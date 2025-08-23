@@ -1,11 +1,13 @@
 (let true 0)
 (let false 1)
+(let nil 0)
 
 (let append! (lambda q item (set! q (length q) item)))
 (let set-and-get! (lambda q index item (do (set! q index item) item)))
 (let tail! (lambda q (del! q)))
 (let push! (lambda q item (do (set! q (length q) item) item)))
 (let pop! (lambda q (do (let l (at q -1)) (del! q) l)))
+(let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 
 (let of (lambda xs cb (do
       (let i [ 0 ])
@@ -90,5 +92,100 @@
 (let count (lambda input item (count-of input (lambda x (= x item)))))
 (let empty! (lambda xs (of xs (lambda (pop! xs)))))
 (let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
+
+
+(let string:equal? (lambda a b (and (= (length a) (length b)) (|>
+   a
+   (zip b)
+   (every? (lambda x (= (get x 0) (get x 1))))))))
+
+(let zip (lambda a b (do 
+      (let out [])
+      (iterate a (lambda i (push! out [(get a i)])))
+      (iterate b (lambda i (push! (get out i) (get b i))))
+      out)))
+
+(let set:index
+  (lambda table key (do
+      (let prime-num 31)
+      (let total [ 0 ])
+      (let i [ 0 ])
+      (let bounds (if (< (- (length key) 1) 100) (- (length key) 1) 100))
+
+      (let process (lambda (do 
+            (let letter (get key (get i 0)))
+            (set! total 0 (euclidean-mod (+ (* (get total 0 ) prime-num) letter) (length table)))
+            (set! i 0 (+ (get i 0) 1)))))
+
+      (loop (< (get i 0) bounds) (process))
+      (get total 0)
+
+)))
+
+(let set:has? (lambda table key (do 
+      (let idx (set:index table key))
+      (let current (get table idx))
+      (and (in-bounds? table idx)
+                   (and (> (length current) 0)
+                        (>= (find-index current (lambda x (string:equal? x key))) 0))))))
+
+(let set:add!
+      (lambda table key
+        (do
+          (let idx (set:index table key))
+          (if (not (in-bounds? table idx)) (set! table idx (array)) nil)
+          (let current (get table idx))
+          (let len (length current))
+          (let index (if (> len 0) (find-index current (lambda x (string:equal? x key))) -1))
+          (let entry key)
+          (if (= index -1)
+            (set! current (length current) entry)
+            (set! current index entry)) table)))
+
+(let set:remove!
+  (lambda table key
+    (do
+      (let idx (set:index table key))
+      (if (not (in-bounds? table idx)) (set! table idx (array)) nil)
+      (let current (get table idx))
+      (let len (length current))
+      (let index (if (> len 0) (find-index current (lambda x (string:equal? x key))) -1))
+      (let entry key)
+      (if (not (= index -1)) (apply (lambda (do (set! current index (at current -1)) (pop! current)))) nil)
+      table)))
+
+(let map:set! (lambda table key value
+        (do
+          (let idx (set:index table key))
+          (if (not (in-bounds? table idx)) (set! table idx []) nil)
+          (let current (get table idx))
+          (let len (length current))
+          (let index (if (> len 0) (find-index current (lambda x (string:equal? (get x 0) key))) -1))
+          (let entry [ key value ])
+          (if (= index -1)
+            (set! current (length current) entry)
+            (set! current index entry))
+          table)))
+          
+(let map:remove! (lambda table key
+      (do
+        (let idx (set:index table key))
+        (if (not (in-bounds? table idx)) (set! table idx []) nil)
+        (let current (get table idx))
+        (let len (length current))
+        (let index (if (> len 0) (find-index current (lambda x (string:equal? (get x 0) key))) -1))
+        (if (not (= index -1)) (do (set! current index (at current -1)) (del! current)) nil)
+        table)))
+
+(let map:get (lambda table key
+    (do
+      (let idx (set:index table key))
+      (if (in-bounds? table idx)
+        (apply (lambda (do
+          (let current (get table idx))
+          (let found-index (find-index current (lambda x (string:equal? key (get x 0)))))
+          (unless (= found-index -1) (get (get current found-index) 1)))))))))
+
+
 
 (|> [ 1 2 3 4 ] (filter even?) (map square) (summation))

@@ -128,6 +128,7 @@ fn desugar(expr: Expression) -> Expression {
                     "|>" => pipe_transform(exprs),
                     "cond" => cond_transform(exprs),
                     "if" => if_transform(exprs),
+                    "unless" => unless_transform(exprs),
                     "-" => minus_transform(exprs),
                     "+" => plus_transform(exprs),
                     "*" => mult_transform(exprs),
@@ -255,6 +256,20 @@ fn if_transform(mut exprs: Vec<Expression>) -> Expression {
         } else {
             exprs[2].clone()
         },
+    ]);
+}
+fn unless_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    return Expression::Apply(vec![
+        Expression::Word("if".to_string()),
+        exprs[0].clone(),
+        if exprs.len() == 2 {
+            Expression::Atom(0)
+        } else {
+            exprs[2].clone()
+        },
+        exprs[1].clone(),
     ]);
 }
 fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
