@@ -63,7 +63,7 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
     } else {
         *i += 1;
         if is_number(tok) {
-            let n: f64 = tok
+            let n: i32 = tok
                 .parse()
                 .map_err(|e| format!("Bad number '{}': {}", tok, e))?;
             Ok(Expression::Atom(n))
@@ -108,7 +108,7 @@ fn preprocess(source: &str) -> String {
                         out.push(' ');
                     }
                     out.push_str(&(c as u32).to_string());
-                    out.push_str(".0");
+                    out.push_str("");
                 }
                 out.push(')');
             }
@@ -121,12 +121,13 @@ fn preprocess(source: &str) -> String {
 fn desugar(expr: Expression) -> Expression {
     match expr {
         Expression::Apply(exprs) if !exprs.is_empty() => {
-            let exprs = exprs.into_iter().map(desugar).collect::<Vec<_>>();
+            let exprs: Vec<Expression> = exprs.into_iter().map(desugar).collect::<Vec<_>>();
 
             if let Expression::Word(ref name) = exprs[0] {
                 match name.as_str() {
                     "|>" => pipe_transform(exprs),
                     "cond" => cond_transform(exprs),
+                    "if" => if_transform(exprs),
                     "-" => minus_transform(exprs),
                     "+" => plus_transform(exprs),
                     "*" => mult_transform(exprs),
@@ -157,11 +158,11 @@ fn minus_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(0.0),
+        0 => Expression::Atom(0),
         1 => Expression::Apply(vec![
             Expression::Word("*".to_string()),
             exprs.remove(0),
-            Expression::Atom(-1.0),
+            Expression::Atom(-1),
         ]),
         _ => {
             let first = exprs.remove(0);
@@ -175,7 +176,7 @@ fn plus_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(1.0),
+        0 => Expression::Atom(1),
         _ => {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
@@ -188,7 +189,7 @@ fn mult_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(1.0),
+        0 => Expression::Atom(1),
         _ => {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
@@ -201,7 +202,7 @@ fn div_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(1.0),
+        0 => Expression::Atom(1),
         _ => {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
@@ -214,11 +215,11 @@ fn cond_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     if exprs.is_empty() {
-        return Expression::Atom(0.0);
+        return Expression::Atom(0);
     }
 
     let mut pairs = Vec::new();
-    let mut default = Expression::Atom(0.0);
+    let mut default = Expression::Atom(0);
 
     if exprs.len() % 2 == 1 {
         default = exprs.pop().unwrap();
@@ -241,6 +242,20 @@ fn cond_transform(mut exprs: Vec<Expression>) -> Expression {
     }
 
     result
+}
+fn if_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    return Expression::Apply(vec![
+        Expression::Word("if".to_string()),
+        exprs[0].clone(),
+        exprs[1].clone(),
+        if exprs.len() == 2 {
+            Expression::Atom(0)
+        } else {
+            exprs[2].clone()
+        },
+    ]);
 }
 fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
     let mut inp = exprs.remove(1);
@@ -289,14 +304,14 @@ fn is_number(s: &str) -> bool {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Atom(f64),
+    Atom(i32),
     Word(String),
     Apply(Vec<Expression>),
 }
 #[derive(Clone)]
 pub enum Evaluated {
     Function(Rc<dyn Fn(Vec<Expression>, Rc<RefCell<Env>>, Rc<RefCell<Env>>) -> Evaluated>),
-    Number(f64),
+    Number(i32),
     Vector(Rc<RefCell<Vec<Evaluated>>>),
 }
 
@@ -308,7 +323,7 @@ impl fmt::Debug for Evaluated {
             Evaluated::Vector(arr) => {
                 let arr_ref = arr.borrow();
                 let elements: Vec<String> = arr_ref.iter().map(|x| format!("{:?}", x)).collect();
-                write!(f, "({})", elements.join(" "))
+                write!(f, "[{}]", elements.join(" "))
             }
         }
     }
@@ -406,13 +421,13 @@ pub fn run(expr: &Expression) -> Evaluated {
                     while let Evaluated::Number(value) =
                         evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs))
                     {
-                        if value == 1.0 {
+                        if value == 1 {
                             evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                         } else {
                             break;
                         }
                     }
-                    return Evaluated::Number(-1.0);
+                    return Evaluated::Number(-1);
                 },
             )),
         );
@@ -439,7 +454,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                  defs: Rc<RefCell<Env>>|
                  -> Evaluated {
                     match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Vector(arr) => Evaluated::Number(arr.borrow().len() as f64),
+                        Evaluated::Vector(arr) => Evaluated::Number(arr.borrow().len() as i32),
                         _ => panic!("First argument must be an array"),
                     }
                 },
@@ -458,7 +473,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                             match index {
                                 Evaluated::Number(index) => {
                                     let len: usize = arr.borrow().len();
-                                    if index >= 0.0 && index < (len as f64) {
+                                    if index >= 0 && index < (len as i32) {
                                         arr.borrow_mut().get(index as usize).unwrap().clone()
                                     } else {
                                         panic!("Index is outside ofthe array bounds")
@@ -486,13 +501,13 @@ pub fn run(expr: &Expression) -> Evaluated {
                                 Evaluated::Number(index) => {
                                     {
                                         let len: usize = arr.borrow().len();
-                                        if index >= 0.0 && index < (len as f64) {
+                                        if index >= 0 && index < (len as i32) {
                                             arr.borrow_mut()[index as usize] = evaluate(
                                                 &args[2],
                                                 Rc::clone(&env),
                                                 Rc::clone(&defs),
                                             );
-                                        } else if index == (len as f64) {
+                                        } else if index == (len as i32) {
                                             arr.borrow_mut().push(evaluate(
                                                 &args[2],
                                                 Rc::clone(&env),
@@ -619,9 +634,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(((a as i64) & (b as i64)) as f64)
-                        }
+                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a & b),
                         _ => panic!("Both arguments must be numbers"),
                     }
                 },
@@ -637,9 +650,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(((a as i64) | (b as i64)) as f64)
-                        }
+                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a | b),
                         _ => panic!("Both arguments must be numbers"),
                     }
                 },
@@ -655,9 +666,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(((a as i64) ^ (b as i64)) as f64)
-                        }
+                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a ^ b),
                         _ => panic!("Both arguments must be numbers"),
                     }
                 },
@@ -672,7 +681,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                  -> Evaluated {
                     let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     match a {
-                        Evaluated::Number(a) => Evaluated::Number(!(a as i64) as f64),
+                        Evaluated::Number(a) => Evaluated::Number(!a),
                         _ => panic!("Argument must be be number"),
                     }
                 },
@@ -688,9 +697,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(((a as i64) >> (b as i64)) as f64)
-                        }
+                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a >> b),
                         _ => panic!("Both arguments must be numbers"),
                     }
                 },
@@ -706,9 +713,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(((a as i64) << (b as i64)) as f64)
-                        }
+                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a << b),
                         _ => panic!("Both arguments must be numbers"),
                     }
                 },
@@ -724,7 +729,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let condition = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     match condition {
                         Evaluated::Number(condition) => {
-                            if condition == 1.0 {
+                            if condition == 1 {
                                 evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs))
                             } else {
                                 evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs))
@@ -746,7 +751,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
                         (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a > b { 1.0 } else { 0.0 })
+                            Evaluated::Number(if a > b { 1 } else { 0 })
                         }
                         _ => panic!("Both arguments must be numbers"),
                     }
@@ -764,7 +769,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
                         (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a < b { 1.0 } else { 0.0 })
+                            Evaluated::Number(if a < b { 1 } else { 0 })
                         }
                         _ => panic!("Both arguments must be numbers"),
                     }
@@ -782,7 +787,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
                         (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a >= b { 1.0 } else { 0.0 })
+                            Evaluated::Number(if a >= b { 1 } else { 0 })
                         }
                         _ => panic!("Both arguments must be numbers"),
                     }
@@ -800,7 +805,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
                         (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a <= b { 1.0 } else { 0.0 })
+                            Evaluated::Number(if a <= b { 1 } else { 0 })
                         }
                         _ => panic!("Both arguments must be numbers"),
                     }
@@ -818,7 +823,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
                     match (a, b) {
                         (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a == b { 1.0 } else { 0.0 })
+                            Evaluated::Number(if a == b { 1 } else { 0 })
                         }
                         _ => panic!("Both arguments must be numbers"),
                     }
@@ -836,10 +841,10 @@ pub fn run(expr: &Expression) -> Evaluated {
                         evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     match condition {
                         Evaluated::Number(condition) => {
-                            if condition != 0.0 {
-                                Evaluated::Number(0.0)
+                            if condition != 0 {
+                                Evaluated::Number(0)
                             } else {
-                                Evaluated::Number(1.0)
+                                Evaluated::Number(1)
                             }
                         }
                         _ => panic!("Argument must be a 1 or 0"),
@@ -856,19 +861,19 @@ pub fn run(expr: &Expression) -> Evaluated {
                  -> Evaluated {
                     match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
                         Evaluated::Number(a) => {
-                            if a == 1.0 {
+                            if a == 1 {
                                 match evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs)) {
                                     Evaluated::Number(b) => {
-                                        if b == 1.0 {
-                                            Evaluated::Number(1.0)
+                                        if b == 1 {
+                                            Evaluated::Number(1)
                                         } else {
-                                            Evaluated::Number(0.0)
+                                            Evaluated::Number(0)
                                         }
                                     }
                                     _ => panic!("First argument must be a 1 or 0"),
                                 }
                             } else {
-                                Evaluated::Number(0.0)
+                                Evaluated::Number(0)
                             }
                         }
                         _ => panic!("First argument must be a 1 or 0"),
@@ -885,19 +890,19 @@ pub fn run(expr: &Expression) -> Evaluated {
                  -> Evaluated {
                     match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
                         Evaluated::Number(a) => {
-                            if a == 0.0 {
+                            if a == 0 {
                                 match evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs)) {
                                     Evaluated::Number(b) => {
-                                        if b == 1.0 {
-                                            Evaluated::Number(1.0)
+                                        if b == 1 {
+                                            Evaluated::Number(1)
                                         } else {
-                                            Evaluated::Number(0.0)
+                                            Evaluated::Number(0)
                                         }
                                     }
                                     _ => panic!("First argument must be a 1 or 0"),
                                 }
                             } else {
-                                Evaluated::Number(1.0)
+                                Evaluated::Number(1)
                             }
                         }
                         _ => panic!("First argument must be a 1 or 0"),
@@ -912,7 +917,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                  env: Rc<RefCell<Env>>,
                  defs: Rc<RefCell<Env>>|
                  -> Evaluated {
-                    let mut last_result: Evaluated = Evaluated::Number(0.0);
+                    let mut last_result: Evaluated = Evaluated::Number(0);
                     for expr in args {
                         last_result = evaluate(&expr, Rc::clone(&env), Rc::clone(&defs));
                     }
@@ -996,7 +1001,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                     }
                     if let Expression::Word(_) = &args[&args.len() - 1] {
                         let func = evaluate(
-                            &args[((args.len() as i64) - 1) as usize],
+                            &args[((args.len() as i32) - 1) as usize],
                             Rc::clone(&env),
                             Rc::clone(&defs),
                         );
@@ -1011,7 +1016,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                         }
                     } else if let Expression::Apply(_) = &args[&args.len() - 1] {
                         let func = evaluate(
-                            &args[((args.len() as i64) - 1) as usize],
+                            &args[((args.len() as i32) - 1) as usize],
                             Rc::clone(&env),
                             Rc::clone(&defs),
                         );
@@ -1041,8 +1046,8 @@ pub fn run(expr: &Expression) -> Evaluated {
                         panic!("atom? expects at least one argument");
                     }
                     match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Number(_) => Evaluated::Number(1.0),
-                        _ => Evaluated::Number(0.0),
+                        Evaluated::Number(_) => Evaluated::Number(1),
+                        _ => Evaluated::Number(0),
                     }
                 },
             )),
@@ -1058,8 +1063,8 @@ pub fn run(expr: &Expression) -> Evaluated {
                         panic!("lambda? expects at least one argument");
                     }
                     match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Function(_) => Evaluated::Number(1.0),
-                        _ => Evaluated::Number(0.0),
+                        Evaluated::Function(_) => Evaluated::Number(1),
+                        _ => Evaluated::Number(0),
                     }
                 },
             )),
