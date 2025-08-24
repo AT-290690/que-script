@@ -6,7 +6,6 @@
 (let set-and-get! (lambda q index item (do (set! q index item) item)))
 (let tail! (lambda q (del! q)))
 (let push! (lambda q item (do (set! q (length q) item) item)))
-(let pop! (lambda q (do (let l (at q -1)) (del! q) l)))
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 
 (let of (lambda xs cb (do
@@ -220,3 +219,41 @@
 (let access-property (lambda table key (do
       (let idx (hash table key))
       (if (in-bounds? table idx) (access-property-helper table idx key)))))
+
+(let swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp))))
+
+(let sort-partition! (lambda arr start end cb (do 
+      (let pivot (get arr end))
+      (let i [(- start 1)])
+      (let j [ start ])
+
+      (let helper (lambda i j (do 
+           (set! i 0 (+ (get i 0) 1))
+           (swap! arr (get i 0) (get j 0)))))
+
+      (let process (lambda (do 
+            (if (cb (get arr (get j 0)) pivot) (helper i j))
+            (set! j 0 (+ (get j 0) 1)))))
+      (loop (< (get j 0) end) (process))
+
+      (swap! arr (+ (get i 0) 1) end)
+      (+ (get i 0) 1))))
+
+(let sort! (lambda arr cb (do 
+      (let stack [])
+      (push! stack 0)
+      (push! stack (- (length arr) 1))
+      (let process (lambda (do
+            (let end (get stack (- (length stack) 1)))
+            (pop! stack)
+            (let start (get stack (- (length stack) 1)))
+            (pop! stack)
+            (let helper (lambda (do 
+                  (let pivot-index (sort-partition! arr start end cb))
+                  (push! stack start)
+                  (push! stack (- pivot-index 1))
+                  (push! stack (+ pivot-index 1))
+                  (push! stack end))))
+            (if (< start end) (helper)))))
+      (loop (> (length stack) 0) (process))
+      arr)))

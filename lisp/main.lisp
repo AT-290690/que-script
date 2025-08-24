@@ -1,2 +1,1 @@
-(let xs [ 1 2 3 4 5 ])
-(|> xs (map square) (summation))
+(|> (range 1 10) (filter odd?) (summation))
