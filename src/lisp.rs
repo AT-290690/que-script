@@ -1088,12 +1088,20 @@ pub fn run(expr: &Expression) -> Evaluated {
     return evaluate(&expr, Rc::clone(&env), Rc::clone(&defs));
 }
 
-pub fn eval(program: &str) {
+pub fn parse_std(program: &str) -> Vec<Expression> {
     let preprocessed = preprocess(&program);
     let exprs = parse(&preprocessed).unwrap();
     let desugared: Vec<Expression> = exprs.into_iter().map(desugar).collect();
+    desugared
+}
+pub fn eval(program: &str, std: &str) {
+    let preprocessed = preprocess(&program);
+    let exprs = parse(&preprocessed).unwrap();
+    let desugared: Vec<Expression> = exprs.into_iter().map(desugar).collect();
+    let std_parsed = parse_std(std);
     let wrapped = Expression::Apply(
         std::iter::once(Expression::Word("do".to_string()))
+            .chain(std_parsed.into_iter())
             .chain(desugared.into_iter())
             .collect(),
     );
