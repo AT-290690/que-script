@@ -11,7 +11,10 @@
       last)))
 (let push! (lambda q item (do (set! q (length q) item) item)))
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
-
+(let first (lambda xs (get xs 0)))
+(let second (lambda xs (get xs 1)))
+(let third (lambda xs (get xs 3)))
+(let last (lambda xs (get xs (- (length xs) 1))))
 (let variable (lambda value [ value ]))
 (let unbound-variable (lambda var (get var 0)))
 (let set (lambda var x (set! var 0 x)))
@@ -133,15 +136,17 @@
 
 (let match? (lambda a b (and (= (length a) (length b)) (|>
    a
-   (zip b)
+   (ziper b)
    (every? (lambda x (= (get x 0) (get x 1))))))))
 
-(let zip (lambda a b (do 
+(let ziper (lambda a b (do 
       (let out [])
       (iterate a (lambda i (push! out [(get a i)])))
       (iterate b (lambda i (push! (get out i) (get b i))))
       out)))
 
+(let zip (lambda xs (ziper (first xs) (second xs))))
+(let unzip (lambda xs (array (map xs first) (map xs second))))
 (let hash
   (lambda table key (do
       (let prime-num 31)
