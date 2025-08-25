@@ -135,6 +135,7 @@ fn desugar(expr: Expression) -> Expression {
                     "/" => div_transform(exprs),
                     "!=" => not_equal_transform(exprs),
                     "<>" => not_equal_transform(exprs),
+                    "." => accessor_transform(exprs),
                     _ => Expression::Apply(exprs),
                 }
             } else {
@@ -143,6 +144,23 @@ fn desugar(expr: Expression) -> Expression {
         }
         other => other,
     }
+}
+fn accessor_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0); 
+    let mut iter = exprs.into_iter();
+
+    let first = iter.next().unwrap(); 
+    let mut acc = first;
+
+    for e in iter {
+        acc = Expression::Apply(vec![
+            Expression::Word("get".to_string()),
+            acc,
+            e,
+        ]);
+    }
+
+    acc
 }
 fn not_equal_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
@@ -1081,7 +1099,7 @@ pub fn run(expr: &Expression) -> Evaluated {
     }
     return evaluate(&expr, Rc::clone(&env), Rc::clone(&defs));
 }
-
+#[allow(dead_code)]
 pub fn eval_with_std(program: &str, std: &str) {
     let preprocessed = preprocess(&program);
     let exprs = parse(&preprocessed).unwrap();
