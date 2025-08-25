@@ -8,6 +8,14 @@
 (let push! (lambda q item (do (set! q (length q) item) item)))
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 
+(let variable (lambda value [ value ]))
+(let unbound-variable (lambda var (get var 0)))
+(let set (lambda var x (set! var 0 x)))
+(let += (lambda var n (set var (+ (unbound-variable var) n))))
+(let -= (lambda var n (set var (- (unbound-variable var) n))))
+(let ++ (lambda var n (set var (+ (unbound-variable var) 1))))
+(let -- (lambda var n (set var (- (unbound-variable var) 1))))
+
 (let of (lambda xs cb (do
       (let i [ 0 ])
       (let len (length xs))
@@ -90,7 +98,6 @@
 (let count (lambda input item (count-of input (lambda x (= x item)))))
 (let empty! (lambda xs (of xs (lambda (pop! xs)))))
 (let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
-
 
 (let range (lambda start end (do
       (let out [])
@@ -212,9 +219,9 @@
         table)))
 
 (let access-property-helper (lambda table idx key (do 
-(let current (get table idx))
-(let found-index (find-index current (lambda x (match? key (get x 0)))))
-(unless (= found-index -1) (get (get current found-index) 1)))))
+    (let current (get table idx))
+    (let found-index (find-index current (lambda x (match? key (get x 0)))))
+    (unless (= found-index -1) (get (get current found-index) 1)))))
 
 (let access-property (lambda table key (do
       (let idx (hash table key))
