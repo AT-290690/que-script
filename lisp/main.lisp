@@ -1,3 +1,1 @@
-(unzip 
-(zip [[ 1 2 3 4 ] [ 10 20 30 40 ]])
-)
+(|> (range 1 10) (filter odd?) (summation))

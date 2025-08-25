@@ -1082,20 +1082,31 @@ pub fn run(expr: &Expression) -> Evaluated {
     return evaluate(&expr, Rc::clone(&env), Rc::clone(&defs));
 }
 
-pub fn parse_std(program: &str) -> Vec<Expression> {
+pub fn eval_with_std(program: &str, std: &str) {
     let preprocessed = preprocess(&program);
     let exprs = parse(&preprocessed).unwrap();
     let desugared: Vec<Expression> = exprs.into_iter().map(desugar).collect();
-    desugared
-}
-pub fn eval(program: &str, std: &str) {
-    let preprocessed = preprocess(&program);
-    let exprs = parse(&preprocessed).unwrap();
-    let desugared: Vec<Expression> = exprs.into_iter().map(desugar).collect();
-    let std_parsed = parse_std(std);
+
+    let preprocessed_std = preprocess(&std);
+    let exprs_std = parse(&preprocessed_std).unwrap();
+    let desugared_std: Vec<Expression> = exprs_std.into_iter().map(desugar).collect();
+
     let wrapped = Expression::Apply(
         std::iter::once(Expression::Word("do".to_string()))
-            .chain(std_parsed.into_iter())
+            .chain(desugared_std.into_iter())
+            .chain(desugared.into_iter())
+            .collect(),
+    );
+    let result = run(&wrapped);
+    println!("Result: {:?}", result);
+}
+#[allow(dead_code)]
+pub fn eval(program: &str) {
+    let preprocessed = preprocess(&program);
+    let exprs = parse(&preprocessed).unwrap();
+    let desugared: Vec<Expression> = exprs.into_iter().map(desugar).collect();
+    let wrapped = Expression::Apply(
+        std::iter::once(Expression::Word("do".to_string()))
             .chain(desugared.into_iter())
             .collect(),
     );
