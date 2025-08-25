@@ -1,8 +1,66 @@
 use core::panic;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use std::fmt;
 use std::rc::Rc;
+
+
+fn collect_idents(expr: &Expression, acc: &mut HashSet<String>) {
+    match expr {
+        Expression::Word(w) => { acc.insert(w.clone()); }
+        Expression::Apply(exprs) => {
+            for e in exprs {
+                collect_idents(e, acc);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expression> {
+    let mut kept = Vec::new();
+    let mut to_process = used.clone();
+    let mut processed = HashSet::new();
+
+    let mut index = HashMap::new();
+    for expr in &std_defs {
+        if let Expression::Apply(list) = expr {
+            if let [Expression::Word(kw), Expression::Word(name), _rest @ ..] = &list[..] {
+                if kw == "let" {
+                    index.insert(name.clone(), expr.clone());
+                }
+            }
+        }
+    }
+
+    while let Some(name) = to_process.iter().next().cloned() {
+        to_process.remove(&name);
+        if processed.contains(&name) {
+            continue;
+        }
+        if let Some(def) = index.get(&name) {
+            kept.push(def.clone());
+
+            if let Expression::Apply(list) = def {
+                if list.len() >= 3 {
+                    let body = &list[2];
+                    let mut acc = HashSet::new();
+                    collect_idents(body, &mut acc);
+                    for dep in acc {
+                        if !processed.contains(&dep) {
+                            to_process.insert(dep);
+                        }
+                    }
+                }
+            }
+        }
+        processed.insert(name);
+    }
+
+    kept
+}
+
+
 
 fn flush(buf: &mut String, out: &mut Vec<String>) {
     if !buf.is_empty() {
@@ -1109,9 +1167,16 @@ pub fn eval_with_std(program: &str, std: &str) {
     let exprs_std = parse(&preprocessed_std).unwrap();
     let desugared_std: Vec<Expression> = exprs_std.into_iter().map(desugar).collect();
 
+    let mut used = HashSet::new();
+    for e in &desugared {
+        collect_idents(e, &mut used);
+    }
+
+    let shaken_std = tree_shake(desugared_std, &used);
+
     let wrapped = Expression::Apply(
         std::iter::once(Expression::Word("do".to_string()))
-            .chain(desugared_std.into_iter())
+            .chain(shaken_std.into_iter())
             .chain(desugared.into_iter())
             .collect(),
     );
