@@ -292,7 +292,7 @@ fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
     inp
 }
 fn is_number(s: &str) -> bool {
-    if s == "-" || s == "." || s == "+ " || s == "+" {
+    if s == "-" || s == "+ " || s == "+" {
         return false;
     }
     if !s.chars().any(|c| c.is_ascii_digit()) {
@@ -303,14 +303,8 @@ fn is_number(s: &str) -> bool {
     } else {
         s
     };
-    let mut seen_dot = false;
     for c in trimmed.chars() {
-        if c == '.' {
-            if seen_dot {
-                return false;
-            }
-            seen_dot = true;
-        } else if !c.is_ascii_digit() {
+         if !c.is_ascii_digit() {
             return false;
         }
     }

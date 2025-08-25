@@ -1,1 +1,1 @@
-(|> (range 1 10) (filter odd?) (summation))
+(let x 1)
