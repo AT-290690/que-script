@@ -400,6 +400,19 @@ pub enum Evaluated {
     Vector(Rc<RefCell<Vec<Evaluated>>>),
 }
 
+impl Expression {
+    pub fn to_rust(&self) -> String {
+        match self {
+            Expression::Atom(n) => format!("Expression::Atom({})", n),
+            Expression::Word(w) => format!("Expression::Word({:?}.to_string())", w),
+            Expression::Apply(exprs) => {
+                let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
+                format!("Expression::Apply(vec![{}])", inner.join(", "))
+            }
+        }
+    }
+}
+
 impl fmt::Debug for Evaluated {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1156,6 +1169,33 @@ pub fn run(expr: &Expression) -> Evaluated {
         );
     }
     return evaluate(&expr, Rc::clone(&env), Rc::clone(&defs));
+}
+
+#[allow(dead_code)]
+pub fn with_std(program: &str, std: &str) -> Expression {
+    let preprocessed = preprocess(&program);
+
+    let exprs = parse(&preprocessed).unwrap();
+    let desugared: Vec<Expression> = exprs.into_iter().map(desugar).collect();
+
+    let preprocessed_std = preprocess(&std);
+    let exprs_std = parse(&preprocessed_std).unwrap();
+    let desugared_std: Vec<Expression> = exprs_std.into_iter().map(desugar).collect();
+
+    let mut used = HashSet::new();
+    for e in &desugared {
+        collect_idents(e, &mut used);
+    }
+
+    let shaken_std = tree_shake(desugared_std, &used);
+
+    let wrapped = Expression::Apply(
+        std::iter::once(Expression::Word("do".to_string()))
+            .chain(shaken_std.into_iter())
+            .chain(desugared.into_iter())
+            .collect(),
+    );
+    wrapped
 }
 #[allow(dead_code)]
 pub fn eval_with_std(program: &str, std: &str) {
