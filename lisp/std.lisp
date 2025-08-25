@@ -1,10 +1,14 @@
-(let true 0)
-(let false 1)
+(let true (not 1))
+(let false (not 0))
 (let nil 0)
 
 (let append! (lambda q item (set! q (length q) item)))
 (let set-and-get! (lambda q index item (do (set! q index item) item)))
-(let tail! (lambda q (del! q)))
+(let tail! (lambda q (pop! q)))
+(let pop-and-get! (lambda xs (do 
+      (let last (get xs (- (length xs) 1))) 
+      (pop! xs) 
+      last)))
 (let push! (lambda q item (do (set! q (length q) item) item)))
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 
@@ -215,7 +219,7 @@
         (let current (get table idx))
         (let len (length current))
         (let index (if (> len 0) (find-index current (lambda x (match? (get x 0) key))) -1))
-        (if (not (= index -1)) (do (set! current index (at current -1)) (del! current)) nil)
+        (if (not (= index -1)) (do (set! current index (at current -1)) (pop! current)) nil)
         table)))
 
 (let access-property-helper (lambda table idx key (do 
