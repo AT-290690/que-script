@@ -1,1 +1,1 @@
-(|> (range 1 100) (filter odd?) (summation))
+(+ 1 2)

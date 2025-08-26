@@ -193,6 +193,7 @@ fn desugar(expr: Expression) -> Expression {
                     "!=" => not_equal_transform(exprs),
                     "<>" => not_equal_transform(exprs),
                     "." => accessor_transform(exprs),
+                    "get" => accessor_transform(exprs),
                     _ => Expression::Apply(exprs),
                 }
             } else {
@@ -204,9 +205,18 @@ fn desugar(expr: Expression) -> Expression {
 }
 fn accessor_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
+    let len = exprs.len();
     let mut iter = exprs.into_iter();
-
     let first = iter.next().unwrap();
+
+    if len == 1 {
+        return Expression::Apply(vec![
+            Expression::Word("get".to_string()),
+            first,
+            Expression::Atom(0),
+        ]);
+    }
+
     let mut acc = first;
 
     for e in iter {
