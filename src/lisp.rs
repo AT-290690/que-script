@@ -1,13 +1,14 @@
 use core::panic;
 use std::cell::RefCell;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
-
 fn collect_idents(expr: &Expression, acc: &mut HashSet<String>) {
     match expr {
-        Expression::Word(w) => { acc.insert(w.clone()); }
+        Expression::Word(w) => {
+            acc.insert(w.clone());
+        }
         Expression::Apply(exprs) => {
             for e in exprs {
                 collect_idents(e, acc);
@@ -59,8 +60,6 @@ fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expressi
 
     kept
 }
-
-
 
 fn flush(buf: &mut String, out: &mut Vec<String>) {
     if !buf.is_empty() {
@@ -204,18 +203,14 @@ fn desugar(expr: Expression) -> Expression {
     }
 }
 fn accessor_transform(mut exprs: Vec<Expression>) -> Expression {
-    exprs.remove(0); 
+    exprs.remove(0);
     let mut iter = exprs.into_iter();
 
-    let first = iter.next().unwrap(); 
+    let first = iter.next().unwrap();
     let mut acc = first;
 
     for e in iter {
-        acc = Expression::Apply(vec![
-            Expression::Word("get".to_string()),
-            acc,
-            e,
-        ]);
+        acc = Expression::Apply(vec![Expression::Word("get".to_string()), acc, e]);
     }
 
     acc
@@ -380,7 +375,7 @@ fn is_number(s: &str) -> bool {
         s
     };
     for c in trimmed.chars() {
-         if !c.is_ascii_digit() {
+        if !c.is_ascii_digit() {
             return false;
         }
     }
@@ -475,7 +470,7 @@ fn evaluate(exp: &Expression, env: Rc<RefCell<Env>>, defs: Rc<RefCell<Env>>) -> 
             if let Some(var) = defs_ref.get(name) {
                 return var;
             }
-            panic!("Undefined variable: {}", name);
+            panic!("Undefined variable: {}", name)
         }
         Expression::Apply(exprs) => {
             if let Expression::Word(name) = &exprs[0] {
@@ -483,7 +478,7 @@ fn evaluate(exp: &Expression, env: Rc<RefCell<Env>>, defs: Rc<RefCell<Env>>) -> 
                 if let Some(var) = env_ref.get(name) {
                     match var {
                         Evaluated::Function(func) => {
-                            return func(exprs[1..].to_vec(), Rc::clone(&env), Rc::clone(&defs));
+                            return func(exprs[1..].to_vec(), Rc::clone(&env), Rc::clone(&defs))
                         }
                         _ => panic!("Cannot apply a non-lambda value"),
                     }
@@ -492,14 +487,14 @@ fn evaluate(exp: &Expression, env: Rc<RefCell<Env>>, defs: Rc<RefCell<Env>>) -> 
                 if let Some(var) = defs_ref.get(name) {
                     match var {
                         Evaluated::Function(func) => {
-                            return func(exprs[1..].to_vec(), Rc::clone(&env), Rc::clone(&defs));
+                            return func(exprs[1..].to_vec(), Rc::clone(&env), Rc::clone(&defs))
                         }
                         _ => panic!("Cannot apply a non-lambda value"),
                     }
                 }
-                panic!("Function not found: {}", name);
+                panic!("Function not found: {}", name)
             }
-            panic!("Invalid lambda application");
+            panic!("Invalid lambda application")
         }
     }
 }
@@ -1082,7 +1077,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                         defs.borrow_mut().set(var_name.clone(), value);
                         return evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
                     } else {
-                        panic!("First argument to 'let' must be a variable name");
+                        panic!("First argument to 'let' must be a variable name")
                     }
                 },
             )),
@@ -1128,7 +1123,7 @@ pub fn run(expr: &Expression) -> Evaluated {
                             panic!("Last argument to 'apply' must be a lambda")
                         }
                     } else {
-                        panic!("First argument to 'apply' must be a word");
+                        panic!("First argument to 'apply' must be a word")
                     }
                 },
             )),
