@@ -218,7 +218,6 @@
       (loop (< (get i) end) (process))
       out)))
 
-
 (let buckets (lambda size (do
       (let out [])
       (let i [ 0 ])
@@ -403,3 +402,35 @@
       (let process (lambda (do (push! out (get xs (+ start (get i)))) (set! i 0 (+ (get i) 1)))))
       (loop (< (get i) bounds) (process))
       out)))
+
+
+(let true? (lambda x (= (get x) true)))
+(let false? (lambda x (= (get x) false)))
+(let true! (lambda x (set! x 0 true)))
+(let false! (lambda x (set! x 0 false)))
+
+(let reverse (lambda xs (do 
+      (let i [ (- (length xs) 1) ])
+      (let out [])
+      (let process (lambda (do (push! out (get xs (get i))) (set! i 0 (- (get i) 1)))))
+      (loop (>= (get i) 0) (process))
+      out)))
+
+(let trim-left (lambda str (do
+  (let tr (variable true))
+  (|> str (reduce (lambda a b (if
+  (and (true? tr) (or (= b char:space) (= b char:new-line))) a
+    (apply (lambda (do
+      (if (true? tr) (false! tr) nil)
+      (merge a (array b))))))) [])))))
+
+(let trim-right (lambda str (do
+  (let tr (variable true))
+  (|> str (reverse) (reduce (lambda a b 
+    (if (and (true? tr) (or (= b char:space) (= b char:new-line))) a
+    (apply (lambda (do
+      (if (true? tr) (false! tr) nil)
+      (merge (array b) a)))))) [])))))
+
+(let trim (lambda str (|> str (trim-left) (trim-right))))
+
