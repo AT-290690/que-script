@@ -19,10 +19,6 @@ fn collect_idents(expr: &Expression, acc: &mut HashSet<String>) {
 }
 
 fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expression> {
-    let mut kept = Vec::new();
-    let mut to_process = used.clone();
-    let mut processed = HashSet::new();
-
     let mut index = HashMap::new();
     for expr in &std_defs {
         if let Expression::Apply(list) = expr {
@@ -34,28 +30,35 @@ fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expressi
         }
     }
 
-    while let Some(name) = to_process.iter().next().cloned() {
-        to_process.remove(&name);
-        if processed.contains(&name) {
-            continue;
-        }
-        if let Some(def) = index.get(&name) {
-            kept.push(def.clone());
+    let mut kept = Vec::new();
+    let mut visited = HashSet::new();
 
+    fn visit(
+        name: &str,
+        index: &HashMap<String, Expression>,
+        kept: &mut Vec<Expression>,
+        visited: &mut HashSet<String>,
+    ) {
+        if visited.contains(name) {
+            return;
+        }
+        if let Some(def) = index.get(name) {
             if let Expression::Apply(list) = def {
                 if list.len() >= 3 {
-                    let body = &list[2];
-                    let mut acc = HashSet::new();
-                    collect_idents(body, &mut acc);
-                    for dep in acc {
-                        if !processed.contains(&dep) {
-                            to_process.insert(dep);
-                        }
+                    let mut deps = HashSet::new();
+                    collect_idents(&list[2], &mut deps);
+                    for dep in deps {
+                        visit(&dep, index, kept, visited);
                     }
                 }
             }
+            kept.push(def.clone());
         }
-        processed.insert(name);
+        visited.insert(name.to_string());
+    }
+
+    for name in used {
+        visit(name, &index, &mut kept, &mut visited);
     }
 
     kept
@@ -194,6 +197,7 @@ fn desugar(expr: Expression) -> Expression {
                     "<>" => not_equal_transform(exprs),
                     "." => accessor_transform(exprs),
                     "get" => accessor_transform(exprs),
+                    "lambda" => lambda_destructure_transform(exprs),
                     _ => Expression::Apply(exprs),
                 }
             } else {
@@ -202,6 +206,67 @@ fn desugar(expr: Expression) -> Expression {
         }
         other => other,
     }
+}
+fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Expression {
+    // separate args and body
+    if exprs.len() < 2 {
+        panic!("lambda expects at least a body");
+    }
+    let args = &exprs[1..exprs.len() - 1];
+    let body = exprs.last().unwrap().clone();
+
+    // look for array args
+    let mut new_bindings = vec![];
+    let new_args: Vec<Expression> = args
+        .iter()
+        .map(|arg| {
+            if let Expression::Apply(array_exprs) = arg {
+                if let [Expression::Word(ref array_kw), ref elements @ ..] = &array_exprs[..] {
+                    if array_kw == "array" {
+                        // replace this arg with _args
+                        for (i, elem) in elements.iter().enumerate() {
+                            match elem {
+                                Expression::Word(name) if name != "." => {
+                                    new_bindings.push(Expression::Apply(vec![
+                                        Expression::Word("let".to_string()),
+                                        Expression::Word(name.clone()),
+                                        Expression::Apply(vec![
+                                            Expression::Word("get".to_string()),
+                                            Expression::Word("_args".to_string()),
+                                            Expression::Atom(i as i32),
+                                        ]),
+                                    ]));
+                                }
+                                Expression::Word(_) => { /* skip element */ }
+                                _ => panic!("lambda array element must be a word or '.'"),
+                            }
+                        }
+                        return Expression::Word("_args".to_string());
+                    }
+                }
+            }
+            arg.clone()
+        })
+        .collect();
+
+    // wrap body with new bindings
+    let new_body = if !new_bindings.is_empty() {
+        let mut do_exprs = new_bindings;
+        do_exprs.push(body);
+        Expression::Apply(
+            std::iter::once(Expression::Word("do".to_string()))
+                .chain(do_exprs.into_iter())
+                .collect(),
+        )
+    } else {
+        body
+    };
+
+    // rebuild lambda with transformed args and body
+    let mut lambda_exprs = vec![Expression::Word("lambda".to_string())];
+    lambda_exprs.extend(new_args);
+    lambda_exprs.push(new_body);
+    Expression::Apply(lambda_exprs)
 }
 fn accessor_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
@@ -1241,3 +1306,495 @@ pub fn eval(program: &str) {
     let result = run(&wrapped);
     println!("Result: {:?}", result);
 }
+
+pub fn sanitize_ident(name: &str) -> String {
+    name.replace('!', "_mutate")
+        .replace('?', "_predicate")
+        .replace('-', "_")
+        .replace(':', "_")
+        .replace('>', "to_")
+}
+fn compile_lambda(args: &[Expression]) -> String {
+    if args.is_empty() {
+        panic!("lambda expects at least a body expression");
+    }
+
+    // The last element is always the body
+    let body_expr = args.last().unwrap();
+    let body_code = compile_expr(body_expr);
+
+    // Everything before the last element are parameters
+    let param_names: Vec<String> = args[..args.len() - 1]
+        .iter()
+        .map(|p| match p {
+            Expression::Word(name) => name.clone(),
+            _ => panic!("lambda parameter must be a symbol"),
+        })
+        .collect();
+
+    // Generate let bindings for parameters
+    let param_bindings = param_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let is_mut = name.ends_with('!');
+            if is_mut {
+                format!("let mut {} = args[{}].clone();", sanitize_ident(name), i)
+            } else {
+                format!("let {} = args[{}].clone();", sanitize_ident(name), i)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Generate closure string
+    format!(
+        "Value::Function(Rc::new(|args: Vec<Value>| {{ {} {} }}))",
+        param_bindings, body_code
+    )
+}
+
+pub fn compile_expr(expr: &Expression) -> String {
+    match expr {
+        Expression::Atom(n) => format!("Value::Number({})", n),
+        Expression::Word(w) => sanitize_ident(w), // variable name
+        Expression::Apply(list) if !list.is_empty() => match &list[0] {
+            Expression::Word(op) => match op.as_str() {
+                "do" => list[1..]
+                    .iter()
+                    .map(|e| compile_expr(e))
+                    .collect::<Vec<_>>()
+                    .join(";\n"),
+                "let" => {
+                    if let Expression::Word(var_name) = &list[1] {
+                        let val_code = compile_expr(&list[2]);
+                        let is_mut = var_name.ends_with('!');
+                        if is_mut {
+                            format!(
+                                "let mut {}: Value = {};",
+                                sanitize_ident(var_name),
+                                val_code
+                            )
+                        } else {
+                            format!("let {}: Value = {};", sanitize_ident(var_name), val_code)
+                        }
+                    } else {
+                        panic!("Invalid let binding");
+                    }
+                }
+                "+" => format!(
+                    "_add(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "-" => format!(
+                    "_sub(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "*" => format!(
+                    "_mult(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "/" => format!(
+                    "_div(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "=" => format!(
+                    "_eq(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                ">" => format!(
+                    "_gt(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "<" => format!(
+                    "_lt(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                ">=" => format!(
+                    "_gte(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "<=" => format!(
+                    "_lte(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "or" => format!(
+                    "or(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "length" => format!("length(&{})", compile_expr(&list[1])),
+                "pop!" => format!("_pop_mutate(&mut {})", compile_expr(&list[1])),
+                "and" => format!(
+                    "and(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "mod" => format!(
+                    "_mod(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "&" => format!(
+                    "_bit_and(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "|" => format!(
+                    "_bit_or(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "^" => format!(
+                    "_bit_xor(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                ">>" => format!(
+                    "_bit_right_shift(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "<<" => format!(
+                    "_bit_left_shift(&{}, &{})",
+                    compile_expr(&list[1]),
+                    compile_expr(&list[2])
+                ),
+                "~" => format!("_bit_not(&{})", compile_expr(&list[1]),),
+                "not" => format!("not(&{})", compile_expr(&list[1])),
+                "array" => {
+                    format!(
+                        "Value::Array(vec![{}])",
+                        list[1..]
+                            .iter()
+                            .map(|e| compile_expr(e))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+                "set!" => {
+                    if list.len() != 4 {
+                        panic!("set! expects three arguments: array, index, value");
+                    }
+                    let array = compile_expr(&list[1]);
+                    let index = compile_expr(&list[2]);
+                    let value: String = compile_expr(&list[3]);
+                    format!("_set_mutate(&mut {}, &{}, &{})", array, index, value)
+                }
+                "get" => {
+                    if list.len() != 3 {
+                        panic!("get expects two arguments: array, index");
+                    }
+                    let array = compile_expr(&list[1]);
+                    let index = compile_expr(&list[2]);
+                    format!("get(&{}, &{})", array, index)
+                }
+                "lambda" => compile_lambda(&list[1..]),
+                "if" => {
+                    let tail = &list[1..];
+                    if tail.len() != 3 {
+                        panic!("if expects exactly three arguments: condition, concequent and alternative");
+                    }
+
+                    let condition: String = compile_expr(&tail[0]);
+                    let concequent: String = compile_expr(&tail[1]);
+                    let alternative: String = compile_expr(&tail[2]);
+
+                    // Generate a while loop that evaluates condition and executes body
+                    format!(
+                        "if {cond} == 1 {{ {conc} }} else {{ {alt} }}",
+                        cond = condition,
+                        conc = concequent,
+                        alt = alternative
+                    )
+                }
+                "loop" => {
+                    let tail = &list[1..];
+                    if tail.len() != 2 {
+                        panic!("loop expects exactly two arguments: condition and body");
+                    }
+                    let cond_code = compile_expr(&tail[0]);
+                    let body_code = compile_expr(&tail[1]);
+
+                    // Generate a while loop that evaluates condition and executes body
+                    format!(
+                        "{{ while let Value::Number(cond_val) = {cond} {{
+                            if cond_val == 1 {{
+                                {body};
+                            }} }} Value::Number(-1) }}",
+                        cond = cond_code,
+                        body = body_code
+                    )
+                }
+                _ => {
+                    let args = list[1..]
+                        .iter()
+                        .map(|e| compile_expr(e))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("call(&{},vec![{}])", sanitize_ident(op), args)
+                }
+            },
+            _ => panic!("Invalid apply expression"),
+        },
+        _ => panic!("Unsupported expression"),
+    }
+}
+
+pub const TOP_LEVEL: &str = r#"
+#![allow(dead_code)]
+#![allow(warnings)]
+
+use std::rc::Rc;
+use std::fmt;
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Number(value) => write!(f, "{}", value),
+            Value::Function(_) => write!(f, "Function"),
+            Value::Array(arr) => {
+                let arr_ref = arr;
+                let elements: Vec<String> = arr_ref.iter().map(|x| format!("{:?}", x)).collect();
+                write!(f, "[{}]", elements.join(" "))
+            }
+        }
+    }
+}
+#[derive(Clone)]
+pub enum Value {
+    Number(i32),
+    Array(Vec<Value>),
+    Function(Rc<dyn Fn(Vec<Value>) -> Value>),
+}
+    
+// PartialEq for comparing Value with Value
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Number(a), Value::Number(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+// PartialEq for comparing Value with i32
+impl PartialEq<i32> for Value {
+    fn eq(&self, other: &i32) -> bool {
+        match self {
+            Value::Number(a) => a == other,
+            _ => false,
+        }
+    }
+}
+
+pub fn _add(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
+        _ => panic!("+ expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _sub(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x - y),
+        _ => panic!("- expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _mult(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x * y),
+        _ => panic!("* expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _div(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x / y),
+        _ => panic!("/ expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _eq(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(if x == y { 1 } else { 0 }),
+        _ => panic!("= expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _gt(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(if x > y { 1 } else { 0 }),
+        _ => panic!("> expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _lt(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(if x < y { 1 } else { 0 }),
+        _ => panic!("< expects two numbers, got non-number Value"),
+    }
+}
+
+
+pub fn _lte(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(if x <= y { 1 } else { 0 }),
+        _ => panic!("<= expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _gte(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(if x >= y { 1 } else { 0 }),
+        _ => panic!(">= expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn or(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(if (*x == 1 || *y == 1) { 1 } else { 0 }),
+        _ => panic!("or expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn and(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(if (*x == 1 && *y == 1)  { 1 } else { 0 }),
+        _ => panic!("and expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _mod(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x % y ),
+        _ => panic!("mod expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _bit_and(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x & y ),
+        _ => panic!("& expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _bit_or(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x | y ),
+        _ => panic!("| expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _bit_not(a: &Value) -> Value {
+    match (a) {
+        Value::Number(x) => Value::Number(!x),
+        _ => panic!("~ expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _bit_xor(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x ^ y ),
+        _ => panic!("^ expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _bit_right_shift(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x >> y ),
+        _ => panic!(">> expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _bit_left_shift(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x << y ),
+        _ => panic!("<< expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn not(a: &Value) -> Value {
+    match (a) {
+        Value::Number(x) => Value::Number(if *x == 0 { 1 } else { 0 }),
+        _ => panic!("not expects two numbers, got non-number Value"),
+    }
+}
+
+pub fn _set_mutate(array: &mut Value, index: &Value, value: &Value) -> Value {
+    match array {
+        Value::Array(ref mut arr) => {
+            let idx = match index {
+                Value::Number(n) if *n >= 0 => *n as usize,
+                _ => panic!("Index must be a non-negative number"),
+            };
+
+            if idx < arr.len() {
+                arr[idx] = value.clone(); // set existing element
+            } else if idx == arr.len() {
+                arr.push(value.clone()); // append at the end
+            } else {
+                panic!("Index out of bounds");
+            }
+             return Value::Number(0)
+        }
+        _ => panic!("First argument to set! must be an array"),
+    }
+}
+pub fn _pop_mutate(array: &mut Value) -> Value {
+    match array {
+        Value::Array(ref mut arr) => {
+             arr.pop();
+            return Value::Number(0)
+        }
+        _ => panic!("First argument to pop! must be an array"),
+    }
+}
+
+pub fn get(array: &Value, index: &Value) -> Value {
+    let arr = match array {
+        Value::Array(a) => a,
+        _ => panic!("First argument to get must be an array"),
+    };
+
+    let idx = match index {
+        Value::Number(n) => *n as usize,
+        _ => panic!("Second argument to get must be a number"),
+    };
+
+    arr[idx].clone() // return a clone of the element
+}
+pub fn length(array: &Value) -> Value {
+       match (array) {
+        Value::Array(x) => Value::Number(x.len() as i32),
+        _ => panic!("First argument to length must be an array"),
+    }
+}
+pub fn lambda<F>(f: F) -> Value
+where
+    F: 'static + Fn(Vec<&Value>) -> Value,
+{
+    Value::Function(Rc::new(move |args: Vec<Value>| {
+        // Convert Vec<Value> to Vec<&Value> for the inner closure
+        let refs: Vec<&Value> = args.iter().collect();
+        f(refs)
+    }))
+}
+ fn call(func: &Value, args: Vec<Value>) -> Value {
+    if let Value::Function(f) = func {
+        f(args)
+    } else {
+        panic!("Not a function");
+    }
+ }   
+"#;

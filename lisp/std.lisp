@@ -98,9 +98,9 @@
 (let append! (lambda q item (set! q (length q) item)))
 (let set-and-get! (lambda q index item (do (set! q index item) item)))
 (let tail! (lambda q (pop! q)))
-(let pop-and-get! (lambda xs (do 
-      (let last (get xs (- (length xs) 1))) 
-      (pop! xs) 
+(let pop-and-get! (lambda xs! (do 
+      (let last (get xs! (- (length xs!) 1))) 
+      (pop! xs!) 
       last)))
 (let push! (lambda q item (do (set! q (length q) item) item)))
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
@@ -129,26 +129,26 @@
       (loop (< (get i) len) (process))
       xs)))
 
-(let for (lambda xs cb (do
-      (let i [ 0 ])
+(let each (lambda xs cb (do
+      (let i! [ 0 ])
       (let len (length xs))
-      (let process (lambda (do (cb (get xs (get i))) (set! i 0 (+ (get i) 1)))))
-      (loop (< (get i) len) (process))
+      (let process (lambda [cb i!] (do (cb (get xs (get i!))) (set! i! 0 (+ (get i!) 1)))))
+      (loop (< (get i!) len) (process [cb i!]))
       xs)))
 
 (let map (lambda xs cb (do
-      (let out [])
-      (for xs (lambda x (push! out (cb x))))
-      out)))
+      (let out! [])
+      (each xs (lambda x (push! out! (cb x))))
+      out!)))
 
 (let filter (lambda xs cb? (do
       (let out [])
-      (for xs (lambda x (if (cb? x) (push! out x))))
+      (each xs (lambda x (if (cb? x) (push! out x))))
       out)))
 
 (let reduce (lambda xs cb initial (do
       (let out [ initial ])
-      (for xs (lambda x (set! out 0 (cb (get out 0) x))))
+      (each xs (lambda x (set! out 0 (cb (get out 0) x))))
       (get out 0))))
 
 
@@ -175,8 +175,8 @@
       (loop (and (< (get i) len) (= (get index 0) -1)) (process))
       (get index 0))))
 
-(let merge! (lambda a b (do (for b (lambda x (push! a x))) a)))
-(let merge (lambda a b (do (let out []) (for a (lambda x (push! out x))) (for b (lambda x (push! out x))) out)))
+(let merge! (lambda a b (do (each b (lambda x (push! a x))) a)))
+(let merge (lambda a b (do (let out []) (each a (lambda x (push! out x))) (each b (lambda x (push! out x))) out)))
 (let concat (lambda xs (reduce xs merge [])))
 
 (let square (lambda x (* x x)))
