@@ -224,18 +224,34 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Expression {
                 if let [Expression::Word(ref array_kw), ref elements @ ..] = &array_exprs[..] {
                     if array_kw == "array" {
                         // replace this arg with _args
-                        for (i, elem) in elements.iter().enumerate() {
+                        for (i, elem) in elements.iter().rev().enumerate() {
                             match elem {
-                                Expression::Word(name) if name != "." => {
-                                    new_bindings.push(Expression::Apply(vec![
-                                        Expression::Word("let".to_string()),
-                                        Expression::Word(name.clone()),
-                                        Expression::Apply(vec![
-                                            Expression::Word("get".to_string()),
-                                            Expression::Word("_args".to_string()),
-                                            Expression::Atom(i as i32),
-                                        ]),
-                                    ]));
+                                Expression::Word(name) => {
+                                    if i == elements.len() - 1 {
+                                        if name != "." {
+                                            new_bindings.push(Expression::Apply(vec![
+                                                Expression::Word("let".to_string()),
+                                                Expression::Word(name.clone()),
+                                                Expression::Word("_args".to_string()),
+                                            ]))
+                                        }
+                                    } else {
+                                        if name != "." {
+                                            new_bindings.push(Expression::Apply(vec![
+                                                Expression::Word("let".to_string()),
+                                                Expression::Word(name.clone()),
+                                                Expression::Apply(vec![
+                                                    Expression::Word("pop-and-get!".to_string()),
+                                                    Expression::Word("_args".to_string()),
+                                                ]),
+                                            ]))
+                                        } else {
+                                            new_bindings.push(Expression::Apply(vec![
+                                                Expression::Word("pop-and-get!".to_string()),
+                                                Expression::Word("_args".to_string()),
+                                            ]))
+                                        }
+                                    }
                                 }
                                 Expression::Word(_) => { /* skip element */ }
                                 _ => panic!("lambda array element must be a word or '.'"),
