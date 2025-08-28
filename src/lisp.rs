@@ -590,694 +590,725 @@ fn evaluate(exp: &Expression, env: Rc<RefCell<Env>>, defs: Rc<RefCell<Env>>) -> 
     }
 }
 
-pub fn run(expr: &Expression) -> Evaluated {
-    let env = Rc::new(RefCell::new(Env::new()));
-    let defs = Rc::new(RefCell::new(Env::new()));
-    {
-        let mut env_ref = env.borrow_mut();
-        env_ref.vars.insert(
-            "loop".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    if (args.len() == 2) {
-                        while let Evaluated::Number(value) =
-                            evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs))
-                        {
-                            if value == 1 {
-                                evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                            } else {
-                                break;
-                            }
-                        }
-                    } else {
-                        let start_val = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                        let end_val = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                        let func_val = evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs));
-
-                        let start = match start_val {
-                            Evaluated::Number(n) => n,
-                            _ => panic!("loop: start must be a number"),
-                        };
-                        let end = match end_val {
-                            Evaluated::Number(n) => n,
-                            _ => panic!("loop: end must be a number"),
-                        };
-                        let func = match func_val {
-                            Evaluated::Function(f) => {
-                                for i in start..end {
-                                    f(vec![Expression::Atom(i)], Rc::clone(&env), Rc::clone(&defs));
+fn init() -> Rc<RefCell<Env>> {
+    Rc::new(RefCell::new(Env {
+        vars: HashMap::from([
+            (
+                "loop".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        if (args.len() == 2) {
+                            while let Evaluated::Number(value) =
+                                evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs))
+                            {
+                                if value == 1 {
+                                    evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                                } else {
+                                    break;
                                 }
                             }
-                            _ => panic!("loop: third argument must be a lambda"),
-                        };
-                    }
+                        } else {
+                            let start_val = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                            let end_val = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                            let func_val = evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs));
 
-                    return Evaluated::Number(-1);
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "array".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let evaluated_args = args
-                        .into_iter()
-                        .map(|arg| evaluate(&arg, Rc::clone(&env), Rc::clone(&defs)))
-                        .collect();
-                    Evaluated::Vector(Rc::new(RefCell::new(evaluated_args)))
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "length".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Vector(arr) => Evaluated::Number(arr.borrow().len() as i32),
-                        _ => panic!("First argument must be an array"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "get".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Vector(arr) => {
-                            let index = evaluate(&args[1], env, defs);
-                            match index {
-                                Evaluated::Number(index) => {
-                                    let len: usize = arr.borrow().len();
-                                    if index >= 0 && index < (len as i32) {
-                                        arr.borrow_mut().get(index as usize).unwrap().clone()
-                                    } else {
-                                        panic!("Index is outside ofthe array bounds")
+                            let start = match start_val {
+                                Evaluated::Number(n) => n,
+                                _ => panic!("loop: start must be a number"),
+                            };
+                            let end = match end_val {
+                                Evaluated::Number(n) => n,
+                                _ => panic!("loop: end must be a number"),
+                            };
+                            let func = match func_val {
+                                Evaluated::Function(f) => {
+                                    for i in start..end {
+                                        f(
+                                            vec![Expression::Atom(i)],
+                                            Rc::clone(&env),
+                                            Rc::clone(&defs),
+                                        );
                                     }
                                 }
-                                _ => panic!("Second argument of get must be a number"),
-                            }
+                                _ => panic!("loop: third argument must be a lambda"),
+                            };
                         }
-                        _ => panic!("First argument must be an array"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "set!".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Vector(arr) => {
-                            let index = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                            match index {
-                                Evaluated::Number(index) => {
-                                    {
+
+                        return Evaluated::Number(-1);
+                    },
+                )),
+            ),
+            (
+                "array".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let evaluated_args = args
+                            .into_iter()
+                            .map(|arg| evaluate(&arg, Rc::clone(&env), Rc::clone(&defs)))
+                            .collect();
+                        Evaluated::Vector(Rc::new(RefCell::new(evaluated_args)))
+                    },
+                )),
+            ),
+            (
+                "length".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
+                            Evaluated::Vector(arr) => Evaluated::Number(arr.borrow().len() as i32),
+                            _ => panic!("First argument must be an array"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "get".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
+                            Evaluated::Vector(arr) => {
+                                let index = evaluate(&args[1], env, defs);
+                                match index {
+                                    Evaluated::Number(index) => {
                                         let len: usize = arr.borrow().len();
                                         if index >= 0 && index < (len as i32) {
-                                            arr.borrow_mut()[index as usize] = evaluate(
-                                                &args[2],
-                                                Rc::clone(&env),
-                                                Rc::clone(&defs),
-                                            );
-                                        } else if index == (len as i32) {
-                                            arr.borrow_mut().push(evaluate(
-                                                &args[2],
-                                                Rc::clone(&env),
-                                                Rc::clone(&defs),
-                                            ));
+                                            arr.borrow_mut().get(index as usize).unwrap().clone()
                                         } else {
-                                            panic!("Index is outside ofthe array bounds");
+                                            panic!("Index is outside ofthe array bounds")
                                         }
                                     }
-                                    Evaluated::Vector(arr)
+                                    _ => panic!("Second argument of get must be a number"),
                                 }
-                                _ => panic!("Second argument of get must be a number"),
                             }
+                            _ => panic!("First argument must be an array"),
                         }
-                        _ => panic!("First argument must be an array"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "pop!".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Vector(arr) => {
-                            arr.borrow_mut().pop();
-                            Evaluated::Vector(arr)
-                        }
-                        _ => panic!("First argument must be an array"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "+".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a + b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "-".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a - b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "*".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a * b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "/".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a / b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "mod".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a % b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "&".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a & b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "|".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a | b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "^".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a ^ b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "~".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    match a {
-                        Evaluated::Number(a) => Evaluated::Number(!a),
-                        _ => panic!("Argument must be be number"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            ">>".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a >> b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "<<".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => Evaluated::Number(a << b),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "if".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let condition = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    match condition {
-                        Evaluated::Number(condition) => {
-                            if condition == 1 {
-                                evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs))
-                            } else {
-                                evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs))
-                            }
-                        }
-                        _ => panic!("First argument must be a 1 or 0"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            ">".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a > b { 1 } else { 0 })
-                        }
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "<".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a < b { 1 } else { 0 })
-                        }
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            ">=".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a >= b { 1 } else { 0 })
-                        }
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "<=".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a <= b { 1 } else { 0 })
-                        }
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "=".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                    match (a, b) {
-                        (Evaluated::Number(a), Evaluated::Number(b)) => {
-                            Evaluated::Number(if a == b { 1 } else { 0 })
-                        }
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "not".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let condition: Evaluated =
-                        evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    match condition {
-                        Evaluated::Number(condition) => {
-                            if condition != 0 {
-                                Evaluated::Number(0)
-                            } else {
-                                Evaluated::Number(1)
-                            }
-                        }
-                        _ => panic!("Argument must be a 1 or 0"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "and".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Number(a) => {
-                            if a == 1 {
-                                match evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs)) {
-                                    Evaluated::Number(b) => {
-                                        if b == 1 {
-                                            Evaluated::Number(1)
-                                        } else {
-                                            Evaluated::Number(0)
+                    },
+                )),
+            ),
+            (
+                "set!".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
+                            Evaluated::Vector(arr) => {
+                                let index = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                                match index {
+                                    Evaluated::Number(index) => {
+                                        {
+                                            let len: usize = arr.borrow().len();
+                                            if index >= 0 && index < (len as i32) {
+                                                arr.borrow_mut()[index as usize] = evaluate(
+                                                    &args[2],
+                                                    Rc::clone(&env),
+                                                    Rc::clone(&defs),
+                                                );
+                                            } else if index == (len as i32) {
+                                                arr.borrow_mut().push(evaluate(
+                                                    &args[2],
+                                                    Rc::clone(&env),
+                                                    Rc::clone(&defs),
+                                                ));
+                                            } else {
+                                                panic!("Index is outside ofthe array bounds");
+                                            }
                                         }
+                                        Evaluated::Vector(arr)
                                     }
-                                    _ => panic!("First argument must be a 1 or 0"),
+                                    _ => panic!("Second argument of get must be a number"),
                                 }
-                            } else {
-                                Evaluated::Number(0)
                             }
+                            _ => panic!("First argument must be an array"),
                         }
-                        _ => panic!("First argument must be a 1 or 0"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "or".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Number(a) => {
-                            if a == 0 {
-                                match evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs)) {
-                                    Evaluated::Number(b) => {
-                                        if b == 1 {
-                                            Evaluated::Number(1)
-                                        } else {
-                                            Evaluated::Number(0)
+                    },
+                )),
+            ),
+            (
+                "pop!".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
+                            Evaluated::Vector(arr) => {
+                                arr.borrow_mut().pop();
+                                Evaluated::Vector(arr)
+                            }
+                            _ => panic!("First argument must be an array"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "+".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a + b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "-".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a - b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "*".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a * b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "/".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a / b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "mod".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a % b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "&".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a & b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "|".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a | b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "^".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a ^ b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "~".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        match a {
+                            Evaluated::Number(a) => Evaluated::Number(!a),
+                            _ => panic!("Argument must be be number"),
+                        }
+                    },
+                )),
+            ),
+            (
+                ">>".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a >> b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "<<".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(a << b)
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "if".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let condition = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        match condition {
+                            Evaluated::Number(condition) => {
+                                if condition == 1 {
+                                    evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs))
+                                } else {
+                                    evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs))
+                                }
+                            }
+                            _ => panic!("First argument must be a 1 or 0"),
+                        }
+                    },
+                )),
+            ),
+            (
+                ">".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(if a > b { 1 } else { 0 })
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "<".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(if a < b { 1 } else { 0 })
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                ">=".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(if a >= b { 1 } else { 0 })
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "<=".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(if a <= b { 1 } else { 0 })
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "=".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let a = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let b = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match (a, b) {
+                            (Evaluated::Number(a), Evaluated::Number(b)) => {
+                                Evaluated::Number(if a == b { 1 } else { 0 })
+                            }
+                            _ => panic!("Both arguments must be numbers"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "not".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let condition: Evaluated =
+                            evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        match condition {
+                            Evaluated::Number(condition) => {
+                                if condition != 0 {
+                                    Evaluated::Number(0)
+                                } else {
+                                    Evaluated::Number(1)
+                                }
+                            }
+                            _ => panic!("Argument must be a 1 or 0"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "and".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
+                            Evaluated::Number(a) => {
+                                if a == 1 {
+                                    match evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs)) {
+                                        Evaluated::Number(b) => {
+                                            if b == 1 {
+                                                Evaluated::Number(1)
+                                            } else {
+                                                Evaluated::Number(0)
+                                            }
                                         }
+                                        _ => panic!("First argument must be a 1 or 0"),
                                     }
-                                    _ => panic!("First argument must be a 1 or 0"),
+                                } else {
+                                    Evaluated::Number(0)
                                 }
-                            } else {
-                                Evaluated::Number(1)
                             }
+                            _ => panic!("First argument must be a 1 or 0"),
                         }
-                        _ => panic!("First argument must be a 1 or 0"),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "do".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    let mut last_result: Evaluated = Evaluated::Number(0);
-                    for expr in args {
-                        last_result = evaluate(&expr, Rc::clone(&env), Rc::clone(&defs));
-                    }
-                    last_result
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "lambda".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 scope: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    if args.len() < 1 {
-                        panic!("lambda expects at least one argument: the body");
-                    }
-                    let params: Vec<String> = args[0..args.len() - 1]
-                        .iter()
-                        .filter_map(|param| match param {
-                            Expression::Word(name) => Some(name.clone()),
-                            _ => None,
-                        })
-                        .collect();
-                    let body: Expression = args[args.len() - 1].clone();
-                    Evaluated::Function(Rc::new(
-                        move |lambda_args: Vec<Expression>,
-                              _env: Rc<RefCell<Env>>,
-                              defs: Rc<RefCell<Env>>| {
-                            if lambda_args.len() != params.len() {
-                                panic!(
-                                    "Expected {} arguments, but got {}",
-                                    params.len(),
-                                    lambda_args.len()
-                                );
-                            }
-                            let local_defs =
-                                Rc::new(RefCell::new(Env::with_parent(Rc::clone(&scope))));
-                            {
-                                let mut local_defs_ref = local_defs.borrow_mut();
-                                for (param, arg) in params.iter().zip(lambda_args.iter()) {
-                                    let value = evaluate(arg, Rc::clone(&env), Rc::clone(&defs));
-                                    local_defs_ref.set(param.clone(), value);
+                    },
+                )),
+            ),
+            (
+                "or".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
+                            Evaluated::Number(a) => {
+                                if a == 0 {
+                                    match evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs)) {
+                                        Evaluated::Number(b) => {
+                                            if b == 1 {
+                                                Evaluated::Number(1)
+                                            } else {
+                                                Evaluated::Number(0)
+                                            }
+                                        }
+                                        _ => panic!("First argument must be a 1 or 0"),
+                                    }
+                                } else {
+                                    Evaluated::Number(1)
                                 }
                             }
-                            evaluate(&body, Rc::clone(&env), Rc::clone(&local_defs))
-                        },
-                    ))
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "let".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    if args.len() != 2 {
-                        panic!("let expects exactly two arguments: a variable name and a value");
-                    }
-                    if let Expression::Word(var_name) = &args[0] {
-                        let value = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                        defs.borrow_mut().set(var_name.clone(), value);
-                        return evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                    } else {
-                        panic!("First argument to 'let' must be a variable name")
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "apply".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    if args.len() < 1 {
-                        panic!("apply expects exactly at least one argument");
-                    }
-                    if let Expression::Word(_) = &args[&args.len() - 1] {
-                        let func = evaluate(
-                            &args[((args.len() as i32) - 1) as usize],
-                            Rc::clone(&env),
-                            Rc::clone(&defs),
-                        );
-                        if let Evaluated::Function(func) = func {
-                            func(
-                                args[0..args.len() - 1].to_vec(),
+                            _ => panic!("First argument must be a 1 or 0"),
+                        }
+                    },
+                )),
+            ),
+            (
+                "do".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let mut last_result: Evaluated = Evaluated::Number(0);
+                        for expr in args {
+                            last_result = evaluate(&expr, Rc::clone(&env), Rc::clone(&defs));
+                        }
+                        last_result
+                    },
+                )),
+            ),
+            (
+                "lambda".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     scope: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        if args.len() < 1 {
+                            panic!("lambda expects at least one argument: the body");
+                        }
+                        let params: Vec<String> = args[0..args.len() - 1]
+                            .iter()
+                            .filter_map(|param| match param {
+                                Expression::Word(name) => Some(name.clone()),
+                                _ => None,
+                            })
+                            .collect();
+                        let body: Expression = args[args.len() - 1].clone();
+                        Evaluated::Function(Rc::new(
+                            move |lambda_args: Vec<Expression>,
+                                  _env: Rc<RefCell<Env>>,
+                                  defs: Rc<RefCell<Env>>| {
+                                if lambda_args.len() != params.len() {
+                                    panic!(
+                                        "Expected {} arguments, but got {}",
+                                        params.len(),
+                                        lambda_args.len()
+                                    );
+                                }
+                                let local_defs =
+                                    Rc::new(RefCell::new(Env::with_parent(Rc::clone(&scope))));
+                                {
+                                    let mut local_defs_ref = local_defs.borrow_mut();
+                                    for (param, arg) in params.iter().zip(lambda_args.iter()) {
+                                        let value =
+                                            evaluate(arg, Rc::clone(&env), Rc::clone(&defs));
+                                        local_defs_ref.set(param.clone(), value);
+                                    }
+                                }
+                                evaluate(&body, Rc::clone(&env), Rc::clone(&local_defs))
+                            },
+                        ))
+                    },
+                )),
+            ),
+            (
+                "let".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        if args.len() != 2 {
+                            panic!(
+                                "let expects exactly two arguments: a variable name and a value"
+                            );
+                        }
+                        if let Expression::Word(var_name) = &args[0] {
+                            let value = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                            defs.borrow_mut().set(var_name.clone(), value);
+                            return Evaluated::Number(0);
+                        } else {
+                            panic!("First argument to 'let' must be a variable name")
+                        }
+                    },
+                )),
+            ),
+            (
+                "apply".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        if args.len() < 1 {
+                            panic!("apply expects exactly at least one argument");
+                        }
+                        if let Expression::Word(_) = &args[&args.len() - 1] {
+                            let func = evaluate(
+                                &args[((args.len() as i32) - 1) as usize],
                                 Rc::clone(&env),
                                 Rc::clone(&defs),
-                            )
-                        } else {
-                            panic!("Last argument to 'apply' must be a lambda")
-                        }
-                    } else if let Expression::Apply(_) = &args[&args.len() - 1] {
-                        let func = evaluate(
-                            &args[((args.len() as i32) - 1) as usize],
-                            Rc::clone(&env),
-                            Rc::clone(&defs),
-                        );
-                        if let Evaluated::Function(func) = func {
-                            func(
-                                args[0..args.len() - 1].to_vec(),
+                            );
+                            if let Evaluated::Function(func) = func {
+                                func(
+                                    args[0..args.len() - 1].to_vec(),
+                                    Rc::clone(&env),
+                                    Rc::clone(&defs),
+                                )
+                            } else {
+                                panic!("Last argument to 'apply' must be a lambda")
+                            }
+                        } else if let Expression::Apply(_) = &args[&args.len() - 1] {
+                            let func = evaluate(
+                                &args[((args.len() as i32) - 1) as usize],
                                 Rc::clone(&env),
                                 Rc::clone(&defs),
-                            )
+                            );
+                            if let Evaluated::Function(func) = func {
+                                func(
+                                    args[0..args.len() - 1].to_vec(),
+                                    Rc::clone(&env),
+                                    Rc::clone(&defs),
+                                )
+                            } else {
+                                panic!("Last argument to 'apply' must be a lambda")
+                            }
                         } else {
-                            panic!("Last argument to 'apply' must be a lambda")
+                            panic!("First argument to 'apply' must be a word")
                         }
-                    } else {
-                        panic!("First argument to 'apply' must be a word")
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "atom?".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    if args.len() < 1 {
-                        panic!("atom? expects at least one argument");
-                    }
-                    match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Number(_) => Evaluated::Number(1),
-                        _ => Evaluated::Number(0),
-                    }
-                },
-            )),
-        );
-        env_ref.vars.insert(
-            "lambda?".to_string(),
-            Evaluated::Function(Rc::new(
-                |args: Vec<Expression>,
-                 env: Rc<RefCell<Env>>,
-                 defs: Rc<RefCell<Env>>|
-                 -> Evaluated {
-                    if args.len() < 1 {
-                        panic!("lambda? expects at least one argument");
-                    }
-                    match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                        Evaluated::Function(_) => Evaluated::Number(1),
-                        _ => Evaluated::Number(0),
-                    }
-                },
-            )),
-        );
-    }
+                    },
+                )),
+            ),
+            (
+                "atom?".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        if args.len() < 1 {
+                            panic!("atom? expects at least one argument");
+                        }
+                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
+                            Evaluated::Number(_) => Evaluated::Number(1),
+                            _ => Evaluated::Number(0),
+                        }
+                    },
+                )),
+            ),
+            (
+                "lambda?".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        if args.len() < 1 {
+                            panic!("lambda? expects at least one argument");
+                        }
+                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
+                            Evaluated::Function(_) => Evaluated::Number(1),
+                            _ => Evaluated::Number(0),
+                        }
+                    },
+                )),
+            ),
+        ]),
+        parent: None,
+    }))
+}
+pub fn run(expr: &Expression) -> Evaluated {
+    let env = init();
+    let defs: Rc<RefCell<Env>> = Rc::new(RefCell::new(Env::new()));
     return evaluate(&expr, Rc::clone(&env), Rc::clone(&defs));
 }
 
