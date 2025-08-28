@@ -116,24 +116,18 @@
 (let -- (lambda var (set var (- (get var) 1))))
 
 (let of (lambda xs cb (do
-      (let i [ 0 ])
-      (let len (length xs))
-      (let process (lambda (do (cb) (set! i 0 (+ (get i) 1)))))
-      (loop (< (get i) len) (process))
+      (let process (lambda . (cb)))
+      (loop 0 (length xs) process)
       xs)))
 
 (let iterate (lambda xs cb (do
-      (let i [ 0 ])
-      (let len (length xs))
-      (let process (lambda (do (cb (get i)) (set! i 0 (+ (get i) 1)))))
-      (loop (< (get i) len) (process))
+      (let process (lambda i (cb i)))
+      (loop 0 (length xs) process)
       xs)))
 
 (let each (lambda xs cb (do
-      (let i! [ 0 ])
-      (let len (length xs))
-      (let process (lambda (do (cb (get xs (get i!))) (set! i! 0 (+ (get i!) 1)))))
-      (loop (< (get i!) len) (process))
+      (let process (lambda i (cb (get xs i))))
+      (loop 0 (length xs) process)
       xs)))
 
 (let map (lambda xs cb (do
@@ -149,7 +143,7 @@
 (let reduce (lambda xs cb initial (do
       (let out [ initial ])
       (each xs (lambda x (set! out 0 (cb (get out 0) x))))
-      (get out 0))))
+      (get out))))
 
 
 (let every? (lambda xs predicate? (do
@@ -208,33 +202,24 @@
       out)))
 
 (let sequence (lambda arr (do
-      (let start 0)
-      (let end (length arr))
       (let out [])
-      (let i [ start ])
-      (let process (lambda (do (push! out (get i)) (set! i 0 (+ (get i) 1)))))
-      (loop (< (get i) end) (process))
+      (let end (length arr))
+      (loop 0 end (lambda i (push! out i)))
       out)))
 
 (let buckets (lambda size (do
       (let out [])
-      (let i [ 0 ])
-      (let process (lambda (do (push! out []) (set! i 0 (+ (get i) 1)))))
-      (loop (< (get i) size) (process))
+      (loop 0 size (lambda . (push! out [])))
       out)))
 
-(let zeroes (lambda end (do
+(let zeroes (lambda start end (do
       (let out [])
-      (let i [ 0 ])
-      (let process (lambda (do (push! out 0) (set! i 0 (+ (get i) 1)))))
-      (loop (< (get i) end) (process))
+      (loop start (+ end 1) (lambda . (push! out 0)))
       out)))
 
-(let ones (lambda end (do
+(let ones (lambda start end (do
       (let out [])
-      (let i [ 0 ])
-      (let process (lambda (do (push! out 1) (set! i 0 (+ (get i) 1)))))
-      (loop (< (get i) end) (process))
+      (loop start (+ end 1) (lambda . (push! out 1)))
       out)))
 
 (let match? (lambda a b (and (= (length a) (length b)) (|>
@@ -280,7 +265,6 @@
             (>= (find-index current
               (lambda x
                 (match? x key))) 0))))))
-
 
 (let add-element!
       (lambda table key
