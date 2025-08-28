@@ -380,9 +380,8 @@
 (let slice (lambda xs start end (do
       (let bounds (- end start))
       (let out [])
-      (let i [ 0 ])
-      (let process (lambda (do (push! out (get xs (+ start (get i)))) (set! i 0 (+ (get i) 1)))))
-      (loop (< (get i) bounds) (process))
+      (let process (lambda i (push! out (get xs (+ start i)))))
+      (loop 0 bounds process)
       out)))
 
 (let true? (lambda x (= (get x) true)))
