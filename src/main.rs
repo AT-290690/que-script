@@ -16,19 +16,6 @@ fn dump_wrapped_ast(expr: lisp::Expression, path: &str) -> std::io::Result<()> {
     writeln!(file, "}}")?;
     Ok(())
 }
-fn dump_compiled(expr: String, path: &str) -> std::io::Result<()> {
-    let mut file = fs::File::create(path)?;
-    writeln!(file, "{}", lisp::TOP_LEVEL,)?;
-    writeln!(file, "pub fn run () -> Value {{")?;
-    write!(file, "    {}", expr)?;
-    writeln!(file, "}}")?;
-    writeln!(file, "pub fn main () {{")?;
-    write!(file, r#"println!("{{:?}}",run())"#)?;
-    write!(file, ";")?;
-    writeln!(file, "}}")?;
-
-    Ok(())
-}
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--dump") {
@@ -40,15 +27,5 @@ fn main() -> std::io::Result<()> {
         println!("{:?}", lisp::run(&wrapped_ast));
     }
 
-    // cargo run && rustc example/main.rs -o example/main
-    // ./example/main
-
-    // let program = fs::read_to_string("./lisp/main.lisp")?;
-    // let std_lib = fs::read_to_string("./lisp/std.lisp")?;
-
-    // dump_compiled(
-    //     lisp::compile_expr(&lisp::with_std(&program, &std_lib)),
-    //     "./example/main.rs",
-    // )?;
     Ok(())
 }

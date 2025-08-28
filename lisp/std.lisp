@@ -112,8 +112,8 @@
 (let set (lambda var x (set! var 0 x)))
 (let += (lambda var n (set var (+ (get var) n))))
 (let -= (lambda var n (set var (- (get var) n))))
-(let ++ (lambda var n (set var (+ (get var) 1))))
-(let -- (lambda var n (set var (- (get var) 1))))
+(let ++ (lambda var (set var (+ (get var) 1))))
+(let -- (lambda var (set var (- (get var) 1))))
 
 (let of (lambda xs cb (do
       (let i [ 0 ])
@@ -204,9 +204,7 @@
 
 (let range (lambda start end (do
       (let out [])
-      (let i [ start ])
-      (let process (lambda (do (push! out (get i)) (set! i 0 (+ (get i) 1)))))
-      (loop (<= (get i) end) (process))
+      (loop start (+ end 1) (lambda i (push! out i)))
       out)))
 
 (let sequence (lambda arr (do
@@ -403,17 +401,16 @@
       (loop (< (get i) bounds) (process))
       out)))
 
-
 (let true? (lambda x (= (get x) true)))
 (let false? (lambda x (= (get x) false)))
 (let true! (lambda x (set! x 0 true)))
 (let false! (lambda x (set! x 0 false)))
 
 (let reverse (lambda xs (do 
-      (let i [ (- (length xs) 1) ])
       (let out [])
-      (let process (lambda (do (push! out (get xs (get i))) (set! i 0 (- (get i) 1)))))
-      (loop (>= (get i) 0) (process))
+      (let len (length xs))
+      (let process (lambda i (push! out (get xs (- len i 1)))))
+      (loop 0 len process)
       out)))
 
 (let trim-left (lambda str (do
