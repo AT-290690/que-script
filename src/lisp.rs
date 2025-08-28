@@ -586,15 +586,39 @@ pub fn run(expr: &Expression) -> Evaluated {
                  env: Rc<RefCell<Env>>,
                  defs: Rc<RefCell<Env>>|
                  -> Evaluated {
-                    while let Evaluated::Number(value) =
-                        evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs))
-                    {
-                        if value == 1 {
-                            evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                        } else {
-                            break;
+                    if (args.len() == 2) {
+                        while let Evaluated::Number(value) =
+                            evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs))
+                        {
+                            if value == 1 {
+                                evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                            } else {
+                                break;
+                            }
                         }
+                    } else {
+                        let start_val = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let end_val = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        let func_val = evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs));
+
+                        let start = match start_val {
+                            Evaluated::Number(n) => n,
+                            _ => panic!("loop: start must be a number"),
+                        };
+                        let end = match end_val {
+                            Evaluated::Number(n) => n,
+                            _ => panic!("loop: end must be a number"),
+                        };
+                        let func = match func_val {
+                            Evaluated::Function(f) => {
+                                for i in start..end {
+                                    f(vec![Expression::Atom(i)], Rc::clone(&env), Rc::clone(&defs));
+                                }
+                            }
+                            _ => panic!("loop: third argument must be a lambda"),
+                        };
                     }
+
                     return Evaluated::Number(-1);
                 },
             )),
@@ -1519,22 +1543,42 @@ pub fn compile_expr(expr: &Expression) -> String {
                 }
                 "loop" => {
                     let tail = &list[1..];
-                    if tail.len() != 2 {
-                        panic!("loop expects exactly two arguments: condition and body");
-                    }
-                    let cond_code = compile_expr(&tail[0]);
-                    let body_code = compile_expr(&tail[1]);
+                    if tail.len() == 2 {
+                        // While-style loop: (loop cond body)
+                        let cond_code = compile_expr(&tail[0]);
+                        let body_code = compile_expr(&tail[1]);
 
-                    // Generate a while loop that evaluates condition and executes body
-                    format!(
-                        "{{ while let Value::Number(cond_val) = {cond} {{
-                            if cond_val == 1 {{
-                                {body};
-                            }} }} Value::Number(-1) }}",
-                        cond = cond_code,
-                        body = body_code
+                        format!(
+                            "{{ while let Value::Number(cond_val) = {cond} {{
+    if cond_val == 1 {{
+        {body};
+    }} else {{ break; }}
+}} Value::Number(-1) }}",
+                            cond = cond_code,
+                            body = body_code
+                        )
+                    } else if tail.len() == 3 {
+                        // For-style loop: (loop start end body)
+                        let start_code = compile_expr(&tail[0]);
+                        let end_code = compile_expr(&tail[1]);
+                        let body_code = compile_expr(&tail[2]);
+
+                        format!(
+"{{ 
+    let start = match {start_code} {{ Value::Number(n) => n, _ => panic!(\"loop start must be a number\") }};
+    let end   = match {end_code}   {{ Value::Number(n) => n, _ => panic!(\"loop end must be a number\") }};
+    for i in start..end {{
+        let i_val = Value::Number(i);
+        {body_code};
+    }}
+    Value::Number(-1)
+}}"
                     )
+                    } else {
+                        panic!("loop expects either 2 arguments (while) or 3 arguments (for)");
+                    }
                 }
+
                 _ => {
                     let args = list[1..]
                         .iter()

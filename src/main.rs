@@ -30,21 +30,25 @@ fn dump_compiled(expr: String, path: &str) -> std::io::Result<()> {
     Ok(())
 }
 fn main() -> std::io::Result<()> {
-    // let args: Vec<String> = env::args().collect();
-    // if args.iter().any(|a| a == "--dump") {
-    //     let program = fs::read_to_string("./lisp/main.lisp")?;
-    //     let std_lib = fs::read_to_string("./lisp/std.lisp")?;
-    //     let _ = dump_wrapped_ast(lisp::with_std(&program, &std_lib), "./src/ast.rs");
-    // } else {
-    //     let wrapped_ast: lisp::Expression = load_ast();
-    //     println!("{:?}", lisp::run(&wrapped_ast));
-    // }
-    let program = fs::read_to_string("./lisp/main.lisp")?;
-    let std_lib = fs::read_to_string("./lisp/std.lisp")?;
+    let args: Vec<String> = env::args().collect();
+    if args.iter().any(|a| a == "--dump") {
+        let program = fs::read_to_string("./lisp/main.lisp")?;
+        let std_lib = fs::read_to_string("./lisp/std.lisp")?;
+        let _ = dump_wrapped_ast(lisp::with_std(&program, &std_lib), "./src/ast.rs");
+    } else {
+        let wrapped_ast: lisp::Expression = load_ast();
+        println!("{:?}", lisp::run(&wrapped_ast));
+    }
 
-    dump_compiled(
-        lisp::compile_expr(&lisp::with_std(&program, &std_lib)),
-        "./example/main.rs",
-    )?;
+    // cargo run && rustc example/main.rs -o example/main
+    // ./example/main
+
+    // let program = fs::read_to_string("./lisp/main.lisp")?;
+    // let std_lib = fs::read_to_string("./lisp/std.lisp")?;
+
+    // dump_compiled(
+    //     lisp::compile_expr(&lisp::with_std(&program, &std_lib)),
+    //     "./example/main.rs",
+    // )?;
     Ok(())
 }

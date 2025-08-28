@@ -1,9 +1,8 @@
-
 #![allow(dead_code)]
 #![allow(warnings)]
 
-use std::rc::Rc;
 use std::fmt;
+use std::rc::Rc;
 
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -24,7 +23,7 @@ pub enum Value {
     Array(Vec<Value>),
     Function(Rc<dyn Fn(Vec<Value>) -> Value>),
 }
-    
+
 // PartialEq for comparing Value with Value
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
@@ -94,7 +93,6 @@ pub fn _lt(a: &Value, b: &Value) -> Value {
     }
 }
 
-
 pub fn _lte(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => Value::Number(if x <= y { 1 } else { 0 }),
@@ -111,35 +109,39 @@ pub fn _gte(a: &Value, b: &Value) -> Value {
 
 pub fn or(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => Value::Number(if (*x == 1 || *y == 1) { 1 } else { 0 }),
+        (Value::Number(x), Value::Number(y)) => {
+            Value::Number(if (*x == 1 || *y == 1) { 1 } else { 0 })
+        }
         _ => panic!("or expects two numbers, got non-number Value"),
     }
 }
 
 pub fn and(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => Value::Number(if (*x == 1 && *y == 1)  { 1 } else { 0 }),
+        (Value::Number(x), Value::Number(y)) => {
+            Value::Number(if (*x == 1 && *y == 1) { 1 } else { 0 })
+        }
         _ => panic!("and expects two numbers, got non-number Value"),
     }
 }
 
 pub fn _mod(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => Value::Number(x % y ),
+        (Value::Number(x), Value::Number(y)) => Value::Number(x % y),
         _ => panic!("mod expects two numbers, got non-number Value"),
     }
 }
 
 pub fn _bit_and(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => Value::Number(x & y ),
+        (Value::Number(x), Value::Number(y)) => Value::Number(x & y),
         _ => panic!("& expects two numbers, got non-number Value"),
     }
 }
 
 pub fn _bit_or(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => Value::Number(x | y ),
+        (Value::Number(x), Value::Number(y)) => Value::Number(x | y),
         _ => panic!("| expects two numbers, got non-number Value"),
     }
 }
@@ -153,21 +155,21 @@ pub fn _bit_not(a: &Value) -> Value {
 
 pub fn _bit_xor(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => Value::Number(x ^ y ),
+        (Value::Number(x), Value::Number(y)) => Value::Number(x ^ y),
         _ => panic!("^ expects two numbers, got non-number Value"),
     }
 }
 
 pub fn _bit_right_shift(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => Value::Number(x >> y ),
+        (Value::Number(x), Value::Number(y)) => Value::Number(x >> y),
         _ => panic!(">> expects two numbers, got non-number Value"),
     }
 }
 
 pub fn _bit_left_shift(a: &Value, b: &Value) -> Value {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => Value::Number(x << y ),
+        (Value::Number(x), Value::Number(y)) => Value::Number(x << y),
         _ => panic!("<< expects two numbers, got non-number Value"),
     }
 }
@@ -194,7 +196,7 @@ pub fn _set_mutate(array: &mut Value, index: &Value, value: &Value) -> Value {
             } else {
                 panic!("Index out of bounds");
             }
-             return Value::Number(0)
+            return Value::Number(0);
         }
         _ => panic!("First argument to set! must be an array"),
     }
@@ -202,8 +204,8 @@ pub fn _set_mutate(array: &mut Value, index: &Value, value: &Value) -> Value {
 pub fn _pop_mutate(array: &mut Value) -> Value {
     match array {
         Value::Array(ref mut arr) => {
-             arr.pop();
-            return Value::Number(0)
+            arr.pop();
+            return Value::Number(0);
         }
         _ => panic!("First argument to pop! must be an array"),
     }
@@ -223,7 +225,7 @@ pub fn get(array: &Value, index: &Value) -> Value {
     arr[idx].clone() // return a clone of the element
 }
 pub fn length(array: &Value) -> Value {
-       match (array) {
+    match (array) {
         Value::Array(x) => Value::Number(x.len() as i32),
         _ => panic!("First argument to length must be an array"),
     }
@@ -238,21 +240,42 @@ where
         f(refs)
     }))
 }
- fn call(func: &Value, args: Vec<Value>) -> Value {
+fn call(func: &Value, args: Vec<Value>) -> Value {
     if let Value::Function(f) = func {
         f(args)
     } else {
         panic!("Not a function");
     }
- }   
+}
 
-pub fn run () -> Value {
-    let mut xs_mutate: Value = Value::Array(vec![Value::Number(1), Value::Number(2), Value::Number(3)]);;
-_set_mutate(&mut xs_mutate, &Value::Number(0), &Value::Number(10));
-_set_mutate(&mut xs_mutate, &Value::Number(1), &Value::Number(10));
-_set_mutate(&mut xs_mutate, &Value::Number(2), &Value::Number(30));
-_set_mutate(&mut xs_mutate, &Value::Number(3), &Value::Number(30));
-_set_mutate(&mut xs_mutate, &Value::Number(4), &Value::Number(30));
-xs_mutate}
-pub fn main () {
-println!("{:?}",run());}
+pub fn run() -> Value {
+    let mut push_mutate: Value = Value::Function(Rc::new(|args: Vec<Value>| {
+        let q = args[0].clone();
+        let item = args[1].clone();
+        _set_mutate(&mut q, &length(&q), &item);
+        item
+    }));
+    let mut out_mutate: Value = Value::Array(vec![]);
+    {
+        let start = match Value::Number(0) {
+            Value::Number(n) => n,
+            _ => panic!("loop start must be a number"),
+        };
+        let end = match Value::Number(10) {
+            Value::Number(n) => n,
+            _ => panic!("loop end must be a number"),
+        };
+        for i in start..end {
+            let i_val = Value::Number(i);
+            Value::Function(Rc::new(|args: Vec<Value>| {
+                let i = args[0].clone();
+                call(&push_mutate, vec![out_mutate, i])
+            }));
+        }
+        Value::Number(-1)
+    };
+    out_mutate
+}
+pub fn main() {
+    println!("{:?}", run());
+}

@@ -132,8 +132,8 @@
 (let each (lambda xs cb (do
       (let i! [ 0 ])
       (let len (length xs))
-      (let process (lambda [cb i!] (do (cb (get xs (get i!))) (set! i! 0 (+ (get i!) 1)))))
-      (loop (< (get i!) len) (process [cb i!]))
+      (let process (lambda (do (cb (get xs (get i!))) (set! i! 0 (+ (get i!) 1)))))
+      (loop (< (get i!) len) (process))
       xs)))
 
 (let map (lambda xs cb (do
