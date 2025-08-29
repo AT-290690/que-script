@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 #![allow(warnings)]
 
+mod infer;
 mod lisp;
+mod types;
 use std::fs;
 use std::io::Write;
 mod ast;
@@ -24,6 +26,10 @@ fn main() -> std::io::Result<()> {
         let _ = dump_wrapped_ast(lisp::with_std(&program, &std_lib), "./src/ast.rs");
     } else {
         let wrapped_ast: lisp::Expression = load_ast();
+        match infer::infer_with_builtins(&wrapped_ast) {
+            Ok(typ) => println!("Type: {}", typ),
+            Err(e) => println!("Error: {}", e),
+        }
         println!("{:?}", lisp::run(&wrapped_ast));
     }
 

@@ -600,42 +600,47 @@ fn init() -> Rc<RefCell<Env>> {
                      env: Rc<RefCell<Env>>,
                      defs: Rc<RefCell<Env>>|
                      -> Evaluated {
-                        if (args.len() == 2) {
-                            while let Evaluated::Number(value) =
-                                evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs))
-                            {
-                                if value == 1 {
-                                    evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                                } else {
-                                    break;
+                        while let Evaluated::Number(value) =
+                            evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs))
+                        {
+                            if value == 1 {
+                                evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                            } else {
+                                break;
+                            }
+                        }
+
+                        return Evaluated::Number(-1);
+                    },
+                )),
+            ),
+            (
+                "dotimes".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let start_val = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
+                        let end_val = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        let func_val = evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs));
+
+                        let start = match start_val {
+                            Evaluated::Number(n) => n,
+                            _ => panic!("dotimes: start must be a number"),
+                        };
+                        let end = match end_val {
+                            Evaluated::Number(n) => n,
+                            _ => panic!("dotimes: end must be a number"),
+                        };
+                        let func = match func_val {
+                            Evaluated::Function(f) => {
+                                for i in start..end {
+                                    f(vec![Expression::Atom(i)], Rc::clone(&env), Rc::clone(&defs));
                                 }
                             }
-                        } else {
-                            let start_val = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-                            let end_val = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-                            let func_val = evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs));
-
-                            let start = match start_val {
-                                Evaluated::Number(n) => n,
-                                _ => panic!("loop: start must be a number"),
-                            };
-                            let end = match end_val {
-                                Evaluated::Number(n) => n,
-                                _ => panic!("loop: end must be a number"),
-                            };
-                            let func = match func_val {
-                                Evaluated::Function(f) => {
-                                    for i in start..end {
-                                        f(
-                                            vec![Expression::Atom(i)],
-                                            Rc::clone(&env),
-                                            Rc::clone(&defs),
-                                        );
-                                    }
-                                }
-                                _ => panic!("loop: third argument must be a lambda"),
-                            };
-                        }
+                            _ => panic!("dotimes: third argument must be a lambda"),
+                        };
 
                         return Evaluated::Number(-1);
                     },

@@ -91,8 +91,10 @@
 (let lower (lambda char (if (and (>= char char:A) (<= char char:Z)) (+ char char:space) char)))
 (let identity (lambda x x))
 
-(let true (not 1))
-(let false (not 0))
+
+(let boolean (lambda x (= x x)))
+(let true (boolean 1))
+(let false (boolean 0))
 (let nil 0)
 
 (let append! (lambda q item (set! q (length q) item)))
@@ -117,17 +119,17 @@
 
 (let of (lambda xs cb (do
       (let process (lambda . (cb)))
-      (loop 0 (length xs) process)
+      (dotimes 0 (length xs) process)
       xs)))
 
 (let iterate (lambda xs cb (do
       (let process (lambda i (cb i)))
-      (loop 0 (length xs) process)
+      (dotimes 0 (length xs) process)
       xs)))
 
 (let each (lambda xs cb (do
       (let process (lambda i (cb (get xs i))))
-      (loop 0 (length xs) process)
+      (dotimes 0 (length xs) process)
       xs)))
 
 (let map (lambda xs cb (do
@@ -198,28 +200,28 @@
 
 (let range (lambda start end (do
       (let out [])
-      (loop start (+ end 1) (lambda i (push! out i)))
+      (dotimes start (+ end 1) (lambda i (push! out i)))
       out)))
 
 (let sequence (lambda arr (do
       (let out [])
       (let end (length arr))
-      (loop 0 end (lambda i (push! out i)))
+      (dotimes 0 end (lambda i (push! out i)))
       out)))
 
 (let buckets (lambda size (do
       (let out [])
-      (loop 0 size (lambda . (push! out [])))
+      (dotimes 0 size (lambda . (push! out [])))
       out)))
 
 (let zeroes (lambda start end (do
       (let out [])
-      (loop start (+ end 1) (lambda . (push! out 0)))
+      (dotimes start (+ end 1) (lambda . (push! out 0)))
       out)))
 
 (let ones (lambda start end (do
       (let out [])
-      (loop start (+ end 1) (lambda . (push! out 1)))
+      (dotimes start (+ end 1) (lambda . (push! out 1)))
       out)))
 
 (let match? (lambda a b (and (= (length a) (length b)) (|>
@@ -381,7 +383,7 @@
       (let bounds (- end start))
       (let out [])
       (let process (lambda i (push! out (get xs (+ start i)))))
-      (loop 0 bounds process)
+      (dotimes 0 bounds process)
       out)))
 
 (let true? (lambda x (= (get x) true)))
@@ -393,7 +395,7 @@
       (let out [])
       (let len (length xs))
       (let process (lambda i (push! out (get xs (- len i 1)))))
-      (loop 0 len process)
+      (dotimes 0 len process)
       out)))
 
 (let trim-left (lambda str (do
