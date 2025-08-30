@@ -90,11 +90,11 @@ fn test_type_inference() {
     }
 
     // Test if expression
-    let if_expression = lisp::parse("(if (= 1 2) 10 (boolean 0))").unwrap();
+    let if_expression = lisp::parse("(if (= 1 2) 10 (= 0 1))").unwrap();
     if let Some(if_expr) = if_expression.first() {
         match infer::infer_with_builtins(if_expr) {
-            Ok(typ) => println!("Type of (if (= 1 2) 10 false): {}", typ),
-            Err(e) => println!("Type error in '(if (= 1 2) 10 false)': {}", e),
+            Ok(typ) => println!("Type of (if (= 1 2) 10 (= 0 1)): {}", typ),
+            Err(e) => println!("Type error in '(if (= 1 2) 10 (= 0 1))': {}", e),
         }
     }
 }

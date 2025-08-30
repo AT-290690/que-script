@@ -92,9 +92,8 @@
 (let identity (lambda x x))
 
 
-(let boolean (lambda x (= x x)))
-(let true (boolean 1))
-(let false (boolean 0))
+(let true (= 1 1))
+(let false (= 0 1))
 (let nil 0)
 
 (let append! (lambda q item (set! q (length q) item)))

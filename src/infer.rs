@@ -429,11 +429,6 @@ pub fn create_builtin_environment() -> TypeEnv {
             ),
         ),
     );
-    env.insert(
-        "boolean".to_string(),
-        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
-    );
-
     env
 }
 
