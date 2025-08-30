@@ -24,7 +24,7 @@ impl InferenceContext {
         InferenceContext {
             env,
             constraints: Vec::new(),
-            fresh_var_counter: 0,
+            fresh_var_counter: 1000,
         }
     }
 
@@ -118,7 +118,6 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     if args.len() < 1 {
         return Err("Lambda requires at least a body".to_string());
     }
-
     let param_count = args.len() - 1;
     let body = &args[param_count];
 
@@ -147,7 +146,6 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     // Infer body type
     let mut body_ctx = InferenceContext::with_env(new_env);
     let body_type = infer_expr(body, &mut body_ctx)?;
-
     // Build function type
     let mut func_type = body_type;
     for param_type in param_types.iter().rev() {
@@ -208,7 +206,8 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
         // now generalize the solved type
         let scheme = generalize(&ctx.env, solved_type);
         ctx.env.insert(var_name.clone(), scheme);
-        Ok(Type::Var(TypeVar::new(0))) // Return a fresh type variable
+        // Ok(Type::Var(TypeVar::new(0))) // Return a fresh type variable
+        Ok(Type::Int) // Return a Int
     } else {
         Err("Let variable must be a variable name".to_string())
     }
@@ -262,7 +261,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     let args = &exprs[1..];
 
     let mut func_type = infer_expr(func_expr, ctx)?;
-
     for arg in args {
         match func_type {
             Type::Function(param_ty, ret_ty) => {
@@ -275,7 +273,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 let arg_ty = infer_expr(arg, ctx)?;
                 let ret_ty = ctx.fresh_var();
                 let func_ty = Type::Function(Box::new(arg_ty.clone()), Box::new(ret_ty.clone()));
-
                 // Constrain tv = (arg -> ret)
                 ctx.add_constraint(Type::Var(tv.clone()), func_ty);
 

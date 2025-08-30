@@ -257,8 +257,7 @@ pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {
 
         (Type::Var(v), ty) | (ty, Type::Var(v)) => {
             if occurs_in(v, ty) {
-                Ok(Substitution::empty())
-                // Err(format!("Occurs check failed: {} occurs in {}", v, ty))
+                Err(format!("Occurs check failed: {} occurs in {}", v, ty))
             } else {
                 let mut sub = Substitution::empty();
                 sub.insert(v.id, ty.clone());
@@ -279,7 +278,7 @@ pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {
 }
 
 // Check if a type variable occurs in a type
-fn occurs_in(var: &TypeVar, ty: &Type) -> bool {
+pub fn occurs_in(var: &TypeVar, ty: &Type) -> bool {
     match ty {
         Type::Var(v) => v.id == var.id,
         Type::Function(from, to) => occurs_in(var, from) || occurs_in(var, to),
@@ -290,8 +289,8 @@ fn occurs_in(var: &TypeVar, ty: &Type) -> bool {
 
 // Generalization and instantiation
 pub fn generalize(env: &TypeEnv, typ: Type) -> TypeScheme {
-    let env_vars = env.free_vars(); // returns HashSet<u64>
-    let typ_vars = typ.free_vars(); // HashSet<u64>
+    let env_vars = env.free_vars(); // gets free vars from the environment
+    let typ_vars = typ.free_vars(); // gets free vars from the type
 
     let vars: Vec<u64> = typ_vars.difference(&env_vars).cloned().collect();
     TypeScheme::new(vars, typ)
