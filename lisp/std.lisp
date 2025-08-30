@@ -295,7 +295,7 @@
 (let set-property! (lambda table key value
         (do
           (let idx (hash table key))
-          (if (not (in-bounds? table idx)) (set! table idx []) nil)
+          (if (not (in-bounds? table idx)) (set! table idx []) [])
           (let current (get table idx))
           (let len (length current))
           (let index (if (> len 0) (find-index current (lambda x (match? (get x 0) key))) -1))
@@ -308,7 +308,7 @@
 (let delete-property! (lambda table key
       (do
         (let idx (hash table key))
-        (if (not (in-bounds? table idx)) (set! table idx []) nil)
+        (if (not (in-bounds? table idx)) (set! table idx []) [])
         (let current (get table idx))
         (let len (length current))
         (let index (if (> len 0) (find-index current (lambda x (match? (get x 0) key))) -1))
