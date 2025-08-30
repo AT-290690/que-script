@@ -39,22 +39,6 @@ impl InferenceContext {
     }
 }
 
-// Main type inference function
-pub fn infer_type(expr: &Expression, env: &TypeEnv) -> Result<Type, String> {
-    let mut ctx = InferenceContext::with_env(env.clone());
-    let typ = infer_expr(expr, &mut ctx)?;
-
-    // // Solve constraints
-    // let mut subst = Substitution::empty();
-    // for (t1, t2) in &ctx.constraints {
-    //     let unifier = crate::types::unify(t1, t2)?;
-    //     subst = subst.compose(&unifier);
-    // }
-    // Ok(subst.apply(&typ))
-    let subst = solve_constraints(ctx.constraints)?;
-    Ok(subst.apply(&typ))
-}
-
 // Type inference for expressions
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     match expr {
@@ -239,7 +223,20 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.add_constraint(*param_ty.clone(), arg_ty);
                 func_type = *ret_ty;
             }
-            _ => return Err(format!("Cannot apply non-function type: {}", func_type)),
+            Type::Var(tv) => {
+                // If it's a type variable, assume it's a function type
+                let arg_ty = infer_expr(arg, ctx)?;
+                let ret_ty = ctx.fresh_var();
+                let func_ty = Type::Function(Box::new(arg_ty.clone()), Box::new(ret_ty.clone()));
+
+                // Constrain tv = (arg -> ret)
+                ctx.add_constraint(Type::Var(tv.clone()), func_ty);
+
+                func_type = ret_ty;
+            }
+            _ => {
+                return Err(format!("Cannot apply non-function type: {}", func_type));
+            }
         }
     }
 

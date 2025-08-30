@@ -4,7 +4,7 @@ use std::fmt;
 // Type variables for type inference
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeVar {
-    id: u64,
+    pub id: u64,
 }
 
 impl TypeVar {
@@ -61,14 +61,7 @@ impl TypeScheme {
     pub fn monotype(typ: Type) -> Self {
         TypeScheme::new(vec![], typ)
     }
-    // original
-    // pub fn instantiate(&self) -> Type {
-    //     let mut subst = HashMap::new();
-    //     for var in &self.vars {
-    //         subst.insert(var.id, Type::Var(TypeVar::new(var.id + 1000))); // Offset to avoid conflicts
-    //     }
-    //     self.typ.substitute(&subst)
-    // }
+
     pub fn instantiate(&self) -> Type {
         if self.vars.is_empty() {
             return self.typ.clone(); // don’t freshen monotypes
