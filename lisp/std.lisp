@@ -336,7 +336,7 @@
            (swap! arr (get i) (get j)))))
 
       (let process (lambda (do 
-            (if (cb (get arr (get j)) pivot) (helper i j))
+            (if (cb (get arr (get j)) pivot) (helper i j) [])
             (set! j 0 (+ (get j) 1)))))
       (loop (< (get j) end) (process))
 
@@ -358,7 +358,7 @@
                   (push! stack (- pivot-index 1))
                   (push! stack (+ pivot-index 1))
                   (push! stack end))))
-            (if (< start end) (helper)))))
+            (if (< start end) (helper) []))))
       (loop (> (length stack) 0) (process))
       arr)))
 

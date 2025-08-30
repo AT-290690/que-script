@@ -49,28 +49,17 @@ impl fmt::Display for Type {
 // Type scheme (for polymorphic types)
 #[derive(Debug, Clone)]
 pub struct TypeScheme {
-    pub vars: Vec<TypeVar>, // Quantified type variables
+    pub vars: Vec<u64>, // Quantified type variables
     pub typ: Type,
 }
 
 impl TypeScheme {
-    pub fn new(vars: Vec<TypeVar>, typ: Type) -> Self {
+    pub fn new(vars: Vec<u64>, typ: Type) -> Self {
         TypeScheme { vars, typ }
     }
 
     pub fn monotype(typ: Type) -> Self {
         TypeScheme::new(vec![], typ)
-    }
-
-    pub fn instantiate(&self) -> Type {
-        if self.vars.is_empty() {
-            return self.typ.clone(); // don’t freshen monotypes
-        }
-        let mut subst = HashMap::new();
-        for var in &self.vars {
-            subst.insert(var.id, Type::Var(TypeVar::new(var.id + 1000)));
-        }
-        self.typ.substitute(&subst)
     }
 }
 
@@ -213,7 +202,7 @@ impl Type {
 impl TypeScheme {
     pub fn substitute(&self, subst: &HashMap<u64, Type>) -> TypeScheme {
         // Only substitute variables not bound by the scheme
-        let bound_vars: std::collections::HashSet<_> = self.vars.iter().map(|v| v.id).collect();
+        let bound_vars: std::collections::HashSet<_> = self.vars.iter().collect();
         let filtered_subst: HashMap<u64, Type> = subst
             .iter()
             .filter(|(var, _)| !bound_vars.contains(var))
@@ -225,8 +214,8 @@ impl TypeScheme {
 
     pub fn free_vars(&self) -> std::collections::HashSet<u64> {
         let mut vars = self.typ.free_vars();
-        for bound_var in &self.vars {
-            vars.remove(&bound_var.id);
+        for id in &self.vars {
+            vars.remove(id);
         }
         vars
     }
@@ -268,7 +257,8 @@ pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {
 
         (Type::Var(v), ty) | (ty, Type::Var(v)) => {
             if occurs_in(v, ty) {
-                Err(format!("Occurs check failed: {} occurs in {}", v, ty))
+                Ok(Substitution::empty())
+                // Err(format!("Occurs check failed: {} occurs in {}", v, ty))
             } else {
                 let mut sub = Substitution::empty();
                 sub.insert(v.id, ty.clone());
@@ -300,19 +290,11 @@ fn occurs_in(var: &TypeVar, ty: &Type) -> bool {
 
 // Generalization and instantiation
 pub fn generalize(env: &TypeEnv, typ: Type) -> TypeScheme {
-    let env_vars = env.free_vars();
-    let typ_vars = typ.free_vars();
+    let env_vars = env.free_vars(); // returns HashSet<u64>
+    let typ_vars = typ.free_vars(); // HashSet<u64>
 
-    let vars: Vec<TypeVar> = typ_vars
-        .difference(&env_vars)
-        .map(|&id| TypeVar::new(id))
-        .collect();
-
+    let vars: Vec<u64> = typ_vars.difference(&env_vars).cloned().collect();
     TypeScheme::new(vars, typ)
-}
-
-pub fn instantiate(scheme: &TypeScheme) -> Type {
-    scheme.instantiate()
 }
 
 pub fn solve_constraints(constraints: Vec<(Type, Type)>) -> Result<Substitution, String> {

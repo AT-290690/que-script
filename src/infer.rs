@@ -37,6 +37,47 @@ impl InferenceContext {
         self.fresh_var_counter += 1;
         Type::Var(var)
     }
+
+    pub fn instantiate(&mut self, scheme: &TypeScheme) -> Type {
+        use std::collections::HashMap;
+        let mut mapping: HashMap<u64, Type> = HashMap::new();
+        for id in &scheme.vars {
+            mapping.insert(*id, self.fresh_var());
+        }
+        scheme.typ.substitute(&mapping)
+    }
+}
+
+fn find_occurs_issues(constraints: &Vec<(Type, Type)>) {
+    use std::collections::HashSet;
+
+    eprintln!(
+        "Examining {} constraints for occurs-check issues...",
+        constraints.len()
+    );
+    for (i, (t1, t2)) in constraints.iter().enumerate() {
+        // gather free vars on both sides (you already have free_vars implementations)
+        let free1 = t1.free_vars();
+        let free2 = t2.free_vars();
+
+        // any var id that appears in lhs and in inner structure of rhs?
+        for id in free1.iter() {
+            // If rhs contains the same id -> cycle candidate
+            if free2.contains(id) {
+                eprintln!("POTENTIAL CYCLE constraint #{}: {}  ~  {}", i, t1, t2);
+            }
+        }
+
+        // Also check symmetric
+        for id in free2.iter() {
+            if t1.free_vars().contains(id) {
+                eprintln!(
+                    "POTENTIAL CYCLE (other side) constraint #{}: {}  ~  {}",
+                    i, t1, t2
+                );
+            }
+        }
+    }
 }
 
 // Type inference for expressions
@@ -46,7 +87,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 
         Expression::Word(name) => {
             if let Some(scheme) = ctx.env.get(name) {
-                Ok(crate::types::instantiate(&scheme))
+                Ok(ctx.instantiate(&scheme))
             } else {
                 Err(format!("Undefined variable: {}", name))
             }
@@ -157,6 +198,7 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 
         // 🔑 apply current substitutions from constraints
         let mut subst = Substitution::empty();
+        // find_occurs_issues(&ctx.constraints);
         for (t1, t2) in &ctx.constraints {
             let s = unify(t1, t2)?;
             subst = subst.compose(&s);
@@ -198,16 +240,21 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
         if name == "array" {
             let args = &exprs[1..];
             if args.is_empty() {
-                return Ok(Type::List(Box::new(ctx.fresh_var())));
+                return Ok(Type::List(Box::new(ctx.fresh_var()))); // Empty array case
             }
+
             let mut elem_types = Vec::new();
             for arg in args {
-                elem_types.push(infer_expr(arg, ctx)?);
+                let elem_type = infer_expr(arg, ctx)?;
+                elem_types.push(elem_type);
             }
+
             let first = elem_types[0].clone();
             for t in &elem_types[1..] {
-                ctx.add_constraint(first.clone(), t.clone());
+                ctx.add_constraint(first.clone(), t.clone()); // Enforce all elements have the same type
             }
+
+            // Return the type of the array (List of the first element type)
             return Ok(Type::List(Box::new(first)));
         }
     }
@@ -355,7 +402,7 @@ pub fn create_builtin_environment() -> TypeEnv {
     env.insert(
         "length".to_string(),
         TypeScheme::new(
-            vec![TypeVar::new(0)],
+            vec![0],
             Type::Function(
                 Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
                 Box::new(Type::Int),
@@ -366,7 +413,7 @@ pub fn create_builtin_environment() -> TypeEnv {
     env.insert(
         "get".to_string(),
         TypeScheme::new(
-            vec![TypeVar::new(0)],
+            vec![0],
             Type::Function(
                 Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
                 Box::new(Type::Function(
@@ -380,7 +427,7 @@ pub fn create_builtin_environment() -> TypeEnv {
     env.insert(
         "set!".to_string(),
         TypeScheme::new(
-            vec![TypeVar::new(0)],
+            vec![0],
             Type::Function(
                 Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
                 Box::new(Type::Function(
@@ -398,7 +445,7 @@ pub fn create_builtin_environment() -> TypeEnv {
     env.insert(
         "loop".to_string(),
         TypeScheme::new(
-            vec![TypeVar::new(0)],
+            vec![0],
             Type::Function(
                 Box::new(Type::Bool),
                 Box::new(Type::Function(
@@ -413,7 +460,7 @@ pub fn create_builtin_environment() -> TypeEnv {
     env.insert(
         "dotimes".to_string(),
         TypeScheme::new(
-            vec![TypeVar::new(0)], // T0
+            vec![0], // T0
             Type::Function(
                 Box::new(Type::Int), // start
                 Box::new(Type::Function(
@@ -429,6 +476,7 @@ pub fn create_builtin_environment() -> TypeEnv {
             ),
         ),
     );
+
     env
 }
 
