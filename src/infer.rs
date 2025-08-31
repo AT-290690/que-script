@@ -451,10 +451,7 @@ pub fn create_builtin_environment() -> TypeEnv {
             vec![0],
             Type::Function(
                 Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
-                Box::new(Type::Function(
-                    Box::new(Type::Var(TypeVar::new(0))),
-                    Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
-                )),
+                Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
             ),
         ),
     );
