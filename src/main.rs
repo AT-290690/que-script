@@ -85,6 +85,23 @@ fn test_type_inference() {
             ),
         }
     }
+
+    let lambda_exprs = lisp::parse(
+        "(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (array (= 1 1) )))",
+    )
+    .unwrap();
+    if let Some(lambda_expr) = lambda_exprs.first() {
+        match infer::infer_with_builtins(lambda_expr) {
+            Ok(typ) => println!(
+                "Type of (do (let process (lambda xs (do (let x (get xs 0)) x))) (process (array (= 1 1) ))): {}",
+                typ
+            ),
+            Err(e) => println!(
+                "Type error in '(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (array (= 1 1) )))': {}",
+                e
+            ),
+        }
+    }
     // Test your range function (without pipe operator)
     let range_exprs = lisp::parse("(summation (range 1 10))").unwrap();
     if let Some(range_expr) = range_exprs.first() {

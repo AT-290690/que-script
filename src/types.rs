@@ -159,6 +159,13 @@ impl Substitution {
 
 // Implementation for Type substitution
 impl Type {
+    pub fn var_id(&self) -> Option<u64> {
+        if let Type::Var(v) = self {
+            Some(v.id)
+        } else {
+            None
+        }
+    }
     pub fn substitute(&self, subst: &HashMap<u64, Type>) -> Type {
         match self {
             Type::Int | Type::Bool | Type::Unit => self.clone(),

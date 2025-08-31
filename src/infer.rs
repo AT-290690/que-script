@@ -2,6 +2,7 @@ use crate::lisp::Expression;
 use crate::types::{
     generalize, solve_constraints, unify, Substitution, Type, TypeEnv, TypeScheme, TypeVar,
 };
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
 // Type inference context
@@ -12,22 +13,6 @@ pub struct InferenceContext {
 }
 
 impl InferenceContext {
-    pub fn new() -> Self {
-        InferenceContext {
-            env: TypeEnv::new(),
-            constraints: Vec::new(),
-            fresh_var_counter: 0,
-        }
-    }
-
-    pub fn with_env(env: TypeEnv) -> Self {
-        InferenceContext {
-            env,
-            constraints: Vec::new(),
-            fresh_var_counter: 0,
-        }
-    }
-
     pub fn add_constraint(&mut self, t1: Type, t2: Type) {
         self.constraints.push((t1, t2));
     }
@@ -243,6 +228,30 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
     // Special handling for array before anything else
     if let Expression::Word(name) = &exprs[0] {
+        if name == "set!" {
+            let list_type = infer_expr(&exprs[1], ctx)?;
+            let idx_type = infer_expr(&exprs[2], ctx)?;
+            let val_type = infer_expr(&exprs[3], ctx)?;
+
+            // Ensure index is Int
+            ctx.constraints.push((idx_type, Type::Int));
+
+            // Ensure list is List<α>
+            let elem_type = ctx.fresh_var();
+            ctx.constraints
+                .push((list_type.clone(), Type::List(Box::new(elem_type.clone()))));
+
+            // Ensure inserted value matches element type
+            ctx.constraints.push((val_type, elem_type.clone()));
+
+            // Update the variable in env
+            if let Expression::Word(var_name) = &exprs[1] {
+                ctx.env
+                    .insert(var_name.clone(), TypeScheme::monotype(list_type.clone()));
+            }
+            // Return same list type
+            return Ok(list_type);
+        }
         if name == "array" {
             let args = &exprs[1..];
             if args.is_empty() {
@@ -295,8 +304,116 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 }
 
 // Built-in function type signatures
-pub fn create_builtin_environment() -> TypeEnv {
+pub fn create_builtin_environment() -> (TypeEnv, u64) {
     let mut env = TypeEnv::new();
+
+    // Local fresh-var generator
+    let mut fresh_id: u64 = 0;
+
+    let mut fresh_var = || {
+        let id = fresh_id;
+        fresh_id += 1;
+        Type::Var(TypeVar { id })
+    };
+
+    // length : [α] -> Int
+    {
+        let a = fresh_var();
+        env.insert(
+            "length".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()], // quantify α
+                Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Int)),
+            ),
+        );
+    }
+
+    // get : [α] -> Int -> α
+    {
+        let a: Type = fresh_var();
+        env.insert(
+            "get".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::Function(Box::new(Type::Int), Box::new(a))),
+                ),
+            ),
+        );
+    }
+
+    // set! : [β] -> Int -> β -> [β]
+    {
+        let b = fresh_var();
+        env.insert(
+            "set!".to_string(),
+            TypeScheme::new(
+                vec![b.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::List(Box::new(b.clone()))),
+                    Box::new(Type::Function(
+                        Box::new(Type::Int),
+                        Box::new(Type::Function(
+                            Box::new(b.clone()),
+                            Box::new(Type::List(Box::new(b))),
+                        )),
+                    )),
+                ),
+            ),
+        );
+    }
+
+    // pop! : [γ] -> [γ]
+    {
+        let c = fresh_var();
+        env.insert(
+            "pop!".to_string(),
+            TypeScheme::new(
+                vec![c.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::List(Box::new(c.clone()))),
+                    Box::new(Type::List(Box::new(c))),
+                ),
+            ),
+        );
+    }
+
+    // loop : Bool -> (δ -> Int)
+    {
+        let d = fresh_var();
+        env.insert(
+            "loop".to_string(),
+            TypeScheme::new(
+                vec![d.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Bool),
+                    Box::new(Type::Function(Box::new(d), Box::new(Type::Int))),
+                ),
+            ),
+        );
+    }
+
+    // dotimes : Int -> Int -> (Int -> ε) -> Int
+    {
+        let e = fresh_var();
+        env.insert(
+            "dotimes".to_string(),
+            TypeScheme::new(
+                vec![e.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Int), // start
+                    Box::new(Type::Function(
+                        Box::new(Type::Int), // count
+                        Box::new(Type::Function(
+                            Box::new(Type::Function(Box::new(Type::Int), Box::new(e))),
+                            Box::new(Type::Int),
+                        )),
+                    )),
+                ),
+            ),
+        );
+    }
 
     // Arithmetic operations
     env.insert(
@@ -402,105 +519,16 @@ pub fn create_builtin_environment() -> TypeEnv {
         TypeScheme::monotype(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
     );
 
-    // Array operations
-    env.insert(
-        "length".to_string(),
-        TypeScheme::new(
-            vec![0],
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
-                Box::new(Type::Int),
-            ),
-        ),
-    );
-
-    env.insert(
-        "get".to_string(),
-        TypeScheme::new(
-            vec![0],
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
-                Box::new(Type::Function(
-                    Box::new(Type::Int),
-                    Box::new(Type::Var(TypeVar::new(0))),
-                )),
-            ),
-        ),
-    );
-
-    env.insert(
-        "set!".to_string(),
-        TypeScheme::new(
-            vec![0],
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
-                Box::new(Type::Function(
-                    Box::new(Type::Int),
-                    Box::new(Type::Function(
-                        Box::new(Type::Var(TypeVar::new(0))),
-                        Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
-                    )),
-                )),
-            ),
-        ),
-    );
-
-    env.insert(
-        "pop!".to_string(),
-        TypeScheme::new(
-            vec![0],
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
-                Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))),
-            ),
-        ),
-    );
-
-    // Loop function
-    env.insert(
-        "loop".to_string(),
-        TypeScheme::new(
-            vec![0],
-            Type::Function(
-                Box::new(Type::Bool),
-                Box::new(Type::Function(
-                    Box::new(Type::Var(TypeVar::new(0))),
-                    Box::new(Type::Int),
-                )),
-            ),
-        ),
-    );
-
-    // dotimes : Int -> Int -> (Int -> T0) -> Int
-    env.insert(
-        "dotimes".to_string(),
-        TypeScheme::new(
-            vec![0], // T0
-            Type::Function(
-                Box::new(Type::Int), // start
-                Box::new(Type::Function(
-                    Box::new(Type::Int), // count
-                    Box::new(Type::Function(
-                        Box::new(Type::Function(
-                            Box::new(Type::Int),
-                            Box::new(Type::Var(TypeVar::new(0))),
-                        )), // body
-                        Box::new(Type::Int), // return type
-                    )),
-                )),
-            ),
-        ),
-    );
-
-    env
+    (env, fresh_id) // also return next fresh ID
 }
 
 // Helper function to infer type with built-in environment
 pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
+    let (env, initId) = create_builtin_environment();
     let mut ctx = InferenceContext {
-        env: create_builtin_environment(),
+        env,
         constraints: Vec::new(),
-        fresh_var_counter: 0,
+        fresh_var_counter: initId,
     };
 
     let typ = infer_expr(expr, &mut ctx)?;
