@@ -180,7 +180,6 @@ fn main() -> std::io::Result<()> {
         //     Ok(typ) => println!("Type: {}", typ),
         //     Err(e) => println!("Error: {}", e),
         // }
-
         println!("{:?}", lisp::run(&wrapped_ast));
 
         // test_type_inference();
