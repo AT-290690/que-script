@@ -24,7 +24,7 @@ impl InferenceContext {
         InferenceContext {
             env,
             constraints: Vec::new(),
-            fresh_var_counter: 1000,
+            fresh_var_counter: 0,
         }
     }
 
@@ -115,13 +115,13 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 
 // Type inference for lambda expressions
 fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err("Lambda requires at least a body".to_string());
     }
+
     let param_count = args.len() - 1;
     let body = &args[param_count];
 
-    // Extract parameter names
     let mut param_names = Vec::new();
     for i in 0..param_count {
         if let Expression::Word(name) = &args[i] {
@@ -131,30 +131,31 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
         }
     }
 
-    // Create fresh type variables for parameters
+    // fresh type vars for params
     let mut param_types = Vec::new();
     for _ in 0..param_count {
         param_types.push(ctx.fresh_var());
     }
 
-    // Extend environment with parameter types
-    let mut new_env = ctx.env.clone();
-    for (name, typ) in param_names.iter().zip(param_types.iter()) {
-        new_env.insert(name.clone(), TypeScheme::monotype(typ.clone()));
+    // extend env in-place (by swap)
+    let saved_env = ctx.env.clone();
+    let mut extended_env = saved_env.clone();
+    for (name, ty) in param_names.iter().zip(param_types.iter()) {
+        extended_env.insert(name.clone(), TypeScheme::monotype(ty.clone()));
     }
+    let old_env = std::mem::replace(&mut ctx.env, extended_env);
 
-    // Infer body type
-    let mut body_ctx = InferenceContext::with_env(new_env);
-    let body_type = infer_expr(body, &mut body_ctx)?;
-    // Build function type
+    // infer body in SAME ctx (no fresh ctx)
+    let body_type = infer_expr(body, ctx)?;
+
+    // restore env
+    ctx.env = old_env;
+
+    // build curried function type (params right-to-left)
     let mut func_type = body_type;
-    for param_type in param_types.iter().rev() {
-        func_type = Type::Function(Box::new(param_type.clone()), Box::new(func_type));
+    for p in param_types.iter().rev() {
+        func_type = Type::Function(Box::new(p.clone()), Box::new(func_type));
     }
-
-    // Add constraints from body context
-    ctx.constraints.extend(body_ctx.constraints);
-
     Ok(func_type)
 }
 
@@ -192,22 +193,28 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
     let value_expr = &args[1];
 
     if let Expression::Word(var_name) = var_expr {
-        let value_type = infer_expr(value_expr, ctx)?;
+        let value_ty = infer_expr(value_expr, ctx)?;
 
-        // 🔑 apply current substitutions from constraints
+        // solve current constraints → compose a single Substitution S
         let mut subst = Substitution::empty();
-        // find_occurs_issues(&ctx.constraints);
         for (t1, t2) in &ctx.constraints {
             let s = unify(t1, t2)?;
             subst = subst.compose(&s);
         }
-        let solved_type = subst.apply(&value_type);
 
-        // now generalize the solved type
-        let scheme = generalize(&ctx.env, solved_type);
+        // apply S to the value AND to the env
+        let solved_value_ty = subst.apply(&value_ty);
+        let solved_env = ctx.env.substitute(&subst.map);
+
+        // generalize against the solved env (so lambda params remain monomorphic)
+        let scheme = generalize(&solved_env, solved_value_ty);
+
+        // (optional but helpful) keep ctx.env solved too
+        ctx.env = solved_env;
         ctx.env.insert(var_name.clone(), scheme);
-        // Ok(Type::Var(TypeVar::new(0))) // Return a fresh type variable
-        Ok(Type::Int) // Return a Int
+
+        // your language: (let ...) returns 0/Int sentinel
+        Ok(Type::Int)
     } else {
         Err("Let variable must be a variable name".to_string())
     }

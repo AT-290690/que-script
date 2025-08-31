@@ -99,7 +99,7 @@ impl TypeEnv {
 // Substitutions map type variables to types
 #[derive(Debug, Clone)]
 pub struct Substitution {
-    map: HashMap<u64, Type>,
+    pub map: HashMap<u64, Type>,
 }
 
 impl Substitution {
@@ -291,7 +291,6 @@ pub fn occurs_in(var: &TypeVar, ty: &Type) -> bool {
 pub fn generalize(env: &TypeEnv, typ: Type) -> TypeScheme {
     let env_vars = env.free_vars(); // gets free vars from the environment
     let typ_vars = typ.free_vars(); // gets free vars from the type
-
     let vars: Vec<u64> = typ_vars.difference(&env_vars).cloned().collect();
     TypeScheme::new(vars, typ)
 }

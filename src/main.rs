@@ -23,6 +23,15 @@ fn test_type_inference() {
         }
     }
 
+    let simple_exprs =
+        lisp::parse("(do (let id (lambda x x)) (let a (id 10)) (let b (id (= 1 1))) b)").unwrap();
+    if let Some(simple_expr) = simple_exprs.first() {
+        match infer::infer_with_builtins(simple_expr) {
+            Ok(typ) => println!("Type of (do (let id (lambda x x)) (let a (id 10)) (let b (id true)) b): {}", typ),
+            Err(e) => println!("Type error in '(do (let id (lambda x x)) (let a (id 10)) (let b (id true)) b)': {}", e),
+        }
+    }
+
     // Test lambda
     let lambda_exprs = lisp::parse("(lambda x (+ x 1))").unwrap();
     if let Some(lambda_expr) = lambda_exprs.first() {
@@ -63,15 +72,15 @@ fn test_type_inference() {
     }
 
     let lambda_exprs =
-        lisp::parse("(let process (lambda xs (get xs 0))) (process [ 1 2 3 ])").unwrap();
+        lisp::parse("(do (let process (lambda xs (get xs 0))) (process (array 1 2 3 )))").unwrap();
     if let Some(lambda_expr) = lambda_exprs.first() {
         match infer::infer_with_builtins(lambda_expr) {
             Ok(typ) => println!(
-                "Type of (let process (lambda xs (get xs 0))) (process [ 1 2 3 ]): {}",
+                "Type of (let process (lambda xs (get xs 0))) (process (array 1 2 3 )): {}",
                 typ
             ),
             Err(e) => println!(
-                "Type error in '(let process (lambda xs (get xs 0))) (process [ 1 2 3 ])': {}",
+                "Type error in '(let process (lambda xs (get xs 0))) (process (array 1 2 3 ))': {}",
                 e
             ),
         }
@@ -123,17 +132,38 @@ fn dump_wrapped_ast(expr: lisp::Expression, path: &str) -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
+    // let lambda_exprs =
+    //     lisp::parse("(do (let fn (lambda xs (do (let x (get xs 0)) x))) (fn (array (= 1 1) )))")
+    //         .unwrap();
+    // if let Some(lambda_expr) = lambda_exprs.first() {
+    //     match infer::infer_with_builtins(lambda_expr) {
+    //         Ok(typ) => println!("Type of : {}", typ),
+    //         Err(e) => println!("Type error : {}", e),
+    //     }
+    // }
+
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--dump") {
         let program = fs::read_to_string("./lisp/main.lisp")?;
         let std_lib = fs::read_to_string("./lisp/std.lisp")?;
-        let _ = dump_wrapped_ast(lisp::with_std(&program, &std_lib), "./src/ast.rs");
-    } else {
-        let wrapped_ast: lisp::Expression = load_ast();
+
+        let wrapped_ast = lisp::with_std(&program, &std_lib);
+
         match infer::infer_with_builtins(&wrapped_ast) {
-            Ok(typ) => println!("Type: {}", typ),
+            Ok(typ) => {
+                println!("Type: {}", typ);
+                dump_wrapped_ast(wrapped_ast, "./src/ast.rs");
+            }
             Err(e) => println!("Error: {}", e),
         }
+    } else {
+        let wrapped_ast: lisp::Expression = load_ast();
+
+        // match infer::infer_with_builtins(&wrapped_ast) {
+        //     Ok(typ) => println!("Type: {}", typ),
+        //     Err(e) => println!("Error: {}", e),
+        // }
+
         println!("{:?}", lisp::run(&wrapped_ast));
 
         // test_type_inference();

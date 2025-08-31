@@ -402,7 +402,7 @@
   (|> str (reduce (lambda a b (if
   (and (true? tr) (or (= b char:space) (= b char:new-line))) a
     (apply (lambda (do
-      (if (true? tr) (false! tr) nil)
+      (if (true? tr) (false! tr) [])
       (merge a (array b))))))) [])))))
 
 (let trim-right (lambda str (do
@@ -410,7 +410,7 @@
   (|> str (reverse) (reduce (lambda a b 
     (if (and (true? tr) (or (= b char:space) (= b char:new-line))) a
     (apply (lambda (do
-      (if (true? tr) (false! tr) nil)
+      (if (true? tr) (false! tr) [])
       (merge (array b) a)))))) [])))))
 
 (let trim (lambda str (|> str (trim-left) (trim-right))))
