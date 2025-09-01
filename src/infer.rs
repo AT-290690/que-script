@@ -420,6 +420,52 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         TypeScheme::monotype(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
     );
 
+    // Bitwise operations
+    env.insert(
+        "&".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "|".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "^".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        ">>".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "<<".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "~".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+    );
+
     (env, fresh_id) // also return next fresh ID
 }
 

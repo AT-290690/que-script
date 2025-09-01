@@ -134,6 +134,39 @@
   out))))
 (let concat (lambda xs (reduce xs merge [])))
 
+(let bit-set? (lambda n pos (= (& n (<< 1 pos)) 0)))
+(let bit-set (lambda n pos (| n (<< 1 pos))))
+(let bit-clear (lambda n pos (& n (~ (<< 1 pos)))))
+(let power-of-two-bits (lambda n (<< 2 (- n 1))))
+(let odd-bit? (lambda n (= (& n 1) 1)))
+(let even-bit? (lambda n (= (& n 1) 0)))
+(let average-bit (lambda a b (>> (+ a b) 1)))
+(let flag-flip (lambda x (- 1 (* x x))))
+(let toggle-bit (lambda n a b (^ (^ a b) n)))
+(let same-sign-bit? (lambda a b (>= (^ a b) 0)))
+(let max-bit (lambda a b (- a (& (- a b) (>> (- a b) 31)))))
+(let min-bit (lambda a b (- a (& (- a b) (>> (- b a) 31)))))
+(let bit-equal? (lambda a b (< (^ a b) 1)))
+(let modulo-bit (lambda numerator divisor (& numerator (- divisor 1))))
+(let n-one-bit? (lambda N nth (not (= (& N (<< 1 nth)) 0))))
+(let largest-power (lambda N (do
+  ; changing all right side bits to 1.
+  (let N1 (| N (>> N 1)))
+  (let N2 (| N1 (>> N1 2)))
+  (let N3 (| N2 (>> N2 4)))
+  (let N4 (| N3 (>> N3 8)))
+  ; as now the number is 2 * x - 1,
+  ; where x is required answer,
+  ; so adding 1 and dividing it by
+  (>> (+ N4 1) 1))))
+(let abs (lambda n (- (^ n (>> n 31)) (>> n 31))))
+(let positive? (lambda x (> x 0)))
+(let negative? (lambda x (< x 0)))
+(let invert (lambda x (- x)))
+(let zero? (lambda x (= x 0)))
+(let negative-one? (lambda x (= x -1)))
+(let divisible? (lambda a b (= (mod a b) 0)))
+
 (let square (lambda x (* x x)))
 (let even? (lambda x (= (mod x 2) 0)))
 (let odd? (lambda x (not (= (mod x 2) 0))))
