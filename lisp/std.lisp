@@ -141,7 +141,6 @@
   out))))
 (let concat (lambda xs (reduce xs merge [])))
 
-
 (let every? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
@@ -154,6 +153,7 @@
            (loop-finish (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
+(let cartesian-product (lambda a b (reduce a (lambda p x (merge p (map b (lambda y [ x y ])))) [])))
 
 (let bit-set? (lambda n pos (= (& n (<< 1 pos)) 0)))
 (let bit-set (lambda n pos (| n (<< 1 pos))))
@@ -207,7 +207,6 @@
 (let empty? (lambda xs (= (length xs) 0)))
 (let not-empty? (lambda xs (not (= (length xs) 0))))
 (let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
-
 
 (let zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
