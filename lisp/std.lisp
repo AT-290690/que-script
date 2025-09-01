@@ -96,6 +96,9 @@
 (let false (= 0 1))
 (let nil 0)
 
+(let swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp) xs)))
+(let push! (lambda xs x (do (set! xs (length xs) x) xs)))
+
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 (let first (lambda xs (get xs 0)))
 (let second (lambda xs (get xs 1)))
@@ -193,8 +196,8 @@
 (let euclidean-mod (lambda a b (mod (+ (mod a b) b) b)))
 (let max (lambda a b (if (> a b) a b)))
 (let min (lambda a b (if (< a b) a b)))
-(let maximum (lambda xs (reduce xs max (get xs 0))))
-(let minimum (lambda xs (reduce xs min (get xs 0))))
+(let maximum (lambda xs (cond (empty? xs) nil (= (length xs) 1) (get xs 0) (reduce xs max (get xs 0)))))
+(let minimum (lambda xs (cond (empty? xs) nil (= (length xs) 1) (get xs 0) (reduce xs min (get xs 0)))))
 (let normalize (lambda value min max (* (- value min) (/ (- max min)))))
 (let linear-interpolation (lambda a b n (+ (* (- 1 n) a) (* n b))))
 (let gauss-sum (lambda n (/ (* n (+ n 1)) 2)))
@@ -234,7 +237,6 @@
      (loop 0 len process)
      out))))
 
-
 (let find-index (lambda xs cb? (do
      (let i [ 0 ])
      (let index [ -1 ])
@@ -262,3 +264,41 @@
         (set! a (length a) [(get xs i)])
         (set! (at a -1) (length (at a -1)) (get xs i)))))
      a))))
+
+(let sort-partition! (lambda arr start end cb (do
+     (let pivot (get arr end))
+     (let i [(- start 1)])
+     (let j [ start ])
+
+     (let helper (lambda i j (do
+          (set! i 0 (+ (get i) 1))
+          (swap! arr (get i) (get j))
+          nil)))
+
+     (let process (lambda (do
+           (if (cb (get arr (get j)) pivot) (helper i j))
+           (set! j 0 (+ (get j) 1)))))
+     (loop-finish (< (get j) end) process)
+
+     (swap! arr (+ (get i) 1) end)
+     (+ (get i) 1))))
+
+(let sort! (lambda arr cb (do
+     (let stack [])
+     (push! stack 0)
+     (push! stack (- (length arr) 1))
+     (let process (lambda (do
+           (let end (get stack (- (length stack) 1)))
+           (pop! stack)
+           (let start (get stack (- (length stack) 1)))
+           (pop! stack)
+           (let helper (lambda (do
+                 (let pivot-index (sort-partition! arr start end cb))
+                 (push! stack start)
+                 (push! stack (- pivot-index 1))
+                 (push! stack (+ pivot-index 1))
+                 (push! stack end)
+                 nil)))
+           (if (< start end) (helper)))))
+     (loop-finish (> (length stack) 0) process)
+     arr)))
