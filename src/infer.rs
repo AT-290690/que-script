@@ -159,14 +159,12 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
         let solved_value_ty = subst.apply(&value_ty);
         let solved_env = ctx.env.substitute(&subst.map);
 
-        // generalize against the solved env (so lambda params remain monomorphic)
         let scheme = generalize(&solved_env, solved_value_ty);
 
-        // (optional but helpful) keep ctx.env solved too
         ctx.env = solved_env;
         ctx.env.insert(var_name.clone(), scheme);
 
-        // your language: (let ...) returns 0/Int sentinel
+        // returns 0/Int sentinel
         Ok(Type::Int)
     } else {
         Err("Let variable must be a variable name".to_string())
@@ -292,7 +290,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
 
     // loop : Int -> Int -> (Int -> ε) -> Int
     {
-        let e = fresh_var(); // generic accumulator type
+        let e = fresh_var();
 
         env.insert(
             "loop".to_string(),
