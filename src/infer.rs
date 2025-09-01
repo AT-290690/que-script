@@ -194,9 +194,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
     // Special handling for array before anything else
     if let Expression::Word(name) = &exprs[0] {
-        if name == "set!" || name == "pop!" {
-            return Ok(Type::Int);
-        }
         if name == "array" {
             let args = &exprs[1..];
             if args.is_empty() {
@@ -261,6 +258,40 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         Type::Var(TypeVar { id })
     };
 
+    // set! : [α] -> Int -> α -> Int
+    {
+        let a: Type = fresh_var();
+        env.insert(
+            "set!".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()], // quantify α
+                Type::Function(
+                    Box::new(Type::List(Box::new(a.clone()))), // [α]
+                    Box::new(Type::Function(
+                        Box::new(Type::Int), // index
+                        Box::new(Type::Function(
+                            Box::new(a),
+                            Box::new(Type::Int), // result
+                        )),
+                    )),
+                ),
+            ),
+        );
+    }
+    // pop! : [α] -> Int
+    {
+        let a: Type = fresh_var();
+        env.insert(
+            "pop!".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()], // quantify α
+                Type::Function(
+                    Box::new(Type::List(Box::new(a))), // [α]
+                    Box::new(Type::Int),
+                ),
+            ),
+        );
+    }
     // length : [α] -> Int
     {
         let a = fresh_var();
