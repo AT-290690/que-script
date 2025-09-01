@@ -593,38 +593,6 @@ fn evaluate(exp: &Expression, env: Rc<RefCell<Env>>, defs: Rc<RefCell<Env>>) -> 
 fn init() -> Rc<RefCell<Env>> {
     Rc::new(RefCell::new(Env {
         vars: HashMap::from([
-            // (
-            //     "range".to_string(),
-            //     Evaluated::Function(Rc::new(
-            //         |args: Vec<Expression>,
-            //          env: Rc<RefCell<Env>>,
-            //          defs: Rc<RefCell<Env>>|
-            //          -> Evaluated {
-            //             let start_val = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-            //             let end_val = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-            //             let func_val = evaluate(&args[2], Rc::clone(&env), Rc::clone(&defs));
-
-            //             let start = match start_val {
-            //                 Evaluated::Number(n) => n,
-            //                 _ => panic!("dotimes: start must be a number"),
-            //             };
-            //             let end = match end_val {
-            //                 Evaluated::Number(n) => n,
-            //                 _ => panic!("dotimes: end must be a number"),
-            //             };
-            //             let func = match func_val {
-            //                 Evaluated::Function(f) => {
-            //                     for i in start..end {
-            //                         f(vec![Expression::Atom(i)], Rc::clone(&env), Rc::clone(&defs));
-            //                     }
-            //                 }
-            //                 _ => panic!("dotimes: third argument must be a lambda"),
-            //             };
-
-            //             return Evaluated::Number(-1);
-            //         },
-            //     )),
-            // ),
             (
                 "loop".to_string(),
                 Evaluated::Function(Rc::new(
@@ -652,11 +620,7 @@ fn init() -> Rc<RefCell<Env>> {
                         match func_val {
                             Evaluated::Function(f) => {
                                 for i in start..end {
-                                    f(
-                                        vec![Expression::Atom(i)],
-                                        Rc::clone(&env),
-                                        Rc::clone(&defs),
-                                    );
+                                    f(vec![Expression::Atom(i)], Rc::clone(&env), Rc::clone(&defs));
                                 }
 
                                 Evaluated::Number(0)
@@ -666,29 +630,6 @@ fn init() -> Rc<RefCell<Env>> {
                     },
                 )),
             ),
-            // (
-            //     "range".to_string(),
-            //     Evaluated::Function(Rc::new(
-            //         |args: Vec<Expression>,
-            //          env: Rc<RefCell<Env>>,
-            //          defs: Rc<RefCell<Env>>|
-            //          -> Evaluated {
-            //             let start_val = evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs));
-            //             let end_val = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
-
-            //             let start = match start_val {
-            //                 Evaluated::Number(n) => n,
-            //                 _ => panic!("dotimes: start must be a number"),
-            //             };
-            //             let end = match end_val {
-            //                 Evaluated::Number(n) => n,
-            //                 _ => panic!("dotimes: end must be a number"),
-            //             };
-
-            //             Evaluated::Vector(Rc::new(RefCell::new(evaluated_args)))
-            //         },
-            //     )),
-            // ),
             (
                 "array".to_string(),
                 Evaluated::Function(Rc::new(

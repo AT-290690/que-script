@@ -33,38 +33,6 @@ impl InferenceContext {
     }
 }
 
-fn find_occurs_issues(constraints: &Vec<(Type, Type)>) {
-    use std::collections::HashSet;
-
-    eprintln!(
-        "Examining {} constraints for occurs-check issues...",
-        constraints.len()
-    );
-    for (i, (t1, t2)) in constraints.iter().enumerate() {
-        // gather free vars on both sides (you already have free_vars implementations)
-        let free1 = t1.free_vars();
-        let free2 = t2.free_vars();
-
-        // any var id that appears in lhs and in inner structure of rhs?
-        for id in free1.iter() {
-            // If rhs contains the same id -> cycle candidate
-            if free2.contains(id) {
-                eprintln!("POTENTIAL CYCLE constraint #{}: {}  ~  {}", i, t1, t2);
-            }
-        }
-
-        // Also check symmetric
-        for id in free2.iter() {
-            if t1.free_vars().contains(id) {
-                eprintln!(
-                    "POTENTIAL CYCLE (other side) constraint #{}: {}  ~  {}",
-                    i, t1, t2
-                );
-            }
-        }
-    }
-}
-
 // Type inference for expressions
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     match expr {
@@ -230,28 +198,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     if let Expression::Word(name) = &exprs[0] {
         if name == "set!" || name == "pop!" {
             return Ok(Type::Int);
-            // let list_type = infer_expr(&exprs[1], ctx)?;
-            // let idx_type = infer_expr(&exprs[2], ctx)?;
-            // let val_type = infer_expr(&exprs[3], ctx)?;
-
-            // // Ensure index is Int
-            // ctx.constraints.push((idx_type, Type::Int));
-
-            // // Ensure list is List<α>
-            // let elem_type = ctx.fresh_var();
-            // ctx.constraints
-            //     .push((list_type.clone(), Type::List(Box::new(elem_type.clone()))));
-
-            // // Ensure inserted value matches element type
-            // ctx.constraints.push((val_type, elem_type.clone()));
-
-            // // Update the variable in env
-            // if let Expression::Word(var_name) = &exprs[1] {
-            //     ctx.env
-            //         .insert(var_name.clone(), TypeScheme::monotype(list_type.clone()));
-            // }
-            // // Return same list type
-            // return Ok(list_type);
         }
         if name == "array" {
             let args = &exprs[1..];
@@ -344,41 +290,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         );
     }
 
-    // {
-    //     let b = fresh_var();
-    //     env.insert(
-    //         "set!".to_string(),
-    //         TypeScheme::new(
-    //             vec![b.var_id().unwrap()],
-    //             Type::Function(
-    //                 Box::new(Type::List(Box::new(b.clone()))),
-    //                 Box::new(Type::Function(
-    //                     Box::new(Type::Int),
-    //                     Box::new(Type::Function(
-    //                         Box::new(b.clone()),
-    //                         Box::new(Type::Int),
-    //                     )),
-    //                 )),
-    //             ),
-    //         ),
-    //     );
-    // }
-
-    // {
-    //     let c = fresh_var();
-    //     env.insert(
-    //         "pop!".to_string(),
-    //         TypeScheme::new(
-    //             vec![c.var_id().unwrap()],
-    //             Type::Function(
-    //                 Box::new(Type::List(Box::new(c.clone()))),
-    //                 Box::new(Type::Int),
-    //             ),
-    //         ),
-    //     );
-    // }
-    // loop : Int -> Int -> (Int -> ε) -> List(ε)
-
+    // loop : Int -> Int -> (Int -> ε) -> Int
     {
         let e = fresh_var(); // generic accumulator type
 
@@ -404,22 +316,6 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         );
     }
 
-    // env.insert(
-    //     "map".to_string(),
-    //     TypeScheme::new(
-    //         vec![0, 1], // α = 0, β = 1
-    //         Type::Function(
-    //             Box::new(Type::List(Box::new(Type::Var(TypeVar::new(0))))), // [α]
-    //             Box::new(Type::Function(
-    //                 Box::new(Type::Function(
-    //                     Box::new(Type::Var(TypeVar::new(0))), // α
-    //                     Box::new(Type::Var(TypeVar::new(1))), // β
-    //                 )),
-    //                 Box::new(Type::List(Box::new(Type::Var(TypeVar::new(1))))), // [β]
-    //             )),
-    //         ),
-    //     ),
-    // );
     // Arithmetic operations
     env.insert(
         "+".to_string(),
@@ -538,16 +434,12 @@ pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
 
     let typ = infer_expr(expr, &mut ctx)?;
 
-    // println!("Constraints:");
-    // for (t1, t2) in &ctx.constraints {
-    //     println!("  {}  ~  {}", t1, t2);
-    // }
     // Solve constraints
     let mut subst = Substitution::empty();
     for (t1, t2) in &ctx.constraints {
         let s = crate::types::unify(t1, t2)?;
         subst = subst.compose(&s);
     }
-    // let subst = solve_constraints(ctx.constraints)?;
+
     Ok(subst.apply(&typ))
 }
