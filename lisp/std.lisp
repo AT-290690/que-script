@@ -104,24 +104,28 @@
 
 (let filter (lambda xs cb? (if (empty? xs) xs (do 
      (let out [])
-     (loop 1 (length xs) (lambda i (do
+     (let process (lambda i (do
       (let x (get xs i))
       (if (cb? x) (set! out (length out) x)))))
+     (loop 1 (length xs) process)
      out))))
 
 (let reduce (lambda xs cb initial (do
      (let out [ initial ])
-     (loop 0 (length xs) (lambda i (set! out 0 (cb (get out 0) (get xs i)))))
+     (let process (lambda i (set! out 0 (cb (get out 0) (get xs i)))))
+     (loop 0 (length xs) process)
      (get out))))
 
 (let map (lambda xs cb (if (empty? xs) [] (do
      (let out [(cb (get xs 0))])
-     (loop 1 (length xs) (lambda i (set! out (length out) (cb (get xs i)))))
+     (let process (lambda i (set! out (length out) (cb (get xs i)))))
+     (loop 1 (length xs) process)
      out))))
 
 (let range (lambda start end (do
      (let out [ start ])
-     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) i)))
+     (let process (lambda i (set! out (length out) i)))
+     (loop (+ start 1) (+ end 1) process)
      out)))     
     
 (let count-of (lambda xs cb? (length (filter xs cb?))))
@@ -190,7 +194,8 @@
 
 (let zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
-      (loop 1 (length a) (lambda i (set! out (length out) [(get a i) (get b i)])))
+      (let process (lambda i (set! out (length out) [(get a i) (get b i)])))
+      (loop 1 (length a) process)
       out)))
 
 (let zip (lambda xs (zipper (first xs) (second xs))))
@@ -201,10 +206,16 @@
 (let digit->char (lambda digit (+ digit char:0)))
 (let digits->chars (lambda digits (map digits digit->char)))
 
-
 (let slice (lambda xs start end (if (empty? xs) xs (do
      (let bounds (- end start))
      (let out [])
      (let process (lambda i (set! out (length out) (get xs (+ start i)))))
      (loop 0 bounds process)
+     out))))
+
+(let reverse (lambda xs (if (empty? xs) xs (do
+     (let out [])
+     (let len (length xs))
+     (let process (lambda i (set! out (length out) (get xs (- len i 1)))))
+     (loop 0 len process)
      out))))
