@@ -102,14 +102,42 @@
 (let third (lambda xs (get xs 3)))
 (let last (lambda xs (get xs (- (length xs) 1))))
 
-(let map (lambda xs cb (loop 0 (length xs) (lambda i (cb (get xs i))))))
-(let range (lambda start end (loop start (+ end 1) (lambda i i))))
-(let reduce (lambda xs cb init (dotimes 0 (length xs) (lambda a i (cb a (get xs i))) init)))
+(let filter (lambda xs cb? (if (empty? xs) xs (do 
+     (let out [])
+     (loop 1 (length xs) (lambda i (do
+      (let x (get xs i))
+      (if (cb? x) (set! out (length out) x)))))
+     out))))
+
+(let reduce (lambda xs cb initial (do
+     (let out [ initial ])
+     (loop 0 (length xs) (lambda i (set! out 0 (cb (get out 0) (get xs i)))))
+     (get out))))
+
+(let map (lambda xs cb (if (empty? xs) [] (do
+     (let out [(cb (get xs 0))])
+     (loop 1 (length xs) (lambda i (set! out (length out) (cb (get xs i)))))
+     out))))
+
+(let range (lambda start end (do
+     (let out [ start ])
+     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) i)))
+     out)))     
+    
+(let count-of (lambda xs cb? (length (filter xs cb?))))
+(let count (lambda input item (count-of input (lambda x (= x item)))))
+
+(let merge (lambda a b (if (and (empty? a) (empty? b)) a (do 
+  (let out []) 
+  (loop 0 (length a) (lambda i (set! out (length out) (get a i)))) 
+  (loop 0 (length b) (lambda i (set! out (length out) (get b i)))) 
+  out))))
+(let concat (lambda xs (reduce xs merge [])))
 
 (let square (lambda x (* x x)))
 (let even? (lambda x (= (mod x 2) 0)))
 (let odd? (lambda x (not (= (mod x 2) 0))))
-(let summation (lambda xs (reduce xs (lambda a b (+ a b)) 0)))
+(let sum (lambda xs (reduce xs (lambda a b (+ a b)) 0)))
 (let product (lambda xs (reduce xs (lambda a b (* a b)) 1)))
 (let euclidean-mod (lambda a b (mod (+ (mod a b) b) b)))
 (let max (lambda a b (if (> a b) a b)))
@@ -124,24 +152,16 @@
 (let clamp-range (lambda x start end (cond (> x end) end (< x start) start (*) x)))
 (let empty? (lambda xs (= (length xs) 0)))
 (let not-empty? (lambda xs (not (= (length xs) 0))))
-; (let count-of (lambda xs cb? (length (filter xs cb?))))
-; (let count (lambda input item (count-of input (lambda x (= x item)))))
 (let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
 
 
-; (let match? (lambda a b (and (= (length a) (length b)) (|>
-;    a
-;    (ziper b)
-;    (every? (lambda x (= (get x 0) (get x 1))))))))
+(let zipper (lambda a b (do 
+      (let out [[(get a 0) (get b 0)]])
+      (loop 1 (length a) (lambda i (set! out (length out) [(get a i) (get b i)])))
+      out)))
 
-; (let ziper (lambda a b (do 
-;       (let out [])
-;       (iterate a (lambda i (push! out [(get a i)])))
-;       (iterate b (lambda i (push! (get out i) (get b i))))
-;       out)))
-
-; (let zip (lambda xs (ziper (first xs) (second xs))))
-; (let unzip (lambda xs (array (map xs first) (map xs second))))
+(let zip (lambda xs (zipper (first xs) (second xs))))
+(let unzip (lambda xs (array (map xs first) (map xs second))))
 
 (let char->digit (lambda ch (- ch char:0)))
 (let chars->digits (lambda digits (map digits char->digit)))
@@ -149,5 +169,9 @@
 (let digits->chars (lambda digits (map digits digit->char)))
 
 
-(let true? (lambda x (= (get x) true)))
-(let false? (lambda x (= (get x) false)))
+(let slice (lambda xs start end (if (empty? xs) xs (do
+     (let bounds (- end start))
+     (let out [])
+     (let process (lambda i (set! out (length out) (get xs (+ start i)))))
+     (loop 0 bounds process)
+     out))))

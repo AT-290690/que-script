@@ -228,30 +228,31 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
     // Special handling for array before anything else
     if let Expression::Word(name) = &exprs[0] {
-        // if name == "set!" {
-        //     let list_type = infer_expr(&exprs[1], ctx)?;
-        //     let idx_type = infer_expr(&exprs[2], ctx)?;
-        //     let val_type = infer_expr(&exprs[3], ctx)?;
+        if name == "set!" || name == "pop!" {
+            return Ok(Type::Int);
+            // let list_type = infer_expr(&exprs[1], ctx)?;
+            // let idx_type = infer_expr(&exprs[2], ctx)?;
+            // let val_type = infer_expr(&exprs[3], ctx)?;
 
-        //     // Ensure index is Int
-        //     ctx.constraints.push((idx_type, Type::Int));
+            // // Ensure index is Int
+            // ctx.constraints.push((idx_type, Type::Int));
 
-        //     // Ensure list is List<α>
-        //     let elem_type = ctx.fresh_var();
-        //     ctx.constraints
-        //         .push((list_type.clone(), Type::List(Box::new(elem_type.clone()))));
+            // // Ensure list is List<α>
+            // let elem_type = ctx.fresh_var();
+            // ctx.constraints
+            //     .push((list_type.clone(), Type::List(Box::new(elem_type.clone()))));
 
-        //     // Ensure inserted value matches element type
-        //     ctx.constraints.push((val_type, elem_type.clone()));
+            // // Ensure inserted value matches element type
+            // ctx.constraints.push((val_type, elem_type.clone()));
 
-        //     // Update the variable in env
-        //     if let Expression::Word(var_name) = &exprs[1] {
-        //         ctx.env
-        //             .insert(var_name.clone(), TypeScheme::monotype(list_type.clone()));
-        //     }
-        //     // Return same list type
-        //     return Ok(list_type);
-        // }
+            // // Update the variable in env
+            // if let Expression::Word(var_name) = &exprs[1] {
+            //     ctx.env
+            //         .insert(var_name.clone(), TypeScheme::monotype(list_type.clone()));
+            // }
+            // // Return same list type
+            // return Ok(list_type);
+        }
         if name == "array" {
             let args = &exprs[1..];
             if args.is_empty() {
@@ -343,7 +344,6 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         );
     }
 
-    // // set! : [β] -> Int -> β -> [β]
     // {
     //     let b = fresh_var();
     //     env.insert(
@@ -356,7 +356,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     //                     Box::new(Type::Int),
     //                     Box::new(Type::Function(
     //                         Box::new(b.clone()),
-    //                         Box::new(Type::List(Box::new(b))),
+    //                         Box::new(Type::Int),
     //                     )),
     //                 )),
     //             ),
@@ -364,7 +364,6 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     //     );
     // }
 
-    // // pop! : [γ] -> [γ]
     // {
     //     let c = fresh_var();
     //     env.insert(
@@ -373,14 +372,16 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     //             vec![c.var_id().unwrap()],
     //             Type::Function(
     //                 Box::new(Type::List(Box::new(c.clone()))),
-    //                 Box::new(Type::List(Box::new(c))),
+    //                 Box::new(Type::Int),
     //             ),
     //         ),
     //     );
     // }
     // loop : Int -> Int -> (Int -> ε) -> List(ε)
+
     {
-        let e = fresh_var();
+        let e = fresh_var(); // generic accumulator type
+
         env.insert(
             "loop".to_string(),
             TypeScheme::new(
@@ -395,36 +396,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
                                 Box::new(Type::Int),
                                 Box::new(e.clone()),
                             )),
-                            Box::new(Type::List(Box::new(e))), // returns list of ε
-                        )),
-                    )),
-                ),
-            ),
-        );
-    }
-    {
-        let e = fresh_var(); // generic accumulator type
-
-        env.insert(
-            "dotimes".to_string(),
-            TypeScheme::new(
-                vec![e.var_id().unwrap()],
-                Type::Function(
-                    Box::new(Type::Int), // start
-                    Box::new(Type::Function(
-                        Box::new(Type::Int), // end
-                        Box::new(Type::Function(
-                            Box::new(Type::Function(
-                                Box::new(e.clone()), // accumulator
-                                Box::new(Type::Function(
-                                    Box::new(Type::Int), // index
-                                    Box::new(e.clone()), // new accumulator
-                                )),
-                            )),
-                            Box::new(Type::Function(
-                                Box::new(e.clone()), // initial value
-                                Box::new(e.clone()), // result
-                            )),
+                            Box::new(Type::Int), // returns int
                         )),
                     )),
                 ),
