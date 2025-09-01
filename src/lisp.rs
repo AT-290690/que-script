@@ -594,6 +594,33 @@ fn init() -> Rc<RefCell<Env>> {
     Rc::new(RefCell::new(Env {
         vars: HashMap::from([
             (
+                "loop-finish".to_string(),
+                Evaluated::Function(Rc::new(
+                    |args: Vec<Expression>,
+                     env: Rc<RefCell<Env>>,
+                     defs: Rc<RefCell<Env>>|
+                     -> Evaluated {
+                        let func_val = evaluate(&args[1], Rc::clone(&env), Rc::clone(&defs));
+                        match func_val {
+                            Evaluated::Function(f) => {
+                                while let Evaluated::Number(value) =
+                                    evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs))
+                                {
+                                    if value == 1 {
+                                        f(vec![], Rc::clone(&env), Rc::clone(&defs));
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            _ => panic!("while: second argument must be a lambda"),
+                        }
+
+                        return Evaluated::Number(0);
+                    },
+                )),
+            ),
+            (
                 "loop".to_string(),
                 Evaluated::Function(Rc::new(
                     |args: Vec<Expression>,

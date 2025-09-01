@@ -219,3 +219,20 @@
      (let process (lambda i (set! out (length out) (get xs (- len i 1)))))
      (loop 0 len process)
      out))))
+
+
+(let find-index (lambda xs cb? (do
+     (let i [ 0 ])
+     (let index [ -1 ])
+     (let len (length xs))
+     (let process (lambda
+           (if (cb? (get xs (get i)))
+              (set! index 0 (get i))
+              (set! i 0 (+ (get i) 1)))))
+     (loop-finish (and (< (get i) len) (= (get index 0) -1)) process)
+     (get index 0))))
+
+(let buckets (lambda size (do
+     (let out [[]])
+     (loop 1 size (lambda . (set! out (length out) [])))
+     out)))

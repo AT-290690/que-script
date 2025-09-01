@@ -314,6 +314,25 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         );
     }
 
+    // loop : Bool -> ε -> Int
+    {
+        let e = fresh_var();
+
+        env.insert(
+            "loop-finish".to_string(),
+            TypeScheme::new(
+                vec![e.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Bool), // predicate
+                    Box::new(Type::Function(
+                        Box::new(e.clone()),
+                        Box::new(Type::Int), // returns int
+                    )),
+                ),
+            ),
+        );
+    }
+
     // Arithmetic operations
     env.insert(
         "+".to_string(),
