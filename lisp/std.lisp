@@ -255,3 +255,10 @@
   a
   (zipper b)
   (every? (lambda x (= (get x 0) (get x 1))))))))
+
+(let partition (lambda xs n (if (= n (length xs)) [xs] (do 
+    (let a [])
+    (loop 0 (length xs) (lambda i (if (= (mod i n) 0)
+        (set! a (length a) [(get xs i)])
+        (set! (at a -1) (length (at a -1)) (get xs i)))))
+     a))))
