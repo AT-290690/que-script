@@ -138,6 +138,20 @@
   out))))
 (let concat (lambda xs (reduce xs merge [])))
 
+
+(let every? (lambda xs predicate? (do
+           (let i [ 0 ])
+           (let len (length xs))
+           (loop-finish (and (< (get i) len) (predicate? (get xs (get i)))) (lambda (set! i 0 (+ (get i) 1))))
+           (not (> len (get i))))))
+
+(let some? (lambda xs predicate? (do
+           (let i [ 0 ])
+           (let len (length xs))
+           (loop-finish (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (set! i 0 (+ (get i) 1))))
+           (or (= len 0) (> len (get i))))))
+
+
 (let bit-set? (lambda n pos (= (& n (<< 1 pos)) 0)))
 (let bit-set (lambda n pos (| n (<< 1 pos))))
 (let bit-clear (lambda n pos (& n (~ (<< 1 pos)))))
@@ -236,3 +250,8 @@
      (let out [[]])
      (loop 1 size (lambda . (set! out (length out) [])))
      out)))
+
+(let match? (lambda a b (and (= (length a) (length b)) (|>
+  a
+  (zipper b)
+  (every? (lambda x (= (get x 0) (get x 1))))))))
