@@ -146,25 +146,25 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
     let value_expr = &args[1];
 
     if let Expression::Word(var_name) = var_expr {
-        let value_ty = infer_expr(value_expr, ctx)?;
+        let value_type = infer_expr(value_expr, ctx)?;
 
-        // solve current constraints → compose a single Substitution S
+        // Solve all constraints into a single substitution S
         let mut subst = Substitution::empty();
         for (t1, t2) in &ctx.constraints {
-            let s = unify(t1, t2)?;
+            let s = unify(&subst.apply(t1), &subst.apply(t2))?;
             subst = subst.compose(&s);
         }
 
-        // apply S to the value AND to the env
-        let solved_value_ty = subst.apply(&value_ty);
-        let solved_env = ctx.env.substitute(&subst.map);
+        // Apply S to the value and to the environment
+        let solved_type = subst.apply(&value_type);
+        ctx.env.apply_in_place(&subst); // ← important
+                                        // (optional but nice) also clear constraints or rewrite them via subst
 
-        let scheme = generalize(&solved_env, solved_value_ty);
-
-        ctx.env = solved_env;
+        // Generalize under the *current, substituted* environment
+        let scheme = generalize(&ctx.env, solved_type);
         ctx.env.insert(var_name.clone(), scheme);
 
-        // returns 0/Int sentinel
+        // Your language’s `let` returns Int sentinel; fine to keep:
         Ok(Type::Int)
     } else {
         Err("Let variable must be a variable name".to_string())

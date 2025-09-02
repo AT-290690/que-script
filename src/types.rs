@@ -52,12 +52,39 @@ pub struct TypeScheme {
 }
 
 impl TypeScheme {
+    pub fn substitute(&self, subst: &HashMap<u64, Type>) -> TypeScheme {
+        // Only substitute variables not bound by the scheme
+        let bound_vars: std::collections::HashSet<_> = self.vars.iter().collect();
+        let filtered_subst: HashMap<u64, Type> = subst
+            .iter()
+            .filter(|(var, _)| !bound_vars.contains(var))
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+
+        TypeScheme::new(self.vars.clone(), self.typ.substitute(&filtered_subst))
+    }
+
     pub fn new(vars: Vec<u64>, typ: Type) -> Self {
         TypeScheme { vars, typ }
     }
 
     pub fn monotype(typ: Type) -> Self {
         TypeScheme::new(vec![], typ)
+    }
+
+    pub fn apply(&self, sub: &Substitution) -> TypeScheme {
+        // filter out mappings for bound vars
+        let filtered = sub.without(&self.vars);
+        TypeScheme::new(self.vars.clone(), filtered.apply(&self.typ))
+    }
+
+    pub fn free_vars(&self) -> std::collections::HashSet<u64> {
+        // free vars of the body minus the bound vars of the scheme
+        let mut fv = self.typ.free_vars();
+        for v in &self.vars {
+            fv.remove(v);
+        }
+        fv
     }
 }
 
@@ -79,10 +106,34 @@ pub struct TypeEnv {
 }
 
 impl TypeEnv {
+    pub fn substitute(&self, subst: &HashMap<u64, Type>) -> TypeEnv {
+        let mut new_env = TypeEnv::new();
+
+        for (name, scheme) in &self.bindings {
+            new_env
+                .bindings
+                .insert(name.clone(), scheme.substitute(subst));
+        }
+
+        new_env
+    }
     pub fn new() -> Self {
         TypeEnv {
             bindings: HashMap::new(),
         }
+    }
+    pub fn apply_in_place(&mut self, sub: &Substitution) {
+        for (_k, scheme) in self.bindings.iter_mut() {
+            *scheme = scheme.apply(sub);
+        }
+    }
+
+    pub fn free_vars(&self) -> std::collections::HashSet<u64> {
+        let mut acc = std::collections::HashSet::new();
+        for scheme in self.bindings.values() {
+            acc.extend(scheme.free_vars());
+        }
+        acc
     }
 
     pub fn insert(&mut self, name: String, scheme: TypeScheme) {
@@ -106,7 +157,13 @@ impl Substitution {
             map: HashMap::new(),
         }
     }
-
+    pub fn without(&self, bound: &[u64]) -> Substitution {
+        let mut new_map = self.map.clone();
+        for b in bound {
+            new_map.remove(b);
+        }
+        Substitution { map: new_map }
+    }
     pub fn empty() -> Self {
         Substitution::new()
     }
@@ -203,53 +260,7 @@ impl Type {
     }
 }
 
-// Implementation for TypeScheme
-impl TypeScheme {
-    pub fn substitute(&self, subst: &HashMap<u64, Type>) -> TypeScheme {
-        // Only substitute variables not bound by the scheme
-        let bound_vars: std::collections::HashSet<_> = self.vars.iter().collect();
-        let filtered_subst: HashMap<u64, Type> = subst
-            .iter()
-            .filter(|(var, _)| !bound_vars.contains(var))
-            .map(|(k, v)| (*k, v.clone()))
-            .collect();
-
-        TypeScheme::new(self.vars.clone(), self.typ.substitute(&filtered_subst))
-    }
-
-    pub fn free_vars(&self) -> std::collections::HashSet<u64> {
-        let mut vars = self.typ.free_vars();
-        for id in &self.vars {
-            vars.remove(id);
-        }
-        vars
-    }
-}
-
 // Implementation for TypeEnv
-impl TypeEnv {
-    pub fn substitute(&self, subst: &HashMap<u64, Type>) -> TypeEnv {
-        let mut new_env = TypeEnv::new();
-
-        for (name, scheme) in &self.bindings {
-            new_env
-                .bindings
-                .insert(name.clone(), scheme.substitute(subst));
-        }
-
-        new_env
-    }
-
-    pub fn free_vars(&self) -> std::collections::HashSet<u64> {
-        let mut vars = std::collections::HashSet::new();
-
-        for scheme in self.bindings.values() {
-            vars.extend(scheme.free_vars());
-        }
-
-        vars
-    }
-}
 
 // Unification algorithm
 pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {
@@ -292,8 +303,8 @@ pub fn occurs_in(var: &TypeVar, ty: &Type) -> bool {
 
 // Generalization and instantiation
 pub fn generalize(env: &TypeEnv, typ: Type) -> TypeScheme {
-    let env_vars = env.free_vars(); // gets free vars from the environment
-    let typ_vars = typ.free_vars(); // gets free vars from the type
+    let env_vars = env.free_vars();
+    let typ_vars = typ.free_vars();
     let vars: Vec<u64> = typ_vars.difference(&env_vars).cloned().collect();
     TypeScheme::new(vars, typ)
 }
