@@ -53,8 +53,6 @@ fn main() -> std::io::Result<()> {
         //     Err(e) => println!("Error: {}", e),
         // }
         println!("{:?}", lisp::run(&wrapped_ast));
-
-        // tests::test_type_inference();
     }
 
     Ok(())
