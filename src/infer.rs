@@ -526,14 +526,20 @@ pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
         fresh_var_counter: initId,
     };
 
-    let typ = infer_expr(expr, &mut ctx)?;
+    // 1) Infer WITHOUT solving here
+    let t = infer_expr(expr, &mut ctx)?;
 
-    // Solve constraints
+    // 2) FINALIZE at top level only
+    //    Solve all constraints accumulated during the whole program
     let mut subst = Substitution::empty();
-    for (t1, t2) in &ctx.constraints {
-        let s = crate::types::unify(t1, t2)?;
+    for (a, b) in &ctx.constraints {
+        // apply current subst to keep things in normal form as we go
+        let s = unify(&subst.apply(a), &subst.apply(b))?;
         subst = subst.compose(&s);
     }
 
-    Ok(subst.apply(&typ))
+    // 3) Apply the final substitution to both type and environment (optional but tidy)
+    let t_final = subst.apply(&t);
+    ctx.env.apply_in_place(&subst);
+    Ok(t_final)
 }
