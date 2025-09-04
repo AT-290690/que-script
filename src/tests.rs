@@ -32,7 +32,8 @@ mod tests {
             ),
             ("(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (array (= 1 1))))", "Bool"),
             ("(array 1 2 3)", "[Int]"),
-            ("(array (array (array 1)))", "[[[Int]]]")
+            ("(array (array (array 1)))", "[[[Int]]]"),
+            ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int")
         ];
 
         for (inp, out) in &test_cases {
@@ -70,6 +71,10 @@ mod tests {
             ("(lambda x (and x 42))", "Cannot unify Bool with Int"),
             ("(summation (range 1 10))", "Undefined variable: summation"),
             ("(if (= 1 2) 10 (= 0 1))", "Cannot unify Int with Bool"),
+            (
+                "(do (let x 10) (let x 2))",
+                "Variable 'x' already defined in this scope",
+            ),
         ];
 
         for (inp, out) in &test_cases {

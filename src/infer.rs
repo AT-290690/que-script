@@ -69,12 +69,13 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 // Type inference for lambda expressions
 fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.is_empty() {
-        return Err("Lambda requires at least a body".to_string());
+        return Err("Lambda requires a body".to_string());
     }
 
     let param_count = args.len() - 1;
     let body = &args[param_count];
 
+    // Extract parameter names
     let mut param_names = Vec::new();
     for i in 0..param_count {
         if let Expression::Word(name) = &args[i] {
@@ -84,31 +85,34 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
         }
     }
 
-    // fresh type vars for params
+    // Create fresh type vars
     let mut param_types = Vec::new();
     for _ in 0..param_count {
         param_types.push(ctx.fresh_var());
     }
 
-    // extend env in-place (by swap)
-    let saved_env = ctx.env.clone();
-    let mut extended_env = saved_env.clone();
-    for (name, ty) in param_names.iter().zip(param_types.iter()) {
-        extended_env.insert(name.clone(), TypeScheme::monotype(ty.clone()));
-    }
-    let old_env = std::mem::replace(&mut ctx.env, extended_env);
+    // Enter new lexical scope
+    ctx.env.enter_scope();
 
-    // infer body in SAME ctx (no fresh ctx)
+    // Insert parameters
+    for (name, typ) in param_names.iter().zip(param_types.iter()) {
+        ctx.env
+            .insert(name.clone(), TypeScheme::monotype(typ.clone()))
+            .map_err(|e| format!("Error in lambda: {}", e))?;
+    }
+
+    // Infer body type
     let body_type = infer_expr(body, ctx)?;
 
-    // restore env
-    ctx.env = old_env;
+    // Exit scope
+    ctx.env.exit_scope();
 
-    // build curried function type (params right-to-left)
+    // Build function type
     let mut func_type = body_type;
-    for p in param_types.iter().rev() {
-        func_type = Type::Function(Box::new(p.clone()), Box::new(func_type));
+    for param_type in param_types.iter().rev() {
+        func_type = Type::Function(Box::new(param_type.clone()), Box::new(func_type));
     }
+
     Ok(func_type)
 }
 
@@ -162,7 +166,7 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 
         // Generalize under the *current, substituted* environment
         let scheme = generalize(&ctx.env, solved_type);
-        ctx.env.insert(var_name.clone(), scheme);
+        ctx.env.insert(var_name.clone(), scheme)?;
 
         // Your language’s `let` returns Int sentinel; fine to keep:
         Ok(Type::Int)

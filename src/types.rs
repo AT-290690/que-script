@@ -102,46 +102,55 @@ impl fmt::Display for TypeScheme {
 // Type environment for storing type assumptions
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
-    pub bindings: HashMap<String, TypeScheme>,
+    pub scopes: Vec<HashMap<String, TypeScheme>>,
 }
 
 impl TypeEnv {
-    pub fn substitute(&self, subst: &HashMap<u64, Type>) -> TypeEnv {
-        let mut new_env = TypeEnv::new();
-
-        for (name, scheme) in &self.bindings {
-            new_env
-                .bindings
-                .insert(name.clone(), scheme.substitute(subst));
-        }
-
-        new_env
-    }
     pub fn new() -> Self {
         TypeEnv {
-            bindings: HashMap::new(),
-        }
-    }
-    pub fn apply_in_place(&mut self, sub: &Substitution) {
-        for (_k, scheme) in self.bindings.iter_mut() {
-            *scheme = scheme.apply(sub);
+            scopes: vec![HashMap::new()],
         }
     }
 
-    pub fn free_vars(&self) -> std::collections::HashSet<u64> {
-        let mut acc = std::collections::HashSet::new();
-        for scheme in self.bindings.values() {
-            acc.extend(scheme.free_vars());
-        }
-        acc
+    pub fn enter_scope(&mut self) {
+        self.scopes.push(HashMap::new());
     }
 
-    pub fn insert(&mut self, name: String, scheme: TypeScheme) {
-        self.bindings.insert(name, scheme);
+    pub fn exit_scope(&mut self) {
+        self.scopes.pop().expect("Cannot exit global scope");
+    }
+
+    pub fn insert(&mut self, name: String, scheme: TypeScheme) -> Result<(), String> {
+        let current = self.scopes.last_mut().unwrap();
+        if current.contains_key(&name) {
+            return Err(format!("Variable '{}' already defined in this scope", name));
+        }
+        current.insert(name, scheme);
+        Ok(())
     }
 
     pub fn get(&self, name: &str) -> Option<TypeScheme> {
-        self.bindings.get(name).cloned()
+        for scope in self.scopes.iter().rev() {
+            if let Some(scheme) = scope.get(name) {
+                return Some(scheme.clone());
+            }
+        }
+        None
+    }
+
+    pub fn free_vars(&self) -> std::collections::HashSet<u64> {
+        self.scopes
+            .iter()
+            .flat_map(|scope| scope.values().flat_map(|scheme| scheme.free_vars()))
+            .collect()
+    }
+
+    pub fn apply_in_place(&mut self, subst: &Substitution) {
+        for scope in &mut self.scopes {
+            for scheme in scope.values_mut() {
+                *scheme = scheme.apply(subst);
+            }
+        }
     }
 }
 
