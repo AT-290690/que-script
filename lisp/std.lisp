@@ -105,6 +105,13 @@
 (let third (lambda xs (get xs 3)))
 (let last (lambda xs (get xs (- (length xs) 1))))
 
+(let variable (lambda value [ value ]))
+(let set (lambda var x (set! var 0 x)))
+(let += (lambda var n (set var (+ (get var) n))))
+(let -= (lambda var n (set var (- (get var) n))))
+(let ++ (lambda var (set var (+ (get var) 1))))
+(let -- (lambda var (set var (- (get var) 1))))
+
 (let filter (lambda xs cb? (if (empty? xs) xs (do 
      (let out [])
      (let process (lambda i (do
@@ -395,3 +402,19 @@
         (if (has-property? table key) 
             (set-property! table key (+ (access-property table key) 1))
             (set-property! table key 1)))) (buckets 64)))))
+
+(let sliding-window-array (lambda arr size (cond 
+     (empty? arr) []
+     (= size (length arr)) [arr]
+     (do
+          (let out [])
+          (let i (variable 0))
+          (loop-finish (<= (+ (get i) size) (length arr)) (lambda (do
+               (let window [])
+               (let j (variable 0))
+               (loop-finish (< (get j) size) (lambda (do
+                    (push! window (get arr (+ (get i) (get j))))
+                    (++ j))))
+               (push! out window)
+               (++ i))))
+          out))))
