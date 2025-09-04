@@ -301,3 +301,91 @@
            (if (< start end) (helper)))))
      (loop-finish (> (length stack) 0) process)
      arr)))
+
+(let hash
+ (lambda table key (do
+     (let prime-num 31)
+     (let total [ 0 ])
+     (let i [ 0 ])
+     (let bounds (if (< (- (length key) 1) 100) (- (length key) 1) 100))
+
+     (let process (lambda (do
+           (let letter (get key (get i)))
+           (set! total 0 (euclidean-mod (+ (* (get total 0 ) prime-num) letter) (length table)))
+           (set! i 0 (+ (get i) 1)))))
+
+     (loop-finish (< (get i) bounds) process)
+     (get total 0))))
+
+(let has-element? (lambda table key (do
+     (let idx (hash table key))
+     (let current (get table idx))
+     (and (in-bounds? table idx)
+                  (and (> (length current) 0)
+                       (>= (find-index current (lambda x (match? x key))) 0))))))
+
+(let has-property? (lambda table key (do
+         (let idx (hash table key))
+         (let current (map (get table idx) (lambda x (get x 0))))
+         (and (in-bounds? table idx)
+         (and (> (length current) 0)
+           (>= (find-index current
+             (lambda x
+               (match? x key))) 0))))))
+
+(let add-element!
+     (lambda table key
+       (do
+         (let idx (hash table key))
+         (if (not (in-bounds? table idx)) (set! table idx (array)) nil)
+         (let current (get table idx))
+         (let len (length current))
+         (let index (if (> len 0) (find-index current (lambda x (match? x key))) -1))
+         (let entry key)
+         (if (= index -1)
+           (set! current (length current) entry)
+           (set! current index entry)) table)))
+
+(let remove-element!
+ (lambda table key
+   (do
+     (let idx (hash table key))
+     (if (not (in-bounds? table idx)) (set! table idx (array)) nil)
+     (let current (get table idx))
+     (let len (length current))
+     (let index (if (> len 0) (find-index current (lambda x (match? x key))) -1))
+     (let entry key)
+     (if (not (= index -1)) (do (set! current index (at current -1)) (pop! current)) nil)
+     table)))
+
+(let set-property! (lambda table key value
+       (do
+         (let idx (hash table key))
+         (if (not (in-bounds? table idx)) (set! table idx []) nil)
+         (let current (get table idx))
+         (let len (length current))
+         (let index (if (> len 0) (find-index current (lambda x (match? (get x 0) key))) -1))
+         (let entry [ key [value] ])
+         (if (= index -1)
+           (set! current (length current) entry)
+           (set! current index entry))
+         table)))
+        
+(let delete-property! (lambda table key
+     (do
+       (let idx (hash table key))
+       (if (not (in-bounds? table idx)) (set! table idx []) nil)
+       (let current (get table idx))
+       (let len (length current))
+       (let index (if (> len 0) (find-index current (lambda x (match? (get x 0) key))) -1))
+       (if (not (= index -1)) (do (set! current index (at current -1)) (pop! current)) nil)
+       table)))
+
+(let access-property-helper (lambda table idx key (do
+   (let current (get table idx))
+   (let found-index (find-index current (lambda x (match? key (get x 0)))))
+   (unless (= found-index -1) (get current found-index 1) []))))
+
+(let access-property (lambda table key (do
+     (let idx (hash table key))
+     (if (in-bounds? table idx) (access-property-helper table idx key) []))))
