@@ -1238,40 +1238,6 @@ fn init() -> Rc<RefCell<Env>> {
                     },
                 )),
             ),
-            (
-                "atom?".to_string(),
-                Evaluated::Function(Rc::new(
-                    |args: Vec<Expression>,
-                     env: Rc<RefCell<Env>>,
-                     defs: Rc<RefCell<Env>>|
-                     -> Evaluated {
-                        if args.len() < 1 {
-                            panic!("atom? expects at least one argument");
-                        }
-                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                            Evaluated::Number(_) => Evaluated::Number(1),
-                            _ => Evaluated::Number(0),
-                        }
-                    },
-                )),
-            ),
-            (
-                "lambda?".to_string(),
-                Evaluated::Function(Rc::new(
-                    |args: Vec<Expression>,
-                     env: Rc<RefCell<Env>>,
-                     defs: Rc<RefCell<Env>>|
-                     -> Evaluated {
-                        if args.len() < 1 {
-                            panic!("lambda? expects at least one argument");
-                        }
-                        match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
-                            Evaluated::Function(_) => Evaluated::Number(1),
-                            _ => Evaluated::Number(0),
-                        }
-                    },
-                )),
-            ),
         ]),
         parent: None,
     }))

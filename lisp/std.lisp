@@ -112,6 +112,10 @@
 (let ++ (lambda var (set var (+ (get var) 1))))
 (let -- (lambda var (set var (- (get var) 1))))
 
+(let empty? (lambda xs (= (length xs) 0)))
+(let not-empty? (lambda xs (not (= (length xs) 0))))
+(let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
+
 (let filter (lambda xs cb? (if (empty? xs) xs (do 
      (let out [])
      (let process (lambda i (do
@@ -210,10 +214,7 @@
 (let gauss-sum (lambda n (/ (* n (+ n 1)) 2)))
 (let gauss-sum-sequance (lambda a b (/ (* (+ a b) (+ (- b a) 1)) 2)))
 (let clamp (lambda x limit (if (> x limit) limit x)))
-(let clamp-range (lambda x start end (cond (> x end) end (< x start) start (*) x)))
-(let empty? (lambda xs (= (length xs) 0)))
-(let not-empty? (lambda xs (not (= (length xs) 0))))
-(let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
+(let clamp-range (lambda x start end (cond (> x end) end (< x start) start x)))
 
 (let zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
@@ -418,3 +419,7 @@
                (push! out window)
                (++ i))))
           out))))
+(let flat-one (lambda xs (cond 
+     (empty? xs) []
+     (= (length xs) 1) (get xs)
+     (reduce xs (lambda a b (merge a b)) []))))
