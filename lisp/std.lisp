@@ -388,4 +388,10 @@
 
 (let access-property (lambda table key (do
      (let idx (hash table key))
-     (if (in-bounds? table idx) (access-property-helper table idx key) []))))
+     (if (in-bounds? table idx) (get (access-property-helper table idx key)) -1))))
+
+(let table-count (lambda arr 
+    (|> arr (reduce (lambda table key (do 
+        (if (has-property? table key) 
+            (set-property! table key (+ (access-property table key) 1))
+            (set-property! table key 1)))) (buckets 64)))))
