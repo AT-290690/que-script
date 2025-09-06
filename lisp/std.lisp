@@ -98,7 +98,10 @@
 
 (let swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp) xs)))
 (let push! (lambda xs x (do (set! xs (length xs) x) xs)))
-
+(let pop-and-get! (lambda xs (do 
+      (let out (get xs (- (length xs) 1))) 
+      (pop! xs)
+      out)))
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 (let first (lambda xs (get xs 0)))
 (let second (lambda xs (get xs 1)))
