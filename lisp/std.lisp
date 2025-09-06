@@ -166,6 +166,18 @@
 
 (let cartesian-product (lambda a b (reduce a (lambda p x (merge p (map b (lambda y [ x y ])))) [])))
 
+(let gcd (lambda a b (do
+    (let A (variable a))
+    (let B (variable b))
+    (loop-finish (> (get B) 0) (lambda (do
+        (let a (get A))
+        (let b (get B))
+        (set A b)
+        (set B (mod a b)))))
+    (get A))))
+(let lcm (lambda a b (/ (* a b) (gcd a b))))
+
+
 (let bit-set? (lambda n pos (= (& n (<< 1 pos)) 0)))
 (let bit-set (lambda n pos (| n (<< 1 pos))))
 (let bit-clear (lambda n pos (& n (~ (<< 1 pos)))))
@@ -215,6 +227,8 @@
 (let gauss-sum-sequance (lambda a b (/ (* (+ a b) (+ (- b a) 1)) 2)))
 (let clamp (lambda x limit (if (> x limit) limit x)))
 (let clamp-range (lambda x start end (cond (> x end) end (< x start) start x)))
+(let between? (lambda v min max (and (> v min) (< v max))))
+(let overlap? (lambda v min max (and (>= v min) (<= v max))))
 
 (let zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
