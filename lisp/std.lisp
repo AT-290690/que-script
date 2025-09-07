@@ -95,6 +95,10 @@
 (let true (= 1 1))
 (let false (= 0 1))
 (let nil 0)
+(let eq (lambda a b (cond 
+          (and a b) true 
+          (and (not a) (not b)) true
+          false)))
 
 (let swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp) xs)))
 (let push! (lambda xs x (do (set! xs (length xs) x) xs)))
@@ -107,14 +111,25 @@
 (let second (lambda xs (get xs 1)))
 (let third (lambda xs (get xs 3)))
 (let last (lambda xs (get xs (- (length xs) 1))))
-
-(let variable (lambda value [ value ]))
+(let min-safe-int -2147483648)
+(let max-safe-int 2147383647)
+(let safe-int? (lambda value (and (>= value min-safe-int) (<= value max-safe-int))))
+(let get-safe-int (lambda var (if (safe-int? (get var)) var 0)))
+(let int (lambda value (if (safe-int? value) [ value ] [ 0 ])))
+(let box (lambda value [ value ]))
 (let set (lambda var x (set! var 0 x)))
-(let += (lambda var n (set var (+ (get var) n))))
-(let -= (lambda var n (set var (- (get var) n))))
-(let ++ (lambda var (set var (+ (get var) 1))))
-(let -- (lambda var (set var (- (get var) 1))))
+(let =! (lambda var x (set! var 0 x)))
 
+(let boole-set (lambda var x (set! var 0 (if x true false))))
+(let boole-eqv (lambda a b (eq (get a) (get b))))
+
+(let true? (lambda var (if (get var) true false)))
+(let false? (lambda var (if (get var) false true)))
+
+(let += (lambda var n (=! var (+ (get var) n))))
+(let -= (lambda var n (=! var (- (get var) n))))
+(let ++ (lambda var (=! var (+ (get var) 1))))
+(let -- (lambda var (=! var (- (get var) 1))))
 (let empty? (lambda xs (= (length xs) 0)))
 (let not-empty? (lambda xs (not (= (length xs) 0))))
 (let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
@@ -170,8 +185,8 @@
 (let cartesian-product (lambda a b (reduce a (lambda p x (merge p (map b (lambda y [ x y ])))) [])))
 
 (let gcd (lambda a b (do
-    (let A (variable a))
-    (let B (variable b))
+    (integer A a)
+    (integer B b)
     (loop-finish (> (get B) 0) (lambda (do
         (let a (get A))
         (let b (get B))
@@ -426,10 +441,10 @@
      (= size (length arr)) [arr]
      (do
           (let out [])
-          (let i (variable 0))
+          (let i (box 0))
           (loop-finish (<= (+ (get i) size) (length arr)) (lambda (do
                (let window [])
-               (let j (variable 0))
+               (let j (box 0))
                (loop-finish (< (get j) size) (lambda (do
                     (push! window (get arr (+ (get i) (get j))))
                     (++ j))))

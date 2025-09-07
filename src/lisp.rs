@@ -197,6 +197,9 @@ fn desugar(expr: Expression) -> Expression {
                     "<>" => not_equal_transform(exprs),
                     "." => accessor_transform(exprs),
                     "get" => accessor_transform(exprs),
+                    "variable" => variable_transform(exprs),
+                    "integer" => integer_transform(exprs),
+                    "boolean" => boolean_transform(exprs),
                     "lambda" => lambda_destructure_transform(exprs),
                     _ => Expression::Apply(exprs),
                 }
@@ -305,6 +308,69 @@ fn accessor_transform(mut exprs: Vec<Expression>) -> Expression {
     }
 
     acc
+}
+fn variable_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+    Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        exprs[0].clone(),
+        Expression::Apply(vec![Expression::Word("box".to_string()), exprs[1].clone()]),
+    ])
+}
+fn integer_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+    Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        exprs[0].clone(),
+        Expression::Apply(vec![Expression::Word("int".to_string()), exprs[1].clone()]),
+    ])
+}
+fn boolean_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+    match &exprs[1] {
+        Expression::Word(x) => {
+            if x != "true" && x != "false" {
+                panic!(
+                    "Booleans variables only be assigned to true or false but got: {}",
+                    x
+                )
+            }
+        }
+        Expression::Apply(x) => match &x[0] {
+            Expression::Word(y) => {
+                if y != "="
+                    && y != ">"
+                    && y != "<"
+                    && y != "<="
+                    && y != ">="
+                    && y != "not"
+                    && y != "or"
+                    && y != "and"
+                {
+                    panic!(
+                        "Booleans variables only be assigned to results of boolean expressions but got: {}",
+                        y
+                    )
+                }
+            }
+            _ => panic!(
+                "Booleans variables only be assigned to true or false but got: {:?}",
+                x[0]
+            ),
+        },
+        x => panic!(
+            "Booleans variables only be assigned to true or false but got : {:?}",
+            x
+        ),
+    }
+    Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        exprs[0].clone(),
+        Expression::Apply(vec![
+            Expression::Word("array".to_string()),
+            exprs[1].clone(),
+        ]),
+    ])
 }
 fn not_equal_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
