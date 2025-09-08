@@ -247,6 +247,27 @@
 (let clamp-range (lambda x start end (cond (> x end) end (< x start) start x)))
 (let between? (lambda v min max (and (> v min) (< v max))))
 (let overlap? (lambda v min max (and (>= v min) (<= v max))))
+(let sqrt (lambda n
+  (do
+    (integer x n)
+    (integer prev 0)
+    (loop-finish (> (abs (- (get x) (get prev))) 0)
+      (lambda (do
+        (set prev (get x))
+        (set x (/ (+ (get x) (/ n (get x))) 2)))))
+    (get x))))
+(let expt (lambda base exp (do
+  (if (< exp 0) 0 (do
+      (integer result 1)
+      (integer b base)
+      (integer e exp)
+      (loop-finish (> (get e) 0)
+        (lambda (do
+          (if (= (mod (get e) 2) 1)
+            (set result (* (get result) (get b))))
+          (set b (* (get b) (get b)))
+          (set e (/ (get e) 2)))))
+      (get result))))))
 
 (let zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
