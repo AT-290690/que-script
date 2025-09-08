@@ -139,12 +139,26 @@
      (let process (lambda i (do
       (let x (get xs i))
       (if (cb? x) (set! out (length out) x)))))
-     (loop 1 (length xs) process)
+     (loop 0 (length xs) process)
+     out))))
+
+(let ifilter (lambda xs cb? (if (empty? xs) xs (do 
+     (let out [])
+     (let process (lambda i (do
+      (let x (get xs i))
+      (if (cb? x i) (set! out (length out) x)))))
+     (loop 0 (length xs) process)
      out))))
 
 (let reduce (lambda xs cb initial (do
      (let out [ initial ])
      (let process (lambda i (set! out 0 (cb (get out 0) (get xs i)))))
+     (loop 0 (length xs) process)
+     (get out))))
+
+(let ireduce (lambda xs cb initial (do
+     (let out [ initial ])
+     (let process (lambda i (set! out 0 (cb (get out 0) (get xs i) i))))
      (loop 0 (length xs) process)
      (get out))))
 
@@ -154,12 +168,30 @@
      (loop 1 (length xs) process)
      out))))
 
+(let imap (lambda xs cb (if (empty? xs) [] (do
+     (let out [(cb (get xs 0) 0)])
+     (let process (lambda i (set! out (length out) (cb (get xs i) i))))
+     (loop 1 (length xs) process)
+     out))))
+
 (let range (lambda start end (do
      (let out [ start ])
      (let process (lambda i (set! out (length out) i)))
      (loop (+ start 1) (+ end 1) process)
      out)))     
-    
+
+ (let ones (lambda n (do
+     (let out [ 1 ])
+     (let process (lambda i (set! out (length out) 1)))
+     (loop 0 n process)
+     out))) 
+
+ (let zeroes (lambda n (do
+     (let out [ 0 ])
+     (let process (lambda i (set! out (length out) 0)))
+     (loop 0 n process)
+     out))) 
+
 (let count-of (lambda xs cb? (length (filter xs cb?))))
 (let count (lambda input item (count-of input (lambda x (= x item)))))
 
@@ -180,6 +212,18 @@
            (let i [ 0 ])
            (let len (length xs))
            (loop-finish (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (set! i 0 (+ (get i) 1))))
+           (or (= len 0) (> len (get i))))))
+
+(let ievery? (lambda xs predicate? (do
+           (let i [ 0 ])
+           (let len (length xs))
+           (loop-finish (and (< (get i) len) (predicate? (get xs (get i)) (get i))) (lambda (set! i 0 (+ (get i) 1))))
+           (not (> len (get i))))))
+
+(let isome? (lambda xs predicate? (do
+           (let i [ 0 ])
+           (let len (length xs))
+           (loop-finish (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
 (let cartesian-product (lambda a b (reduce a (lambda p x (merge p (map b (lambda y [ x y ])))) [])))
