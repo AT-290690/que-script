@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(warnings)]
 mod infer;
-mod lisp;
+mod interpreter;
 mod parser;
 mod types;
 mod vm;
@@ -14,7 +14,7 @@ mod tests;
 
 fn dump_wrapped_ast(expr: parser::Expression, path: &str) -> std::io::Result<()> {
     let mut file = fs::File::create(path)?;
-    writeln!(file, "use crate::lisp::Expression;")?;
+    writeln!(file, "use crate::parser::Expression;")?;
     writeln!(file, "pub fn load_ast() -> Expression {{")?;
     writeln!(file, "    {}", expr.to_rust())?;
     writeln!(file, "}}")?;
@@ -47,7 +47,7 @@ fn main() -> std::io::Result<()> {
             Err(e) => println!("Error: {}", e),
         }
     } else {
-        let wrapped_ast: lisp::Expression = load_ast();
+        let wrapped_ast: parser::Expression = load_ast();
 
         // match infer::infer_with_builtins(&wrapped_ast) {
         //     Ok(typ) => println!("Type: {}", typ),

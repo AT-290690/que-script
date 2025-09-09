@@ -1,15 +1,9 @@
+use crate::parser::Expression;
 use core::panic;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
-
-#[derive(Debug, Clone)]
-pub enum Expression {
-    Atom(i32),
-    Word(String),
-    Apply(Vec<Expression>),
-}
 #[derive(Clone)]
 pub enum Evaluated {
     Function(Rc<dyn Fn(Vec<Expression>, Rc<RefCell<Env>>, Rc<RefCell<Env>>) -> Evaluated>),
@@ -26,19 +20,6 @@ impl fmt::Debug for Evaluated {
                 let arr_ref = arr.borrow();
                 let elements: Vec<String> = arr_ref.iter().map(|x| format!("{:?}", x)).collect();
                 write!(f, "[{}]", elements.join(" "))
-            }
-        }
-    }
-}
-
-impl Expression {
-    pub fn to_rust(&self) -> String {
-        match self {
-            Expression::Atom(n) => format!("Expression::Atom({})", n),
-            Expression::Word(w) => format!("Expression::Word({:?}.to_string())", w),
-            Expression::Apply(exprs) => {
-                let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
-                format!("Expression::Apply(vec![{}])", inner.join(", "))
             }
         }
     }
