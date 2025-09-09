@@ -4,6 +4,7 @@
 mod infer;
 mod lisp;
 mod types;
+mod vm;
 use std::fs;
 use std::io::Write;
 mod ast;
@@ -52,7 +53,16 @@ fn main() -> std::io::Result<()> {
         //     Ok(typ) => println!("Type: {}", typ),
         //     Err(e) => println!("Error: {}", e),
         // }
-        println!("{:?}", lisp::run(&wrapped_ast));
+        // println!("{:?}", lisp::run(&wrapped_ast));
+        let mut code = Vec::new();
+        vm::compile(&wrapped_ast, &mut code);
+        // Run
+        let mut vm = vm::VM::new();
+        vm.run(&code);
+        println!(
+            "{:?}",
+            vm.result().unwrap_or(&vm::BiteCodeEvaluated::Int(0))
+        );
     }
 
     Ok(())

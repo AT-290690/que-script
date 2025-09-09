@@ -829,7 +829,7 @@ fn init() -> Rc<RefCell<Env>> {
                         match evaluate(&args[0], Rc::clone(&env), Rc::clone(&defs)) {
                             Evaluated::Vector(arr) => {
                                 arr.borrow_mut().pop();
-                                Evaluated::Vector(arr)
+                                Evaluated::Number(0)
                             }
                             _ => panic!("First argument must be an array"),
                         }
