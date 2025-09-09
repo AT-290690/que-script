@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 #![allow(warnings)]
-
 mod infer;
 mod lisp;
+mod parser;
 mod types;
 mod vm;
 use std::fs;
@@ -12,7 +12,7 @@ use ast::load_ast;
 use std::env;
 mod tests;
 
-fn dump_wrapped_ast(expr: lisp::Expression, path: &str) -> std::io::Result<()> {
+fn dump_wrapped_ast(expr: parser::Expression, path: &str) -> std::io::Result<()> {
     let mut file = fs::File::create(path)?;
     writeln!(file, "use crate::lisp::Expression;")?;
     writeln!(file, "pub fn load_ast() -> Expression {{")?;
@@ -37,7 +37,7 @@ fn main() -> std::io::Result<()> {
         let program = fs::read_to_string("./lisp/main.lisp")?;
         let std_lib = fs::read_to_string("./lisp/std.lisp")?;
 
-        let wrapped_ast = lisp::with_std(&program, &std_lib);
+        let wrapped_ast = parser::with_std(&program, &std_lib);
 
         match infer::infer_with_builtins(&wrapped_ast) {
             Ok(typ) => {
@@ -54,6 +54,7 @@ fn main() -> std::io::Result<()> {
         //     Err(e) => println!("Error: {}", e),
         // }
         // println!("{:?}", lisp::run(&wrapped_ast));
+
         let mut code = Vec::new();
         vm::compile(&wrapped_ast, &mut code);
         // Run

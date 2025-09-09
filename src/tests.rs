@@ -37,7 +37,7 @@ mod tests {
         ];
 
         for (inp, out) in &test_cases {
-            let exprs = crate::lisp::parse(inp).unwrap();
+            let exprs = crate::parser::parse(inp).unwrap();
 
             if let Some(expr) = exprs.first() {
                 let result = crate::infer::infer_with_builtins(expr);
@@ -78,7 +78,7 @@ mod tests {
         ];
 
         for (inp, out) in &test_cases {
-            let exprs = crate::lisp::parse(inp).unwrap();
+            let exprs = crate::parser::parse(inp).unwrap();
 
             if let Some(expr) = exprs.first() {
                 // Check that type inference returns an Err

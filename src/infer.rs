@@ -1,4 +1,4 @@
-use crate::lisp::Expression;
+use crate::parser::Expression;
 use crate::types::{
     generalize, solve_constraints, unify, Substitution, Type, TypeEnv, TypeScheme, TypeVar,
 };

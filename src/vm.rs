@@ -608,8 +608,18 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
 
         Expression::Word(name) => {
             match name.as_str() {
+                // push a closure representing these
+                "/" => {
+                    code.push(Instruction::MakeClosure(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::Div,
+                        ],
+                    ));
+                }
                 "mod" => {
-                    // push a closure representing +
                     code.push(Instruction::MakeClosure(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -620,7 +630,6 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "+" => {
-                    // push a closure representing +
                     code.push(Instruction::MakeClosure(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -631,7 +640,6 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "-" => {
-                    // push a closure representing +
                     code.push(Instruction::MakeClosure(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -642,7 +650,6 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "*" => {
-                    // push a closure representing +
                     code.push(Instruction::MakeClosure(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -659,7 +666,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Gt,
-                        ], // you'd need Instruction::Gt
+                        ],
                     ));
                 }
                 "<" => {
@@ -669,7 +676,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Lt,
-                        ], // you'd need Instruction::Gt
+                        ],
                     ));
                 }
                 ">=" => {
@@ -679,7 +686,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Gte,
-                        ], // you'd need Instruction::Gt
+                        ],
                     ));
                 }
                 "<=" => {
@@ -689,7 +696,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Lte,
-                        ], // you'd need Instruction::Gt
+                        ],
                     ));
                 }
                 "=" => {
@@ -699,19 +706,19 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Eq,
-                        ], // you'd need Instruction::Gt
+                        ],
                     ));
                 }
                 "length" => {
                     code.push(Instruction::MakeClosure(
                         vec!["xs".to_string()],
-                        vec![Instruction::LoadVar("xs".to_string()), Instruction::Length], // you'd need Instruction::Gt
+                        vec![Instruction::LoadVar("xs".to_string()), Instruction::Length],
                     ));
                 }
                 "not" => {
                     code.push(Instruction::MakeClosure(
                         vec!["a".to_string()],
-                        vec![Instruction::LoadVar("a".to_string()), Instruction::Not], // you'd need Instruction::Gt
+                        vec![Instruction::LoadVar("a".to_string()), Instruction::Not],
                     ));
                 }
                 _ => {
