@@ -106,6 +106,7 @@
       (let out (get xs (- (length xs) 1))) 
       (pop! xs)
       out)))
+(let tail! (lambda xs (do (pop! xs) xs)))
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 (let first (lambda xs (get xs 0)))
 (let second (lambda xs (get xs 1)))
@@ -522,3 +523,18 @@
 (let digits->chars (lambda digits (map digits digit->char)))
 (let bool->int (lambda x (if (eq x true) 1 0)))
 (let int->bool (lambda x (if (= x 0) false true)))
+
+; (let buffer [])
+; (let fn (ring-buffer buffer 5))
+; (let buffer:get (get fn 0))
+; (let buffer:push! (get fn 1))
+; (loop 0 6 (lambda i (buffer:push! i)))
+; buffer
+(let ring-buffer (lambda buffer len (do 
+    (integer pointer 0)
+    [(lambda index (get buffer index)) 
+    (lambda item (do 
+        (let pt (get pointer))
+        (set! buffer pt item)
+        (set pointer (mod (+ len pt 1) len))
+        item))])))
