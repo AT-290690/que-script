@@ -76,8 +76,6 @@ pub enum Instruction {
     Lte,
     Gte,
     Eq,
-    And,
-    Or,
     Not,
 
     BitXor,
@@ -371,26 +369,6 @@ impl VM {
                         _ => panic!("Both arguments must be numbers"),
                     }
                 }
-                Instruction::And => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
-                    match (a, b) {
-                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
-                            .stack
-                            .push(BiteCodeEvaluated::Int(if a == 1 { b } else { 0 })),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                }
-                Instruction::Or => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
-                    match (a, b) {
-                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
-                            .stack
-                            .push(BiteCodeEvaluated::Int(if a == 1 { 1 } else { b })),
-                        _ => panic!("Both arguments must be numbers"),
-                    }
-                }
                 Instruction::Not => {
                     let a = self.stack.pop().expect("stack underflow");
                     match (a) {
@@ -485,7 +463,8 @@ impl VM {
                 }
                 Instruction::LoopFinish { cond, func } => {
                     loop {
-                        // Evaluate condition in the current VM, so mutations are seen
+                        // evaluate condition
+
                         self.run(cond);
                         let cond_val = self.stack.pop().expect("loop-finish: missing condition");
 
@@ -495,10 +474,9 @@ impl VM {
                         };
 
                         if cond_int != 1 {
-                            break;
+                            break; // exit loop
                         }
 
-                        // Evaluate function: must mutate shared locals
                         self.run(func);
                         let func_val = self.stack.pop().expect("loop-finish: missing function");
 
@@ -507,23 +485,19 @@ impl VM {
                                 if !params.is_empty() {
                                     panic!("loop-finish lambda must take 0 params");
                                 }
-                                // Run lambda **in place**, using the shared env
                                 let mut inner_vm = VM {
                                     stack: Vec::new(),
-                                    locals: Rc::clone(&env), // now shared, not cloned
+                                    locals: Rc::clone(&env),
                                 };
                                 inner_vm.run(&body);
-
-                                // Apply mutations back to the shared environment
-                                *env.borrow_mut() = inner_vm.locals.borrow().clone();
                             }
                             _ => panic!("loop-finish: second argument must be a lambda"),
                         }
                     }
 
+                    // by convention, return 0
                     self.stack.push(BiteCodeEvaluated::Int(0));
                 }
-
                 Instruction::Loop { start, end, func } => {
                     // Evaluate start
                     let mut tmp_start = VM {
@@ -777,15 +751,34 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         code.push(Instruction::Gte);
                     }
                     "and" => {
+                        if exprs.len() != 3 {
+                            panic!("and expects exactly 2 arguments");
+                        }
+
+                        let mut then_code = Vec::new();
+                        compile(&exprs[2], &mut then_code);
+                        // First argument is the condition
                         compile(&exprs[1], code);
-                        compile(&exprs[2], code);
-                        code.push(Instruction::And);
+                        code.push(Instruction::If {
+                            then_branch: then_code,
+                            else_branch: vec![Instruction::PushInt(0)],
+                        });
                     }
                     "or" => {
+                        if exprs.len() != 3 {
+                            panic!("or expects exactly 2 arguments");
+                        }
+
+                        let mut then_code = vec![Instruction::PushInt(1)];
+                        compile(&exprs[2], &mut then_code);
+
                         compile(&exprs[1], code);
-                        compile(&exprs[2], code);
-                        code.push(Instruction::Or);
+                        code.push(Instruction::If {
+                            then_branch: vec![Instruction::PushInt(1)],
+                            else_branch: then_code,
+                        });
                     }
+
                     "not" => {
                         compile(&exprs[1], code);
                         code.push(Instruction::Not);
