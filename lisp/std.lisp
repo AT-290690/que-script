@@ -322,11 +322,6 @@
 (let zip (lambda xs (zipper (first xs) (second xs))))
 (let unzip (lambda xs (array (map xs first) (map xs second))))
 
-(let char->digit (lambda ch (- ch char:0)))
-(let chars->digits (lambda digits (map digits char->digit)))
-(let digit->char (lambda digit (+ digit char:0)))
-(let digits->chars (lambda digits (map digits digit->char)))
-
 (let slice (lambda xs start end (if (empty? xs) xs (do
      (let bounds (- end start))
      (let out [])
@@ -520,3 +515,10 @@
      (empty? xs) []
      (= (length xs) 1) (get xs)
      (reduce xs (lambda a b (merge a b)) []))))
+
+(let char->digit (lambda ch (- ch char:0)))
+(let chars->digits (lambda digits (map digits char->digit)))
+(let digit->char (lambda digit (+ digit char:0)))
+(let digits->chars (lambda digits (map digits digit->char)))
+(let bool->int (lambda x (if (eq x true) 1 0)))
+(let int->bool (lambda x (if (= x 0) false true)))
