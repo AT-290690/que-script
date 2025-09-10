@@ -54,8 +54,8 @@ fn main() -> std::io::Result<()> {
         //     Err(e) => println!("Error: {}", e),
         // }
 
-        println!("{:?}", interpreter::run(&wrapped_ast));
-        // println!("{:?}", vm::run(&wrapped_ast));
+        // println!("{:?}", interpreter::run(&wrapped_ast));
+        println!("{:?}", vm::run(&wrapped_ast));
     }
 
     Ok(())
