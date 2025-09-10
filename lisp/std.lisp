@@ -112,6 +112,8 @@
 (let second (lambda xs (get xs 1)))
 (let third (lambda xs (get xs 3)))
 (let last (lambda xs (get xs (- (length xs) 1))))
+(let +. (lambda xs index (get xs index)))
+(let -. (lambda xs index (get xs (- (length xs) index))))
 (let min-safe-int -2147483648)
 (let max-safe-int 2147383647)
 (let safe-int? (lambda value (and (>= value min-safe-int) (<= value max-safe-int))))
