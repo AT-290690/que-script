@@ -130,10 +130,15 @@
 (let true? (lambda var (if (get var) true false)))
 (let false? (lambda var (if (get var) false true)))
 
+
 (let += (lambda var n (=! var (+ (get var) n))))
 (let -= (lambda var n (=! var (- (get var) n))))
+(let *= (lambda var n (=! var (* (get var) n))))
+(let /= (lambda var n (=! var (/ (get var) n))))
 (let ++ (lambda var (=! var (+ (get var) 1))))
 (let -- (lambda var (=! var (- (get var) 1))))
+(let ** (lambda var (=! var (* (get var) (get var)))))
+
 (let empty? (lambda xs (= (length xs) 0)))
 (let not-empty? (lambda xs (not (= (length xs) 0))))
 (let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
@@ -535,6 +540,32 @@
                     (set! prev (length prev) b)) a))
               [[]])
               (map (lambda x (array->string [ x ] char:empty))))))
+
+(let positive-or-negative-digits->integer (lambda digits-with-sign (do
+    (let negative? (< (first digits-with-sign) 0))
+    (let digits (if negative? (map digits-with-sign abs) digits-with-sign))
+    (integer num 0)
+    (integer base (/ (expt 10 (length digits)) 10))
+    (loop 0 (length digits) (lambda i (do 
+      (+= num (* (get base) (. digits i)))
+      (/= base 10)
+    )))
+    (*= num (if negative? -1 1))
+    (get num)
+    )))
+(let chars->positive-or-negative-digits (lambda chars (do
+    (integer current-sign 1)
+    (|> chars 
+        (reduce (lambda a ch (do 
+            (if (= ch char:minus) 
+                (set current-sign -1) 
+                (do  
+                    (push! a (* (get current-sign) (char->digit ch))) 
+                    (set current-sign 1)))
+                a)) [])))))
+(let positive-or-negative-chars->integer (lambda x (|> x (chars->positive-or-negative-digits) (positive-or-negative-digits->integer))))
+(let chars->integer (lambda chars (positive-or-negative-chars->integer chars)))
+
 ; (let buffer [])
 ; (let fn (ring-buffer buffer 5))
 ; (let buffer:get (get fn 0))
