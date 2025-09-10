@@ -485,13 +485,9 @@ impl VM {
                 }
                 Instruction::LoopFinish { cond, func } => {
                     loop {
-                        // evaluate condition
-                        let mut cond_vm = VM {
-                            stack: Vec::new(),
-                            locals: self.locals.clone(),
-                        };
-                        cond_vm.run(cond);
-                        let cond_val = cond_vm.stack.pop().expect("loop-finish: missing condition");
+                        // Evaluate condition in the current VM, so mutations are seen
+                        self.run(cond);
+                        let cond_val = self.stack.pop().expect("loop-finish: missing condition");
 
                         let cond_int = match cond_val {
                             BiteCodeEvaluated::Int(n) => n,
@@ -499,35 +495,35 @@ impl VM {
                         };
 
                         if cond_int != 1 {
-                            break; // exit loop
+                            break;
                         }
 
-                        // evaluate function expression
-                        let mut func_vm = VM {
-                            stack: Vec::new(),
-                            locals: self.locals.clone(),
-                        };
-                        func_vm.run(func);
-                        let func_val = func_vm.stack.pop().expect("loop-finish: missing function");
+                        // Evaluate function: must mutate shared locals
+                        self.run(func);
+                        let func_val = self.stack.pop().expect("loop-finish: missing function");
 
                         match func_val {
                             BiteCodeEvaluated::Function(params, body, env) => {
                                 if !params.is_empty() {
                                     panic!("loop-finish lambda must take 0 params");
                                 }
+                                // Run lambda **in place**, using the shared env
                                 let mut inner_vm = VM {
                                     stack: Vec::new(),
-                                    locals: env.clone(),
+                                    locals: Rc::clone(&env), // now shared, not cloned
                                 };
                                 inner_vm.run(&body);
+
+                                // Apply mutations back to the shared environment
+                                *env.borrow_mut() = inner_vm.locals.borrow().clone();
                             }
                             _ => panic!("loop-finish: second argument must be a lambda"),
                         }
                     }
 
-                    // by convention, return 0
                     self.stack.push(BiteCodeEvaluated::Int(0));
                 }
+
                 Instruction::Loop { start, end, func } => {
                     // Evaluate start
                     let mut tmp_start = VM {
