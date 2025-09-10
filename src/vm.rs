@@ -87,7 +87,7 @@ pub enum Instruction {
 
     StoreVar(String),
     LoadVar(String),
-    MakeClosure(Vec<String>, Vec<Instruction>),
+    MakeLambda(Vec<String>, Vec<Instruction>),
     Call(usize),
     MakeArray(usize),
     If {
@@ -408,7 +408,7 @@ impl VM {
                         .push(BiteCodeEvaluated::Array(Rc::new(RefCell::new(elements))));
                 }
 
-                Instruction::MakeClosure(params, body) => {
+                Instruction::MakeLambda(params, body) => {
                     let closure = BiteCodeEvaluated::Function(
                         params.clone(),
                         body.clone(),
@@ -580,7 +580,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
             match name.as_str() {
                 // push a closure representing these
                 "/" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -590,7 +590,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "mod" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -600,7 +600,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "+" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -610,7 +610,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "-" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -620,7 +620,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "*" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -630,7 +630,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 ">" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -640,7 +640,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "<" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -650,7 +650,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 ">=" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -660,7 +660,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "<=" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -670,7 +670,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "=" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
@@ -680,13 +680,13 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     ));
                 }
                 "length" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["xs".to_string()],
                         vec![Instruction::LoadVar("xs".to_string()), Instruction::Length],
                     ));
                 }
                 "not" => {
-                    code.push(Instruction::MakeClosure(
+                    code.push(Instruction::MakeLambda(
                         vec!["a".to_string()],
                         vec![Instruction::LoadVar("a".to_string()), Instruction::Not],
                     ));
@@ -860,7 +860,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         let mut body_code = Vec::new();
                         compile(body_expr, &mut body_code);
 
-                        code.push(Instruction::MakeClosure(params, body_code));
+                        code.push(Instruction::MakeLambda(params, body_code));
                     }
                     "array" => {
                         let count = exprs.len() - 1;
@@ -967,4 +967,12 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
             }
         }
     }
+}
+
+pub fn run(expr: &crate::parser::Expression) -> BiteCodeEvaluated {
+    let mut code = Vec::new();
+    compile(&expr, &mut code);
+    let mut vm = VM::new();
+    vm.run(&code);
+    return vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone();
 }

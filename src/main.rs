@@ -53,17 +53,9 @@ fn main() -> std::io::Result<()> {
         //     Ok(typ) => println!("Type: {}", typ),
         //     Err(e) => println!("Error: {}", e),
         // }
-        println!("{:?}", interpreter::run(&wrapped_ast));
 
-        // let mut code = Vec::new();
-        // vm::compile(&wrapped_ast, &mut code);
-        // // Run
-        // let mut vm = vm::VM::new();
-        // vm.run(&code);
-        // println!(
-        //     "{:?}",
-        //     vm.result().unwrap_or(&vm::BiteCodeEvaluated::Int(0))
-        // );
+        println!("{:?}", interpreter::run(&wrapped_ast));
+        // println!("{:?}", vm::run(&wrapped_ast));
     }
 
     Ok(())
