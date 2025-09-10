@@ -20,8 +20,6 @@ cargo run -- --eval
 
 ---
 
-## 🚀 Features
-
 ### Hindley–Milner Type Inference
 
 - No type annotations required: the compiler figures everything out.
