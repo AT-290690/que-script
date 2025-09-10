@@ -6,16 +6,10 @@ An experimental functional programming language with:
 - **tree-shaking** of standard libary
 - A **stack-based bytecode VM** for speed
 
-Write code in main.lisp and type check it with
+Write code in main.lisp and quickly type check and run it with
 
 ```bash
-cargo run -- --dump
-```
-
-Then run the code with
-
-```bash
-cargo run -- --eval
+cargo run
 ```
 
 ---

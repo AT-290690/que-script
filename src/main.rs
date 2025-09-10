@@ -47,7 +47,7 @@ fn main() -> std::io::Result<()> {
             }
             Err(e) => println!("Error: {}", e),
         }
-    } else {
+    } else if args.iter().any(|a| a == "--eval") {
         let wrapped_ast: parser::Expression = load_ast();
 
         // match infer::infer_with_builtins(&wrapped_ast) {
@@ -57,6 +57,19 @@ fn main() -> std::io::Result<()> {
 
         // println!("{:?}", interpreter::run(&wrapped_ast));
         println!("{:?}", vm::run(&wrapped_ast));
+    } else {
+        let program = fs::read_to_string("./lisp/main.lisp")?;
+        let std_lib = fs::read_to_string("./lisp/std.lisp")?;
+
+        let wrapped_ast = parser::with_std(&program, &std_lib);
+
+        match infer::infer_with_builtins(&wrapped_ast) {
+            Ok(typ) => {
+                println!("Type: {}", typ);
+                println!("{:?}", vm::run(&wrapped_ast))
+            }
+            Err(e) => println!("Error: {}", e),
+        }
     }
 
     Ok(())
