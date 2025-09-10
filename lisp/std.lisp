@@ -107,6 +107,7 @@
       (pop! xs)
       out)))
 (let tail! (lambda xs (do (pop! xs) xs)))
+(let append! (lambda xs x (do (push! xs x) xs)))
 (let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 (let first (lambda xs (get xs 0)))
 (let second (lambda xs (get xs 1)))
@@ -181,7 +182,7 @@
      (let out [ start ])
      (let process (lambda i (set! out (length out) i)))
      (loop (+ start 1) (+ end 1) process)
-     out)))     
+     out))) 
 
  (let ones (lambda n (do
      (let out [ 1 ])
@@ -525,7 +526,15 @@
 (let digits->chars (lambda digits (map digits digit->char)))
 (let bool->int (lambda x (if (eq x true) 1 0)))
 (let int->bool (lambda x (if (= x 0) false true)))
-
+(let array->string (lambda xs delim (ireduce xs (lambda a b i (if (> i 0) (merge (append! a delim) b) b)) [])))
+(let string->array (lambda str char (|> str
+              (reduce(lambda a b (do
+              (let prev (at a -1))
+                (if (match? [b] [char])
+                    (set! a (length a) [])
+                    (set! prev (length prev) b)) a))
+              [[]])
+              (map (lambda x (array->string [ x ] char:empty))))))
 ; (let buffer [])
 ; (let fn (ring-buffer buffer 5))
 ; (let buffer:get (get fn 0))
