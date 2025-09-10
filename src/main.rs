@@ -14,8 +14,9 @@ mod tests;
 
 fn dump_wrapped_ast(expr: parser::Expression, path: &str) -> std::io::Result<()> {
     let mut file = fs::File::create(path)?;
-    writeln!(file, "use crate::parser::Expression;")?;
-    writeln!(file, "pub fn load_ast() -> Expression {{")?;
+    writeln!(file, "use crate::parser::Expression::*;")?;
+    writeln!(file, "macro_rules! s {{($s:expr) => {{ $s.to_string() }}}}")?;
+    writeln!(file, "pub fn load_ast() -> crate::parser::Expression {{")?;
     writeln!(file, "    {}", expr.to_rust())?;
     writeln!(file, "}}")?;
     Ok(())

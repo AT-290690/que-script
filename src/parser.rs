@@ -538,7 +538,9 @@ fn is_number(s: &str) -> bool {
     }
     true
 }
-
+macro_rules! s {
+    ($s:expr) => { $s.to_string() }
+}
 #[derive(Debug, Clone)]
 pub enum Expression {
     Atom(i32),
@@ -549,11 +551,11 @@ pub enum Expression {
 impl Expression {
     pub fn to_rust(&self) -> String {
         match self {
-            Expression::Atom(n) => format!("Expression::Atom({})", n),
-            Expression::Word(w) => format!("Expression::Word({:?}.to_string())", w),
+            Expression::Atom(n) => format!("Atom({})", n),
+            Expression::Word(w) => format!("Word(s!({:?}))", w),
             Expression::Apply(exprs) => {
                 let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
-                format!("Expression::Apply(vec![{}])", inner.join(", "))
+                format!("Apply(vec![{}])", inner.join(", "))
             }
         }
     }
