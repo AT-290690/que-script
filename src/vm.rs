@@ -134,12 +134,22 @@ impl Instruction {
             Instruction::BitOr => "BitOr".to_string(),
             Instruction::BitAnd => "BitAnd".to_string(),
 
-            Instruction::StoreVar(name) => format!("StoreVar({:?}.to_string())", name),
-            Instruction::LoadVar(name) => format!("LoadVar({:?}.to_string())", name),
+            Instruction::StoreVar(name) => format!("StoreVar(s!({:?}))", name),
+            Instruction::LoadVar(name) => format!("LoadVar(s!({:?}))", name),
 
             Instruction::MakeLambda(params, body) => {
-                let params_str =
-                    format!("{:?}.into_iter().map(|s| s.to_string()).collect()", params);
+                let params_str = if params.is_empty() {
+                    "Vec::<String>::new()".to_string()
+                } else {
+                    format!(
+                        "vec![{}]",
+                        params
+                            .iter()
+                            .map(|s| format!("s!({:?})", s))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
                 let body_str = body
                     .iter()
                     .map(|instr| instr.to_rust())

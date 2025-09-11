@@ -28,6 +28,7 @@ fn dump_wrapped_ast(expr: parser::Expression, path: &str) -> std::io::Result<()>
 pub fn dump_wrapped_bytecode(code: Vec<vm::Instruction>, path: &str) -> std::io::Result<()> {
     let mut file: fs::File = fs::File::create(path)?;
     writeln!(file, "use crate::vm::Instruction::*;")?;
+    writeln!(file, "macro_rules! s {{($s:expr) => {{ $s.to_string() }}}}")?;
     writeln!(
         file,
         "pub fn load_bytecode() -> Vec<crate::vm::Instruction> {{"
