@@ -580,3 +580,10 @@
         (set! buffer pt item)
         (set pointer (mod (+ len pt 1) len))
         item))])))
+
+(let new:object (lambda args 
+  (ireduce args (lambda a . i 
+    (if (even? i) 
+        (set-property! a (. args i) (. args (+ i 1) 0)) 
+        a)) 
+        [[] [] [] []])))

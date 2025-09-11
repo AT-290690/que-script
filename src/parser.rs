@@ -539,7 +539,9 @@ fn is_number(s: &str) -> bool {
     true
 }
 macro_rules! s {
-    ($s:expr) => { $s.to_string() }
+    ($s:expr) => {
+        $s.to_string()
+    };
 }
 #[derive(Debug, Clone)]
 pub enum Expression {
