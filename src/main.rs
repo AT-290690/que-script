@@ -7,8 +7,11 @@ mod types;
 mod vm;
 use std::fs;
 use std::io::Write;
+use std::num::Wrapping;
 mod ast;
+mod ir;
 use ast::load_ast;
+use ir::load_bytecode;
 use std::env;
 mod tests;
 
@@ -17,8 +20,26 @@ fn dump_wrapped_ast(expr: parser::Expression, path: &str) -> std::io::Result<()>
     writeln!(file, "use crate::parser::Expression::*;")?;
     writeln!(file, "macro_rules! s {{($s:expr) => {{ $s.to_string() }}}}")?;
     writeln!(file, "pub fn load_ast() -> crate::parser::Expression {{")?;
-    writeln!(file, "    {}", expr.to_rust())?;
+    writeln!(file, "{}", expr.to_rust())?;
     writeln!(file, "}}")?;
+    Ok(())
+}
+
+pub fn dump_wrapped_bytecode(code: Vec<vm::Instruction>, path: &str) -> std::io::Result<()> {
+    let mut file: fs::File = fs::File::create(path)?;
+    writeln!(file, "use crate::vm::Instruction::*;")?;
+    writeln!(
+        file,
+        "pub fn load_bytecode() -> Vec<crate::vm::Instruction> {{"
+    )?;
+    write!(file, "vec![")?;
+
+    for instr in code {
+        write!(file, "{},", instr.to_rust())?;
+    }
+
+    writeln!(file, "]")?;
+    write!(file, "}}")?;
     Ok(())
 }
 
@@ -47,16 +68,19 @@ fn main() -> std::io::Result<()> {
             }
             Err(e) => println!("Error: {}", e),
         }
+    } else if args.iter().any(|a| a == "--comp") {
+        let program = fs::read_to_string("./lisp/main.lisp")?;
+        let std_lib = fs::read_to_string("./lisp/std.lisp")?;
+        let wrapped_ast = parser::with_std(&program, &std_lib);
+        let mut code: Vec<vm::Instruction> = Vec::new();
+        vm::compile(&wrapped_ast, &mut code);
+        dump_wrapped_bytecode(code, "./src/ir.rs");
     } else if args.iter().any(|a| a == "--eval") {
         let wrapped_ast: parser::Expression = load_ast();
-
-        // match infer::infer_with_builtins(&wrapped_ast) {
-        //     Ok(typ) => println!("Type: {}", typ),
-        //     Err(e) => println!("Error: {}", e),
-        // }
-
-        // println!("{:?}", interpreter::run(&wrapped_ast));
-        println!("{:?}", vm::run(&wrapped_ast));
+        println!("{:?}", interpreter::run(&wrapped_ast));
+    } else if args.iter().any(|a| a == "--exec") {
+        let bitecode = ir::load_bytecode();
+        println!("{:?}", vm::exe(bitecode));
     } else {
         let program = fs::read_to_string("./lisp/main.lisp")?;
         let std_lib = fs::read_to_string("./lisp/std.lisp")?;

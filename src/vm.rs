@@ -109,6 +109,114 @@ pub enum Instruction {
     PopArray,
 }
 
+impl Instruction {
+    pub fn to_rust(&self) -> String {
+        match self {
+            Instruction::PushInt(n) => format!("PushInt({})", n),
+            Instruction::Length => "Length".to_string(),
+            Instruction::Add => "Add".to_string(),
+            Instruction::Mult => "Mult".to_string(),
+            Instruction::Div => "Div".to_string(),
+            Instruction::Sub => "Sub".to_string(),
+            Instruction::Mod => "Mod".to_string(),
+            Instruction::Pop => "Pop".to_string(),
+            Instruction::Lt => "Lt".to_string(),
+            Instruction::Gt => "Gt".to_string(),
+            Instruction::Lte => "Lte".to_string(),
+            Instruction::Gte => "Gte".to_string(),
+            Instruction::Eq => "Eq".to_string(),
+            Instruction::Not => "Not".to_string(),
+
+            Instruction::BitXor => "BitXor".to_string(),
+            Instruction::BitRs => "BitRs".to_string(),
+            Instruction::BitLs => "BitLs".to_string(),
+            Instruction::BitNot => "BitNot".to_string(),
+            Instruction::BitOr => "BitOr".to_string(),
+            Instruction::BitAnd => "BitAnd".to_string(),
+
+            Instruction::StoreVar(name) => format!("StoreVar({:?}.to_string())", name),
+            Instruction::LoadVar(name) => format!("LoadVar({:?}.to_string())", name),
+
+            Instruction::MakeLambda(params, body) => {
+                let params_str =
+                    format!("{:?}.into_iter().map(|s| s.to_string()).collect()", params);
+                let body_str = body
+                    .iter()
+                    .map(|instr| instr.to_rust())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("MakeLambda({}, vec![{}])", params_str, body_str)
+            }
+
+            Instruction::Call(n) => format!("Call({})", n),
+            Instruction::MakeArray(n) => format!("MakeArray({})", n),
+
+            Instruction::If {
+                then_branch,
+                else_branch,
+            } => {
+                let then_str = then_branch
+                    .iter()
+                    .map(|i| i.to_rust())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let else_str = else_branch
+                    .iter()
+                    .map(|i| i.to_rust())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "If {{ then_branch: vec![{}], else_branch: vec![{}] }}",
+                    then_str, else_str
+                )
+            }
+
+            Instruction::Loop { start, end, func } => {
+                let start_str = start
+                    .iter()
+                    .map(|i| i.to_rust())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let end_str = end
+                    .iter()
+                    .map(|i| i.to_rust())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let func_str = func
+                    .iter()
+                    .map(|i| i.to_rust())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Loop {{ start: vec![{}], end: vec![{}], func: vec![{}] }}",
+                    start_str, end_str, func_str
+                )
+            }
+
+            Instruction::LoopFinish { cond, func } => {
+                let cond_str = cond
+                    .iter()
+                    .map(|i| i.to_rust())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let func_str = func
+                    .iter()
+                    .map(|i| i.to_rust())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "LoopFinish {{ cond: vec![{}], func: vec![{}] }}",
+                    cond_str, func_str
+                )
+            }
+
+            Instruction::SetArray => "SetArray".to_string(),
+            Instruction::GetArray => "GetArray".to_string(),
+            Instruction::PopArray => "PopArray".to_string(),
+        }
+    }
+}
+
 pub struct VM {
     stack: Vec<BiteCodeEvaluated>,
     locals: Rc<RefCell<BiteCodeEnv>>, // or Rc<RefCell<_>> if needed
@@ -972,6 +1080,12 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
 pub fn run(expr: &crate::parser::Expression) -> BiteCodeEvaluated {
     let mut code = Vec::new();
     compile(&expr, &mut code);
+    let mut vm = VM::new();
+    vm.run(&code);
+    return vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone();
+}
+
+pub fn exe(code: Vec<Instruction>) -> BiteCodeEvaluated {
     let mut vm = VM::new();
     vm.run(&code);
     return vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone();

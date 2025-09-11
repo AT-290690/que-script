@@ -37,7 +37,7 @@ cargo run
 - Pipe (|> ... ) will be desuggered to:
 
 ```lisp
-    (sum (map (filter xs odd?) square))
+(sum (map (filter xs odd?) square))
 ```
 
 - Argument type of the function will be [Int].
