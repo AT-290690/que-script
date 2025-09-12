@@ -621,12 +621,13 @@ impl VM {
                         panic!("loop: lambda must take exactly one parameter");
                     }
 
-                    // Now run the body N times, injecting i manually
+                    let mut inner_vm = VM {
+                        stack: Vec::new(),
+                        locals: captured_env.clone(),
+                    };
+
                     for i in start_int..end_int {
-                        let mut inner_vm = VM {
-                            stack: Vec::new(),
-                            locals: captured_env.clone(),
-                        };
+                        inner_vm.stack.clear(); // reuse stack
                         inner_vm
                             .locals
                             .borrow_mut()
@@ -638,7 +639,7 @@ impl VM {
                 }
 
                 Instruction::LoopFinish { cond, func } => {
-                    // Pre-resolve function ONCE
+                    // Pre-resolve function once (like in Loop)
                     let mut func_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
@@ -651,18 +652,25 @@ impl VM {
                     };
 
                     if !params.is_empty() {
-                        panic!("loop-finish lambda must take 0 params");
+                        panic!("loop-finish: lambda must take 0 params");
                     }
 
-                    // Evaluate condition every iteration
-                    loop {
-                        let mut cond_vm = VM {
-                            stack: Vec::new(),
-                            locals: self.locals.clone(),
-                        };
-                        cond_vm.run(cond);
-                        let cond_val = cond_vm.stack.pop().expect("loop-finish: missing condition");
+                    // Reuse the same VMs
+                    let mut cond_vm = VM {
+                        stack: Vec::new(),
+                        locals: self.locals.clone(),
+                    };
 
+                    let mut inner_vm = VM {
+                        stack: Vec::new(),
+                        locals: captured_env.clone(),
+                    };
+
+                    loop {
+                        cond_vm.stack.clear();
+                        cond_vm.run(cond);
+
+                        let cond_val = cond_vm.stack.pop().expect("loop-finish: missing condition");
                         let cond_int = match cond_val {
                             BiteCodeEvaluated::Int(n) => n,
                             _ => panic!("loop-finish condition must be int"),
@@ -672,14 +680,11 @@ impl VM {
                             break;
                         }
 
-                        let mut inner_vm = VM {
-                            stack: Vec::new(),
-                            locals: captured_env.clone(),
-                        };
+                        inner_vm.stack.clear();
                         inner_vm.run(&body);
                     }
 
-                    self.stack.push(BiteCodeEvaluated::Int(0));
+                    self.stack.push(BiteCodeEvaluated::Int(0)); // by convention
                 }
             }
         }
