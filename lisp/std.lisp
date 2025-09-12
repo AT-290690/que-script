@@ -64,6 +64,7 @@
 (let char:double-quote 34)
 (let char:new-line 10)
 (let char:space 32)
+(let char:tab 9)
 (let char:comma 44)
 (let char:dot 46)
 (let char:semi-colon 59)
