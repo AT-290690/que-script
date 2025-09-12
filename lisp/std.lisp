@@ -505,7 +505,7 @@
             (set-property! table key (+ (access-property table key) 1))
             (set-property! table key 1)))) (buckets 64)))))
 
-(let sliding-window-array (lambda arr size (cond 
+(let sliding-window (lambda arr size (cond
      (empty? arr) []
      (= size (length arr)) [arr]
      (do
@@ -580,10 +580,3 @@
         (set! buffer pt item)
         (set pointer (mod (+ len pt 1) len))
         item))])))
-
-(let new:object (lambda args 
-  (ireduce args (lambda a . i 
-    (if (even? i) 
-        (set-property! a (. args i) (. args (+ i 1) 0)) 
-        a)) 
-        [[] [] [] []])))
