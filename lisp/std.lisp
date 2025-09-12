@@ -209,7 +209,13 @@
   (loop 0 (length a) (lambda i (set! out (length out) (get a i)))) 
   (loop 0 (length b) (lambda i (set! out (length out) (get b i)))) 
   out))))
+
+(let cons! (lambda a b (if (and (empty? a) (empty? b)) a (do 
+  (loop 0 (length b) (lambda i (set! a (length a) (get b i)))) 
+  a))))
+
 (let concat (lambda xs (reduce xs cons [])))
+(let concat! (lambda xs os (reduce os cons! xs)))
 
 (let every? (lambda xs predicate? (do
            (let i [ 0 ])
@@ -247,7 +253,6 @@
         (set B (mod a b)))))
     (get A))))
 (let lcm (lambda a b (/ (* a b) (gcd a b))))
-
 
 (let bit-set? (lambda n pos (= (& n (<< 1 pos)) 0)))
 (let bit-set (lambda n pos (| n (<< 1 pos))))
@@ -541,8 +546,8 @@
       (/= base 10)
     )))
     (*= num (if negative? -1 1))
-    (get num)
-    )))
+    (get num))))
+
 (let chars->positive-or-negative-digits (lambda chars (do
     (integer current-sign 1)
     (|> chars 
