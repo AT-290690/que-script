@@ -540,45 +540,69 @@ impl VM {
 
                 Instruction::Call(arg_count) => {
                     let func = self.stack.pop().expect("stack underflow");
-                    let args: Vec<BiteCodeEvaluated> = (0..*arg_count)
+                    let mut args: Vec<BiteCodeEvaluated> = (0..*arg_count)
                         .map(|_| self.stack.pop().expect("stack underflow"))
                         .collect::<Vec<_>>()
                         .into_iter()
                         .rev()
                         .collect();
 
-                    match func {
-                        BiteCodeEvaluated::Function(params, body, env) => {
-                            if params.len() != args.len() {
-                                panic!("Expected {} args, got {}", params.len(), args.len());
-                            }
+                    let mut current_func = func;
 
-                            // Create a new Env with captured env as parent
-                            let local_env =
-                                Rc::new(RefCell::new(BiteCodeEnv::with_parent(Rc::clone(&env))));
+                    loop {
+                        match current_func {
+                            BiteCodeEvaluated::Function(params, body, env) => {
+                                let consumed = args.len().min(params.len());
+                                let (used_args, remaining_args) = args.split_at(consumed);
 
-                            // Bind arguments
-                            {
-                                let mut local_env_ref = local_env.borrow_mut();
-                                for (p, v) in params.iter().zip(args) {
-                                    local_env_ref.set(p.clone(), v);
-                                    // wrap if needed
+                                let local_env =
+                                    Rc::new(RefCell::new(BiteCodeEnv::with_parent(env.clone())));
+                                {
+                                    let mut local_env_ref = local_env.borrow_mut();
+                                    for (p, v) in
+                                        params.iter().take(consumed).zip(used_args.iter().cloned())
+                                    {
+                                        local_env_ref.set(p.clone(), v);
+                                    }
+                                }
+
+                                if consumed == params.len() {
+                                    // Run body if we've satisfied this function's arguments
+                                    let mut inner_vm = VM {
+                                        stack: Vec::new(),
+                                        locals: local_env,
+                                    };
+                                    inner_vm.run(&body);
+
+                                    let result =
+                                        inner_vm.stack.pop().unwrap_or(BiteCodeEvaluated::Int(0));
+
+                                    if remaining_args.is_empty() {
+                                        // No more args to apply -> we're done
+                                        self.stack.push(result);
+                                        break;
+                                    } else {
+                                        // More args left, result must be a function -> continue applying
+                                        current_func = result;
+                                        args = remaining_args.to_vec();
+                                        continue;
+                                    }
+                                } else {
+                                    // Partial application -> return closure waiting for the rest
+                                    let remaining_params = params[consumed..].to_vec();
+                                    self.stack.push(BiteCodeEvaluated::Function(
+                                        remaining_params,
+                                        body,
+                                        local_env,
+                                    ));
+                                    break;
                                 }
                             }
-
-                            // Run closure body in new VM with local_env
-                            let mut inner_vm = VM {
-                                stack: Vec::new(),
-                                locals: local_env, // store Rc<RefCell<Env>>
-                            };
-                            inner_vm.run(&body);
-
-                            let result = inner_vm.stack.pop().unwrap_or(BiteCodeEvaluated::Int(0));
-                            self.stack.push(result);
+                            _ => panic!("Cannot call non-function"),
                         }
-                        _ => panic!("Cannot call non-function"),
                     }
                 }
+
                 Instruction::Loop { start, end, func } => {
                     // Evaluate start
                     let mut start_vm = VM {
@@ -826,51 +850,81 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
             if let Expression::Word(op) = &exprs[0] {
                 match op.as_str() {
                     "+" => {
+                        if exprs.len() != 3 {
+                            panic!("+ expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Add);
                     }
                     "*" => {
+                        if exprs.len() != 3 {
+                            panic!("* expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Mult);
                     }
                     "/" => {
+                        if exprs.len() != 3 {
+                            panic!("/ expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Div);
                     }
                     "-" => {
+                        if exprs.len() != 3 {
+                            panic!("- expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Sub);
                     }
                     "mod" => {
+                        if exprs.len() != 3 {
+                            panic!("mod expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Mod);
                     }
                     "=" => {
+                        if exprs.len() != 3 {
+                            panic!("= expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Eq);
                     }
                     "<" => {
+                        if exprs.len() != 3 {
+                            panic!("< expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Lt);
                     }
                     ">" => {
+                        if exprs.len() != 3 {
+                            panic!("> expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Gt);
                     }
                     "<=" => {
+                        if exprs.len() != 3 {
+                            panic!("<= expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Lte);
                     }
                     ">=" => {
+                        if exprs.len() != 3 {
+                            panic!(">= expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::Gte);
@@ -905,41 +959,65 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     }
 
                     "not" => {
+                        if exprs.len() != 2 {
+                            panic!("not expects exactly 1 arguments");
+                        }
                         compile(&exprs[1], code);
                         code.push(Instruction::Not);
                     }
 
                     ">>" => {
+                        if exprs.len() != 3 {
+                            panic!(">> expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::BitRs);
                     }
                     "<<" => {
+                        if exprs.len() != 3 {
+                            panic!("<< expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::BitLs);
                     }
                     "^" => {
+                        if exprs.len() != 3 {
+                            panic!("^ expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::BitXor);
                     }
                     "&" => {
+                        if exprs.len() != 3 {
+                            panic!("& expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::BitAnd);
                     }
                     "|" => {
+                        if exprs.len() != 3 {
+                            panic!("| expects exactly 2 arguments");
+                        }
                         compile(&exprs[1], code);
                         compile(&exprs[2], code);
                         code.push(Instruction::BitOr);
                     }
                     "~" => {
+                        if exprs.len() != 2 {
+                            panic!("~ expects exactly 1 arguments");
+                        }
                         compile(&exprs[1], code);
                         code.push(Instruction::BitNot);
                     }
 
                     "do" => {
+                        if exprs.len() <= 0 {
+                            panic!("do expects atleast 1 argument");
+                        }
                         for (i, e) in exprs[1..].iter().enumerate() {
                             compile(e, code);
                             if i < exprs.len() - 2 {

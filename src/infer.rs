@@ -178,7 +178,7 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 // Type inference for do expressions
 fn infer_do(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.is_empty() {
-        return Err("Do requires at least one expression".to_string());
+        return Err("do requires at least one expression".to_string());
     }
 
     let mut last_type = Type::Int; // Default type
@@ -245,7 +245,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
         }
     }
-
     Ok(func_type)
 }
 

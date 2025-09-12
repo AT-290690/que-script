@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 #![allow(warnings)]
 mod infer;
-mod interpreter;
 mod parser;
 mod types;
 mod vm;
@@ -76,10 +75,8 @@ fn main() -> std::io::Result<()> {
         let mut code: Vec<vm::Instruction> = Vec::new();
         vm::compile(&wrapped_ast, &mut code);
         dump_wrapped_bytecode(code, "./src/ir.rs");
-    } else if args.iter().any(|a| a == "--eval") {
-        let wrapped_ast: parser::Expression = load_ast();
-        println!("{:?}", interpreter::run(&wrapped_ast));
-    } else if args.iter().any(|a| a == "--exec") {
+    }
+    if args.iter().any(|a| a == "--exec") {
         let bitecode = ir::load_bytecode();
         println!("{:?}", vm::exe(bitecode));
     } else {
