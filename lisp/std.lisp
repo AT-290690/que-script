@@ -204,12 +204,12 @@
 (let count-of (lambda xs cb? (length (filter xs cb?))))
 (let count (lambda input item (count-of input (lambda x (= x item)))))
 
-(let merge (lambda a b (if (and (empty? a) (empty? b)) a (do 
+(let cons (lambda a b (if (and (empty? a) (empty? b)) a (do 
   (let out []) 
   (loop 0 (length a) (lambda i (set! out (length out) (get a i)))) 
   (loop 0 (length b) (lambda i (set! out (length out) (get b i)))) 
   out))))
-(let concat (lambda xs (reduce xs merge [])))
+(let concat (lambda xs (reduce xs cons [])))
 
 (let every? (lambda xs predicate? (do
            (let i [ 0 ])
@@ -235,7 +235,7 @@
            (loop-finish (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
-(let cartesian-product (lambda a b (reduce a (lambda p x (merge p (map b (lambda y [ x y ])))) [])))
+(let cartesian-product (lambda a b (reduce a (lambda p x (cons p (map b (lambda y [ x y ])))) [])))
 
 (let gcd (lambda a b (do
     (integer A a)
@@ -505,25 +505,15 @@
             (set-property! table key (+ (access-property table key) 1))
             (set-property! table key 1)))) (buckets 64)))))
 
-(let sliding-window (lambda arr size (cond
-     (empty? arr) []
-     (= size (length arr)) [arr]
-     (do
-          (let out [])
-          (let i (box 0))
-          (loop-finish (<= (+ (get i) size) (length arr)) (lambda (do
-               (let window [])
-               (let j (box 0))
-               (loop-finish (< (get j) size) (lambda (do
-                    (push! window (get arr (+ (get i) (get j))))
-                    (++ j))))
-               (push! out window)
-               (++ i))))
-          out))))
+(let sliding-window (lambda xs size (cond 
+     (empty? xs) []
+     (= size (length xs)) [xs]
+     (ireduce xs (lambda a b i (if (> (+ i size) (length xs)) a (cons a [(slice xs i (+ i size))]))) []))))
+
 (let flat-one (lambda xs (cond 
      (empty? xs) []
      (= (length xs) 1) (get xs)
-     (reduce xs (lambda a b (merge a b)) []))))
+     (reduce xs (lambda a b (cons a b)) []))))
 
 (let char->digit (lambda ch (- ch char:0)))
 (let chars->digits (lambda digits (map digits char->digit)))
@@ -531,7 +521,7 @@
 (let digits->chars (lambda digits (map digits digit->char)))
 (let bool->int (lambda x (if (eq x true) 1 0)))
 (let int->bool (lambda x (if (= x 0) false true)))
-(let array->string (lambda xs delim (ireduce xs (lambda a b i (if (> i 0) (merge (append! a delim) b) b)) [])))
+(let array->string (lambda xs delim (ireduce xs (lambda a b i (if (> i 0) (cons (append! a delim) b) b)) [])))
 (let string->array (lambda str char (|> str
               (reduce(lambda a b (do
               (let prev (at a -1))
