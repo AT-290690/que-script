@@ -64,7 +64,7 @@ fn main() -> std::io::Result<()> {
 
         match infer::infer_with_builtins(&wrapped_ast) {
             Ok(typ) => {
-                println!("Type: {}", typ);
+                println!("{}", typ);
                 dump_wrapped_ast(wrapped_ast, "./src/ast.rs");
             }
             Err(e) => println!("Error: {}", e),
@@ -90,7 +90,7 @@ fn main() -> std::io::Result<()> {
 
         match infer::infer_with_builtins(&wrapped_ast) {
             Ok(typ) => {
-                println!("Type: {}", typ);
+                println!("{}", typ);
                 println!("{:?}", vm::run(&wrapped_ast))
             }
             Err(e) => println!("Error: {}", e),
