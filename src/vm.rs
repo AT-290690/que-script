@@ -579,104 +579,106 @@ impl VM {
                         _ => panic!("Cannot call non-function"),
                     }
                 }
-                Instruction::LoopFinish { cond, func } => {
-                    loop {
-                        // evaluate condition
-
-                        self.run(cond);
-                        let cond_val = self.stack.pop().expect("loop-finish: missing condition");
-
-                        let cond_int = match cond_val {
-                            BiteCodeEvaluated::Int(n) => n,
-                            _ => panic!("loop-finish condition must evaluate to int"),
-                        };
-
-                        if cond_int != 1 {
-                            break; // exit loop
-                        }
-
-                        self.run(func);
-                        let func_val = self.stack.pop().expect("loop-finish: missing function");
-
-                        match func_val {
-                            BiteCodeEvaluated::Function(params, body, env) => {
-                                if !params.is_empty() {
-                                    panic!("loop-finish lambda must take 0 params");
-                                }
-                                let mut inner_vm = VM {
-                                    stack: Vec::new(),
-                                    locals: Rc::clone(&env),
-                                };
-                                inner_vm.run(&body);
-                            }
-                            _ => panic!("loop-finish: second argument must be a lambda"),
-                        }
-                    }
-
-                    // by convention, return 0
-                    self.stack.push(BiteCodeEvaluated::Int(0));
-                }
                 Instruction::Loop { start, end, func } => {
                     // Evaluate start
-                    let mut tmp_start = VM {
+                    let mut start_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
                     };
-                    tmp_start.run(start);
-                    let start_val = tmp_start.stack.pop().expect("loop: missing start");
-                    let start = match start_val {
-                        BiteCodeEvaluated::Int(n) => n,
-                        _ => panic!("loop: start must be int"),
-                    };
+                    start_vm.run(start);
+                    let start_val = start_vm.stack.pop().expect("loop: missing start value");
 
                     // Evaluate end
-                    let mut tmp_end = VM {
+                    let mut end_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
                     };
-                    tmp_end.run(end);
-                    let end_val = tmp_end.stack.pop().expect("loop: missing end");
-                    let end = match end_val {
+                    end_vm.run(end);
+                    let end_val = end_vm.stack.pop().expect("loop: missing end value");
+
+                    let start_int = match start_val {
                         BiteCodeEvaluated::Int(n) => n,
-                        _ => panic!("loop: end must be int"),
+                        _ => panic!("loop start must be int"),
+                    };
+                    let end_int = match end_val {
+                        BiteCodeEvaluated::Int(n) => n,
+                        _ => panic!("loop end must be int"),
                     };
 
-                    // Evaluate function expression
-                    let mut tmp_func = VM {
+                    // Pre-resolve the function ONCE
+                    let mut func_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
                     };
-                    tmp_func.run(func);
-                    let func_val = tmp_func.stack.pop().expect("loop: missing function");
-
-                    let closure = match func_val {
-                        BiteCodeEvaluated::Function(params, body, env) => (params, body, env),
+                    func_vm.run(func);
+                    let func_val = func_vm.stack.pop().expect("loop: missing function");
+                    let (params, body, captured_env) = match func_val {
+                        BiteCodeEvaluated::Function(p, b, e) => (p, b, e),
                         _ => panic!("loop: third argument must be a lambda"),
                     };
 
-                    // Run iterations
-                    for i in start..end {
-                        let mut new_locals = closure.2.clone();
-                        if closure.1.is_empty() {
-                            continue;
-                        }
-                        // closure must have exactly 1 param
-                        if closure.0.len() != 1 {
-                            panic!("loop lambda must take exactly 1 param");
-                        }
-                        new_locals
+                    if params.len() != 1 {
+                        panic!("loop: lambda must take exactly one parameter");
+                    }
+
+                    // Now run the body N times, injecting i manually
+                    for i in start_int..end_int {
+                        let mut inner_vm = VM {
+                            stack: Vec::new(),
+                            locals: captured_env.clone(),
+                        };
+                        inner_vm
+                            .locals
                             .borrow_mut()
-                            .vars
-                            .insert(closure.0[0].clone(), BiteCodeEvaluated::Int(i));
+                            .set(params[0].clone(), BiteCodeEvaluated::Int(i));
+                        inner_vm.run(&body);
+                    }
+
+                    self.stack.push(BiteCodeEvaluated::Int(0));
+                }
+
+                Instruction::LoopFinish { cond, func } => {
+                    // Pre-resolve function ONCE
+                    let mut func_vm = VM {
+                        stack: Vec::new(),
+                        locals: self.locals.clone(),
+                    };
+                    func_vm.run(func);
+                    let func_val = func_vm.stack.pop().expect("loop-finish: missing function");
+                    let (params, body, captured_env) = match func_val {
+                        BiteCodeEvaluated::Function(p, b, e) => (p, b, e),
+                        _ => panic!("loop-finish: second argument must be a lambda"),
+                    };
+
+                    if !params.is_empty() {
+                        panic!("loop-finish lambda must take 0 params");
+                    }
+
+                    // Evaluate condition every iteration
+                    loop {
+                        let mut cond_vm = VM {
+                            stack: Vec::new(),
+                            locals: self.locals.clone(),
+                        };
+                        cond_vm.run(cond);
+                        let cond_val = cond_vm.stack.pop().expect("loop-finish: missing condition");
+
+                        let cond_int = match cond_val {
+                            BiteCodeEvaluated::Int(n) => n,
+                            _ => panic!("loop-finish condition must be int"),
+                        };
+
+                        if cond_int != 1 {
+                            break;
+                        }
 
                         let mut inner_vm = VM {
                             stack: Vec::new(),
-                            locals: new_locals,
+                            locals: captured_env.clone(),
                         };
-                        inner_vm.run(&closure.1);
+                        inner_vm.run(&body);
                     }
 
-                    // convention: loop returns 0
                     self.stack.push(BiteCodeEvaluated::Int(0));
                 }
             }
