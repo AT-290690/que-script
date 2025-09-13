@@ -221,25 +221,25 @@
 (let every? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop-finish (and (< (get i) len) (predicate? (get xs (get i)))) (lambda (set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (predicate? (get xs (get i)))) (lambda (set! i 0 (+ (get i) 1))))
            (not (> len (get i))))))
 
 (let some? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop-finish (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
 (let ievery? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop-finish (and (< (get i) len) (predicate? (get xs (get i)) (get i))) (lambda (set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (predicate? (get xs (get i)) (get i))) (lambda (set! i 0 (+ (get i) 1))))
            (not (> len (get i))))))
 
 (let isome? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop-finish (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
 (let cartesian-product (lambda a b (reduce a (lambda p x (cons p (map b (lambda y [ x y ])))) [])))
@@ -247,7 +247,7 @@
 (let gcd (lambda a b (do
     (integer A a)
     (integer B b)
-    (loop-finish (> (get B) 0) (lambda (do
+    (loop (> (get B) 0) (lambda (do
         (let a (get A))
         (let b (get B))
         (set A b)
@@ -310,7 +310,7 @@
   (do
     (integer x n)
     (integer prev 0)
-    (loop-finish (> (abs (- (get x) (get prev))) 0)
+    (loop (> (abs (- (get x) (get prev))) 0)
       (lambda (do
         (set prev (get x))
         (set x (/ (+ (get x) (/ n (get x))) 2)))))
@@ -320,7 +320,7 @@
       (integer result 1)
       (integer b base)
       (integer e exp)
-      (loop-finish (> (get e) 0)
+      (loop (> (get e) 0)
         (lambda (do
           (if (= (mod (get e) 2) 1)
             (set result (* (get result) (get b))))
@@ -359,7 +359,7 @@
            (if (cb? (get xs (get i)))
               (set! index 0 (get i))
               (set! i 0 (+ (get i) 1)))))
-     (loop-finish (and (< (get i) len) (= (get index 0) -1)) process)
+     (loop (and (< (get i) len) (= (get index 0) -1)) process)
      (get index 0))))
 
 (let buckets (lambda size (do
@@ -392,7 +392,7 @@
      (let process (lambda (do
            (if (cb (get arr (get j)) pivot) (helper i j))
            (set! j 0 (+ (get j) 1)))))
-     (loop-finish (< (get j) end) process)
+     (loop (< (get j) end) process)
 
      (swap! arr (+ (get i) 1) end)
      (+ (get i) 1))))
@@ -414,7 +414,7 @@
                  (push! stack end)
                  nil)))
            (if (< start end) (helper)))))
-     (loop-finish (> (length stack) 0) process)
+     (loop (> (length stack) 0) process)
      arr)))
 
 (let hash
@@ -429,7 +429,7 @@
            (set! total 0 (euclidean-mod (+ (* (get total 0 ) prime-num) letter) (length table)))
            (set! i 0 (+ (get i) 1)))))
 
-     (loop-finish (< (get i) bounds) process)
+     (loop (< (get i) bounds) process)
      (get total 0))))
 
 (let has-element? (lambda table key (do

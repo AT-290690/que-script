@@ -200,6 +200,7 @@ fn desugar(expr: Expression) -> Expression {
                     "variable" => variable_transform(exprs),
                     "integer" => integer_transform(exprs),
                     "boolean" => boolean_transform(exprs),
+                    "loop" => loop_transform(exprs),
                     _ => Expression::Apply(exprs),
                 }
             } else {
@@ -207,6 +208,24 @@ fn desugar(expr: Expression) -> Expression {
             }
         }
         other => other,
+    }
+}
+fn loop_transform(mut exprs: Vec<Expression>) -> Expression {
+     exprs.remove(0);
+    let len = exprs.len();
+    if len == 2 {
+        return  Expression::Apply(vec![
+                Expression::Word("loop-finish".to_string()),
+                exprs[0].clone(),
+                exprs[1].clone(),
+        ]);
+    } else {
+       return  Expression::Apply(vec![
+            Expression::Word("loop".to_string()),
+            exprs[0].clone(),
+            exprs[1].clone(),
+            exprs[2].clone(),
+        ]);
     }
 }
 fn accessor_transform(mut exprs: Vec<Expression>) -> Expression {
