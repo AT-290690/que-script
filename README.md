@@ -6,7 +6,7 @@ My hobby scripting language implemented in Rust.
 (it's called resin because it's tree based and catches bugs)
 
 - **Lisp**
-- **Stack-based bytecode VM**
+- **Stack-based bytecode Virtual Machine**
 - **Standard library**
 - **Tree-shaking** of standard libary
 - **Strictly evaluated**
@@ -84,7 +84,7 @@ cargo run
                                  (+ steps 1)))))
 
 (collatz 27 0)
-; Int
+; t
 ; 111
 ```
 
