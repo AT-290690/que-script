@@ -75,8 +75,7 @@ fn main() -> std::io::Result<()> {
         let mut code: Vec<vm::Instruction> = Vec::new();
         vm::compile(&wrapped_ast, &mut code);
         dump_wrapped_bytecode(code, "./src/ir.rs");
-    }
-    if args.iter().any(|a| a == "--exec") {
+    } else if args.iter().any(|a| a == "--exec") {
         let bitecode = ir::load_bytecode();
         println!("{:?}", vm::exe(bitecode));
     } else {
