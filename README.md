@@ -88,6 +88,14 @@ cargo run
 ; 111
 ```
 
+**Tail-Call Optimization Convention**
+
+When a function is transformed for tail-call optimization, the last parameter is treated as the accumulator/result parameter.
+On entry, the compiler initializes the result register from this last parameter.
+On each tail-call, the accumulator is updated before the next iteration.
+This guarantees that type inference can resolve the result type statically.
+Users are encouraged to design tail-recursive functions so that the accumulator is the last argument.
+
 ### Solving Puzzles
 
 Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner.

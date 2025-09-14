@@ -626,64 +626,6 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
         other => other,
     }
 }
-
-/// Try to extract a non-recursive "base case" expression from `expr`
-/// that will be returned immediately (i.e. the terminal return when recursion stops).
-/// Returns `Some(expr)` if found; otherwise `None`.
-fn extract_base_case(expr: &Expression, fn_name: &str) -> Option<Expression> {
-    match expr {
-        Expression::Apply(items) if !items.is_empty() => {
-            if let Expression::Word(op) = &items[0] {
-                match op.as_str() {
-                    "if" => {
-                        // (if cond then else)
-                        if items.len() >= 3 {
-                            let then_branch = &items[2];
-                            // prefer the then branch if it is non-recursive in tail position
-                            if !contains_tail_call_to(then_branch, fn_name) {
-                                return Some(then_branch.clone());
-                            }
-                            if items.len() > 3 {
-                                let else_branch = &items[3];
-                                if !contains_tail_call_to(else_branch, fn_name) {
-                                    return Some(else_branch.clone());
-                                }
-                            }
-                        }
-                        None
-                    }
-                    "do" => {
-                        // tail of do is last expr
-                        if items.len() >= 2 {
-                            extract_base_case(&items[items.len() - 1], fn_name)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => {
-                        // not a control form we understand — check whether it's itself a non-recursive terminal
-                        // If it's a direct call to fn_name, it's recursive; otherwise treat it as terminal (non-recursive).
-                        if let Expression::Word(w) = &items[0] {
-                            if w == fn_name {
-                                None
-                            } else {
-                                // e.g. a plain application of a different function -> take it as base
-                                Some(expr.clone())
-                            }
-                        } else {
-                            Some(expr.clone())
-                        }
-                    }
-                }
-            } else {
-                // head isn't a Word (e.g. computed call); treat as terminal unless recursive
-                Some(expr.clone())
-            }
-        }
-        // Atom or Word: a terminal base-case value
-        other => Some(other.clone()),
-    }
-}
 /// Transform a `lambda` expression **bound to name `fn_name`** into a loop-driven lambda
 /// if it contains tail-recursive calls. If no tail recursion is found, return the original lambda.
 ///
@@ -823,12 +765,14 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
             Expression::Atom(0),
         ]),
     ]);
-    // try to extract a sensible base-case to seed __rec_result with a single-element array
-    let base_case_expr = extract_base_case(&body_expr, &fn_name).unwrap_or(Expression::Atom(0)); // fallback to Atom(0) if nothing found
+    // NOTE: Earlier we made __rec_result as Unknown — but that isn't an array. Let's change: create __rec_result as []
     let let_result_arr = Expression::Apply(vec![
         Expression::Word("let".to_string()),
         Expression::Word(result_name.clone()),
-        Expression::Apply(vec![Expression::Word("array".to_string()), base_case_expr]), // THE DEFAULT GETS INFERED SET TO TYPE VARIABLE
+        Expression::Apply(vec![
+            Expression::Word("array".to_string()),
+            Expression::Word(params.last().unwrap().clone()),
+        ]),
     ]);
 
     // final return: (get __rec_result 0)
