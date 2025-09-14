@@ -58,16 +58,8 @@ fn main() -> std::io::Result<()> {
     if args.iter().any(|a| a == "--dump") {
         let program = fs::read_to_string("./lisp/main.lisp")?;
         let std_lib = fs::read_to_string("./lisp/std.lisp")?;
-
         let wrapped_ast = parser::with_std(&program, &std_lib);
-
-        match infer::infer_with_builtins(&wrapped_ast) {
-            Ok(typ) => {
-                println!("{}", typ);
-                dump_wrapped_ast(wrapped_ast, "./src/ast.rs");
-            }
-            Err(e) => println!("Error: {}", e),
-        }
+        dump_wrapped_ast(wrapped_ast, "./src/ast.rs");
     } else if args.iter().any(|a| a == "--comp") {
         let program = fs::read_to_string("./lisp/main.lisp")?;
         let std_lib = fs::read_to_string("./lisp/std.lisp")?;

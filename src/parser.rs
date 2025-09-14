@@ -193,6 +193,8 @@ fn desugar(expr: Expression) -> Expression {
                     "+" => plus_transform(exprs),
                     "*" => mult_transform(exprs),
                     "/" => div_transform(exprs),
+                    "and" => and_transform(exprs),
+                    "or" => or_transform(exprs),
                     "!=" => not_equal_transform(exprs),
                     "<>" => not_equal_transform(exprs),
                     "." => accessor_transform(exprs),
@@ -351,6 +353,34 @@ fn plus_transform(mut exprs: Vec<Expression>) -> Expression {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
                 Expression::Apply(vec![Expression::Word("+".to_string()), acc, next])
+            })
+        }
+    }
+}
+
+fn and_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    match exprs.len() {
+        0 => Expression::Atom(1),
+        _ => {
+            let first = exprs.remove(0);
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("and".to_string()), acc, next])
+            })
+        }
+    }
+}
+
+fn or_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    match exprs.len() {
+        0 => Expression::Atom(1),
+        _ => {
+            let first = exprs.remove(0);
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("or".to_string()), acc, next])
             })
         }
     }
@@ -740,10 +770,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     let let_result_arr = Expression::Apply(vec![
         Expression::Word("let".to_string()),
         Expression::Word(result_name.clone()),
-        Expression::Apply(vec![
-            Expression::Word("array".to_string()),
-            Expression::Atom(0),
-        ]),
+        Expression::Apply(vec![Expression::Word("array".to_string())]),
     ]);
 
     // final return: (get __rec_result 0)

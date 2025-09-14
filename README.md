@@ -90,6 +90,25 @@ cargo run
 
 ### Solving Puzzles
 
+Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner.
+
+```lisp
+(let factorial (lambda n total
+   (if (= n 0)
+       total
+       (factorial (- n 1) (* total n)))))
+
+(let bionomial-coefficient (lambda a b
+    (/ (factorial a 1)
+            (*
+                (factorial b 1)
+                (factorial (- a b) 1)))))
+
+(let m 2)
+(let n 2)
+(bionomial-coefficient (+ m n) m)
+```
+
 **Advent of Code 2015**
 
 --- Day 1: Not Quite Lisp ---
