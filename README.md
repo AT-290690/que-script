@@ -1,6 +1,6 @@
 # Resin
 
-<img src="./logo.png" width="128px"/>
+<img src="./logo.png" width="256px"/>
 
 My hobby scripting language implemented in Rust.
 (it's called resin because it's tree based and catches bugs)
@@ -11,6 +11,7 @@ My hobby scripting language implemented in Rust.
 - **Tree-shaking** of standard libary
 - **Strictly evaluated**
 - Everything is an **Expression**
+- **Syntactic suggar** layer
 - **Strongly typed** using the **Hindley-Milner** type system
 - It supports some cool features from **functional programming**
   - **Partial function application**
