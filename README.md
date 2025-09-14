@@ -1,12 +1,31 @@
-# Programming Language
+# Resin
 
-An experimental functional programming language with:
+<img src="./logo.png" width="128px"/>
 
-- **Hindley–Milner (HM) type inference**
-- **tree-shaking** of standard libary
-- A **stack-based bytecode VM** for speed
+My hobby scripting language implemented in Rust.
+(it's called resin because it's tree based and catches bugs)
 
-Write code in main.lisp and quickly type check and run it with
+- **Lisp**
+- **Stack-based bytecode VM**
+- **Standard library**
+- **Tree-shaking** of standard libary
+- **Strictly evaluated**
+- Everything is an **Expression**
+- **Strongly typed** using the **Hindley-Milner** type system
+- It supports some cool features from **functional programming**
+  - **Partial function application**
+  - **Lexically scoped closures**
+  - **First-class functions**
+  - **Type inference**
+  - **Tail Call Optimization**
+
+Write code in **main.lisp**
+
+```lisp
+(* (+ 1 2 3) 5)
+```
+
+type check and execute with:
 
 ```bash
 cargo run
@@ -17,8 +36,8 @@ cargo run
 ### Hindley–Milner Type Inference
 
 - No type annotations required: the compiler figures everything out.
-- Supports polymorphism and higher-order functions.
-- Only 4 types - functions, booleans, integers and arrays.
+- Supports **polymorphism** and **higher-order functions**.
+- Only 4 types - **functions**, **booleans**, **integers** and **arrays**.
 - Guarantees **soundness**: if your program compiles, it won’t have type errors at runtime.
 - Example:
 
@@ -47,8 +66,51 @@ cargo run
 - **map** will only work with [Int] and callback of type Int -> Int
 - **sum** will only work with [Int]
 
+### Recursive Tail Call Optimization
+
 ```lisp
-; The first Advent of Code puzzle
+; tco recursion
+(let k-mod (lambda n k (if (< k n) k (k-mod n (- k n)))))
+; taking advantage of partial apply
+(let mod2 (k-mod 2))
+; tco recursion
+(let collatz (lambda n steps
+               (if (= n 1)
+                    steps
+                    (collatz (if (= (mod2 n) 0)
+                                 (/ n 2)
+                                 (+ (* n 3) 1))
+                                 (+ steps 1)))))
+
+(collatz 27 0)
+; Int
+; 111
+```
+
+### Solving Puzzles
+
+**Advent of Code 2015**
+
+--- Day 1: Not Quite Lisp ---
+
+_Santa is trying to deliver presents in a large apartment building, but he can't find the right floor - the directions he got are a little confusing. He starts on the ground floor (floor 0) and then follows the instructions one character at a time._
+
+_An opening parenthesis, (, means he should go up one floor, and a closing parenthesis, ), means he should go down one floor._
+
+_The apartment building is very tall, and the basement is very deep; he will never find the top or bottom floors._
+
+For example:
+
+```
+(()) and ()() both result in floor 0.
+((( and (()(()( both result in floor 3.
+))((((( also results in floor 3.
+()) and ))( both result in floor -1 (the first basement level).
+))) and )())()) both result in floor -3.
+To what floor do the instructions take Santa?
+```
+
+```lisp
 (let samples [
     "(())"    ; result in floor 0.
     "()()"    ; result in floor 0.
@@ -63,5 +125,5 @@ cargo run
 (let solve (lambda input (- (count input char:left-brace) (count input char:right-brace))))
 (map samples solve)
 ; [Int]
-; =>  [0 0 3 3 3 -1 -1 -3 -3]
+; [0 0 3 3 3 -1 -1 -3 -3]
 ```
