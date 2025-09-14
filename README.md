@@ -84,7 +84,7 @@ cargo run
                                  (+ steps 1)))))
 
 (collatz 27 0)
-; t
+; Int
 ; 111
 ```
 
