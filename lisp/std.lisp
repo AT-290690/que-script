@@ -141,6 +141,9 @@
 (let ** (lambda var (=! var (* (get var) (get var)))))
 
 (let empty? (lambda xs (= (length xs) 0)))
+(let empty! (lambda xs (if (empty? xs) xs (do 
+     (loop 0 (length xs) (lambda . (pop! xs)))
+     xs))))
 (let not-empty? (lambda xs (not (= (length xs) 0))))
 (let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
 
@@ -496,6 +499,14 @@
        (if (not (= index -1)) (do (set! current index (at current -1)) (pop! current)) nil)
        table)))
 
+(let clear! (lambda table (do 
+     (loop 0 (length table) (lambda i (empty! (get table i))))
+     table)))
+
+(let keys (lambda table (|> table (flat-one) (map first))))
+(let values (lambda table (|> table (flat-one) (map second))))
+(let entries (lambda table (|> table (flat-one))))
+
 (let access-property-helper (lambda table idx key (do
    (let current (get table idx))
    (let found-index (find-index current (lambda x (match? key (get x 0)))))
@@ -576,3 +587,15 @@
         (set! buffer pt item)
         (set pointer (mod (+ len pt 1) len))
         item))])))
+
+(let unique-pairs (lambda xs (do 
+    (let pairs [])
+    (let len (length xs))
+    (integer i 0)
+    (loop (< (get i) len) (lambda (do 
+        (integer j (+ (get i) 1))
+        (loop (< (get j) len) (lambda (do 
+            (push! pairs [(get xs (get i)) (get xs (get j))])
+            (++ j)))) 
+        (++ i))))
+    pairs)))
