@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
 
-// Type variables for type inference
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeVar {
     pub id: u64,
@@ -19,7 +18,6 @@ impl fmt::Display for TypeVar {
     }
 }
 
-// Types in the Hindley-Milner system
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Var(TypeVar),
@@ -47,7 +45,7 @@ impl fmt::Display for Type {
 // Type scheme (for polymorphic types)
 #[derive(Debug, Clone)]
 pub struct TypeScheme {
-    pub vars: Vec<u64>, // Quantified type variables
+    pub vars: Vec<u64>,
     pub typ: Type,
 }
 
@@ -99,7 +97,6 @@ impl fmt::Display for TypeScheme {
     }
 }
 
-// Type environment for storing type assumptions
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
     pub scopes: Vec<HashMap<String, TypeScheme>>,
@@ -154,7 +151,6 @@ impl TypeEnv {
     }
 }
 
-// Substitutions map type variables to types
 #[derive(Debug, Clone)]
 pub struct Substitution {
     pub map: HashMap<u64, Type>,
@@ -221,7 +217,6 @@ impl Substitution {
     }
 }
 
-// Implementation for Type substitution
 impl Type {
     pub fn var_id(&self) -> Option<u64> {
         if let Type::Var(v) = self {
@@ -268,8 +263,6 @@ impl Type {
         }
     }
 }
-
-// Implementation for TypeEnv
 
 // Unification algorithm
 pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {

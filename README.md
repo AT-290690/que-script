@@ -21,12 +21,7 @@ My hobby scripting language implemented in Rust.
   - **Tail Call Optimization**
 
 Write code in **main.lisp**
-
-```lisp
-(* (+ 1 2 3) 5)
-```
-
-type check and execute with:
+Type check and execute with:
 
 ```bash
 cargo run
@@ -115,6 +110,8 @@ Starting in the top left corner of a 2x2 grid, and only being able to move to th
 (let m 2)
 (let n 2)
 (bionomial-coefficient (+ m n) m)
+; Int
+; 6
 ```
 
 **Advent of Code 2015**
