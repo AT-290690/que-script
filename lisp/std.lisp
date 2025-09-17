@@ -599,3 +599,7 @@
             (++ j)))) 
         (++ i))))
     pairs)))
+
+(let apply-0 (lambda x fn (fn x)))
+(let apply-1 (lambda x y fn (fn x y)))
+(let apply-2 (lambda x y z fn (fn x y z)))
