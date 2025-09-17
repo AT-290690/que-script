@@ -565,6 +565,49 @@ pub fn with_std(program: &str, std: &str) -> Expression {
     );
     wrapped
 }
+pub fn build(program: &str) -> Expression {
+    let preprocessed = preprocess(&program);
+    let wrapped = Expression::Apply(
+        std::iter::once(Expression::Word("do".to_string()))
+            .chain(
+                parse(&preprocessed)
+                    .unwrap()
+                    .into_iter()
+                    .map(desugar_tail_recursion)
+                    .map(desugar)
+                    .collect::<Vec<Expression>>()
+                    .into_iter(),
+            )
+            .collect(),
+    );
+    wrapped
+}
+#[allow(dead_code)]
+pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Expression {
+    let preprocessed = preprocess(&program);
+
+    let exprs = parse(&preprocessed).unwrap();
+    let desugared: Vec<Expression> = exprs
+        .into_iter()
+        .map(desugar_tail_recursion)
+        .map(desugar)
+        .collect();
+
+    let mut used = HashSet::new();
+    for e in &desugared {
+        collect_idents(e, &mut used);
+    }
+
+    let shaken_std = tree_shake(std, &used);
+
+    let wrapped = Expression::Apply(
+        std::iter::once(Expression::Word("do".to_string()))
+            .chain(shaken_std.into_iter())
+            .chain(desugared.into_iter())
+            .collect(),
+    );
+    wrapped
+}
 
 // Main entry: recursively transform expressions, but when a let with a lambda bound to a name
 // is encountered, run the "lambda-to-loop" transform on it if it's tail-recursive.
