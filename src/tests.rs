@@ -221,6 +221,22 @@ mod tests {
  )"#,
                 "[111 3628800 3 4 0 9 6 0 4 12 4 18 9 10 9 8 7 6 5 4 3 2 1]",
             ),
+            (
+                r#"(let samples [
+        "(())"    ; result in floor 0.
+        "()()"    ; result in floor 0.
+        "((("     ; result in floor 3.
+        "(()(()(" ; result in floor 3.
+        "))(((((" ; also results in floor 3.
+        "())"     ; result in floor -1 (the first basement level).
+        "))("     ; result in floor -1 (the first basement level).
+        ")))"     ; result in floor -3.
+        ")())())" ; result in floor -3.
+])
+(let solve (lambda input (- (std:vector:ints:count input std:int:char:left-brace) (std:vector:ints:count input std:int:char:right-brace))))
+(std:vector:map samples solve)"#,
+                "[0 0 3 3 3 -1 -1 -3 -3]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
