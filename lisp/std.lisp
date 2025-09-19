@@ -110,6 +110,7 @@
 (let std:int:max-safe 2147383647)
 (let std:int:safe? (lambda value (and (>= value std:int:min-safe) (<= value std:int:max-safe))))
 (let std:int:get-safe (lambda var (if (std:int:safe? (get var)) var 0)))
+(let std:int:min-safe -2147483648)
 
 ; Extra "keywords" 
 (let identity (lambda x x))
@@ -122,7 +123,6 @@
           false)))
 (let +. (lambda xs index (get xs index)))
 (let -. (lambda xs index (get xs (- (length xs) index))))
-(let std:int:min-safe -2147483648)
 (let int (lambda value (if (std:int:safe? value) [ value ] [ 0 ])))
 (let box (lambda value [ value ]))
 (let set (lambda var x (std:vector:set! var 0 x)))
