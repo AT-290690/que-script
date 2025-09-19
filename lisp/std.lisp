@@ -90,16 +90,6 @@
 (let std:int:char:digit? (lambda ch (and (>= ch std:int:char:0) (<= ch std:int:char:9))))
 (let std:vector:string:upper (lambda char (if (and (>= char std:int:char:a) (<= char std:int:char:z)) (- char std:int:char:space) char)))
 (let std:vector:string:lower (lambda char (if (and (>= char std:int:char:A) (<= char std:int:char:Z)) (+ char std:int:char:space) char)))
-(let identity (lambda x x))
-
-
-(let true (= 1 1))
-(let false (= 0 1))
-(let nil 0)
-(let eq (lambda a b (cond 
-          (and a b) true 
-          (and (not a) (not b)) true
-          false)))
 (let std:vector:length (lambda xs (length xs)))
 (let std:vector:get (lambda xs i (get xs i)))
 (let std:vector:pop! (lambda xs (pop! xs)))
@@ -117,24 +107,30 @@
 (let std:vector:second (lambda xs (get xs 1)))
 (let std:vector:third (lambda xs (get xs 3)))
 (let std:vector:last (lambda xs (get xs (- (length xs) 1))))
-(let +. (lambda xs index (get xs index)))
-(let -. (lambda xs index (get xs (- (length xs) index))))
-(let std:int:min-safe -2147483648)
 (let std:int:max-safe 2147383647)
 (let std:int:safe? (lambda value (and (>= value std:int:min-safe) (<= value std:int:max-safe))))
 (let std:int:get-safe (lambda var (if (std:int:safe? (get var)) var 0)))
+
+; Extra "keywords" 
+(let identity (lambda x x))
+(let true (= 1 1))
+(let false (= 0 1))
+(let nil 0)
+(let eq (lambda a b (cond 
+          (and a b) true 
+          (and (not a) (not b)) true
+          false)))
+(let +. (lambda xs index (get xs index)))
+(let -. (lambda xs index (get xs (- (length xs) index))))
+(let std:int:min-safe -2147483648)
 (let int (lambda value (if (std:int:safe? value) [ value ] [ 0 ])))
 (let box (lambda value [ value ]))
 (let set (lambda var x (std:vector:set! var 0 x)))
 (let =! (lambda var x (std:vector:set! var 0 x)))
-
 (let boole-set (lambda var x (std:vector:set! var 0 (if x true false))))
 (let boole-eqv (lambda a b (eq (get a) (get b))))
-
 (let true? (lambda var (if (get var) true false)))
 (let false? (lambda var (if (get var) false true)))
-
-
 (let += (lambda var n (=! var (+ (get var) n))))
 (let -= (lambda var n (=! var (- (get var) n))))
 (let *= (lambda var n (=! var (* (get var) n))))
@@ -142,6 +138,10 @@
 (let ++ (lambda var (=! var (+ (get var) 1))))
 (let -- (lambda var (=! var (- (get var) 1))))
 (let ** (lambda var (=! var (* (get var) (get var)))))
+
+(let std:fn:apply-0 (lambda x fn (fn x)))
+(let std:fn:apply-1 (lambda x y fn (fn x y)))
+(let std:fn:apply-2 (lambda x y z fn (fn x y z)))
 
 (let std:vector:empty? (lambda xs (= (length xs) 0)))
 (let std:vector:empty! (lambda xs (if (std:vector:empty? xs) xs (do 
@@ -602,10 +602,6 @@
             (++ j))))
         (++ i))))
     pairs)))
-
-(let apply-0 (lambda x fn (fn x)))
-(let apply-1 (lambda x y fn (fn x y)))
-(let apply-2 (lambda x y z fn (fn x y z)))
 
 (let std:vector:dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
 (let std:vector:in-bounds? (lambda matrix y x (and (std:vector:in-bounds? matrix y) (std:vector:in-bounds? (get matrix y) x))))
