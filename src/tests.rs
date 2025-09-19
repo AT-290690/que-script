@@ -16,23 +16,23 @@ mod tests {
                 "Bool",
             ),
             (
-                "(do (let xs (array (array 1))) (let x (get xs 0)) (let y (get x 0)) y)",
+                "(do (let xs (vector (vector 1))) (let x (get xs 0)) (let y (get x 0)) y)",
                 "Int",
             ),
             (
-                "(do (let xs (array (array 1))) (let x (get (get xs 0) 0)) x)",
+                "(do (let xs (vector (vector 1))) (let x (get (get xs 0) 0)) x)",
                 "Int",
             ),
             ("(lambda x (+ x 1))", "Int -> Int"),
             ("(lambda x (and x (or x x)))", "Bool -> Bool"),
             ("(let fn (lambda a b (and a b))) (fn 42 69)", "Int"),
             (
-                "(let process (lambda xs (get xs 0))) (process (array 1 2 3 ))",
+                "(let process (lambda xs (get xs 0))) (process (vector 1 2 3 ))",
                 "Int",
             ),
-            ("(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (array (= 1 1))))", "Bool"),
-            ("(array 1 2 3)", "[Int]"),
-            ("(array (array (array 1)))", "[[[Int]]]"),
+            ("(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (vector (= 1 1))))", "Bool"),
+            ("(vector 1 2 3)", "[Int]"),
+            ("(vector (vector (vector 1)))", "[[[Int]]]"),
             ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int")
         ];
 

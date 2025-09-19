@@ -196,12 +196,12 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
         return Err("Function call requires at least a function".to_string());
     }
 
-    // Special handling for array before anything else
+    // Special handling for vector before anything else
     if let Expression::Word(name) = &exprs[0] {
-        if name == "array" {
+        if name == "vector" {
             let args = &exprs[1..];
             if args.is_empty() {
-                return Ok(Type::List(Box::new(ctx.fresh_var()))); // Empty array case
+                return Ok(Type::List(Box::new(ctx.fresh_var()))); // Empty vector case
             }
 
             let mut elem_types = Vec::new();
@@ -215,7 +215,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.add_constraint(first.clone(), t.clone()); // Enforce all elements have the same type
             }
 
-            // Return the type of the array (List of the first element type)
+            // Return the type of the vector (List of the first element type)
             return Ok(Type::List(Box::new(first)));
         }
     }

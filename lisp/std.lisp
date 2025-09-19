@@ -1,95 +1,95 @@
-(let char:A 65)
-(let char:B 66)
-(let char:C 67)
-(let char:D 68)
-(let char:E 69)
-(let char:F 70)
-(let char:G 71)
-(let char:H 72)
-(let char:I 73)
-(let char:J 74)
-(let char:K 75)
-(let char:L 76)
-(let char:M 77)
-(let char:N 78)
-(let char:O 79)
-(let char:P 80)
-(let char:Q 81)
-(let char:R 82)
-(let char:S 83)
-(let char:T 84)
-(let char:U 85)
-(let char:V 86)
-(let char:W 87)
-(let char:X 88)
-(let char:Y 89)
-(let char:Z 90)
-(let char:a 97)
-(let char:b 98)
-(let char:c 99)
-(let char:d 100)
-(let char:e 101)
-(let char:f 102)
-(let char:g 103)
-(let char:h 104)
-(let char:i 105)
-(let char:j 106)
-(let char:k 107)
-(let char:l 108)
-(let char:m 109)
-(let char:n 110)
-(let char:o 111)
-(let char:p 112)
-(let char:q 113)
-(let char:r 114)
-(let char:s 115)
-(let char:t 116)
-(let char:u 117)
-(let char:v 118)
-(let char:w 119)
-(let char:x 120)
-(let char:y 121)
-(let char:z 122)
-(let char:0 48)
-(let char:1 49)
-(let char:2 50)
-(let char:3 51)
-(let char:4 52)
-(let char:5 53)
-(let char:6 54)
-(let char:7 55)
-(let char:8 56)
-(let char:9 57)
-(let char:empty 0)
-(let char:double-quote 34)
-(let char:new-line 10)
-(let char:space 32)
-(let char:tab 9)
-(let char:comma 44)
-(let char:dot 46)
-(let char:semi-colon 59)
-(let char:colon 58)
-(let char:dash 45)
-(let char:left-brace 40)
-(let char:right-brace 41)
-(let char:curly-left-brace 123)
-(let char:curly-right-brace 125)
-(let char:left-bracket 91)
-(let char:right-bracket 93)
-(let char:pipe 124)
-(let char:hash 35)
-(let char:question-mark 63)
-(let char:exclamation-mark 33)
-(let char:minus 45)
-(let char:plus 43)
-(let char:equal 61)
-(let char:asterix 42)
-(let char:ampersand 38)
-(let char:at 64)
-(let char:backtick 96)
-(let digit? (lambda ch (and (>= ch char:0) (<= ch char:9))))
-(let upper (lambda char (if (and (>= char char:a) (<= char char:z)) (- char char:space) char)))
-(let lower (lambda char (if (and (>= char char:A) (<= char char:Z)) (+ char char:space) char)))
+(let std:int:char:A 65)
+(let std:int:char:B 66)
+(let std:int:char:C 67)
+(let std:int:char:D 68)
+(let std:int:char:E 69)
+(let std:int:char:F 70)
+(let std:int:char:G 71)
+(let std:int:char:H 72)
+(let std:int:char:I 73)
+(let std:int:char:J 74)
+(let std:int:char:K 75)
+(let std:int:char:L 76)
+(let std:int:char:M 77)
+(let std:int:char:N 78)
+(let std:int:char:O 79)
+(let std:int:char:P 80)
+(let std:int:char:Q 81)
+(let std:int:char:R 82)
+(let std:int:char:S 83)
+(let std:int:char:T 84)
+(let std:int:char:U 85)
+(let std:int:char:V 86)
+(let std:int:char:W 87)
+(let std:int:char:X 88)
+(let std:int:char:Y 89)
+(let std:int:char:Z 90)
+(let std:int:char:a 97)
+(let std:int:char:b 98)
+(let std:int:char:c 99)
+(let std:int:char:d 100)
+(let std:int:char:e 101)
+(let std:int:char:f 102)
+(let std:int:char:g 103)
+(let std:int:char:h 104)
+(let std:int:char:i 105)
+(let std:int:char:j 106)
+(let std:int:char:k 107)
+(let std:int:char:l 108)
+(let std:int:char:m 109)
+(let std:int:char:n 110)
+(let std:int:char:o 111)
+(let std:int:char:p 112)
+(let std:int:char:q 113)
+(let std:int:char:r 114)
+(let std:int:char:s 115)
+(let std:int:char:t 116)
+(let std:int:char:u 117)
+(let std:int:char:v 118)
+(let std:int:char:w 119)
+(let std:int:char:x 120)
+(let std:int:char:y 121)
+(let std:int:char:z 122)
+(let std:int:char:0 48)
+(let std:int:char:1 49)
+(let std:int:char:2 50)
+(let std:int:char:3 51)
+(let std:int:char:4 52)
+(let std:int:char:5 53)
+(let std:int:char:6 54)
+(let std:int:char:7 55)
+(let std:int:char:8 56)
+(let std:int:char:9 57)
+(let std:int:char:empty 0)
+(let std:int:char:double-quote 34)
+(let std:int:char:new-line 10)
+(let std:int:char:space 32)
+(let std:int:char:tab 9)
+(let std:int:char:comma 44)
+(let std:int:char:dot 46)
+(let std:int:char:semi-colon 59)
+(let std:int:char:colon 58)
+(let std:int:char:dash 45)
+(let std:int:char:left-brace 40)
+(let std:int:char:right-brace 41)
+(let std:int:char:curly-left-brace 123)
+(let std:int:char:curly-right-brace 125)
+(let std:int:char:left-bracket 91)
+(let std:int:char:right-bracket 93)
+(let std:int:char:pipe 124)
+(let std:int:char:hash 35)
+(let std:int:char:question-mark 63)
+(let std:int:char:exclamation-mark 33)
+(let std:int:char:minus 45)
+(let std:int:char:plus 43)
+(let std:int:char:equal 61)
+(let std:int:char:asterix 42)
+(let std:int:char:ampersand 38)
+(let std:int:char:std:vector:at 64)
+(let std:int:char:backtick 96)
+(let std:int:char:digit? (lambda ch (and (>= ch std:int:char:0) (<= ch std:int:char:9))))
+(let std:vector:string:upper (lambda char (if (and (>= char std:int:char:a) (<= char std:int:char:z)) (- char std:int:char:space) char)))
+(let std:vector:string:lower (lambda char (if (and (>= char std:int:char:A) (<= char std:int:char:Z)) (+ char std:int:char:space) char)))
 (let identity (lambda x x))
 
 
@@ -100,32 +100,35 @@
           (and a b) true 
           (and (not a) (not b)) true
           false)))
-
-(let swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp) xs)))
-(let push! (lambda xs x (do (set! xs (length xs) x) xs)))
-(let pop-and-get! (lambda xs (do 
+(let std:vector:length (lambda xs (length xs)))
+(let std:vector:get (lambda xs i (get xs i)))
+(let std:vector:pop! (lambda xs (pop! xs)))
+(let std:vector:set! (lambda xs i x (set! xs i x)))
+(let std:vector:swap! (lambda xs i j (do (let temp (get xs i)) (std:vector:set! xs i (get xs j)) (std:vector:set! xs j temp) xs)))
+(let std:vector:push! (lambda xs x (do (std:vector:set! xs (length xs) x) xs)))
+(let std:vector:pop-and-get! (lambda xs (do 
       (let out (get xs (- (length xs) 1))) 
-      (pop! xs)
+      (std:vector:pop! xs)
       out)))
-(let tail! (lambda xs (do (pop! xs) xs)))
-(let append! (lambda xs x (do (push! xs x) xs)))
-(let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
-(let first (lambda xs (get xs 0)))
-(let second (lambda xs (get xs 1)))
-(let third (lambda xs (get xs 3)))
-(let last (lambda xs (get xs (- (length xs) 1))))
+(let std:vector:tail! (lambda xs (do (std:vector:pop! xs) xs)))
+(let std:vector:append! (lambda xs x (do (std:vector:push! xs x) xs)))
+(let std:vector:at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
+(let std:vector:first (lambda xs (get xs 0)))
+(let std:vector:second (lambda xs (get xs 1)))
+(let std:vector:third (lambda xs (get xs 3)))
+(let std:vector:last (lambda xs (get xs (- (length xs) 1))))
 (let +. (lambda xs index (get xs index)))
 (let -. (lambda xs index (get xs (- (length xs) index))))
-(let min-safe-int -2147483648)
-(let max-safe-int 2147383647)
-(let safe-int? (lambda value (and (>= value min-safe-int) (<= value max-safe-int))))
-(let get-safe-int (lambda var (if (safe-int? (get var)) var 0)))
-(let int (lambda value (if (safe-int? value) [ value ] [ 0 ])))
+(let std:int:min-safe -2147483648)
+(let std:int:max-safe 2147383647)
+(let std:int:safe? (lambda value (and (>= value std:int:min-safe) (<= value std:int:max-safe))))
+(let std:int:get-safe (lambda var (if (std:int:safe? (get var)) var 0)))
+(let int (lambda value (if (std:int:safe? value) [ value ] [ 0 ])))
 (let box (lambda value [ value ]))
-(let set (lambda var x (set! var 0 x)))
-(let =! (lambda var x (set! var 0 x)))
+(let set (lambda var x (std:vector:set! var 0 x)))
+(let =! (lambda var x (std:vector:set! var 0 x)))
 
-(let boole-set (lambda var x (set! var 0 (if x true false))))
+(let boole-set (lambda var x (std:vector:set! var 0 (if x true false))))
 (let boole-eqv (lambda a b (eq (get a) (get b))))
 
 (let true? (lambda var (if (get var) true false)))
@@ -140,114 +143,114 @@
 (let -- (lambda var (=! var (- (get var) 1))))
 (let ** (lambda var (=! var (* (get var) (get var)))))
 
-(let empty? (lambda xs (= (length xs) 0)))
-(let empty! (lambda xs (if (empty? xs) xs (do 
-     (loop 0 (length xs) (lambda . (pop! xs)))
+(let std:vector:empty? (lambda xs (= (length xs) 0)))
+(let std:vector:empty! (lambda xs (if (std:vector:empty? xs) xs (do 
+     (loop 0 (length xs) (lambda . (std:vector:pop! xs)))
      xs))))
-(let not-empty? (lambda xs (not (= (length xs) 0))))
-(let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
+(let std:vector:not-empty? (lambda xs (not (= (length xs) 0))))
+(let std:vector:in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
 
-(let filter (lambda xs cb? (if (empty? xs) xs (do 
+(let std:vector:filter (lambda xs cb? (if (std:vector:empty? xs) xs (do 
      (let out [])
      (let process (lambda i (do
       (let x (get xs i))
-      (if (cb? x) (set! out (length out) x)))))
+      (if (cb? x) (std:vector:set! out (length out) x)))))
      (loop 0 (length xs) process)
      out))))
 
-(let ifilter (lambda xs cb? (if (empty? xs) xs (do 
+(let std:vector:filter:i (lambda xs cb? (if (std:vector:empty? xs) xs (do 
      (let out [])
      (let process (lambda i (do
       (let x (get xs i))
-      (if (cb? x i) (set! out (length out) x)))))
+      (if (cb? x i) (std:vector:set! out (length out) x)))))
      (loop 0 (length xs) process)
      out))))
 
-(let reduce (lambda xs cb initial (do
+(let std:vector:reduce (lambda xs cb initial (do
      (let out [ initial ])
-     (let process (lambda i (set! out 0 (cb (get out 0) (get xs i)))))
+     (let process (lambda i (std:vector:set! out 0 (cb (get out 0) (get xs i)))))
      (loop 0 (length xs) process)
      (get out))))
 
-(let ireduce (lambda xs cb initial (do
+(let std:vector:reduce:i (lambda xs cb initial (do
      (let out [ initial ])
-     (let process (lambda i (set! out 0 (cb (get out 0) (get xs i) i))))
+     (let process (lambda i (std:vector:set! out 0 (cb (get out 0) (get xs i) i))))
      (loop 0 (length xs) process)
      (get out))))
 
-(let map (lambda xs cb (if (empty? xs) [] (do
+(let std:vector:map (lambda xs cb (if (std:vector:empty? xs) [] (do
      (let out [(cb (get xs 0))])
-     (let process (lambda i (set! out (length out) (cb (get xs i)))))
+     (let process (lambda i (std:vector:set! out (length out) (cb (get xs i)))))
      (loop 1 (length xs) process)
      out))))
 
-(let imap (lambda xs cb (if (empty? xs) [] (do
+(let std:vector:map:i (lambda xs cb (if (std:vector:empty? xs) [] (do
      (let out [(cb (get xs 0) 0)])
-     (let process (lambda i (set! out (length out) (cb (get xs i) i))))
+     (let process (lambda i (std:vector:set! out (length out) (cb (get xs i) i))))
      (loop 1 (length xs) process)
      out))))
 
-(let range (lambda start end (do
+(let std:vector:ints:range (lambda start end (do
      (let out [ start ])
-     (let process (lambda i (set! out (length out) i)))
+     (let process (lambda i (std:vector:set! out (length out) i)))
      (loop (+ start 1) (+ end 1) process)
      out))) 
 
- (let ones (lambda n (do
+ (let std:vector:ints:ones (lambda n (do
      (let out [ 1 ])
-     (let process (lambda i (set! out (length out) 1)))
+     (let process (lambda i (std:vector:set! out (length out) 1)))
      (loop 0 n process)
      out))) 
 
- (let zeroes (lambda n (do
+ (let std:vector:ints:zeroes (lambda n (do
      (let out [ 0 ])
-     (let process (lambda i (set! out (length out) 0)))
+     (let process (lambda i (std:vector:set! out (length out) 0)))
      (loop 0 n process)
      out))) 
 
-(let count-of (lambda xs cb? (length (filter xs cb?))))
-(let count (lambda input item (count-of input (lambda x (= x item)))))
+(let std:vector:count-of (lambda xs cb? (length (std:vector:filter xs cb?))))
+(let std:vector:ints:count (lambda input item (std:vector:count-of input (lambda x (= x item)))))
 
-(let cons (lambda a b (if (and (empty? a) (empty? b)) a (do 
+(let std:vector:cons (lambda a b (if (and (std:vector:empty? a) (std:vector:empty? b)) a (do 
   (let out []) 
-  (loop 0 (length a) (lambda i (set! out (length out) (get a i)))) 
-  (loop 0 (length b) (lambda i (set! out (length out) (get b i)))) 
+  (loop 0 (length a) (lambda i (std:vector:set! out (length out) (get a i)))) 
+  (loop 0 (length b) (lambda i (std:vector:set! out (length out) (get b i)))) 
   out))))
 
-(let cons! (lambda a b (if (and (empty? a) (empty? b)) a (do 
-  (loop 0 (length b) (lambda i (set! a (length a) (get b i)))) 
+(let std:vector:cons! (lambda a b (if (and (std:vector:empty? a) (std:vector:empty? b)) a (do 
+  (loop 0 (length b) (lambda i (std:vector:set! a (length a) (get b i)))) 
   a))))
 
-(let concat (lambda xs (reduce xs cons [])))
-(let concat! (lambda xs os (reduce os cons! xs)))
+(let std:vector:concat (lambda xs (std:vector:reduce xs std:vector:cons [])))
+(let std:vector:concat! (lambda xs os (std:vector:reduce os std:vector:cons! xs)))
 
-(let every? (lambda xs predicate? (do
+(let std:vector:every? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop (and (< (get i) len) (predicate? (get xs (get i)))) (lambda (set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (predicate? (get xs (get i)))) (lambda (std:vector:set! i 0 (+ (get i) 1))))
            (not (> len (get i))))))
 
-(let some? (lambda xs predicate? (do
+(let std:vector:some? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (std:vector:set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
-(let ievery? (lambda xs predicate? (do
+(let std:vector:every:i? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop (and (< (get i) len) (predicate? (get xs (get i)) (get i))) (lambda (set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (predicate? (get xs (get i)) (get i))) (lambda (std:vector:set! i 0 (+ (get i) 1))))
            (not (> len (get i))))))
 
-(let isome? (lambda xs predicate? (do
+(let std:vector:some:i? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (std:vector:set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
-(let cartesian-product (lambda a b (reduce a (lambda p x (cons p (map b (lambda y [ x y ])))) [])))
+(let std:vector:cartesian-product (lambda a b (std:vector:reduce a (lambda p x (std:vector:cons p (std:vector:map b (lambda y [ x y ])))) [])))
 
-(let gcd (lambda a b (do
+(let std:int:gcd (lambda a b (do
     (integer A a)
     (integer B b)
     (loop (> (get B) 0) (lambda (do
@@ -256,24 +259,24 @@
         (set A b)
         (set B (mod a b)))))
     (get A))))
-(let lcm (lambda a b (/ (* a b) (gcd a b))))
+(let std:int:lcm (lambda a b (/ (* a b) (std:int:gcd  a b))))
 
-(let bit-set? (lambda n pos (= (& n (<< 1 pos)) 0)))
-(let bit-set (lambda n pos (| n (<< 1 pos))))
-(let bit-clear (lambda n pos (& n (~ (<< 1 pos)))))
-(let power-of-two-bits (lambda n (<< 2 (- n 1))))
-(let odd-bit? (lambda n (= (& n 1) 1)))
-(let even-bit? (lambda n (= (& n 1) 0)))
-(let average-bit (lambda a b (>> (+ a b) 1)))
-(let flag-flip (lambda x (- 1 (* x x))))
-(let toggle-bit (lambda n a b (^ (^ a b) n)))
-(let same-sign-bit? (lambda a b (>= (^ a b) 0)))
-(let max-bit (lambda a b (- a (& (- a b) (>> (- a b) 31)))))
-(let min-bit (lambda a b (- a (& (- a b) (>> (- b a) 31)))))
-(let bit-equal? (lambda a b (< (^ a b) 1)))
-(let modulo-bit (lambda numerator divisor (& numerator (- divisor 1))))
-(let n-one-bit? (lambda N nth (not (= (& N (<< 1 nth)) 0))))
-(let largest-power (lambda N (do
+(let std:int:bit:set? (lambda n pos (= (& n (<< 1 pos)) 0)))
+(let std:int:bit:set (lambda n pos (| n (<< 1 pos))))
+(let std:int:bit:clear (lambda n pos (& n (~ (<< 1 pos)))))
+(let std:int:bit:power-of-two (lambda n (<< 2 (- n 1))))
+(let std:int:bit:odd? (lambda n (= (& n 1) 1)))
+(let std:int:bit:even? (lambda n (= (& n 1) 0)))
+(let std:int:bit:average (lambda a b (>> (+ a b) 1)))
+(let std:int:bit:flag-flip (lambda x (- 1 (* x x))))
+(let std:int:bit:toggle (lambda n a b (^ (^ a b) n)))
+(let std:int:bit:same-sign? (lambda a b (>= (^ a b) 0)))
+(let std:int:bit:max (lambda a b (- a (& (- a b) (>> (- a b) 31)))))
+(let std:int:bit:min (lambda a b (- a (& (- a b) (>> (- b a) 31)))))
+(let std:int:bit:equal? (lambda a b (< (^ a b) 1)))
+(let std:int:bit:modulo (lambda numerator divisor (& numerator (- divisor 1))))
+(let std:int:bit:n-one? (lambda N nth (not (= (& N (<< 1 nth)) 0))))
+(let std:int:bit:largest-power (lambda N (do
   ; changing all right side bits to 1.
   (let N1 (| N (>> N 1)))
   (let N2 (| N1 (>> N1 2)))
@@ -283,42 +286,42 @@
   ; where x is required answer,
   ; so adding 1 and dividing it by
   (>> (+ N4 1) 1))))
-(let abs (lambda n (- (^ n (>> n 31)) (>> n 31))))
-(let positive? (lambda x (> x 0)))
-(let negative? (lambda x (< x 0)))
-(let invert (lambda x (- x)))
-(let zero? (lambda x (= x 0)))
-(let negative-one? (lambda x (= x -1)))
-(let divisible? (lambda a b (= (mod a b) 0)))
+(let std:int:abs (lambda n (- (^ n (>> n 31)) (>> n 31))))
+(let std:int:positive? (lambda x (> x 0)))
+(let std:int:negative? (lambda x (< x 0)))
+(let std:int:invert (lambda x (- x)))
+(let std:int:zero? (lambda x (= x 0)))
+(let std:int:negative-one? (lambda x (= x -1)))
+(let std:int:divisible? (lambda a b (= (mod a b) 0)))
 
-(let square (lambda x (* x x)))
-(let even? (lambda x (= (mod x 2) 0)))
-(let odd? (lambda x (not (= (mod x 2) 0))))
-(let sum (lambda xs (reduce xs (lambda a b (+ a b)) 0)))
-(let product (lambda xs (reduce xs (lambda a b (* a b)) 1)))
-(let euclidean-mod (lambda a b (mod (+ (mod a b) b) b)))
-(let max (lambda a b (if (> a b) a b)))
-(let min (lambda a b (if (< a b) a b)))
-(let maximum (lambda xs (cond (empty? xs) nil (= (length xs) 1) (get xs 0) (reduce xs max (get xs 0)))))
-(let minimum (lambda xs (cond (empty? xs) nil (= (length xs) 1) (get xs 0) (reduce xs min (get xs 0)))))
-(let normalize (lambda value min max (* (- value min) (/ (- max min)))))
-(let linear-interpolation (lambda a b n (+ (* (- 1 n) a) (* n b))))
-(let gauss-sum (lambda n (/ (* n (+ n 1)) 2)))
-(let gauss-sum-sequance (lambda a b (/ (* (+ a b) (+ (- b a) 1)) 2)))
-(let clamp (lambda x limit (if (> x limit) limit x)))
-(let clamp-range (lambda x start end (cond (> x end) end (< x start) start x)))
-(let between? (lambda v min max (and (> v min) (< v max))))
-(let overlap? (lambda v min max (and (>= v min) (<= v max))))
-(let sqrt (lambda n
+(let std:int:square (lambda x (* x x)))
+(let std:int:even? (lambda x (= (mod x 2) 0)))
+(let std:int:odd? (lambda x (not (= (mod x 2) 0))))
+(let std:vector:ints:sum (lambda xs (std:vector:reduce xs (lambda a b (+ a b)) 0)))
+(let std:vector:ints:product (lambda xs (std:vector:reduce xs (lambda a b (* a b)) 1)))
+(let std:int:euclidean-mod (lambda a b (mod (+ (mod a b) b) b)))
+(let std:int:max (lambda a b (if (> a b) a b)))
+(let std:int:min (lambda a b (if (< a b) a b)))
+(let std:vector:ints:maximum (lambda xs (cond (std:vector:empty? xs) nil (= (length xs) 1) (get xs 0) (std:vector:reduce xs std:int:max (get xs 0)))))
+(let std:vector:ints:minimum (lambda xs (cond (std:vector:empty? xs) nil (= (length xs) 1) (get xs 0) (std:vector:reduce xs std:int:min (get xs 0)))))
+(let std:int:normalize (lambda value min max (* (- value min) (/ (- max min)))))
+(let std:int:linear-interpolation (lambda a b n (+ (* (- 1 n) a) (* n b))))
+(let std:int:gauss-sum (lambda n (/ (* n (+ n 1)) 2)))
+(let std:int:gauss-sum-sequance (lambda a b (/ (* (+ a b) (+ (- b a) 1)) 2)))
+(let std:int:clamp (lambda x limit (if (> x limit) limit x)))
+(let std:int:clamp-range (lambda x start end (cond (> x end) end (< x start) start x)))
+(let std:int:between? (lambda v min max (and (> v min) (< v max))))
+(let std:int:overlap? (lambda v min max (and (>= v min) (<= v max))))
+(let std:int:sqrt (lambda n
   (do
     (integer x n)
     (integer prev 0)
-    (loop (> (abs (- (get x) (get prev))) 0)
+    (loop (> (std:int:abs (- (get x) (get prev))) 0)
       (lambda (do
         (set prev (get x))
         (set x (/ (+ (get x) (/ n (get x))) 2)))))
     (get x))))
-(let expt (lambda base exp (do
+(let std:int:expt (lambda base exp (do
   (if (< exp 0) 0 (do
       (integer result 1)
       (integer b base)
@@ -331,96 +334,96 @@
           (set e (/ (get e) 2)))))
       (get result))))))
 
-(let zipper (lambda a b (do 
+(let std:vector:zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
-      (let process (lambda i (set! out (length out) [(get a i) (get b i)])))
+      (let process (lambda i (std:vector:set! out (length out) [(get a i) (get b i)])))
       (loop 1 (length a) process)
       out)))
 
-(let zip (lambda xs (zipper (first xs) (second xs))))
-(let unzip (lambda xs (array (map xs first) (map xs second))))
+(let std:vector:zip (lambda xs (std:vector:zipper (std:vector:first xs) (std:vector:second xs))))
+(let std:vector:unzip (lambda xs [ (std:vector:map xs std:vector:first) (std:vector:map xs std:vector:second) ]))
 
-(let slice (lambda xs start end (if (empty? xs) xs (do
+(let std:vector:slice (lambda xs start end (if (std:vector:empty? xs) xs (do
      (let bounds (- end start))
      (let out [])
-     (let process (lambda i (set! out (length out) (get xs (+ start i)))))
+     (let process (lambda i (std:vector:set! out (length out) (get xs (+ start i)))))
      (loop 0 bounds process)
      out))))
 
-(let reverse (lambda xs (if (empty? xs) xs (do
+(let std:vector:reverse (lambda xs (if (std:vector:empty? xs) xs (do
      (let out [])
      (let len (length xs))
-     (let process (lambda i (set! out (length out) (get xs (- len i 1)))))
+     (let process (lambda i (std:vector:set! out (length out) (get xs (- len i 1)))))
      (loop 0 len process)
      out))))
 
-(let find-index (lambda xs cb? (do
+(let std:vector:find-index (lambda xs cb? (do
      (let i [ 0 ])
      (let index [ -1 ])
      (let len (length xs))
      (let process (lambda
            (if (cb? (get xs (get i)))
-              (set! index 0 (get i))
-              (set! i 0 (+ (get i) 1)))))
+              (std:vector:set! index 0 (get i))
+              (std:vector:set! i 0 (+ (get i) 1)))))
      (loop (and (< (get i) len) (= (get index 0) -1)) process)
      (get index 0))))
 
-(let buckets (lambda size (do
+(let std:vector:buckets (lambda size (do
      (let out [[]])
-     (loop 1 size (lambda . (set! out (length out) [])))
+     (loop 1 size (lambda . (std:vector:set! out (length out) [])))
      out)))
 
-(let match? (lambda a b (and (= (length a) (length b)) (|>
+(let std:vector:string:match? (lambda a b (and (= (length a) (length b)) (|>
   a
-  (zipper b)
-  (every? (lambda x (= (get x 0) (get x 1))))))))
+  (std:vector:zipper b)
+  (std:vector:every? (lambda x (= (get x 0) (get x 1))))))))
 
-(let partition (lambda xs n (if (= n (length xs)) [xs] (do 
+(let std:vector:partition (lambda xs n (if (= n (length xs)) [xs] (do 
     (let a [])
     (loop 0 (length xs) (lambda i (if (= (mod i n) 0)
-        (set! a (length a) [(get xs i)])
-        (set! (at a -1) (length (at a -1)) (get xs i)))))
+        (std:vector:set! a (length a) [(get xs i)])
+        (std:vector:set! (std:vector:at a -1) (length (std:vector:at a -1)) (get xs i)))))
      a))))
 
-(let sort-partition! (lambda arr start end cb (do
+(let std:vector:sort-partition! (lambda arr start end cb (do
      (let pivot (get arr end))
      (let i [(- start 1)])
      (let j [ start ])
 
      (let helper (lambda i j (do
-          (set! i 0 (+ (get i) 1))
-          (swap! arr (get i) (get j))
+          (std:vector:set! i 0 (+ (get i) 1))
+          (std:vector:swap! arr (get i) (get j))
           nil)))
 
      (let process (lambda (do
            (if (cb (get arr (get j)) pivot) (helper i j))
-           (set! j 0 (+ (get j) 1)))))
+           (std:vector:set! j 0 (+ (get j) 1)))))
      (loop (< (get j) end) process)
 
-     (swap! arr (+ (get i) 1) end)
+     (std:vector:swap! arr (+ (get i) 1) end)
      (+ (get i) 1))))
 
-(let sort! (lambda arr cb (do
+(let std:vector:sort! (lambda arr cb (do
      (let stack [])
-     (push! stack 0)
-     (push! stack (- (length arr) 1))
+     (std:vector:push! stack 0)
+     (std:vector:push! stack (- (length arr) 1))
      (let process (lambda (do
            (let end (get stack (- (length stack) 1)))
-           (pop! stack)
+           (std:vector:pop! stack)
            (let start (get stack (- (length stack) 1)))
-           (pop! stack)
+           (std:vector:pop! stack)
            (let helper (lambda (do
-                 (let pivot-index (sort-partition! arr start end cb))
-                 (push! stack start)
-                 (push! stack (- pivot-index 1))
-                 (push! stack (+ pivot-index 1))
-                 (push! stack end)
+                 (let pivot-index (std:vector:sort-partition! arr start end cb))
+                 (std:vector:push! stack start)
+                 (std:vector:push! stack (- pivot-index 1))
+                 (std:vector:push! stack (+ pivot-index 1))
+                 (std:vector:push! stack end)
                  nil)))
            (if (< start end) (helper)))))
      (loop (> (length stack) 0) process)
      arr)))
 
-(let hash
+(let std:int:hash
  (lambda table key (do
      (let prime-num 31)
      (let total [ 0 ])
@@ -429,177 +432,180 @@
 
      (let process (lambda (do
            (let letter (get key (get i)))
-           (set! total 0 (euclidean-mod (+ (* (get total 0 ) prime-num) letter) (length table)))
-           (set! i 0 (+ (get i) 1)))))
+           (std:vector:set! total 0 (euclidean-mod (+ (* (get total 0 ) prime-num) letter) (length table)))
+           (std:vector:set! i 0 (+ (get i) 1)))))
 
      (loop (< (get i) bounds) process)
      (get total 0))))
 
-(let has-element? (lambda table key (do
-     (let idx (hash table key))
+(let std:vector:hash:set:has? (lambda table key (do
+     (let idx (std:int:hash table key))
      (let current (get table idx))
-     (and (in-bounds? table idx)
+     (and (std:vector:in-bounds? table idx)
                   (and (> (length current) 0)
-                       (>= (find-index current (lambda x (match? x key))) 0))))))
+                       (>= (std:vector:find-index current (lambda x (std:vector:string:match? x key))) 0))))))
 
-(let has-property? (lambda table key (do
-         (let idx (hash table key))
-         (let current (map (get table idx) (lambda x (get x 0))))
-         (and (in-bounds? table idx)
+(let std:vector:hash:table:has? (lambda table key (do
+         (let idx (std:int:hash table key))
+         (let current (std:vector:map (get table idx) (lambda x (get x 0))))
+         (and (std:vector:in-bounds? table idx)
          (and (> (length current) 0)
-           (>= (find-index current
+           (>= (std:vector:find-index current
              (lambda x
-               (match? x key))) 0))))))
+               (std:vector:string:match? x key))) 0))))))
 
-(let add-element!
+(let std:vector:hash:set:add!
      (lambda table key
        (do
-         (let idx (hash table key))
-         (if (not (in-bounds? table idx)) (set! table idx (array)) nil)
+         (let idx (std:int:hash table key))
+         (if (not (std:vector:in-bounds? table idx)) (std:vector:set! table idx []) nil)
          (let current (get table idx))
          (let len (length current))
-         (let index (if (> len 0) (find-index current (lambda x (match? x key))) -1))
+         (let index (if (> len 0) (std:vector:find-index current (lambda x (std:vector:string:match? x key))) -1))
          (let entry key)
          (if (= index -1)
-           (set! current (length current) entry)
-           (set! current index entry)) table)))
+           (std:vector:set! current (length current) entry)
+           (std:vector:set! current index entry)) table)))
 
-(let remove-element!
+(let std:vector:hash:set:remove!
  (lambda table key
    (do
-     (let idx (hash table key))
-     (if (not (in-bounds? table idx)) (set! table idx (array)) nil)
+     (let idx (std:int:hash table key))
+     (if (not (std:vector:in-bounds? table idx)) (std:vector:set! table idx []) nil)
      (let current (get table idx))
      (let len (length current))
-     (let index (if (> len 0) (find-index current (lambda x (match? x key))) -1))
+     (let index (if (> len 0) (std:vector:find-index current (lambda x (std:vector:string:match? x key))) -1))
      (let entry key)
-     (if (not (= index -1)) (do (set! current index (at current -1)) (pop! current)) nil)
+     (if (not (= index -1)) (do (std:vector:set! current index (std:vector:at current -1)) (std:vector:pop! current)) nil)
      table)))
 
-(let set-property! (lambda table key value
+(let std:vector:hash:table:set! (lambda table key value
        (do
-         (let idx (hash table key))
-         (if (not (in-bounds? table idx)) (set! table idx []) nil)
+         (let idx (std:int:hash table key))
+         (if (not (std:vector:in-bounds? table idx)) (std:vector:set! table idx []) nil)
          (let current (get table idx))
          (let len (length current))
-         (let index (if (> len 0) (find-index current (lambda x (match? (get x 0) key))) -1))
+         (let index (if (> len 0) (std:vector:find-index current (lambda x (std:vector:string:match? (get x 0) key))) -1))
          (let entry [ key [value] ])
          (if (= index -1)
-           (set! current (length current) entry)
-           (set! current index entry))
+           (std:vector:set! current (length current) entry)
+           (std:vector:set! current index entry))
          table)))
         
-(let delete-property! (lambda table key
+(let std:vector:hash:table:delete! (lambda table key
      (do
-       (let idx (hash table key))
-       (if (not (in-bounds? table idx)) (set! table idx []) nil)
+       (let idx (std:int:hash table key))
+       (if (not (std:vector:in-bounds? table idx)) (std:vector:set! table idx []) nil)
        (let current (get table idx))
        (let len (length current))
-       (let index (if (> len 0) (find-index current (lambda x (match? (get x 0) key))) -1))
-       (if (not (= index -1)) (do (set! current index (at current -1)) (pop! current)) nil)
+       (let index (if (> len 0) (std:vector:find-index current (lambda x (std:vector:string:match? (get x 0) key))) -1))
+       (if (not (= index -1)) (do (std:vector:set! current index (std:vector:at current -1)) (std:vector:pop! current)) nil)
        table)))
 
-(let clear! (lambda table (do 
-     (loop 0 (length table) (lambda i (empty! (get table i))))
+(let std:vector:hash:clear! (lambda table (do 
+     (loop 0 (length table) (lambda i (std:vector:empty! (get table i))))
      table)))
 
-(let keys (lambda table (|> table (flat-one) (map first))))
-(let values (lambda table (|> table (flat-one) (map second))))
-(let entries (lambda table (|> table (flat-one))))
+(let std:vector:hash:table:keys (lambda table (|> table (std:vector:flat-one) (std:vector:map std:vector:first))))
+(let std:vector:hash:table:values (lambda table (|> table (std:vector:flat-one) (std:vector:map std:vector:second))))
+(let std:vector:hash:table:entries (lambda table (|> table (std:vector:flat-one))))
 
-(let access-property-helper (lambda table idx key (do
+(let std:vector:hash:table:get-helper (lambda table idx key (do
    (let current (get table idx))
-   (let found-index (find-index current (lambda x (match? key (get x 0)))))
+   (let found-index (std:vector:find-index current (lambda x (std:vector:string:match? key (get x 0)))))
    (unless (= found-index -1) (get current found-index 1) []))))
 
-(let access-property (lambda table key (do
-     (let idx (hash table key))
-     (if (in-bounds? table idx) (get (access-property-helper table idx key)) -1))))
+(let std:vector:hash:table:get (lambda table key (do
+     (let idx (std:int:hash table key))
+     (if (std:vector:in-bounds? table idx) (get (std:vector:hash:table:get-helper table idx key)) -1))))
 
 (let table-count (lambda arr 
-    (|> arr (reduce (lambda table key (do 
-        (if (has-property? table key) 
-            (set-property! table key (+ (access-property table key) 1))
-            (set-property! table key 1)))) (buckets 64)))))
+    (|> arr (std:vector:reduce (lambda table key (do 
+        (if (std:vector:hash:table:has? table key) 
+            (std:vector:hash:table:set! table key (+ (std:vector:hash:table:get table key) 1))
+            (std:vector:hash:table:set! table key 1)))) (std:vector:buckets 64)))))
 
-(let sliding-window (lambda xs size (cond 
-     (empty? xs) []
+(let std:vector:sliding-window (lambda xs size (cond 
+     (std:vector:empty? xs) []
      (= size (length xs)) [xs]
-     (ireduce xs (lambda a b i (if (> (+ i size) (length xs)) a (cons a [(slice xs i (+ i size))]))) []))))
+     (std:vector:reduce:i xs (lambda a b i (if (> (+ i size) (length xs)) a (std:vector:cons a [(std:vector:slice xs i (+ i size))]))) []))))
 
-(let flat-one (lambda xs (cond 
-     (empty? xs) []
+(let std:vector:flat-one (lambda xs (cond 
+     (std:vector:empty? xs) []
      (= (length xs) 1) (get xs)
-     (reduce xs (lambda a b (cons a b)) []))))
+     (std:vector:reduce xs (lambda a b (std:vector:cons a b)) []))))
 
-(let char->digit (lambda ch (- ch char:0)))
-(let chars->digits (lambda digits (map digits char->digit)))
-(let digit->char (lambda digit (+ digit char:0)))
-(let digits->chars (lambda digits (map digits digit->char)))
-(let bool->int (lambda x (if (eq x true) 1 0)))
-(let int->bool (lambda x (if (= x 0) false true)))
-(let array->string (lambda xs delim (ireduce xs (lambda a b i (if (> i 0) (cons (append! a delim) b) b)) [])))
-(let string->array (lambda str char (|> str
-              (reduce(lambda a b (do
-              (let prev (at a -1))
-                (if (match? [b] [char])
-                    (set! a (length a) [])
-                    (set! prev (length prev) b)) a))
+(let std:convert:char->digit (lambda ch (- ch std:int:char:0)))
+(let std:convert:chars->digits (lambda digits (std:vector:map digits std:convert:char->digit)))
+(let std:convert:digit->char (lambda digit (+ digit std:int:char:0)))
+(let std:convert:digits->chars (lambda digits (std:vector:map digits std:convert:digit->char)))
+(let std:convert:bool->int (lambda x (if (eq x true) 1 0)))
+(let std:convert:int->bool (lambda x (if (= x 0) false true)))
+(let std:convert:vector->string (lambda xs delim (std:vector:reduce:i xs (lambda a b i (if (> i 0) (std:vector:cons (std:vector:append! a delim) b) b)) [])))
+(let std:convert:string->vector (lambda str char (|> str
+              (std:vector:reduce(lambda a b (do
+              (let prev (std:vector:at a -1))
+                (if (std:vector:string:match? [b] [char])
+                    (std:vector:set! a (length a) [])
+                    (std:vector:set! prev (length prev) b)) a))
               [[]])
-              (map (lambda x (array->string [ x ] char:empty))))))
+              (std:vector:map (lambda x (std:convert:vector->string [ x ] std:int:char:empty))))))
 
-(let positive-or-negative-digits->integer (lambda digits-with-sign (do
-    (let negative? (< (first digits-with-sign) 0))
-    (let digits (if negative? (map digits-with-sign abs) digits-with-sign))
+(let std:convert:positive-or-negative-digits->integer (lambda digits-with-sign (do
+    (let std:int:negative? (< (std:vector:first digits-with-sign) 0))
+    (let digits (if std:int:negative? (std:vector:map digits-with-sign std:int:abs) digits-with-sign))
     (integer num 0)
-    (integer base (/ (expt 10 (length digits)) 10))
+    (integer base (/ (std:int:expt 10 (length digits)) 10))
     (loop 0 (length digits) (lambda i (do 
       (+= num (* (get base) (. digits i)))
       (/= base 10)
     )))
-    (*= num (if negative? -1 1))
+    (*= num (if std:int:negative? -1 1))
     (get num))))
 
-(let chars->positive-or-negative-digits (lambda chars (do
+(let std:convert:chars->positive-or-negative-digits (lambda chars (do
     (integer current-sign 1)
     (|> chars 
-        (reduce (lambda a ch (do 
-            (if (= ch char:minus) 
+        (std:vector:reduce (lambda a ch (do 
+            (if (= ch std:int:char:minus) 
                 (set current-sign -1) 
                 (do  
-                    (push! a (* (get current-sign) (char->digit ch))) 
+                    (std:vector:push! a (* (get current-sign) (std:convert:char->digit ch))) 
                     (set current-sign 1)))
                 a)) [])))))
-(let positive-or-negative-chars->integer (lambda x (|> x (chars->positive-or-negative-digits) (positive-or-negative-digits->integer))))
-(let chars->integer (lambda chars (positive-or-negative-chars->integer chars)))
+(let std:convert:positive-or-negative-chars->integer (lambda x (|> x (std:convert:chars->positive-or-negative-digits) (std:convert:positive-or-negative-digits->integer))))
+(let std:convert:chars->integer (lambda chars (std:convert:positive-or-negative-chars->integer chars)))
 
 ; (let buffer [])
 ; (let fn (ring-buffer buffer 5))
 ; (let buffer:get (get fn 0))
-; (let buffer:push! (get fn 1))
-; (loop 0 6 (lambda i (buffer:push! i)))
+; (let buffer:std:vector:push! (get fn 1))
+; (loop 0 6 (lambda i (buffer:std:vector:push! i)))
 ; buffer
 (let ring-buffer (lambda buffer len (do 
     (integer pointer 0)
     [(lambda index (get buffer index)) 
     (lambda item (do 
         (let pt (get pointer))
-        (set! buffer pt item)
+        (std:vector:set! buffer pt item)
         (set pointer (mod (+ len pt 1) len))
         item))])))
 
-(let unique-pairs (lambda xs (do 
+(let std:vector:unique-pairs (lambda xs (do 
     (let pairs [])
     (let len (length xs))
     (integer i 0)
     (loop (< (get i) len) (lambda (do 
         (integer j (+ (get i) 1))
         (loop (< (get j) len) (lambda (do 
-            (push! pairs [(get xs (get i)) (get xs (get j))])
-            (++ j)))) 
+            (std:vector:push! pairs [(get xs (get i)) (get xs (get j))])
+            (++ j))))
         (++ i))))
     pairs)))
 
 (let apply-0 (lambda x fn (fn x)))
 (let apply-1 (lambda x y fn (fn x y)))
 (let apply-2 (lambda x y z fn (fn x y z)))
+
+(let std:vector:dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
+(let std:vector:in-bounds? (lambda matrix y x (and (std:vector:in-bounds? matrix y) (std:vector:in-bounds? (get matrix y) x))))

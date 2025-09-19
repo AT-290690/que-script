@@ -149,7 +149,7 @@ fn preprocess(source: &str) -> String {
         match ch {
             '[' => {
                 out.push('(');
-                out.push_str("array ");
+                out.push_str("vector ");
             }
             ']' => out.push(')'),
             '"' => {
@@ -162,7 +162,7 @@ fn preprocess(source: &str) -> String {
                         s.push(next);
                     }
                 }
-                out.push_str("(array ");
+                out.push_str("(vector ");
                 for (i, c) in s.chars().enumerate() {
                     if i > 0 {
                         out.push(' ');
@@ -310,7 +310,7 @@ fn boolean_transform(mut exprs: Vec<Expression>) -> Expression {
         Expression::Word("let".to_string()),
         exprs[0].clone(),
         Expression::Apply(vec![
-            Expression::Word("array".to_string()),
+            Expression::Word("vector".to_string()),
             exprs[1].clone(),
         ]),
     ])
@@ -490,6 +490,117 @@ fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
 
     inp
 }
+/// Expand imports in a top-level list of expressions.
+///
+/// - If an expression is `(import sym1 sym2 ... module)`, this produces a Vec of
+///   `(let sym1 module:sym1) (let sym2 module:sym2) ...` and the original import is removed.
+/// - For non-import expressions, we recurse inside them and return the transformed single expression.
+/// - For nested imports inside a sub-expression we replace the import with `(do (let ...) (let ...) ...)`
+///   so that it remains a valid single-expression replacement.
+pub fn expand_imports_top_level(exprs: Vec<Expression>) -> Vec<Expression> {
+    exprs.into_iter().flat_map(expand_imports_single).collect()
+}
+
+// Expand one expression into zero-or-more expressions.
+fn expand_imports_single(expr: Expression) -> Vec<Expression> {
+    match expr {
+        Expression::Apply(items) if !items.is_empty() => {
+            if let Expression::Word(ref kw) = items[0] {
+                if kw == "import" {
+                    // import form: (import sym1 sym2 ... moduleName)
+                    let mut parts = items[1..].to_vec();
+                    if parts.is_empty() {
+                        return vec![]; // nothing to import
+                    }
+                    let module_expr = parts.pop().unwrap();
+                    let module_name = match module_expr {
+                        Expression::Word(m) => m,
+                        other => panic!("import: expected module name symbol, got {:?}", other),
+                    };
+
+                    // create one (let sym module:sym) for every symbol
+                    let mut lets = Vec::new();
+                    for part in parts {
+                        match part {
+                            Expression::Word(sym) => {
+                                let qualified =
+                                    Expression::Word(format!("{}:{}", module_name, sym));
+                                lets.push(Expression::Apply(vec![
+                                    Expression::Word("let".to_string()),
+                                    Expression::Word(sym.clone()),
+                                    qualified,
+                                ]));
+                            }
+                            other => panic!("import: expected symbol names, got {:?}", other),
+                        }
+                    }
+                    return lets;
+                }
+            }
+
+            // Not a top-level import: recurse into children but keep single expression
+            let mapped = items
+                .into_iter()
+                .map(map_expr_replace_nested_imports)
+                .collect();
+            vec![Expression::Apply(mapped)]
+        }
+        other => vec![other],
+    }
+}
+
+// Map inside an expression and replace any nested `import` with a single `do` of lets.
+// This is safe for non-top-level positions (where we must return exactly one Expression).
+fn map_expr_replace_nested_imports(expr: Expression) -> Expression {
+    match expr {
+        Expression::Apply(items) if !items.is_empty() => {
+            if let Expression::Word(ref kw) = items[0] {
+                if kw == "import" {
+                    // Convert nested import into a single `do` expression containing the lets
+                    let mut parts = items[1..].to_vec();
+                    if parts.is_empty() {
+                        return Expression::Atom(0); // fallback unit
+                    }
+                    let module_expr = parts.pop().unwrap();
+                    let module_name = match module_expr {
+                        Expression::Word(m) => m,
+                        other => panic!("nested import: expected module name, got {:?}", other),
+                    };
+
+                    let mut do_items: Vec<Expression> = Vec::with_capacity(parts.len() + 1);
+                    do_items.push(Expression::Word("do".to_string()));
+                    for part in parts {
+                        if let Expression::Word(sym) = part {
+                            do_items.push(Expression::Apply(vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(sym.clone()),
+                                Expression::Word(format!("{}:{}", module_name, sym)),
+                            ]));
+                        } else {
+                            panic!("nested import: expected symbol, got {:?}", part);
+                        }
+                    }
+                    return Expression::Apply(do_items);
+                } else {
+                    // Regular apply head: map children
+                    let mapped = items
+                        .into_iter()
+                        .map(map_expr_replace_nested_imports)
+                        .collect();
+                    return Expression::Apply(mapped);
+                }
+            } else {
+                // Head is not a word; just recurse into children
+                let mapped = items
+                    .into_iter()
+                    .map(map_expr_replace_nested_imports)
+                    .collect();
+                return Expression::Apply(mapped);
+            }
+        }
+        other => other,
+    }
+}
 fn is_number(s: &str) -> bool {
     if s == "-" || s == "+ " || s == "+" {
         return false;
@@ -587,7 +698,8 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Expression 
     let preprocessed = preprocess(&program);
 
     let exprs = parse(&preprocessed).unwrap();
-    let desugared: Vec<Expression> = exprs
+    let expanded = expand_imports_top_level(exprs);
+    let desugared: Vec<Expression> = expanded
         .into_iter()
         .map(desugar_tail_recursion)
         .map(desugar)
@@ -753,7 +865,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
             Expression::Word("let".to_string()),
             Expression::Word("_".to_string() + p),
             Expression::Apply(vec![
-                Expression::Word("array".to_string()), // array literal constructor
+                Expression::Word("vector".to_string()), // vector literal constructor
                 Expression::Word(p.clone()),
             ]),
         ]);
@@ -761,7 +873,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
             Expression::Word("let".to_string()),
             Expression::Word("_new_".to_string() + p),
             Expression::Apply(vec![
-                Expression::Word("array".to_string()), // array literal constructor
+                Expression::Word("vector".to_string()), // vector literal constructor
             ]),
         ]);
         param_inits.push(init);
@@ -796,24 +908,24 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
 
     // After loop finishes, return the actual stored result: since we put final result into __rec_result,
     // which we created as an int, but to be consistent with our single-element approach we stored values inside arrays
-    // earlier — to be safe, we will store result into a single-element array as well and fetch via (get __rec_result 0).
-    // For simplicity here: we made __rec_result a boxed single element array initialised to [0] instead of 0.
+    // earlier — to be safe, we will store result into a single-element vector as well and fetch via (get __rec_result 0).
+    // For simplicity here: we made __rec_result a boxed single element vector initialised to [0] instead of 0.
     //
 
     let let_cont_arr = Expression::Apply(vec![
         Expression::Word("let".to_string()),
         Expression::Word(cont_name.clone()),
         Expression::Apply(vec![
-            Expression::Word("array".to_string()),
+            Expression::Word("vector".to_string()),
             Expression::Atom(0),
         ]),
     ]);
-    // NOTE: Earlier we made __rec_result as Unknown — but that isn't an array. Let's change: create __rec_result as []
+    // NOTE: Earlier we made __rec_result as Unknown — but that isn't an vector. Let's change: create __rec_result as []
     let let_result_arr = Expression::Apply(vec![
         Expression::Word("let".to_string()),
         Expression::Word(result_name.clone()),
         Expression::Apply(vec![
-            Expression::Word("array".to_string()),
+            Expression::Word("vector".to_string()),
             Expression::Word(params.last().unwrap().clone()),
         ]),
     ]);
@@ -828,7 +940,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     // Assemble the whole `do` body in order:
     let mut do_items = vec![];
     do_items.push(let_cont_arr);
-    do_items.push(let_result_arr); // replaced earlier simple let with array version
+    do_items.push(let_result_arr); // replaced earlier simple let with vector version
     do_items.extend(param_inits);
     do_items.push(loop_finish_call);
     // do_items.push(final_get_result);

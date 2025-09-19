@@ -104,7 +104,7 @@ pub enum Instruction {
         cond: Vec<Instruction>,
         func: Vec<Instruction>,
     },
-    SetArray, // expects stack: [value, index, array]
+    SetArray, // expects stack: [value, index, vector]
     GetArray,
     PopArray,
 }
@@ -245,7 +245,7 @@ impl VM {
             match instr {
                 Instruction::GetArray => {
                     let index_val = self.stack.pop().expect("stack underflow (index)");
-                    let array_val = self.stack.pop().expect("stack underflow (array)");
+                    let array_val = self.stack.pop().expect("stack underflow (vector)");
 
                     match (array_val, index_val) {
                         (BiteCodeEvaluated::Array(arr), BiteCodeEvaluated::Int(i)) => {
@@ -255,7 +255,7 @@ impl VM {
                             }
                             self.stack.push(r[i as usize].clone());
                         }
-                        _ => panic!("get expects (array, int)"),
+                        _ => panic!("get expects (vector, int)"),
                     }
                 }
 
@@ -263,13 +263,13 @@ impl VM {
                     let arr = self
                         .stack
                         .pop()
-                        .expect("stack underflow: length needs an array");
+                        .expect("stack underflow: length needs an vector");
                     match arr {
                         BiteCodeEvaluated::Array(elements) => {
                             self.stack
                                 .push(BiteCodeEvaluated::Int(elements.borrow().len() as i32));
                         }
-                        _ => panic!("length expects an array"),
+                        _ => panic!("length expects an vector"),
                     }
                 }
                 Instruction::PopArray => {
@@ -280,12 +280,12 @@ impl VM {
                             self.stack.push(BiteCodeEvaluated::Int(0))
                         }
                         _ => {
-                            panic!("pop! argument not an array");
+                            panic!("pop! argument not an vector");
                         }
                     }
                 }
                 Instruction::SetArray => {
-                    // Stack: [..., array(Rc<RefCell<Vec<BiteCodeEvaluated>>>), index(Int), value(BiteCodeEvaluated)]
+                    // Stack: [..., vector(Rc<RefCell<Vec<BiteCodeEvaluated>>>), index(Int), value(BiteCodeEvaluated)]
                     let value = self.stack.pop().expect("stack underflow");
                     let index_val = self.stack.pop().expect("stack underflow");
                     let array_val = self.stack.pop().expect("stack underflow");
@@ -305,7 +305,7 @@ impl VM {
                         }
                         self.stack.push(BiteCodeEvaluated::Int(0));
                     } else {
-                        panic!("set! expects array and integer index");
+                        panic!("set! expects vector and integer index");
                     }
                 }
                 Instruction::If {
@@ -1029,7 +1029,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         if exprs.len() != 2 {
                             panic!("length expects exactly 1 argument");
                         }
-                        compile(&exprs[1], code); // compile array expression
+                        compile(&exprs[1], code); // compile vector expression
                         code.push(Instruction::Length);
                     }
                     "let" => {
@@ -1065,7 +1065,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
 
                         code.push(Instruction::MakeLambda(params, body_code));
                     }
-                    "array" => {
+                    "vector" => {
                         let count = exprs.len() - 1;
                         for arg in &exprs[1..] {
                             compile(arg, code);
@@ -1127,26 +1127,26 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                     }
                     "set!" => {
                         if exprs.len() != 4 {
-                            panic!("set! expects 3 arguments: array, index, value");
+                            panic!("set! expects 3 arguments: vector, index, value");
                         }
-                        compile(&exprs[1], code); // array
+                        compile(&exprs[1], code); // vector
                         compile(&exprs[2], code); // index
                         compile(&exprs[3], code); // value
                         code.push(Instruction::SetArray);
                     }
                     "pop!" => {
                         if exprs.len() != 2 {
-                            panic!("set! expects 1 arguments: array, index, value");
+                            panic!("set! expects 1 arguments: vector, index, value");
                         }
-                        compile(&exprs[1], code); // array
+                        compile(&exprs[1], code); // vector
                         code.push(Instruction::PopArray);
                     }
 
                     "get" => {
                         if exprs.len() != 3 {
-                            panic!("get expects 2 arguments: array, index");
+                            panic!("get expects 2 arguments: vector, index");
                         }
-                        // push array
+                        // push vector
                         compile(&exprs[1], code);
                         // push index
                         compile(&exprs[2], code);
