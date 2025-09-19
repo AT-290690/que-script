@@ -40,9 +40,9 @@ cargo run
 ```lisp
 (let sum-odd-squares (lambda xs
     (|> xs
-        (filter odd?)
-        (map square)
-        (sum))))
+        (std:vector:filter std:int:odd?)
+        (std:vector:map std:int:square)
+        (std:vector:ints:sum))))
 
 (sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
 ; Int
@@ -53,7 +53,7 @@ cargo run
 - Pipe (|> ... ) will be desuggered to:
 
 ```lisp
-(sum (map (filter xs odd?) square))
+(std:vector:ints:sum (std:vector:map (std:vector:filter xs std:int:odd?) std:int:square))
 ```
 
 - Argument type of the function will be [Int].
@@ -61,6 +61,34 @@ cargo run
 - **filter** will only work with [Int] and callback of type Int -> Bool
 - **map** will only work with [Int] and callback of type Int -> Int
 - **sum** will only work with [Int]
+
+Short names can be extracted from std using **import**
+
+```lisp
+(import filter map std:vector)
+(import odd? square std:int)
+(import sum std:vector:ints)
+
+(let sum-odd-squares (lambda xs
+    (|> xs
+        (filter odd?)
+        (map square)
+        (sum))))
+
+(sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
+```
+
+**sum** is a sub import of vector under **ints**
+
+```lisp
+; import ints:sum directly from std:vector
+(import ints:sum filter map std:vector)
+(import odd? square std:int)
+
+(let xs [ 1 2 3 4 5 6 7 8 9 10 ])
+; here we use ints:sum
+(ints:sum (map (filter xs int:odd?) int:square))
+```
 
 ### Recursive Tail Call Optimization
 
@@ -147,8 +175,8 @@ To what floor do the instructions take Santa?
     ")))"     ; result in floor -3.
     ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (count input char:left-brace) (count input char:right-brace))))
-(map samples solve)
+(let solve (lambda input (- (std:vector:ints:count input std:int:char:left-brace) (std:vector:ints:count input std:int:char:right-brace))))
+(std:vector:map samples solve)
 ; [Int]
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
