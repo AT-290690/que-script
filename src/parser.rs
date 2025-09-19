@@ -493,21 +493,25 @@ fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
 /// Expand imports in a top-level list of expressions.
 ///
 /// - If an expression is `(import sym1 sym2 ... module)`, this produces a Vec of
-///   `(let sym1 module:sym1) (let sym2 module:sym2) ...` and the original import is removed.
-/// - For non-import expressions, we recurse inside them and return the transformed single expression.
-/// - For nested imports inside a sub-expression we replace the import with `(do (let ...) (let ...) ...)`
-///   so that it remains a valid single-expression replacement.
+///   `(let sym1 module:sym1) (let sym2 module:sym2) ...` and removes the import.
+/// - If an import appears *anywhere else* (not top-level), we panic.
 pub fn expand_imports_top_level(exprs: Vec<Expression>) -> Vec<Expression> {
-    exprs.into_iter().flat_map(expand_imports_single).collect()
+    exprs
+        .into_iter()
+        .flat_map(|expr| expand_imports_single(expr, true))
+        .collect()
 }
 
-// Expand one expression into zero-or-more expressions.
-fn expand_imports_single(expr: Expression) -> Vec<Expression> {
+// The `is_top_level` flag tells us whether this expression is a direct
+// element of the top-level list or nested somewhere deeper.
+fn expand_imports_single(expr: Expression, is_top_level: bool) -> Vec<Expression> {
     match expr {
         Expression::Apply(items) if !items.is_empty() => {
             if let Expression::Word(ref kw) = items[0] {
                 if kw == "import" {
-                    // import form: (import sym1 sym2 ... moduleName)
+                    if !is_top_level {
+                        panic!("import is only allowed at top level!");
+                    }
                     let mut parts = items[1..].to_vec();
                     if parts.is_empty() {
                         return vec![]; // nothing to import
@@ -518,7 +522,6 @@ fn expand_imports_single(expr: Expression) -> Vec<Expression> {
                         other => panic!("import: expected module name symbol, got {:?}", other),
                     };
 
-                    // create one (let sym module:sym) for every symbol
                     let mut lets = Vec::new();
                     for part in parts {
                         match part {
@@ -538,10 +541,10 @@ fn expand_imports_single(expr: Expression) -> Vec<Expression> {
                 }
             }
 
-            // Not a top-level import: recurse into children but keep single expression
+            // Not an import: recurse into children (but not as top-level anymore)
             let mapped = items
                 .into_iter()
-                .map(map_expr_replace_nested_imports)
+                .flat_map(|child| expand_imports_single(child, false))
                 .collect();
             vec![Expression::Apply(mapped)]
         }
