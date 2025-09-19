@@ -149,44 +149,44 @@
      xs))))
 (let std:vector:not-empty? (lambda xs (not (= (length xs) 0))))
 (let std:vector:in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
-
-(let std:vector:filter (lambda xs cb? (if (std:vector:empty? xs) xs (do 
+(let std:vector:for (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i))))))
+(let std:vector:filter (lambda xs fn? (if (std:vector:empty? xs) xs (do 
      (let out [])
      (let process (lambda i (do
       (let x (get xs i))
-      (if (cb? x) (std:vector:set! out (length out) x)))))
+      (if (fn? x) (std:vector:set! out (length out) x)))))
      (loop 0 (length xs) process)
      out))))
 
-(let std:vector:filter:i (lambda xs cb? (if (std:vector:empty? xs) xs (do 
+(let std:vector:filter:i (lambda xs fn? (if (std:vector:empty? xs) xs (do 
      (let out [])
      (let process (lambda i (do
       (let x (get xs i))
-      (if (cb? x i) (std:vector:set! out (length out) x)))))
+      (if (fn? x i) (std:vector:set! out (length out) x)))))
      (loop 0 (length xs) process)
      out))))
 
-(let std:vector:reduce (lambda xs cb initial (do
+(let std:vector:reduce (lambda xs fn initial (do
      (let out [ initial ])
-     (let process (lambda i (std:vector:set! out 0 (cb (get out 0) (get xs i)))))
+     (let process (lambda i (std:vector:set! out 0 (fn (get out 0) (get xs i)))))
      (loop 0 (length xs) process)
      (get out))))
 
-(let std:vector:reduce:i (lambda xs cb initial (do
+(let std:vector:reduce:i (lambda xs fn initial (do
      (let out [ initial ])
-     (let process (lambda i (std:vector:set! out 0 (cb (get out 0) (get xs i) i))))
+     (let process (lambda i (std:vector:set! out 0 (fn (get out 0) (get xs i) i))))
      (loop 0 (length xs) process)
      (get out))))
 
-(let std:vector:map (lambda xs cb (if (std:vector:empty? xs) [] (do
-     (let out [(cb (get xs 0))])
-     (let process (lambda i (std:vector:set! out (length out) (cb (get xs i)))))
+(let std:vector:map (lambda xs fn (if (std:vector:empty? xs) [] (do
+     (let out [(fn (get xs 0))])
+     (let process (lambda i (std:vector:set! out (length out) (fn (get xs i)))))
      (loop 1 (length xs) process)
      out))))
 
-(let std:vector:map:i (lambda xs cb (if (std:vector:empty? xs) [] (do
-     (let out [(cb (get xs 0) 0)])
-     (let process (lambda i (std:vector:set! out (length out) (cb (get xs i) i))))
+(let std:vector:map:i (lambda xs fn (if (std:vector:empty? xs) [] (do
+     (let out [(fn (get xs 0) 0)])
+     (let process (lambda i (std:vector:set! out (length out) (fn (get xs i) i))))
      (loop 1 (length xs) process)
      out))))
 
@@ -208,7 +208,7 @@
      (loop 0 n process)
      out))) 
 
-(let std:vector:count-of (lambda xs cb? (length (std:vector:filter xs cb?))))
+(let std:vector:count-of (lambda xs fn? (length (std:vector:filter xs fn?))))
 (let std:vector:ints:count (lambda input item (std:vector:count-of input (lambda x (= x item)))))
 
 (let std:vector:cons (lambda a b (if (and (std:vector:empty? a) (std:vector:empty? b)) a (do 
@@ -357,12 +357,12 @@
      (loop 0 len process)
      out))))
 
-(let std:vector:find-index (lambda xs cb? (do
+(let std:vector:find-index (lambda xs fn? (do
      (let i [ 0 ])
      (let index [ -1 ])
      (let len (length xs))
      (let process (lambda
-           (if (cb? (get xs (get i)))
+           (if (fn? (get xs (get i)))
               (std:vector:set! index 0 (get i))
               (std:vector:set! i 0 (+ (get i) 1)))))
      (loop (and (< (get i) len) (= (get index 0) -1)) process)
@@ -385,7 +385,7 @@
         (std:vector:set! (std:vector:at a -1) (length (std:vector:at a -1)) (get xs i)))))
      a))))
 
-(let std:vector:sort-partition! (lambda arr start end cb (do
+(let std:vector:sort-partition! (lambda arr start end fn (do
      (let pivot (get arr end))
      (let i [(- start 1)])
      (let j [ start ])
@@ -396,14 +396,14 @@
           nil)))
 
      (let process (lambda (do
-           (if (cb (get arr (get j)) pivot) (helper i j))
+           (if (fn (get arr (get j)) pivot) (helper i j))
            (std:vector:set! j 0 (+ (get j) 1)))))
      (loop (< (get j) end) process)
 
      (std:vector:swap! arr (+ (get i) 1) end)
      (+ (get i) 1))))
 
-(let std:vector:sort! (lambda arr cb (do
+(let std:vector:sort! (lambda arr fn (do
      (let stack [])
      (std:vector:push! stack 0)
      (std:vector:push! stack (- (length arr) 1))
@@ -413,7 +413,7 @@
            (let start (get stack (- (length stack) 1)))
            (std:vector:pop! stack)
            (let helper (lambda (do
-                 (let pivot-index (std:vector:sort-partition! arr start end cb))
+                 (let pivot-index (std:vector:sort-partition! arr start end fn))
                  (std:vector:push! stack start)
                  (std:vector:push! stack (- pivot-index 1))
                  (std:vector:push! stack (+ pivot-index 1))
@@ -603,5 +603,17 @@
         (++ i))))
     pairs)))
 
-(let std:vector:dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
-(let std:vector:in-bounds? (lambda matrix y x (and (std:vector:in-bounds? matrix y) (std:vector:in-bounds? (get matrix y) x))))
+(let std:vector:3d:dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
+(let std:vector:3d:in-bounds? (lambda matrix y x (and (std:vector:in-bounds? matrix y) (std:vector:in-bounds? (get matrix y) x))))
+
+(let std:vector:3d:diagonal-neighborhood [ [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
+(let std:vector:3d:kernel-neighborhood [ [ 0 0 ] [ 0 1 ] [ 1 0 ] [ -1 0 ] [ 0 -1 ] [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ]])
+(let std:vector:3d:moore-neighborhood [ [ 0 1 ] [ 1 0 ] [ -1 0 ] [ 0 -1 ] [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
+(let std:vector:3d:von-neumann-neighborhood [ [ 1 0 ] [ 0 -1 ] [ 0 1 ] [ -1 0 ] ])
+
+(let std:vector:3d:adjacent (lambda xs directions y x fn
+      (std:vector:for directions (lambda dir (do
+          (let dy (+ (std:vector:first dir) y))
+          (let dx (+ (std:vector:second dir) x))
+          (if (std:vector:3d:in-bounds? xs dy dx)
+              (fn (get xs dy dx) dir dy dx)))))))

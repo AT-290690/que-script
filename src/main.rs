@@ -51,7 +51,7 @@ fn main() -> std::io::Result<()> {
         dump_wrapped_ast(std_ast, "./src/baked.rs");
     } else if args.iter().any(|a| a == "--comp") {
         let program = fs::read_to_string("./lisp/main.lisp")?;
-        let std_ast = baked::load_ast(); // just import and call
+        let std_ast = baked::load_ast();
         if let parser::Expression::Apply(items) = &std_ast {
             let wrapped_ast = parser::merge_std_and_program(&program, items[1..].to_vec());
             let mut code: Vec<vm::Instruction> = Vec::new();
@@ -63,7 +63,7 @@ fn main() -> std::io::Result<()> {
         println!("{:?}", vm::exe(bitecode));
     } else {
         let program = fs::read_to_string("./lisp/main.lisp")?;
-        let std_ast = baked::load_ast(); // just import and call
+        let std_ast = baked::load_ast();
         if let parser::Expression::Apply(items) = &std_ast {
             let wrapped_ast = parser::merge_std_and_program(&program, items[1..].to_vec());
             match infer::infer_with_builtins(&wrapped_ast) {
