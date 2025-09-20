@@ -680,3 +680,43 @@ heap)))
 (let std:heap:empty! std:vector:empty!)
 
 (let std:convert:vector->heap (lambda xs fn (std:vector:reduce xs (lambda heap x (do (std:heap:push! heap x fn) heap)) [])))
+(let std:convert:set->vector (lambda xs (std:vector:filter (std:vector:flat-one xs) std:vector:not-empty?)))
+
+(let std:vector:hash:set:max-capacity (lambda a b (std:vector:buckets (std:int:max (length a) (length b)))))
+(let std:vector:hash:set:min-capacity (lambda a b (std:vector:buckets (std:int:min (length a) (length b)))))
+
+(let std:convert:integer->string-base (lambda num base  
+    (if (= num 0) [ std:int:char:0 ] (do 
+        (let neg? (< num 0))
+        (integer n (if neg? (* num -1) num))
+        (let tail-call:while (lambda out
+            (if (> (get n) 0) (do
+                (std:vector:push! out (mod (get n) base))
+                (set n (/ (get n) base))
+                (tail-call:while out)) out)))
+        (let str (std:convert:digits->chars (tail-call:while [])))
+        (std:vector:reverse (if neg? (std:vector:append! str std:int:char:dash) str))))))
+
+(let std:convert:vector->set (lambda xs (std:vector:reduce xs (lambda s x (do (std:vector:hash:set:add! s x) s)) [ [] [] [] [] ])))
+(let std:vector:hash:set:intersection (lambda a b
+        (|> b
+          (std:convert:set->vector)
+          (std:vector:reduce (lambda out element
+          (do (if (std:vector:hash:set:has? a element)
+                    (std:vector:hash:set:add! out element) out) out)) (std:vector:hash:set:max-capacity a b)))))
+(let std:vector:hash:set:difference (lambda a b
+      (|> a
+        (std:convert:set->vector)
+        (std:vector:reduce (lambda out element
+                        (do (if (not (std:vector:hash:set:has? b element))
+                                        (std:vector:hash:set:add! out element) out) out)) (std:vector:hash:set:max-capacity a b)))))
+(let std:vector:hash:set:xor (lambda a b (do
+        (let out (std:vector:hash:set:max-capacity a b))
+        (|> a (std:convert:set->vector) (std:vector:for (lambda element (if (not (std:vector:hash:set:has? b element)) (std:vector:hash:set:add! out element) out))))
+        (|> b (std:convert:set->vector) (std:vector:for (lambda element (if (not (std:vector:hash:set:has? a element)) (std:vector:hash:set:add! out element) out))))
+        out)))
+(let std:vector:hash:set:union (lambda a b (do
+        (let out (std:vector:hash:set:max-capacity a b))
+        (|> a (std:convert:set->vector) (std:vector:for (lambda element (std:vector:hash:set:add! out element))))
+        (|> b (std:convert:set->vector) (std:vector:for (lambda element (std:vector:hash:set:add! out element))))
+        out)))

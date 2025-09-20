@@ -281,6 +281,23 @@ mod tests {
 ]"#,
                 "[1 0]",
             ),
+            (
+                r#"
+            (let find-missing-numbers (lambda nums (|> 
+    (std:vector:ints:range 1 (length nums)) 
+    (std:vector:map (lambda x (std:convert:integer->string-base x 10)))
+    (std:convert:vector->set)
+    (std:vector:hash:set:difference (|> nums (std:vector:map (lambda x (std:convert:integer->string-base x 10))) (std:convert:vector->set)))
+    (std:vector:flat-one)
+    (std:vector:map std:convert:chars->integer))))
+
+[
+    (find-missing-numbers [ 4 3 2 7 8 2 3 1 ]) ; Output: [5 6]
+    (find-missing-numbers [ 1 1 ])             ; Output: [2]
+]
+            "#,
+                "[[5 6] [2]]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
