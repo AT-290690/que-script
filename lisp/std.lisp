@@ -108,9 +108,9 @@
 (let std:vector:third (lambda xs (get xs 3)))
 (let std:vector:last (lambda xs (get xs (- (length xs) 1))))
 (let std:int:max-safe 2147383647)
-(let std:int:safe? (lambda value (and (>= value std:int:min-safe) (<= value std:int:max-safe))))
-(let std:int:get-safe (lambda var (if (std:int:safe? (get var)) var 0)))
 (let std:int:min-safe -2147483648)
+(let std:int:safe? (lambda value (and (>= value std:int:min-safe) (<= value std:int:max-safe))))
+(let std:int:get-safe (lambda var (if (std:int:safe? (get var)) (get var) nil)))
 
 ; Extra "keywords" 
 (let identity (lambda x x))
@@ -506,10 +506,6 @@
      (loop 0 (length table) (lambda i (std:vector:empty! (get table i))))
      table)))
 
-(let std:vector:hash:table:keys (lambda table (|> table (std:vector:flat-one) (std:vector:map std:vector:first))))
-(let std:vector:hash:table:values (lambda table (|> table (std:vector:flat-one) (std:vector:map std:vector:second))))
-(let std:vector:hash:table:entries (lambda table (|> table (std:vector:flat-one))))
-
 (let std:vector:hash:table:get-helper (lambda table idx key (do
    (let current (get table idx))
    (let found-index (std:vector:find-index current (lambda x (std:vector:string:match? key (get x 0)))))
@@ -534,6 +530,10 @@
      (std:vector:empty? xs) []
      (= (length xs) 1) (get xs)
      (std:vector:reduce xs (lambda a b (std:vector:cons a b)) []))))
+
+(let std:vector:hash:table:keys (lambda table (|> table (std:vector:flat-one) (std:vector:map std:vector:first))))
+(let std:vector:hash:table:values (lambda table (|> table (std:vector:flat-one) (std:vector:map std:vector:second))))
+(let std:vector:hash:table:entries (lambda table (|> table (std:vector:flat-one))))
 
 (let std:convert:char->digit (lambda ch (- ch std:int:char:0)))
 (let std:convert:chars->digits (lambda digits (std:vector:map digits std:convert:char->digit)))
