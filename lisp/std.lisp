@@ -605,7 +605,7 @@
 
 (let std:vector:3d:dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
 (let std:vector:3d:in-bounds? (lambda matrix y x (and (std:vector:in-bounds? matrix y) (std:vector:in-bounds? (get matrix y) x))))
-
+(let std:vector:3d:set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))
 (let std:vector:3d:diagonal-neighborhood [ [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
 (let std:vector:3d:kernel-neighborhood [ [ 0 0 ] [ 0 1 ] [ 1 0 ] [ -1 0 ] [ 0 -1 ] [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ]])
 (let std:vector:3d:moore-neighborhood [ [ 0 1 ] [ 1 0 ] [ -1 0 ] [ 0 -1 ] [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])

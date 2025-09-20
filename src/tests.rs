@@ -298,6 +298,56 @@ mod tests {
             "#,
                 "[[5 6] [2]]",
             ),
+            (
+                r#"(let has-trailing-zeros (lambda nums (>= (std:vector:count-of nums (lambda x (= (mod x 2) 0))) 2)))
+
+[(has-trailing-zeros [ 1 2 3 4 5 ]) ; Should return true
+ (has-trailing-zeros [ 2 4 8 16 ]) ; Should return true
+ (has-trailing-zeros [ 1 3 5 7 9 ]) ; Should return false
+ (has-trailing-zeros [ 1 2 ])]  ; Should return false
+"#,
+                "[1 1 0 0]",
+            ),
+            (
+                r#"(let pillow-holder (lambda n time (do
+  (let cycle (- (* 2 n) 2))
+  (let t (mod time cycle))
+  (if (< t n)
+    (+ 1 t)
+    (- (+ n n -1) t)))))
+
+[(pillow-holder 4 5) (pillow-holder 3 2)]
+"#,
+                "[2 3]",
+            ),
+            (
+                r#"(let flood-fill (lambda image sr sc color (do 
+    (let old (. image sr sc))
+    (if (= old color) 
+        image 
+        (do 
+            (let m (length image))
+            (let n (length (std:vector:first image)))
+            (let stack [[sr sc]])
+            (loop (std:vector:not-empty? stack) (lambda (do 
+                (let t (std:vector:pop-and-get! stack))
+                (let i (std:vector:first t))
+                (let j (std:vector:second t))
+                (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (. image i j) old)) (do
+                    (std:vector:3d:set! image i j color)
+                    (std:vector:push! stack [(+ i 1) j])
+                    (std:vector:push! stack [(- i 1) j])
+                    (std:vector:push! stack [i (+ j 1)])
+                    (std:vector:push! stack [i (- j 1)])
+                    nil)))))
+        image)))))
+
+
+(let image [[1 1 1] [1 1 0] [1 0 1]])
+(flood-fill image 1 1 2)
+; Output: [[2 2 2] [2 2 0] [2 0 1]]"#,
+                "[[2 2 2] [2 2 0] [2 0 1]]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
