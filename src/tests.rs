@@ -237,6 +237,50 @@ mod tests {
 (std:vector:map samples solve)"#,
                 "[0 0 3 3 3 -1 -1 -3 -3]",
             ),
+            (
+                r#"(let last-stone-weight (lambda stones (do
+  (let max-cmp (lambda a b (> a b)))
+  (let heap (std:convert:vector->heap stones max-cmp))
+  (let tail-call:smash (lambda t
+    (if (> (length heap) 1)
+      (do
+        (let y (std:heap:peek heap))
+        (std:heap:pop! heap max-cmp)
+        (let x (std:heap:peek heap))
+        (std:heap:pop! heap max-cmp)
+        (if (!= x y)
+          (std:heap:push! heap (- y x) max-cmp))
+        (tail-call:smash t))
+        false)))
+  (tail-call:smash true)
+  (if (> (length heap) 0) (std:heap:peek heap)))))
+
+[(last-stone-weight [ 2 7 4 1 8 1 ]) (last-stone-weight [ 1 ])]"#,
+                "[1 1]",
+            ),
+            (
+                r#"(let has-groups (lambda deck
+  (do
+    (let counts (|> deck
+                    ; TODO:
+                    ; delete next 2 lines
+                    ; replace them with std:convert:integer->string
+                    ; once that gets impelemnted
+                    (std:vector:map std:convert:digit->char)
+                    (std:vector:map int)
+                    ; ^ to be replaced with std:convert:integer->string
+                    (std:vector:hash:table:count)
+                    (std:vector:hash:table:entries)
+                    (std:vector:map std:vector:second)
+                    (std:vector:flat-one)))
+    (> (std:vector:reduce counts std:int:gcd (std:vector:first counts)) 1))))
+
+[
+    (has-groups [ 1 2 3 4 4 3 2 1 ]) ; Output: true
+    (has-groups [ 1 1 1 2 2 2 3 3 ]) ; Output: false
+]"#,
+                "[1 0]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

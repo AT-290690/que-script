@@ -432,7 +432,7 @@
 
      (let process (lambda (do
            (let letter (get key (get i)))
-           (std:vector:set! total 0 (euclidean-mod (+ (* (get total 0 ) prime-num) letter) (length table)))
+           (std:vector:set! total 0 (std:int:euclidean-mod (+ (* (get total 0 ) prime-num) letter) (length table)))
            (std:vector:set! i 0 (+ (get i) 1)))))
 
      (loop (< (get i) bounds) process)
@@ -519,7 +519,7 @@
      (let idx (std:int:hash table key))
      (if (std:vector:in-bounds? table idx) (get (std:vector:hash:table:get-helper table idx key)) -1))))
 
-(let table-count (lambda arr 
+(let std:vector:hash:table:count (lambda arr 
     (|> arr (std:vector:reduce (lambda table key (do 
         (if (std:vector:hash:table:has? table key) 
             (std:vector:hash:table:set! table key (+ (std:vector:hash:table:get table key) 1))
@@ -617,3 +617,66 @@
           (let dx (+ (std:vector:second dir) x))
           (if (std:vector:3d:in-bounds? xs dy dx)
               (fn (get xs dy dx) dir dy dx)))))))
+
+(let std:node:parent (lambda i (- (>> (+ i 1) 1) 1)))
+(let std:node:left (lambda i (+ (<< i 1) 1)))
+(let std:node:right (lambda i (<< (+ i 1) 1)))
+
+(let std:heap:top 0)
+(let std:heap:greater? (lambda heap i j fn? (fn? (get heap i) (get heap j))))
+(let std:heap:sift-up! (lambda heap fn (do 
+  (integer node (- (length heap) 1))
+  (let tail-call:std:heap:sift-up! (lambda heap
+    (if (and (> (get node) std:heap:top) (std:heap:greater? heap (get node) (std:node:parent (get node)) fn))
+      (do 
+        (std:vector:swap! heap (get node) (std:node:parent (get node)))
+        (set node (std:node:parent (get node)))
+        (tail-call:std:heap:sift-up! heap)) heap)))
+  (tail-call:std:heap:sift-up! heap))))
+
+(let std:heap:sift-down! (lambda heap fn (do
+  (integer node std:heap:top)
+  (let tail-call:std:heap:sift-down! (lambda heap
+    (if (or 
+          (and 
+            (< (std:node:left (get node)) (length heap))
+            (std:heap:greater? heap (std:node:left (get node)) (get node) fn))
+          (and 
+            (< (std:node:right (get node)) (length heap))
+            (std:heap:greater? heap (std:node:right (get node)) (get node) fn)))
+      (do 
+        (let max-child (if (and 
+                            (< (std:node:right (get node)) (length heap))
+                            (std:heap:greater? heap (std:node:right (get node)) (std:node:left (get node)) fn))
+                            (std:node:right (get node))
+                            (std:node:left (get node))))
+        (std:vector:swap!  heap (get node) max-child)
+        (set node max-child)
+        (tail-call:std:heap:sift-down! heap)) heap)))
+  (tail-call:std:heap:sift-down! heap))))
+
+(let std:heap:peek (lambda heap (get heap std:heap:top)))
+
+(let std:heap:push! (lambda heap value fn (do 
+    (set! heap (length heap) value)
+    (std:heap:sift-up! heap fn)
+    nil)))
+
+(let std:heap:pop! (lambda heap fn (do 
+  (let bottom (- (length heap) 1))
+  (if (> bottom std:heap:top) (std:vector:swap! heap std:heap:top bottom) heap)
+  (pop! heap)
+  (std:heap:sift-down! heap fn)
+  nil)))
+
+(let std:heap:replace! (lambda heap value fn (do 
+(set! heap std:heap:top value)
+(std:heap:sift-down! heap fn)
+heap)))
+
+
+(let std:heap:empty? std:vector:empty?)
+(let std:heap:not-empty? std:vector:not-empty?)
+(let std:heap:empty! std:vector:empty!)
+
+(let std:convert:vector->heap (lambda xs fn (std:vector:reduce xs (lambda heap x (do (std:heap:push! heap x fn) heap)) [])))
