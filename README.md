@@ -5,6 +5,8 @@
 My hobby scripting language implemented in Rust.
 (it's called resin because it's tree based and catches bugs)
 
+Try it online at [playground](https://at-290690.github.io/rust-lisp/)
+
 - **Lisp**
 - **Stack-based bytecode Virtual Machine**
 - **Standard library**

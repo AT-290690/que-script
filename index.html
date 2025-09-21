@@ -1,0 +1,116 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rust Wasm Example</title>
+    <script type="module">
+      import init, { run } from "./pkg/fez_rs.js";
+
+      async function evaluate() {
+        await init();
+        document.getElementById("output").innerText = run("(+ 1 2 3 4 5 6)");
+      }
+
+      evaluate();
+    </script>
+  </head>
+  <body>
+    <h1>Rust WebAssembly Example</h1>
+    <div id="output"></div>
+  </body>
+</html> -->
+
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height"
+  />
+  <meta name="description" content="Write and run Fez programs" />
+  <title>Fez</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <style>
+    html {
+      background-color: black;
+    }
+    .ace_comment {
+      color: #7285b2aa !important;
+    }
+    @font-face {
+      font-family: "Monaco9";
+      src: url(./monaco-9.ttf) format("truetype");
+      font-display: swap;
+    }
+    * {
+      font-family: "Monaco9" !important;
+      font-size: 20px !important;
+    }
+    #editor {
+      height: 80%;
+      width: 100%;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #terminal {
+      border-top: 1px solid steelblue;
+      height: 19%;
+      width: 100%;
+    }
+    #link {
+      position: absolute;
+      bottom: 15px;
+      right: 60px;
+    }
+    #log {
+      position: absolute;
+      bottom: 12px;
+      right: 35px;
+    }
+    #run {
+      position: absolute;
+      bottom: 15px;
+      right: 12px;
+    }
+    button {
+      background-color: transparent;
+      border: none;
+      cursor: pointer;
+    }
+    button:active {
+      transform: scale(1.2);
+    }
+    button > span:hover {
+      opacity: 1;
+      color: rgb(255, 255, 255);
+    }
+    button > span:active {
+      color: rgb(140, 255, 73);
+    }
+    button > span {
+      opacity: 0.8;
+      color: rgb(255, 255, 255);
+    }
+  </style>
+</head>
+<body>
+  <div id="editor"></div>
+  <div id="terminal"></div>
+  <script
+    defer
+    src="//ajaxorg.github.io/ace-builds/src-min-noconflict/ace.js"
+    type="text/javascript"
+    charset="utf-8"
+  ></script>
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"
+    integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ=="
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"
+  ></script>
+  <button id="run" title="run code"><span>▶</span></button>
+  <script type="module" src="./main.js"></script>
+</body>
