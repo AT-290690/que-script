@@ -28,8 +28,8 @@
     content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height"
   />
   <meta name="description" content="Write and run Fez programs" />
-  <title>Fez</title>
-  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <title>Resin</title>
+  <link rel="icon" type="image/x-icon" href="./favicon.ico" />
   <style>
     html {
       background-color: black;
@@ -60,39 +60,29 @@
       height: 19%;
       width: 100%;
     }
-    #link {
-      position: absolute;
-      bottom: 15px;
-      right: 60px;
-    }
-    #log {
-      position: absolute;
-      bottom: 12px;
-      right: 35px;
-    }
     #run {
       position: absolute;
       bottom: 15px;
       right: 12px;
+      width: 64px;
+      height: 32px;
     }
     button {
       background-color: transparent;
-      border: none;
+      border: steelblue 1px solid;
       cursor: pointer;
+      color: rgb(255, 255, 255);
     }
     button:active {
-      transform: scale(1.2);
+      transform: scale(1.1);
     }
-    button > span:hover {
-      opacity: 1;
-      color: rgb(255, 255, 255);
+    button:hover {
+      background-color: steelblue;
+      border: rgb(140, 255, 73) 1px solid;
     }
-    button > span:active {
-      color: rgb(140, 255, 73);
-    }
-    button > span {
-      opacity: 0.8;
-      color: rgb(255, 255, 255);
+    button:active {
+      background-color: rgb(140, 255, 73);
+      color: black;
     }
   </style>
 </head>
