@@ -6,7 +6,6 @@ mod parser;
 mod types;
 mod vm;
 use crate::baked::load_ast;
-mod tests;
 use wasm_bindgen::prelude::wasm_bindgen;
 #[wasm_bindgen]
 pub fn run(program: String) -> String {

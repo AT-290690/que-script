@@ -493,6 +493,41 @@ mod tests {
 [(part1 PARSED) (part2 PARSED)]"#,
                 "[11 31]",
             ),
+            (
+                r#"
+(let parse (lambda input (|> input (std:string:lines) (std:vector:map std:convert:chars->integer))))
+(let part1 (lambda input (do 
+    (let min (std:vector:ints:minimum input))
+    (|> input
+        (std:vector:map (lambda x (- x min)))
+        (std:vector:ints:sum)))))
+
+ (let part2 (lambda input (do 
+    (std:vector:sort:desc! input)
+    (let median (std:vector:ints:median input))
+    (|> input
+        (std:vector:map (lambda x (cond (> x median) (- x median) (< x median) (- median x) 0)))
+        (std:vector:ints:sum)))))
+
+[(|> 
+"3
+4
+7
+8"
+    (parse)
+    (part1)
+)
+(|> 
+"2
+4
+5
+6
+8"
+    (parse)
+    (part2)
+)]"#,
+                "[10 8]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
