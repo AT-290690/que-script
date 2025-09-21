@@ -14,6 +14,17 @@ use ir::load_bytecode;
 use std::env;
 mod tests;
 
+fn run_code(program: String) -> String {
+    let std_ast = baked::load_ast();
+    if let parser::Expression::Apply(items) = &std_ast {
+        let wrapped_ast = parser::merge_std_and_program(&program, items[1..].to_vec());
+        match infer::infer_with_builtins(&wrapped_ast) {
+            Ok(typ) => return format!("{}\n{:?}", typ, vm::run(&wrapped_ast)),
+            Err(e) => return format!("{:?}", e),
+        }
+    }
+    "No expressions...".to_string()
+}
 fn dump_wrapped_ast(expr: parser::Expression, path: &str) -> std::io::Result<()> {
     let mut file = fs::File::create(path)?;
     writeln!(file, "use crate::parser::Expression::*;")?;
@@ -62,18 +73,7 @@ fn main() -> std::io::Result<()> {
         let bitecode = ir::load_bytecode();
         println!("{:?}", vm::exe(bitecode));
     } else {
-        let program = fs::read_to_string("./lisp/main.lisp")?;
-        let std_ast = baked::load_ast();
-        if let parser::Expression::Apply(items) = &std_ast {
-            let wrapped_ast = parser::merge_std_and_program(&program, items[1..].to_vec());
-            match infer::infer_with_builtins(&wrapped_ast) {
-                Ok(typ) => {
-                    println!("{}", typ);
-                    println!("{:?}", vm::run(&wrapped_ast))
-                }
-                Err(e) => println!("Error: {}", e),
-            }
-        }
+        println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
     }
     Ok(())
 }
