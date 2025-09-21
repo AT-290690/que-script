@@ -720,3 +720,190 @@ heap)))
         (|> a (std:convert:set->vector) (std:vector:for (lambda element (std:vector:hash:set:add! out element))))
         (|> b (std:convert:set->vector) (std:vector:for (lambda element (std:vector:hash:set:add! out element))))
         out)))
+
+; Experimental still
+
+(let std:vector:deque:new (lambda default [[ default ] []]))
+(let std:vector:deque:offset-left (lambda q (* (- (length (get q 0)) 1) -1)))
+(let std:vector:deque:offset-right (lambda q (length (get q 1))))
+(let std:vector:deque:length (lambda q (+ (length (get q 0)) (length (get q 1)) -1)))
+(let std:vector:deque:empty? (lambda q (= (std:vector:deque:length q) 0)))
+(let std:vector:deque:empty! (lambda q default (do
+    (set! q 0 [default])
+    (set! q 1 [])
+    q)))
+
+(let std:vector:deque:get (lambda q offset (do
+  (let offset-index (+ offset (std:vector:deque:offset-left q)))
+  (let index (if (< offset-index 0) (* offset-index -1) offset-index))
+  (if (>= offset-index 0)
+       (get (get q 1) index)
+       (get (get q 0) index)))))
+
+(let std:vector:deque:set! (lambda q index value (do
+    (let offset (+ index (std:vector:deque:offset-left q)))
+    (if (>= offset 0)
+        (set! (get q 1) offset value)
+        (set! (get q 0) (* offset -1) value))
+  q)))
+(let std:vector:deque:add-to-left! (lambda q item (do (let c (get q 0)) (set! c (length c) item))))
+(let std:vector:deque:add-to-right! (lambda q item (do (let c (get q 1)) (set! c (length c) item))))
+(let std:vector:deque:remove-from-left! (lambda q default (do
+  (let len (std:vector:deque:length q))
+  (if (> len 0)
+     (cond
+        (= len 1) (std:vector:deque:empty! q default)
+        (> (length (get q 0)) 0) (do (pop! (get q 0)) q)
+        q) q))))
+(let std:vector:deque:remove-from-right! (lambda q default (do
+    (let len (std:vector:deque:length q))
+    (if (> len 0)
+     (cond
+        (= len 1) (std:vector:deque:empty! q default)
+        (> (length (get q 1)) 0) (do (pop! (get q 1)) q)
+        q) q))))
+(let std:vector:deque:iter (lambda q fn (do
+  (let tail-call:std:vector:deque:iter (lambda index bounds (do
+      (fn (std:vector:deque:get q index))
+      (if (< index bounds) (tail-call:std:vector:deque:iter (+ index 1) bounds) nil))))
+    (tail-call:std:vector:deque:iter 0 (std:vector:deque:length q)))))
+(let std:vector:deque:map (lambda q fn default (do
+  (let result (std:vector:deque:new default))
+  (let len (std:vector:deque:length q))
+  (let half (/ len 2))
+  (let tail-call:left:std:vector:deque:map (lambda index (do
+    (std:vector:deque:add-to-left! result (fn (std:vector:deque:get q index)))
+   (if (> index 0) (tail-call:left:std:vector:deque:map (- index 1)) nil))))
+ (tail-call:left:std:vector:deque:map (- half 1))
+(let tail-call:right:std:vector:deque:map (lambda index bounds (do
+   (std:vector:deque:add-to-right! result (fn (std:vector:deque:get q index)))
+   (if (< index bounds) (tail-call:right:std:vector:deque:map (+ index 1) bounds) nil))))
+ (tail-call:right:std:vector:deque:map half (- len 1))
+ result)))
+(let std:vector:deque:balance? (lambda q (= (+ (std:vector:deque:offset-right q) (std:vector:deque:offset-left q)) 0)))
+(let std:convert:vector->deque (lambda initial default (do
+ (let q (std:vector:deque:new default))
+ (let half  (/ (length initial) 2))
+ (let tail-call:left:from:vector->deque (lambda index (do
+    (std:vector:deque:add-to-left! q (get initial index))
+   (if (> index 0) (tail-call:left:from:vector->deque (- index 1)) nil))))
+ (tail-call:left:from:vector->deque (- half 1))
+(let tail-call:right:from:vector->deque (lambda index bounds (do
+   (std:vector:deque:add-to-right! q (get initial index))
+   (if (< index bounds) (tail-call:right:from:vector->deque (+ index 1) bounds) nil))))
+ (tail-call:right:from:vector->deque half (- (length initial) 1))
+    q)))
+(let std:convert:deque->vector (lambda q (if (std:vector:deque:empty? q) [(. q 0 0)] (do
+  (let out [])
+  (let tail-call:from:deque->vector (lambda index bounds (do
+      (set! out (length out) (std:vector:deque:get q index))
+      (if (< index bounds) (tail-call:from:deque->vector (+ index 1) bounds) nil))))
+    (tail-call:from:deque->vector 0 (- (std:vector:deque:length q) 1))
+    out))))
+(let std:vector:deque:balance! (lambda q default
+    (if (std:vector:deque:balance? q) q (do
+      (let initial (std:convert:deque->vector q))
+      (std:vector:deque:empty! q default)
+      (let half (/ (length initial) 2))
+      (let tail-call:left:std:vector:deque:balance! (lambda index (do
+        (std:vector:deque:add-to-left! q (get initial index))
+        (if (> index 0) (tail-call:left:std:vector:deque:balance! (- index 1)) nil))))
+      (let tail-call:right:std:vector:deque:balance! (lambda index bounds (do
+        (std:vector:deque:add-to-right! q (get initial index))
+        (if (< index bounds) (tail-call:right:std:vector:deque:balance! (+ index 1) bounds) nil))))
+      (tail-call:right:std:vector:deque:balance! half (- (length initial) 1))
+      (if (> (length initial) 1) (tail-call:left:std:vector:deque:balance! (- half 1)) nil)
+    q))))
+(let std:vector:deque:append! (lambda q item (do (std:vector:deque:add-to-right! q item) q)))
+(let std:vector:deque:prepend! (lambda q item (do (std:vector:deque:add-to-left! q item) q)))
+(let std:vector:deque:head! (lambda q default (do
+    (if (= (std:vector:deque:offset-right q) 0) (std:vector:deque:balance! q default) q)
+    (std:vector:deque:remove-from-right! q default)
+    q)))
+(let std:vector:deque:tail! (lambda q default (do
+    (if (= (std:vector:deque:offset-left q) 0) (std:vector:deque:balance! q default) q)
+    (std:vector:deque:remove-from-left! q default)
+q)))
+(let std:vector:deque:first (lambda q (std:vector:deque:get q 0)))
+(let std:vector:deque:last (lambda q (std:vector:deque:get q (- (std:vector:deque:length q) 1))))
+(let std:vector:deque:pop-right! (lambda q (do
+    (let last (std:vector:deque:last q))
+    (std:vector:deque:head! q)
+    last)))
+(let std:vector:deque:pop-left! (lambda q (do
+    (let first (std:vector:deque:first q))
+    (std:vector:deque:tail! q)
+    first)))
+(let std:vector:deque:rotate-left! (lambda q n default (do
+  (let N (mod n (std:vector:deque:length q)))
+  (let tail-call:std:vector:deque:rotate-left! (lambda index bounds (do
+      (if (= (std:vector:deque:offset-left q) 0) (std:vector:deque:balance! q default) q)
+      (std:vector:deque:add-to-right! q (std:vector:deque:first q))
+      (std:vector:deque:remove-from-left! q default)
+      (if (< index bounds) (tail-call:std:vector:deque:rotate-left! (+ index 1) bounds) nil))))
+    (tail-call:std:vector:deque:rotate-left! 0 N) q)))
+(let std:vector:deque:rotate-right! (lambda q n default (do
+  (let N (mod n (std:vector:deque:length q)))
+  (let tail-call:std:vector:deque:rotate-left! (lambda index bounds (do
+      (if (= (std:vector:deque:offset-right q) 0) (std:vector:deque:balance! q default) q)
+      (std:vector:deque:add-to-left! q (std:vector:deque:last q))
+      (std:vector:deque:remove-from-right! q)
+      (if (< index bounds) (tail-call:std:vector:deque:rotate-left! (+ index 1) bounds) nil))))
+    (tail-call:std:vector:deque:rotate-left! 0 N) q)))
+(let std:vector:deque:slice (lambda entity s e default (do
+  (let len (std:vector:deque:length entity))
+  (let start (if (< s 0) (std:int:max (+ len s) 0) (std:int:min s len)))
+  (let end (if (< e 0) (std:int:max (+ len e) 0) (std:int:min e len)))
+  (let slice (std:vector:deque:new default))
+  (let slice-len (std:int:max (- end start) 0))
+  (let half (/ slice-len 2))
+  (let tail-call:left:std:vector:deque:slice (lambda index (do
+      (std:vector:deque:add-to-left! slice (std:vector:deque:get entity (+ start index)))
+      (if (> index 0) (tail-call:left:std:vector:deque:slice (- index 1)) nil))))
+  (tail-call:left:std:vector:deque:slice (- half 1))
+  (let tail-call:right:std:vector:deque:slice (lambda index bounds (do
+      (std:vector:deque:add-to-right! slice (std:vector:deque:get entity (+ start index)))
+      (if (< index bounds) (tail-call:right:std:vector:deque:slice (+ index 1) bounds) nil))))
+  (tail-call:right:std:vector:deque:slice half (- slice-len 1))
+  slice)))
+
+(let std:vector:queue:new std:vector:deque:new)
+(let std:vector:stack:new std:vector:deque:new)
+
+(let std:vector:queue:empty? std:vector:deque:empty?)
+(let std:vector:queue:not-empty? (lambda q (not (std:vector:deque:empty? q))))
+(let std:vector:queue:empty! std:vector:deque:empty!)
+(let std:vector:queue:enqueue! (lambda queue item (std:vector:deque:append! queue item)))
+(let std:vector:queue:dequeue! (lambda queue (std:vector:deque:tail! queue)))
+(let std:vector:queue:peek (lambda queue (std:vector:deque:first queue)))
+
+(let std:vector:stack:empty? std:vector:deque:empty?)
+(let std:vector:stack:not-empty? (lambda q (not (std:vector:deque:empty? q))))
+(let std:vector:stack:empty! std:vector:deque:empty!)
+(let std:vector:stack:push! (lambda stack item (std:vector:deque:append! stack item)))
+(let std:vector:stack:pop! (lambda stack (std:vector:deque:head! stack)))
+(let std:vector:stack:peek (lambda stack (std:vector:deque:last stack)))
+
+
+(let std:vector:3d:for (lambda matrix fn (do
+  (let width (length (std:vector:first matrix)))
+  (let height (length matrix))
+  (loop 0 height (lambda y 
+    (loop 0 width (lambda x
+      (fn (get matrix y x))))))
+   matrix)))
+
+(let std:vector:3d:for:i (lambda matrix fn (do
+  (let width (length (std:vector:first matrix)))
+  (let height (length matrix))
+  (loop 0 height (lambda y 
+    (loop 0 width (lambda x
+      (fn (get matrix y x) y x)))))
+   matrix)))
+
+(let std:vector:3d:points (lambda matrix fn? (do 
+   (let coords [])
+   (std:vector:3d:for:i matrix (lambda cell y x (if (fn? cell) (do (std:vector:push! coords [ y x ]) nil)))) 
+    coords)))
+
+(let std:vector:concat-with (lambda xs ch (std:vector:reduce:i xs (lambda a b i (if (and (> i 0) (< i (length xs))) (std:vector:cons (std:vector:cons a [ ch ]) b) (std:vector:cons a b))) [])))
