@@ -17,10 +17,12 @@ mod tests;
 fn run_code(program: String) -> String {
     let std_ast = baked::load_ast();
     if let parser::Expression::Apply(items) = &std_ast {
-        let wrapped_ast = parser::merge_std_and_program(&program, items[1..].to_vec());
-        match infer::infer_with_builtins(&wrapped_ast) {
-            Ok(typ) => return format!("{}\n{:?}", typ, vm::run(&wrapped_ast)),
-            Err(e) => return format!("{:?}", e),
+        match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+            Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
+                Ok(typ) => return format!("{}\n{:?}", typ, vm::run(&wrapped_ast)),
+                Err(e) => return format!("{:?}", e),
+            },
+            Err(e) => return e,
         }
     }
     "No expressions...".to_string()
@@ -63,11 +65,16 @@ fn main() -> std::io::Result<()> {
     } else if args.iter().any(|a| a == "--comp") {
         let program = fs::read_to_string("./lisp/main.lisp")?;
         let std_ast = baked::load_ast();
+
         if let parser::Expression::Apply(items) = &std_ast {
-            let wrapped_ast = parser::merge_std_and_program(&program, items[1..].to_vec());
-            let mut code: Vec<vm::Instruction> = Vec::new();
-            vm::compile(&wrapped_ast, &mut code);
-            dump_wrapped_bytecode(code, "./src/ir.rs");
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    let mut code: Vec<vm::Instruction> = Vec::new();
+                    vm::compile(&wrapped_ast, &mut code);
+                    dump_wrapped_bytecode(code, "./src/ir.rs");
+                }
+                Err(e) => println!("{:?}", e),
+            }
         }
     } else if args.iter().any(|a| a == "--exec") {
         let bitecode = ir::load_bytecode();

@@ -9,13 +9,15 @@ use crate::baked::load_ast;
 mod tests;
 use wasm_bindgen::prelude::wasm_bindgen;
 #[wasm_bindgen]
-pub fn run(program: &str) -> String {
+pub fn run(program: String) -> String {
     let std_ast = baked::load_ast();
     if let parser::Expression::Apply(items) = &std_ast {
-        let wrapped_ast = parser::merge_std_and_program(&program, items[1..].to_vec());
-        match infer::infer_with_builtins(&wrapped_ast) {
-            Ok(typ) => return format!("{}\n{:?}", typ, vm::run(&wrapped_ast)),
-            Err(e) => return format!("{:?}", e),
+        match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+            Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
+                Ok(typ) => return format!("{}\n{:?}", typ, vm::run(&wrapped_ast)),
+                Err(e) => return format!("{:?}", e),
+            },
+            Err(e) => return e,
         }
     }
     "No expressions...".to_string()

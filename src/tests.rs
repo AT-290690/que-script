@@ -497,9 +497,13 @@ mod tests {
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
             if let crate::parser::Expression::Apply(items) = &std_ast {
-                let exprs = crate::parser::merge_std_and_program(&inp, items[1..].to_vec());
-                let result = crate::vm::run(&exprs);
-                assert_eq!(format!("{:?}", result), *out, "Solution");
+                match crate::parser::merge_std_and_program(&inp, items[1..].to_vec()) {
+                    Ok(exprs) => {
+                        let result = crate::vm::run(&exprs);
+                        assert_eq!(format!("{:?}", result), *out, "Solution");
+                    }
+                    Err(e) => panic!("Failed tests because {}", e),
+                }
             }
         }
     }

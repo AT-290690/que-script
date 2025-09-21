@@ -136,11 +136,21 @@ pub fn parse(src: &str) -> Result<Vec<Expression>, String> {
     let tokens = tokenize(src);
     let mut i = 0;
     let mut exprs = Vec::new();
+
     while i < tokens.len() {
-        exprs.push(parse_expr(&tokens, &mut i)?);
+        match parse_expr(&tokens, &mut i) {
+            Ok(expr) => exprs.push(expr),
+            Err(e) => {
+                return Err(format!(
+                    "Error parsing expression at token index {}: {}",
+                    i, e
+                ))
+            }
+        }
     }
     Ok(exprs)
 }
+
 fn preprocess(source: &str) -> String {
     let mut out = String::new();
     let mut chars = source.chars().peekable();
@@ -697,31 +707,34 @@ pub fn build(program: &str) -> Expression {
     wrapped
 }
 #[allow(dead_code)]
-pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Expression {
+pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expression, String> {
     let preprocessed = preprocess(&program);
+    match parse(&preprocessed) {
+        Ok(exprs) => {
+            let expanded = expand_imports_top_level(exprs);
+            let desugared: Vec<Expression> = expanded
+                .into_iter()
+                .map(desugar_tail_recursion)
+                .map(desugar)
+                .collect();
 
-    let exprs = parse(&preprocessed).unwrap();
-    let expanded = expand_imports_top_level(exprs);
-    let desugared: Vec<Expression> = expanded
-        .into_iter()
-        .map(desugar_tail_recursion)
-        .map(desugar)
-        .collect();
+            let mut used = HashSet::new();
+            for e in &desugared {
+                collect_idents(e, &mut used);
+            }
 
-    let mut used = HashSet::new();
-    for e in &desugared {
-        collect_idents(e, &mut used);
+            let shaken_std = tree_shake(std, &used);
+
+            let wrapped = Expression::Apply(
+                std::iter::once(Expression::Word("do".to_string()))
+                    .chain(shaken_std.into_iter())
+                    .chain(desugared.into_iter())
+                    .collect(),
+            );
+            Ok(wrapped)
+        }
+        Err(e) => Err(e),
     }
-
-    let shaken_std = tree_shake(std, &used);
-
-    let wrapped = Expression::Apply(
-        std::iter::once(Expression::Word("do".to_string()))
-            .chain(shaken_std.into_iter())
-            .chain(desugared.into_iter())
-            .collect(),
-    );
-    wrapped
 }
 
 // Main entry: recursively transform expressions, but when a let with a lambda bound to a name
