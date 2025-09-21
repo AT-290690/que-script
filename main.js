@@ -20,9 +20,7 @@ const THEME = "terminal";
 const editor = makeEditor("editor", THEME);
 const terminal = makeEditor("terminal", THEME);
 terminal.renderer.setShowGutter(false);
-terminal.setValue(
-  "; To run press cmd/ctrl + S or the play button at the top right corner"
-);
+terminal.setValue("; To run press cmd/ctrl + S or the run button");
 terminal.clearSelection();
 const initial = new URLSearchParams(location.search).get("l") ?? "";
 if (initial) {
