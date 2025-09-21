@@ -1,0 +1,96 @@
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height"
+  />
+  <meta name="description" content="Write and run Resin programs" />
+  <title>Resin</title>
+  <link rel="icon" type="image/x-icon" href="./favicon.ico" />
+  <style>
+    html {
+      background-color: black;
+    }
+    .ace_comment {
+      color: #7285b2aa !important;
+    }
+    @font-face {
+      font-family: "Monaco9";
+      src: url(./monaco-9.ttf) format("truetype");
+      font-display: swap;
+    }
+    * {
+      font-family: "Monaco9" !important;
+      font-size: 20px !important;
+    }
+    #editor {
+      height: 80%;
+      width: 100%;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #terminal {
+      border-top: 1px solid steelblue;
+      height: 19%;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="editor"></div>
+  <div id="terminal"></div>
+  <script
+    defer
+    src="//ajaxorg.github.io/ace-builds/src-min-noconflict/ace.js"
+    type="text/javascript"
+    charset="utf-8"
+  ></script>
+  <script type="module">
+    import init, { run } from "./pkg/fez_rs.js";
+    init();
+    const makeEditor = (el, theme) => {
+      const editor = ace.edit(el);
+      editor.setOptions({
+        fontFamily: "Monaco9",
+        fontSize: "10pt",
+        copyWithEmptySelection: true,
+      });
+      editor.setKeyboardHandler("ace/keyboard/vscode");
+      editor.renderer.setShowGutter(false);
+      editor.setTheme(`ace/theme/${theme}`);
+      editor.setShowPrintMargin(false);
+      editor.session.setMode("ace/mode/lisp");
+      editor.renderer.setScrollMargin(10, 10);
+      editor.session.setUseWrapMode(true);
+      return editor;
+    };
+    const THEME = "terminal";
+    const editor = makeEditor("editor", THEME);
+    const terminal = makeEditor("terminal", THEME);
+    terminal.renderer.setShowGutter(false);
+    const comp = (value) => {
+      const out = run(value);
+      if (out && out[0] === '"') {
+        terminal.setValue(out.substring(1, out.length - 1));
+      } else terminal.setValue(out);
+    };
+    document.addEventListener("keydown", (e) => {
+      if (
+        e.key.toLowerCase() === "s" &&
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        const value = editor.getValue();
+        if (value.trim()) {
+          comp(value);
+          terminal.clearSelection();
+        }
+      }
+    });
+  </script>
+</body>
