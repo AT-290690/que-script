@@ -453,6 +453,46 @@ mod tests {
 "#,
                 "[36 81]",
             ),
+            (
+                r#"(let INPUT
+"3   4
+4   3
+2   5
+1   3
+3   9
+3   3")
+
+(let parse (lambda input (|>
+                            input
+                            (std:string:lines)
+                            (std:vector:map (lambda word (|>
+                                                      word
+                                                      (std:string:words)
+                                                      (std:vector:filter std:vector:not-empty?)
+                                                      (std:vector:map std:convert:chars->integer)))))))
+
+(let part1 (lambda input (|>
+                          input
+                          (std:vector:unzip)
+                          (std:vector:map std:vector:sort:desc!)
+                          (std:vector:zip)
+                          (std:vector:map std:vector:ints:pair:sub)
+                          (std:vector:map std:int:abs)
+                          (std:vector:ints:sum))))
+                        
+(let part2 (lambda input (do
+  (let unzipped (std:vector:unzip input))
+  (let left (std:vector:first unzipped))
+  (let right (std:vector:second unzipped))
+  (|>
+    left
+    (std:vector:map (lambda l (* l (std:vector:count-of right (lambda r (= l r))))))
+    (std:vector:ints:sum)))))
+
+(let PARSED (parse INPUT))
+[(part1 PARSED) (part2 PARSED)]"#,
+                "[11 31]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

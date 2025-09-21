@@ -907,3 +907,13 @@ q)))
     coords)))
 
 (let std:vector:concat-with (lambda xs ch (std:vector:reduce:i xs (lambda a b i (if (and (> i 0) (< i (length xs))) (std:vector:cons (std:vector:cons a [ ch ]) b) (std:vector:cons a b))) [])))
+
+(let std:string:lines (lambda xs (std:convert:string->vector xs std:int:char:new-line)))
+(let std:string:words (lambda xs (std:convert:string->vector xs std:int:char:space)))
+(let std:string:commas (lambda xs (std:convert:string->vector xs std:int:char:comma)))
+(let std:vector:ints:pair:sub (lambda xs (- (. xs 0) (. xs 1))))
+(let std:vector:ints:pair:add (lambda xs (+ (. xs 0) (. xs 1))))
+(let std:vector:ints:pair:mult (lambda xs (* (. xs 0) (. xs 1))))
+(let std:vector:ints:pair:div (lambda xs (/ (. xs 0) (. xs 1))))
+(let std:vector:sort:asc! (lambda xs (std:vector:sort! xs <)))
+(let std:vector:sort:desc! (lambda xs (std:vector:sort! xs >)))
