@@ -840,6 +840,63 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         vec![Instruction::LoadVar("a".to_string()), Instruction::Not],
                     ));
                 }
+
+                ">>" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::BitRs,
+                        ],
+                    ));
+                }
+                "<<" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::BitLs,
+                        ],
+                    ));
+                }
+                "^" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::BitXor,
+                        ],
+                    ));
+                }
+                "|" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::BitOr,
+                        ],
+                    ));
+                }
+                "&" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::BitAnd,
+                        ],
+                    ));
+                }
+                "~" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string()],
+                        vec![Instruction::LoadVar("a".to_string()), Instruction::BitNot],
+                    ));
+                }
                 _ => {
                     code.push(Instruction::LoadVar(name.clone()));
                 }

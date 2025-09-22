@@ -528,6 +528,70 @@ mod tests {
 )]"#,
                 "[10 8]",
             ),
+            (
+                r#"(let xs [1 2 0 4 3 0 5 0])
+
+(let solve! (lambda xs (do 
+    (integer count 0)
+    (let len (length xs))
+    (std:vector:for xs (lambda x (if (<> x 0) (do 
+        (set! xs (get count) x)
+        (++ count)))))
+    (loop (< (get count) len) (lambda (do 
+        (set! xs (get count) 0)
+        (++ count))))
+    xs)))
+
+(solve! xs)"#,
+                "[1 2 4 3 5 0 0 0]",
+            ),
+            (
+                r#"(let naive-sub-array-sum (lambda xs (do 
+    (let n (length xs))
+    (integer out 0)
+    (loop 0 n (lambda i (do 
+        (integer temp 0)
+        (loop i n (lambda j (do 
+            (+= temp (get xs j))
+            (+= out (get temp))))))))
+    (get out))))
+
+(let expert-sub-array-sum (lambda xs (do 
+    (let n (length xs))
+    (integer out 0)
+    (loop 0 n (lambda i (+= out (* (get xs i) (+ i 1) (- n i)))))
+    (get out))))
+
+(let xs [1 4 5 3 2])
+[(naive-sub-array-sum xs) (expert-sub-array-sum xs)]
+"#,
+                "[116 116]",
+            ),
+            (
+                r#"
+; Input : [1, 2, 4]
+; Output : 125
+; Explanation: 124 + 1 = 125 
+
+; Input : [9, 9, 9]
+; Output: 1000
+; Explanation: 999 + 1 = 1000 
+
+[
+    (+ (std:convert:digits->integer [ 1 2 4 ]) 1)
+    (+ (std:convert:digits->integer [ 9 9 9 ]) 1)
+]
+            "#,
+                "[125 1000]",
+            ),
+            ("(std:convert:bits->integer [ 1 0 0 0 0 0 1 1 0 0 ])", "524"),
+            (
+                r#"(let xs [ 1 2 3 ])
+(let copy (std:vector:copy xs))
+(set! copy 0 1000)
+[ xs copy ]"#,
+                "[[1 2 3] [1000 2 3]]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

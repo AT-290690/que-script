@@ -581,8 +581,9 @@
                     (std:vector:push! a (* (get current-sign) (std:convert:char->digit ch))) 
                     (set current-sign 1)))
                 a)) [])))))
+(let std:convert:digits->integer std:convert:positive-or-negative-digits->integer)
 (let std:convert:positive-or-negative-chars->integer (lambda x (|> x (std:convert:chars->positive-or-negative-digits) (std:convert:positive-or-negative-digits->integer))))
-(let std:convert:chars->integer (lambda chars (std:convert:positive-or-negative-chars->integer chars)))
+(let std:convert:chars->integer std:convert:positive-or-negative-chars->integer)
 
 ; (let buffer [])
 ; (let fn (ring-buffer buffer 5))
@@ -925,3 +926,33 @@ q)))
 (let std:vector:ints:pair:div (lambda xs (/ (. xs 0) (. xs 1))))
 (let std:vector:sort:asc! (lambda xs (std:vector:sort! xs <)))
 (let std:vector:sort:desc! (lambda xs (std:vector:sort! xs >)))
+
+(let std:convert:integer->bits (lambda num  
+    (if (= num 0) [ 0 ] (do 
+        (integer n num)
+        (let tail-call:while (lambda out
+            (if (> (get n) 0) (do
+                (std:vector:push! out (mod (get n) 2))
+                (set n (/ (get n) 2))
+                (tail-call:while out)) out)))
+        (tail-call:while [])))))
+
+(let std:vector:subset (lambda xs (do
+    (let n (length xs))
+    (let out [])
+    (loop 0 (std:int:expt 2 n) (lambda i 
+       ; generate bitmask, from 0..00 to 1..11
+        (std:vector:push! out (|>
+                i
+                (std:convert:integer->bits)
+                (std:vector:reduce:i (lambda a x i
+                    (if (= x 1) (std:vector:append! a (get xs i)) a)) [])))))
+    out)))
+
+(let std:convert:bits->integer (lambda xs (do
+  (let bits->integer (lambda index out (if
+                              (= index (length xs)) out
+                              (bits->integer (+ index 1) (+ out (* (std:vector:at xs index) (std:int:expt 2 (- (length xs) index 1))))))))
+  (bits->integer 0 0))))
+
+(let std:vector:copy (lambda xs (std:vector:map xs identity)))
