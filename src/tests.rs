@@ -592,6 +592,23 @@ mod tests {
 [ xs copy ]"#,
                 "[[1 2 3] [1000 2 3]]",
             ),
+            (
+                r#"(let sort-array-by-parity2 (lambda nums (if (std:vector:empty? nums) nums (do 
+    (let odd [])
+    (let even [])
+    (let out [])
+    (loop 0 (length nums) (lambda i (std:vector:push! (if (std:int:even? i) even odd) (. nums i))))
+    (loop 0 (length even) (lambda i (do (std:vector:push! out (. even i)) (std:vector:push! out (. odd i)))))
+    out))))
+
+[
+  (sort-array-by-parity2 [ 4 2 5 7 ])
+  (sort-array-by-parity2 [ 2 3 ])
+  (sort-array-by-parity2 [ 4 3 ])
+]"#,
+                "[[4 2 5 7] [2 3] [4 3]]",
+            ),
+            ("(std:int:collinear? [[ 3 8 ] [ 5 10 ] [ 7 12 ]])", "1"),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

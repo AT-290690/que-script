@@ -935,9 +935,9 @@ q)))
                 (std:vector:push! out (mod (get n) 2))
                 (set n (/ (get n) 2))
                 (tail-call:while out)) out)))
-        (tail-call:while [])))))
+        (std:vector:reverse (tail-call:while []))))))
 
-(let std:vector:subset (lambda xs (do
+(let std:vector:subset (lambda xs (if (std:vector:empty? xs) [ xs ] (do
     (let n (length xs))
     (let out [])
     (loop 0 (std:int:expt 2 n) (lambda i 
@@ -947,7 +947,7 @@ q)))
                 (std:convert:integer->bits)
                 (std:vector:reduce:i (lambda a x i
                     (if (= x 1) (std:vector:append! a (get xs i)) a)) [])))))
-    out)))
+    out))))
 
 (let std:convert:bits->integer (lambda xs (do
   (let bits->integer (lambda index out (if
@@ -956,3 +956,59 @@ q)))
   (bits->integer 0 0))))
 
 (let std:vector:copy (lambda xs (std:vector:map xs identity)))
+
+(let std:int:reduce (lambda n fn acc (do 
+    (let tail-call:fold-n (lambda i out (if (< i n) (tail-call:fold-n (+ i 1) (fn out i)) out)))
+    (tail-call:fold-n 0 acc))))
+(let std:vector:2d:fill (lambda n fn (do 
+  (let tail-call:std:vector:fill (lambda i xs (if (= i 0) xs (tail-call:std:vector:fill (- i 1) (std:vector:cons! xs (vector (fn)))))))
+  (tail-call:std:vector:fill n []))))
+(let std:vector:3d:fill (lambda W H fn (do
+    (let matrix [])
+    (loop 0 W (lambda i (do 
+        (std:vector:push! matrix [])
+        (loop 0 H (lambda j (std:vector:3d:set! matrix i j (fn i j)))))))
+    matrix)))
+(let std:vector:3d:product (lambda A B (do
+  (let dimsA (std:vector:3d:dimensions A))
+  (let dimsB (std:vector:3d:dimensions B))
+  (let rowsA (. dimsA 0))
+  (let colsA (. dimsA 1))
+  (let rowsB (. dimsB 0))
+  (let colsB (. dimsB 1))
+  (if (= colsA rowsB) (std:vector:3d:fill rowsA colsB (lambda i j
+      (std:int:reduce colsA (lambda sum k (+ sum (* (. A i k) (. B k j)))) 0))) []))))
+(let std:vector:3d:dot-product (lambda a b (do
+  (let lenA (length a))
+  (let lenB (length b))
+  (if (= lenA lenB)
+    (std:int:reduce lenA (lambda sum i (+ sum (* (. a i) (. b i)))) 0) nil))))
+
+(let std:vector:3d:rotate (lambda matrix (if (std:vector:empty? matrix) matrix (do 
+    (let H (length matrix))
+    (let W (length (. matrix 0)))
+    (let out [])
+    (loop 0 W (lambda i (do
+        (std:vector:push! out [])
+        (loop 0 H (lambda j 
+            (std:vector:push! (std:vector:at out -1) (. matrix j i)))))))
+    out))))
+
+(let std:vector:ints:sequence (lambda xs (std:vector:ints:range 0 (- (length xs) 1))))
+(let std:int:shoelace (lambda points (do
+    (let len (length points))
+    (/ (|> (std:vector:ints:sequence points)
+        (std:vector:reduce (lambda ab i (do
+            (let a (. ab 0))
+            (let b (. ab 1))
+            (let left (. points i))
+            (let right (. points (mod (+ i 1) len)))
+            (let y1 (. left 0))
+            (let x1 (. left 1))
+            (let y2 (. right 0))
+            (let x2 (. right 1))
+            [(+ a (* y1 x2)) (+ b (* y2 x1))])) 
+        [0 0])
+        (std:vector:ints:pair:sub)
+        (std:int:abs)) 2))))
+(let std:int:collinear? (lambda points (= (std:int:shoelace points) 0)))
