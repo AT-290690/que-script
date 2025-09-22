@@ -358,6 +358,14 @@
      (loop 0 bounds process)
      out))))
 
+(let std:vector:drop (lambda xs start (if (std:vector:empty? xs) xs (do
+     (let end (length xs))
+     (let bounds (- end start))
+     (let out [])
+     (let process (lambda i (std:vector:set! out (length out) (get xs (+ start i)))))
+     (loop 0 bounds process)
+     out))))
+
 (let std:vector:reverse (lambda xs (if (std:vector:empty? xs) xs (do
      (let out [])
      (let len (length xs))

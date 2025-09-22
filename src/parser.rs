@@ -213,6 +213,8 @@ fn desugar(expr: Expression) -> Expression {
                     "integer" => integer_transform(exprs),
                     "boolean" => boolean_transform(exprs),
                     "loop" => loop_transform(exprs),
+                    "lambda" => lambda_destructure_transform(exprs),
+
                     _ => Expression::Apply(exprs),
                 }
             } else {
@@ -221,6 +223,83 @@ fn desugar(expr: Expression) -> Expression {
         }
         other => other,
     }
+}
+fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Expression {
+    // separate args and body
+    if exprs.len() < 2 {
+        panic!("lambda expects at least a body");
+    }
+    let args = &exprs[1..exprs.len() - 1];
+    let body = exprs.last().unwrap().clone();
+
+    // look for array args
+    let mut new_bindings = vec![];
+    let new_args: Vec<Expression> = args
+        .iter()
+        .map(|arg| {
+            if let Expression::Apply(array_exprs) = arg {
+                if let [Expression::Word(ref array_kw), ref elements @ ..] = &array_exprs[..] {
+                    if array_kw == "vector" {
+                        // replace this arg with _args
+                        for (i, elem) in elements.iter().enumerate() {
+                            match elem {
+                                Expression::Word(name) => {
+                                    if i == elements.len() - 1 {
+                                        if name != "." {
+                                            new_bindings.push(Expression::Apply(vec![
+                                                Expression::Word("let".to_string()),
+                                                Expression::Word(name.clone()),
+                                                Expression::Apply(vec![
+                                                    Expression::Word("std:vector:drop".to_string()),
+                                                    Expression::Word("_args".to_string()),
+                                                    Expression::Atom(i as i32),
+                                                ]),
+                                            ]))
+                                        }
+                                    } else {
+                                        if name != "." {
+                                            new_bindings.push(Expression::Apply(vec![
+                                                Expression::Word("let".to_string()),
+                                                Expression::Word(name.clone()),
+                                                Expression::Apply(vec![
+                                                    Expression::Word("get".to_string()),
+                                                    Expression::Word("_args".to_string()),
+                                                    Expression::Atom(i as i32),
+                                                ]),
+                                            ]))
+                                        }
+                                    }
+                                }
+                                Expression::Word(_) => { /* skip element */ }
+                                _ => panic!("lambda array element must be a word or '.'"),
+                            }
+                        }
+                        return Expression::Word("_args".to_string());
+                    }
+                }
+            }
+            arg.clone()
+        })
+        .collect();
+
+    // wrap body with new bindings
+    let new_body = if !new_bindings.is_empty() {
+        let mut do_exprs = new_bindings;
+        do_exprs.push(body);
+        Expression::Apply(
+            std::iter::once(Expression::Word("do".to_string()))
+                .chain(do_exprs.into_iter())
+                .collect(),
+        )
+    } else {
+        body
+    };
+
+    // rebuild lambda with transformed args and body
+    let mut lambda_exprs = vec![Expression::Word("lambda".to_string())];
+    lambda_exprs.extend(new_args);
+    lambda_exprs.push(new_body);
+    Expression::Apply(lambda_exprs)
 }
 fn loop_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);

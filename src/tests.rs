@@ -609,6 +609,11 @@ mod tests {
                 "[[4 2 5 7] [2 3] [4 3]]",
             ),
             ("(std:int:collinear? [[ 3 8 ] [ 5 10 ] [ 7 12 ]])", "1"),
+            (
+                r#"(let fn (lambda [ a b c r ] (+ a b c (std:vector:ints:product r))))
+(fn [ 1 2 3 4 5 6 ])"#,
+                "126",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
