@@ -614,6 +614,34 @@ mod tests {
 (fn [ 1 2 3 4 5 6 ])"#,
                 "126",
             ),
+            (
+                r#"(let input "A:+,-,=,=,+,-,=,=,+,-
+B:+,=,-,+,+,=,-,+,+,=
+C:=,-,+,+,=,-,+,+,=,-
+D:=,=,=,+,=,=,=,+,=,=")
+
+(let parse (lambda input (do 
+(|> input (std:string:lines) (std:vector:map (lambda x (do 
+    (let y (std:string:commas x))
+    (set! y 0 (get (std:convert:string->vector (get y 0) std:int:char:colon) 1))
+    (std:vector:flat-one y)))))
+)))
+    
+(let app (lambda a x 
+    (cond (= x std:int:char:plus) (std:vector:append! a (+ (std:vector:last a) 1))
+    (= x std:int:char:minus) (std:vector:append! a (- (std:vector:last a) 1))
+    (= x std:int:char:equal) (std:vector:append! a (std:vector:last a))
+    (std:vector:append! a (std:vector:last a)))))
+(let part1 (lambda xs (do
+    (let letters (|> input (std:string:lines) (std:vector:map std:vector:first)))
+    (|> xs (std:vector:map (lambda x (|> x (std:vector:reduce app [0])))) 
+    (std:vector:map std:vector:ints:sum)
+    (std:vector:map:i (lambda x i [i (+ x 100)]))
+    (std:vector:sort! (lambda a b (> (. a 1) (. b 1))))
+    (std:vector:map (lambda [i .] (. letters i)))))))
+(|> input (parse) (part1))"#,
+                "[66 68 67 65]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
