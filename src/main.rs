@@ -13,6 +13,7 @@ use baked::load_ast;
 use ir::load_bytecode;
 use std::env;
 mod tests;
+mod js;
 
 fn run_code(program: String) -> String {
     let std_ast = baked::load_ast();
@@ -36,6 +37,7 @@ fn dump_wrapped_ast(expr: parser::Expression, path: &str) -> std::io::Result<()>
     writeln!(file, "}}")?;
     Ok(())
 }
+
 
 pub fn dump_wrapped_bytecode(code: Vec<vm::Instruction>, path: &str) -> std::io::Result<()> {
     let mut file: fs::File = fs::File::create(path)?;
@@ -79,6 +81,19 @@ fn main() -> std::io::Result<()> {
     } else if args.iter().any(|a| a == "--exec") {
         let bitecode = ir::load_bytecode();
         println!("{:?}", vm::exe(bitecode));
+    } else if args.iter().any(|a| a == "--js") {
+        let program = fs::read_to_string("./lisp/main.lisp")?;
+        let std_ast = baked::load_ast();
+        if let parser::Expression::Apply(items) = &std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    let mut code: Vec<vm::Instruction> = Vec::new();
+                    let js = js::compile_program_to_js(&wrapped_ast);
+                    println!("{}", js);
+                }
+                Err(e) => println!("{:?}", e),
+            }
+        }
     } else {
         println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
     }
