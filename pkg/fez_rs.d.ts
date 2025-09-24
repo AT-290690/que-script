@@ -1,12 +1,16 @@
 /* tslint:disable */
 /* eslint-disable */
 export function run(program: string): string;
+export function js(program: string): string;
+export function check(program: string): string;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly run: (a: number, b: number) => [number, number];
+  readonly js: (a: number, b: number) => [number, number];
+  readonly check: (a: number, b: number) => [number, number];
   readonly __wbindgen_export_0: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

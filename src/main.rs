@@ -12,8 +12,8 @@ mod ir;
 use baked::load_ast;
 use ir::load_bytecode;
 use std::env;
-mod tests;
 mod js;
+mod tests;
 
 fn run_code(program: String) -> String {
     let std_ast = baked::load_ast();
@@ -37,7 +37,6 @@ fn dump_wrapped_ast(expr: parser::Expression, path: &str) -> std::io::Result<()>
     writeln!(file, "}}")?;
     Ok(())
 }
-
 
 pub fn dump_wrapped_bytecode(code: Vec<vm::Instruction>, path: &str) -> std::io::Result<()> {
     let mut file: fs::File = fs::File::create(path)?;

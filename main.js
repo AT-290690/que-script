@@ -1,4 +1,4 @@
-import init, { run } from "./pkg/fez_rs.js";
+import init, { run, check, js } from "./pkg/fez_rs.js";
 init();
 const makeEditor = (el, theme) => {
   const editor = ace.edit(el);
@@ -33,6 +33,13 @@ if (initial) {
     alert(e instanceof Error ? e.message : e);
   }
 }
+const serialise = (arg) => {
+  if (typeof arg === "number" || typeof arg === "string") return arg.toString();
+  else if (Array.isArray(arg))
+    return arg.length ? `[${arg.map((a) => serialise(a)).join(" ")}]` : "[]";
+  else if (arg === true || arg === false) return arg.toString();
+  else return "(lambda)";
+};
 const link = (value) => {
   const compressed = LZString.compressToBase64(value);
   const newurl =
@@ -49,6 +56,15 @@ const comp = (value) => {
     terminal.setValue(out.substring(1, out.length - 1));
   } else terminal.setValue(out);
 };
+const type = (value) => {
+  const out = check(value);
+  if (out && out[0] === '"') {
+    terminal.setValue(out.substring(1, out.length - 1));
+  } else terminal.setValue(out);
+};
+const javascript = (value) =>
+  terminal.setValue(serialise(new Function(`return ${js(value)}`)()));
+
 document.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() === "s" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
     e.preventDefault();
@@ -65,6 +81,22 @@ document.getElementById("run").addEventListener("click", () => {
   const value = editor.getValue();
   if (value.trim()) {
     comp(value);
+    link(value);
+    terminal.clearSelection();
+  }
+});
+document.getElementById("check").addEventListener("click", () => {
+  const value = editor.getValue();
+  if (value.trim()) {
+    type(value);
+    link(value);
+    terminal.clearSelection();
+  }
+});
+document.getElementById("js").addEventListener("click", () => {
+  const value = editor.getValue();
+  if (value.trim()) {
+    javascript(value);
     link(value);
     terminal.clearSelection();
   }
