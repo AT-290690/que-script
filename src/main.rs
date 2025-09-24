@@ -57,6 +57,16 @@ pub fn dump_wrapped_bytecode(code: Vec<vm::Instruction>, path: &str) -> std::io:
     Ok(())
 }
 
+pub fn dump_wrapped_js(src: String, path: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+    let mut file = fs::File::create(path)?;
+    writeln!(file, "const _ =(")?;
+    writeln!(file, "{}", src)?;
+    writeln!(file, ");console.log(_)")?;
+
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--std") {
@@ -80,6 +90,18 @@ fn main() -> std::io::Result<()> {
     } else if args.iter().any(|a| a == "--exec") {
         let bitecode = ir::load_bytecode();
         println!("{:?}", vm::exe(bitecode));
+    } else if args.iter().any(|a| a == "--check") {
+        let program = fs::read_to_string("./lisp/main.lisp")?;
+        let std_ast = baked::load_ast();
+        if let parser::Expression::Apply(items) = &std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
+                    Ok(typ) => println!("{}", typ),
+                    Err(e) => println!("{:?}", e),
+                },
+                Err(e) => println!("{:?}", e),
+            }
+        }
     } else if args.iter().any(|a| a == "--js") {
         let program = fs::read_to_string("./lisp/main.lisp")?;
         let std_ast = baked::load_ast();
@@ -88,7 +110,7 @@ fn main() -> std::io::Result<()> {
                 Ok(wrapped_ast) => {
                     let mut code: Vec<vm::Instruction> = Vec::new();
                     let js = js::compile_program_to_js(&wrapped_ast);
-                    println!("{}", js);
+                    dump_wrapped_js(js, "./dist/index.js");
                 }
                 Err(e) => println!("{:?}", e),
             }
