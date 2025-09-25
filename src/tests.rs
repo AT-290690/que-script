@@ -642,6 +642,42 @@ D:=,=,=,+,=,=,=,+,=,=")
 (|> input (parse) (part1))"#,
                 "[66 68 67 65]",
             ),
+            (
+                r#"(let palindrome? (lambda str (do 
+    (let q (std:vector:queue:new 0))
+    (let s (std:vector:stack:new 0))
+    
+    (std:vector:for str (lambda x (do
+        (std:vector:stack:push! s x)
+        (std:vector:queue:enqueue! q x))))
+    
+    (let p? [true])
+    
+    (loop 0 (/ (length str) 2) (lambda . 
+        (if (!= (std:vector:stack:peek s) (std:vector:queue:peek q)) 
+             (boole-set p? false) 
+             (do 
+                 (std:vector:stack:pop! s 0)
+                 (std:vector:queue:dequeue! q 0)
+                 nil))))
+    (get p?))))
+    
+[(palindrome? "racecar") (palindrome? "yes")]"#,
+                "[1 0]",
+            ),
+            (
+                r#"(let palindrome? (lambda str (do 
+    (let p? [true])
+    (loop 0 (/ (length str) 2) (lambda i (if (<> (get str i) (get str (- (length str) i 1))) (boole-set p? false))))
+    (true? p?))))
+[(palindrome? "racecar") (palindrome? "yes")]"#,
+                "[1 0]",
+            ),
+            (
+                r#"(let palindrome? (lambda str (std:vector:string:match? str (std:vector:reverse str))))
+[(palindrome? "racecar") (palindrome? "yes")]"#,
+                "[1 0]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
