@@ -14,6 +14,8 @@ Try it online at [playground](https://at-290690.github.io/rust-lisp/)
 - Everything is an **Expression**
 - **Syntactic suggar** layer
 - **Strongly typed** using the **Hindley-Milner** type system
+- **Compiler** to JavaScript
+- **WASM** build for online editor
 - It supports some cool features from **functional programming**
   - **Partial function application**
   - **Lexically scoped closures**
