@@ -255,7 +255,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         // we assume func_js looks like `(i)=>{ ... }`
                         // so we apply it inside the loop.
                         format!(
-                            "(()=>{{for(let i={}; i<{}; ++i){{({})(i);}}return 0}})()",
+                            "(()=>{{for(let __i={}; __i<{}; ++__i){{({})(__i);}}return 0}})()",
                             start_js, end_js, func_js
                         )
                     }

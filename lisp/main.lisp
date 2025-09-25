@@ -1,1 +1,1 @@
-(+ 1 2)
+(std:vector:3d:fill 8 8 (lambda i j (if (std:int:odd? (+ i j)) 1 0)))
