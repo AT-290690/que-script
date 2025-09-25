@@ -92,7 +92,39 @@ Short names can be extracted from std using **import**
 (ints:sum (map (filter xs int:odd?) int:square))
 ```
 
-### Recursive Tail Call Optimization
+### Tail Call Optimization
+
+A call is said to be in tail position if it is the last instruction executed before returning from the current function. Compilers can optimize such calls by discarding the caller frame and replacing the call with a jump.
+
+This is especially useful for recursive functions. For instance, take this function that sums the elements of a vector:
+
+```lisp
+(let sum (lambda xs acc
+    (if (= (length xs) 0) acc
+        (sum (std:vector:drop xs 1) (+ acc (get xs 0))))))
+
+(sum [ 1 2 3 4 5 ] 0)
+; Int
+; 15
+```
+
+With a regular call, this consumes 𝒪(n) stack space: each element of the vector adds a new frame on the call stack. With a long enough vector, this could very quickly overflow the stack. By replacing the call with a jump, tail call optimization effectively turns this recursive function into a loop which uses 𝒪(1) stack space:
+
+```lisp
+(let sum (lambda xs acc (do
+    (let _acc [ acc ])
+    (let _xs [ xs ])
+    (let _new_xs [])
+    (let _new_acc [])
+    (loop (not (= (length (get _xs 0)) 0)) (lambda (do
+        (set! _new_xs 0 (std:vector:drop (get _xs 0) 1))
+        (set! _new_acc 0 (+ (get _acc 0) (get (get _xs 0) 0)))
+        (set! _xs 0  (get _new_xs 0))
+        (set! _acc 0 (get _new_acc 0)))))
+    (get _acc 0))))
+```
+
+This optimization is particularly important for functional languages. They rely heavily on recursive functions, and pure ones like Haskell don’t even provide loop control structures. Any kind of custom iteration typically uses recursion one way or another. Without tail call optimization, this would very quickly run into a stack overflow for any non-trivial program.
 
 ```lisp
 ; tco recursion
