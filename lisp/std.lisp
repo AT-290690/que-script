@@ -139,9 +139,10 @@
 (let -- (lambda vrbl (=! vrbl (- (get vrbl) 1))))
 (let ** (lambda vrbl (=! vrbl (* (get vrbl) (get vrbl)))))
 
-(let std:fn:apply-0 (lambda x fn (fn x)))
-(let std:fn:apply-1 (lambda x y fn (fn x y)))
-(let std:fn:apply-2 (lambda x y z fn (fn x y z)))
+(let std:fn:apply-0 (lambda fn (fn)))
+(let std:fn:apply-1 (lambda x fn (fn x)))
+(let std:fn:apply-2 (lambda x y fn (fn x y)))
+(let std:fn:apply-3 (lambda x y z fn (fn x y z)))
 
 (let std:vector:empty? (lambda xs (= (length xs) 0)))
 (let std:vector:empty! (lambda xs (if (std:vector:empty? xs) xs (do 
@@ -1039,3 +1040,135 @@ q)))
         (std:vector:ints:pair:sub)
         (std:int:abs)) 2))))
 (let std:int:collinear? (lambda points (= (std:int:shoelace points) 0)))
+
+
+(let std:int:big:add (lambda a1 b1 (do
+  (let a (std:vector:reverse a1))
+  (let b (std:vector:reverse b1))
+  (let max-length (std:int:max (length a) (length b)))
+  (let result [])
+  (integer carry 0)
+  (loop 0 max-length (lambda i (do
+    (let digit-A (if (< i (length a)) (get a i) 0))
+    (let digit-B (if (< i (length b)) (get b i) 0))
+    (let sum (+ digit-A digit-B (get carry)))
+    (std:vector:push! result (mod sum 10))
+    (set carry (/ sum 10)))
+  ))
+  ; Handle remaining carry
+  (loop (> (get carry) 0) (lambda (do
+    (std:vector:push! result (mod (get carry) 10))
+    (set carry (/ (get carry) 10)))))
+  (std:vector:reverse result))))
+  
+(let std:int:big:sub (lambda a1 b1 (do
+  (let a (std:vector:reverse a1))
+  (let b (std:vector:reverse b1))
+  (let max-length (std:int:max (length a) (length b)))
+  (let result [])
+  (integer borrow 0)
+  (loop 0 max-length (lambda i (do
+    (let digit-A (if (< i (length a)) (get a i) 0))
+    (let digit-B (if (< i (length b)) (get b i) 0))
+    (let sub (- digit-A digit-B (get borrow)))
+    (if (< sub 0)
+      (do
+        (std:vector:push! result (+ sub 10))
+        (set borrow 1))
+      (do
+        (std:vector:push! result sub)
+        (set borrow 0))))))
+  ; Remove trailing zeros (from the most significant end)
+  (integer i (- (length result) 1))
+  (loop (and (> (get i) 0) (= (get result (get i)) 0)) (lambda (do
+    (std:vector:pop! result)
+    (set i (- (get i) 1)))))
+  (std:vector:reverse result))))
+
+(let std:int:big:mul (lambda a1 b1 (do
+  (let a (std:vector:reverse a1))
+  (let b (std:vector:reverse b1))
+  (let result [])
+  ; Initialize result array with zeros
+  (loop 0 (+ (length a) (length b)) (lambda . (std:vector:push! result 0)))
+  (loop 0 (length a) (lambda i (do
+    (integer carry 0)
+    (let digit-a (get a i))
+    (loop 0 (length b) (lambda j (do
+      (let digit-B (get b j))
+      (let idx (+ i j))
+      (let prod (+ (* digit-a digit-B) (get result idx) (get carry)))
+      (set! result idx (mod prod 10))
+      (set carry (/ prod 10)))))
+    ; Handle carry for this digit-a
+    (integer k (+ i (length b)))
+    (loop (> (get carry) 0) (lambda (do
+      (if (not (< (get k) (length result))) (do (std:vector:push! result 0) nil) nil)
+      (let sum (+ (get result (get k)) (get carry)))
+      (set! result (get k) (mod sum 10))
+      (set carry (/ sum 10))
+      (set k (+ (get k) 1))))))))
+  ; Remove trailing zeros (from the most significant end), but keep at least one digit
+  (integer i (- (length result) 1))
+  (loop (and (> (get i) 0) (= (get result (get i)) 0) (> (length result) 1)) (lambda (do
+    (std:vector:pop! result)
+    (set i (- (get i) 1)))))
+  (std:vector:reverse result))))
+
+(let std:vector:ints:remove-leading-zeroes (lambda digits (do
+  (boolean tr true)
+  (|> digits (std:vector:reduce (lambda a b (if
+  (and (true? tr) (std:int:zero? b)) a
+    (do
+      (if (true? tr) (boole-set tr false))
+      (std:vector:cons! a [b])))) [])))))
+
+(let std:int:big:less-or-equal? (lambda a b (do
+  (if (< (length a) (length b)) true
+  (if (> (length a) (length b)) false
+    ; Equal length, compare digit by digit
+    (do
+      (integer i 0)
+      (boolean result true) ; assume a <= b
+      (loop (< (get i) (length a)) (lambda (do
+        (let da (get a (get i)))
+        (let db (get b (get i)))
+        (if (< da db) (do
+          (boole-set result true)
+          (set i (length a))))
+        (if (> da db) (do
+          (boole-set result false)
+          (set i (length a))))
+        (set i (+ (get i) 1)))))
+      (if (true? result) true false)))))))
+
+(let std:int:big:div (lambda dividend divisor (do
+  (let result [])
+  (let current [[]])
+  (let len (length dividend))
+  (integer i 0)
+  ; Main loop: process each digit of the dividend
+  (loop (< (get i) len) (lambda (do
+    (let digit (get dividend (get i)))
+    (set current (std:vector:ints:remove-leading-zeroes (std:vector:cons (get current) [ digit ])))
+    ; Find max digit q such that (divisor * q) <= current
+    (integer low 0)
+    (integer high 9)
+    (integer q 0)
+    (loop (<= (get low) (get high)) (lambda (do
+      (let mid (/ (+ (get low) (get high)) 2))
+      (let prod (std:int:big:mul divisor [ mid ]))
+      (if (std:int:big:less-or-equal? prod (get current))
+        (do
+          (set q mid)
+          (set low (+ mid 1)))
+        (set high (- mid 1))))))
+
+    (std:vector:push! result (get q))
+
+    ; current := current - (divisor * q)
+    (let sub (std:int:big:mul divisor [ (get q) ]))
+    (set current (std:int:big:sub (get current) sub))
+    (++ i))))
+  (let out (std:vector:ints:remove-leading-zeroes result))
+  (if (std:vector:empty? out) [ 0 ] out))))

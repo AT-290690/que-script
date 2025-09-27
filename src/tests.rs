@@ -678,6 +678,28 @@ D:=,=,=,+,=,=,=,+,=,=")
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[1 0]",
             ),
+            (
+                r#"(let reverse (lambda xs rev 
+    (if (std:vector:empty? xs) 
+         rev 
+        (reverse (std:vector:drop:last xs 1) (std:vector:append! rev (-. xs 1))))))
+;
+(reverse [ 1 2 3 4 5 ] [])"#,
+                "[5 4 3 2 1]",
+            ),
+            (
+                r#"
+[
+
+(std:int:big:div [ 1 0 ] [ 5 ])
+(std:int:big:add [ 9 9 9 ] [ 1 2 ])
+(std:int:big:sub [ 1 0 1 ] [ 1 1 ])
+(std:int:big:mul [ 2 ] [ 9 9 5 ])
+
+]
+"#,
+                "[[2] [1 0 1 1] [9 0] [1 9 9 0]]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
