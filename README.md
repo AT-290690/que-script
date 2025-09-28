@@ -215,3 +215,9 @@ To what floor do the instructions take Santa?
 ; [Int]
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
+
+<div style="display: flex; align-items: center;  height: 100px;" >
+    <img src="./favicon.png" width="64px"/>  
+     <span>Disclamer! This project is work in progress and might contain bugs! </span>
+     <img src="./favicon.png" width="64px" style="transform:scale(-1,1)"/>
+</div>
