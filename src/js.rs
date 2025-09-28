@@ -278,7 +278,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
 
                         format!("({}) => {}", params.join(", "), body_js)
                     }
-
+                    "T" => "".to_string(),
                     // call a named function/operator: default: compile args then `fn(args...)`
                     _ => {
                         // compile operator expression (could be a word or more complex expr)

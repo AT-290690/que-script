@@ -114,6 +114,7 @@
 
 ; Extra "keywords" 
 (let identity (lambda x x))
+(let T (lambda x x))
 (let true (= 1 1))
 (let false (= 0 1))
 (let nil 0)
@@ -1047,7 +1048,7 @@ q)))
   (let a (std:vector:reverse a1))
   (let b (std:vector:reverse b1))
   (let max-length (std:int:max (length a) (length b)))
-  (let result [])
+  (let result [(T 0)])
   (integer carry 0)
   (loop 0 max-length (lambda i (do
     (let digit-A (if (< i (length a)) (get a i) 0))
@@ -1066,7 +1067,7 @@ q)))
   (let a (std:vector:reverse a1))
   (let b (std:vector:reverse b1))
   (let max-length (std:int:max (length a) (length b)))
-  (let result [])
+  (let result [(T 0)])
   (integer borrow 0)
   (loop 0 max-length (lambda i (do
     (let digit-A (if (< i (length a)) (get a i) 0))
@@ -1089,7 +1090,7 @@ q)))
 (let std:int:big:mul (lambda a1 b1 (do
   (let a (std:vector:reverse a1))
   (let b (std:vector:reverse b1))
-  (let result [])
+  (let result [(T 0)])
   ; Initialize result array with zeros
   (loop 0 (+ (length a) (length b)) (lambda . (std:vector:push! result 0)))
   (loop 0 (length a) (lambda i (do
@@ -1144,7 +1145,7 @@ q)))
       (if (true? result) true false)))))))
 
 (let std:int:big:div (lambda dividend divisor (do
-  (let result [])
+  (let result [(T 0)])
   (let current [[]])
   (let len (length dividend))
   (integer i 0)
@@ -1175,3 +1176,4 @@ q)))
   (if (std:vector:empty? out) [ 0 ] out))))
 
 (let std:vector:int:big:sum (lambda xs (std:vector:reduce xs (lambda a b (std:int:big:add a b)) [ 0 ] )))
+(let std:int:big:new (lambda str (std:convert:chars->digits str)))

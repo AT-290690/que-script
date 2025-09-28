@@ -33,7 +33,9 @@ mod tests {
             ("(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (vector (= 1 1))))", "Bool"),
             ("(vector 1 2 3)", "[Int]"),
             ("(vector (vector (vector 1)))", "[[[Int]]]"),
-            ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int")
+            ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
+            ("(do (let true (= 1 1)) (let false (= 1 0)) (let fn (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn)", "Int -> Int -> Bool -> [Int -> Bool] -> Bool"),
+            ("(do (let T (lambda x x)) (let xs (vector (T 0))) xs)", "[Int]")
         ];
 
         for (inp, out) in &test_cases {
@@ -699,6 +701,25 @@ D:=,=,=,+,=,=,=,+,=,=")
 ]
 "#,
                 "[[2] [1 0 1 1] [9 0] [1 9 9 0]]",
+            ),
+            (
+                r#"(let fn (lambda xs (do 
+    (integer max 0)
+    (integer i 0)
+    (integer j (- (length xs) 1))
+    (loop (<> (get i) (get j)) (lambda (do 
+        (if (> (get xs (get i)) (get xs (get j))) (do 
+            (set max (std:int:max (* (- (get j) (get i)) (get xs (get j))) (get max)))
+            (-- j)) (do
+            (set max (std:int:max (* (- (get j) (get i)) (get xs (get i))) (get max)))
+            (++ i))))))
+    (get max))))
+
+[
+    (fn [ 1 8 6 2 5 4 8 3 7 ]) ; 49
+    (fn [ 1 1 ]) ; 1
+]"#,
+                "[49 1]",
             ),
         ];
         let std_ast = crate::baked::load_ast();
