@@ -109,11 +109,11 @@ mod tests {
     fn test_correctness() {
         let test_cases = [
             ("(+ 1 2)", "3"),
-            ("(std:vector:ints:sum [ 1 2 ])", "3"),
+            ("(std:vector:int:sum [ 1 2 ])", "3"),
             (
                 r#"(import filter map std:vector)
 (import odd? square std:int)
-(import sum std:vector:ints)
+(import sum std:vector:int)
 
 (let sum-odd-squares (lambda xs
     (|> xs
@@ -131,7 +131,7 @@ mod tests {
             (
                 r#"(import
     cons sliding-window filter map slice
-    ints:sum ints:maximum ints:minimum ints:range
+    int:sum int:maximum int:minimum int:range
     first last
     push! concat! sort!
  std:vector)
@@ -163,7 +163,7 @@ mod tests {
   (sliding-window 2)
   (filter (lambda xs (= (. xs 0) (. xs 1))))
   (map first)
-  (ints:sum))))
+  (int:sum))))
  
  (let Apart2 (lambda input (|>
   input
@@ -171,7 +171,7 @@ mod tests {
   (sliding-window (+ (/ (length input) 2) 1))
   (filter (lambda xs (= (first xs) (last xs))))
   (map first)
-  (ints:sum))))
+  (int:sum))))
  
  (let parse (lambda input (|>
  input
@@ -182,7 +182,7 @@ mod tests {
                   (string->vector char:space)
                   (map chars->integer)))))))
  
- (let part1 (lambda input (|> input (map (lambda xs (- (ints:maximum xs) (ints:minimum xs)))) (ints:sum))))
+ (let part1 (lambda input (|> input (map (lambda xs (- (int:maximum xs) (int:minimum xs)))) (int:sum))))
  
  (let divisible-pair (lambda xs (do
  (let len (length xs))
@@ -204,7 +204,7 @@ mod tests {
  (map (lambda xs (do
   (let pair (divisible-pair xs))
   (/ (. pair 0) (. pair 1)))))
- (ints:sum))))
+ (int:sum))))
  
  (concat! [ (collatz 27 0) (fact 10 1) ]
  [
@@ -216,7 +216,7 @@ mod tests {
 (|> "5 9 2 8
 9 4 7 3
 3 8 6 5" (parse) (part2))]
- (sort! (ints:range 1 10) >=)
+ (sort! (int:range 1 10) >=)
  ]
  )"#,
                 "[111 3628800 3 4 0 9 6 0 4 12 4 18 9 10 9 8 7 6 5 4 3 2 1]",
@@ -233,7 +233,7 @@ mod tests {
         ")))"     ; result in floor -3.
         ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (std:vector:ints:count input std:int:char:left-brace) (std:vector:ints:count input std:int:char:right-brace))))
+(let solve (lambda input (- (std:vector:int:count input std:int:char:left-brace) (std:vector:int:count input std:int:char:right-brace))))
 (std:vector:map samples solve)"#,
                 "[0 0 3 3 3 -1 -1 -3 -3]",
             ),
@@ -284,7 +284,7 @@ mod tests {
             (
                 r#"
             (let find-missing-numbers (lambda nums (|> 
-    (std:vector:ints:range 1 (length nums)) 
+    (std:vector:int:range 1 (length nums)) 
     (std:vector:map (lambda x (std:convert:integer->string-base x 10)))
     (std:convert:vector->set)
     (std:vector:hash:set:difference (|> nums (std:vector:map (lambda x (std:convert:integer->string-base x 10))) (std:convert:vector->set)))
@@ -352,13 +352,13 @@ mod tests {
                 r#"(let valid-path (lambda n edges source destination (do
   (if (= source destination) true
     (do
-      (let graph (std:vector:map (std:vector:ints:zeroes n) (lambda . [])))
+      (let graph (std:vector:map (std:vector:int:zeroes n) (lambda . [])))
       (std:vector:for edges (lambda edge (do
         (let u (get edge 0))
         (let v (get edge 1))
         (std:vector:push! (get graph u) v)
         (std:vector:push! (get graph v) u))))
-      (let visited (std:vector:ints:zeroes n))
+      (let visited (std:vector:int:zeroes n))
       (let queue [source])
       (std:vector:set! visited source 1)
       (boolean found false)
@@ -476,9 +476,9 @@ mod tests {
                           (std:vector:unzip)
                           (std:vector:map std:vector:sort:desc!)
                           (std:vector:zip)
-                          (std:vector:map std:vector:ints:pair:sub)
+                          (std:vector:map std:vector:int:pair:sub)
                           (std:vector:map std:int:abs)
-                          (std:vector:ints:sum))))
+                          (std:vector:int:sum))))
                         
 (let part2 (lambda input (do
   (let unzipped (std:vector:unzip input))
@@ -487,7 +487,7 @@ mod tests {
   (|>
     left
     (std:vector:map (lambda l (* l (std:vector:count-of right (lambda r (= l r))))))
-    (std:vector:ints:sum)))))
+    (std:vector:int:sum)))))
 
 (let PARSED (parse INPUT))
 [(part1 PARSED) (part2 PARSED)]"#,
@@ -497,17 +497,17 @@ mod tests {
                 r#"
 (let parse (lambda input (|> input (std:string:lines) (std:vector:map std:convert:chars->integer))))
 (let part1 (lambda input (do 
-    (let min (std:vector:ints:minimum input))
+    (let min (std:vector:int:minimum input))
     (|> input
         (std:vector:map (lambda x (- x min)))
-        (std:vector:ints:sum)))))
+        (std:vector:int:sum)))))
 
  (let part2 (lambda input (do 
     (std:vector:sort:desc! input)
-    (let median (std:vector:ints:median input))
+    (let median (std:vector:int:median input))
     (|> input
         (std:vector:map (lambda x (cond (> x median) (- x median) (< x median) (- median x) 0)))
-        (std:vector:ints:sum)))))
+        (std:vector:int:sum)))))
 
 [(|> 
 "3
@@ -610,7 +610,7 @@ mod tests {
             ),
             ("(std:int:collinear? [[ 3 8 ] [ 5 10 ] [ 7 12 ]])", "1"),
             (
-                r#"(let fn (lambda [ a b c r ] (+ a b c (std:vector:ints:product r))))
+                r#"(let fn (lambda [ a b c r ] (+ a b c (std:vector:int:product r))))
 (fn [ 1 2 3 4 5 6 ])"#,
                 "126",
             ),
@@ -635,7 +635,7 @@ D:=,=,=,+,=,=,=,+,=,=")
 (let part1 (lambda xs (do
     (let letters (|> input (std:string:lines) (std:vector:map std:vector:first)))
     (|> xs (std:vector:map (lambda x (|> x (std:vector:reduce app [0])))) 
-    (std:vector:map std:vector:ints:sum)
+    (std:vector:map std:vector:int:sum)
     (std:vector:map:i (lambda x i [i (+ x 100)]))
     (std:vector:sort! (lambda a b (> (. a 1) (. b 1))))
     (std:vector:map (lambda [i .] (. letters i)))))))

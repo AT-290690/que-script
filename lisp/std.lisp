@@ -192,26 +192,26 @@
      (loop 1 (length xs) process)
      out))))
 
-(let std:vector:ints:range (lambda start end (do
+(let std:vector:int:range (lambda start end (do
      (let out [ start ])
      (let process (lambda i (std:vector:set! out (length out) i)))
      (loop (+ start 1) (+ end 1) process)
      out))) 
 
- (let std:vector:ints:ones (lambda n (do
+ (let std:vector:int:ones (lambda n (do
      (let out [ 1 ])
      (let process (lambda i (std:vector:set! out (length out) 1)))
      (loop 0 n process)
      out))) 
 
- (let std:vector:ints:zeroes (lambda n (do
+ (let std:vector:int:zeroes (lambda n (do
      (let out [ 0 ])
      (let process (lambda i (std:vector:set! out (length out) 0)))
      (loop 0 n process)
      out))) 
 
 (let std:vector:count-of (lambda xs fn? (length (std:vector:filter xs fn?))))
-(let std:vector:ints:count (lambda input item (std:vector:count-of input (lambda x (= x item)))))
+(let std:vector:int:count (lambda input item (std:vector:count-of input (lambda x (= x item)))))
 
 (let std:vector:cons (lambda a b (if (and (std:vector:empty? a) (std:vector:empty? b)) a (do 
   (let out []) 
@@ -299,16 +299,16 @@
 (let std:int:square (lambda x (* x x)))
 (let std:int:even? (lambda x (= (mod x 2) 0)))
 (let std:int:odd? (lambda x (not (= (mod x 2) 0))))
-(let std:vector:ints:sum (lambda xs (std:vector:reduce xs (lambda a b (+ a b)) 0)))
-(let std:vector:ints:product (lambda xs (std:vector:reduce xs (lambda a b (* a b)) 1)))
+(let std:vector:int:sum (lambda xs (std:vector:reduce xs (lambda a b (+ a b)) 0)))
+(let std:vector:int:product (lambda xs (std:vector:reduce xs (lambda a b (* a b)) 1)))
 (let std:int:euclidean-mod (lambda a b (mod (+ (mod a b) b) b)))
 (let std:int:max (lambda a b (if (> a b) a b)))
 (let std:int:min (lambda a b (if (< a b) a b)))
-(let std:vector:ints:maximum (lambda xs (cond (std:vector:empty? xs) nil (= (length xs) 1) (get xs 0) (std:vector:reduce xs std:int:max (get xs 0)))))
-(let std:vector:ints:minimum (lambda xs (cond (std:vector:empty? xs) nil (= (length xs) 1) (get xs 0) (std:vector:reduce xs std:int:min (get xs 0)))))
+(let std:vector:int:maximum (lambda xs (cond (std:vector:empty? xs) nil (= (length xs) 1) (get xs 0) (std:vector:reduce xs std:int:max (get xs 0)))))
+(let std:vector:int:minimum (lambda xs (cond (std:vector:empty? xs) nil (= (length xs) 1) (get xs 0) (std:vector:reduce xs std:int:min (get xs 0)))))
 (let std:int:average (lambda x y (/ (+ x y) 2)))
-(let std:vector:ints:mean (lambda xs (/ (std:vector:ints:sum xs) (length xs))))
-(let std:vector:ints:median (lambda xs (do
+(let std:vector:int:mean (lambda xs (/ (std:vector:int:sum xs) (length xs))))
+(let std:vector:int:median (lambda xs (do
     (let len (length xs))
     (let half (/ len 2))
     (if (std:int:odd? len)
@@ -949,10 +949,10 @@ q)))
 (let std:string:lines (lambda xs (std:convert:string->vector xs std:int:char:new-line)))
 (let std:string:words (lambda xs (std:convert:string->vector xs std:int:char:space)))
 (let std:string:commas (lambda xs (std:convert:string->vector xs std:int:char:comma)))
-(let std:vector:ints:pair:sub (lambda xs (- (. xs 0) (. xs 1))))
-(let std:vector:ints:pair:add (lambda xs (+ (. xs 0) (. xs 1))))
-(let std:vector:ints:pair:mult (lambda xs (* (. xs 0) (. xs 1))))
-(let std:vector:ints:pair:div (lambda xs (/ (. xs 0) (. xs 1))))
+(let std:vector:int:pair:sub (lambda xs (- (. xs 0) (. xs 1))))
+(let std:vector:int:pair:add (lambda xs (+ (. xs 0) (. xs 1))))
+(let std:vector:int:pair:mult (lambda xs (* (. xs 0) (. xs 1))))
+(let std:vector:int:pair:div (lambda xs (/ (. xs 0) (. xs 1))))
 (let std:vector:sort:asc! (lambda xs (std:vector:sort! xs <)))
 (let std:vector:sort:desc! (lambda xs (std:vector:sort! xs >)))
 
@@ -1023,10 +1023,10 @@ q)))
             (std:vector:push! (std:vector:at out -1) (. matrix j i)))))))
     out))))
 
-(let std:vector:ints:sequence (lambda xs (std:vector:ints:range 0 (- (length xs) 1))))
+(let std:vector:int:sequence (lambda xs (std:vector:int:range 0 (- (length xs) 1))))
 (let std:int:shoelace (lambda points (do
     (let len (length points))
-    (/ (|> (std:vector:ints:sequence points)
+    (/ (|> (std:vector:int:sequence points)
         (std:vector:reduce (lambda ab i (do
             (let a (. ab 0))
             (let b (. ab 1))
@@ -1038,7 +1038,7 @@ q)))
             (let x2 (. right 1))
             [(+ a (* y1 x2)) (+ b (* y2 x1))])) 
         [0 0])
-        (std:vector:ints:pair:sub)
+        (std:vector:int:pair:sub)
         (std:int:abs)) 2))))
 (let std:int:collinear? (lambda points (= (std:int:shoelace points) 0)))
 
@@ -1116,7 +1116,7 @@ q)))
     (set i (- (get i) 1)))))
   (std:vector:reverse result))))
 
-(let std:vector:ints:remove-leading-zeroes (lambda digits (do
+(let std:vector:int:remove-leading-zeroes (lambda digits (do
   (boolean tr true)
   (|> digits (std:vector:reduce (lambda a b (if
   (and (true? tr) (std:int:zero? b)) a
@@ -1151,7 +1151,7 @@ q)))
   ; Main loop: process each digit of the dividend
   (loop (< (get i) len) (lambda (do
     (let digit (get dividend (get i)))
-    (set current (std:vector:ints:remove-leading-zeroes (std:vector:cons (get current) [ digit ])))
+    (set current (std:vector:int:remove-leading-zeroes (std:vector:cons (get current) [ digit ])))
     ; Find max digit q such that (divisor * q) <= current
     (integer low 0)
     (integer high 9)
@@ -1171,7 +1171,7 @@ q)))
     (let sub (std:int:big:mul divisor [ (get q) ]))
     (set current (std:int:big:sub (get current) sub))
     (++ i))))
-  (let out (std:vector:ints:remove-leading-zeroes result))
+  (let out (std:vector:int:remove-leading-zeroes result))
   (if (std:vector:empty? out) [ 0 ] out))))
 
-(let std:vector:ints:big:sum (lambda xs (std:vector:reduce xs (lambda a b (std:int:big:add a b)) [ 0 ] )))
+(let std:vector:int:big:sum (lambda xs (std:vector:reduce xs (lambda a b (std:int:big:add a b)) [ 0 ] )))

@@ -45,7 +45,7 @@ cargo run
     (|> xs
         (std:vector:filter std:int:odd?)
         (std:vector:map std:int:square)
-        (std:vector:ints:sum))))
+        (std:vector:int:sum))))
 
 (sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
 ; Int
@@ -56,7 +56,7 @@ cargo run
 - Pipe (|> ... ) will be desuggered to:
 
 ```lisp
-(std:vector:ints:sum (std:vector:map (std:vector:filter xs std:int:odd?) std:int:square))
+(std:vector:int:sum (std:vector:map (std:vector:filter xs std:int:odd?) std:int:square))
 ```
 
 - Argument type of the function will be [Int].
@@ -70,7 +70,7 @@ Short names can be extracted from std using **import**
 ```lisp
 (import filter map std:vector)
 (import odd? square std:int)
-(import sum std:vector:ints)
+(import sum std:vector:int)
 
 (let sum-odd-squares (lambda xs
     (|> xs
@@ -81,16 +81,16 @@ Short names can be extracted from std using **import**
 (sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
 ```
 
-**sum** is a sub import of vector under **ints**
+**sum** is a sub import of vector under **int**
 
 ```lisp
-; import ints:sum directly from std:vector
-(import ints:sum filter map std:vector)
+; import int:sum directly from std:vector
+(import int:sum filter map std:vector)
 (import odd? square std:int)
 
 (let xs [ 1 2 3 4 5 6 7 8 9 10 ])
-; here we use ints:sum
-(ints:sum (map (filter xs int:odd?) int:square))
+; here we use int:sum
+(int:sum (map (filter xs int:odd?) int:square))
 ```
 
 ### Tail Call Optimization
@@ -210,7 +210,7 @@ To what floor do the instructions take Santa?
     ")))"     ; result in floor -3.
     ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (std:vector:ints:count input std:int:char:left-brace) (std:vector:ints:count input std:int:char:right-brace))))
+(let solve (lambda input (- (std:vector:int:count input std:int:char:left-brace) (std:vector:int:count input std:int:char:right-brace))))
 (std:vector:map samples solve)
 ; [Int]
 ; [0 0 3 3 3 -1 -1 -3 -3]
