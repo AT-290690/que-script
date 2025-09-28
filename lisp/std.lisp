@@ -1177,3 +1177,39 @@ q)))
 
 (let std:vector:int:big:sum (lambda xs (std:vector:reduce xs (lambda a b (std:int:big:add a b)) [ 0 ] )))
 (let std:int:big:new (lambda str (std:convert:chars->digits str)))
+(let std:int:pow:big (lambda n pow (do
+  ; Initialize digits array with the first digit
+  (let digits [ n ])
+  (integer p 1) ; Use numeric variable for p
+  (integer carry 0) ; Use numeric variable for carry
+  ; Loop to calculate n^pow
+  (loop (< (get p) pow) (lambda (do
+    (set carry 0) ; Reset carry to 0
+    (loop 0 (length digits) (lambda exp (do
+      (let prod (+ (* (get digits exp) n) (get carry)))
+      (let new-carry (/ prod 10))
+      (set! digits exp (mod prod 10))
+      ; Update carry using variable helper
+      (set carry new-carry))))
+    ; Handle carry
+    (loop (> (get carry) 0) (lambda (do
+      (std:vector:push! digits (mod (get carry) 10))
+      ; Update carry using variable helper
+      (/= carry 10))))
+    ; Increment p using variable helper
+    (++ p))))
+  (std:vector:reverse digits))))
+
+(let std:int:big:pow (lambda a b (if (= b 0) [ 1 ] (do 
+    (variable out a)
+    (loop 0 (- b 1) (lambda . (set out (std:int:big:mul (get out) a))))
+    (get out)))))
+
+(let std:int:big:expt (lambda a b (if (and (= (length b) 1) (= (get b 0) 0)) [ 1 ] (do 
+    (variable out a)
+    (variable expt (std:int:big:sub b [ 1 ]))
+    (loop (not (and (= (length (get expt)) 1) (= (get (get expt) 0) 0))) (lambda (do 
+      (set out (std:int:big:mul (get out) a))
+      (set expt (std:int:big:sub (get expt) [ 1 ])))))
+    (get out)))))
+
