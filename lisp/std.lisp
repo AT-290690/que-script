@@ -143,6 +143,7 @@
 (let std:fn:apply-1 (lambda x fn (fn x)))
 (let std:fn:apply-2 (lambda x y fn (fn x y)))
 (let std:fn:apply-3 (lambda x y z fn (fn x y z)))
+(let std:fn:const (lambda x . x))
 
 (let std:vector:empty? (lambda xs (= (length xs) 0)))
 (let std:vector:empty! (lambda xs (if (std:vector:empty? xs) xs (do 
@@ -1172,3 +1173,5 @@ q)))
     (++ i))))
   (let out (std:vector:ints:remove-leading-zeroes result))
   (if (std:vector:empty? out) [ 0 ] out))))
+
+(let std:vector:ints:big:sum (lambda xs (std:vector:reduce xs (lambda a b (std:int:big:add a b)) [ 0 ] )))
