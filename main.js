@@ -3,8 +3,7 @@ init();
 const makeEditor = (el, theme) => {
   const editor = ace.edit(el);
   editor.setOptions({
-    fontFamily: "Monaco9",
-    fontSize: "10pt",
+    fontFamily: "Fantastic",
     copyWithEmptySelection: true,
   });
   editor.setKeyboardHandler("ace/keyboard/vscode");
