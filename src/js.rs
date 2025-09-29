@@ -276,7 +276,11 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         let body_expr = &items[items.len() - 1];
                         let body_js = compile_expr_to_js_inner(body_expr, true);
 
-                        format!("({}) => {}", params.join(", "), body_js)
+                        if params.len() == 0 {
+                            format!("() => {}", body_js)
+                        } else {
+                            format!("_curry(({}) => {})", params.join(", "), body_js)
+                        }
                     }
                     "T" => "".to_string(),
                     // call a named function/operator: default: compile args then `fn(args...)`
@@ -341,8 +345,11 @@ pub fn compile_program_to_js(top: &Expression) -> String {
             _ => vec![format!("return {};", compile_expr_to_js(expr))],
         }
     }
-
     let stmts = top_level_to_statements(top);
     let body = stmts.join("\n");
-    format!("(()=>{{\n{}\n}})()", body)
+    format!(
+        "(()=>{{\n{}\n{}\n}})()",
+        "function _curry(func) {return function curried(...args) {if (args.length === func.length){return func(...args);}else{return function (...next) {return curried(...args, ...next);};}};}",
+        body
+    )
 }

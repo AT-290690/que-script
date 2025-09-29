@@ -865,13 +865,13 @@ heap)))
 q)))
 (let std:vector:deque:first (lambda q (std:vector:deque:get q 0)))
 (let std:vector:deque:last (lambda q (std:vector:deque:get q (- (std:vector:deque:length q) 1))))
-(let std:vector:deque:pop-right! (lambda q (do
+(let std:vector:deque:pop-right! (lambda q def (do
     (let last (std:vector:deque:last q))
-    (std:vector:deque:head! q)
+    (std:vector:deque:head! q def)
     last)))
-(let std:vector:deque:pop-left! (lambda q (do
+(let std:vector:deque:pop-left! (lambda q def (do
     (let first (std:vector:deque:first q))
-    (std:vector:deque:tail! q)
+    (std:vector:deque:tail! q def)
     first)))
 (let std:vector:deque:rotate-left! (lambda q n def (do
   (let N (mod n (std:vector:deque:length q)))
@@ -886,7 +886,7 @@ q)))
   (let tail-call:std:vector:deque:rotate-left! (lambda index bounds (do
       (if (= (std:vector:deque:offset-right q) 0) (std:vector:deque:balance! q def) q)
       (std:vector:deque:add-to-left! q (std:vector:deque:last q))
-      (std:vector:deque:remove-from-right! q)
+      (std:vector:deque:remove-from-right! q def)
       (if (< index bounds) (tail-call:std:vector:deque:rotate-left! (+ index 1) bounds) nil))))
     (tail-call:std:vector:deque:rotate-left! 0 N) q)))
 (let std:vector:deque:slice (lambda entity s e def (do
@@ -913,7 +913,7 @@ q)))
 (let std:vector:queue:not-empty? (lambda q (not (std:vector:deque:empty? q))))
 (let std:vector:queue:empty! std:vector:deque:empty!)
 (let std:vector:queue:enqueue! (lambda queue item (std:vector:deque:append! queue item)))
-(let std:vector:queue:dequeue! (lambda queue (std:vector:deque:tail! queue)))
+(let std:vector:queue:dequeue! (lambda queue def (std:vector:deque:tail! queue def)))
 (let std:vector:queue:peek (lambda queue (std:vector:deque:first queue)))
 
 (let std:vector:stack:empty? std:vector:deque:empty?)
