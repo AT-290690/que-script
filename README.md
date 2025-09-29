@@ -203,7 +203,7 @@ Starting in the top left corner of a 2x2 grid, and only being able to move to th
 
 How many such routes are there through a 20x20 grid?
 Unfortunately, we can't fit that number in 32 big integers.
-Instead we have to use **Big** integers (or numbers as a vectors wit arbitrary precision):
+Instead we have to use **Big** integers (or numbers as a vectors with arbitrary precision):
 
 ```lisp
 (let factorial (lambda n total
