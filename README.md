@@ -2,7 +2,7 @@
 
 <img src="./logo.png" width="256px"/>
 
-My hobby scripting language implemented in Rust.
+My hobby, scripting language implemented in Rust.
 
 Try it online at [playground](https://at-290690.github.io/rust-lisp/)
 
@@ -154,6 +154,30 @@ On each tail-call, the accumulator is updated before the next iteration.
 This guarantees that type inference can resolve the result type statically.
 Users are encouraged to design tail-recursive functions so that the accumulator is the last argument.
 
+**Cast**
+
+An empty vector has a polymorphic type (it can contain anything):
+
+```lisp
+(let xs [])
+xs
+; [t7]
+; []
+```
+
+To enforce a type we can use **as**:
+
+```lisp
+(let xs (as [] [Int]))
+xs
+; [Int]
+; []
+```
+
+Now the vector can only have **Ints** and will error out if anything else is pushed to it.
+
+_Note: This works nicely for vectors of any depth with concrete types Int or Bool. Lambdas are a bit awkward to cast and are therefore discouraged for now._
+
 ### Solving Puzzles
 
 Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner:
@@ -177,28 +201,28 @@ Starting in the top left corner of a 2x2 grid, and only being able to move to th
 ; 6
 ```
 
-**Cast**
-Empty vector has polymorphic type (it can contain one of anything):
+How many such routes are there through a 20x20 grid?
+Unfortunately, we can't fit that number in 32 big integers.
+Instead we have to use **Big** integers (or numbers as a vectors wit arbitrary precision):
 
 ```lisp
-(let xs [])
-xs
-; [t7]
-; []
-```
+(let factorial (lambda n total
+        (if (= (get n 0) 0)
+            total
+            (factorial (std:int:big:sub n [ 1 ]) (std:int:big:mul total n)))))
 
-To enforce a type we can use **as**:
+(let bionomial-coefficient (lambda a b
+    (std:int:big:div (factorial a [ 1 ])
+            (std:int:big:mul
+                (factorial b [ 1 ])
+                (factorial (std:int:big:sub a b) [ 1 ])))))
 
-```lisp
-(let xs (as [] [Int]))
-xs
+(let m [ 2 0 ])
+(let n [ 2 0 ])
+(bionomial-coefficient (std:int:big:add m n) m)
 ; [Int]
-; []
+; [1 3 7 8 4 6 5 2 8 8 2 0]
 ```
-
-Now the vector can only have **Ints** and will error out if anything else is pushed to it.
-
-_Note: This works nice for vectors of any depth with concrete types Int or Bool. Lambdas are a bit awkward to cast and thus are discouraged for now_.
 
 **Advent of Code 2015**
 
@@ -243,4 +267,4 @@ To what floor do the instructions take Santa?
 
 <img src="./favicon.png" width="64px"/>
 
-_This project is work in progress and might contain bugs!_
+_This project is a work in progress and might contain bugs!_

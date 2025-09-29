@@ -721,6 +721,28 @@ D:=,=,=,+,=,=,=,+,=,=")
 ]"#,
                 "[49 1]",
             ),
+            (
+                r#"
+            (let factorial (lambda n total
+               (if (= (get n 0) 0)
+                   total
+                   (factorial (std:int:big:sub n [ 1 ]) (std:int:big:mul total n)))))
+            
+            (let bionomial-coefficient (lambda a b
+                (std:int:big:div (factorial a [ 1 ])
+                        (std:int:big:mul
+                            (factorial b [ 1 ])
+                            (factorial (std:int:big:sub a b) [ 1 ])))))
+            
+            (let m [ 2 0 ])
+            (let n [ 2 0 ])
+            (bionomial-coefficient (std:int:big:add m n) m)
+            ; [Int]
+            ; [1 3 7 8 4 6 5 2 8 8 2 0]
+            
+            "#,
+                "[1 3 7 8 4 6 5 2 8 8 2 0]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
