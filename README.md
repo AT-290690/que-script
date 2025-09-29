@@ -12,7 +12,7 @@ Try it online at [playground](https://at-290690.github.io/rust-lisp/)
 - **Tree-shaking** of standard libary
 - **Strictly evaluated**
 - Everything is an **Expression**
-- **Syntactic suggar** layer
+- **Syntactic sugar** layer
 - **Strongly typed** using the **Hindley-Milner** type system
 - **Compiler** to JavaScript
 - **WASM** build for online editor
@@ -120,7 +120,7 @@ With a regular call, this consumes 𝒪(n) stack space: each element of the vect
     (loop (not (= (length (get _xs 0)) 0)) (lambda (do
         (set! _new_xs 0 (std:vector:drop (get _xs 0) 1))
         (set! _new_acc 0 (+ (get _acc 0) (get (get _xs 0) 0)))
-        (set! _xs 0  (get _new_xs 0))
+        (set! _xs 0 (get _new_xs 0))
         (set! _acc 0 (get _new_acc 0)))))
     (get _acc 0))))
 ```
@@ -128,11 +128,11 @@ With a regular call, this consumes 𝒪(n) stack space: each element of the vect
 This optimization is particularly important for functional languages. They rely heavily on recursive functions, and pure ones like Haskell don’t even provide loop control structures. Any kind of custom iteration typically uses recursion one way or another. Without tail call optimization, this would very quickly run into a stack overflow for any non-trivial program:
 
 ```lisp
-; tco recursion
+; TCO recursion
 (let k-mod (lambda n k (if (< k n) k (k-mod n (- k n)))))
 ; taking advantage of partial apply
 (let mod2 (k-mod 2))
-; tco recursion
+; TCO recursion
 (let collatz (lambda n steps
                (if (= n 1)
                     steps
@@ -146,7 +146,7 @@ This optimization is particularly important for functional languages. They rely 
 ; 111
 ```
 
-**Tail-Call Optimization Convention**
+**Tail Call Optimization Convention**
 
 When a function is transformed for tail-call optimization, the last parameter is treated as the accumulator/result parameter.
 On entry, the compiler initializes the result register from this last parameter.
@@ -263,7 +263,7 @@ To what floor do the instructions take Santa?
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
 
-**Disclamer!**
+**Disclaimer!**
 
 <img src="./favicon.png" width="64px"/>
 
