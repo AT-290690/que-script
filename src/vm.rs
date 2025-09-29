@@ -1122,29 +1122,13 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
 
                         code.push(Instruction::MakeLambda(params, body_code));
                     }
+                    "as" => {
+                        code.push(Instruction::MakeArray(0));
+                    }
                     "vector" => {
-                        // Empty arrays have polymorphic types by default
-                        // This ensures we can force a type for them by
-                        // initializing first item for the type checker to infer
-                        // but during compilation we removei it.
-
-                        // This makes things so much easier
-                        // because we don't have to do wacky inits
-                        let mut count = exprs.len() - 1;
-                        if count == 1 {
-                            if let Expression::Apply(v) = &exprs[1] {
-                                if let Expression::Word(w) = &v[0] {
-                                    // T is an identity function defined in std
-                                    if w == "T" {
-                                        count = 0; // Set count to 0 if the condition is met
-                                    }
-                                }
-                            }
-                        }
-                        if count > 0 {
-                            for arg in &exprs[1..] {
-                                compile(arg, code);
-                            }
+                        let count = exprs.len() - 1;
+                        for arg in &exprs[1..] {
+                            compile(arg, code);
                         }
                         code.push(Instruction::MakeArray(count));
                     }

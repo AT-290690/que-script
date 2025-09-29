@@ -278,11 +278,13 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
 
                         if params.len() == 0 {
                             format!("() => {}", body_js)
+                        } else if params.len() == 1 {
+                            format!("({}) => {}", params[0], body_js)
                         } else {
                             format!("_curry(({}) => {})", params.join(", "), body_js)
                         }
                     }
-                    "T" => "".to_string(),
+                    "as" => "[]".to_string(),
                     // call a named function/operator: default: compile args then `fn(args...)`
                     _ => {
                         // compile operator expression (could be a word or more complex expr)

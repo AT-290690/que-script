@@ -65,7 +65,7 @@ cargo run
 - **map** will only work with [Int] and callback of type Int -> Int
 - **sum** will only work with [Int]
 
-Short names can be extracted from std using **import**
+Short names can be extracted from std using **import**:
 
 ```lisp
 (import filter map std:vector)
@@ -81,7 +81,7 @@ Short names can be extracted from std using **import**
 (sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
 ```
 
-**sum** is a sub import of vector under **int**
+**sum** is a sub import of vector under **int**:
 
 ```lisp
 ; import int:sum directly from std:vector
@@ -125,7 +125,7 @@ With a regular call, this consumes 𝒪(n) stack space: each element of the vect
     (get _acc 0))))
 ```
 
-This optimization is particularly important for functional languages. They rely heavily on recursive functions, and pure ones like Haskell don’t even provide loop control structures. Any kind of custom iteration typically uses recursion one way or another. Without tail call optimization, this would very quickly run into a stack overflow for any non-trivial program.
+This optimization is particularly important for functional languages. They rely heavily on recursive functions, and pure ones like Haskell don’t even provide loop control structures. Any kind of custom iteration typically uses recursion one way or another. Without tail call optimization, this would very quickly run into a stack overflow for any non-trivial program:
 
 ```lisp
 ; tco recursion
@@ -156,7 +156,7 @@ Users are encouraged to design tail-recursive functions so that the accumulator 
 
 ### Solving Puzzles
 
-Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner.
+Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner:
 
 ```lisp
 (let factorial (lambda n total
@@ -176,6 +176,29 @@ Starting in the top left corner of a 2x2 grid, and only being able to move to th
 ; Int
 ; 6
 ```
+
+**Cast**
+Empty vector has polymorphic type (it can contain one of anything):
+
+```lisp
+(let xs [])
+xs
+; [t7]
+; []
+```
+
+To enforce a type we can use **as**:
+
+```lisp
+(let xs (as [] [Int]))
+xs
+; [Int]
+; []
+```
+
+Now the vector can only have **Ints** and will error out if anything else is pushed to it.
+
+_Note: This works nice for vectors of any depth with concrete types Int or Bool. Lambdas are a bit awkward to cast and thus are discouraged for now_.
 
 **Advent of Code 2015**
 
