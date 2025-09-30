@@ -993,14 +993,17 @@ q)))
     (let tail-call:fold-n (lambda i out (if (< i n) (tail-call:fold-n (+ i 1) (fn out i)) out)))
     (tail-call:fold-n 0 acc))))
 (let std:vector:2d:fill (lambda n fn (do 
-  (let tail-call:std:vector:fill (lambda i xs (if (= i 0) xs (tail-call:std:vector:fill (- i 1) (std:vector:cons! xs (vector (fn)))))))
+  (let tail-call:std:vector:fill (lambda i xs (if (= i 0) xs (tail-call:std:vector:fill (- i 1) (std:vector:cons! xs (vector (fn i)))))))
   (tail-call:std:vector:fill n []))))
-(let std:vector:3d:fill (lambda W H fn (do
-    (let matrix [])
-    (loop 0 W (lambda i (do 
-        (std:vector:push! matrix [])
-        (loop 0 H (lambda j (std:vector:3d:set! matrix i j (fn i j)))))))
-    matrix)))
+(let std:vector:3d:fill (lambda W H fn 
+  (cond 
+    (or (= W 0) (= H 0)) [] 
+    (and (= W 1) (= H 1)) [[(fn 0 0)]] (do
+      (let matrix [])
+      (loop 0 W (lambda i (do 
+          (std:vector:push! matrix [])
+          (loop 0 H (lambda j (std:vector:3d:set! matrix i j (fn i j)))))))
+      matrix))))
 (let std:vector:3d:product (lambda A B (do
   (let dimsA (std:vector:3d:dimensions A))
   (let dimsB (std:vector:3d:dimensions B))
@@ -1215,3 +1218,15 @@ q)))
       (set expt (std:int:big:sub (get expt) [ 1 ])))))
     (get out)))))
 
+(let std:convert:integer->digits-base (lambda num base  
+    (if (= num 0) [ 0 ] (do 
+        (integer n num)
+        (let tail-call:while (lambda out
+            (if (> (get n) 0) (do
+                (std:vector:push! out (mod (get n) base))
+                (set n (/ (get n) base))
+                (tail-call:while out)) out)))
+        (let digits (tail-call:while []))
+        (std:vector:reverse digits)))))
+
+(let std:convert:integer->digits (lambda num (std:convert:integer->digits-base num 10)))
