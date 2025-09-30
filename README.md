@@ -1,32 +1,41 @@
-# Resin
+# Lamb
 
-<img src="./logo.png" width="256px"/>
+<img src="./logo-lamb.png" width="256px"/>
 
 My hobby, scripting language implemented in Rust.
+It's called **Lamb**, short for **Lambda** the greek letter **λ**
+(the **keyword** for the [anonymous functions](https://en.wikipedia.org/wiki/Anonymous_function) of the language)
+
+**Lamb** is:
+
+- **[Lisp](<https://en.wikipedia.org/wiki/Lisp_(programming_language)>)**
+- **[Stack-based bytecode Virtual Machine](https://en.wikipedia.org/wiki/Stack_machine)**
+- **[Standard library](https://en.wikipedia.org/wiki/Standard_library)**
+- **[Tree-shaking](https://en.wikipedia.org/wiki/Tree_shaking)** of Standard Libary
+- **[Strictly evaluated](https://en.wikipedia.org/wiki/Evaluation_strategy)**
+- Everything is an **[Expression](<https://en.wikipedia.org/wiki/Expression_(computer_science)>)**
+- **[Syntactic sugar](https://en.wikipedia.org/wiki/Syntactic_sugar)** layer
+- **[Strongly typed](https://en.wikipedia.org/wiki/Strong_and_weak_typing)** using the **[Hindley-Milner](https://en.wikipedia.org/wiki/Hindley–Milner_type_system)** type system
+- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [JavaScript](https://en.wikipedia.org/wiki/JavaScript)
+- **[WASM](https://en.wikipedia.org/wiki/WebAssembly)** build for [online editor](https://at-290690.github.io/rust-lisp/)
+- It supports some cool features from **functional programming**
+
+  - **[Partial function application](https://en.wikipedia.org/wiki/Partial_application)**
+  - **[Lexically scoped closures](<https://en.wikipedia.org/wiki/Closure_(computer_programming)>)**
+  - **[First-class functions](https://en.wikipedia.org/wiki/First-class_function)**
+  - **[Type inference](https://en.wikipedia.org/wiki/Type_inference)**
+  - **[Tail Call Optimization](https://en.wikipedia.org/wiki/Tail_call)**
+
+- A **weapon** of choice for the knights of the
+  [The Grand Recursive Order Of Lambda Calculus Hackers](https://youtu.be/aAlR3cezPJg?list=PLE18841CABEA24090&t=4786)
+  <img src="https://upload.wikimedia.org/wikipedia/en/4/4d/Knights_of_the_Lambda_Calculus.svg" width="256px"/>
 
 Try it online at [playground](https://at-290690.github.io/rust-lisp/)
 
-- **Lisp**
-- **Stack-based bytecode Virtual Machine**
-- **Standard library**
-- **Tree-shaking** of standard libary
-- **Strictly evaluated**
-- Everything is an **Expression**
-- **Syntactic sugar** layer
-- **Strongly typed** using the **Hindley-Milner** type system
-- **Compiler** to JavaScript
-- **WASM** build for online editor
-- It supports some cool features from **functional programming**
-  - **Partial function application**
-  - **Lexically scoped closures**
-  - **First-class functions**
-  - **Type inference**
-  - **Tail Call Optimization**
-
-Write code in **main.lisp**
-Type check and execute with:
+or clone this project and write code in **main.lisp**
 
 ```bash
+# type check and eval
 cargo run
 ```
 
@@ -265,6 +274,6 @@ To what floor do the instructions take Santa?
 
 **Disclaimer!**
 
-<img src="./favicon.png" width="64px"/>
+<img src="./bug.png" width="64px"/>
 
 _This project is a work in progress and might contain bugs!_
