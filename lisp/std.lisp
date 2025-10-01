@@ -100,6 +100,7 @@
       (let out (get xs (- (length xs) 1))) 
       (std:vector:pop! xs)
       out)))
+(let std:vector:update! (lambda xs i value (do (set! xs i value) xs)))
 (let std:vector:tail! (lambda xs (do (std:vector:pop! xs) xs)))
 (let std:vector:append! (lambda xs x (do (std:vector:push! xs x) xs)))
 (let std:vector:at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
@@ -305,6 +306,11 @@
 (let std:vector:int:sum (lambda xs (std:vector:reduce xs (lambda a b (+ a b)) 0)))
 (let std:vector:int:product (lambda xs (std:vector:reduce xs (lambda a b (* a b)) 1)))
 (let std:int:euclidean-mod (lambda a b (mod (+ (mod a b) b) b)))
+(let std:int:euclidean-distance (lambda x1 y1 x2 y2 (do
+  (let a (- x1 x2))
+  (let b (- y1 y2))
+  (std:int:sqrt (+ (* a a) (* b b))))))
+(let std:int:manhattan-distance (lambda x1 y1 x2 y2 (+ (std:int:abs (- x2 x1)) (std:int:abs (- y2 y1)))))
 (let std:int:max (lambda a b (if (> a b) a b)))
 (let std:int:min (lambda a b (if (< a b) a b)))
 (let std:vector:int:maximum (lambda xs (cond (std:vector:empty? xs) nil (= (length xs) 1) (get xs 0) (std:vector:reduce xs std:int:max (get xs 0)))))
@@ -1230,3 +1236,11 @@ q)))
         (std:vector:reverse digits)))))
 
 (let std:convert:integer->digits (lambda num (std:convert:integer->digits-base num 10)))
+(let std:vector:adjacent-difference (lambda xs cb (do
+  (let len (length xs))
+  (if (= len 1) xs
+    (do
+      (vector (std:vector:first xs))
+      (let tail-call:vector:adjacent-difference (lambda i result (if (< i len) (do
+        (tail-call:vector:adjacent-difference (+ i 1) (std:vector:update! result i (cb (get xs (- i 1)) (get xs i))))) result)))
+        (tail-call:vector:adjacent-difference 1 xs))))))

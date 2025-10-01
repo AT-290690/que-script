@@ -743,6 +743,28 @@ D:=,=,=,+,=,=,=,+,=,=")
             "#,
                 "[1 3 7 8 4 6 5 2 8 8 2 0]",
             ),
+            (
+                r#"(let str "
+ 1 + 2 = 3
+ 3 + 3 = 6
+ 8 + -1 = 7
+ 8 + 1 = 9
+ 8 + 1 = 10
+")
+(|>
+ str
+ (std:convert:string->vector std:int:char:new-line)
+ (std:vector:filter std:vector:not-empty?) ; trim
+ (std:vector:map (lambda xs
+   (|> xs
+     (std:convert:string->vector std:int:char:space)
+     (std:vector:filter std:vector:not-empty?)
+     (std:vector:filter:i (lambda . i (std:int:even? i)))
+     (std:vector:map std:convert:chars->integer))))
+ (std:vector:map (lambda [ a b c . ] (= (+ a b) c)))
+ (std:vector:count-of (lambda x (eq x true))))"#,
+                "4",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

@@ -4,7 +4,7 @@
 
 My hobby, scripting language implemented in Rust.
 It's called **Lamb**, short for **Lambda** the greek letter **λ**
-(the **keyword** for the [anonymous functions](https://en.wikipedia.org/wiki/Anonymous_function) of the language)
+(the **keyword** for the [anonymous functions](https://en.wikipedia.org/wiki/Anonymous_function) in the language)
 
 **Lamb** is:
 
