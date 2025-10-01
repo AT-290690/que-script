@@ -26,10 +26,6 @@ It's called **Lamb**, short for **Lambda** the greek letter **λ**
   - **[Type inference](https://en.wikipedia.org/wiki/Type_inference)**
   - **[Tail Call Optimization](https://en.wikipedia.org/wiki/Tail_call)**
 
-- A **weapon** of choice for the knights of the
-  [The Grand Recursive Order Of Lambda Calculus Hackers](https://youtu.be/aAlR3cezPJg?list=PLE18841CABEA24090&t=4786)
-  <img src="https://upload.wikimedia.org/wikipedia/en/4/4d/Knights_of_the_Lambda_Calculus.svg" width="256px"/>
-
 Try it online at [playground](https://at-290690.github.io/rust-lisp/)
 
 or clone this project and write code in **main.lisp**
