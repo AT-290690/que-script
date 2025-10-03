@@ -147,14 +147,14 @@ impl Instruction {
                             .iter()
                             .map(|s| format!("s!({:?})", s))
                             .collect::<Vec<_>>()
-                            .join(", ")
+                            .join(",")
                     )
                 };
                 let body_str = body
                     .iter()
                     .map(|instr| instr.to_rust())
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join(",");
                 format!("MakeLambda({}, vec![{}])", params_str, body_str)
             }
 
@@ -169,12 +169,12 @@ impl Instruction {
                     .iter()
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join(",");
                 let else_str = else_branch
                     .iter()
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join(",");
                 format!(
                     "If {{ then_branch: vec![{}], else_branch: vec![{}] }}",
                     then_str, else_str
@@ -186,17 +186,17 @@ impl Instruction {
                     .iter()
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join(",");
                 let end_str = end
                     .iter()
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join(",");
                 let func_str = func
                     .iter()
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join(",");
                 format!(
                     "Loop {{ start: vec![{}], end: vec![{}], func: vec![{}] }}",
                     start_str, end_str, func_str
@@ -208,12 +208,12 @@ impl Instruction {
                     .iter()
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join(",");
                 let func_str = func
                     .iter()
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join(",");
                 format!(
                     "LoopFinish {{ cond: vec![{}], func: vec![{}] }}",
                     cond_str, func_str

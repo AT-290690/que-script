@@ -297,6 +297,7 @@
 (let std:int:negative? (lambda x (< x 0)))
 (let std:int:invert (lambda x (- x)))
 (let std:int:zero? (lambda x (= x 0)))
+(let std:int:one? (lambda x (= x 1)))
 (let std:int:negative-one? (lambda x (= x -1)))
 (let std:int:divisible? (lambda a b (= (mod a b) 0)))
 
