@@ -12,6 +12,8 @@ mod ir;
 use baked::load_ast;
 use ir::load_bytecode;
 use std::env;
+
+use crate::vm::parse_bitecode;
 mod js;
 mod tests;
 
@@ -61,6 +63,20 @@ pub fn dump_wrapped_bytecode(code: Vec<vm::Instruction>, path: &str) -> std::io:
 
     writeln!(file, "]")?;
     write!(file, "}}")?;
+    Ok(())
+}
+
+pub fn dump_raw_bytecode(code: Vec<vm::Instruction>, path: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+    let mut file = fs::File::create(path)?;
+    write!(file, "[")?;
+    for (i, instr) in code.iter().enumerate() {
+        write!(file, "{}", instr.serialise())?;
+        if i < code.len() - 1 {
+            write!(file, ",")?;
+        }
+    }
+    writeln!(file, "]")?;
     Ok(())
 }
 
@@ -122,6 +138,23 @@ fn main() -> std::io::Result<()> {
                 Err(e) => println!("{:?}", e),
             }
         }
+    } else if args.iter().any(|a| a == "--str") {
+        let program = fs::read_to_string("./lisp/main.lisp")?;
+        let std_ast = baked::load_ast();
+
+        if let parser::Expression::Apply(items) = &std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    let mut code: Vec<vm::Instruction> = Vec::new();
+                    vm::compile(&wrapped_ast, &mut code);
+                    dump_raw_bytecode(code, "./dist/ir.txt");
+                }
+                Err(e) => println!("{:?}", e),
+            }
+        }
+    } else if args.iter().any(|a| a == "--bit") {
+        let program = fs::read_to_string("./dist/ir.txt")?;
+        println!("{:?}", vm::exe(parse_bitecode(&program).unwrap()));
     } else {
         println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
     }

@@ -64,6 +64,21 @@ impl BiteCodeEnv {
 #[derive(Clone, Debug)]
 pub enum Instruction {
     PushInt(i32),
+
+    StoreVar(String),
+    LoadVar(String),
+    MakeLambda(Vec<String>, Vec<Instruction>),
+    Call(usize),
+    MakeVector(usize),
+    If(Vec<Instruction>, Vec<Instruction>),
+
+    Loop(
+        Vec<Instruction>,
+        Vec<Instruction>,
+        Vec<Instruction>, // code for the lambda expression
+    ),
+    LoopFinish(Vec<Instruction>, Vec<Instruction>),
+
     Length,
     Add,
     Mult,
@@ -85,19 +100,6 @@ pub enum Instruction {
     BitOr,
     BitAnd,
 
-    StoreVar(String),
-    LoadVar(String),
-    MakeLambda(Vec<String>, Vec<Instruction>),
-    Call(usize),
-    MakeArray(usize),
-    If(Vec<Instruction>, Vec<Instruction>),
-
-    Loop(
-        Vec<Instruction>,
-        Vec<Instruction>,
-        Vec<Instruction>, // code for the lambda expression
-    ),
-    LoopFinish(Vec<Instruction>, Vec<Instruction>),
     SetArray, // expects stack: [value, index, vector]
     GetArray,
     PopArray,
@@ -153,7 +155,7 @@ impl Instruction {
             }
 
             Instruction::Call(n) => format!("Call({})", n),
-            Instruction::MakeArray(n) => format!("MakeArray({})", n),
+            Instruction::MakeVector(n) => format!("MakeVector({})", n),
 
             Instruction::If(then_branch, else_branch) => {
                 let then_str = then_branch
@@ -203,6 +205,109 @@ impl Instruction {
                     .collect::<Vec<_>>()
                     .join(",");
                 format!("LoopFinish(vec![{}], vec![{}])", cond_str, func_str)
+            }
+
+            Instruction::SetArray => "SetArray".to_string(),
+            Instruction::GetArray => "GetArray".to_string(),
+            Instruction::PopArray => "PopArray".to_string(),
+        }
+    }
+    pub fn serialise(&self) -> String {
+        match self {
+            Instruction::PushInt(n) => format!("PushInt({})", n),
+            Instruction::Length => "Length".to_string(),
+            Instruction::Add => "Add".to_string(),
+            Instruction::Mult => "Mult".to_string(),
+            Instruction::Div => "Div".to_string(),
+            Instruction::Sub => "Sub".to_string(),
+            Instruction::Mod => "Mod".to_string(),
+            Instruction::Pop => "Pop".to_string(),
+            Instruction::Lt => "Lt".to_string(),
+            Instruction::Gt => "Gt".to_string(),
+            Instruction::Lte => "Lte".to_string(),
+            Instruction::Gte => "Gte".to_string(),
+            Instruction::Eq => "Eq".to_string(),
+            Instruction::Not => "Not".to_string(),
+
+            Instruction::BitXor => "BitXor".to_string(),
+            Instruction::BitRs => "BitRs".to_string(),
+            Instruction::BitLs => "BitLs".to_string(),
+            Instruction::BitNot => "BitNot".to_string(),
+            Instruction::BitOr => "BitOr".to_string(),
+            Instruction::BitAnd => "BitAnd".to_string(),
+
+            Instruction::StoreVar(name) => format!("StoreVar({:?})", name),
+            Instruction::LoadVar(name) => format!("LoadVar({:?})", name),
+
+            Instruction::MakeLambda(params, body) => {
+                let params_str = if params.is_empty() {
+                    "[]".to_string()
+                } else {
+                    format!(
+                        "[{}]",
+                        params
+                            .iter()
+                            .map(|s| format!("{:?}", s))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )
+                };
+                let body_str = body
+                    .iter()
+                    .map(|instr| instr.serialise())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("MakeLambda({}, [{}])", params_str, body_str)
+            }
+
+            Instruction::Call(n) => format!("Call({})", n),
+            Instruction::MakeVector(n) => format!("MakeVector({})", n),
+
+            Instruction::If(then_branch, else_branch) => {
+                let then_str = then_branch
+                    .iter()
+                    .map(|i| i.serialise())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let else_str = else_branch
+                    .iter()
+                    .map(|i| i.serialise())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("If([{}], [{}])", then_str, else_str)
+            }
+
+            Instruction::Loop(start, end, func) => {
+                let start_str = start
+                    .iter()
+                    .map(|i| i.serialise())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let end_str = end
+                    .iter()
+                    .map(|i| i.serialise())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let func_str = func
+                    .iter()
+                    .map(|i| i.serialise())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("Loop([{}], [{}], [{}])", start_str, end_str, func_str)
+            }
+
+            Instruction::LoopFinish(cond, func) => {
+                let cond_str = cond
+                    .iter()
+                    .map(|i| i.serialise())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let func_str = func
+                    .iter()
+                    .map(|i| i.serialise())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("LoopFinish([{}], [{}])", cond_str, func_str)
             }
 
             Instruction::SetArray => "SetArray".to_string(),
@@ -498,7 +603,7 @@ impl VM {
                     self.stack.push(val.clone());
                 }
 
-                Instruction::MakeArray(n) => {
+                Instruction::MakeVector(n) => {
                     let mut elements = Vec::new();
                     for _ in 0..*n {
                         elements.push(self.stack.pop().expect("stack underflow"));
@@ -1099,14 +1204,14 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         code.push(Instruction::MakeLambda(params, body_code));
                     }
                     "as" => {
-                        code.push(Instruction::MakeArray(0));
+                        code.push(Instruction::MakeVector(0));
                     }
                     "vector" => {
                         let count = exprs.len() - 1;
                         for arg in &exprs[1..] {
                             compile(arg, code);
                         }
-                        code.push(Instruction::MakeArray(count));
+                        code.push(Instruction::MakeVector(count));
                     }
                     "if" => {
                         if exprs.len() != 4 {
@@ -1210,4 +1315,372 @@ pub fn exe(code: Vec<Instruction>) -> BiteCodeEvaluated {
     let mut vm = VM::new();
     vm.run(&code);
     return vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone();
+}
+
+use std::str::Chars;
+
+#[derive(Debug)]
+struct P<'a> {
+    s: &'a str,
+    chars: Chars<'a>,
+    i: usize, // byte index
+}
+
+impl<'a> P<'a> {
+    fn new(s: &'a str) -> Self {
+        Self {
+            s,
+            chars: s.chars(),
+            i: 0,
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.s[self.i..].chars().next()
+    }
+
+    fn next_char(&mut self) -> Option<char> {
+        let ch = self.peek()?;
+        let ch_len = ch.len_utf8();
+        self.i += ch_len;
+        Some(ch)
+    }
+
+    fn skip_ws(&mut self) {
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn expect_str(&mut self, expected: &str) -> Result<(), String> {
+        self.skip_ws();
+        if self.s[self.i..].starts_with(expected) {
+            // advance
+            for _ in 0..expected.len() {
+                self.next_char();
+            }
+            Ok(())
+        } else {
+            Err(format!("Expected `{}` at pos {}", expected, self.i))
+        }
+    }
+
+    fn consume_if(&mut self, pat: &str) -> bool {
+        self.skip_ws();
+        if self.s[self.i..].starts_with(pat) {
+            for _ in 0..pat.len() {
+                self.next_char();
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<String, String> {
+        self.skip_ws();
+        if self.peek() != Some('"') {
+            return Err(format!("Expected string at pos {}", self.i));
+        }
+        // consume opening "
+        self.next_char();
+        let mut out = String::new();
+        while let Some(ch) = self.next_char() {
+            match ch {
+                '"' => return Ok(out),
+                '\\' => {
+                    if let Some(esc) = self.next_char() {
+                        match esc {
+                            '"' => out.push('"'),
+                            '\\' => out.push('\\'),
+                            'n' => out.push('\n'),
+                            't' => out.push('\t'),
+                            other => out.push(other),
+                        }
+                    } else {
+                        return Err("Unterminated escape".to_string());
+                    }
+                }
+                c => out.push(c),
+            }
+        }
+        Err("Unterminated string literal".to_string())
+    }
+
+    fn parse_number(&mut self) -> Result<i32, String> {
+        self.skip_ws();
+        let mut start = self.i;
+        if self.peek() == Some('-') {
+            self.next_char();
+        }
+        while let Some(c) = self.peek() {
+            if c.is_ascii_digit() {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+        if start == self.i {
+            return Err(format!("Expected number at {}", start));
+        }
+        let slice = &self.s[start..self.i];
+        slice
+            .parse::<i32>()
+            .map_err(|e| format!("Invalid number `{}`: {}", slice, e))
+    }
+
+    fn parse_ident(&mut self) -> String {
+        self.skip_ws();
+        let mut out = String::new();
+        while let Some(c) = self.peek() {
+            // identifier chars: ASCII letters, digits, underscore, punctuation used in names like ':' '-' '?', etc.
+            // stop at delimiters: whitespace, ',', ']', ')'
+            if c.is_whitespace() || c == ',' || c == ']' || c == ')' {
+                break;
+            }
+            // also stop when encountering '(' because ident followed by '(' is function-like name
+            if c == '(' || c == '[' || c == ']' || c == '{' || c == ')' {
+                break;
+            }
+            out.push(c);
+            self.next_char();
+        }
+        out
+    }
+
+    // parse vec![ ... ] that contains instruction-like elements
+    fn parse_vec_instructions(&mut self) -> Result<Vec<Instruction>, String> {
+        self.skip_ws();
+        // expect "vec!"
+        // self.expect_str("vec!")?;
+        // self.skip_ws();
+        self.expect_str("[")?;
+        let mut items = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.consume_if("]") {
+                break;
+            }
+            let instr = self.parse_instruction()?;
+            items.push(instr);
+            self.skip_ws();
+            if self.consume_if(",") {
+                continue;
+            } else if self.consume_if("]") {
+                break;
+            } else {
+                return Err(format!("Expected `,` or `]` after item at pos {}", self.i));
+            }
+        }
+        Ok(items)
+    }
+
+    // parse vec!["x", "y"] => Vec<String>
+    fn parse_vec_strings(&mut self) -> Result<Vec<String>, String> {
+        self.skip_ws();
+        // self.expect_str("vec!")?;
+        // self.skip_ws();
+        self.expect_str("[")?;
+        let mut out = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.consume_if("]") {
+                break;
+            }
+            let s = self.parse_string()?;
+            out.push(s);
+            self.skip_ws();
+            if self.consume_if(",") {
+                continue;
+            } else if self.consume_if("]") {
+                break;
+            } else {
+                return Err(format!(
+                    "Expected `,` or `]` in vec![strings] at pos {}",
+                    self.i
+                ));
+            }
+        }
+        Ok(out)
+    }
+
+    // parse a single instruction; it recognizes named instructions and their args
+    fn parse_instruction(&mut self) -> Result<Instruction, String> {
+        self.skip_ws();
+        // Many elements are function-like: Name(...) or bare Name
+        // Read identifier (could be MakeLambda, StoreVar, PushInt, Pop, etc.)
+        let name = self.parse_ident();
+        if name.is_empty() {
+            return Err(format!("Expected instruction at pos {}", self.i));
+        }
+
+        // If next non-ws char is '(' then there are args, else it's a bare instruction name
+        self.skip_ws();
+        if self.peek() == Some('(') {
+            self.next_char(); // consume '('
+                              // parse according to name
+            let res = match name.as_str() {
+                "MakeLambda" => {
+                    // ( vec!["x", ...] , vec![ instrs ... ] )
+                    self.skip_ws();
+                    let params = self.parse_vec_strings()?;
+                    self.skip_ws();
+                    self.expect_str(",")?;
+                    self.skip_ws();
+                    let body = self.parse_vec_instructions()?;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::MakeLambda(params, body))
+                }
+                "StoreVar" => {
+                    // ( "some:name" )
+                    self.skip_ws();
+                    let s = self.parse_string()?;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::StoreVar(s))
+                }
+                "PushInt" => {
+                    self.skip_ws();
+                    let n = self.parse_number()?;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::PushInt(n))
+                }
+                "Call" => {
+                    self.skip_ws();
+                    let n = self.parse_number()? as usize;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::Call(n))
+                }
+                "MakeVector" => {
+                    self.skip_ws();
+                    let n = self.parse_number()? as usize;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::MakeVector(n))
+                }
+                "If" => {
+                    // ( vec![then_instrs], vec![else_instrs] )
+                    self.skip_ws();
+                    let then_branch = self.parse_vec_instructions()?;
+                    self.skip_ws();
+                    self.expect_str(",")?;
+                    self.skip_ws();
+                    let else_branch = self.parse_vec_instructions()?;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::If(then_branch, else_branch))
+                }
+                "Loop" => {
+                    // ( vec![start], vec![end], vec![func] )
+                    self.skip_ws();
+                    let start = self.parse_vec_instructions()?;
+                    self.skip_ws();
+                    self.expect_str(",")?;
+                    self.skip_ws();
+                    let end = self.parse_vec_instructions()?;
+                    self.skip_ws();
+                    self.expect_str(",")?;
+                    self.skip_ws();
+                    let func = self.parse_vec_instructions()?;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::Loop(start, end, func))
+                }
+                "LoopFinish" => {
+                    self.skip_ws();
+                    let cond = self.parse_vec_instructions()?;
+                    self.skip_ws();
+                    self.expect_str(",")?;
+                    self.skip_ws();
+                    let func = self.parse_vec_instructions()?;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::LoopFinish(cond, func))
+                }
+                // Some instructions take string arg (LoadVar) or number etc.
+                "LoadVar" => {
+                    self.skip_ws();
+                    let s = self.parse_string()?;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::LoadVar(s))
+                }
+                other => Err(format!(
+                    "Unknown instruction with args: {} at pos {}",
+                    other, self.i
+                )),
+            };
+            return res;
+        } else {
+            // bare name: Pop, Length, GetArray, SetArray, Eq, Add, Mult, Div, Sub, Mod, LoadVar ops without args, etc.
+            let instr = self.parse_instruction_named(&name)?;
+            return Ok(instr);
+        }
+    }
+
+    fn parse_instruction_named(&self, name: &str) -> Result<Instruction, String> {
+        match name {
+            "PushInt" => Err("PushInt requires an argument".into()),
+            // LoadVar without parens isn't used in your data, but map to error to be explicit
+            // You could accept bare identifiers and try to map them to LoadVar with that name, if desired.
+            "MakeLambda" => Err("MakeLambda expects args".into()),
+            // If you have bare names that are synonyms for zero-arg instructions, add here:
+            "LoadVar" => Err("LoadVar expects a string arg".into()),
+
+            "Pop" => Ok(Instruction::Pop),
+            "Length" => Ok(Instruction::Length),
+            "GetArray" => Ok(Instruction::GetArray),
+            "SetArray" => Ok(Instruction::SetArray),
+            "PopArray" => Ok(Instruction::PopArray),
+            "Eq" => Ok(Instruction::Eq),
+            "Add" => Ok(Instruction::Add),
+            "Mult" => Ok(Instruction::Mult),
+            "Div" => Ok(Instruction::Div),
+            "Sub" => Ok(Instruction::Sub),
+            "Mod" => Ok(Instruction::Mod),
+
+            // also catch `LoadVar("...")` handled above
+            "Pop," => Ok(Instruction::Pop), // tolerance for trailing commas
+            "Lt" => Ok(Instruction::Lt),
+            "Gt" => Ok(Instruction::Gt),
+            "Gte" => Ok(Instruction::Gte),
+            "Lte" => Ok(Instruction::Lte),
+            "Not" => Ok(Instruction::Not),
+
+            "BitXor" => Ok(Instruction::BitXor),
+            "BitRs" => Ok(Instruction::BitRs),
+            "BitLs" => Ok(Instruction::BitLs),
+            "BitNot" => Ok(Instruction::BitNot),
+            "BitOr" => Ok(Instruction::BitOr),
+            "BitAnd" => Ok(Instruction::BitAnd),
+
+            other => Err(format!("Unknown bare instruction `{}`", other)),
+        }
+    }
+}
+
+/// Public parser entrypoint
+pub fn parse_bitecode(s: &str) -> Result<Vec<Instruction>, String> {
+    let mut p = P::new(s);
+    p.skip_ws();
+    // Expect top-level vec![ ... ]
+    let v = p.parse_vec_instructions()?;
+    p.skip_ws();
+    if p.i < s.len() {
+        // allow trailing whitespace only
+        if s[p.i..].trim().is_empty() {
+            Ok(v)
+        } else {
+            Err(format!("Trailing data after top-level vec! at pos {}", p.i))
+        }
+    } else {
+        Ok(v)
+    }
 }
