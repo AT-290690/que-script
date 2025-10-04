@@ -90,20 +90,14 @@ pub enum Instruction {
     MakeLambda(Vec<String>, Vec<Instruction>),
     Call(usize),
     MakeArray(usize),
-    If {
-        then_branch: Vec<Instruction>,
-        else_branch: Vec<Instruction>,
-    },
+    If(Vec<Instruction>, Vec<Instruction>),
 
-    Loop {
-        start: Vec<Instruction>,
-        end: Vec<Instruction>,
-        func: Vec<Instruction>, // code for the lambda expression
-    },
-    LoopFinish {
-        cond: Vec<Instruction>,
-        func: Vec<Instruction>,
-    },
+    Loop(
+        Vec<Instruction>,
+        Vec<Instruction>,
+        Vec<Instruction>, // code for the lambda expression
+    ),
+    LoopFinish(Vec<Instruction>, Vec<Instruction>),
     SetArray, // expects stack: [value, index, vector]
     GetArray,
     PopArray,
@@ -161,10 +155,7 @@ impl Instruction {
             Instruction::Call(n) => format!("Call({})", n),
             Instruction::MakeArray(n) => format!("MakeArray({})", n),
 
-            Instruction::If {
-                then_branch,
-                else_branch,
-            } => {
+            Instruction::If(then_branch, else_branch) => {
                 let then_str = then_branch
                     .iter()
                     .map(|i| i.to_rust())
@@ -175,13 +166,10 @@ impl Instruction {
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!(
-                    "If {{ then_branch: vec![{}], else_branch: vec![{}] }}",
-                    then_str, else_str
-                )
+                format!("If(vec![{}], vec![{}])", then_str, else_str)
             }
 
-            Instruction::Loop { start, end, func } => {
+            Instruction::Loop(start, end, func) => {
                 let start_str = start
                     .iter()
                     .map(|i| i.to_rust())
@@ -198,12 +186,12 @@ impl Instruction {
                     .collect::<Vec<_>>()
                     .join(",");
                 format!(
-                    "Loop {{ start: vec![{}], end: vec![{}], func: vec![{}] }}",
+                    "Loop(vec![{}], vec![{}], vec![{}])",
                     start_str, end_str, func_str
                 )
             }
 
-            Instruction::LoopFinish { cond, func } => {
+            Instruction::LoopFinish(cond, func) => {
                 let cond_str = cond
                     .iter()
                     .map(|i| i.to_rust())
@@ -214,10 +202,7 @@ impl Instruction {
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!(
-                    "LoopFinish {{ cond: vec![{}], func: vec![{}] }}",
-                    cond_str, func_str
-                )
+                format!("LoopFinish(vec![{}], vec![{}])", cond_str, func_str)
             }
 
             Instruction::SetArray => "SetArray".to_string(),
@@ -308,10 +293,7 @@ impl VM {
                         panic!("set! expects vector and integer index");
                     }
                 }
-                Instruction::If {
-                    then_branch,
-                    else_branch,
-                } => {
+                Instruction::If(then_branch, else_branch) => {
                     let cond = self.stack.pop().expect("stack underflow");
                     let cond_val = match cond {
                         BiteCodeEvaluated::Int(n) => n,
@@ -603,7 +585,7 @@ impl VM {
                     }
                 }
 
-                Instruction::Loop { start, end, func } => {
+                Instruction::Loop(start, end, func) => {
                     // Evaluate start
                     let mut start_vm = VM {
                         stack: Vec::new(),
@@ -662,7 +644,7 @@ impl VM {
                     self.stack.push(BiteCodeEvaluated::Int(0));
                 }
 
-                Instruction::LoopFinish { cond, func } => {
+                Instruction::LoopFinish(cond, func) => {
                     // Pre-resolve function once (like in Loop)
                     let mut func_vm = VM {
                         stack: Vec::new(),
@@ -995,10 +977,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         compile(&exprs[2], &mut then_code);
                         // First argument is the condition
                         compile(&exprs[1], code);
-                        code.push(Instruction::If {
-                            then_branch: then_code,
-                            else_branch: vec![Instruction::PushInt(0)],
-                        });
+                        code.push(Instruction::If(then_code, vec![Instruction::PushInt(0)]));
                     }
                     "or" => {
                         if exprs.len() != 3 {
@@ -1009,10 +988,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         compile(&exprs[2], &mut then_code);
 
                         compile(&exprs[1], code);
-                        code.push(Instruction::If {
-                            then_branch: vec![Instruction::PushInt(1)],
-                            else_branch: then_code,
-                        });
+                        code.push(Instruction::If(vec![Instruction::PushInt(1)], then_code));
                     }
 
                     "not" => {
@@ -1144,10 +1120,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         let mut else_code = Vec::new();
                         compile(&exprs[3], &mut else_code);
 
-                        code.push(Instruction::If {
-                            then_branch: then_code,
-                            else_branch: else_code,
-                        });
+                        code.push(Instruction::If(then_code, else_code));
                     }
                     "loop-finish" => {
                         if exprs.len() != 3 {
@@ -1160,10 +1133,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         let mut func_code = Vec::new();
                         compile(&exprs[2], &mut func_code);
 
-                        code.push(Instruction::LoopFinish {
-                            cond: cond_code,
-                            func: func_code,
-                        });
+                        code.push(Instruction::LoopFinish(cond_code, func_code));
                     }
                     "loop" => {
                         if exprs.len() != 4 {
@@ -1179,11 +1149,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                         let mut func_code = Vec::new();
                         compile(&exprs[3], &mut func_code);
 
-                        code.push(Instruction::Loop {
-                            start: start_code,
-                            end: end_code,
-                            func: func_code,
-                        });
+                        code.push(Instruction::Loop(start_code, end_code, func_code));
                     }
                     "set!" => {
                         if exprs.len() != 4 {
