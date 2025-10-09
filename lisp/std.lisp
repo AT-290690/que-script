@@ -100,6 +100,7 @@
       (let out (get xs (- (length xs) 1))) 
       (std:vector:pop! xs)
       out)))
+(let std:vector:push-and-get! (lambda xs x (do (std:vector:set! xs (length xs) x) x)))
 (let std:vector:update! (lambda xs i value (do (set! xs i value) xs)))
 (let std:vector:tail! (lambda xs (do (std:vector:pop! xs) xs)))
 (let std:vector:append! (lambda xs x (do (std:vector:push! xs x) xs)))

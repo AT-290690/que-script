@@ -1061,32 +1061,34 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
 fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
     match expr {
         Expression::Apply(items) if !items.is_empty() => {
-            if let Expression::Word(op) = &items[0] {
-                if op == fn_name {
-                    // a direct call in this position => tail call (since we're asking about this spot)
-                    return true;
+            match &items[0] {
+                Expression::Word(op) if op == fn_name => {
+                    // ✅ Tail if the entire expression is a call to the function itself
+                    true
                 }
-                // special control forms where the tail position is specific:
-                match op.as_str() {
+
+                Expression::Word(op) => match op.as_str() {
                     "if" | "unless" => {
-                        // (if cond then else) -> check then and else tails
+                        // tail position is inside then and else branches
                         if items.len() >= 3 {
-                            return contains_tail_call_to(&items[2], fn_name)
-                                || (items.len() > 3 && contains_tail_call_to(&items[3], fn_name));
+                            contains_tail_call_to(&items[2], fn_name)
+                                || (items.len() > 3 && contains_tail_call_to(&items[3], fn_name))
+                        } else {
+                            false
                         }
-                        false
                     }
                     "do" => {
-                        // tail is the last expr in do
+                        // tail position is the last expression in a do
                         if items.len() >= 2 {
-                            return contains_tail_call_to(&items[items.len() - 1], fn_name);
+                            contains_tail_call_to(&items[items.len() - 1], fn_name)
+                        } else {
+                            false
                         }
-                        false
                     }
-                    _ => false,
-                }
-            } else {
-                false
+                    _ => false, // any other operator => no tail call
+                },
+
+                _ => false,
             }
         }
         _ => false,

@@ -147,13 +147,13 @@ fn main() -> std::io::Result<()> {
                 Ok(wrapped_ast) => {
                     let mut code: Vec<vm::Instruction> = Vec::new();
                     vm::compile(&wrapped_ast, &mut code);
-                    dump_raw_bytecode(code, "./dist/ir.txt");
+                    dump_raw_bytecode(code, "./dist/ir.js");
                 }
                 Err(e) => println!("{:?}", e),
             }
         }
     } else if args.iter().any(|a| a == "--bit") {
-        let program = fs::read_to_string("./dist/ir.txt")?;
+        let program = fs::read_to_string("./dist/ir.js")?;
         println!("{:?}", vm::exe(parse_bitecode(&program).unwrap()));
     } else {
         println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
