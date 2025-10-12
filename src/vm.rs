@@ -330,6 +330,8 @@ impl VM {
     }
 
     pub fn run(&mut self, code: &[Instruction]) -> Result<(), String> {
+        const LOOP_LIMIT: i32 = 5000000;
+        let mut universal_loop_count = 0;
         for instr in code {
             match instr {
                 Instruction::GetArray => {
@@ -714,7 +716,13 @@ impl VM {
                         BiteCodeEvaluated::Int(n) => n,
                         _ => return Err("loop end must be int".to_string()),
                     };
-
+                    if end_int > LOOP_LIMIT {
+                        return Err("loop iteration is higher than the limit".to_string());
+                    }
+                    universal_loop_count += end_int;
+                    if universal_loop_count > LOOP_LIMIT {
+                        return Err("Program is looping too much".to_string());
+                    }
                     // Pre-resolve the function ONCE
                     let mut func_vm = VM {
                         stack: Vec::new(),
@@ -777,8 +785,13 @@ impl VM {
                         stack: Vec::new(),
                         locals: captured_env.clone(),
                     };
+                    let mut loop_count = 0;
 
                     loop {
+                        loop_count += 1;
+                        if loop_count > LOOP_LIMIT {
+                            return Err("loop-finish reached loop limit".to_string());
+                        }
                         cond_vm.stack.clear();
                         cond_vm.run(cond)?;
 
@@ -798,7 +811,10 @@ impl VM {
                         inner_vm.stack.clear();
                         inner_vm.run(&body)?;
                     }
-
+                    universal_loop_count += loop_count;
+                    if universal_loop_count > LOOP_LIMIT {
+                        return Err("Program is looping too much".to_string());
+                    }
                     self.stack.push(BiteCodeEvaluated::Int(0)); // by convention
                 }
             }

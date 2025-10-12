@@ -183,6 +183,12 @@ Now the vector can only have **Ints** and will error out if anything else is pus
 
 _Note: This works nicely for vectors of any depth with concrete types Int or Bool. Lambdas are a bit awkward to cast and are therefore discouraged for now._
 
+### Loop Limit
+
+Loops are capped at 5,000,000 (five million) total iterations for the entire program.
+
+To ensure programs remain safe when running locally or on shared servers, loops must be "safe" and unable to hang or block the main thread. This limit also applies to tail-call optimized recursion.
+
 ### Solving Puzzles
 
 Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner:
