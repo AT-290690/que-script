@@ -22,10 +22,15 @@ fn run_code(program: String) -> String {
     if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
-                Ok(typ) => return format!("{}\n{:?}", typ, vm::run(&wrapped_ast)),
-                Err(e) => return format!("{:?}", e),
+                Ok(typ) => {
+                    return match vm::run(&wrapped_ast) {
+                        Ok(res) => return format!("{}\n{:?}", typ, res),
+                        Err(err) => return err,
+                    }
+                }
+                Err(err) => return err,
             },
-            Err(e) => return e,
+            Err(err) => return err,
         }
     }
     "No expressions...".to_string()

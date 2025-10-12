@@ -1,5 +1,4 @@
 use crate::parser::Expression;
-use core::panic;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -330,22 +329,22 @@ impl VM {
         }
     }
 
-    pub fn run(&mut self, code: &[Instruction]) {
+    pub fn run(&mut self, code: &[Instruction]) -> Result<(), String> {
         for instr in code {
             match instr {
                 Instruction::GetArray => {
-                    let index_val = self.stack.pop().expect("stack underflow (index)");
-                    let array_val = self.stack.pop().expect("stack underflow (vector)");
+                    let index_val = self.stack.pop().ok_or("stack underflow (index)")?;
+                    let array_val = self.stack.pop().ok_or("stack underflow (vector)")?;
 
                     match (array_val, index_val) {
                         (BiteCodeEvaluated::Array(arr), BiteCodeEvaluated::Int(i)) => {
                             let r = arr.borrow();
                             if i < 0 || i as usize >= r.len() {
-                                panic!("get: index out of bounds");
+                                return Err("get: index out of bounds".to_string());
                             }
                             self.stack.push(r[i as usize].clone());
                         }
-                        _ => panic!("get expects (vector, int)"),
+                        _ => return Err("get expects (vector, int)".to_string()),
                     }
                 }
 
@@ -353,32 +352,32 @@ impl VM {
                     let arr = self
                         .stack
                         .pop()
-                        .expect("stack underflow: length needs an vector");
+                        .ok_or("stack underflow: length needs an vector")?;
                     match arr {
                         BiteCodeEvaluated::Array(elements) => {
                             self.stack
                                 .push(BiteCodeEvaluated::Int(elements.borrow().len() as i32));
                         }
-                        _ => panic!("length expects an vector"),
+                        _ => return Err("length expects an vector".to_string()),
                     }
                 }
                 Instruction::PopArray => {
-                    let array_val = self.stack.pop().expect("stack underflow");
+                    let array_val = self.stack.pop().ok_or("stack underflow")?;
                     match array_val {
                         BiteCodeEvaluated::Array(arr) => {
                             arr.borrow_mut().pop();
                             self.stack.push(BiteCodeEvaluated::Int(0))
                         }
                         _ => {
-                            panic!("pop! argument not an vector");
+                            return Err("pop! argument not an vector".to_string());
                         }
                     }
                 }
                 Instruction::SetArray => {
                     // Stack: [..., vector(Rc<RefCell<Vec<BiteCodeEvaluated>>>), index(Int), value(BiteCodeEvaluated)]
-                    let value = self.stack.pop().expect("stack underflow");
-                    let index_val = self.stack.pop().expect("stack underflow");
-                    let array_val = self.stack.pop().expect("stack underflow");
+                    let value = self.stack.pop().ok_or("stack underflow")?;
+                    let index_val = self.stack.pop().ok_or("stack underflow")?;
+                    let array_val = self.stack.pop().ok_or("stack underflow")?;
 
                     if let (BiteCodeEvaluated::Array(arr), BiteCodeEvaluated::Int(idx)) =
                         (array_val, index_val)
@@ -391,205 +390,205 @@ impl VM {
                                 arr.borrow_mut()[idx as usize] = value;
                             }
                         } else {
-                            panic!("Index out of bounds");
+                            return Err("Index out of bounds".to_string());
                         }
                         self.stack.push(BiteCodeEvaluated::Int(0));
                     } else {
-                        panic!("set! expects vector and integer index");
+                        return Err("set! expects vector and integer index".to_string());
                     }
                 }
                 Instruction::If(then_branch, else_branch) => {
-                    let cond = self.stack.pop().expect("stack underflow");
+                    let cond = self.stack.pop().ok_or("stack underflow")?;
                     let cond_val = match cond {
                         BiteCodeEvaluated::Int(n) => n,
-                        _ => panic!("if condition must be 0 or 1"),
+                        _ => return Err("if condition must be 0 or 1".to_string()),
                     };
                     if cond_val == 1 {
-                        self.run(&then_branch);
+                        self.run(&then_branch)?;
                     } else {
-                        self.run(&else_branch);
+                        self.run(&else_branch)?;
                     }
                 }
                 Instruction::PushInt(n) => self.stack.push(BiteCodeEvaluated::Int(*n)),
 
                 Instruction::Add => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a + b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
 
                 Instruction::Mult => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a * b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
 
                 Instruction::Div => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a / b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
 
                 Instruction::Sub => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a - b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
 
                 Instruction::Mod => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a % b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
 
                 Instruction::BitXor => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a ^ b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::BitRs => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a >> b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::BitLs => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a << b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::BitAnd => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a & b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::BitOr => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a | b))
                         }
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::BitNot => {
-                    let a = self.stack.pop().expect("stack underflow");
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a) {
                         (BiteCodeEvaluated::Int(a)) => self.stack.push(BiteCodeEvaluated::Int(!a)),
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::Eq => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
                             .stack
                             .push(BiteCodeEvaluated::Int(if a == b { 1 } else { 0 })),
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::Lt => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
                             .stack
                             .push(BiteCodeEvaluated::Int(if a < b { 1 } else { 0 })),
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::Gt => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
                             .stack
                             .push(BiteCodeEvaluated::Int(if a > b { 1 } else { 0 })),
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::Lte => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
                             .stack
                             .push(BiteCodeEvaluated::Int(if a <= b { 1 } else { 0 })),
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::Gte => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
                             .stack
                             .push(BiteCodeEvaluated::Int(if a >= b { 1 } else { 0 })),
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
                 Instruction::Not => {
-                    let a = self.stack.pop().expect("stack underflow");
+                    let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a) {
                         (BiteCodeEvaluated::Int(a)) => self
                             .stack
                             .push(BiteCodeEvaluated::Int(if a == 1 { 0 } else { 1 })),
-                        _ => panic!("Both arguments must be numbers"),
+                        _ => return Err("Both arguments must be numbers".to_string()),
                     }
                 }
 
                 Instruction::Pop => {
-                    self.stack.pop().expect("stack underflow");
+                    self.stack.pop().ok_or("stack underflow")?;
                 }
 
                 Instruction::StoreVar(name) => {
-                    let val = self.stack.pop().expect("stack underflow");
+                    let val = self.stack.pop().ok_or("stack underflow")?;
                     let mut locals = self.locals.borrow_mut();
                     locals.vars.insert(name.clone(), val);
                 }
@@ -599,14 +598,14 @@ impl VM {
                         .locals
                         .borrow_mut()
                         .get(name)
-                        .expect("undefined variable");
+                        .ok_or(format!("undefined variable: {}", name))?;
                     self.stack.push(val.clone());
                 }
 
                 Instruction::MakeVector(n) => {
                     let mut elements = Vec::new();
                     for _ in 0..*n {
-                        elements.push(self.stack.pop().expect("stack underflow"));
+                        elements.push(self.stack.pop().ok_or("stack underflow")?);
                     }
                     elements.reverse(); // preserve order
                     self.stack
@@ -626,10 +625,10 @@ impl VM {
                 }
 
                 Instruction::Call(arg_count) => {
-                    let func = self.stack.pop().expect("stack underflow");
+                    let func = self.stack.pop().ok_or("stack underflow")?;
                     let mut args: Vec<BiteCodeEvaluated> = (0..*arg_count)
-                        .map(|_| self.stack.pop().expect("stack underflow"))
-                        .collect::<Vec<_>>()
+                        .map(|_| self.stack.pop().ok_or("stack underflow"))
+                        .collect::<Result<Vec<_>, _>>()?
                         .into_iter()
                         .rev()
                         .collect();
@@ -659,7 +658,7 @@ impl VM {
                                         stack: Vec::new(),
                                         locals: local_env,
                                     };
-                                    inner_vm.run(&body);
+                                    inner_vm.run(&body)?;
 
                                     let result =
                                         inner_vm.stack.pop().unwrap_or(BiteCodeEvaluated::Int(0));
@@ -685,7 +684,7 @@ impl VM {
                                     break;
                                 }
                             }
-                            _ => panic!("Cannot call non-function"),
+                            _ => return Err("Cannot call non-function".to_string()),
                         }
                     }
                 }
@@ -696,24 +695,24 @@ impl VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
                     };
-                    start_vm.run(start);
-                    let start_val = start_vm.stack.pop().expect("loop: missing start value");
+                    start_vm.run(start)?;
+                    let start_val = start_vm.stack.pop().ok_or("loop: missing start value")?;
 
                     // Evaluate end
                     let mut end_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
                     };
-                    end_vm.run(end);
-                    let end_val = end_vm.stack.pop().expect("loop: missing end value");
+                    end_vm.run(end)?;
+                    let end_val = end_vm.stack.pop().ok_or("loop: missing end value")?;
 
                     let start_int = match start_val {
                         BiteCodeEvaluated::Int(n) => n,
-                        _ => panic!("loop start must be int"),
+                        _ => return Err("loop start must be int".to_string()),
                     };
                     let end_int = match end_val {
                         BiteCodeEvaluated::Int(n) => n,
-                        _ => panic!("loop end must be int"),
+                        _ => return Err("loop end must be int".to_string()),
                     };
 
                     // Pre-resolve the function ONCE
@@ -721,15 +720,15 @@ impl VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
                     };
-                    func_vm.run(func);
-                    let func_val = func_vm.stack.pop().expect("loop: missing function");
+                    func_vm.run(func)?;
+                    let func_val = func_vm.stack.pop().ok_or("loop: missing function")?;
                     let (params, body, captured_env) = match func_val {
                         BiteCodeEvaluated::Function(p, b, e) => (p, b, e),
-                        _ => panic!("loop: third argument must be a lambda"),
+                        _ => return Err("loop: third argument must be a lambda".to_string()),
                     };
 
                     if params.len() != 1 {
-                        panic!("loop: lambda must take exactly one parameter");
+                        return Err("loop: lambda must take exactly one parameter".to_string());
                     }
 
                     let mut inner_vm = VM {
@@ -743,7 +742,7 @@ impl VM {
                             .locals
                             .borrow_mut()
                             .set(params[0].clone(), BiteCodeEvaluated::Int(i));
-                        inner_vm.run(&body);
+                        inner_vm.run(&body)?;
                     }
 
                     self.stack.push(BiteCodeEvaluated::Int(0));
@@ -755,15 +754,17 @@ impl VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
                     };
-                    func_vm.run(func);
-                    let func_val = func_vm.stack.pop().expect("loop-finish: missing function");
+                    func_vm.run(func)?;
+                    let func_val = func_vm.stack.pop().ok_or("loop-finish: missing function")?;
                     let (params, body, captured_env) = match func_val {
                         BiteCodeEvaluated::Function(p, b, e) => (p, b, e),
-                        _ => panic!("loop-finish: second argument must be a lambda"),
+                        _ => {
+                            return Err("loop-finish: second argument must be a lambda".to_string())
+                        }
                     };
 
                     if !params.is_empty() {
-                        panic!("loop-finish: lambda must take 0 params");
+                        return Err("loop-finish: lambda must take 0 params".to_string());
                     }
 
                     // Reuse the same VMs
@@ -779,12 +780,15 @@ impl VM {
 
                     loop {
                         cond_vm.stack.clear();
-                        cond_vm.run(cond);
+                        cond_vm.run(cond)?;
 
-                        let cond_val = cond_vm.stack.pop().expect("loop-finish: missing condition");
+                        let cond_val = cond_vm
+                            .stack
+                            .pop()
+                            .ok_or("loop-finish: missing condition")?;
                         let cond_int = match cond_val {
                             BiteCodeEvaluated::Int(n) => n,
-                            _ => panic!("loop-finish condition must be int"),
+                            _ => return Err("loop-finish condition must be int".to_string()),
                         };
 
                         if cond_int != 1 {
@@ -792,13 +796,14 @@ impl VM {
                         }
 
                         inner_vm.stack.clear();
-                        inner_vm.run(&body);
+                        inner_vm.run(&body)?;
                     }
 
                     self.stack.push(BiteCodeEvaluated::Int(0)); // by convention
                 }
             }
         }
+        Ok(())
     }
 
     pub fn result(&self) -> Option<&BiteCodeEvaluated> {
@@ -806,10 +811,11 @@ impl VM {
     }
 }
 
-pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
+pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), String> {
     match expr {
         Expression::Atom(n) => {
             code.push(Instruction::PushInt(*n));
+            Ok(())
         }
 
         Expression::Word(name) => {
@@ -824,6 +830,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Div,
                         ],
                     ));
+                    Ok(())
                 }
                 "mod" => {
                     code.push(Instruction::MakeLambda(
@@ -834,6 +841,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Mod,
                         ],
                     ));
+                    Ok(())
                 }
                 "+" => {
                     code.push(Instruction::MakeLambda(
@@ -844,6 +852,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Add,
                         ],
                     ));
+                    Ok(())
                 }
                 "-" => {
                     code.push(Instruction::MakeLambda(
@@ -854,6 +863,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Sub,
                         ],
                     ));
+                    Ok(())
                 }
                 "*" => {
                     code.push(Instruction::MakeLambda(
@@ -864,6 +874,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Mult,
                         ],
                     ));
+                    Ok(())
                 }
                 ">" => {
                     code.push(Instruction::MakeLambda(
@@ -874,6 +885,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Gt,
                         ],
                     ));
+                    Ok(())
                 }
                 "<" => {
                     code.push(Instruction::MakeLambda(
@@ -884,6 +896,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Lt,
                         ],
                     ));
+                    Ok(())
                 }
                 ">=" => {
                     code.push(Instruction::MakeLambda(
@@ -894,6 +907,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Gte,
                         ],
                     ));
+                    Ok(())
                 }
                 "<=" => {
                     code.push(Instruction::MakeLambda(
@@ -904,6 +918,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Lte,
                         ],
                     ));
+                    Ok(())
                 }
                 "=" => {
                     code.push(Instruction::MakeLambda(
@@ -914,18 +929,21 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::Eq,
                         ],
                     ));
+                    Ok(())
                 }
                 "length" => {
                     code.push(Instruction::MakeLambda(
                         vec!["xs".to_string()],
                         vec![Instruction::LoadVar("xs".to_string()), Instruction::Length],
                     ));
+                    Ok(())
                 }
                 "not" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string()],
                         vec![Instruction::LoadVar("a".to_string()), Instruction::Not],
                     ));
+                    Ok(())
                 }
 
                 ">>" => {
@@ -937,6 +955,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::BitRs,
                         ],
                     ));
+                    Ok(())
                 }
                 "<<" => {
                     code.push(Instruction::MakeLambda(
@@ -947,6 +966,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::BitLs,
                         ],
                     ));
+                    Ok(())
                 }
                 "^" => {
                     code.push(Instruction::MakeLambda(
@@ -957,6 +977,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::BitXor,
                         ],
                     ));
+                    Ok(())
                 }
                 "|" => {
                     code.push(Instruction::MakeLambda(
@@ -967,6 +988,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::BitOr,
                         ],
                     ));
+                    Ok(())
                 }
                 "&" => {
                     code.push(Instruction::MakeLambda(
@@ -977,15 +999,18 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                             Instruction::BitAnd,
                         ],
                     ));
+                    Ok(())
                 }
                 "~" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string()],
                         vec![Instruction::LoadVar("a".to_string()), Instruction::BitNot],
                     ));
+                    Ok(())
                 }
                 _ => {
                     code.push(Instruction::LoadVar(name.clone()));
+                    Ok(())
                 }
             }
         }
@@ -995,326 +1020,366 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) {
                 match op.as_str() {
                     "+" => {
                         if exprs.len() != 3 {
-                            panic!("+ expects exactly 2 arguments");
+                            return Err("+ expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Add);
+                        Ok(())
                     }
                     "*" => {
                         if exprs.len() != 3 {
-                            panic!("* expects exactly 2 arguments");
+                            return Err("* expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Mult);
+                        Ok(())
                     }
                     "/" => {
                         if exprs.len() != 3 {
-                            panic!("/ expects exactly 2 arguments");
+                            return Err("/ expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Div);
+                        Ok(())
                     }
                     "-" => {
                         if exprs.len() != 3 {
-                            panic!("- expects exactly 2 arguments");
+                            return Err("- expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Sub);
+                        Ok(())
                     }
                     "mod" => {
                         if exprs.len() != 3 {
-                            panic!("mod expects exactly 2 arguments");
+                            return Err("mod expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Mod);
+                        Ok(())
                     }
                     "=" => {
                         if exprs.len() != 3 {
-                            panic!("= expects exactly 2 arguments");
+                            return Err("= expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Eq);
+                        Ok(())
                     }
                     "<" => {
                         if exprs.len() != 3 {
-                            panic!("< expects exactly 2 arguments");
+                            return Err("< expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Lt);
+                        Ok(())
                     }
                     ">" => {
                         if exprs.len() != 3 {
-                            panic!("> expects exactly 2 arguments");
+                            return Err("> expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Gt);
+                        Ok(())
                     }
                     "<=" => {
                         if exprs.len() != 3 {
-                            panic!("<= expects exactly 2 arguments");
+                            return Err("<= expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Lte);
+                        Ok(())
                     }
                     ">=" => {
                         if exprs.len() != 3 {
-                            panic!(">= expects exactly 2 arguments");
+                            return Err(">= expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::Gte);
+                        Ok(())
                     }
                     "and" => {
                         if exprs.len() != 3 {
-                            panic!("and expects exactly 2 arguments");
+                            return Err("and expects exactly 2 arguments".to_string());
                         }
 
                         let mut then_code = Vec::new();
-                        compile(&exprs[2], &mut then_code);
+                        compile(&exprs[2], &mut then_code)?;
                         // First argument is the condition
-                        compile(&exprs[1], code);
+                        compile(&exprs[1], code)?;
                         code.push(Instruction::If(then_code, vec![Instruction::PushInt(0)]));
+                        Ok(())
                     }
                     "or" => {
                         if exprs.len() != 3 {
-                            panic!("or expects exactly 2 arguments");
+                            return Err("or expects exactly 2 arguments".to_string());
                         }
 
                         let mut then_code = vec![Instruction::PushInt(1)];
-                        compile(&exprs[2], &mut then_code);
+                        compile(&exprs[2], &mut then_code)?;
 
-                        compile(&exprs[1], code);
+                        compile(&exprs[1], code)?;
                         code.push(Instruction::If(vec![Instruction::PushInt(1)], then_code));
+                        Ok(())
                     }
 
                     "not" => {
                         if exprs.len() != 2 {
-                            panic!("not expects exactly 1 arguments");
+                            return Err("not expects exactly 1 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
+                        compile(&exprs[1], code)?;
                         code.push(Instruction::Not);
+                        Ok(())
                     }
 
                     ">>" => {
                         if exprs.len() != 3 {
-                            panic!(">> expects exactly 2 arguments");
+                            return Err(">> expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::BitRs);
+                        Ok(())
                     }
                     "<<" => {
                         if exprs.len() != 3 {
-                            panic!("<< expects exactly 2 arguments");
+                            return Err("<< expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::BitLs);
+                        Ok(())
                     }
                     "^" => {
                         if exprs.len() != 3 {
-                            panic!("^ expects exactly 2 arguments");
+                            return Err("^ expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::BitXor);
+                        Ok(())
                     }
                     "&" => {
                         if exprs.len() != 3 {
-                            panic!("& expects exactly 2 arguments");
+                            return Err("& expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::BitAnd);
+                        Ok(())
                     }
                     "|" => {
                         if exprs.len() != 3 {
-                            panic!("| expects exactly 2 arguments");
+                            return Err("| expects exactly 2 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
-                        compile(&exprs[2], code);
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
                         code.push(Instruction::BitOr);
+                        Ok(())
                     }
                     "~" => {
                         if exprs.len() != 2 {
-                            panic!("~ expects exactly 1 arguments");
+                            return Err("~ expects exactly 1 arguments".to_string());
                         }
-                        compile(&exprs[1], code);
+                        compile(&exprs[1], code)?;
                         code.push(Instruction::BitNot);
+                        Ok(())
                     }
 
                     "do" => {
                         if exprs.len() <= 0 {
-                            panic!("do expects atleast 1 argument");
+                            return Err("do expects atleast 1 argument".to_string());
                         }
                         for (i, e) in exprs[1..].iter().enumerate() {
-                            compile(e, code);
+                            compile(e, code)?;
                             if i < exprs.len() - 2 {
                                 code.push(Instruction::Pop);
                             }
                         }
+                        Ok(())
                     }
                     "length" => {
                         if exprs.len() != 2 {
-                            panic!("length expects exactly 1 argument");
+                            return Err("length expects exactly 1 argument".to_string());
                         }
-                        compile(&exprs[1], code); // compile vector expression
+                        compile(&exprs[1], code)?; // compile vector expression
                         code.push(Instruction::Length);
+                        Ok(())
                     }
                     "let" => {
                         if exprs.len() != 3 {
-                            panic!("let requires exactly 2 arguments: name and value");
+                            return Err(
+                                "let requires exactly 2 arguments: name and value".to_string()
+                            );
                         }
                         let var_name = match &exprs[1] {
                             Expression::Word(name) => name.clone(),
-                            _ => panic!("let variable must be a word"),
+                            _ => return Err("let variable must be a word".to_string()),
                         };
-                        compile(&exprs[2], code); // evaluate value
+                        compile(&exprs[2], code)?; // evaluate value
                         code.push(Instruction::StoreVar(var_name));
                         // push sentinel Unit (here just Int 0) so `do` sees something
                         code.push(Instruction::PushInt(0));
+                        Ok(())
                     }
                     "lambda" => {
                         // args: (lambda param1 param2 ... body)
                         if exprs.len() < 2 {
-                            panic!("lambda requires at least 1 param and a body");
+                            return Err("lambda requires at least 1 param and a body".to_string());
                         }
 
-                        let params: Vec<String> = exprs[1..exprs.len() - 1]
-                            .iter()
-                            .map(|e| match e {
-                                Expression::Word(name) => name.clone(),
-                                _ => panic!("lambda params must be words"),
-                            })
-                            .collect();
+                        let mut params = Vec::new();
+                        for e in &exprs[1..exprs.len() - 1] {
+                            match e {
+                                Expression::Word(name) => params.push(name.clone()),
+                                _ => return Err("lambda params must be words".to_string()),
+                            }
+                        }
 
                         let body_expr = &exprs[exprs.len() - 1];
                         let mut body_code = Vec::new();
-                        compile(body_expr, &mut body_code);
+                        compile(body_expr, &mut body_code)?;
 
                         code.push(Instruction::MakeLambda(params, body_code));
+                        Ok(())
                     }
                     "as" => {
                         code.push(Instruction::MakeVector(0));
+                        Ok(())
                     }
                     "vector" => {
                         let count = exprs.len() - 1;
                         for arg in &exprs[1..] {
-                            compile(arg, code);
+                            compile(arg, code)?;
                         }
                         code.push(Instruction::MakeVector(count));
+                        Ok(())
                     }
                     "if" => {
                         if exprs.len() != 4 {
-                            panic!("if requires exactly 3 arguments");
+                            return Err("if requires exactly 3 arguments".to_string());
                         }
-                        compile(&exprs[1], code); // compile condition
+                        compile(&exprs[1], code)?; // compile condition
 
                         let mut then_code = Vec::new();
-                        compile(&exprs[2], &mut then_code);
+                        compile(&exprs[2], &mut then_code)?;
 
                         let mut else_code = Vec::new();
-                        compile(&exprs[3], &mut else_code);
+                        compile(&exprs[3], &mut else_code)?;
 
                         code.push(Instruction::If(then_code, else_code));
+                        Ok(())
                     }
                     "loop-finish" => {
                         if exprs.len() != 3 {
-                            panic!("loop-finish expects 2 arguments: condition, lambda");
+                            return Err(
+                                "loop-finish expects 2 arguments: condition, lambda".to_string()
+                            );
                         }
 
                         let mut cond_code = Vec::new();
-                        compile(&exprs[1], &mut cond_code);
+                        compile(&exprs[1], &mut cond_code)?;
 
                         let mut func_code = Vec::new();
-                        compile(&exprs[2], &mut func_code);
+                        compile(&exprs[2], &mut func_code)?;
 
                         code.push(Instruction::LoopFinish(cond_code, func_code));
+                        Ok(())
                     }
                     "loop" => {
                         if exprs.len() != 4 {
-                            panic!("loop expects 3 arguments: start, end, lambda");
+                            return Err("loop expects 3 arguments: start, end, lambda".to_string());
                         }
 
                         let mut start_code = Vec::new();
-                        compile(&exprs[1], &mut start_code);
+                        compile(&exprs[1], &mut start_code)?;
 
                         let mut end_code = Vec::new();
-                        compile(&exprs[2], &mut end_code);
+                        compile(&exprs[2], &mut end_code)?;
 
                         let mut func_code = Vec::new();
-                        compile(&exprs[3], &mut func_code);
+                        compile(&exprs[3], &mut func_code)?;
 
                         code.push(Instruction::Loop(start_code, end_code, func_code));
+                        Ok(())
                     }
                     "set!" => {
                         if exprs.len() != 4 {
-                            panic!("set! expects 3 arguments: vector, index, value");
+                            return Err(
+                                "set! expects 3 arguments: vector, index, value".to_string()
+                            );
                         }
-                        compile(&exprs[1], code); // vector
-                        compile(&exprs[2], code); // index
-                        compile(&exprs[3], code); // value
+                        compile(&exprs[1], code)?; // vector
+                        compile(&exprs[2], code)?; // index
+                        compile(&exprs[3], code)?; // value
                         code.push(Instruction::SetArray);
+                        Ok(())
                     }
                     "pop!" => {
                         if exprs.len() != 2 {
-                            panic!("set! expects 1 arguments: vector, index, value");
+                            return Err("pop! expects 1 argument: vector".to_string());
                         }
-                        compile(&exprs[1], code); // vector
+                        compile(&exprs[1], code)?; // vector
                         code.push(Instruction::PopArray);
+                        Ok(())
                     }
 
                     "get" => {
                         if exprs.len() != 3 {
-                            panic!("get expects 2 arguments: vector, index");
+                            return Err("get expects 2 arguments: vector, index".to_string());
                         }
                         // push vector
-                        compile(&exprs[1], code);
+                        compile(&exprs[1], code)?;
                         // push index
-                        compile(&exprs[2], code);
+                        compile(&exprs[2], code)?;
                         // emit get
                         code.push(Instruction::GetArray);
+                        Ok(())
                     }
 
                     _ => match &exprs[0] {
                         Expression::Word(name) => {
                             // push all arguments first
                             for arg in &exprs[1..] {
-                                compile(arg, code);
+                                compile(arg, code)?;
                             }
                             // load the function/variable and call
                             code.push(Instruction::LoadVar(name.clone()));
                             code.push(Instruction::Call(exprs.len() - 1));
+                            Ok(())
                         }
-                        _ => panic!("Cannot call non-word expression"),
+                        _ => return Err("Cannot call non-word expression".to_string()),
                     },
                 }
+            } else {
+                Ok(())
             }
         }
     }
 }
 
-pub fn run(expr: &crate::parser::Expression) -> BiteCodeEvaluated {
+pub fn run(expr: &crate::parser::Expression) -> Result<BiteCodeEvaluated, String> {
     let mut code = Vec::new();
-    compile(&expr, &mut code);
+    compile(&expr, &mut code)?;
     let mut vm = VM::new();
-    vm.run(&code);
-    return vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone();
+    vm.run(&code)?;
+    return Ok(vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone());
 }
 
-pub fn exe(code: Vec<Instruction>) -> BiteCodeEvaluated {
+pub fn exe(code: Vec<Instruction>) -> Result<BiteCodeEvaluated, String> {
     let mut vm = VM::new();
-    vm.run(&code);
-    return vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone();
+    vm.run(&code)?;
+    return Ok(vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone());
 }
 
 use std::str::Chars;

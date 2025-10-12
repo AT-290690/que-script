@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
+use wasm_bindgen::UnwrapThrowExt;
+
 fn collect_idents(expr: &Expression, acc: &mut HashSet<String>) {
     match expr {
         Expression::Word(w) => {
@@ -214,8 +216,8 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "or" => Ok(or_transform(exprs)),
                     "!=" => Ok(not_equal_transform(exprs)),
                     "<>" => Ok(not_equal_transform(exprs)),
-                    "." => Ok(accessor_transform(exprs)),
-                    "get" => Ok(accessor_transform(exprs)),
+                    "." => Ok(accessor_transform(exprs)?),
+                    "get" => Ok(accessor_transform(exprs)?),
                     "variable" => Ok(variable_transform(exprs)),
                     "integer" => Ok(integer_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
@@ -332,27 +334,26 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Expression {
         ]);
     }
 }
-fn accessor_transform(mut exprs: Vec<Expression>) -> Expression {
+fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
     let len = exprs.len();
     let mut iter = exprs.into_iter();
+    if len == 0 {
+        return Err("get requires at least 1 argument".to_string());
+    }
     let first = iter.next().unwrap();
-
     if len == 1 {
-        return Expression::Apply(vec![
+        return Ok(Expression::Apply(vec![
             Expression::Word("get".to_string()),
             first,
             Expression::Atom(0),
-        ]);
+        ]));
     }
-
     let mut acc = first;
-
     for e in iter {
         acc = Expression::Apply(vec![Expression::Word("get".to_string()), acc, e]);
     }
-
-    acc
+    Ok(acc)
 }
 fn variable_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);

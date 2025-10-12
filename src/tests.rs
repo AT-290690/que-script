@@ -793,7 +793,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             if let crate::parser::Expression::Apply(items) = &std_ast {
                 match crate::parser::merge_std_and_program(&inp, items[1..].to_vec()) {
                     Ok(exprs) => {
-                        let result = crate::vm::run(&exprs);
+                        let result = crate::vm::run(&exprs).unwrap();
                         assert_eq!(format!("{:?}", result), *out, "Solution");
                     }
                     Err(e) => panic!("Failed tests because {}", e),
