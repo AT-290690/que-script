@@ -94,7 +94,7 @@ fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--std") {
         let std_src = fs::read_to_string("./lisp/std.lisp")?;
-        let std_ast = parser::build(&std_src);
+        let std_ast = parser::build(&std_src).unwrap();
         dump_wrapped_ast(std_ast, "./src/baked.rs");
     } else if args.iter().any(|a| a == "--comp") {
         let program = fs::read_to_string("./lisp/main.lisp")?;

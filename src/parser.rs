@@ -188,56 +188,63 @@ fn preprocess(source: &str) -> String {
 
     out
 }
-fn desugar(expr: Expression) -> Expression {
+fn desugar(expr: Expression) -> Result<Expression, String> {
     match expr {
         Expression::Apply(exprs) if !exprs.is_empty() => {
-            let exprs: Vec<Expression> = exprs.into_iter().map(desugar).collect::<Vec<_>>();
+            let mut desugared_exprs = Vec::new();
+            for expr in exprs {
+                match desugar(expr) {
+                    Ok(expr) => desugared_exprs.push(expr),
+                    Err(e) => return Err(e),
+                }
+            }
+            let exprs = desugared_exprs;
 
             if let Expression::Word(ref name) = exprs[0] {
                 match name.as_str() {
-                    "|>" => pipe_transform(exprs),
-                    "cond" => cond_transform(exprs),
-                    "if" => if_transform(exprs),
-                    "unless" => unless_transform(exprs),
-                    "-" => minus_transform(exprs),
-                    "+" => plus_transform(exprs),
-                    "*" => mult_transform(exprs),
-                    "/" => div_transform(exprs),
-                    "and" => and_transform(exprs),
-                    "or" => or_transform(exprs),
-                    "!=" => not_equal_transform(exprs),
-                    "<>" => not_equal_transform(exprs),
-                    "." => accessor_transform(exprs),
-                    "get" => accessor_transform(exprs),
-                    "variable" => variable_transform(exprs),
-                    "integer" => integer_transform(exprs),
+                    "|>" => Ok(pipe_transform(exprs)),
+                    "cond" => Ok(cond_transform(exprs)),
+                    "if" => Ok(if_transform(exprs)),
+                    "unless" => Ok(unless_transform(exprs)),
+                    "-" => Ok(minus_transform(exprs)),
+                    "+" => Ok(plus_transform(exprs)),
+                    "*" => Ok(mult_transform(exprs)),
+                    "/" => Ok(div_transform(exprs)),
+                    "and" => Ok(and_transform(exprs)),
+                    "or" => Ok(or_transform(exprs)),
+                    "!=" => Ok(not_equal_transform(exprs)),
+                    "<>" => Ok(not_equal_transform(exprs)),
+                    "." => Ok(accessor_transform(exprs)),
+                    "get" => Ok(accessor_transform(exprs)),
+                    "variable" => Ok(variable_transform(exprs)),
+                    "integer" => Ok(integer_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
-                    "loop" => loop_transform(exprs),
+                    "loop" => Ok(loop_transform(exprs)),
                     "lambda" => lambda_destructure_transform(exprs),
 
-                    _ => Expression::Apply(exprs),
+                    _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
-                Expression::Apply(exprs)
+                Ok(Expression::Apply(exprs))
             }
         }
-        other => other,
+        other => Ok(other),
     }
 }
-fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Expression {
+fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     // separate args and body
     if exprs.len() < 2 {
-        panic!("lambda expects at least a body");
+        return Err("lambda expects at least a body".to_string());
     }
     let args = &exprs[1..exprs.len() - 1];
     let body = exprs.last().unwrap().clone();
 
     // look for array args
     let mut new_bindings = vec![];
-    let new_args: Vec<Expression> = args
-        .iter()
-        .map(|arg| {
-            if let Expression::Apply(array_exprs) = arg {
+    let mut new_args = Vec::new();
+    for arg in args {
+        match arg {
+            Expression::Apply(array_exprs) => {
                 if let [Expression::Word(ref array_kw), ref elements @ ..] = &array_exprs[..] {
                     if array_kw == "vector" {
                         // replace this arg with _args
@@ -271,16 +278,22 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Expression {
                                     }
                                 }
                                 Expression::Word(_) => { /* skip element */ }
-                                _ => panic!("lambda array element must be a word or '.'"),
+                                _ => {
+                                    return Err(
+                                        "lambda array element must be a word or '.'".to_string()
+                                    )
+                                }
                             }
                         }
-                        return Expression::Word("_args".to_string());
+                        new_args.push(Expression::Word("_args".to_string()));
+                        continue;
                     }
                 }
+                new_args.push(arg.clone());
             }
-            arg.clone()
-        })
-        .collect();
+            _ => new_args.push(arg.clone()),
+        }
+    }
 
     // wrap body with new bindings
     let new_body = if !new_bindings.is_empty() {
@@ -299,7 +312,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Expression {
     let mut lambda_exprs = vec![Expression::Word("lambda".to_string())];
     lambda_exprs.extend(new_args);
     lambda_exprs.push(new_body);
-    Expression::Apply(lambda_exprs)
+    Ok(Expression::Apply(lambda_exprs))
 }
 fn loop_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
@@ -357,15 +370,15 @@ fn integer_transform(mut exprs: Vec<Expression>) -> Expression {
         Expression::Apply(vec![Expression::Word("int".to_string()), exprs[1].clone()]),
     ])
 }
-fn boolean_transform(mut exprs: Vec<Expression>) -> Expression {
+fn boolean_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
     match &exprs[1] {
         Expression::Word(x) => {
             if x != "true" && x != "false" {
-                panic!(
+                return Err(format!(
                     "Booleans variables only be assigned to true or false but got: {}",
                     x
-                )
+                ));
             }
         }
         Expression::Apply(x) => match &x[0] {
@@ -379,30 +392,34 @@ fn boolean_transform(mut exprs: Vec<Expression>) -> Expression {
                     && y != "or"
                     && y != "and"
                 {
-                    panic!(
+                    return Err(format!(
                         "Booleans variables only be assigned to results of boolean expressions but got: {}",
                         y
-                    )
+                    ));
                 }
             }
-            _ => panic!(
-                "Booleans variables only be assigned to true or false but got: {:?}",
-                x[0]
-            ),
+            _ => {
+                return Err(format!(
+                    "Booleans variables only be assigned to true or false but got: {:?}",
+                    x[0]
+                ))
+            }
         },
-        x => panic!(
-            "Booleans variables only be assigned to true or false but got : {:?}",
-            x
-        ),
+        x => {
+            return Err(format!(
+                "Booleans variables only be assigned to true or false but got : {:?}",
+                x
+            ))
+        }
     }
-    Expression::Apply(vec![
+    Ok(Expression::Apply(vec![
         Expression::Word("let".to_string()),
         exprs[0].clone(),
         Expression::Apply(vec![
             Expression::Word("vector".to_string()),
             exprs[1].clone(),
         ]),
-    ])
+    ]))
 }
 fn not_equal_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
@@ -584,31 +601,40 @@ fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
 /// - If an expression is `(import sym1 sym2 ... module)`, this produces a Vec of
 ///   `(let sym1 module:sym1) (let sym2 module:sym2) ...` and removes the import.
 /// - If an import appears *anywhere else* (not top-level), we panic.
-pub fn expand_imports_top_level(exprs: Vec<Expression>) -> Vec<Expression> {
-    exprs
-        .into_iter()
-        .flat_map(|expr| expand_imports_single(expr, true))
-        .collect()
+pub fn expand_imports_top_level(exprs: Vec<Expression>) -> Result<Vec<Expression>, String> {
+    let mut result = Vec::new();
+    for expr in exprs {
+        match expand_imports_single(expr, true) {
+            Ok(exprs) => result.extend(exprs),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(result)
 }
 
 // The `is_top_level` flag tells us whether this expression is a direct
 // element of the top-level list or nested somewhere deeper.
-fn expand_imports_single(expr: Expression, is_top_level: bool) -> Vec<Expression> {
+fn expand_imports_single(expr: Expression, is_top_level: bool) -> Result<Vec<Expression>, String> {
     match expr {
         Expression::Apply(items) if !items.is_empty() => {
             if let Expression::Word(ref kw) = items[0] {
                 if kw == "import" {
                     if !is_top_level {
-                        panic!("import is only allowed at top level!");
+                        return Err("import is only allowed at top level!".to_string());
                     }
                     let mut parts = items[1..].to_vec();
                     if parts.is_empty() {
-                        return vec![]; // nothing to import
+                        return Err("Nothing to import!".to_string());
                     }
                     let module_expr = parts.pop().unwrap();
                     let module_name = match module_expr {
                         Expression::Word(m) => m,
-                        other => panic!("import: expected module name symbol, got {:?}", other),
+                        other => {
+                            return Err(format!(
+                                "import: expected module name symbol, got {:?}",
+                                other
+                            ))
+                        }
                     };
 
                     let mut lets = Vec::new();
@@ -623,27 +649,35 @@ fn expand_imports_single(expr: Expression, is_top_level: bool) -> Vec<Expression
                                     qualified,
                                 ]));
                             }
-                            other => panic!("import: expected symbol names, got {:?}", other),
+                            other => {
+                                return Err(format!(
+                                    "import: expected symbol names, got {:?}",
+                                    other
+                                ))
+                            }
                         }
                     }
-                    return lets;
+                    return Ok(lets);
                 }
             }
 
             // Not an import: recurse into children (but not as top-level anymore)
-            let mapped = items
-                .into_iter()
-                .flat_map(|child| expand_imports_single(child, false))
-                .collect();
-            vec![Expression::Apply(mapped)]
+            let mut mapped = Vec::new();
+            for child in items {
+                match expand_imports_single(child, false) {
+                    Ok(exprs) => mapped.extend(exprs),
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(vec![Expression::Apply(mapped)])
         }
-        other => vec![other],
+        other => Ok(vec![other]),
     }
 }
 
 // Map inside an expression and replace any nested `import` with a single `do` of lets.
 // This is safe for non-top-level positions (where we must return exactly one Expression).
-fn map_expr_replace_nested_imports(expr: Expression) -> Expression {
+fn map_expr_replace_nested_imports(expr: Expression) -> Result<Expression, String> {
     match expr {
         Expression::Apply(items) if !items.is_empty() => {
             if let Expression::Word(ref kw) = items[0] {
@@ -651,12 +685,17 @@ fn map_expr_replace_nested_imports(expr: Expression) -> Expression {
                     // Convert nested import into a single `do` expression containing the lets
                     let mut parts = items[1..].to_vec();
                     if parts.is_empty() {
-                        return Expression::Atom(0); // fallback unit
+                        return Ok(Expression::Atom(0)); // fallback unit
                     }
                     let module_expr = parts.pop().unwrap();
                     let module_name = match module_expr {
                         Expression::Word(m) => m,
-                        other => panic!("nested import: expected module name, got {:?}", other),
+                        other => {
+                            return Err(format!(
+                                "nested import: expected module name, got {:?}",
+                                other
+                            ))
+                        }
                     };
 
                     let mut do_items: Vec<Expression> = Vec::with_capacity(parts.len() + 1);
@@ -669,28 +708,34 @@ fn map_expr_replace_nested_imports(expr: Expression) -> Expression {
                                 Expression::Word(format!("{}:{}", module_name, sym)),
                             ]));
                         } else {
-                            panic!("nested import: expected symbol, got {:?}", part);
+                            return Err(format!("nested import: expected symbol, got {:?}", part));
                         }
                     }
-                    return Expression::Apply(do_items);
+                    return Ok(Expression::Apply(do_items));
                 } else {
                     // Regular apply head: map children
-                    let mapped = items
-                        .into_iter()
-                        .map(map_expr_replace_nested_imports)
-                        .collect();
-                    return Expression::Apply(mapped);
+                    let mut mapped = Vec::new();
+                    for item in items {
+                        match map_expr_replace_nested_imports(item) {
+                            Ok(expr) => mapped.push(expr),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    return Ok(Expression::Apply(mapped));
                 }
             } else {
                 // Head is not a word; just recurse into children
-                let mapped = items
-                    .into_iter()
-                    .map(map_expr_replace_nested_imports)
-                    .collect();
-                return Expression::Apply(mapped);
+                let mut mapped = Vec::new();
+                for item in items {
+                    match map_expr_replace_nested_imports(item) {
+                        Ok(expr) => mapped.push(expr),
+                        Err(e) => return Err(e),
+                    }
+                }
+                return Ok(Expression::Apply(mapped));
             }
         }
-        other => other,
+        other => Ok(other),
     }
 }
 fn is_number(s: &str) -> bool {
@@ -737,22 +782,27 @@ impl Expression {
     }
 }
 #[allow(dead_code)]
-pub fn with_std(program: &str, std: &str) -> Expression {
+pub fn with_std(program: &str, std: &str) -> Result<Expression, String> {
     let preprocessed = preprocess(&program);
 
     let exprs = parse(&preprocessed).unwrap();
-    let desugared: Vec<Expression> = exprs
-        .into_iter()
-        .map(desugar_tail_recursion)
-        .map(desugar)
-        .collect();
+    let mut desugared = Vec::new();
+    for expr in exprs {
+        let expr = desugar_tail_recursion(expr);
+        match desugar(expr) {
+            Ok(expr) => desugared.push(expr),
+            Err(e) => return Err(e),
+        }
+    }
     let preprocessed_std = preprocess(&std);
     let exprs_std = parse(&preprocessed_std).unwrap();
-    let desugared_std: Vec<Expression> = exprs_std
-        .into_iter()
-        // .map(desugar_tail_recursion)
-        .map(desugar)
-        .collect();
+    let mut desugared_std = Vec::new();
+    for expr in exprs_std {
+        match desugar(expr) {
+            Ok(expr) => desugared_std.push(expr),
+            Err(e) => return Err(e),
+        }
+    }
     let mut used = HashSet::new();
     for e in &desugared {
         collect_idents(e, &mut used);
@@ -766,36 +816,39 @@ pub fn with_std(program: &str, std: &str) -> Expression {
             .chain(desugared.into_iter())
             .collect(),
     );
-    wrapped
+    Ok(wrapped)
 }
-pub fn build(program: &str) -> Expression {
+pub fn build(program: &str) -> Result<Expression, String> {
     let preprocessed = preprocess(&program);
+    let mut desugared = Vec::new();
+    for expr in parse(&preprocessed).unwrap() {
+        let expr = desugar_tail_recursion(expr);
+        match desugar(expr) {
+            Ok(expr) => desugared.push(expr),
+            Err(e) => return Err(e),
+        }
+    }
     let wrapped = Expression::Apply(
         std::iter::once(Expression::Word("do".to_string()))
-            .chain(
-                parse(&preprocessed)
-                    .unwrap()
-                    .into_iter()
-                    .map(desugar_tail_recursion)
-                    .map(desugar)
-                    .collect::<Vec<Expression>>()
-                    .into_iter(),
-            )
+            .chain(desugared.into_iter())
             .collect(),
     );
-    wrapped
+    Ok(wrapped)
 }
 #[allow(dead_code)]
 pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expression, String> {
     let preprocessed = preprocess(&program);
     match parse(&preprocessed) {
         Ok(exprs) => {
-            let expanded = expand_imports_top_level(exprs);
-            let desugared: Vec<Expression> = expanded
-                .into_iter()
-                .map(desugar_tail_recursion)
-                .map(desugar)
-                .collect();
+            let expanded = expand_imports_top_level(exprs)?;
+            let mut desugared = Vec::new();
+            for expr in expanded {
+                let expr = desugar_tail_recursion(expr);
+                match desugar(expr) {
+                    Ok(expr) => desugared.push(expr),
+                    Err(e) => return Err(e),
+                }
+            }
 
             let mut used = HashSet::new();
             for e in &desugared {
