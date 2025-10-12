@@ -99,7 +99,7 @@ pub enum Instruction {
     BitOr,
     BitAnd,
 
-    SetArray, // expects stack: [value, index, vector]
+    SetArray, // expects stack: [value,index,vector]
     GetArray,
     PopArray,
 }
@@ -150,7 +150,7 @@ impl Instruction {
                     .map(|instr| instr.to_rust())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("MakeLambda({}, vec![{}])", params_str, body_str)
+                format!("MakeLambda({},vec![{}])", params_str, body_str)
             }
 
             Instruction::Call(n) => format!("Call({})", n),
@@ -167,7 +167,7 @@ impl Instruction {
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("If(vec![{}], vec![{}])", then_str, else_str)
+                format!("If(vec![{}],vec![{}])", then_str, else_str)
             }
 
             Instruction::Loop(start, end, func) => {
@@ -187,7 +187,7 @@ impl Instruction {
                     .collect::<Vec<_>>()
                     .join(",");
                 format!(
-                    "Loop(vec![{}], vec![{}], vec![{}])",
+                    "Loop(vec![{}],vec![{}],vec![{}])",
                     start_str, end_str, func_str
                 )
             }
@@ -203,7 +203,7 @@ impl Instruction {
                     .map(|i| i.to_rust())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("LoopFinish(vec![{}], vec![{}])", cond_str, func_str)
+                format!("LoopFinish(vec![{}],vec![{}])", cond_str, func_str)
             }
 
             Instruction::SetArray => "SetArray".to_string(),
@@ -256,7 +256,7 @@ impl Instruction {
                     .map(|instr| instr.serialise())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("MakeLambda({}, [{}])", params_str, body_str)
+                format!("MakeLambda({},[{}])", params_str, body_str)
             }
 
             Instruction::Call(n) => format!("Call({})", n),
@@ -273,7 +273,7 @@ impl Instruction {
                     .map(|i| i.serialise())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("If([{}], [{}])", then_str, else_str)
+                format!("If([{}],[{}])", then_str, else_str)
             }
 
             Instruction::Loop(start, end, func) => {
@@ -292,7 +292,7 @@ impl Instruction {
                     .map(|i| i.serialise())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("Loop([{}], [{}], [{}])", start_str, end_str, func_str)
+                format!("Loop([{}],[{}],[{}])", start_str, end_str, func_str)
             }
 
             Instruction::LoopFinish(cond, func) => {
@@ -306,7 +306,7 @@ impl Instruction {
                     .map(|i| i.serialise())
                     .collect::<Vec<_>>()
                     .join(",");
-                format!("LoopFinish([{}], [{}])", cond_str, func_str)
+                format!("LoopFinish([{}],[{}])", cond_str, func_str)
             }
 
             Instruction::SetArray => "SetArray".to_string(),
@@ -346,7 +346,7 @@ impl VM {
                             }
                             self.stack.push(r[i as usize].clone());
                         }
-                        _ => return Err("get expects (vector, int)".to_string()),
+                        _ => return Err("get expects (vector,int)".to_string()),
                     }
                 }
 
@@ -376,7 +376,7 @@ impl VM {
                     }
                 }
                 Instruction::SetArray => {
-                    // Stack: [..., vector(Rc<RefCell<Vec<BiteCodeEvaluated>>>), index(Int), value(BiteCodeEvaluated)]
+                    // Stack: [...,vector(Rc<RefCell<Vec<BiteCodeEvaluated>>>),index(Int),value(BiteCodeEvaluated)]
                     let value = self.stack.pop().ok_or("stack underflow")?;
                     let index_val = self.stack.pop().ok_or("stack underflow")?;
                     let array_val = self.stack.pop().ok_or("stack underflow")?;
@@ -670,7 +670,7 @@ impl VM {
                                         self.stack.push(result);
                                         break;
                                     } else {
-                                        // More args left, result must be a function -> continue applying
+                                        // More args left,result must be a function -> continue applying
                                         current_func = result;
                                         args = remaining_args.to_vec();
                                         continue;
@@ -1299,7 +1299,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     "loop-finish" => {
                         if exprs.len() != 3 {
                             return Err(
-                                "loop-finish expects 2 arguments: condition, lambda".to_string()
+                                "loop-finish expects 2 arguments: condition,lambda".to_string()
                             );
                         }
 
@@ -1314,7 +1314,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     }
                     "loop" => {
                         if exprs.len() != 4 {
-                            return Err("loop expects 3 arguments: start, end, lambda".to_string());
+                            return Err("loop expects 3 arguments: start,end,lambda".to_string());
                         }
 
                         let mut start_code = Vec::new();
@@ -1331,9 +1331,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     }
                     "set!" => {
                         if exprs.len() != 4 {
-                            return Err(
-                                "set! expects 3 arguments: vector, index, value".to_string()
-                            );
+                            return Err("set! expects 3 arguments: vector,index,value".to_string());
                         }
                         compile(&exprs[1], code)?; // vector
                         compile(&exprs[2], code)?; // index
@@ -1352,7 +1350,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
 
                     "get" => {
                         if exprs.len() != 3 {
-                            return Err("get expects 2 arguments: vector, index".to_string());
+                            return Err("get expects 2 arguments: vector,index".to_string());
                         }
                         // push vector
                         compile(&exprs[1], code)?;
@@ -1518,8 +1516,8 @@ impl<'a> P<'a> {
         self.skip_ws();
         let mut out = String::new();
         while let Some(c) = self.peek() {
-            // identifier chars: ASCII letters, digits, underscore, punctuation used in names like ':' '-' '?', etc.
-            // stop at delimiters: whitespace, ',', ']', ')'
+            // identifier chars: ASCII letters,digits,underscore,punctuation used in names like ':' '-' '?',etc.
+            // stop at delimiters: whitespace,',',']',')'
             if c.is_whitespace() || c == ',' || c == ']' || c == ')' {
                 break;
             }
@@ -1560,7 +1558,7 @@ impl<'a> P<'a> {
         Ok(items)
     }
 
-    // parse vec!["x", "y"] => Vec<String>
+    // parse vec!["x","y"] => Vec<String>
     fn parse_vec_strings(&mut self) -> Result<Vec<String>, String> {
         self.skip_ws();
         // self.expect_str("vec!")?;
@@ -1593,20 +1591,20 @@ impl<'a> P<'a> {
     fn parse_instruction(&mut self) -> Result<Instruction, String> {
         self.skip_ws();
         // Many elements are function-like: Name(...) or bare Name
-        // Read identifier (could be MakeLambda, StoreVar, PushInt, Pop, etc.)
+        // Read identifier (could be MakeLambda,StoreVar,PushInt,Pop,etc.)
         let name = self.parse_ident();
         if name.is_empty() {
             return Err(format!("Expected instruction at pos {}", self.i));
         }
 
-        // If next non-ws char is '(' then there are args, else it's a bare instruction name
+        // If next non-ws char is '(' then there are args,else it's a bare instruction name
         self.skip_ws();
         if self.peek() == Some('(') {
             self.next_char(); // consume '('
                               // parse according to name
             let res = match name.as_str() {
                 "MakeLambda" => {
-                    // ( vec!["x", ...] , vec![ instrs ... ] )
+                    // ( vec!["x",...] ,vec![ instrs ... ] )
                     self.skip_ws();
                     let params = self.parse_vec_strings()?;
                     self.skip_ws();
@@ -1647,7 +1645,7 @@ impl<'a> P<'a> {
                     Ok(Instruction::MakeVector(n))
                 }
                 "If" => {
-                    // ( vec![then_instrs], vec![else_instrs] )
+                    // ( vec![then_instrs],vec![else_instrs] )
                     self.skip_ws();
                     let then_branch = self.parse_vec_instructions()?;
                     self.skip_ws();
@@ -1659,7 +1657,7 @@ impl<'a> P<'a> {
                     Ok(Instruction::If(then_branch, else_branch))
                 }
                 "Loop" => {
-                    // ( vec![start], vec![end], vec![func] )
+                    // ( vec![start],vec![end],vec![func] )
                     self.skip_ws();
                     let start = self.parse_vec_instructions()?;
                     self.skip_ws();
@@ -1700,7 +1698,7 @@ impl<'a> P<'a> {
             };
             return res;
         } else {
-            // bare name: Pop, Length, GetArray, SetArray, Eq, Add, Mult, Div, Sub, Mod, LoadVar ops without args, etc.
+            // bare name: Pop,Length,GetArray,SetArray,Eq,Add,Mult,Div,Sub,Mod,LoadVar ops without args,etc.
             let instr = self.parse_instruction_named(&name)?;
             return Ok(instr);
         }
@@ -1709,10 +1707,10 @@ impl<'a> P<'a> {
     fn parse_instruction_named(&self, name: &str) -> Result<Instruction, String> {
         match name {
             "PushInt" => Err("PushInt requires an argument".into()),
-            // LoadVar without parens isn't used in your data, but map to error to be explicit
-            // You could accept bare identifiers and try to map them to LoadVar with that name, if desired.
+            // LoadVar without parens isn't used in your data,but map to error to be explicit
+            // You could accept bare identifiers and try to map them to LoadVar with that name,if desired.
             "MakeLambda" => Err("MakeLambda expects args".into()),
-            // If you have bare names that are synonyms for zero-arg instructions, add here:
+            // If you have bare names that are synonyms for zero-arg instructions,add here:
             "LoadVar" => Err("LoadVar expects a string arg".into()),
 
             "Pop" => Ok(Instruction::Pop),

@@ -1,5 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
+export function exec(program: string): string;
+export function comp(program: string): string;
 export function run(program: string): string;
 export function js(program: string): string;
 export function check(program: string): string;
@@ -8,6 +10,8 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
+  readonly exec: (a: number, b: number) => [number, number];
+  readonly comp: (a: number, b: number) => [number, number];
   readonly run: (a: number, b: number) => [number, number];
   readonly js: (a: number, b: number) => [number, number];
   readonly check: (a: number, b: number) => [number, number];

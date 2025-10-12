@@ -1,6 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const exec: (a: number, b: number) => [number, number];
+export const comp: (a: number, b: number) => [number, number];
 export const run: (a: number, b: number) => [number, number];
 export const js: (a: number, b: number) => [number, number];
 export const check: (a: number, b: number) => [number, number];
