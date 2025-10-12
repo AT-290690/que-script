@@ -765,6 +765,28 @@ D:=,=,=,+,=,=,=,+,=,=")
  (std:vector:count-of (lambda x (eq x true))))"#,
                 "4",
             ),
+            (
+                r#"
+(let num-rabbits (lambda answers
+  (|> answers
+      (std:vector:map std:convert:integer->string)
+      (std:vector:hash:table:count)
+      (std:vector:hash:table:entries)
+   
+      (std:vector:reduce (lambda acc [str count .]
+        (+ acc (* (std:int:ceil:div (get count) (+ (std:convert:chars->integer str) 1))
+                  (+ (std:convert:chars->integer str) 1))))
+      0)
+      
+      )))
+    
+[
+    (num-rabbits [ 1 1 2 ]) ; Output: 5
+    (num-rabbits [ 10 10 10 ]) ; Output: 11
+]
+"#,
+                "[5 11]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

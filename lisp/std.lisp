@@ -301,6 +301,8 @@
 (let std:int:one? (lambda x (= x 1)))
 (let std:int:negative-one? (lambda x (= x -1)))
 (let std:int:divisible? (lambda a b (= (mod a b) 0)))
+(let std:int:floor:div (lambda a b (/ a b)))
+(let std:int:ceil:div (lambda a b (/ (+ a b -1) b)))
 
 (let std:int:square (lambda x (* x x)))
 (let std:int:even? (lambda x (= (mod x 2) 0)))
@@ -733,7 +735,6 @@ heap)))
 
 (let std:vector:hash:set:max-capacity (lambda a b (std:vector:buckets (std:int:max (length a) (length b)))))
 (let std:vector:hash:set:min-capacity (lambda a b (std:vector:buckets (std:int:min (length a) (length b)))))
-
 (let std:convert:integer->string-base (lambda num base  
     (if (= num 0) [ std:int:char:0 ] (do 
         (let neg? (< num 0))
@@ -745,7 +746,7 @@ heap)))
                 (tail-call:while out)) out)))
         (let str (std:convert:digits->chars (tail-call:while [])))
         (std:vector:reverse (if neg? (std:vector:append! str std:int:char:dash) str))))))
-
+(let std:convert:integer->string (lambda x (std:convert:integer->string-base x 10)))
 (let std:convert:vector->set (lambda xs (std:vector:reduce xs (lambda s x (do (std:vector:hash:set:add! s x) s)) [ [] [] [] [] ])))
 (let std:vector:hash:set:intersection (lambda a b
         (|> b
@@ -1187,7 +1188,10 @@ q)))
     (++ i))))
   (let out (std:vector:int:remove-leading-zeroes result))
   (if (std:vector:empty? out) [ 0 ] out))))
-
+(let std:int:big:square (lambda x (std:int:big:mul x x)))
+(let std:int:big:floor:div (lambda a b (std:int:big:div a b)))
+(let std:int:big:ceil:div (lambda a b (std:int:big:div 
+    (std:int:big:sub (std:int:big:add a b) [ 1 ]) b)))
 (let std:vector:int:big:sum (lambda xs (std:vector:reduce xs (lambda a b (std:int:big:add a b)) [ 0 ] )))
 (let std:int:big:new (lambda str (std:convert:chars->digits str)))
 (let std:int:pow:big (lambda n pow (do
