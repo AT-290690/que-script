@@ -94,7 +94,16 @@ pub fn dump_wrapped_js(src: String, path: &str) -> std::io::Result<()> {
 
     Ok(())
 }
-
+pub fn cons(a: String, b: String) -> String {
+    return format!(
+        "{:?}",
+        parse_bitecode(&a)
+            .unwrap()
+            .into_iter()
+            .chain(parse_bitecode(&b).unwrap().into_iter())
+            .collect::<Vec<_>>(),
+    );
+}
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--std") {
@@ -152,15 +161,17 @@ fn main() -> std::io::Result<()> {
                 Ok(wrapped_ast) => {
                     let mut code: Vec<vm::Instruction> = Vec::new();
                     vm::compile(&wrapped_ast, &mut code);
-                    dump_raw_bytecode(code, "./dist/ir.js");
+                    dump_raw_bytecode(code, "./dist/ir.txt");
                 }
                 Err(e) => println!("{:?}", e),
             }
         }
     } else if args.iter().any(|a| a == "--bit") {
-        let program = fs::read_to_string("./dist/ir.js")?;
+        let program = fs::read_to_string("./dist/ir.txt")?;
         println!("{:?}", vm::exe(parse_bitecode(&program).unwrap()));
     } else {
+        let program = fs::read_to_string("./dist/ir.txt")?;
+        println!("{:?}", cons(program.clone(), program.clone()));
         println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
     }
     Ok(())

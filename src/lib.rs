@@ -9,6 +9,17 @@ mod vm;
 use crate::{baked::load_ast, vm::parse_bitecode};
 use wasm_bindgen::prelude::wasm_bindgen;
 #[wasm_bindgen]
+pub fn cons(a: String, b: String) -> String {
+    return format!(
+        "{:?}",
+        parse_bitecode(&a)
+            .unwrap()
+            .into_iter()
+            .chain(parse_bitecode(&b).unwrap().into_iter())
+            .collect::<Vec<_>>(),
+    );
+}
+#[wasm_bindgen]
 pub fn exec(program: String) -> String {
     match vm::exe(parse_bitecode(&program).unwrap()) {
         Ok(res) => return format!("{:?}", res),

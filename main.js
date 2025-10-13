@@ -1,4 +1,4 @@
-import init, { run, check, js } from "./pkg/fez_rs.js";
+import init, { run, check, js } from "./pkg/web/fez_rs.js";
 init();
 const makeEditor = (el, theme) => {
   const editor = ace.edit(el);
