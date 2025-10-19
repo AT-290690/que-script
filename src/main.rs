@@ -9,14 +9,12 @@ use std::io::Write;
 use std::num::Wrapping;
 mod baked;
 mod ir;
+use crate::vm::parse_bitecode;
 use baked::load_ast;
 use ir::load_bytecode;
 use std::env;
-
-use crate::vm::parse_bitecode;
 mod js;
 mod tests;
-
 fn run_code(program: String) -> String {
     let std_ast = baked::load_ast();
     if let parser::Expression::Apply(items) = &std_ast {
@@ -171,8 +169,8 @@ fn main() -> std::io::Result<()> {
         println!("{:?}", vm::exe(parse_bitecode(&program).unwrap()));
     } else {
         let program = fs::read_to_string("./dist/ir.txt")?;
-        println!("{:?}", cons(program.clone(), program.clone()));
         println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
     }
+
     Ok(())
 }

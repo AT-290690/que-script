@@ -218,7 +218,7 @@
 (let std:vector:count-of (lambda xs fn? (length (std:vector:filter xs fn?))))
 (let std:vector:int:count (lambda input item (std:vector:count-of input (lambda x (= x item)))))
 
-(let std:vector:cons (lambda a b (if (and (std:vector:empty? a) (std:vector:empty? b)) a (do 
+(let std:vector:cons (lambda a b (cond (std:vector:empty? a) b (std:vector:empty? b) a (do 
   (let out []) 
   (loop 0 (length a) (lambda i (std:vector:set! out (length out) (get a i)))) 
   (loop 0 (length b) (lambda i (std:vector:set! out (length out) (get b i)))) 

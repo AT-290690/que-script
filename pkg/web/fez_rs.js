@@ -90,7 +90,7 @@ function getStringFromWasm0(ptr, len) {
  * @param {string} b
  * @returns {string}
  */
-export function cons(a, b) {
+export function cons_str(a, b) {
     let deferred3_0;
     let deferred3_1;
     try {
@@ -98,7 +98,7 @@ export function cons(a, b) {
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(b, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.cons(ptr0, len0, ptr1, len1);
+        const ret = wasm.cons_str(ptr0, len0, ptr1, len1);
         deferred3_0 = ret[0];
         deferred3_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -111,13 +111,13 @@ export function cons(a, b) {
  * @param {string} program
  * @returns {string}
  */
-export function exec(program) {
+export function exec_str(program) {
     let deferred2_0;
     let deferred2_1;
     try {
         const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.exec(ptr0, len0);
+        const ret = wasm.exec_str(ptr0, len0);
         deferred2_0 = ret[0];
         deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -130,13 +130,13 @@ export function exec(program) {
  * @param {string} program
  * @returns {string}
  */
-export function comp(program) {
+export function comp_str(program) {
     let deferred2_0;
     let deferred2_1;
     try {
         const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.comp(ptr0, len0);
+        const ret = wasm.comp_str(ptr0, len0);
         deferred2_0 = ret[0];
         deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -200,6 +200,58 @@ export function check(program) {
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
+}
+
+/**
+ * @returns {number}
+ */
+export function get_output_ptr() {
+    const ret = wasm.get_output_ptr();
+    return ret >>> 0;
+}
+
+/**
+ * @returns {number}
+ */
+export function get_output_len() {
+    const ret = wasm.get_output_len();
+    return ret >>> 0;
+}
+
+/**
+ * @param {string} program
+ * @returns {number}
+ */
+export function exec_to_buffer(program) {
+    const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.exec_to_buffer(ptr0, len0);
+    return ret >>> 0;
+}
+
+/**
+ * @param {string} program
+ * @returns {number}
+ */
+export function comp_to_buffer(program) {
+    const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.comp_to_buffer(ptr0, len0);
+    return ret >>> 0;
+}
+
+/**
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+export function cons_to_buffer(a, b) {
+    const ptr0 = passStringToWasm0(a, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(b, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.cons_to_buffer(ptr0, len0, ptr1, len1);
+    return ret >>> 0;
 }
 
 const EXPECTED_RESPONSE_TYPES = new Set(['basic', 'cors', 'default']);
