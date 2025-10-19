@@ -281,6 +281,66 @@ To what floor do the instructions take Santa?
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
 
+### WASM usage
+
+**Web**
+
+```js
+import init, {
+  exec,
+  comp,
+  cons,
+  run,
+  check,
+  js,
+  get_output_len,
+} from "./pkg/web/fez_rs.js";
+(async () => {
+  const wasm = await init();
+})();
+```
+
+**Node**
+
+```js
+import {
+  exec,
+  comp,
+  cons,
+  run,
+  check,
+  js,
+  get_output_len,
+} from "./pkg/node/fez_rs.js";
+const memory = __wasm.memory;
+```
+
+**Helper functions**
+
+```js
+const readWasmString = (ptr, len) =>
+  new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, ptr, len));
+// Use these
+const typeCheck = (program) => readWasmString(check(program), get_output_len());
+const compileJs = (program) => readWasmString(js(program), get_output_len());
+const compileBiteCode = (program) =>
+  readWasmString(comp(program), get_output_len());
+const execBiteCode = (program) =>
+  readWasmString(exec(program), get_output_len());
+const concatenateBiteCode = (a, b) =>
+  readWasmString(cons(a, b), get_output_len());
+const typeCheckAndRun = (program) =>
+  readWasmString(run(program), get_output_len());
+```
+
+**Example**
+
+```js
+const program = "(+ 1 2)";
+console.log(typeCheck(program));
+console.log(execBiteCode(compileBiteCode(program)));
+```
+
 **Disclaimer!**
 
 <img src="./bug.png" width="64px"/>

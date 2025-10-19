@@ -281,6 +281,24 @@ To what floor do the instructions take Santa?
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
 
+### WASM usage
+
+**Web**
+
+```js
+import init, { run, check, js, get_output_len } from "./pkg/web/fez_rs.js";
+let wasm;
+(async () => {
+  wasm = await init();
+})();
+const readWasmString = (ptr, len) =>
+  new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, ptr, len));
+const typeCheck = (program) => readWasmString(check(program), get_output_len());
+const compileJs = (program) => readWasmString(js(program), get_output_len());
+const typeCheckAndRun = (program) =>
+  readWasmString(run(program), get_output_len());
+```
+
 **Disclaimer!**
 
 <img src="./bug.png" width="64px"/>

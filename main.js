@@ -1,5 +1,30 @@
-import init, { run, check, js } from "./pkg/web/fez_rs.js";
-init();
+import init, {
+  //   exec,
+  //   comp,
+  //   cons,
+  run,
+  check,
+  js,
+  get_output_len,
+} from "./pkg/web/fez_rs.js";
+let wasm;
+(async () => {
+  wasm = await init();
+})();
+const readWasmString = (ptr, len) =>
+  new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, ptr, len));
+// Use these
+const typeCheck = (program) => readWasmString(check(program), get_output_len());
+const compileJs = (program) => readWasmString(js(program), get_output_len());
+// const compileBiteCode = (program) =>
+//   readWasmString(comp(program), get_output_len());
+// const execBiteCode = (program) =>
+//   readWasmString(exec(program), get_output_len());
+const typeCheckAndRun = (program) =>
+  readWasmString(run(program), get_output_len());
+// const concatenateBiteCode = (a, b) =>
+//   readWasmString(cons(a, b), get_output_len());
+
 const makeEditor = (el, theme) => {
   const editor = ace.edit(el);
   editor.setOptions({
@@ -49,20 +74,20 @@ const link = (value) => {
     `?l=${encodeURIComponent(compressed)}`;
   window.history.pushState({ path: newurl }, "", newurl);
 };
-const comp = (value) => {
-  const out = run(value);
+const compile = (value) => {
+  const out = typeCheckAndRun(value);
   if (out && out[0] === '"') {
     terminal.setValue(out.substring(1, out.length - 1));
   } else terminal.setValue(out);
 };
 const type = (value) => {
-  const out = check(value);
+  const out = typeCheck(value);
   if (out && out[0] === '"') {
     terminal.setValue(out.substring(1, out.length - 1));
   } else terminal.setValue(out);
 };
 const javascript = (value) =>
-  terminal.setValue(serialise(new Function(`return ${js(value)}`)()));
+  terminal.setValue(serialise(new Function(`return ${compileJs(value)}`)()));
 
 document.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() === "s" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
@@ -70,7 +95,7 @@ document.addEventListener("keydown", (e) => {
     e.stopPropagation();
     const value = editor.getValue();
     if (value.trim()) {
-      comp(value);
+      compile(value);
       link(value);
       terminal.clearSelection();
     }
@@ -79,7 +104,7 @@ document.addEventListener("keydown", (e) => {
 document.getElementById("run").addEventListener("click", () => {
   const value = editor.getValue();
   if (value.trim()) {
-    comp(value);
+    compile(value);
     link(value);
     terminal.clearSelection();
   }

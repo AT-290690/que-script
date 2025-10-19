@@ -1,36 +1,29 @@
 /* tslint:disable */
 /* eslint-disable */
-export function cons_str(a: string, b: string): string;
-export function exec_str(program: string): string;
-export function comp_str(program: string): string;
-export function run(program: string): string;
-export function js(program: string): string;
-export function check(program: string): string;
 export function get_output_ptr(): number;
 export function get_output_len(): number;
-export function exec_to_buffer(program: string): number;
-export function comp_to_buffer(program: string): number;
-export function cons_to_buffer(a: string, b: string): number;
+export function run(program: string): number;
+export function js(program: string): number;
+export function check(program: string): number;
+export function exec(program: string): number;
+export function comp(program: string): number;
+export function cons(a: string, b: string): number;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly cons_str: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly exec_str: (a: number, b: number) => [number, number];
-  readonly comp_str: (a: number, b: number) => [number, number];
-  readonly run: (a: number, b: number) => [number, number];
-  readonly js: (a: number, b: number) => [number, number];
-  readonly check: (a: number, b: number) => [number, number];
   readonly get_output_ptr: () => number;
   readonly get_output_len: () => number;
-  readonly exec_to_buffer: (a: number, b: number) => number;
-  readonly comp_to_buffer: (a: number, b: number) => number;
-  readonly cons_to_buffer: (a: number, b: number, c: number, d: number) => number;
+  readonly run: (a: number, b: number) => number;
+  readonly js: (a: number, b: number) => number;
+  readonly check: (a: number, b: number) => number;
+  readonly exec: (a: number, b: number) => number;
+  readonly comp: (a: number, b: number) => number;
+  readonly cons: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_0: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_start: () => void;
 }
 

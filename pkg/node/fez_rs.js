@@ -2,7 +2,23 @@
 let imports = {};
 imports['__wbindgen_placeholder__'] = module.exports;
 let wasm;
-const { TextEncoder, TextDecoder } = require(`util`);
+const { TextEncoder } = require(`util`);
+
+/**
+ * @returns {number}
+ */
+module.exports.get_output_ptr = function() {
+    const ret = wasm.get_output_ptr();
+    return ret >>> 0;
+};
+
+/**
+ * @returns {number}
+ */
+module.exports.get_output_len = function() {
+    const ret = wasm.get_output_len();
+    return ret >>> 0;
+};
 
 let WASM_VECTOR_LEN = 0;
 
@@ -68,149 +84,36 @@ function passStringToWasm0(arg, malloc, realloc) {
     WASM_VECTOR_LEN = offset;
     return ptr;
 }
-
-let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
-
-cachedTextDecoder.decode();
-
-function decodeText(ptr, len) {
-    return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
-}
-
-function getStringFromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return decodeText(ptr, len);
-}
-/**
- * @param {string} a
- * @param {string} b
- * @returns {string}
- */
-module.exports.cons_str = function(a, b) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passStringToWasm0(a, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(b, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.cons_str(ptr0, len0, ptr1, len1);
-        deferred3_0 = ret[0];
-        deferred3_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
-    }
-};
-
 /**
  * @param {string} program
- * @returns {string}
- */
-module.exports.exec_str = function(program) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.exec_str(ptr0, len0);
-        deferred2_0 = ret[0];
-        deferred2_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
-};
-
-/**
- * @param {string} program
- * @returns {string}
- */
-module.exports.comp_str = function(program) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.comp_str(ptr0, len0);
-        deferred2_0 = ret[0];
-        deferred2_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
-};
-
-/**
- * @param {string} program
- * @returns {string}
+ * @returns {number}
  */
 module.exports.run = function(program) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.run(ptr0, len0);
-        deferred2_0 = ret[0];
-        deferred2_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
+    const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.run(ptr0, len0);
+    return ret >>> 0;
 };
 
 /**
  * @param {string} program
- * @returns {string}
+ * @returns {number}
  */
 module.exports.js = function(program) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.js(ptr0, len0);
-        deferred2_0 = ret[0];
-        deferred2_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
+    const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.js(ptr0, len0);
+    return ret >>> 0;
 };
 
 /**
  * @param {string} program
- * @returns {string}
+ * @returns {number}
  */
 module.exports.check = function(program) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.check(ptr0, len0);
-        deferred2_0 = ret[0];
-        deferred2_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
-};
-
-/**
- * @returns {number}
- */
-module.exports.get_output_ptr = function() {
-    const ret = wasm.get_output_ptr();
-    return ret >>> 0;
-};
-
-/**
- * @returns {number}
- */
-module.exports.get_output_len = function() {
-    const ret = wasm.get_output_len();
+    const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.check(ptr0, len0);
     return ret >>> 0;
 };
 
@@ -218,10 +121,10 @@ module.exports.get_output_len = function() {
  * @param {string} program
  * @returns {number}
  */
-module.exports.exec_to_buffer = function(program) {
+module.exports.exec = function(program) {
     const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.exec_to_buffer(ptr0, len0);
+    const ret = wasm.exec(ptr0, len0);
     return ret >>> 0;
 };
 
@@ -229,10 +132,10 @@ module.exports.exec_to_buffer = function(program) {
  * @param {string} program
  * @returns {number}
  */
-module.exports.comp_to_buffer = function(program) {
+module.exports.comp = function(program) {
     const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.comp_to_buffer(ptr0, len0);
+    const ret = wasm.comp(ptr0, len0);
     return ret >>> 0;
 };
 
@@ -241,12 +144,12 @@ module.exports.comp_to_buffer = function(program) {
  * @param {string} b
  * @returns {number}
  */
-module.exports.cons_to_buffer = function(a, b) {
+module.exports.cons = function(a, b) {
     const ptr0 = passStringToWasm0(a, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(b, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.cons_to_buffer(ptr0, len0, ptr1, len1);
+    const ret = wasm.cons(ptr0, len0, ptr1, len1);
     return ret >>> 0;
 };
 
