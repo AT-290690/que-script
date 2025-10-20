@@ -787,6 +787,59 @@ D:=,=,=,+,=,=,=,+,=,=")
 "#,
                 "[5 11]",
             ),
+            (
+                r#"(let count-apples-and-oranges (lambda s t a b apples oranges (do
+          (let helper (lambda xs m (|> xs (std:vector:map (lambda x (+ x m))) (std:vector:count-of (lambda x (and (>= x s) (<= x t)))))))
+          [(helper apples a) (helper oranges b)])))
+      
+      (count-apples-and-oranges 7 11 5 15 [ -2 2 1 ] [ 5 -6 ])"#,
+                "[1 1]",
+            ),
+            (
+                r#"(let count-points (lambda rings (do
+  (let rods (std:vector:map (std:vector:int:zeroes 10) (lambda . [false false false]))) ; [R, G, B] for each rod
+  (let len (length rings))
+  (loop 0 len (lambda i (do
+    (if (std:int:even? i)
+      (do
+        (let color (get rings i))
+        (let rod-char (get rings (+ i 1)))
+        (let rod (get rods (- (std:convert:char->digit rod-char) 0)))
+        (cond
+          (= color std:int:char:R) (set! rod 0 true)
+          (= color std:int:char:G) (set! rod 1 true)
+          (= color std:int:char:B) (set! rod 2 true)
+          nil))))))
+  (std:vector:count-of rods (lambda rod (and (get rod 0) (get rod 1) (get rod 2)))))))
+
+; Example usage
+[(count-points "B0B6G0R6R0R6G9") ; Should return 1
+ (count-points "B0R0G0R9R0B0G0") ; Should return 1
+ (count-points "G4")] ; Should return 0
+
+"#,
+                "[1 1 0]",
+            ),
+            (
+                r#"(let part1 (lambda input (|> input 
+    (std:vector:cons [(std:vector:first input)]) 
+    (std:vector:sliding-window 2) 
+    (std:vector:filter (lambda x (= (. x 0) (. x 1))))
+    (std:vector:map std:vector:first)
+    (std:vector:int:sum))))
+(let part2 (lambda input (|> input
+    (std:vector:cons (std:vector:slice input 0 (/ (length input) 2)))
+    (std:vector:sliding-window (+ (/ (length input) 2) 1))
+    (std:vector:filter (lambda x (= (std:vector:first x) (std:vector:last x))))
+    (std:vector:map std:vector:first)
+    (std:vector:int:sum))))
+    
+[
+  (|> ["1122" "1111" "1234" "91212129"] (std:vector:map std:convert:chars->digits) (std:vector:map part1)) 
+  (|> ["1212"  "1221" "123425" "123123" "12131415"] (std:vector:map std:convert:chars->digits) (std:vector:map part2))
+]"#,
+                "[[3 4 0 9] [6 0 4 12 4]]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
