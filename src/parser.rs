@@ -259,7 +259,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                                 Expression::Word("let".to_string()),
                                                 Expression::Word(name.clone()),
                                                 Expression::Apply(vec![
-                                                    Expression::Word("std:vector:drop".to_string()),
+                                                    Expression::Word("std/vector/drop".to_string()),
                                                     Expression::Word("_args".to_string()),
                                                     Expression::Atom(i as i32),
                                                 ]),
@@ -643,7 +643,7 @@ fn expand_imports_single(expr: Expression, is_top_level: bool) -> Result<Vec<Exp
                         match part {
                             Expression::Word(sym) => {
                                 let qualified =
-                                    Expression::Word(format!("{}:{}", module_name, sym));
+                                    Expression::Word(format!("{}/{}", module_name, sym));
                                 lets.push(Expression::Apply(vec![
                                     Expression::Word("let".to_string()),
                                     Expression::Word(sym.clone()),
@@ -706,7 +706,7 @@ fn map_expr_replace_nested_imports(expr: Expression) -> Result<Expression, Strin
                             do_items.push(Expression::Apply(vec![
                                 Expression::Word("let".to_string()),
                                 Expression::Word(sym.clone()),
-                                Expression::Word(format!("{}:{}", module_name, sym)),
+                                Expression::Word(format!("{}/{}", module_name, sym)),
                             ]));
                         } else {
                             return Err(format!("nested import: expected symbol, got {:?}", part));

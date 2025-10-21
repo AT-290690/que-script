@@ -48,7 +48,7 @@ fn ident(name: &str) -> String {
             for c in name.chars() {
                 match c {
                     'a'..='z' | 'A'..='Z' | '0'..='9' => s.push(c),
-                    ':' | '-' | '.' | '*' => s.push('_'),
+                    ':' | '-' | '.' | '*' | '/' => s.push('_'),
                     '?' => {
                         s.push('_');
                         s.push('p')

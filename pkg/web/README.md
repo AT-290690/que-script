@@ -55,9 +55,9 @@ wasm-pack build --target web --out-dir pkg/web
 ```lisp
 (let sum-odd-squares (lambda xs
     (|> xs
-        (std:vector:filter std:int:odd?)
-        (std:vector:map std:int:square)
-        (std:vector:int:sum))))
+        (std/vector/filter std/int/odd?)
+        (std/vector/map std/int/square)
+        (std/vector/int/sum))))
 
 (sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
 ; Int
@@ -68,7 +68,7 @@ wasm-pack build --target web --out-dir pkg/web
 - Pipe (|> ... ) will be desuggered to:
 
 ```lisp
-(std:vector:int:sum (std:vector:map (std:vector:filter xs std:int:odd?) std:int:square))
+(std/vector/int/sum (std/vector/map (std/vector/filter xs std/int/odd?) std/int/square))
 ```
 
 - Argument type of the function will be [Int].
@@ -80,9 +80,9 @@ wasm-pack build --target web --out-dir pkg/web
 Short names can be extracted from std using **import**:
 
 ```lisp
-(import filter map std:vector)
-(import odd? square std:int)
-(import sum std:vector:int)
+(import filter map std/vector)
+(import odd? square std/int)
+(import sum std/vector/int)
 
 (let sum-odd-squares (lambda xs
     (|> xs
@@ -96,13 +96,13 @@ Short names can be extracted from std using **import**:
 **sum** is a sub import of vector under **int**:
 
 ```lisp
-; import int:sum directly from std:vector
-(import int:sum filter map std:vector)
-(import odd? square std:int)
+; import int/sum directly from std/vector
+(import int/sum filter map std/vector)
+(import odd? square std/int)
 
 (let xs [ 1 2 3 4 5 6 7 8 9 10 ])
-; here we use int:sum
-(int:sum (map (filter xs int:odd?) int:square))
+; here we use int/sum
+(int/sum (map (filter xs int/odd?) int/square))
 ```
 
 ### Tail Call Optimization
@@ -114,7 +114,7 @@ This is especially useful for recursive functions. For instance, take this funct
 ```lisp
 (let sum (lambda xs acc
     (if (= (length xs) 0) acc
-        (sum (std:vector:drop xs 1) (+ acc (get xs 0))))))
+        (sum (std/vector/drop xs 1) (+ acc (get xs 0))))))
 
 (sum [ 1 2 3 4 5 ] 0)
 ; Int
@@ -130,7 +130,7 @@ With a regular call, this consumes 𝒪(n) stack space: each element of the vect
     (let _new_xs [])
     (let _new_acc [])
     (loop (not (= (length (get _xs 0)) 0)) (lambda (do
-        (set! _new_xs 0 (std:vector:drop (get _xs 0) 1))
+        (set! _new_xs 0 (std/vector/drop (get _xs 0) 1))
         (set! _new_acc 0 (+ (get _acc 0) (get (get _xs 0) 0)))
         (set! _xs 0 (get _new_xs 0))
         (set! _acc 0 (get _new_acc 0)))))
@@ -227,17 +227,17 @@ Instead we have to use **Big** integers (or numbers as a vectors with arbitrary 
 (let factorial (lambda n total
         (if (= (get n 0) 0)
             total
-            (factorial (std:int:big:sub n [ 1 ]) (std:int:big:mul total n)))))
+            (factorial (std/int/big/sub n [ 1 ]) (std/int/big/mul total n)))))
 
 (let bionomial-coefficient (lambda a b
-    (std:int:big:div (factorial a [ 1 ])
-            (std:int:big:mul
+    (std/int/big/div (factorial a [ 1 ])
+            (std/int/big/mul
                 (factorial b [ 1 ])
-                (factorial (std:int:big:sub a b) [ 1 ])))))
+                (factorial (std/int/big/sub a b) [ 1 ])))))
 
 (let m [ 2 0 ])
 (let n [ 2 0 ])
-(bionomial-coefficient (std:int:big:add m n) m)
+(bionomial-coefficient (std/int/big/add m n) m)
 ; [Int]
 ; [1 3 7 8 4 6 5 2 8 8 2 0]
 ```
@@ -275,8 +275,8 @@ To what floor do the instructions take Santa?
     ")))"     ; result in floor -3.
     ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (std:vector:int:count input std:int:char:left-brace) (std:vector:int:count input std:int:char:right-brace))))
-(std:vector:map samples solve)
+(let solve (lambda input (- (std/vector/int/count input std/int/char/left-brace) (std/vector/int/count input std/int/char/right-brace))))
+(std/vector/map samples solve)
 ; [Int]
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
@@ -286,17 +286,59 @@ To what floor do the instructions take Santa?
 **Web**
 
 ```js
-import init, { run, check, js, get_output_len } from "./pkg/web/fez_rs.js";
-let wasm;
+import init, {
+  exec,
+  comp,
+  cons,
+  run,
+  check,
+  js,
+  get_output_len,
+} from "./pkg/web/fez_rs.js";
 (async () => {
-  wasm = await init();
+  const wasm = await init();
 })();
+```
+
+**Node**
+
+```js
+import {
+  exec,
+  comp,
+  cons,
+  run,
+  check,
+  js,
+  get_output_len,
+} from "./pkg/node/fez_rs.js";
+const memory = __wasm.memory;
+```
+
+**Helper functions**
+
+```js
 const readWasmString = (ptr, len) =>
   new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, ptr, len));
+// Use these
 const typeCheck = (program) => readWasmString(check(program), get_output_len());
 const compileJs = (program) => readWasmString(js(program), get_output_len());
+const compileBiteCode = (program) =>
+  readWasmString(comp(program), get_output_len());
+const execBiteCode = (program) =>
+  readWasmString(exec(program), get_output_len());
+const concatenateBiteCode = (a, b) =>
+  readWasmString(cons(a, b), get_output_len());
 const typeCheckAndRun = (program) =>
   readWasmString(run(program), get_output_len());
+```
+
+**Example**
+
+```js
+const program = "(+ 1 2)";
+console.log(typeCheck(program));
+console.log(execBiteCode(compileBiteCode(program)));
 ```
 
 **Disclaimer!**
