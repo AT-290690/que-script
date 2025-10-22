@@ -840,6 +840,41 @@ D:=,=,=,+,=,=,=,+,=,=")
 ]"#,
                 "[[3 4 0 9] [6 0 4 12 4]]",
             ),
+            (
+                r#"(let INPUT "0
+3
+0
+1
+-3")
+
+(let parse (lambda input (|> input (std/convert/string->vector std/int/char/new-line) (std/vector/map std/convert/chars->integer))))
+(let part1 (lambda input (do 
+    (integer pointer (get input))
+    (integer steps 0)
+    (integer index 0)
+    (boolean escaped? false)
+    (loop (false? escaped?) (lambda (do
+        (set! input (get index) (+ (get pointer) 1))
+        (+= index (get pointer))
+        (if (std/vector/in-bounds? input (get index)) (set pointer (get input (get index))) (boole-set escaped? true))
+        (++ steps))))
+    (get steps))))
+
+(let part2 (lambda input (do 
+    (integer pointer (get input))
+    (integer steps 0)
+    (integer index 0)
+    (boolean escaped? false)
+    (loop (false? escaped?) (lambda (do
+        (set! input (get index) (+ (get pointer) (if (>= (get pointer) 3) -1 1)))
+        (+= index (get pointer))
+        (if (std/vector/in-bounds? input (get index)) (set pointer (get input (get index))) (boole-set escaped? true))
+        (++ steps))))
+    (get steps))))
+    
+[(|> INPUT (parse) (part1)) (|> INPUT (parse) (part2))]"#,
+                "[5 10]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

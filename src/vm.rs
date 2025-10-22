@@ -2,7 +2,7 @@ use crate::parser::Expression;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 #[derive(Clone)]
 pub enum BiteCodeEvaluated {
     Int(i32),
@@ -27,7 +27,7 @@ impl fmt::Debug for BiteCodeEvaluated {
 #[derive(Clone)]
 pub struct BiteCodeEnv {
     vars: HashMap<String, BiteCodeEvaluated>,
-    parent: Option<Rc<RefCell<BiteCodeEnv>>>,
+    parent: Option<Weak<RefCell<BiteCodeEnv>>>,
 }
 
 impl BiteCodeEnv {
@@ -41,7 +41,7 @@ impl BiteCodeEnv {
     fn with_parent(parent: Rc<RefCell<BiteCodeEnv>>) -> Self {
         BiteCodeEnv {
             vars: HashMap::new(),
-            parent: Some(parent),
+            parent: Some(Rc::downgrade(&parent)),
         }
     }
 
@@ -49,8 +49,8 @@ impl BiteCodeEnv {
         if let Some(var) = self.vars.get(name) {
             return Some(var.clone());
         }
-        if let Some(ref parent) = self.parent {
-            return parent.borrow().get(name);
+        if let Some(ref weak_parent) = self.parent {
+            return weak_parent.upgrade()?.borrow().get(name);
         }
         None
     }
