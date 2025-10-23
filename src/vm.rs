@@ -33,14 +33,14 @@ pub struct BiteCodeEnv {
 impl BiteCodeEnv {
     fn new() -> Self {
         BiteCodeEnv {
-            vars: HashMap::new(),
+            vars: HashMap::with_capacity(16), // Pre-allocate space for common variables
             parent: None,
         }
     }
 
     fn with_parent(parent: Rc<RefCell<BiteCodeEnv>>) -> Self {
         BiteCodeEnv {
-            vars: HashMap::new(),
+            vars: HashMap::with_capacity(16), // Pre-allocate space for common variables
             parent: Some(Rc::downgrade(&parent)),
         }
     }
@@ -324,7 +324,7 @@ pub struct VM {
 impl VM {
     pub fn new() -> Self {
         VM {
-            stack: Vec::new(),
+            stack: Vec::with_capacity(64), // Pre-allocate stack space
             locals: Rc::new(RefCell::new(BiteCodeEnv::new())),
         }
     }
@@ -598,14 +598,14 @@ impl VM {
                 Instruction::LoadVar(name) => {
                     let val = self
                         .locals
-                        .borrow_mut()
+                        .borrow()
                         .get(name)
                         .ok_or(format!("undefined variable: {}", name))?;
                     self.stack.push(val.clone());
                 }
 
                 Instruction::MakeVector(n) => {
-                    let mut elements = Vec::new();
+                    let mut elements = Vec::with_capacity(*n);
                     for _ in 0..*n {
                         elements.push(self.stack.pop().ok_or("stack underflow")?);
                     }
@@ -647,23 +647,32 @@ impl VM {
                                     Rc::new(RefCell::new(BiteCodeEnv::with_parent(env.clone())));
                                 {
                                     let mut local_env_ref = local_env.borrow_mut();
-                                    for (p, v) in
-                                        params.iter().take(consumed).zip(used_args.iter().cloned())
+                                    for (p, v) in params.iter().take(consumed).zip(used_args.iter())
                                     {
-                                        local_env_ref.set(p.clone(), v);
+                                        local_env_ref.set(p.clone(), v.clone());
                                     }
                                 }
 
                                 if consumed == params.len() {
                                     // Run body if we've satisfied this function's arguments
-                                    let mut inner_vm = VM {
-                                        stack: Vec::new(),
-                                        locals: local_env,
-                                    };
-                                    inner_vm.run(&body)?;
+                                    // Save current environment and stack
+                                    let old_env = self.locals.clone();
+                                    let old_stack_len = self.stack.len();
 
+                                    // Switch to function environment
+                                    self.locals = local_env;
+
+                                    // Run function body
+                                    self.run(&body)?;
+
+                                    // Get result
                                     let result =
-                                        inner_vm.stack.pop().unwrap_or(BiteCodeEvaluated::Int(0));
+                                        self.stack.pop().unwrap_or(BiteCodeEvaluated::Int(0));
+
+                                    // Restore environment and stack
+                                    self.locals = old_env;
+                                    // Remove any extra stack elements that might have been added
+                                    self.stack.truncate(old_stack_len);
 
                                     if remaining_args.is_empty() {
                                         // No more args to apply -> we're done

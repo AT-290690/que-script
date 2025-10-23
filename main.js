@@ -98,6 +98,7 @@ document.addEventListener("keydown", (e) => {
       compile(value);
       link(value);
       terminal.clearSelection();
+      //   console.log(wasm.memory.buffer);
     }
   }
 });
