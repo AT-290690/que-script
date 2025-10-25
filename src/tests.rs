@@ -69,6 +69,7 @@ mod tests {
         // Test cases that should result in type inference errors
         let test_cases = [
             ("(+ 1 (= 1 1))", "(+ 1 (= 1 1))\nCannot unify Int with Bool"),
+            ("(1 2)", "(1 2)\nCannot apply non-function type: Int"),
             ("(let x (vector 1 2 (= 1 2)))", "(let x (vector 1 2 (= 1 2)))\nCannot unify Int with Bool"),
             ("(vector 1 2 (> 1 2))", "(vector 1 2 (> 1 2))\nCannot unify Int with Bool"),
             (

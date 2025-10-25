@@ -293,6 +293,7 @@ import init, {
   run,
   check,
   js,
+  evaluate,
   get_output_len,
 } from "./pkg/web/fez_rs.js";
 (async () => {

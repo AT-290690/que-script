@@ -321,7 +321,18 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 }
             }
             _ => {
-                return Err(format!("Cannot apply non-function type: {}", func_type));
+                return Err(format!(
+                    "{}\nCannot apply non-function type: {}",
+                    format!(
+                        "({})",
+                        exprs
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" ")
+                    ),
+                    func_type
+                ));
             }
         }
     }
