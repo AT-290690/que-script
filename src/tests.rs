@@ -25,9 +25,9 @@ mod tests {
             ),
             ("(lambda x (+ x 1))", "Int -> Int"),
             ("(lambda x (and x (or x x)))", "Bool -> Bool"),
-            ("(let fn (lambda a b (and a b))) (fn 42 69)", "Int"),
+            ("(do (let fn (lambda a b (and a b))) (fn (= 1 1) (= 1 2)))", "Bool"),
             (
-                "(let process (lambda xs (get xs 0))) (process (vector 1 2 3 ))",
+                "(do (let process (lambda xs (get xs 0))) (process (vector 1 2 3 )))",
                 "Int",
             ),
             ("(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (vector (= 1 1))))", "Bool"),
@@ -50,7 +50,6 @@ mod tests {
                     "Type inference should succeed for expression: {}",
                     inp
                 );
-
                 // Optionally, check that the type is Int
                 if let Ok(typ) = result {
                     assert_eq!(
@@ -255,7 +254,7 @@ mod tests {
         (tail-call/smash t))
         false)))
   (tail-call/smash true)
-  (if (> (length heap) 0) (std/heap/peek heap)))))
+  (if (> (length heap) 0) (std/heap/peek heap) Int))))
 
 [(last-stone-weight [ 2 7 4 1 8 1 ]) (last-stone-weight [ 1 ])]"#,
                 "[1 1]",
@@ -874,6 +873,30 @@ D:=,=,=,+,=,=,=,+,=,=")
     
 [(|> INPUT (parse) (part1)) (|> INPUT (parse) (part2))]"#,
                 "[5 10]",
+            ),
+            (
+                r#"(import map reduce std/vector)
+(import max std/int)
+
+; Kadane's algorithm: returns maximum subarray sum for a vector of Ints
+(let max-subarray (lambda xs (do 
+  (let step (lambda acc x (do 
+    (let current (max x (+ (get acc 0) x)))
+    (let best (max (get acc 1) current))
+    [ current best ])))
+
+  (let init [ (get xs 0) (get xs 0) ]) ; start with first element as current and best
+  (let rest (std/vector/drop xs 1))
+  (let result (reduce rest step init))
+  (get result 1))))
+
+; Examples
+[
+    (max-subarray [ -2 1 -3 4 -1 2 1 -5 4 ]) ; Int -> 6 (subarray [4 -1 2 1])
+    (max-subarray [ 1 2 3 ]) ; Int -> 6
+    (max-subarray [ -3 -2 -1 ]) ; Int -> -1
+]"#,
+                "[6 6 -1]",
             ),
         ];
         let std_ast = crate::baked::load_ast();

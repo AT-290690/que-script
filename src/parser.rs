@@ -558,7 +558,7 @@ fn if_transform(mut exprs: Vec<Expression>) -> Expression {
         exprs[0].clone(),
         exprs[1].clone(),
         if exprs.len() == 2 {
-            Expression::Atom(0)
+            Expression::Word("nil".to_string())
         } else {
             exprs[2].clone()
         },

@@ -92,6 +92,7 @@
 (let std/vector/string/lower (lambda char (if (and (>= char std/int/char/A) (<= char std/int/char/Z)) (+ char std/int/char/space) char)))
 (let std/vector/length (lambda xs (length xs)))
 (let std/vector/get (lambda xs i (get xs i)))
+(let std/vector/get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
 (let std/vector/pop! (lambda xs (pop! xs)))
 (let std/vector/set! (lambda xs i x (set! xs i x)))
 (let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (std/vector/set! xs i (get xs j)) (std/vector/set! xs j temp) xs)))
@@ -112,7 +113,7 @@
 (let std/int/max-safe 2147383647)
 (let std/int/min-safe -2147483648)
 (let std/int/safe? (lambda value (and (>= value std/int/min-safe) (<= value std/int/max-safe))))
-(let std/int/get-safe (lambda vrbl (if (std/int/safe? (get vrbl)) (get vrbl) nil)))
+(let std/int/get-safe (lambda vrbl (if (std/int/safe? (get vrbl)) (get vrbl) Int)))
 
 ; Extra "keywords" 
 (let identity (lambda x x))
@@ -121,7 +122,7 @@
 (let as (lambda . t t))
 (let true (= 1 1))
 (let false (= 0 1))
-(let nil 0)
+(let nil (loop 0 0 (lambda . 0)))
 (let eq (lambda a b (cond 
           (and a b) true 
           (and (not a) (not b)) true
@@ -317,8 +318,8 @@
 (let std/int/manhattan-distance (lambda x1 y1 x2 y2 (+ (std/int/abs (- x2 x1)) (std/int/abs (- y2 y1)))))
 (let std/int/max (lambda a b (if (> a b) a b)))
 (let std/int/min (lambda a b (if (< a b) a b)))
-(let std/vector/int/maximum (lambda xs (cond (std/vector/empty? xs) nil (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/max (get xs 0)))))
-(let std/vector/int/minimum (lambda xs (cond (std/vector/empty? xs) nil (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/min (get xs 0)))))
+(let std/vector/int/maximum (lambda xs (cond (std/vector/empty? xs) Int (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/max (get xs 0)))))
+(let std/vector/int/minimum (lambda xs (cond (std/vector/empty? xs) Int (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/min (get xs 0)))))
 (let std/int/average (lambda x y (/ (+ x y) 2)))
 (let std/vector/int/mean (lambda xs (/ (std/vector/int/sum xs) (length xs))))
 (let std/vector/int/median (lambda xs (do
@@ -815,7 +816,7 @@ heap)))
 (let std/vector/deque/iter (lambda q fn (do
   (let tail-call/std/vector/deque/iter (lambda index bounds (do
       (fn (std/vector/deque/get q index))
-      (if (< index bounds) (tail-call/std/vector/deque/iter (+ index 1) bounds) nil))))
+      (if (< index bounds) (tail-call/std/vector/deque/iter (+ index 1) bounds) Int))))
     (tail-call/std/vector/deque/iter 0 (std/vector/deque/length q)))))
 (let std/vector/deque/map (lambda q fn def (do
   (let result (std/vector/deque/new def))
@@ -823,11 +824,11 @@ heap)))
   (let half (/ len 2))
   (let tail-call/left/std/vector/deque/map (lambda index (do
     (std/vector/deque/add-to-left! result (fn (std/vector/deque/get q index)))
-   (if (> index 0) (tail-call/left/std/vector/deque/map (- index 1)) nil))))
+   (if (> index 0) (tail-call/left/std/vector/deque/map (- index 1)) Int))))
  (tail-call/left/std/vector/deque/map (- half 1))
 (let tail-call/right/std/vector/deque/map (lambda index bounds (do
    (std/vector/deque/add-to-right! result (fn (std/vector/deque/get q index)))
-   (if (< index bounds) (tail-call/right/std/vector/deque/map (+ index 1) bounds) nil))))
+   (if (< index bounds) (tail-call/right/std/vector/deque/map (+ index 1) bounds) Int))))
  (tail-call/right/std/vector/deque/map half (- len 1))
  result)))
 (let std/vector/deque/balance? (lambda q (= (+ (std/vector/deque/offset-right q) (std/vector/deque/offset-left q)) 0)))
@@ -836,18 +837,18 @@ heap)))
  (let half  (/ (length initial) 2))
  (let tail-call/left/from/vector->deque (lambda index (do
     (std/vector/deque/add-to-left! q (get initial index))
-   (if (> index 0) (tail-call/left/from/vector->deque (- index 1)) nil))))
+   (if (> index 0) (tail-call/left/from/vector->deque (- index 1)) Int))))
  (tail-call/left/from/vector->deque (- half 1))
 (let tail-call/right/from/vector->deque (lambda index bounds (do
    (std/vector/deque/add-to-right! q (get initial index))
-   (if (< index bounds) (tail-call/right/from/vector->deque (+ index 1) bounds) nil))))
+   (if (< index bounds) (tail-call/right/from/vector->deque (+ index 1) bounds) Int))))
  (tail-call/right/from/vector->deque half (- (length initial) 1))
     q)))
 (let std/convert/deque->vector (lambda q (if (std/vector/deque/empty? q) [(. q 0 0)] (do
   (let out [])
   (let tail-call/from/deque->vector (lambda index bounds (do
       (set! out (length out) (std/vector/deque/get q index))
-      (if (< index bounds) (tail-call/from/deque->vector (+ index 1) bounds) nil))))
+      (if (< index bounds) (tail-call/from/deque->vector (+ index 1) bounds) Int))))
     (tail-call/from/deque->vector 0 (- (std/vector/deque/length q) 1))
     out))))
 (let std/vector/deque/balance! (lambda q def
@@ -857,12 +858,12 @@ heap)))
       (let half (/ (length initial) 2))
       (let tail-call/left/std/vector/deque/balance! (lambda index (do
         (std/vector/deque/add-to-left! q (get initial index))
-        (if (> index 0) (tail-call/left/std/vector/deque/balance! (- index 1)) nil))))
+        (if (> index 0) (tail-call/left/std/vector/deque/balance! (- index 1)) Int))))
       (let tail-call/right/std/vector/deque/balance! (lambda index bounds (do
         (std/vector/deque/add-to-right! q (get initial index))
-        (if (< index bounds) (tail-call/right/std/vector/deque/balance! (+ index 1) bounds) nil))))
+        (if (< index bounds) (tail-call/right/std/vector/deque/balance! (+ index 1) bounds) Int))))
       (tail-call/right/std/vector/deque/balance! half (- (length initial) 1))
-      (if (> (length initial) 1) (tail-call/left/std/vector/deque/balance! (- half 1)) nil)
+      (if (> (length initial) 1) (tail-call/left/std/vector/deque/balance! (- half 1)) Int)
     q))))
 (let std/vector/deque/append! (lambda q item (do (std/vector/deque/add-to-right! q item) q)))
 (let std/vector/deque/prepend! (lambda q item (do (std/vector/deque/add-to-left! q item) q)))
@@ -890,7 +891,7 @@ q)))
       (if (= (std/vector/deque/offset-left q) 0) (std/vector/deque/balance! q def) q)
       (std/vector/deque/add-to-right! q (std/vector/deque/first q))
       (std/vector/deque/remove-from-left! q def)
-      (if (< index bounds) (tail-call/std/vector/deque/rotate-left! (+ index 1) bounds) nil))))
+      (if (< index bounds) (tail-call/std/vector/deque/rotate-left! (+ index 1) bounds) Int))))
     (tail-call/std/vector/deque/rotate-left! 0 N) q)))
 (let std/vector/deque/rotate-right! (lambda q n def (do
   (let N (mod n (std/vector/deque/length q)))
@@ -898,7 +899,7 @@ q)))
       (if (= (std/vector/deque/offset-right q) 0) (std/vector/deque/balance! q def) q)
       (std/vector/deque/add-to-left! q (std/vector/deque/last q))
       (std/vector/deque/remove-from-right! q def)
-      (if (< index bounds) (tail-call/std/vector/deque/rotate-left! (+ index 1) bounds) nil))))
+      (if (< index bounds) (tail-call/std/vector/deque/rotate-left! (+ index 1) bounds) Int))))
     (tail-call/std/vector/deque/rotate-left! 0 N) q)))
 (let std/vector/deque/slice (lambda entity s e def (do
   (let len (std/vector/deque/length entity))
@@ -909,11 +910,11 @@ q)))
   (let half (/ slice-len 2))
   (let tail-call/left/std/vector/deque/slice (lambda index (do
       (std/vector/deque/add-to-left! slice (std/vector/deque/get entity (+ start index)))
-      (if (> index 0) (tail-call/left/std/vector/deque/slice (- index 1)) nil))))
+      (if (> index 0) (tail-call/left/std/vector/deque/slice (- index 1)) Int))))
   (tail-call/left/std/vector/deque/slice (- half 1))
   (let tail-call/right/std/vector/deque/slice (lambda index bounds (do
       (std/vector/deque/add-to-right! slice (std/vector/deque/get entity (+ start index)))
-      (if (< index bounds) (tail-call/right/std/vector/deque/slice (+ index 1) bounds) nil))))
+      (if (< index bounds) (tail-call/right/std/vector/deque/slice (+ index 1) bounds) Int))))
   (tail-call/right/std/vector/deque/slice half (- slice-len 1))
   slice)))
 
@@ -1026,7 +1027,7 @@ q)))
   (let lenA (length a))
   (let lenB (length b))
   (if (= lenA lenB)
-    (std/int/reduce lenA (lambda sum i (+ sum (* (. a i) (. b i)))) 0) nil))))
+    (std/int/reduce lenA (lambda sum i (+ sum (* (. a i) (. b i)))) 0) Int))))
 
 (let std/vector/3d/rotate (lambda matrix (if (std/vector/empty? matrix) matrix (do 
     (let H (length matrix))

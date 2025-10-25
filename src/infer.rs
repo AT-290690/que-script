@@ -108,10 +108,16 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     ctx.env.exit_scope();
 
     // Build function type
-    let mut func_type = body_type;
-    for param_type in param_types.iter().rev() {
-        func_type = Type::Function(Box::new(param_type.clone()), Box::new(func_type));
-    }
+    let func_type = if param_types.is_empty() {
+        // <-- NEW: zero-arg lambdas get an explicit () -> body_type
+        Type::Function(Box::new(Type::Unit), Box::new(body_type))
+    } else {
+        let mut ft = body_type;
+        for param_type in param_types.iter().rev() {
+            ft = Type::Function(Box::new(param_type.clone()), Box::new(ft));
+        }
+        ft
+    };
 
     Ok(func_type)
 }
@@ -168,8 +174,8 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
         let scheme = generalize(&ctx.env, solved_type);
         ctx.env.insert(var_name.clone(), scheme)?;
 
-        // Your language’s `let` returns Int sentinel; fine to keep:
-        Ok(Type::Int)
+        // Your language’s `let` returns Unit sentinel; fine to keep:
+        Ok(Type::Unit)
     } else {
         Err("Let variable must be a variable name".to_string())
     }
@@ -245,6 +251,15 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
         }
     }
+    // ✅ Handle calling () -> T
+    if args.is_empty() {
+        if let Type::Function(param_ty, ret_ty) = &func_type {
+            if matches!(**param_ty, Type::Unit) {
+                return Ok((**ret_ty).clone());
+            }
+        }
+    }
+
     Ok(func_type)
 }
 
@@ -274,7 +289,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
                         Box::new(Type::Int), // index
                         Box::new(Type::Function(
                             Box::new(a),
-                            Box::new(Type::Int), // result
+                            Box::new(Type::Unit), // result
                         )),
                     )),
                 ),
@@ -290,7 +305,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
                 vec![a.var_id().unwrap()], // quantify α
                 Type::Function(
                     Box::new(Type::List(Box::new(a))), // [α]
-                    Box::new(Type::Int),
+                    Box::new(Type::Unit),
                 ),
             ),
         );
@@ -340,7 +355,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
                                 Box::new(Type::Int),
                                 Box::new(e.clone()),
                             )),
-                            Box::new(Type::Int), // returns int
+                            Box::new(Type::Unit), // returns unit
                         )),
                     )),
                 ),
