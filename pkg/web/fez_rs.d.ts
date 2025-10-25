@@ -2,6 +2,7 @@
 /* eslint-disable */
 export function get_output_ptr(): number;
 export function get_output_len(): number;
+export function evaluate(program: string): number;
 export function run(program: string): number;
 export function js(program: string): number;
 export function check(program: string): number;
@@ -15,6 +16,7 @@ export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly get_output_ptr: () => number;
   readonly get_output_len: () => number;
+  readonly evaluate: (a: number, b: number) => number;
   readonly run: (a: number, b: number) => number;
   readonly js: (a: number, b: number) => number;
   readonly check: (a: number, b: number) => number;

@@ -310,6 +310,7 @@ import {
   run,
   check,
   js,
+  evaluate,
   get_output_len,
 } from "./pkg/node/fez_rs.js";
 const memory = __wasm.memory;
@@ -329,8 +330,9 @@ const execBiteCode = (program) =>
   readWasmString(exec(program), get_output_len());
 const concatenateBiteCode = (a, b) =>
   readWasmString(cons(a, b), get_output_len());
+const uncheckRun = (program) => readWasmString(run(program), get_output_len());
 const typeCheckAndRun = (program) =>
-  readWasmString(run(program), get_output_len());
+  readWasmString(evaluate(program), get_output_len());
 ```
 
 **Example**

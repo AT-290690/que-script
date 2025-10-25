@@ -88,6 +88,17 @@ function passStringToWasm0(arg, malloc, realloc) {
  * @param {string} program
  * @returns {number}
  */
+module.exports.evaluate = function(program) {
+    const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.evaluate(ptr0, len0);
+    return ret >>> 0;
+};
+
+/**
+ * @param {string} program
+ * @returns {number}
+ */
 module.exports.run = function(program) {
     const ptr0 = passStringToWasm0(program, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;

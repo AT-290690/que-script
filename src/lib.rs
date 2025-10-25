@@ -36,7 +36,7 @@ pub fn get_output_len() -> usize {
 }
 
 #[wasm_bindgen]
-pub fn run(program: String) -> *const u8 {
+pub fn evaluate(program: String) -> *const u8 {
     let std_ast = baked::load_ast();
     let result = if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
@@ -57,12 +57,30 @@ pub fn run(program: String) -> *const u8 {
 }
 
 #[wasm_bindgen]
+pub fn run(program: String) -> *const u8 {
+    let std_ast = baked::load_ast();
+    let result = if let parser::Expression::Apply(items) = &std_ast {
+        match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+            Ok(wrapped_ast) => match vm::run(&wrapped_ast) {
+                Ok(res) => format!("{:?}", res),
+                Err(err) => err,
+            },
+            Err(err) => err,
+        }
+    } else {
+        "No expressions...".to_string()
+    };
+
+    write_to_output(&result)
+}
+
+#[wasm_bindgen]
 pub fn js(program: String) -> *const u8 {
     let std_ast = baked::load_ast();
     let result = if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => js::compile_program_to_js(&wrapped_ast),
-            Err(e) => format!("{:?}", e),
+            Err(e) => e,
         }
     } else {
         "No expressions...".to_string()
@@ -78,7 +96,7 @@ pub fn check(program: String) -> *const u8 {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
                 Ok(typ) => format!("{}", typ),
-                Err(e) => format!("{:?}", e),
+                Err(e) => e,
             },
             Err(e) => e,
         }

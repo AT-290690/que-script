@@ -3,6 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const get_output_ptr: () => number;
 export const get_output_len: () => number;
+export const evaluate: (a: number, b: number) => number;
 export const run: (a: number, b: number) => number;
 export const js: (a: number, b: number) => number;
 export const check: (a: number, b: number) => number;

@@ -2,6 +2,7 @@ import init, {
   //   exec,
   //   comp,
   //   cons,
+  evaluate,
   run,
   check,
   js,
@@ -21,7 +22,8 @@ const compileJs = (program) => readWasmString(js(program), get_output_len());
 // const execBiteCode = (program) =>
 //   readWasmString(exec(program), get_output_len());
 const typeCheckAndRun = (program) =>
-  readWasmString(run(program), get_output_len());
+  readWasmString(evaluate(program), get_output_len());
+const uncheckRun = (program) => readWasmString(run(program), get_output_len());
 // const concatenateBiteCode = (a, b) =>
 //   readWasmString(cons(a, b), get_output_len());
 
@@ -80,6 +82,12 @@ const compile = (value) => {
     terminal.setValue(out.substring(1, out.length - 1));
   } else terminal.setValue(out);
 };
+const runCode = (value) => {
+  const out = uncheckRun(value);
+  if (out && out[0] === '"') {
+    terminal.setValue(out.substring(1, out.length - 1));
+  } else terminal.setValue(out);
+};
 const type = (value) => {
   const out = typeCheck(value);
   if (out && out[0] === '"') {
@@ -105,7 +113,7 @@ document.addEventListener("keydown", (e) => {
 document.getElementById("run").addEventListener("click", () => {
   const value = editor.getValue();
   if (value.trim()) {
-    compile(value);
+    runCode(value);
     link(value);
     terminal.clearSelection();
   }
