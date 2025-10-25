@@ -781,6 +781,19 @@ impl Expression {
             }
         }
     }
+    pub fn to_lisp(&self) -> String {
+        match self {
+            Expression::Word(w) => w.clone(),
+            Expression::Atom(a) => a.to_string(),
+            Expression::Apply(items) => {
+                if items.is_empty() {
+                    return "()".to_string();
+                }
+                let parts: Vec<String> = items.iter().map(|e| e.to_lisp()).collect();
+                format!("({})", parts.join(" "))
+            }
+        }
+    }
 }
 #[allow(dead_code)]
 pub fn with_std(program: &str, std: &str) -> Result<Expression, String> {

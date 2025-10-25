@@ -68,10 +68,22 @@ mod tests {
     fn test_type_inference_failure() {
         // Test cases that should result in type inference errors
         let test_cases = [
-            ("(+ 1 (= 1 1))", "Cannot unify Int with Bool"),
-            ("(lambda x (and x 42))", "Cannot unify Bool with Int"),
+            ("(+ 1 (= 1 1))", "(+ 1 (= 1 1))\nCannot unify Int with Bool"),
+            ("(let x (vector 1 2 (= 1 2)))", "(let x (vector 1 2 (= 1 2)))\nCannot unify Int with Bool"),
+            ("(vector 1 2 (> 1 2))", "(vector 1 2 (> 1 2))\nCannot unify Int with Bool"),
+            (
+                "(lambda x (and x 42))",
+                "(and x 42)\nCannot unify Bool with Int",
+            ),
             ("(summation (range 1 10))", "Undefined variable: summation"),
-            ("(if (= 1 2) 10 (= 0 1))", "Cannot unify Int with Bool"),
+            (
+                "(if 1 10 20)",
+                "Condition must be Bool\n(if 1 10 20)\nCannot unify Int with Bool",
+            ),
+            (
+                "(if (= 1 2) 10 (= 0 1))",
+                "Concequent and alternative must match types\n(if (= 1 2) 10 (= 0 1))\nCannot unify Int with Bool",
+            ),
             (
                 "(do (let x 10) (let x 2))",
                 "Variable 'x' already defined in this scope",

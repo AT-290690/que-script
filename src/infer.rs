@@ -8,13 +8,13 @@ use std::collections::HashMap;
 // Type inference context
 pub struct InferenceContext {
     pub env: TypeEnv,
-    pub constraints: Vec<(Type, Type)>,
+    pub constraints: Vec<(Type, Type, String)>,
     pub fresh_var_counter: u64,
 }
 
 impl InferenceContext {
-    pub fn add_constraint(&mut self, t1: Type, t2: Type) {
-        self.constraints.push((t1, t2));
+    pub fn add_constraint(&mut self, t1: Type, t2: Type, src: String) {
+        self.constraints.push((t1, t2, src));
     }
 
     pub fn fresh_var(&mut self) -> Type {
@@ -134,14 +134,34 @@ fn infer_if(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
 
     // Infer condition type - should be Bool
     let cond_type = infer_expr(condition, ctx)?;
-    ctx.add_constraint(cond_type, Type::Bool);
+    ctx.add_constraint(
+        cond_type,
+        Type::Bool,
+        format!(
+            "Condition must be Bool\n(if {})",
+            args.into_iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<String>>()
+                .join(" ")
+        ),
+    );
 
     // Infer then and else types
     let then_type = infer_expr(then_expr, ctx)?;
     let else_type = infer_expr(else_expr, ctx)?;
 
     // Both branches must have the same type
-    ctx.add_constraint(then_type.clone(), else_type);
+    ctx.add_constraint(
+        then_type.clone(),
+        else_type,
+        format!(
+            "Concequent and alternative must match types\n(if {})",
+            args.into_iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<String>>()
+                .join(" "),
+        ),
+    );
 
     Ok(then_type)
 }
@@ -160,9 +180,25 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 
         // Solve all constraints into a single substitution S
         let mut subst = Substitution::empty();
-        for (t1, t2) in &ctx.constraints {
-            let s = unify(&subst.apply(t1), &subst.apply(t2))?;
-            subst = subst.compose(&s);
+        for (t1, t2, _) in &ctx.constraints {
+            let left = subst.apply(t1);
+            let right = subst.apply(t2);
+
+            match unify(&left, &right) {
+                Ok(s) => {
+                    subst = subst.compose(&s);
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "(let {})\n{}",
+                        args.into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" "),
+                        e
+                    ));
+                }
+            }
         }
 
         // Apply S to the value and to the environment
@@ -212,13 +248,29 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
             let mut elem_types = Vec::new();
             for arg in args {
-                let elem_type = infer_expr(arg, ctx)?;
-                elem_types.push(elem_type);
+                match infer_expr(arg, ctx) {
+                    Ok(elem_type) => {
+                        elem_types.push(elem_type);
+                    }
+                    Err(e) => {
+                        return Err(format!("{}", e));
+                    }
+                }
             }
 
             let first = elem_types[0].clone();
             for t in &elem_types[1..] {
-                ctx.add_constraint(first.clone(), t.clone()); // Enforce all elements have the same type
+                ctx.add_constraint(
+                    first.clone(),
+                    t.clone(),
+                    format!(
+                        "(vector {})",
+                        args.into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" ")
+                    ),
+                ); // Enforce all elements have the same type
             }
 
             // Return the type of the vector (List of the first element type)
@@ -229,22 +281,44 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     let args = &exprs[1..];
 
     let mut func_type = infer_expr(func_expr, ctx)?;
+
     for arg in args {
         match func_type {
-            Type::Function(param_ty, ret_ty) => {
-                let arg_ty = infer_expr(arg, ctx)?;
-                ctx.add_constraint(*param_ty.clone(), arg_ty);
-                func_type = *ret_ty;
-            }
+            Type::Function(param_ty, ret_ty) => match infer_expr(arg, ctx) {
+                Ok(arg_ty) => {
+                    ctx.add_constraint(
+                        *param_ty.clone(),
+                        arg_ty,
+                        format!(
+                            "({})",
+                            exprs
+                                .into_iter()
+                                .map(|e| e.to_lisp())
+                                .collect::<Vec<String>>()
+                                .join(" ")
+                        ),
+                    );
+                    func_type = *ret_ty;
+                }
+                Err(e) => {
+                    return Err(format!("{}", e));
+                }
+            },
             Type::Var(tv) => {
                 // If it's a type variable, assume it's a function type
-                let arg_ty = infer_expr(arg, ctx)?;
-                let ret_ty = ctx.fresh_var();
-                let func_ty = Type::Function(Box::new(arg_ty.clone()), Box::new(ret_ty.clone()));
-                // Constrain tv = (arg -> ret)
-                ctx.add_constraint(Type::Var(tv.clone()), func_ty);
-
-                func_type = ret_ty;
+                match infer_expr(arg, ctx) {
+                    Ok(arg_ty) => {
+                        let ret_ty = ctx.fresh_var();
+                        let func_ty =
+                            Type::Function(Box::new(arg_ty.clone()), Box::new(ret_ty.clone()));
+                        // Constrain tv = (arg -> ret)
+                        ctx.add_constraint(Type::Var(tv.clone()), func_ty, arg.to_lisp());
+                        func_type = ret_ty;
+                    }
+                    Err(e) => {
+                        return Err(format!("{}", e));
+                    }
+                }
             }
             _ => {
                 return Err(format!("Cannot apply non-function type: {}", func_type));
@@ -550,10 +624,18 @@ pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
     // 2) FINALIZE at top level only
     //    Solve all constraints accumulated during the whole program
     let mut subst = Substitution::empty();
-    for (a, b) in &ctx.constraints {
+    for (a, b, src) in &ctx.constraints {
         // apply current subst to keep things in normal form as we go
-        let s = unify(&subst.apply(a), &subst.apply(b))?;
-        subst = subst.compose(&s);
+        let left = &subst.apply(a);
+        let right = &subst.apply(b);
+        match unify(&left, &right) {
+            Ok(s) => {
+                subst = subst.compose(&s);
+            }
+            Err(e) => {
+                return Err(format!("{}\n{}", src, e));
+            }
+        }
     }
 
     // 3) Apply the final substitution to both type and environment (optional but tidy)
