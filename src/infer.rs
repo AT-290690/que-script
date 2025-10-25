@@ -4,16 +4,26 @@ use crate::types::{
 };
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-
+pub enum TypeErrorFormatVariant {
+    IfCond,
+    IfBody,
+    Source,
+    Vector,
+    Call,
+}
+pub struct TypeErrorFormat {
+    pub variant: TypeErrorFormatVariant,
+    pub expr: Vec<Expression>,
+}
 // Type inference context
 pub struct InferenceContext {
     pub env: TypeEnv,
-    pub constraints: Vec<(Type, Type, String)>,
+    pub constraints: Vec<(Type, Type, TypeErrorFormat)>,
     pub fresh_var_counter: u64,
 }
 
 impl InferenceContext {
-    pub fn add_constraint(&mut self, t1: Type, t2: Type, src: String) {
+    pub fn add_constraint(&mut self, t1: Type, t2: Type, src: TypeErrorFormat) {
         self.constraints.push((t1, t2, src));
     }
 
@@ -137,13 +147,10 @@ fn infer_if(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
     ctx.add_constraint(
         cond_type,
         Type::Bool,
-        format!(
-            "Condition must be Bool\n(if {})",
-            args.into_iter()
-                .map(|e| e.to_lisp())
-                .collect::<Vec<String>>()
-                .join(" ")
-        ),
+        TypeErrorFormat {
+            variant: TypeErrorFormatVariant::IfCond,
+            expr: args.to_vec(),
+        },
     );
 
     // Infer then and else types
@@ -154,13 +161,10 @@ fn infer_if(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
     ctx.add_constraint(
         then_type.clone(),
         else_type,
-        format!(
-            "Concequent and alternative must match types\n(if {})",
-            args.into_iter()
-                .map(|e| e.to_lisp())
-                .collect::<Vec<String>>()
-                .join(" "),
-        ),
+        TypeErrorFormat {
+            variant: TypeErrorFormatVariant::IfBody,
+            expr: args.to_vec(),
+        },
     );
 
     Ok(then_type)
@@ -263,13 +267,10 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.add_constraint(
                     first.clone(),
                     t.clone(),
-                    format!(
-                        "(vector {})",
-                        args.into_iter()
-                            .map(|e| e.to_lisp())
-                            .collect::<Vec<String>>()
-                            .join(" ")
-                    ),
+                    TypeErrorFormat {
+                        variant: TypeErrorFormatVariant::Vector,
+                        expr: args.to_vec(),
+                    },
                 ); // Enforce all elements have the same type
             }
 
@@ -289,14 +290,10 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                     ctx.add_constraint(
                         *param_ty.clone(),
                         arg_ty,
-                        format!(
-                            "({})",
-                            exprs
-                                .into_iter()
-                                .map(|e| e.to_lisp())
-                                .collect::<Vec<String>>()
-                                .join(" ")
-                        ),
+                        TypeErrorFormat {
+                            variant: TypeErrorFormatVariant::Call,
+                            expr: exprs.to_vec(),
+                        },
                     );
                     func_type = *ret_ty;
                 }
@@ -312,7 +309,14 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                         let func_ty =
                             Type::Function(Box::new(arg_ty.clone()), Box::new(ret_ty.clone()));
                         // Constrain tv = (arg -> ret)
-                        ctx.add_constraint(Type::Var(tv.clone()), func_ty, arg.to_lisp());
+                        ctx.add_constraint(
+                            Type::Var(tv.clone()),
+                            func_ty,
+                            TypeErrorFormat {
+                                variant: TypeErrorFormatVariant::Source,
+                                expr: vec![arg.clone()],
+                            },
+                        );
                         func_type = ret_ty;
                     }
                     Err(e) => {
@@ -639,13 +643,79 @@ pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
         // apply current subst to keep things in normal form as we go
         let left = &subst.apply(a);
         let right = &subst.apply(b);
+        let source_expression = &src.expr;
         match unify(&left, &right) {
             Ok(s) => {
                 subst = subst.compose(&s);
             }
-            Err(e) => {
-                return Err(format!("{}\n{}", src, e));
-            }
+            Err(e) => match src.variant {
+                TypeErrorFormatVariant::Vector => {
+                    return Err(format!(
+                        "(vector {})\n{}",
+                        source_expression
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" "),
+                        e
+                    ));
+                }
+                TypeErrorFormatVariant::Call => {
+                    return Err(format!(
+                        "({})\n{}",
+                        source_expression
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" "),
+                        e
+                    ))
+                }
+                TypeErrorFormatVariant::Source => {
+                    return Err(format!(
+                        "{}\n{}",
+                        source_expression
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" "),
+                        e
+                    ))
+                }
+                TypeErrorFormatVariant::IfBody => {
+                    return Err(format!(
+                        "Concequent and alternative must match types\n(if {})\n{}",
+                        source_expression
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" "),
+                        e
+                    ))
+                }
+                TypeErrorFormatVariant::IfCond => {
+                    return Err(format!(
+                        "Condition must be Bool\n(if {})\n{}",
+                        source_expression
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" "),
+                        e
+                    ))
+                }
+                _ => {
+                    return Err(format!(
+                        "Unknown type error {}\n{}",
+                        source_expression
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" "),
+                        e
+                    ))
+                }
+            },
         }
     }
 
