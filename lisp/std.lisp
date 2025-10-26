@@ -670,6 +670,12 @@
           (if (std/vector/3d/in-bounds? xs dy dx)
               (fn (get xs dy dx) dir dy dx)))))))
 
+(let std/vector/3d/sliding-adjacent-sum (lambda xs directions y x N fn
+      (std/vector/reduce directions (lambda a dir (do
+          (let dy (+ (std/vector/first dir) y))
+          (let dx (+ (std/vector/second dir) x))
+          (fn a (get xs (std/int/euclidean-mod dy N) (std/int/euclidean-mod dx N))))) 0)))
+
 (let std/node/parent (lambda i (- (>> (+ i 1) 1) 1)))
 (let std/node/left (lambda i (+ (<< i 1) 1)))
 (let std/node/right (lambda i (<< (+ i 1) 1)))
@@ -991,6 +997,9 @@ q)))
                     (if (= x 1) (std/vector/append! a (get xs i)) a)) [])))))
     out))))
 
+; alternative implementation using bitwise operators
+; (let std/convert/bits->integer (lambda bits (std/vector/reduce bits (lambda value bit (| (<< value 1) (& bit 1))) 0)))
+
 (let std/convert/bits->integer (lambda xs (do
   (let bits->integer (lambda index out (if
                               (= index (length xs)) out
@@ -1251,3 +1260,5 @@ q)))
       (let tail-call/vector/adjacent-difference (lambda i result (if (< i len) (do
         (tail-call/vector/adjacent-difference (+ i 1) (std/vector/update! result i (cb (get xs (- i 1)) (get xs i))))) result)))
         (tail-call/vector/adjacent-difference 1 xs))))))
+
+(let std/convert/vector/3d->string (lambda xs a b (std/convert/vector->string (std/vector/map xs (lambda x (std/convert/vector->string x b))) a)))

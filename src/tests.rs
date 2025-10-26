@@ -921,6 +921,135 @@ D:=,=,=,+,=,=,=,+,=,=")
 ]"#,
                 "[[[97] [49] [98] [50] [99] [51]] [[49] [120] [50] [121]]]",
             ),
+
+
+            (r#"
+(let RAW "A=._
+B=_...
+C=_._.
+D=_..
+E=.
+F=.._.
+G=__.
+H=....
+I=..
+J=.___
+K=_._
+L=._..
+M=__
+N=_.
+O=___
+P=.__.
+Q=__._
+R=._.
+S=...
+T=_
+U=.._
+V=..._
+W=.__
+X=_.._
+Y=_.__
+Z=__..
+0=_____
+1=.____
+2=..___
+3=...__
+4=...._
+5=.....
+6=_....
+7=__...
+8=___..
+9=____.
+.=._._._
+,=__..__")
+(let parse (lambda xs (|> xs (std/convert/string->vector std/int/char/new-line) (std/vector/map (lambda x (std/convert/string->vector x std/int/char/equal))))))
+(let PARSED (parse RAW))
+(let *ABC->MORSE-IDEXES* (std/vector/reduce/i PARSED (lambda a [k .] i (std/vector/hash/table/set! a k i)) (std/vector/buckets 64)))
+(let *ABC->MORSE-CODES* (std/vector/map PARSED (lambda [. v .] v)))
+
+(let *MORSE->ABC-IDEXES* (std/vector/reduce/i PARSED (lambda a [. k .] i (std/vector/hash/table/set! a k i)) (std/vector/buckets 64)))
+(let *MORSE->ABC-CODES* (std/vector/map PARSED (lambda [v .] v)))
+
+(let abc->morse (lambda letter (get *ABC->MORSE-CODES* (std/vector/hash/table/get *ABC->MORSE-IDEXES* letter))))
+(let morse->abc (lambda letter (get *MORSE->ABC-CODES* (std/vector/hash/table/get *MORSE->ABC-IDEXES* letter))))
+
+
+[
+(|> "Hello,World.1234" (std/vector/map std/vector/string/upper) (std/vector/map (lambda xs (|> xs (vector) (abc->morse)))) (std/vector/flat-one))
+(|> 
+["...." "." "._.." "._.." "___" "__..__" ".__" "___" "._." "._.." "_.." "._._._" ".____" "..___" "...__" "...._"] 
+(std/vector/map morse->abc)
+(std/vector/flat-one)
+)]"#, "[[46 46 46 46 46 46 95 46 46 46 95 46 46 95 95 95 95 95 46 46 95 95 46 95 95 95 95 95 46 95 46 46 95 46 46 95 46 46 46 95 46 95 46 95 46 95 95 95 95 46 46 95 95 95 46 46 46 95 95 46 46 46 46 95] [72 69 76 76 79 44 87 79 82 76 68 46 49 50 51 52]]"),
+(r#"
+(let N 8)
+(let matrix (|> (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda . 0))))))
+(let add-glider! (lambda matrix y x (do 
+  (set! (get matrix (+ y 2)) (+ x 1) 1)
+  (set! (get matrix (+ y 2)) (+ x 2) 1)
+  (set! (get matrix (+ y 2)) (+ x 3) 1)
+  (set! (get matrix (+ y 1)) (+ x 3) 1)
+  (set! (get matrix (+ y 0)) (+ x 2) 1)
+  )))
+(add-glider! matrix 0 0)
+
+; (set! (get matrix 6) 2 1)
+; (set! (get matrix 5) 4 1)
+; (set! (get matrix 5) 3 1)
+; (set! (get matrix 3) 3 1)
+
+(let gof (lambda matrix (do
+  (std/vector/map/i matrix (lambda arr y (do
+    (std/vector/map/i arr (lambda cell x (do
+      (let score (std/vector/3d/sliding-adjacent-sum matrix std/vector/3d/moore-neighborhood y x N +))
+      (cond 
+        (and (= cell 1) (or (< score 2) (> score 3))) 0
+        (and (= cell 1) (or (= score 2) (= score 3))) 1
+        (and (= cell 0) (= score 3)) 1
+        0))))))))))
+(let render (lambda matrix 
+                  (do (|> matrix 
+                      (std/vector/map (lambda y 
+                        (std/vector/map y (lambda x (cond 
+                                                (= x 0) "." 
+                                                (= x 1) "*"
+                                                ""))))) 
+                              (std/convert/vector/3d->string std/int/char/new-line std/int/char/space)))))
+(|> matrix (gof) (gof) (gof) (gof) (gof) (gof) (gof) (gof))"#, "[[0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 1 0 0 0 0] [0 0 0 0 0 1 0 0 0] [0 0 0 1 1 1 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0]]"),
+
+(r#"(let *RES* 50)
+(integer generation 0)
+(variable cells (std/vector/int/zeroes *RES*))
+(let ruleset [ 0 1 0 1 1 0 1 0 ])
+(set! (get cells) (/ (length (get cells)) 2) 1)
+(let out [])
+
+(let rules (lambda a b c (do 
+    (let index (std/convert/bits->integer [ a b c ]))
+    (get ruleset (- 7 index)))))
+
+(loop (< (get generation) (/ *RES* 2)) (lambda (do 
+    (std/vector/push! out (get cells))
+    (let nextgen (std/vector/copy (get cells)))
+    (loop 1 (- (length (get cells)) 1) (lambda i (do 
+        (let left (get cells 0 (- i 1)))
+        (let me (get cells 0 i))
+        (let right (get cells 0 (+ i 1)))
+        (set! nextgen i (rules left me right)))))
+    (set cells nextgen)
+    (++ generation))))
+
+
+(|> out 
+        (std/vector/map (lambda y 
+            (std/vector/map y (lambda x (cond 
+                                    (= x 0) "." 
+                                    (= x 1) "*"
+                                    "")))))
+                (std/convert/vector/3d->string std/int/char/new-line std/int/char/space))
+out                
+                
+                "#, "[[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0] [0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0] [0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0] [0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0] [0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0] [0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0] [0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0]]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
