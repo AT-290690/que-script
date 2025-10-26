@@ -25,7 +25,7 @@ pub enum Type {
     Bool,
     Function(Box<Type>, Box<Type>),
     List(Box<Type>),
-    Unit, // <- add this
+    Unit,
 }
 
 impl fmt::Display for Type {

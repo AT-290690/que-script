@@ -134,3 +134,18 @@ document.getElementById("js").addEventListener("click", () => {
     terminal.clearSelection();
   }
 });
+const charCodesToString = (codes) => {
+  if (typeof codes[0] === "number")
+    return codes.map((x) => String.fromCharCode(x)).join("");
+  else return codes.map(charCodesToString);
+};
+document.getElementById("str").addEventListener("click", () => {
+  try {
+    const arr = JSON.parse(
+      terminal.getValue().trim().split("\n").at(-1).replaceAll(" ", ",")
+    );
+    terminal.setValue(serialise(charCodesToString(arr)));
+  } catch (e) {
+    terminal.setValue("Can't serialise - not a String output");
+  }
+});

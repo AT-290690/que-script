@@ -119,7 +119,7 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
 
     // Build function type
     let func_type = if param_types.is_empty() {
-        // <-- NEW: zero-arg lambdas get an explicit () -> body_type
+        // zero-arg lambdas get an explicit () -> body_type
         Type::Function(Box::new(Type::Unit), Box::new(body_type))
     } else {
         let mut ft = body_type;

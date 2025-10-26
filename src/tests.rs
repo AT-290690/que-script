@@ -911,6 +911,16 @@ D:=,=,=,+,=,=,=,+,=,=")
 ]"#,
                 "[6 6 -1]",
             ),
+            (
+                r#"(let interleave (lambda a b (|> (std/vector/zipper a b) (std/vector/flat-one))))
+(let ints (lambda xs (std/vector/map xs std/convert/integer->string)))
+; examples
+[
+ (interleave [ "a" "b" "c" ] (ints [ 1 2 3 ])) ; [ "a" 1 "b" 2 "c" 3 ]
+ (interleave (ints [ 1 2 ]) [ "x" "y" "z" ])  ; [ 1 "x" 2 "y" "z" ]
+]"#,
+                "[[[97] [49] [98] [50] [99] [51]] [[49] [120] [50] [121]]]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
