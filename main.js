@@ -8,9 +8,12 @@ import init, {
   js,
   get_output_len,
 } from "./pkg/web/fez_rs.js";
+let lib = "";
 let wasm;
 (async () => {
   wasm = await init();
+  const response = await fetch("./lib.json");
+  lib = await response.json();
 })();
 const readWasmString = (ptr, len) =>
   new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, ptr, len));
@@ -108,6 +111,17 @@ document.addEventListener("keydown", (e) => {
       terminal.clearSelection();
       //   console.log(wasm.memory.buffer);
     }
+  } else if (
+    e.key.toLowerCase() === "s" &&
+    (e.ctrlKey || e.metaKey) &&
+    e.shiftKey
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const selection = editor.session
+      .getTextRange(editor.getSelectionRange())
+      .trim();
+    terminal.setValue(lib.filter((x) => x.includes(selection)).join("\n"));
   }
 });
 document.getElementById("run").addEventListener("click", () => {
