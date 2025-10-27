@@ -244,7 +244,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
     // look for array args
     let mut new_bindings = vec![];
     let mut new_args = Vec::new();
-    for arg in args {
+    for (j, arg) in args.iter().enumerate() {
         match arg {
             Expression::Apply(array_exprs) => {
                 if let [Expression::Word(ref array_kw), ref elements @ ..] = &array_exprs[..] {
@@ -260,7 +260,9 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                                 Expression::Word(name.clone()),
                                                 Expression::Apply(vec![
                                                     Expression::Word("std/vector/drop".to_string()),
-                                                    Expression::Word("_args".to_string()),
+                                                    Expression::Word(
+                                                        "_args".to_string() + &j.to_string(),
+                                                    ),
                                                     Expression::Atom(i as i32),
                                                 ]),
                                             ]))
@@ -272,7 +274,9 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                                 Expression::Word(name.clone()),
                                                 Expression::Apply(vec![
                                                     Expression::Word("get".to_string()),
-                                                    Expression::Word("_args".to_string()),
+                                                    Expression::Word(
+                                                        "_args".to_string() + &j.to_string(),
+                                                    ),
                                                     Expression::Atom(i as i32),
                                                 ]),
                                             ]))
@@ -287,7 +291,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                 }
                             }
                         }
-                        new_args.push(Expression::Word("_args".to_string()));
+                        new_args.push(Expression::Word("_args".to_string() + &j.to_string()));
                         continue;
                     }
                 }

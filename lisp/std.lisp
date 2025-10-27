@@ -316,6 +316,7 @@
   (let b (- y1 y2))
   (std/int/sqrt (+ (* a a) (* b b))))))
 (let std/int/manhattan-distance (lambda x1 y1 x2 y2 (+ (std/int/abs (- x2 x1)) (std/int/abs (- y2 y1)))))
+(let std/int/chebyshev-distance (lambda x1 y1 x2 y2 (std/int/max (std/int/abs (- x2 x1)) (std/int/abs (- y2 y1)))))
 (let std/int/max (lambda a b (if (> a b) a b)))
 (let std/int/min (lambda a b (if (< a b) a b)))
 (let std/vector/int/maximum (lambda xs (cond (std/vector/empty? xs) Int (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/max (get xs 0)))))
