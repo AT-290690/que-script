@@ -167,6 +167,28 @@ fn main() -> std::io::Result<()> {
     } else if args.iter().any(|a| a == "--bit") {
         let program = fs::read_to_string("./dist/ir.txt")?;
         println!("{:?}", vm::exe(parse_bitecode(&program).unwrap()));
+    } else if args.iter().any(|a| a == "--doc") {
+        let std_ast = baked::load_ast();
+        let mut names = Vec::new();
+        if let parser::Expression::Apply(items) = &std_ast {
+            for expr in items[1..].to_vec() {
+                if let parser::Expression::Apply(list) = expr {
+                    let a = &list[0];
+                    let b = &list[1];
+                    if let parser::Expression::Word(kw) = a {
+                        if kw == "let" {
+                            if let parser::Expression::Word(name) = b {
+                                names.push(name.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let path = "./dist/lib.json";
+        std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+        let mut file = fs::File::create(path)?;
+        write!(file, "{:?}", names)?;
     } else {
         let program = fs::read_to_string("./dist/ir.txt")?;
         println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
