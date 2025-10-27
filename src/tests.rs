@@ -976,7 +976,7 @@ Z=__..
 
 
 [
-(|> "Hello,World.1234" (std/vector/map std/vector/string/upper) (std/vector/map (lambda xs (|> xs (vector) (abc->morse)))) (std/vector/flat-one))
+(|> "Hello,World.1234" (std/vector/map std/int/char/upper) (std/vector/map (lambda xs (|> xs (vector) (abc->morse)))) (std/vector/flat-one))
 (|> 
 ["...." "." "._.." "._.." "___" "__..__" ".__" "___" "._." "._.." "_.." "._._._" ".____" "..___" "...__" "...._"] 
 (std/vector/map morse->abc)
