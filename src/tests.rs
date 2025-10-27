@@ -478,10 +478,10 @@ mod tests {
 
 (let parse (lambda input (|>
                             input
-                            (std/string/lines)
+                            (std/vector/string/lines)
                             (std/vector/map (lambda word (|>
                                                       word
-                                                      (std/string/words)
+                                                      (std/vector/string/words)
                                                       (std/vector/filter std/vector/not-empty?)
                                                       (std/vector/map std/convert/chars->integer)))))))
 
@@ -509,7 +509,7 @@ mod tests {
             ),
             (
                 r#"
-(let parse (lambda input (|> input (std/string/lines) (std/vector/map std/convert/chars->integer))))
+(let parse (lambda input (|> input (std/vector/string/lines) (std/vector/map std/convert/chars->integer))))
 (let part1 (lambda input (do 
     (let min (std/vector/int/minimum input))
     (|> input
@@ -635,8 +635,8 @@ C:=,-,+,+,=,-,+,+,=,-
 D:=,=,=,+,=,=,=,+,=,=")
 
 (let parse (lambda input (do 
-(|> input (std/string/lines) (std/vector/map (lambda x (do 
-    (let y (std/string/commas x))
+(|> input (std/vector/string/lines) (std/vector/map (lambda x (do 
+    (let y (std/vector/string/commas x))
     (set! y 0 (get (std/convert/string->vector (get y 0) std/int/char/colon) 1))
     (std/vector/flat-one y)))))
 )))
@@ -647,7 +647,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (= x std/int/char/equal) (std/vector/append! a (std/vector/last a))
     (std/vector/append! a (std/vector/last a)))))
 (let part1 (lambda xs (do
-    (let letters (|> input (std/string/lines) (std/vector/map std/vector/first)))
+    (let letters (|> input (std/vector/string/lines) (std/vector/map std/vector/first)))
     (|> xs (std/vector/map (lambda x (|> x (std/vector/reduce app [0])))) 
     (std/vector/map std/vector/int/sum)
     (std/vector/map/i (lambda x i [i (+ x 100)]))
