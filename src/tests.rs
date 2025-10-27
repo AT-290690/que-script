@@ -70,7 +70,8 @@ mod tests {
         let test_cases = [
             ("(+ 1 (= 1 1))", "(+ 1 (= 1 1))\nCannot unify Int with Bool"),
             ("(1 2)", "(1 2)\nCannot apply non-function type: Int"),
-            ("(let x (vector 1 2 (= 1 2)))", "(let x (vector 1 2 (= 1 2)))\nCannot unify Int with Bool"),
+            ("(do (let t 10) (t))", "(t)\nCannot apply non-function type: Int"),
+            ("(let x (vector 1 2 (= 1 2)))", "(vector 1 2 (= 1 2))\nCannot unify Int with Bool"),
             ("(vector 1 2 (> 1 2))", "(vector 1 2 (> 1 2))\nCannot unify Int with Bool"),
             (
                 "(lambda x (and x 42))",

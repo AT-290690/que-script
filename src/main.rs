@@ -119,7 +119,7 @@ fn main() -> std::io::Result<()> {
                     vm::compile(&wrapped_ast, &mut code);
                     dump_wrapped_bytecode(code, "./src/ir.rs");
                 }
-                Err(e) => println!("{:?}", e),
+                Err(e) => println!("{}", e),
             }
         }
     } else if args.iter().any(|a| a == "--exec") {
@@ -132,9 +132,9 @@ fn main() -> std::io::Result<()> {
             match parser::merge_std_and_program(&program, items[1..].to_vec()) {
                 Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
                     Ok(typ) => println!("{}", typ),
-                    Err(e) => println!("{:?}", e),
+                    Err(e) => println!("{}", e),
                 },
-                Err(e) => println!("{:?}", e),
+                Err(e) => println!("{}", e),
             }
         }
     } else if args.iter().any(|a| a == "--js") {
@@ -147,7 +147,7 @@ fn main() -> std::io::Result<()> {
                     let js = js::compile_program_to_js(&wrapped_ast);
                     dump_wrapped_js(js, "./dist/index.js");
                 }
-                Err(e) => println!("{:?}", e),
+                Err(e) => println!("{}", e),
             }
         }
     } else if args.iter().any(|a| a == "--str") {
@@ -161,7 +161,7 @@ fn main() -> std::io::Result<()> {
                     vm::compile(&wrapped_ast, &mut code);
                     dump_raw_bytecode(code, "./dist/ir.txt");
                 }
-                Err(e) => println!("{:?}", e),
+                Err(e) => println!("{}", e),
             }
         }
     } else if args.iter().any(|a| a == "--bit") {

@@ -314,25 +314,3 @@ pub fn generalize(env: &TypeEnv, typ: Type) -> TypeScheme {
     let vars: Vec<u64> = typ_vars.difference(&env_vars).cloned().collect();
     TypeScheme::new(vars, typ)
 }
-
-pub fn solve_constraints(constraints: Vec<(Type, Type)>) -> Result<Substitution, String> {
-    let mut subst = Substitution::empty();
-    let mut worklist = constraints;
-
-    while let Some((t1, t2)) = worklist.pop() {
-        // Apply current substitution before unifying
-        let t1_applied = subst.apply(&t1);
-        let t2_applied = subst.apply(&t2);
-
-        let s = unify(&t1_applied, &t2_applied)?;
-        subst = subst.compose(&s);
-
-        // Apply the new substitution to all remaining constraints
-        worklist = worklist
-            .into_iter()
-            .map(|(a, b)| (s.apply(&a), s.apply(&b)))
-            .collect();
-    }
-
-    Ok(subst)
-}
