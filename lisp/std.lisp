@@ -93,6 +93,9 @@
 (let std/vector/length (lambda xs (length xs)))
 (let std/vector/get (lambda xs i (get xs i)))
 (let std/vector/get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
+(let std/vector/2d/length std/vector/length)
+(let std/vector/2d/get std/vector/get)
+(let std/vector/2d/get/default std/vector/get/default)
 (let std/vector/pop! (lambda xs (pop! xs)))
 (let std/vector/set! (lambda xs i x (set! xs i x)))
 (let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (std/vector/set! xs i (get xs j)) (std/vector/set! xs j temp) xs)))
@@ -123,6 +126,7 @@
 (let true (= 1 1))
 (let false (= 0 1))
 (let nil (loop 0 0 (lambda . 0)))
+(let null (lambda nil))
 (let eq (lambda a b (cond 
           (and a b) true 
           (and (not a) (not b)) true
@@ -1263,3 +1267,9 @@ q)))
         (tail-call/vector/adjacent-difference 1 xs))))))
 
 (let std/convert/vector/3d->string (lambda xs a b (std/convert/vector->string (std/vector/map xs (lambda x (std/convert/vector->string x b))) a)))
+
+(let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
+(let std/vector/get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
+(let std/vector/2d/get* std/vector/get*)
+(let std/vector/3d/get* (lambda xs i j some none (if (std/vector/3d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))
+(let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))
