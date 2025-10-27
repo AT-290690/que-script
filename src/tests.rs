@@ -152,9 +152,9 @@ mod tests {
  std/vector)
  
  (import
-   max min char/space char/tab char/new-line
+   max min 
  std/int)
- 
+ (import char/space char/tab char/new-line std)
  (import
     chars->digits string->vector chars->integer
  std/convert)
@@ -193,7 +193,7 @@ mod tests {
  (string->vector char/new-line)
  (map (lambda xs (|>
                   xs
-                  (map (lambda x (if (= x char/tab) char/space x)))
+                  (map (lambda x (if (=# x char/tab) char/space x)))
                   (string->vector char/space)
                   (map chars->integer)))))))
  
@@ -248,7 +248,7 @@ mod tests {
         ")))"     ; result in floor -3.
         ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (std/vector/int/count input std/int/char/left-brace) (std/vector/int/count input std/int/char/right-brace))))
+(let solve (lambda input (- (std/vector/char/count input std/char/left-brace) (std/vector/char/count input std/char/right-brace))))
 (std/vector/map samples solve)"#,
                 "[0 0 3 3 3 -1 -1 -3 -3]",
             ),
@@ -276,24 +276,22 @@ mod tests {
             (
                 r#"(let has-groups (lambda deck
   (do
-    (let counts (|> deck
-                    ; TODO/
-                    ; delete next 2 lines
-                    ; replace them with std/convert/integer->string
-                    ; once that gets impelemnted
-                    (std/vector/map std/convert/digit->char)
-                    (std/vector/map int)
-                    ; ^ to be replaced with std/convert/integer->string
+    (let chars (|> deck
+                    (std/vector/map std/convert/integer->string)
                     (std/vector/hash/table/count)
                     (std/vector/hash/table/entries)
                     (std/vector/map std/vector/second)
                     (std/vector/flat-one)))
-    (> (std/vector/reduce counts std/int/gcd (std/vector/first counts)) 1))))
+    (let counts (as chars [Int]))
+    (> (std/vector/reduce counts std/int/gcd (std/vector/first counts)) 1)
+    
+    )))
 
 [
     (has-groups [ 1 2 3 4 4 3 2 1 ]) ; Output/ true
     (has-groups [ 1 1 1 2 2 2 3 3 ]) ; Output/ false
-]"#,
+]
+"#,
                 "[1 0]",
             ),
             (
@@ -404,8 +402,8 @@ mod tests {
 32019012
 01329801
 10456732")
-(let yx->key (lambda y x (std/vector/concat-with (std/vector/map [ y x ] (lambda c [ c ])) std/int/char/dash)))
-(let parse (lambda input (|> input (std/convert/string->vector std/int/char/new-line) (std/vector/map std/convert/chars->digits))))
+(let yx->key (lambda y x (std/vector/concat-with (std/vector/map [ (as y Char) (as x Char) ] (lambda c [ c ])) std/char/dash)))
+(let parse (lambda input (|> input (std/convert/string->vector std/char/new-line) (std/vector/map std/convert/chars->digits))))
 (let part1 (lambda matrix (do
   (let coords (std/vector/3d/points matrix std/int/zero?))
   (let default-queue-value [ 0 ])
@@ -450,14 +448,14 @@ mod tests {
             (let element (std/vector/queue/peek queue))
             (let y (std/vector/first element))
             (let x (std/vector/second element))  
-            (if (= (. matrix y x) 9) (+= score (std/vector/hash/table/get visited root-key)))
+            (if (= (. matrix y x) 9) (+= score (as (std/vector/hash/table/get visited root-key) Int)))
             (std/vector/queue/dequeue! queue default-queue-value)
             (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
                  (if (= (- cell (. matrix y x)) 1) (do
                     (std/vector/queue/enqueue! queue [ dy dx ])
                     (if (std/vector/hash/table/has? visited key) 
-                        (std/vector/hash/table/set! visited key (+ (std/vector/hash/table/get visited root-key) (std/vector/hash/table/get visited key))) 
+                        (std/vector/hash/table/set! visited key (+# (std/vector/hash/table/get visited root-key) (std/vector/hash/table/get visited key))) 
                         (std/vector/hash/table/set! visited key (std/vector/hash/table/get visited root-key)))
                       nil))))))))
         (+ a (get score)))) 0))))
@@ -638,14 +636,14 @@ D:=,=,=,+,=,=,=,+,=,=")
 (let parse (lambda input (do 
 (|> input (std/vector/string/lines) (std/vector/map (lambda x (do 
     (let y (std/vector/string/commas x))
-    (set! y 0 (get (std/convert/string->vector (get y 0) std/int/char/colon) 1))
+    (set! y 0 (get (std/convert/string->vector (get y 0) std/char/colon) 1))
     (std/vector/flat-one y)))))
 )))
     
 (let app (lambda a x 
-    (cond (= x std/int/char/plus) (std/vector/append! a (+ (std/vector/last a) 1))
-    (= x std/int/char/minus) (std/vector/append! a (- (std/vector/last a) 1))
-    (= x std/int/char/equal) (std/vector/append! a (std/vector/last a))
+    (cond (=# x std/char/plus) (std/vector/append! a (+ (std/vector/last a) 1))
+    (=# x std/char/minus) (std/vector/append! a (- (std/vector/last a) 1))
+    (=# x std/char/equal) (std/vector/append! a (std/vector/last a))
     (std/vector/append! a (std/vector/last a)))))
 (let part1 (lambda xs (do
     (let letters (|> input (std/vector/string/lines) (std/vector/map std/vector/first)))
@@ -659,8 +657,8 @@ D:=,=,=,+,=,=,=,+,=,=")
             ),
             (
                 r#"(let palindrome? (lambda str (do 
-    (let q (std/vector/queue/new 0))
-    (let s (std/vector/stack/new 0))
+    (let q (std/vector/queue/new std/char/0))
+    (let s (std/vector/stack/new std/char/0))
     
     (std/vector/for str (lambda x (do
         (std/vector/stack/push! s x)
@@ -669,11 +667,11 @@ D:=,=,=,+,=,=,=,+,=,=")
     (let p? [true])
     
     (loop 0 (/ (length str) 2) (lambda . 
-        (if (!= (std/vector/stack/peek s) (std/vector/queue/peek q)) 
+        (if (not (=# (std/vector/stack/peek s) (std/vector/queue/peek q)))
              (boole-set p? false) 
              (do 
-                 (std/vector/stack/pop! s 0)
-                 (std/vector/queue/dequeue! q 0)
+                 (std/vector/stack/pop! s std/char/0)
+                 (std/vector/queue/dequeue! q std/char/0)
                  nil))))
     (get p?))))
     
@@ -683,7 +681,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"(let palindrome? (lambda str (do 
     (let p? [true])
-    (loop 0 (/ (length str) 2) (lambda i (if (<> (get str i) (get str (- (length str) i 1))) (boole-set p? false))))
+    (loop 0 (/ (length str) 2) (lambda i (if (not (=# (get str i) (get str (- (length str) i 1)))) (boole-set p? false))))
     (true? p?))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[1 0]",
@@ -766,11 +764,11 @@ D:=,=,=,+,=,=,=,+,=,=")
 ")
 (|>
  str
- (std/convert/string->vector std/int/char/new-line)
+ (std/convert/string->vector std/char/new-line)
  (std/vector/filter std/vector/not-empty?) ; trim
  (std/vector/map (lambda xs
    (|> xs
-     (std/convert/string->vector std/int/char/space)
+     (std/convert/string->vector std/char/space)
      (std/vector/filter std/vector/not-empty?)
      (std/vector/filter/i (lambda . i (std/int/even? i)))
      (std/vector/map std/convert/chars->integer))))
@@ -787,8 +785,8 @@ D:=,=,=,+,=,=,=,+,=,=")
       (std/vector/hash/table/entries)
    
       (std/vector/reduce (lambda acc [str count .]
-        (+ acc (* (std/int/ceil/div (get count) (+ (std/convert/chars->integer str) 1))
-                  (+ (std/convert/chars->integer str) 1))))
+        (+ acc (* (std/int/ceil/div (as (get count) Int) (+ (std/convert/chars->integer (as str [Char])) 1))
+                  (+ (std/convert/chars->integer (as str [Char])) 1))))
       0)
       
       )))
@@ -819,9 +817,9 @@ D:=,=,=,+,=,=,=,+,=,=")
         (let rod-char (get rings (+ i 1)))
         (let rod (get rods (- (std/convert/char->digit rod-char) 0)))
         (cond
-          (= color std/int/char/R) (set! rod 0 true)
-          (= color std/int/char/G) (set! rod 1 true)
-          (= color std/int/char/B) (set! rod 2 true)
+          (=# color std/char/R) (set! rod 0 true)
+          (=# color std/char/G) (set! rod 1 true)
+          (=# color std/char/B) (set! rod 2 true)
           nil))))))
   (std/vector/count-of rods (lambda rod (and (get rod 0) (get rod 1) (get rod 2)))))))
 
@@ -860,7 +858,7 @@ D:=,=,=,+,=,=,=,+,=,=")
 1
 -3")
 
-(let parse (lambda input (|> input (std/convert/string->vector std/int/char/new-line) (std/vector/map std/convert/chars->integer))))
+(let parse (lambda input (|> input (std/convert/string->vector std/char/new-line) (std/vector/map std/convert/chars->integer))))
 (let part1 (lambda input (do 
     (integer pointer (get input))
     (integer steps 0)
@@ -964,7 +962,7 @@ Z=__..
 9=____.
 .=._._._
 ,=__..__")
-(let parse (lambda xs (|> xs (std/convert/string->vector std/int/char/new-line) (std/vector/map (lambda x (std/convert/string->vector x std/int/char/equal))))))
+(let parse (lambda xs (|> xs (std/convert/string->vector std/char/new-line) (std/vector/map (lambda x (std/convert/string->vector x std/char/equal))))))
 (let PARSED (parse RAW))
 (let *ABC->MORSE-IDEXES* (std/vector/reduce/i PARSED (lambda a [k .] i (std/vector/hash/table/set! a k i)) (std/vector/buckets 64)))
 (let *ABC->MORSE-CODES* (std/vector/map PARSED (lambda [. v .] v)))
@@ -972,12 +970,12 @@ Z=__..
 (let *MORSE->ABC-IDEXES* (std/vector/reduce/i PARSED (lambda a [. k .] i (std/vector/hash/table/set! a k i)) (std/vector/buckets 64)))
 (let *MORSE->ABC-CODES* (std/vector/map PARSED (lambda [v .] v)))
 
-(let abc->morse (lambda letter (get *ABC->MORSE-CODES* (std/vector/hash/table/get *ABC->MORSE-IDEXES* letter))))
-(let morse->abc (lambda letter (get *MORSE->ABC-CODES* (std/vector/hash/table/get *MORSE->ABC-IDEXES* letter))))
+(let abc->morse (lambda letter (get *ABC->MORSE-CODES* (as (std/vector/hash/table/get *ABC->MORSE-IDEXES* letter) Int))))
+(let morse->abc (lambda letter (get *MORSE->ABC-CODES* (as (std/vector/hash/table/get *MORSE->ABC-IDEXES* letter) Int))))
 
 
 [
-(|> "Hello,World.1234" (std/vector/map std/int/char/upper) (std/vector/map (lambda xs (|> xs (vector) (abc->morse)))) (std/vector/flat-one))
+(|> "Hello,World.1234" (std/vector/map std/char/upper) (std/vector/map (lambda xs (|> xs (vector) (abc->morse)))) (std/vector/flat-one))
 (|> 
 ["...." "." "._.." "._.." "___" "__..__" ".__" "___" "._." "._.." "_.." "._._._" ".____" "..___" "...__" "...._"] 
 (std/vector/map morse->abc)
@@ -1016,7 +1014,7 @@ Z=__..
                                                 (= x 0) "." 
                                                 (= x 1) "*"
                                                 ""))))) 
-                              (std/convert/vector/3d->string std/int/char/new-line std/int/char/space)))))
+                              (std/convert/vector/3d->string std/char/new-line std/char/space)))))
 (|> matrix (gof) (gof) (gof) (gof) (gof) (gof) (gof) (gof))"#, "[[0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 1 0 0 0 0] [0 0 0 0 0 1 0 0 0] [0 0 0 1 1 1 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0]]"),
 
 (r#"(let *RES* 50)
@@ -1048,7 +1046,7 @@ Z=__..
                                     (= x 0) "." 
                                     (= x 1) "*"
                                     "")))))
-                (std/convert/vector/3d->string std/int/char/new-line std/int/char/space))
+                (std/convert/vector/3d->string std/char/new-line std/char/space))
 out                
                 
                 "#, "[[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0] [0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0] [0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0] [0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0] [0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0] [0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0] [0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0]]")
@@ -1063,7 +1061,7 @@ out
                         }
                         Err(e) => {
                             // to figure out which test failed due to run time error:
-                            // println!("{:?}", inp);
+                            println!("{:?}", inp);
                             panic!("Failed tests because {}", e)
                         }
                     },

@@ -174,13 +174,12 @@ fn preprocess(source: &str) -> String {
                         s.push(next);
                     }
                 }
-                out.push_str("(vector ");
+                out.push_str("(string ");
                 for (i, c) in s.chars().enumerate() {
                     if i > 0 {
                         out.push(' ');
                     }
                     out.push_str(&(c as u32).to_string());
-                    out.push_str("");
                 }
                 out.push(')');
             }

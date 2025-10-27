@@ -286,7 +286,7 @@ fn infer_do(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
         return Err("do requires at least one expression".to_string());
     }
 
-    let mut last_type = Type::Int; // Default type
+    let mut last_type = Type::Unit; // Default type
 
     for expr in args {
         last_type = infer_expr(expr, ctx)?;
@@ -335,6 +335,34 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
             // Return the type of the vector (List of the first element type)
             return Ok(Type::List(Box::new(first)));
+        } else if name == "string" {
+            let args = &exprs[1..];
+            if args.is_empty() {
+                return Ok(Type::List(Box::new(Type::Char))); // empty string
+            }
+
+            for arg in args {
+                match infer_expr(arg, ctx) {
+                    Ok(elem_type) => {
+                        let valid_type = match elem_type {
+                            Type::Char => Type::Char,
+                            Type::Int => Type::Char,
+                            _ => elem_type,
+                        };
+                        ctx.add_constraint(
+                            Type::Char,
+                            valid_type,
+                            TypeErrorFormat {
+                                variant: TypeErrorFormatVariant::Vector, // or create Variant::String if desired
+                                expr: args.to_vec(),
+                            },
+                        );
+                    }
+                    Err(e) => return Err(format!("{}", e)),
+                }
+            }
+
+            return Ok(Type::List(Box::new(Type::Char)));
         }
     }
     let func_expr = &exprs[0];
@@ -577,10 +605,42 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     env.insert(
+        "+?".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "+#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
+    );
+
+    env.insert(
         "-".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "-?".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "-#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
         )),
     );
 
@@ -618,10 +678,34 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     env.insert(
+        "=?".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
+        "=#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
         "<".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
+        "<#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
         )),
     );
 
@@ -634,6 +718,14 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     env.insert(
+        ">#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
         "<=".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -642,10 +734,26 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     env.insert(
+        "<=#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
         ">=".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
+        ">=#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
         )),
     );
 

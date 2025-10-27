@@ -23,6 +23,7 @@ pub enum Type {
     Var(TypeVar),
     Int,
     Bool,
+    Char,
     Function(Box<Type>, Box<Type>),
     List(Box<Type>),
     Unit,
@@ -35,6 +36,7 @@ impl fmt::Display for Type {
             Type::Var(v) => write!(f, "{}", v),
             Type::Int => write!(f, "Int"),
             Type::Bool => write!(f, "Bool"),
+            Type::Char => write!(f, "Char"),
             Type::Function(from, to) => match **from {
                 Type::Function(_, _) => write!(f, "({}) -> {}", from, to),
                 _ => write!(f, "{} -> {}", from, to),
@@ -229,7 +231,7 @@ impl Type {
     }
     pub fn substitute(&self, subst: &HashMap<u64, Type>) -> Type {
         match self {
-            Type::Int | Type::Bool | Type::Unit => self.clone(),
+            Type::Int | Type::Bool | Type::Char | Type::Unit => self.clone(),
             Type::Var(v) => {
                 if let Some(ty) = subst.get(&v.id) {
                     ty.clone()
@@ -253,7 +255,7 @@ impl Type {
 
     fn collect_free_vars(&self, vars: &mut std::collections::HashSet<u64>) {
         match self {
-            Type::Int | Type::Bool | Type::Unit => {}
+            Type::Int | Type::Bool | Type::Char | Type::Unit => {}
             Type::Var(v) => {
                 vars.insert(v.id);
             }
@@ -269,9 +271,10 @@ impl Type {
 // Unification algorithm
 pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {
     match (ty1, ty2) {
-        (Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::Unit, Type::Unit) => {
-            Ok(Substitution::empty())
-        }
+        (Type::Int, Type::Int)
+        | (Type::Bool, Type::Bool)
+        | (Type::Char, Type::Char)
+        | (Type::Unit, Type::Unit) => Ok(Substitution::empty()),
 
         (Type::Var(v1), Type::Var(v2)) if v1.id == v2.id => Ok(Substitution::empty()),
 

@@ -48,7 +48,7 @@ wasm-pack build --target web --out-dir pkg/web
 
 - No type annotations required: the compiler figures everything out.
 - Supports **polymorphism** and **higher-order functions**.
-- Only 4 types - **functions**, **booleans**, **integers** and **arrays**.
+- Only 5 types - **functions**, **booleans**, **integers**, **characters** and **vectors**.
 - Guarantees **soundness**: if your program compiles, it won’t have type errors at runtime.
 - Example:
 
@@ -188,7 +188,16 @@ xs
 
 Now the vector can only have **Ints** and will error out if anything else is pushed to it.
 
-_Note: This works nicely for vectors of any depth with concrete types Int or Bool. Lambdas are a bit awkward to cast and are therefore discouraged for now._
+We can also cast **Int** to **Char**:
+
+```lisp
+(let x (as 64 Char))
+x
+; Char
+; 64
+```
+
+_Note: This works nicely for vectors of any depth with concrete types Int, Char or Bool. Lambdas are a bit awkward to cast and are therefore discouraged for now._
 
 ### Loop Limit
 
@@ -275,7 +284,7 @@ To what floor do the instructions take Santa?
     ")))"     ; result in floor -3.
     ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (std/vector/int/count input std/int/char/left-brace) (std/vector/int/count input std/int/char/right-brace))))
+(let solve (lambda input (- (std/vector/char/count input std/char/left-brace) (std/vector/char/count input std/char/right-brace))))
 (std/vector/map samples solve)
 ; [Int]
 ; [0 0 3 3 3 -1 -1 -3 -3]
@@ -401,7 +410,7 @@ const render = `
                                     (= x 0) "." 
                                     (= x 1) "*"
                                     "")))))
-                (std/convert/vector/3d->string std/int/char/new-line std/int/char/space)))))
+                (std/convert/vector/3d->string std/char/new-line std/char/space)))))
                 (render GRID)`;
 let grid = `(let GRID ${execBiteCode(compileBiteCode(init))})`;
 setInterval(() => {

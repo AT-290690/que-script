@@ -4,17 +4,17 @@ fn ident(name: &str) -> String {
     // simple rules: replace ":" "*" "?" "!" "-" "." with underscores, remove other unsafe chars
 
     match name {
-        "+" => "(a,b)=>a+b".to_string(),
-        "-" => "(a,b)=>a-b".to_string(),
+        "+" | "+?" | "+#" => "(a,b)=>a+b".to_string(),
+        "-" | "-?" | "-#" => "(a,b)=>a-b".to_string(),
         "/" => "(a,b)=>(a/b)|0".to_string(),
         "*" => "(a,b)=>a*b".to_string(),
         "mod" => "(a,b)=>a%b".to_string(),
-        "=" => "(a,b)=>a==b".to_string(),
-        "<" => "(a,b)=>a<b".to_string(),
-        ">" => "(a,b)=>a>b".to_string(),
-        "<=" => "(a,b)=>a<=b".to_string(),
-        ">=" => "(a,b)=>a>=b".to_string(),
-        "!" => "(a)=>!a".to_string(),
+        "=" | "=?" | "=#" => "(a,b)=>a==b".to_string(),
+        "<" | "<#" => "(a,b)=>a<b".to_string(),
+        ">" | ">#" => "(a,b)=>a>b".to_string(),
+        "<=" | "<=#" => "(a,b)=>a<=b".to_string(),
+        ">=" | ">=#" => "(a,b)=>a>=b".to_string(),
+        "not" => "(a)=>!a".to_string(),
         "and" => "(a,b)=>a&&b".to_string(),
         "or" => "(a,b)=>a||b".to_string(),
 
@@ -122,7 +122,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         format!("var {} = ({})", name, val)
                     }
                     // vector literal - variadic: (vector a b c) -> `[a, b, c]`
-                    "vector" => {
+                    "vector" | "string" => {
                         let elems: Vec<String> =
                             items[1..].iter().map(|e| compile_expr_to_js(e)).collect();
                         format!("[{}]", elems.join(", "))
@@ -145,12 +145,12 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "+" => format!(
+                    "+" | "+?" | "+#" => format!(
                         "({} + {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "-" => format!(
+                    "-" | "-?" | "-#" => format!(
                         "({} - {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
@@ -165,27 +165,27 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    ">" => format!(
+                    ">" | ">#" => format!(
                         "({} > {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "<" => format!(
+                    "<" | "<#" => format!(
                         "({} < {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    ">=" => format!(
+                    ">=" | ">=#" => format!(
                         "({} >= {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "<=" => format!(
+                    "<=" | "<=#" => format!(
                         "({} <= {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "=" => format!(
+                    "=" | "=?" | "=#" => format!(
                         "({} == {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
@@ -284,7 +284,11 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             format!("_curry(({}) => {})", params.join(", "), body_js)
                         }
                     }
-                    "as" => "[]".to_string(),
+                    "as" => match &items[1] {
+                        Expression::Atom(x) => x.to_string(),
+                        Expression::Word(x) => x.to_string(),
+                        _ => "[]".to_string(),
+                    },
                     // call a named function/operator: default: compile args then `fn(args...)`
                     _ => {
                         // compile operator expression (could be a word or more complex expr)
