@@ -151,6 +151,18 @@
 (let -- (lambda vrbl (=! vrbl (- (get vrbl) 1))))
 (let ** (lambda vrbl (=! vrbl (* (get vrbl) (get vrbl)))))
 
+(let Bool->Int (lambda x (as x Int)))
+(let Bool->Char (lambda x (as x Char)))
+(let Char->Int (lambda x (as x Int)))
+(let Char->Bool (lambda x (if (or (=# x std/char/empty) (=# x std/char/0)) false true)))
+(let Int->Bool (lambda x 
+    (cond 
+        (or (= x 0) (= x 1)) (as x Bool) 
+        (< x 0) false
+        (> x 1) true
+        false)))
+(let Int->Char (lambda x (if (>= x 0) (as x Char) std/char/empty)))
+
 (let std/fn/apply-0 (lambda fn (fn)))
 (let std/fn/apply-1 (lambda x fn (fn x)))
 (let std/fn/apply-2 (lambda x y fn (fn x y)))

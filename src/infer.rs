@@ -236,15 +236,18 @@ fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
         let inner_hint = inner_type(&type_hint);
 
         match (inner_expr, inner_hint) {
-            (Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::Char, Type::Char) => (),
-            (Type::Int, Type::Bool)
-            | (Type::Bool, Type::Int)
-            | (Type::Char, Type::Char)
-            | (Type::Bool, Type::Bool)
+            // scalar cross-casts allowed
+            (Type::Int, Type::Int)
+            | (Type::Int, Type::Bool)
             | (Type::Int, Type::Char)
-            | (Type::Char, Type::Int) => (),
-            (Type::Var(_), Type::Int | Type::Char | Type::Bool)
-            | (Type::Int | Type::Char | Type::Bool, Type::Var(_)) => (),
+            | (Type::Bool, Type::Int)
+            | (Type::Bool, Type::Bool)
+            | (Type::Bool, Type::Char)
+            | (Type::Char, Type::Int)
+            | (Type::Char, Type::Bool)
+            | (Type::Char, Type::Char)
+            | (Type::Var(_), _)
+            | (_, Type::Var(_)) => (),
             _ => {
                 return Err(format!(
                     "Invalid array cast in `as`: cannot cast {} to {}\n(as {})",
