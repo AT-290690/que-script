@@ -1,10 +1,6 @@
-# Q Script
+# Que Script
 
-my hobby, scripting language implemented in Rust.
-
-<p>
-<img src="./logo.svg" width="128px">
-</p>
+![logo](./logo.svg)
 
 - **[Lisp](<https://en.wikipedia.org/wiki/Lisp_(programming_language)>)**
 - **[Stack-based bytecode Virtual Machine](https://en.wikipedia.org/wiki/Stack_machine)**
@@ -449,6 +445,6 @@ Note that this is an extreme overkill example. The language is not designed to b
 
 **Disclaimer!**
 
-<img src="./bug.png" width="64px"/>
-
 _This project is a work in progress and might contain bugs! Do NOT use it in production!_
+
+![logo](./footer.svg)

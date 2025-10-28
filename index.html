@@ -4,8 +4,8 @@
     name="viewport"
     content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height"
   />
-  <meta name="description" content="Write and run Q scripts" />
-  <title>Q Script Playground</title>
+  <meta name="description" content="Write and run Que scripts" />
+  <title>Que Script Playground</title>
   <link rel="icon" type="image/x-icon" href="./logo.svg" />
   <style>
     html {
@@ -36,42 +36,54 @@
 
     #terminal {
       border-top: 1px solid #ff0077;
-      height: 19%;
+      height: 15%;
       width: 100%;
     }
-    #run {
-      position: absolute;
-      bottom: 21%;
-      right: 20px;
-      width: 64px;
-      height: 32px;
+    #logo {
+      height: 15px;
+      padding: 5px;
     }
-    #check {
-      position: absolute;
-      bottom: 21%;
-      right: 90px;
-      width: 64px;
-      height: 32px;
+    #tools {
+      justify-content: left;
+      display: flex;
+      border-bottom: #ff0077 1px solid;
     }
-    #js {
-      position: absolute;
-      bottom: 21%;
-      right: 160px;
-      width: 64px;
-      height: 32px;
+    #libs {
+      height: 150px;
+      resize: none;
     }
-
-    #str {
-      position: absolute;
-      bottom: 21%;
-      right: 230px;
-      width: 64px;
-      height: 32px;
-    }
-
-    button {
-      background-color: black;
+    #closeModal {
+      border: none;
       border: #ff0077 1px solid;
+    }
+    input {
+      height: 25px;
+      padding: 5px;
+    }
+    dialog {
+      width: 60%;
+      height: fit-content;
+      background-color: black;
+      color: white;
+      border: #ff0077 1px solid;
+    }
+
+    input,
+    textarea {
+      padding: 5px;
+      background-color: black;
+      border: none;
+      width: 100%;
+      border: #ff0077 1px solid;
+      /* border: #ff0077 1px solid; */
+      color: white;
+    }
+    button {
+      padding: 5px;
+      width: 50px;
+      background-color: black;
+      border: none;
+      /* border: #ff0077 1px solid; */
       cursor: pointer;
       color: rgb(255, 255, 255);
     }
@@ -88,8 +100,32 @@
   </style>
 </head>
 <body>
+  <div id="tools">
+    <img id="logo" src="./logo.svg" />
+    <button id="run" title="run code"><span>run</span></button>
+    <button id="check" title="check code"><span>check</span></button>
+    <button id="js" title="compile and run javascript"><span>js</span></button>
+    <button id="str" title="string view"><span>char</span></button>
+    <button id="std" title="library"><span>lib</span></button>
+    <button id="help" title="help"><span>help</span></button>
+  </div>
   <div id="editor"></div>
   <div id="terminal"></div>
+
+  <dialog id="modal">
+    <div style="display: flex; gap: 5px">
+      <input
+        id="search"
+        autocomplete="off"
+        placeholder="Search in Standard Library"
+      />
+      <button autofocus id="closeModal">x</button>
+    </div>
+    <p></p>
+    <div>
+      <textarea id="libs"></textarea>
+    </div>
+  </dialog>
   <script
     defer
     src="//ajaxorg.github.io/ace-builds/src-min-noconflict/ace.js"
@@ -102,10 +138,6 @@
     crossorigin="anonymous"
     referrerpolicy="no-referrer"
   ></script>
-  <button id="run" title="run code"><span>run</span></button>
-  <button id="check" title="check code"><span>check</span></button>
-  <button id="js" title="js code"><span>js</span></button>
-  <button id="str" title="string view"><span>str</span></button>
 
   <script type="module" src="./main.js"></script>
 </body>
