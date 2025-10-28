@@ -632,7 +632,7 @@
             (if (=# ch std/char/minus) 
                 (set current-sign -1) 
                 (do  
-                    (std/vector/push! a (* (get current-sign) (std/convert/char->digit (as ch Int)))) 
+                    (std/vector/push! a (* (get current-sign) (std/convert/char->digit ch))) 
                     (set current-sign 1)))
                 a)) [])))))
 (let std/convert/digits->integer std/convert/positive-or-negative-digits->integer)
@@ -760,10 +760,10 @@ heap)))
         (let tail-call/while (lambda out
             (if (> (get n) 0) (do
                 (let x (mod (get n) base))
-                (std/vector/push! out (as x Char))
+                (std/vector/push! out x)
                 (set n (/ (get n) base))
                 (tail-call/while out)) out)))
-        (let str (std/convert/digits->chars (tail-call/while "")))
+        (let str (std/convert/digits->chars (tail-call/while [])))
         (std/vector/reverse (if neg? (std/vector/append! str std/char/dash) str))))))
 (let std/convert/integer->string (lambda x (std/convert/integer->string-base x 10)))
 (let std/convert/vector->set (lambda xs (std/vector/reduce xs (lambda s x (do (std/vector/hash/set/add! s x) s)) [ [] [] [] [] ])))

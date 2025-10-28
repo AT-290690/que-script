@@ -284,11 +284,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             format!("_curry(({}) => {})", params.join(", "), body_js)
                         }
                     }
-                    "as" => match &items[1] {
-                        Expression::Atom(x) => x.to_string(),
-                        Expression::Word(x) => x.to_string(),
-                        _ => "[]".to_string(),
-                    },
+                    "as" => format!("{}", compile_expr_to_js(&items[1]),),
                     // call a named function/operator: default: compile args then `fn(args...)`
                     _ => {
                         // compile operator expression (could be a word or more complex expr)
