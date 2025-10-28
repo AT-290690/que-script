@@ -798,12 +798,12 @@ heap)))
         (let out (std/vector/hash/set/max-capacity a b))
         (|> a (std/convert/set->vector) (std/vector/for (lambda element (if (not (std/vector/hash/set/has? b element)) (std/vector/hash/set/add! out element) out))))
         (|> b (std/convert/set->vector) (std/vector/for (lambda element (if (not (std/vector/hash/set/has? a element)) (std/vector/hash/set/add! out element) out))))
-        out)))
+        (as out [[[Char]]]))))
 (let std/vector/hash/set/union (lambda a b (do
         (let out (std/vector/hash/set/max-capacity a b))
         (|> a (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
         (|> b (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
-        out)))
+        (as out [[[Char]]]))))
 
 ; Experimental still
 
