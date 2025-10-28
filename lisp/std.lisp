@@ -151,9 +151,9 @@
 (let -- (lambda vrbl (=! vrbl (- (get vrbl) 1))))
 (let ** (lambda vrbl (=! vrbl (* (get vrbl) (get vrbl)))))
 
-(let Bool->Int (lambda x (as x Int)))
-(let Bool->Char (lambda x (as x Char)))
-(let Char->Int (lambda x (as x Int)))
+(let Bool->Int (lambda x (if (=? x true) 1 0)))
+(let Bool->Char (lambda x (if (=? x true) std/char/1 std/char/0)))
+(let Char->Int (lambda x (if (>=# x std/char/empty) (as x Int) 0)))
 (let Char->Bool (lambda x (if (or (=# x std/char/empty) (=# x std/char/0)) false true)))
 (let Int->Bool (lambda x 
     (cond 
@@ -867,7 +867,7 @@ heap)))
 (let std/vector/deque/balance? (lambda q (= (+ (std/vector/deque/offset-right q) (std/vector/deque/offset-left q)) 0)))
 (let std/convert/vector->deque (lambda initial def (do
  (let q (std/vector/deque/new def))
- (let half  (/ (length initial) 2))
+ (let half (/ (length initial) 2))
  (let tail-call/left/from/vector->deque (lambda index (do
     (std/vector/deque/add-to-left! q (get initial index))
    (if (> index 0) (tail-call/left/from/vector->deque (- index 1)) Int))))

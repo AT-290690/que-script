@@ -4,8 +4,8 @@
     name="viewport"
     content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height"
   />
-  <meta name="description" content="Write and run Resin programs" />
-  <title>Q</title>
+  <meta name="description" content="Write and run Q scripts" />
+  <title>Q Script Playground</title>
   <link rel="icon" type="image/x-icon" href="./logo.svg" />
   <style>
     html {
@@ -13,6 +13,9 @@
     }
     .ace_comment {
       color: #7285b2aa !important;
+    }
+    .ace_keyword {
+      color: #ff0077 !important;
     }
     @font-face {
       font-family: "Fantastic";
@@ -32,7 +35,7 @@
     }
 
     #terminal {
-      border-top: 1px solid steelblue;
+      border-top: 1px solid #ff0077;
       height: 19%;
       width: 100%;
     }
@@ -68,7 +71,7 @@
 
     button {
       background-color: black;
-      border: steelblue 1px solid;
+      border: #ff0077 1px solid;
       cursor: pointer;
       color: rgb(255, 255, 255);
     }
@@ -76,12 +79,11 @@
       transform: scale(1.1);
     }
     button:hover {
-      background-color: steelblue;
-      border: rgb(140, 255, 73) 1px solid;
+      background-color: #ff0077;
+      border: #ff0077;
     }
     button:active {
-      background-color: rgb(140, 255, 73);
-      color: black;
+      background-color: #ff0077;
     }
   </style>
 </head>
