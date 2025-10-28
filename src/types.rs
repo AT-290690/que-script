@@ -14,7 +14,7 @@ impl TypeVar {
 
 impl fmt::Display for TypeVar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "t{}", self.id)
+        write!(f, "T{}", self.id)
     }
 }
 

@@ -121,7 +121,12 @@ document.addEventListener("keydown", (e) => {
     const selection = editor.session
       .getTextRange(editor.getSelectionRange())
       .trim();
-    terminal.setValue(lib.filter((x) => x.includes(selection)).join("\n"));
+    terminal.setValue(
+      lib
+        .filter(([x]) => x.includes(selection))
+        .map((x) => x.join(" "))
+        .join("\n")
+    );
   }
 });
 document.getElementById("run").addEventListener("click", () => {

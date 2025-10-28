@@ -169,8 +169,10 @@ fn main() -> std::io::Result<()> {
         println!("{:?}", vm::exe(parse_bitecode(&program).unwrap()));
     } else if args.iter().any(|a| a == "--doc") {
         let std_ast = baked::load_ast();
+
         let mut names = Vec::new();
         if let parser::Expression::Apply(items) = &std_ast {
+            let std_items = items[1..].to_vec();
             for expr in items[1..].to_vec() {
                 if let parser::Expression::Apply(list) = expr {
                     let a = &list[0];
@@ -178,7 +180,13 @@ fn main() -> std::io::Result<()> {
                     if let parser::Expression::Word(kw) = a {
                         if kw == "let" {
                             if let parser::Expression::Word(name) = b {
-                                names.push(name.clone());
+                                match parser::merge_std_and_program(&name, items[1..].to_vec()) {
+                                    Ok(p) => match infer::infer_with_builtins(&p) {
+                                        Ok(typ) => names.push([name.clone(), format!("{}", typ)]),
+                                        Err(e) => println!("{}", e),
+                                    },
+                                    Err(e) => println!("{}", e),
+                                }
                             }
                         }
                     }

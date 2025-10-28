@@ -707,7 +707,7 @@
 (let std/node/right (lambda i (<< (+ i 1) 1)))
 
 (let std/heap/top 0)
-(let std/heap/greater? (lambda heap i j fn? (fn? (get heap i) (get heap j))))
+(let std/heap/greater? (lambda heap i j fn? (=? (fn? (get heap i) (get heap j)) true)))
 (let std/heap/sift-up! (lambda heap fn (do 
   (integer node (- (length heap) 1))
   (let tail-call/std/heap/sift-up! (lambda heap
