@@ -1,12 +1,10 @@
-# Lamb
+# Q Script
 
-<img src="./logo-lamb.png" width="256px"/>
+my hobby, scripting language implemented in Rust.
 
-My hobby, scripting language implemented in Rust.
-It's called **Lamb**, short for **Lambda** the greek letter **λ**
-(the **keyword** for the [anonymous functions](https://en.wikipedia.org/wiki/Anonymous_function) in the language)
-
-**Lamb** is:
+<p>
+<img src="./logo.svg" width="128px">
+</p>
 
 - **[Lisp](<https://en.wikipedia.org/wiki/Lisp_(programming_language)>)**
 - **[Stack-based bytecode Virtual Machine](https://en.wikipedia.org/wiki/Stack_machine)**
@@ -20,11 +18,12 @@ It's called **Lamb**, short for **Lambda** the greek letter **λ**
 - **[WASM](https://en.wikipedia.org/wiki/WebAssembly)** build for [online editor](https://at-290690.github.io/rust-lisp/)
 - It supports some cool features from **functional programming**
 
-  - **[Partial function application](https://en.wikipedia.org/wiki/Partial_application)**
-  - **[Lexically scoped closures](<https://en.wikipedia.org/wiki/Closure_(computer_programming)>)**
-  - **[First-class functions](https://en.wikipedia.org/wiki/First-class_function)**
-  - **[Type inference](https://en.wikipedia.org/wiki/Type_inference)**
-  - **[Tail Call Optimization](https://en.wikipedia.org/wiki/Tail_call)**
+- **[Partial function application](https://en.wikipedia.org/wiki/Partial_application)**
+- **[Lexically scoped closures](<https://en.wikipedia.org/wiki/Closure_(computer_programming)>)**
+- **[First-class functions](https://en.wikipedia.org/wiki/First-class_function)**
+- **[Anonymous Functions](https://en.wikipedia.org/wiki/Anonymous_function)**
+- **[Type inference](https://en.wikipedia.org/wiki/Type_inference)**
+- **[Tail Call Optimization](https://en.wikipedia.org/wiki/Tail_call)**
 
 Try it online at [playground](https://at-290690.github.io/rust-lisp/)
 
