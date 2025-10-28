@@ -131,6 +131,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 
             if let Expression::Word(func_name) = &exprs[0] {
                 match func_name.as_str() {
+                    "as" => infer_as(&exprs[1..], ctx),
                     "lambda" => infer_lambda(&exprs[1..], ctx),
                     "if" => infer_if(&exprs[1..], ctx),
                     "let" => infer_let(&exprs[1..], ctx),
@@ -142,6 +143,123 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
             }
         }
     }
+}
+
+fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
+    match expr {
+        Expression::Word(name) => match name.as_str() {
+            "Int" => Ok(Type::Int),
+            "Bool" => Ok(Type::Bool),
+            "Char" => Ok(Type::Char),
+            _ => Ok(ctx.fresh_var()), // unknown type name
+        },
+
+        // Handles list-like hints like [Int], [[Char]], etc.
+        Expression::Apply(items) if !items.is_empty() => {
+            // A shorthand for [T] means (vector T)
+            if let Expression::Word(t) = &items[0] {
+                if t == "vector" || t == "string" || t == "[" {
+                    if items.len() == 2 {
+                        let inner = parse_type_hint(&items[1], ctx)?;
+                        return Ok(Type::List(Box::new(inner)));
+                    }
+                }
+            }
+            Err(format!("Invalid type hint syntax: {}", expr.to_lisp()))
+        }
+
+        _ => Err(format!("Invalid type hint: {}", expr.to_lisp())),
+    }
+}
+// 2️⃣ Helper to compute "arity" depth (number of list nestings)
+fn type_arity(t: &Type) -> usize {
+    match t {
+        Type::List(inner) => 1 + type_arity(inner),
+        _ => 0,
+    }
+}
+fn inner_type(t: &Type) -> &Type {
+    match t {
+        Type::List(inner) => inner_type(inner),
+        _ => t,
+    }
+}
+// --- Helper: get deepest inner type ---
+fn deepest_type(t: &Type) -> &Type {
+    match t {
+        Type::List(inner) => deepest_type(inner),
+        _ => t,
+    }
+}
+
+fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    if args.len() != 2 {
+        return Err("`as` expects exactly two arguments: (as expr Type)".to_string());
+    }
+
+    // 1️⃣ Infer both sides
+    let expr_type = infer_expr(&args[0], ctx)?;
+    let type_hint = parse_type_hint(&args[1], ctx)?;
+
+    // 3️⃣ Compute arities
+    let expr_arity = type_arity(&expr_type);
+    let hint_arity = type_arity(&type_hint);
+    let inner_expr_type = deepest_type(&expr_type);
+    // --- Determine if *deepest* inner type is a variable ---
+    let is_expr_var = matches!(inner_expr_type, Type::Var(_));
+    // --- If expr_type is a type variable, allow up to (≤) right-side arity ---
+    if is_expr_var && expr_arity > hint_arity {
+        return Err(format!(
+            "Type variable in `as` cannot represent deeper nesting: {} vs {}",
+            expr_type, type_hint
+        ));
+    }
+
+    // 4️⃣ Check if they differ (e.g., Int vs [Int], or [Int] vs [[Int]])
+    if !is_expr_var && expr_arity != hint_arity {
+        return Err(format!(
+            "Type arity mismatch in `as`: left has arity {}, right has arity {} ({} vs {})\n(as {})",
+            expr_arity,
+            hint_arity,
+            expr_type,
+            type_hint,
+            args.into_iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<String>>()
+                .join(" ")
+        ));
+    }
+
+    // 6️⃣ If both are lists (arity > 0), restrict element-wise match on inner type
+    if expr_arity > 0 {
+        let inner_expr = inner_type(&expr_type);
+        let inner_hint = inner_type(&type_hint);
+
+        match (inner_expr, inner_hint) {
+            (Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::Char, Type::Char) => (),
+            (Type::Int, Type::Bool)
+            | (Type::Bool, Type::Int)
+            | (Type::Char, Type::Char)
+            | (Type::Bool, Type::Bool)
+            | (Type::Int, Type::Char)
+            | (Type::Char, Type::Int) => (),
+            (Type::Var(_), Type::Int | Type::Char | Type::Bool)
+            | (Type::Int | Type::Char | Type::Bool, Type::Var(_)) => (),
+            _ => {
+                return Err(format!(
+                    "Invalid array cast in `as`: cannot cast {} to {}\n(as {})",
+                    expr_type,
+                    type_hint,
+                    args.into_iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<String>>()
+                        .join(" ")
+                ));
+            }
+        }
+    }
+
+    Ok(type_hint)
 }
 
 // Type inference for lambda expressions
