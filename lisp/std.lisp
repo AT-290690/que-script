@@ -550,16 +550,15 @@
      (if (not (= index -1)) (do (std/vector/set! current index (std/vector/at current -1)) (std/vector/pop! current)) nil)
      table)))
 
-(let std/vector/hash/table/set! (lambda table key v
+(let std/vector/hash/table/set! (lambda table key value
        (do
-         (let value (as v Char))
          (let idx (std/int/hash table key))
          (if (not (std/vector/in-bounds? table idx)) (std/vector/set! table idx (as [] [[[Char]]])) nil)
          (let item (get table idx))
          (let current (as item [[[Char]]]))
          (let len (length current))
          (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/string/match? (as (get x 0) [Char]) key))) -1))
-         (let entry [ key [value] ])
+         (let entry [ key [(Int->Char value)] ])
          (if (= index -1)
            (std/vector/set! current (length current) entry)
            (std/vector/set! current index entry))
