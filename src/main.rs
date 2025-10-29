@@ -193,7 +193,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
-        let path = "./dist/lib.json";
+        let path = "./lib.json";
         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
         let mut file = fs::File::create(path)?;
         write!(file, "{:?}", names)?;

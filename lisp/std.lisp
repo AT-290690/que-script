@@ -157,9 +157,8 @@
 (let Char->Bool (lambda x (if (or (=# x std/char/empty) (=# x std/char/0)) false true)))
 (let Int->Bool (lambda x 
     (cond 
-        (or (= x 0) (= x 1)) (as x Bool) 
-        (< x 0) false
-        (> x 1) true
+        (<= x 0) false
+        (>= x 1) true
         false)))
 (let Int->Char (lambda x (if (>= x 0) (as x Char) std/char/empty)))
 
@@ -237,6 +236,7 @@
 (let std/vector/count-of (lambda xs fn? (length (std/vector/filter xs fn?))))
 (let std/vector/int/count (lambda input item (std/vector/count-of input (lambda x (= x item)))))
 (let std/vector/char/count (lambda input item (std/vector/count-of input (lambda x (=# x item)))))
+(let std/vector/bool/count (lambda input item (std/vector/count-of input (lambda x (=? x item)))))
 
 (let std/vector/cons (lambda a b (cond (std/vector/empty? a) b (std/vector/empty? b) a (do 
   (let out []) 

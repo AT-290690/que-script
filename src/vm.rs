@@ -5,6 +5,7 @@ use std::fmt;
 use std::rc::{Rc, Weak};
 #[derive(Clone)]
 pub enum BiteCodeEvaluated {
+    Bool(bool),
     Int(i32),
     Function(Vec<String>, Vec<Instruction>, Rc<RefCell<BiteCodeEnv>>),
     Array(Rc<RefCell<Vec<BiteCodeEvaluated>>>),
@@ -13,6 +14,7 @@ pub enum BiteCodeEvaluated {
 impl fmt::Debug for BiteCodeEvaluated {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            BiteCodeEvaluated::Bool(value) => write!(f, "{}", value),
             BiteCodeEvaluated::Int(value) => write!(f, "{}", value),
             BiteCodeEvaluated::Function(_, _, _) => write!(f, "Function"),
             BiteCodeEvaluated::Array(arr) => {
@@ -63,6 +65,7 @@ impl BiteCodeEnv {
 #[derive(Clone, Debug)]
 pub enum Instruction {
     PushInt(i32),
+    PushBool(bool),
 
     StoreVar(String),
     LoadVar(String),
@@ -92,6 +95,8 @@ pub enum Instruction {
     Eq,
     Not,
 
+    EqBool,
+
     BitXor,
     BitRs,
     BitLs,
@@ -107,6 +112,7 @@ pub enum Instruction {
 impl Instruction {
     pub fn to_rust(&self) -> String {
         match self {
+            Instruction::PushBool(n) => format!("PushBool({})", n),
             Instruction::PushInt(n) => format!("PushInt({})", n),
             Instruction::Length => "Length".to_string(),
             Instruction::Add => "Add".to_string(),
@@ -120,6 +126,8 @@ impl Instruction {
             Instruction::Lte => "Lte".to_string(),
             Instruction::Gte => "Gte".to_string(),
             Instruction::Eq => "Eq".to_string(),
+            Instruction::EqBool => "EqBool".to_string(),
+
             Instruction::Not => "Not".to_string(),
 
             Instruction::BitXor => "BitXor".to_string(),
@@ -213,6 +221,7 @@ impl Instruction {
     }
     pub fn serialise(&self) -> String {
         match self {
+            Instruction::PushBool(n) => format!("PushBool({})", n),
             Instruction::PushInt(n) => format!("PushInt({})", n),
             Instruction::Length => "Length".to_string(),
             Instruction::Add => "Add".to_string(),
@@ -226,6 +235,8 @@ impl Instruction {
             Instruction::Lte => "Lte".to_string(),
             Instruction::Gte => "Gte".to_string(),
             Instruction::Eq => "Eq".to_string(),
+            Instruction::EqBool => "EqBool".to_string(),
+
             Instruction::Not => "Not".to_string(),
 
             Instruction::BitXor => "BitXor".to_string(),
@@ -401,16 +412,17 @@ impl VM {
                 Instruction::If(then_branch, else_branch) => {
                     let cond = self.stack.pop().ok_or("stack underflow")?;
                     let cond_val = match cond {
-                        BiteCodeEvaluated::Int(n) => n,
-                        _ => return Err("if condition must be 0 or 1".to_string()),
+                        BiteCodeEvaluated::Bool(n) => n,
+                        _ => return Err("if condition must be true or false".to_string()),
                     };
-                    if cond_val == 1 {
+                    if cond_val {
                         self.run(&then_branch)?;
                     } else {
                         self.run(&else_branch)?;
                     }
                 }
                 Instruction::PushInt(n) => self.stack.push(BiteCodeEvaluated::Int(*n)),
+                Instruction::PushBool(n) => self.stack.push(BiteCodeEvaluated::Bool(*n)),
 
                 Instruction::Add => {
                     let b = self.stack.pop().ok_or("stack underflow")?;
@@ -527,20 +539,32 @@ impl VM {
                 Instruction::Eq => {
                     let b = self.stack.pop().ok_or("stack underflow")?;
                     let a = self.stack.pop().ok_or("stack underflow")?;
+
                     match (a, b) {
-                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
-                            .stack
-                            .push(BiteCodeEvaluated::Int(if a == b { 1 } else { 0 })),
+                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a == b))
+                        }
                         _ => return Err("Both arguments must be numbers at (=)".to_string()),
+                    }
+                }
+                Instruction::EqBool => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+
+                    match (a, b) {
+                        (BiteCodeEvaluated::Bool(a), BiteCodeEvaluated::Bool(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a == b))
+                        }
+                        _ => return Err("Both arguments must be bools at (=)".to_string()),
                     }
                 }
                 Instruction::Lt => {
                     let b = self.stack.pop().ok_or("stack underflow")?;
                     let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
-                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
-                            .stack
-                            .push(BiteCodeEvaluated::Int(if a < b { 1 } else { 0 })),
+                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a < b))
+                        }
                         _ => return Err("Both arguments must be numbers at (<)".to_string()),
                     }
                 }
@@ -548,9 +572,9 @@ impl VM {
                     let b = self.stack.pop().ok_or("stack underflow")?;
                     let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
-                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
-                            .stack
-                            .push(BiteCodeEvaluated::Int(if a > b { 1 } else { 0 })),
+                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a > b))
+                        }
                         _ => return Err("Both arguments must be numbers at (>)".to_string()),
                     }
                 }
@@ -558,9 +582,9 @@ impl VM {
                     let b = self.stack.pop().ok_or("stack underflow")?;
                     let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
-                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
-                            .stack
-                            .push(BiteCodeEvaluated::Int(if a <= b { 1 } else { 0 })),
+                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a <= b))
+                        }
                         _ => return Err("Both arguments must be numbers at (<=)".to_string()),
                     }
                 }
@@ -568,18 +592,18 @@ impl VM {
                     let b = self.stack.pop().ok_or("stack underflow")?;
                     let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
-                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => self
-                            .stack
-                            .push(BiteCodeEvaluated::Int(if a >= b { 1 } else { 0 })),
+                        (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a >= b))
+                        }
                         _ => return Err("Both arguments must be numbers at (>=)".to_string()),
                     }
                 }
                 Instruction::Not => {
                     let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a) {
-                        (BiteCodeEvaluated::Int(a)) => self
-                            .stack
-                            .push(BiteCodeEvaluated::Int(if a == 1 { 0 } else { 1 })),
+                        (BiteCodeEvaluated::Bool(a)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(!a))
+                        }
                         _ => return Err("Argument must be a number at (not)".to_string()),
                     }
                 }
@@ -807,12 +831,12 @@ impl VM {
                             .stack
                             .pop()
                             .ok_or("loop-finish: missing condition")?;
-                        let cond_int = match cond_val {
-                            BiteCodeEvaluated::Int(n) => n,
-                            _ => return Err("loop-finish condition must be int".to_string()),
+                        let cond_bool = match cond_val {
+                            BiteCodeEvaluated::Bool(n) => n,
+                            _ => return Err("loop-finish condition must be bool".to_string()),
                         };
 
-                        if cond_int != 1 {
+                        if !cond_bool {
                             break;
                         }
 
@@ -944,7 +968,18 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                "=" | "=?" | "=#" => {
+                "=?" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::EqBool,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "=" | "=#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -1042,7 +1077,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
         Expression::Apply(exprs) => {
             if let Expression::Word(op) = &exprs[0] {
                 match op.as_str() {
-                    "+" | "+?" | "+#" => {
+                    "+" | "+#" => {
                         if exprs.len() != 3 {
                             return Err("+ expects exactly 2 arguments".to_string());
                         }
@@ -1051,7 +1086,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Add);
                         Ok(())
                     }
-                    "*" | "*?" | "*#" => {
+                    "*" | "*#" => {
                         if exprs.len() != 3 {
                             return Err("* expects exactly 2 arguments".to_string());
                         }
@@ -1060,7 +1095,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Mult);
                         Ok(())
                     }
-                    "/" | "/?" | "/#" => {
+                    "/" | "/#" => {
                         if exprs.len() != 3 {
                             return Err("/ expects exactly 2 arguments".to_string());
                         }
@@ -1069,7 +1104,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Div);
                         Ok(())
                     }
-                    "-" | "-?" | "-#" => {
+                    "-" | "-#" => {
                         if exprs.len() != 3 {
                             return Err("- expects exactly 2 arguments".to_string());
                         }
@@ -1087,7 +1122,16 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Mod);
                         Ok(())
                     }
-                    "=" | "=?" | "=#" => {
+                    "=?" => {
+                        if exprs.len() != 3 {
+                            return Err("= expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::EqBool);
+                        Ok(())
+                    }
+                    "=" | "=#" => {
                         if exprs.len() != 3 {
                             return Err("= expects exactly 2 arguments".to_string());
                         }
@@ -1096,7 +1140,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Eq);
                         Ok(())
                     }
-                    "<" | "<?" | "<#" => {
+                    "<" | "<#" => {
                         if exprs.len() != 3 {
                             return Err("< expects exactly 2 arguments".to_string());
                         }
@@ -1105,7 +1149,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Lt);
                         Ok(())
                     }
-                    ">" | ">?" | ">#" => {
+                    ">" | ">#" => {
                         if exprs.len() != 3 {
                             return Err("> expects exactly 2 arguments".to_string());
                         }
@@ -1141,7 +1185,10 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         compile(&exprs[2], &mut then_code)?;
                         // First argument is the condition
                         compile(&exprs[1], code)?;
-                        code.push(Instruction::If(then_code, vec![Instruction::PushInt(0)]));
+                        code.push(Instruction::If(
+                            then_code,
+                            vec![Instruction::PushBool(false)],
+                        ));
                         Ok(())
                     }
                     "or" => {
@@ -1149,11 +1196,14 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                             return Err("or expects exactly 2 arguments".to_string());
                         }
 
-                        let mut then_code = vec![Instruction::PushInt(1)];
+                        let mut then_code = vec![Instruction::PushBool(true)];
                         compile(&exprs[2], &mut then_code)?;
 
                         compile(&exprs[1], code)?;
-                        code.push(Instruction::If(vec![Instruction::PushInt(1)], then_code));
+                        code.push(Instruction::If(
+                            vec![Instruction::PushBool(true)],
+                            then_code,
+                        ));
                         Ok(())
                     }
 
@@ -1737,6 +1787,7 @@ impl<'a> P<'a> {
             "SetArray" => Ok(Instruction::SetArray),
             "PopArray" => Ok(Instruction::PopArray),
             "Eq" => Ok(Instruction::Eq),
+            "EqBool" => Ok(Instruction::EqBool),
             "Add" => Ok(Instruction::Add),
             "Mult" => Ok(Instruction::Mult),
             "Div" => Ok(Instruction::Div),

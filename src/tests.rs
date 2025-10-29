@@ -185,7 +185,7 @@ mod tests {
     (has-groups [ 1 1 1 2 2 2 3 3 ]) ; Output/ false
 ]
 "#,
-                "[1 0]",
+                "[true false]",
             ),
             (
                 r#"
@@ -212,7 +212,7 @@ mod tests {
  (has-trailing-zeros [ 1 3 5 7 9 ]) ; Should return false
  (has-trailing-zeros [ 1 2 ])]  ; Should return false
 "#,
-                "[1 1 0 0]",
+                "[true true false false]",
             ),
             (
                 r#"(let pillow-holder (lambda n time (do
@@ -283,7 +283,7 @@ mod tests {
 
 [(valid-path 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2) ; Should return true
  (valid-path 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)] ; Should return false"#,
-                "[1 0]",
+                "[true false]",
             ),
             (
                 r#"(let INPUT 
@@ -514,7 +514,7 @@ mod tests {
 ]"#,
                 "[[4 2 5 7] [2 3] [4 3]]",
             ),
-            ("(std/int/collinear? [[ 3 8 ] [ 5 10 ] [ 7 12 ]])", "1"),
+            ("(std/int/collinear? [[ 3 8 ] [ 5 10 ] [ 7 12 ]])", "true"),
             (
                 r#"(let fn (lambda [ a b c r ] (+ a b c (std/vector/int/product r))))
 (fn [ 1 2 3 4 5 6 ])"#,
@@ -569,7 +569,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (get p?))))
     
 [(palindrome? "racecar") (palindrome? "yes")]"#,
-                "[1 0]",
+                "[true false]",
             ),
             (
                 r#"(let palindrome? (lambda str (do 
@@ -577,12 +577,12 @@ D:=,=,=,+,=,=,=,+,=,=")
     (loop 0 (/ (length str) 2) (lambda i (if (not (=# (get str i) (get str (- (length str) i 1)))) (boole-set p? false))))
     (true? p?))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
-                "[1 0]",
+                "[true false]",
             ),
             (
                 r#"(let palindrome? (lambda str (std/vector/string/match? str (std/vector/reverse str))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
-                "[1 0]",
+                "[true false]",
             ),
             (
                 r#"(let reverse (lambda xs rev 
