@@ -169,8 +169,16 @@ fn main() -> std::io::Result<()> {
         println!("{:?}", vm::exe(parse_bitecode(&program).unwrap()));
     } else if args.iter().any(|a| a == "--doc") {
         let std_ast = baked::load_ast();
-
         let mut names = Vec::new();
+        "+ +# - -# / /# * *# mod = =? =# < <# > ># <= <=# >= >=# not and or ^ >> << | & ~ true false"
+            .split(" ")
+            .for_each(|p| {
+                let name = p.to_string();
+                match infer::infer_with_builtins(&parser::Expression::Word(p.to_string())) {
+                    Ok(typ) => names.push([name, format!("{}", typ)]),
+                    Err(e) => println!("{}", e),
+                }
+            });
         if let parser::Expression::Apply(items) = &std_ast {
             let std_items = items[1..].to_vec();
             for expr in items[1..].to_vec() {

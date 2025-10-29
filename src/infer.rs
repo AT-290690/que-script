@@ -758,10 +758,26 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     env.insert(
+        "*#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
+    );
+
+    env.insert(
         "/".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "/#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
         )),
     );
 

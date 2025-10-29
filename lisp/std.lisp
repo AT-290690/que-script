@@ -778,7 +778,7 @@ heap)))
         (let str (std/convert/digits->chars (tail-call/while [])))
         (std/vector/reverse (if neg? (std/vector/append! str std/char/dash) str))))))
 (let std/convert/integer->string (lambda x (std/convert/integer->string-base x 10)))
-(let std/convert/vector->set (lambda xs (std/vector/reduce xs (lambda s x (do (std/vector/hash/set/add! s x) s)) [ [] [] [] [] ])))
+(let std/convert/vector->set (lambda xs (std/vector/reduce xs (lambda s x (do (std/vector/hash/set/add! s x) s)) [ [] [] [] [] [] [] [] ])))
 (let std/vector/hash/set/intersection (lambda a b
         (|> b
           (std/convert/set->vector)
