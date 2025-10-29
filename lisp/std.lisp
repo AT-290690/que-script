@@ -163,10 +163,10 @@
         false)))
 (let Int->Char (lambda x (if (>= x 0) (as x Char) std/char/empty)))
 
-(let std/fn/apply-0 (lambda fn (fn)))
-(let std/fn/apply-1 (lambda x fn (fn x)))
-(let std/fn/apply-2 (lambda x y fn (fn x y)))
-(let std/fn/apply-3 (lambda x y z fn (fn x y z)))
+(let std/fn/apply/0 (lambda fn (fn)))
+(let std/fn/apply/1 (lambda x fn (fn x)))
+(let std/fn/apply/2 (lambda x y fn (fn x y)))
+(let std/fn/apply/3 (lambda x y z fn (fn x y z)))
 (let std/fn/const (lambda x . x))
 
 (let std/vector/empty? (lambda xs (= (length xs) 0)))
@@ -990,7 +990,7 @@ q)))
    (std/vector/3d/for/i matrix (lambda cell y x (if (fn? cell) (do (std/vector/push! coords [ y x ]) nil)))) 
     coords)))
 
-(let std/vector/concat-with (lambda xs ch (std/vector/reduce/i xs (lambda a b i (if (and (> i 0) (< i (length xs))) (std/vector/cons (std/vector/cons a [ ch ]) b) (std/vector/cons a b))) [])))
+(let std/vector/concat/with (lambda xs ch (std/vector/reduce/i xs (lambda a b i (if (and (> i 0) (< i (length xs))) (std/vector/cons (std/vector/cons a [ ch ]) b) (std/vector/cons a b))) [])))
 
 (let std/vector/string/lines (lambda xs (std/convert/string->vector xs std/char/new-line)))
 (let std/vector/string/words (lambda xs (std/convert/string->vector xs std/char/space)))

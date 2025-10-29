@@ -845,7 +845,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
         Expression::Word(name) => {
             match name.as_str() {
                 // push a closure representing these
-                "/" => {
+                "/" | "/?" | "/#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -889,7 +889,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                "*" => {
+                "*" | "*?" | "*#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -900,7 +900,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                ">" | ">#" => {
+                ">" | ">?" | ">#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -911,7 +911,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                "<" | "<#" => {
+                "<" | "<?" | "<#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -1051,7 +1051,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Add);
                         Ok(())
                     }
-                    "*" => {
+                    "*" | "*?" | "*#" => {
                         if exprs.len() != 3 {
                             return Err("* expects exactly 2 arguments".to_string());
                         }
@@ -1060,7 +1060,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Mult);
                         Ok(())
                     }
-                    "/" => {
+                    "/" | "/?" | "/#" => {
                         if exprs.len() != 3 {
                             return Err("/ expects exactly 2 arguments".to_string());
                         }
@@ -1096,7 +1096,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Eq);
                         Ok(())
                     }
-                    "<" | "<#" => {
+                    "<" | "<?" | "<#" => {
                         if exprs.len() != 3 {
                             return Err("< expects exactly 2 arguments".to_string());
                         }
@@ -1105,7 +1105,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Lt);
                         Ok(())
                     }
-                    ">" | ">#" => {
+                    ">" | ">?" | ">#" => {
                         if exprs.len() != 3 {
                             return Err("> expects exactly 2 arguments".to_string());
                         }
