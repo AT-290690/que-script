@@ -63,7 +63,8 @@ if (initial) {
   }
 }
 const serialise = (arg) => {
-  if (typeof arg === "number" || typeof arg === "string") return arg.toString();
+  if (typeof arg === "number") return arg.toString();
+  else if (typeof arg === "string") return `"${arg.toString()}"`;
   else if (Array.isArray(arg))
     return arg.length ? `[${arg.map((a) => serialise(a)).join(" ")}]` : "[]";
   else if (arg === true || arg === false) return arg.toString();
@@ -292,14 +293,6 @@ xs
 ; []
 
 ; Now the vector can only have Ints and will error out if anything else is pushed to it.
-; We can also cast Int to Char:
-
-(let x (as 64 Char))
-x
-; Char
-; 64
-
-; Note: This works nicely for vectors of any depth with concrete types Int, Char or Bool. Lambdas are a bit awkward to cast and are therefore discouraged for now.
 
 ; Loop Limit
 ; Loops are capped at 5,000,000 (five million) total iterations for the entire program.
