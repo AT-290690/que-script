@@ -223,30 +223,6 @@ document.getElementById("help").addEventListener("click", () => {
 ; - map will only work with [Int] and callback of type Int -> Int
 ; - sum will only work with [Int]
 
-; Short names can be extracted from std using import:
-
-(import filter map std/vector)
-(import odd? square std/int)
-(import sum std/vector/int)
-
-(let sum-odd-squares (lambda xs
-    (|> xs
-        (filter odd?)
-        (map square)
-        (sum))))
-
-(sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
-
-; sum is a sub import of vector under int:
-
-; import int/sum directly from std/vector
-(import int/sum filter map std/vector)
-(import odd? square std/int)
-
-(let xs [ 1 2 3 4 5 6 7 8 9 10 ])
-; here we use int/sum
-(int/sum (map (filter xs odd?) square))
-
 ; Tail Call Optimization
 ; A call is said to be in tail position if it is the last instruction executed before returning from the current function. Compilers can optimize such calls by discarding the caller frame and replacing the call with a jump.
 ; This is especially useful for recursive functions. For instance, take this function that sums the elements of a vector:
