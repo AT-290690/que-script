@@ -72,34 +72,6 @@ wasm-pack build --target web --out-dir pkg/web
 - **map** will only work with [Int] and callback of type Int -> Int
 - **sum** will only work with [Int]
 
-Short names can be extracted from std using **import**:
-
-```lisp
-(import filter map std/vector)
-(import odd? square std/int)
-(import sum std/vector/int)
-
-(let sum-odd-squares (lambda xs
-    (|> xs
-        (filter odd?)
-        (map square)
-        (sum))))
-
-(sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
-```
-
-**sum** is a sub import of vector under **int**:
-
-```lisp
-; import int/sum directly from std/vector
-(import int/sum filter map std/vector)
-(import odd? square std/int)
-
-(let xs [ 1 2 3 4 5 6 7 8 9 10 ])
-; here we use int/sum
-(int/sum (map (filter xs odd?) square))
-```
-
 ### Tail Call Optimization
 
 A call is said to be in tail position if it is the last instruction executed before returning from the current function. Compilers can optimize such calls by discarding the caller frame and replacing the call with a jump.
@@ -441,7 +413,7 @@ This will give an infinite [Glider](<https://en.wikipedia.org/wiki/Glider_(Conwa
 . . . . . . . . .
 ```
 
-Note that this is an extreme overkill example. The language is not designed to be used like that. It's just to demonstrate something animated and interesting.
+_Note: that this is an extreme overkill example. The language is not designed to be used like that. It's just to demonstrate something animated and interesting._
 
 **Disclaimer!**
 

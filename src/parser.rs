@@ -600,148 +600,6 @@ fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
 
     inp
 }
-/// Expand imports in a top-level list of expressions.
-///
-/// - If an expression is `(import sym1 sym2 ... module)`, this produces a Vec of
-///   `(let sym1 module:sym1) (let sym2 module:sym2) ...` and removes the import.
-/// - If an import appears *anywhere else* (not top-level), we panic.
-pub fn expand_imports_top_level(exprs: Vec<Expression>) -> Result<Vec<Expression>, String> {
-    let mut result = Vec::new();
-    for expr in exprs {
-        match expand_imports_single(expr, true) {
-            Ok(exprs) => result.extend(exprs),
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(result)
-}
-
-// The `is_top_level` flag tells us whether this expression is a direct
-// element of the top-level list or nested somewhere deeper.
-fn expand_imports_single(expr: Expression, is_top_level: bool) -> Result<Vec<Expression>, String> {
-    match expr {
-        Expression::Apply(items) if !items.is_empty() => {
-            if let Expression::Word(ref kw) = items[0] {
-                if kw == "import" {
-                    if !is_top_level {
-                        return Err("import is only allowed at top level!".to_string());
-                    }
-                    let mut parts = items[1..].to_vec();
-                    if parts.is_empty() {
-                        return Err("Nothing to import!".to_string());
-                    }
-                    let module_expr = parts.pop().unwrap();
-                    let module_name = match module_expr {
-                        Expression::Word(m) => m,
-                        other => {
-                            return Err(format!(
-                                "import: expected module name symbol, got {:?}",
-                                other
-                            ))
-                        }
-                    };
-
-                    let mut lets = Vec::new();
-                    for part in parts {
-                        match part {
-                            Expression::Word(sym) => {
-                                let qualified =
-                                    Expression::Word(format!("{}/{}", module_name, sym));
-                                lets.push(Expression::Apply(vec![
-                                    Expression::Word("let".to_string()),
-                                    Expression::Word(sym.clone()),
-                                    qualified,
-                                ]));
-                            }
-                            other => {
-                                return Err(format!(
-                                    "import: expected symbol names, got {:?}",
-                                    other
-                                ))
-                            }
-                        }
-                    }
-                    return Ok(lets);
-                }
-            }
-
-            // Not an import: recurse into children (but not as top-level anymore)
-            let mut mapped = Vec::new();
-            for child in items {
-                match expand_imports_single(child, false) {
-                    Ok(exprs) => mapped.extend(exprs),
-                    Err(e) => return Err(e),
-                }
-            }
-            Ok(vec![Expression::Apply(mapped)])
-        }
-        other => Ok(vec![other]),
-    }
-}
-
-// Map inside an expression and replace any nested `import` with a single `do` of lets.
-// This is safe for non-top-level positions (where we must return exactly one Expression).
-fn map_expr_replace_nested_imports(expr: Expression) -> Result<Expression, String> {
-    match expr {
-        Expression::Apply(items) if !items.is_empty() => {
-            if let Expression::Word(ref kw) = items[0] {
-                if kw == "import" {
-                    // Convert nested import into a single `do` expression containing the lets
-                    let mut parts = items[1..].to_vec();
-                    if parts.is_empty() {
-                        return Ok(Expression::Atom(0)); // fallback unit
-                    }
-                    let module_expr = parts.pop().unwrap();
-                    let module_name = match module_expr {
-                        Expression::Word(m) => m,
-                        other => {
-                            return Err(format!(
-                                "nested import: expected module name, got {:?}",
-                                other
-                            ))
-                        }
-                    };
-
-                    let mut do_items: Vec<Expression> = Vec::with_capacity(parts.len() + 1);
-                    do_items.push(Expression::Word("do".to_string()));
-                    for part in parts {
-                        if let Expression::Word(sym) = part {
-                            do_items.push(Expression::Apply(vec![
-                                Expression::Word("let".to_string()),
-                                Expression::Word(sym.clone()),
-                                Expression::Word(format!("{}/{}", module_name, sym)),
-                            ]));
-                        } else {
-                            return Err(format!("nested import: expected symbol, got {:?}", part));
-                        }
-                    }
-                    return Ok(Expression::Apply(do_items));
-                } else {
-                    // Regular apply head: map children
-                    let mut mapped = Vec::new();
-                    for item in items {
-                        match map_expr_replace_nested_imports(item) {
-                            Ok(expr) => mapped.push(expr),
-                            Err(e) => return Err(e),
-                        }
-                    }
-                    return Ok(Expression::Apply(mapped));
-                }
-            } else {
-                // Head is not a word; just recurse into children
-                let mut mapped = Vec::new();
-                for item in items {
-                    match map_expr_replace_nested_imports(item) {
-                        Ok(expr) => mapped.push(expr),
-                        Err(e) => return Err(e),
-                    }
-                }
-                return Ok(Expression::Apply(mapped));
-            }
-        }
-        other => Ok(other),
-    }
-}
 fn is_number(s: &str) -> bool {
     if s == "-" || s == "+ " || s == "+" {
         return false;
@@ -857,9 +715,8 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
     let preprocessed = preprocess(&program);
     match parse(&preprocessed) {
         Ok(exprs) => {
-            let expanded = expand_imports_top_level(exprs)?;
             let mut desugared = Vec::new();
-            for expr in expanded {
+            for expr in exprs {
                 let expr = desugar_tail_recursion(expr);
                 match desugar(expr) {
                     Ok(expr) => desugared.push(expr),
