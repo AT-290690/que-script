@@ -624,7 +624,7 @@ impl VM {
                         .borrow()
                         .get(name)
                         .ok_or(format!("undefined variable: {}", name))?;
-                    self.stack.push(val.clone());
+                    self.stack.push(val);
                 }
 
                 Instruction::MakeVector(n) => {
@@ -868,8 +868,16 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
 
         Expression::Word(name) => {
             match name.as_str() {
+                "true" => {
+                    code.push(Instruction::PushBool(true));
+                    Ok(())
+                }
+                "false" => {
+                    code.push(Instruction::PushBool(false));
+                    Ok(())
+                }
                 // push a closure representing these
-                "/" | "/?" | "/#" => {
+                "/" | "/#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -891,7 +899,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                "+" | "+?" | "+#" => {
+                "+" | "+#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -902,7 +910,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                "-" | "-?" | "-#" => {
+                "-" | "-#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -913,7 +921,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                "*" | "*?" | "*#" => {
+                "*" | "*#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -924,7 +932,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                ">" | ">?" | ">#" => {
+                ">" | ">#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
@@ -935,7 +943,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
-                "<" | "<?" | "<#" => {
+                "<" | "<#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![

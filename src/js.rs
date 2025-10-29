@@ -39,8 +39,8 @@ fn ident(name: &str) -> String {
         "+." => "__get_pos".to_string(),
         "-." => "__get_neg".to_string(),
         "=!" => "__set".to_string(),
-        "true" => "__true".to_string(),
-        "false" => "__false".to_string(),
+        "true" => "true".to_string(),
+        "false" => "false".to_string(),
         "null" => "__null".to_string(),
         "function" => "__function".to_string(),
         _ => {

@@ -726,14 +726,6 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     env.insert(
-        "+?".to_string(),
-        TypeScheme::monotype(Type::Function(
-            Box::new(Type::Bool),
-            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Int))),
-        )),
-    );
-
-    env.insert(
         "+#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -746,14 +738,6 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
-        )),
-    );
-
-    env.insert(
-        "-?".to_string(),
-        TypeScheme::monotype(Type::Function(
-            Box::new(Type::Bool),
-            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Int))),
         )),
     );
 
@@ -797,6 +781,9 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
         )),
     );
+
+    env.insert("true".to_string(), TypeScheme::monotype(Type::Bool));
+    env.insert("false".to_string(), TypeScheme::monotype(Type::Bool));
 
     env.insert(
         "=?".to_string(),

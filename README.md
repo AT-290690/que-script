@@ -155,7 +155,7 @@ xs
 
 Now the vector can only have **Ints** and will error out if anything else is pushed to it.
 
-We can also cast **Int** to **Char**:
+We can also cast **Int** to **Char** and **Char** to **Int**:
 
 ```lisp
 (let x (as 64 Char))
@@ -163,8 +163,6 @@ x
 ; Char
 ; 64
 ```
-
-_Note: This works nicely for vectors of any depth with concrete types Int, Char or Bool. Lambdas are a bit awkward to cast and are therefore discouraged for now._
 
 ### Loop Limit
 

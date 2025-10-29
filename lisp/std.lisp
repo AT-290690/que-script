@@ -125,8 +125,6 @@
 (let Char (get "a"))
 (let Bool false)
 (let as (lambda . t t))
-(let true (= 1 1))
-(let false (= 0 1))
 (let nil (loop 0 0 (lambda . 0)))
 (let null (lambda nil))
 (let eq (lambda a b (cond 
