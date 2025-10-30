@@ -358,7 +358,19 @@ fn infer_if(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
 
     Ok(then_type)
 }
+fn is_nonexpansive(expr: &Expression) -> bool {
+    match expr {
+        Expression::Word(_) | Expression::Atom(_) => true,
 
+        Expression::Apply(list) if !list.is_empty() => match &list[0] {
+            Expression::Word(name) if name == "lambda" => true,
+            Expression::Word(name) if name == "vector" => !list[1..].is_empty(),
+            _ => false,
+        },
+
+        _ => false,
+    }
+}
 // Type inference for let expressions
 fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.len() != 2 {
@@ -371,30 +383,28 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
 
-        // Solve all constraints into a single substitution S
+        // Unify all constraints
         let mut subst = Substitution::empty();
         for (t1, t2, src) in &ctx.constraints {
             let left = subst.apply(t1);
             let right = subst.apply(t2);
-
             match unify(&left, &right) {
-                Ok(s) => {
-                    subst = subst.compose(&s);
-                }
+                Ok(s) => subst = subst.compose(&s),
                 Err(e) => resolve_variant(e, src)?,
             }
         }
 
-        // Apply S to the value and to the environment
         let solved_type = subst.apply(&value_type);
-        ctx.env.apply_in_place(&subst); // ← important
-                                        // (optional but nice) also clear constraints or rewrite them via subst
+        ctx.env.apply_in_place(&subst);
 
-        // Generalize under the *current, substituted* environment
-        let scheme = generalize(&ctx.env, solved_type);
+        // Apply value restriction
+        let scheme = if is_nonexpansive(value_expr) {
+            generalize(&ctx.env, solved_type)
+        } else {
+            TypeScheme::monotype(solved_type)
+        };
+
         ctx.env.insert(var_name.clone(), scheme)?;
-
-        // Your language’s `let` returns Unit sentinel; fine to keep:
         Ok(Type::Unit)
     } else {
         Err("Let variable must be a variable name".to_string())
