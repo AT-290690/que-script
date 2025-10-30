@@ -348,8 +348,8 @@ mod tests {
                  (if (= (- cell (. matrix y x)) 1) (do
                     (std/vector/queue/enqueue! queue [ dy dx ])
                     (if (std/vector/hash/table/has? visited key) 
-                        (std/vector/hash/table/set! visited key (+# (std/vector/hash/table/get visited root-key) (std/vector/hash/table/get visited key))) 
-                        (std/vector/hash/table/set! visited key (std/vector/hash/table/get visited root-key)))
+                        (std/vector/hash/table/set! visited key (as (+# (std/vector/hash/table/get visited root-key) (std/vector/hash/table/get visited key)) Int)) 
+                        (std/vector/hash/table/set! visited key (as (std/vector/hash/table/get visited root-key) Int)))
                       nil))))))))
         (+ a (get score)))) 0))))
 
@@ -967,24 +967,97 @@ out
 
 (|> ["R2, L3"  "R2, R2, R2" "R5, L5, R5, R3"] (std/vector/map parse) (std/vector/map part1))
 
-"#, "[5 2 12]")
-        
+"#, "[5 2 12]"),
+
+        (r#"(let INPUT
+"7 6 4 2 1
+1 2 7 8 9
+9 7 6 2 1
+1 3 2 4 5
+8 6 4 4 1
+1 3 6 7 9")
+
+(let parse (lambda input (|> input (std/vector/string/lines) (std/vector/map (lambda l (|> l (std/vector/string/words) (std/vector/map std/convert/chars->integer)))))))
+
+(let part1 (lambda input (|> input 
+    (std/vector/filter (lambda line (do
+        (let slice (|> line 
+                       (std/vector/drop/last 1)
+                       (std/vector/zipper (std/vector/drop line 1))
+                       (std/vector/map std/vector/int/pair/sub)))
+        ; The levels are either all increasing or all decreasing.
+        ; Any two adjacent levels differ by at least one and at most three.
+        (or (std/vector/every? slice (lambda x (and (>= x 1) (<= x 3)))) 
+            (std/vector/every? slice (lambda x (and (<= x -1) (>= x -3))))))))
+    (length))))
+
+(let part2 (lambda input (|> input
+                            (std/vector/map
+                              (lambda line (|> line
+                                (std/vector/map/i (lambda . i
+                                  (|> line (std/vector/filter/i (lambda . j (not (= i j))))))))))
+                            (std/vector/count-of (lambda x (std/int/positive? (part1 x)))))))
+
+(let PARSED (parse INPUT))
+
+[(part1 PARSED) (part2 PARSED)]"#, "[2 4]"),
+        (r#"(let INPUT "12
+14
+1969
+100756")
+
+(let parse (lambda input 
+    (|> input (std/vector/string/lines) (std/vector/map std/convert/chars->integer))))
+
+(let PARSED (parse INPUT))
+
+(let part1 (lambda input (|>    
+    input 
+    (std/vector/map (lambda x (- (/ x 3) 2)))
+    (std/vector/int/sum))))
+
+(let part2 (lambda input (do
+
+(let retry (lambda x (do
+    (let tail-call:retry! (lambda x out (do 
+        (let result (- (/ x 3) 2))
+        (if (<= result 0) out 
+            (tail-call:retry! result (std/vector/append! out result))))))
+     (tail-call:retry! x []))))
+     
+ (|>
+    input 
+    (std/vector/map retry)
+    (std/vector/map std/vector/int/sum)
+    (std/vector/int/sum)))))
+    
+[(part1 PARSED) (part2 PARSED)]"#, "[34241 51316]"
+
+
+)
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
             if let crate::parser::Expression::Apply(items) = &std_ast {
                 match crate::parser::merge_std_and_program(&inp, items[1..].to_vec()) {
-                    Ok(exprs) => match crate::vm::run(&exprs) {
-                        Ok(result) => {
-                            // println!("{:?}", inp);
-                            assert_eq!(format!("{:?}", result), *out, "Solution")
+                    Ok(exprs) => {
+                        match crate::infer::infer_with_builtins(&exprs) {
+                            Ok(_) => {
+                                match crate::vm::run(&exprs) {
+                                    Ok(result) => {
+                                        // println!("{:?}", inp);
+                                        assert_eq!(format!("{:?}", result), *out, "Solution")
+                                    }
+                                    Err(e) => {
+                                        // to figure out which test failed due to run time error:
+                                        // println!("{:?}", inp);
+                                        panic!("Failed tests because {}", e)
+                                    }
+                                }
+                            }
+                            Err(e) => panic!("Failed tests because {}", e),
                         }
-                        Err(e) => {
-                            // to figure out which test failed due to run time error:
-                            // println!("{:?}", inp);
-                            panic!("Failed tests because {}", e)
-                        }
-                    },
+                    }
                     Err(e) => panic!("Failed tests because {}", e),
                 }
             }
