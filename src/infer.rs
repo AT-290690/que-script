@@ -120,13 +120,13 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
             if let Some(scheme) = ctx.env.get(name) {
                 Ok(ctx.instantiate(&scheme))
             } else {
-                Err(format!("Undefined variable: {}", name))
+                Err(format!("Error! Undefined variable: {}", name))
             }
         }
 
         Expression::Apply(exprs) => {
             if exprs.is_empty() {
-                return Err("Empty application".to_string());
+                return Err("Error! Empty application".to_string());
             }
 
             if let Expression::Word(func_name) = &exprs[0] {
@@ -165,10 +165,13 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     }
                 }
             }
-            Err(format!("Invalid type hint syntax: {}", expr.to_lisp()))
+            Err(format!(
+                "Error! Invalid type hint syntax: {}",
+                expr.to_lisp()
+            ))
         }
 
-        _ => Err(format!("Invalid type hint: {}", expr.to_lisp())),
+        _ => Err(format!("Error! Invalid type hint: {}", expr.to_lisp())),
     }
 }
 // 2️⃣ Helper to compute "arity" depth (number of list nestings)
@@ -194,7 +197,7 @@ fn deepest_type(t: &Type) -> &Type {
 
 fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.len() != 2 {
-        return Err("`as` expects exactly two arguments: (as expr Type)".to_string());
+        return Err("Error! `as` expects exactly two arguments: (as expr Type)".to_string());
     }
 
     // 1️⃣ Infer both sides
@@ -268,7 +271,7 @@ fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
 // Type inference for lambda expressions
 fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.is_empty() {
-        return Err("Lambda requires a body".to_string());
+        return Err("Error! Lambda requires a body".to_string());
     }
 
     let param_count = args.len() - 1;
@@ -280,7 +283,7 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
         if let Expression::Word(name) = &args[i] {
             param_names.push(name.clone());
         } else {
-            return Err("Lambda parameters must be variable names".to_string());
+            return Err("Error! Lambda parameters must be variable names".to_string());
         }
     }
 
@@ -324,7 +327,7 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
 // Type inference for if expressions
 fn infer_if(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.len() != 3 {
-        return Err("If requires exactly 3 arguments: condition, then, else".to_string());
+        return Err("Error! If requires exactly 3 arguments: condition, then, else".to_string());
     }
 
     let condition = &args[0];
@@ -374,7 +377,7 @@ fn is_nonexpansive(expr: &Expression) -> bool {
 // Type inference for let expressions
 fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.len() != 2 {
-        return Err("Let requires exactly 2 arguments: variable and value".to_string());
+        return Err("Error! Let requires exactly 2 arguments: variable and value".to_string());
     }
 
     let var_expr = &args[0];
@@ -407,14 +410,14 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
         ctx.env.insert(var_name.clone(), scheme)?;
         Ok(Type::Unit)
     } else {
-        Err("Let variable must be a variable name".to_string())
+        Err("Error! Let variable must be a variable name".to_string())
     }
 }
 
 // Type inference for do expressions
 fn infer_do(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.is_empty() {
-        return Err("do requires at least one expression".to_string());
+        return Err("Error! do requires at least one expression".to_string());
     }
 
     let mut last_type = Type::Unit; // Default type
@@ -429,7 +432,7 @@ fn infer_do(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
 // Type inference for function calls
 fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if exprs.is_empty() {
-        return Err("Function call requires at least a function".to_string());
+        return Err("Error! Function call requires at least a function".to_string());
     }
 
     // Special handling for vector before anything else
@@ -447,7 +450,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                         elem_types.push(elem_type);
                     }
                     Err(e) => {
-                        return Err(format!("{}", e));
+                        return Err(format!("Error! {}", e));
                     }
                 }
             }
@@ -489,7 +492,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                             },
                         );
                     }
-                    Err(e) => return Err(format!("{}", e)),
+                    Err(e) => return Err(format!("Error! {}", e)),
                 }
             }
 
@@ -524,7 +527,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
             _ => {
                 return Err(format!(
-                    "{}\nCannot apply non-function type: {}",
+                    "{}\nError! Cannot apply non-function type: {}",
                     format!(
                         "({})",
                         exprs
@@ -553,7 +556,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                     func_type = *ret_ty;
                 }
                 Err(e) => {
-                    return Err(format!("{}", e));
+                    return Err(format!("Error! {}", e));
                 }
             },
             Type::Var(tv) => {
@@ -575,13 +578,13 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                         func_type = ret_ty;
                     }
                     Err(e) => {
-                        return Err(format!("{}", e));
+                        return Err(format!("Error! {}", e));
                     }
                 }
             }
             _ => {
                 return Err(format!(
-                    "{}\nCannot apply non-function type: {}",
+                    "{}\nError! Cannot apply non-function type: {}",
                     format!(
                         "({})",
                         exprs

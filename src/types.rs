@@ -124,7 +124,10 @@ impl TypeEnv {
     pub fn insert(&mut self, name: String, scheme: TypeScheme) -> Result<(), String> {
         let current = self.scopes.last_mut().unwrap();
         if name != "." && current.contains_key(&name) {
-            return Err(format!("Variable '{}' already defined in this scope", name));
+            return Err(format!(
+                "Error! Variable '{}' already defined in this scope",
+                name
+            ));
         }
         current.insert(name, scheme);
         Ok(())
@@ -280,7 +283,10 @@ pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {
 
         (Type::Var(v), ty) | (ty, Type::Var(v)) => {
             if occurs_in(v, ty) {
-                Err(format!("Occurs check failed: {} occurs in {}", v, ty))
+                Err(format!(
+                    "Error! Occurs check failed: {} occurs in {}",
+                    v, ty
+                ))
             } else {
                 let mut sub = Substitution::empty();
                 sub.insert(v.id, ty.clone());
@@ -296,7 +302,7 @@ pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {
 
         (Type::List(inner1), Type::List(inner2)) => unify(inner1, inner2),
 
-        _ => Err(format!("Cannot unify {} with {}", ty1, ty2)),
+        _ => Err(format!("Error! Cannot unify {} with {}", ty1, ty2)),
     }
 }
 

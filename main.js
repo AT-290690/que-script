@@ -82,9 +82,7 @@ const link = (value) => {
 };
 const compile = (value) => {
   const out = typeCheckAndRun(value);
-  if (out && out[0] === '"') {
-    terminal.setValue(out.substring(1, out.length - 1));
-  } else terminal.setValue(out);
+  terminal.setValue(out);
 };
 const runCode = (value) => {
   const out = uncheckRun(value);

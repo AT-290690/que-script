@@ -68,27 +68,27 @@ mod tests {
     fn test_type_inference_failure() {
         // Test cases that should result in type inference errors
         let test_cases = [
-            ("(+ 1 (= 1 1))", "(+ 1 (= 1 1))\nCannot unify Int with Bool"),
-            ("(1 2)", "(1 2)\nCannot apply non-function type: Int"),
-            ("(do (let t 10) (t))", "(t)\nCannot apply non-function type: Int"),
-            ("(let x (vector 1 2 (= 1 2)))", "(vector 1 2 (= 1 2))\nCannot unify Int with Bool"),
-            ("(vector 1 2 (> 1 2))", "(vector 1 2 (> 1 2))\nCannot unify Int with Bool"),
+            ("(+ 1 (= 1 1))", "(+ 1 (= 1 1))\nError! Cannot unify Int with Bool"),
+            ("(1 2)", "(1 2)\nError! Cannot apply non-function type: Int"),
+            ("(do (let t 10) (t))", "(t)\nError! Cannot apply non-function type: Int"),
+            ("(let x (vector 1 2 (= 1 2)))", "(vector 1 2 (= 1 2))\nError! Cannot unify Int with Bool"),
+            ("(vector 1 2 (> 1 2))", "(vector 1 2 (> 1 2))\nError! Cannot unify Int with Bool"),
             (
                 "(lambda x (and x 42))",
-                "(and x 42)\nCannot unify Bool with Int",
+                "(and x 42)\nError! Cannot unify Bool with Int",
             ),
-            ("(summation (range 1 10))", "Undefined variable: summation"),
+            ("(summation (range 1 10))", "Error! Undefined variable: summation"),
             (
                 "(if 1 10 20)",
-                "Condition must be Bool\n(if 1 10 20)\nCannot unify Int with Bool",
+                "Condition must be Bool\n(if 1 10 20)\nError! Cannot unify Int with Bool",
             ),
             (
                 "(if (= 1 2) 10 (= 0 1))",
-                "Concequent and alternative must match types\n(if (= 1 2) 10 (= 0 1))\nCannot unify Int with Bool",
+                "Concequent and alternative must match types\n(if (= 1 2) 10 (= 0 1))\nError! Cannot unify Int with Bool",
             ),
             (
                 "(do (let x 10) (let x 2))",
-                "Variable 'x' already defined in this scope",
+                "Error! Variable 'x' already defined in this scope",
             ),
         ];
 
@@ -1049,7 +1049,7 @@ out
                                         assert_eq!(format!("{:?}", result), *out, "Solution")
                                     }
                                     Err(e) => {
-                                        // to figure out which test failed due to run time error:
+                                        // to figure out which test failed due to run time Error!
                                         // println!("{:?}", inp);
                                         panic!("Failed tests because {}", e)
                                     }

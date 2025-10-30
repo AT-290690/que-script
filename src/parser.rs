@@ -105,7 +105,7 @@ fn tokenize(input: &str) -> Vec<String> {
 
 fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
     if *i >= tokens.len() {
-        return Err("Unexpected end of input".into());
+        return Err("Error! Unexpected end of input".into());
     }
     let tok = &tokens[*i];
 
@@ -116,12 +116,12 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
             exprs.push(parse_expr(tokens, i)?);
         }
         if *i >= tokens.len() {
-            return Err("Unclosed '('".into());
+            return Err("Error! Unclosed '('".into());
         }
         *i += 1;
         Ok(Expression::Apply(exprs))
     } else if tok == ")" {
-        Err("Unexpected ')'".into())
+        Err("Error! Unexpected ')'".into())
     } else {
         *i += 1;
         if is_number(tok) {
@@ -235,7 +235,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
 fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     // separate args and body
     if exprs.len() < 2 {
-        return Err("lambda expects at least a body".to_string());
+        return Err("Error! lambda expects at least a body".to_string());
     }
     let args = &exprs[1..exprs.len() - 1];
     let body = exprs.last().unwrap().clone();
@@ -342,7 +342,7 @@ fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> 
     let len = exprs.len();
     let mut iter = exprs.into_iter();
     if len == 0 {
-        return Err("get requires at least 1 argument".to_string());
+        return Err("Error! get requires at least 1 argument".to_string());
     }
     let first = iter.next().unwrap();
     if len == 1 {
