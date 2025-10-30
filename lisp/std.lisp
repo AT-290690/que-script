@@ -236,6 +236,16 @@
 (let std/vector/char/count (lambda input item (std/vector/count-of input (lambda x (=# x item)))))
 (let std/vector/bool/count (lambda input item (std/vector/count-of input (lambda x (=? x item)))))
 
+(let std/vector/2d/count-of std/vector/count-of)
+(let std/vector/2d/int/count std/vector/int/count)
+(let std/vector/2d/char/count std/vector/char/count)
+(let std/vector/2d/bool/count std/vector/bool/count)
+
+(let std/vector/3d/count-of (lambda xs fn? (|> xs (std/vector/map (lambda ys (std/vector/2d/count-of ys fn?))) (std/vector/int/sum))))
+(let std/vector/3d/int/count (lambda xs x (|> xs (std/vector/map (lambda ys (std/vector/2d/int/count ys x))) (std/vector/int/sum))))
+(let std/vector/3d/char/count (lambda xs x (|> xs (std/vector/map (lambda ys (std/vector/2d/char/count ys x))) (std/vector/int/sum))))
+(let std/vector/3d/bool/count (lambda xs x (|> xs (std/vector/map (lambda ys (std/vector/2d/bool/count ys x))) (std/vector/int/sum))))
+
 (let std/vector/cons (lambda a b (cond (std/vector/empty? a) b (std/vector/empty? b) a (do 
   (let out []) 
   (loop 0 (length a) (lambda i (std/vector/set! out (length out) (get a i)))) 
