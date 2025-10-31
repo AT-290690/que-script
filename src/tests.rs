@@ -585,12 +585,12 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[true false]",
             ),
             (
-                r#"(let reverse (lambda xs rev 
+                r#"(let rev (lambda xs rev 
     (if (std/vector/empty? xs) 
          rev 
-        (reverse (std/vector/drop/last xs 1) (std/vector/append! rev (-. xs 1))))))
+        (rev (std/vector/drop/last xs 1) (std/vector/append! rev (-. xs 1))))))
 ;
-(reverse [ 1 2 3 4 5 ] [])"#,
+(rev [ 1 2 3 4 5 ] [])"#,
                 "[5 4 3 2 1]",
             ),
             (

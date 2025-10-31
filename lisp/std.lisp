@@ -149,6 +149,7 @@
 (let -- (lambda vrbl (=! vrbl (- (get vrbl) 1))))
 (let ** (lambda vrbl (=! vrbl (* (get vrbl) (get vrbl)))))
 
+
 (let Bool->Int (lambda x (if (=? x true) 1 0)))
 (let Bool->Char (lambda x (if (=? x true) std/char/1 std/char/0)))
 (let Char->Int (lambda x (if (>=# x std/char/empty) (as x Int) 0)))
@@ -1302,3 +1303,42 @@ q)))
 (let std/vector/2d/get* std/vector/get*)
 (let std/vector/3d/get* (lambda xs i j some none (if (std/vector/3d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))
 (let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))
+
+; More Fake keywords
+(let map std/vector/map)
+(let filter std/vector/filter)
+(let reduce std/vector/reduce)
+(let every? std/vector/every?)
+(let some? std/vector/some?)
+(let empty? std/vector/empty?)
+(let reverse std/vector/reverse)
+(let slice std/vector/slice)
+(let cons std/vector/cons)
+(let sort! std/vector/sort!)
+(let range std/vector/int/range)
+(let square std/int/square)
+(let expt std/int/expt)
+(let max std/int/max)
+(let min std/int/min)
+(let push! (lambda xs x (set! xs (length xs) x)))
+(let abs std/int/abs)
+(let pull! std/vector/pop-and-get!)
+(let first std/vector/first)
+(let last std/vector/last)
+(let car std/vector/first)
+(let cdr (lambda xs (std/vector/slice xs 1 (length xs))))
+(let sum std/vector/int/sum)
+
+(let nl std/char/new-line)
+(let String->Vector std/convert/string->vector)
+(let Vector->String std/convert/vector->string)
+(let Chars->Integer std/convert/chars->integer)
+(let Integer->Digits std/convert/integer->digits)
+(let Digits->Chars std/convert/digits->chars)
+(let Set->Vector std/convert/set->vector)
+(let Vector->Set std/convert/vector->set)
+
+
+
+
+
