@@ -284,6 +284,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             format!("_curry(({}) => {})", params.join(", "), body_js)
                         }
                     }
+                    "char" => format!("{}", compile_expr_to_js(&items[1]),),
                     "as" => format!("{}", compile_expr_to_js(&items[1]),),
                     // call a named function/operator: default: compile args then `fn(args...)`
                     _ => {

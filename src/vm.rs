@@ -1369,6 +1369,12 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
 
                         Ok(())
                     }
+                    "char" => {
+                        for arg in &exprs[1..] {
+                            compile(arg, code)?;
+                        }
+                        Ok(())
+                    }
                     "vector" | "string" => {
                         let count = exprs.len() - 1;
                         for arg in &exprs[1..] {

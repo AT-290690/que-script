@@ -1055,7 +1055,10 @@ out
                                     }
                                 }
                             }
-                            Err(e) => panic!("Failed tests because {}", e),
+                            Err(e) => {
+                                println!("{:?}", inp);
+                                panic!("Failed tests because {}", e)
+                            }
                         }
                     }
                     Err(e) => panic!("Failed tests because {}", e),

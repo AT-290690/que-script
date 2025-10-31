@@ -158,7 +158,7 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
         Expression::Apply(items) if !items.is_empty() => {
             // A shorthand for [T] means (vector T)
             if let Expression::Word(t) = &items[0] {
-                if t == "vector" || t == "string" || t == "[" {
+                if t == "vector" || t == "string" {
                     if items.len() == 2 {
                         let inner = parse_type_hint(&items[1], ctx)?;
                         return Ok(Type::List(Box::new(inner)));
@@ -213,7 +213,7 @@ fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
     // --- If expr_type is a type variable, allow up to (≤) right-side arity ---
     if is_expr_var && expr_arity > hint_arity {
         return Err(format!(
-            "Type variable in `as` cannot represent deeper nesting: {} vs {}",
+            "Error! Type variable in `as` cannot represent deeper nesting: {} vs {}",
             expr_type, type_hint
         ));
     }
@@ -221,7 +221,7 @@ fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
     // 4️⃣ Check if they differ (e.g., Int vs [Int], or [Int] vs [[Int]])
     if !is_expr_var && expr_arity != hint_arity {
         return Err(format!(
-            "Type arity mismatch in `as`: left has arity {}, right has arity {} ({} vs {})\n(as {})",
+            "Error! Type arity mismatch in `as`: left has arity {}, right has arity {} ({} vs {})\n(as {})",
             expr_arity,
             hint_arity,
             expr_type,
@@ -253,7 +253,7 @@ fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
             | (_, Type::Var(_)) => (),
             _ => {
                 return Err(format!(
-                    "Invalid array cast in `as`: cannot cast {} to {}\n(as {})",
+                    "Error! Invalid array cast in `as`: cannot cast {} to {}\n(as {})",
                     expr_type,
                     type_hint,
                     args.into_iter()
@@ -497,6 +497,34 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
 
             return Ok(Type::List(Box::new(Type::Char)));
+        } else if name == "char" {
+            let args = &exprs[1..];
+            if args.is_empty() {
+                return Ok(Type::Char);
+            }
+
+            for arg in args {
+                match infer_expr(arg, ctx) {
+                    Ok(elem_type) => {
+                        let valid_type = match elem_type {
+                            Type::Char => Type::Char,
+                            Type::Int => Type::Char,
+                            _ => elem_type,
+                        };
+                        ctx.add_constraint(
+                            Type::Char,
+                            valid_type,
+                            TypeErrorFormat {
+                                variant: TypeErrorFormatVariant::Source, // or create Variant::String if desired
+                                expr: args.to_vec(),
+                            },
+                        );
+                    }
+                    Err(e) => return Err(format!("Error! {}", e)),
+                }
+            }
+
+            return Ok(Type::Char);
         }
     }
     let func_expr = &exprs[0];

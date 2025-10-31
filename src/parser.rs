@@ -153,12 +153,20 @@ pub fn parse(src: &str) -> Result<Vec<Expression>, String> {
     Ok(exprs)
 }
 
-fn preprocess(source: &str) -> String {
+fn preprocess(source: &str) -> Result<String, String> {
     let mut out = String::new();
     let mut chars = source.chars().peekable();
 
     while let Some(ch) = chars.next() {
         match ch {
+            ';' => {
+                while let Some(nc) = chars.peek() {
+                    if *nc == '\n' {
+                        break;
+                    }
+                    chars.next();
+                }
+            }
             '[' => {
                 out.push('(');
                 out.push_str("vector ");
@@ -183,11 +191,32 @@ fn preprocess(source: &str) -> String {
                 }
                 out.push(')');
             }
+
+            '\'' => {
+                let mut s = String::new();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next == '\'' {
+                        break;
+                    } else {
+                        s.push(next);
+                    }
+                }
+                if (s.len() != 1) {
+                    return Err(format!("Error! Char should be of length 1"));
+                }
+                out.push_str("(char ");
+                for (c) in s.chars() {
+                    out.push_str(&(c as u32).to_string());
+                    break;
+                }
+                out.push(')');
+            }
             _ => out.push(ch),
         }
     }
 
-    out
+    Ok(out)
 }
 fn desugar(expr: Expression) -> Result<Expression, String> {
     match expr {
@@ -658,63 +687,9 @@ impl Expression {
 }
 #[allow(dead_code)]
 pub fn with_std(program: &str, std: &str) -> Result<Expression, String> {
-    let preprocessed = preprocess(&program);
-
-    let exprs = parse(&preprocessed).unwrap();
-    let mut desugared = Vec::new();
-    for expr in exprs {
-        let expr = desugar_tail_recursion(expr);
-        match desugar(expr) {
-            Ok(expr) => desugared.push(expr),
-            Err(e) => return Err(e),
-        }
-    }
-    let preprocessed_std = preprocess(&std);
-    let exprs_std = parse(&preprocessed_std).unwrap();
-    let mut desugared_std = Vec::new();
-    for expr in exprs_std {
-        match desugar(expr) {
-            Ok(expr) => desugared_std.push(expr),
-            Err(e) => return Err(e),
-        }
-    }
-    let mut used = HashSet::new();
-    for e in &desugared {
-        collect_idents(e, &mut used);
-    }
-
-    let shaken_std = tree_shake(desugared_std, &used);
-
-    let wrapped = Expression::Apply(
-        std::iter::once(Expression::Word("do".to_string()))
-            .chain(shaken_std.into_iter())
-            .chain(desugared.into_iter())
-            .collect(),
-    );
-    Ok(wrapped)
-}
-pub fn build(program: &str) -> Result<Expression, String> {
-    let preprocessed = preprocess(&program);
-    let mut desugared = Vec::new();
-    for expr in parse(&preprocessed).unwrap() {
-        let expr = desugar_tail_recursion(expr);
-        match desugar(expr) {
-            Ok(expr) => desugared.push(expr),
-            Err(e) => return Err(e),
-        }
-    }
-    let wrapped = Expression::Apply(
-        std::iter::once(Expression::Word("do".to_string()))
-            .chain(desugared.into_iter())
-            .collect(),
-    );
-    Ok(wrapped)
-}
-#[allow(dead_code)]
-pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expression, String> {
-    let preprocessed = preprocess(&program);
-    match parse(&preprocessed) {
-        Ok(exprs) => {
+    match preprocess(&program) {
+        Ok(preprocessed) => {
+            let exprs = parse(&preprocessed).unwrap();
             let mut desugared = Vec::new();
             for expr in exprs {
                 let expr = desugar_tail_recursion(expr);
@@ -723,23 +698,91 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                     Err(e) => return Err(e),
                 }
             }
+            match preprocess(&std) {
+                Ok(preprocessed_std) => {
+                    let exprs_std = parse(&preprocessed_std).unwrap();
+                    let mut desugared_std = Vec::new();
+                    for expr in exprs_std {
+                        match desugar(expr) {
+                            Ok(expr) => desugared_std.push(expr),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    let mut used = HashSet::new();
+                    for e in &desugared {
+                        collect_idents(e, &mut used);
+                    }
 
-            let mut used = HashSet::new();
-            for e in &desugared {
-                collect_idents(e, &mut used);
+                    let shaken_std = tree_shake(desugared_std, &used);
+
+                    let wrapped = Expression::Apply(
+                        std::iter::once(Expression::Word("do".to_string()))
+                            .chain(shaken_std.into_iter())
+                            .chain(desugared.into_iter())
+                            .collect(),
+                    );
+                    Ok(wrapped)
+                }
+                Err(e) => return Err(e),
             }
+        }
+        Err(e) => return Err(e),
+    }
+}
+pub fn build(program: &str) -> Result<Expression, String> {
+    match preprocess(&program) {
+        Ok(preprocessed) => {
+            let mut desugared = Vec::new();
 
-            let shaken_std = tree_shake(std, &used);
-
+            for expr in parse(&preprocessed).unwrap() {
+                let expr = desugar_tail_recursion(expr);
+                match desugar(expr) {
+                    Ok(expr) => desugared.push(expr),
+                    Err(e) => return Err(e),
+                }
+            }
             let wrapped = Expression::Apply(
                 std::iter::once(Expression::Word("do".to_string()))
-                    .chain(shaken_std.into_iter())
                     .chain(desugared.into_iter())
                     .collect(),
             );
             Ok(wrapped)
         }
-        Err(e) => Err(e),
+        Err(e) => return Err(e),
+    }
+}
+#[allow(dead_code)]
+pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expression, String> {
+    match preprocess(&program) {
+        Ok(preprocessed) => match parse(&preprocessed) {
+            Ok(exprs) => {
+                let mut desugared = Vec::new();
+                for expr in exprs {
+                    let expr = desugar_tail_recursion(expr);
+                    match desugar(expr) {
+                        Ok(expr) => desugared.push(expr),
+                        Err(e) => return Err(e),
+                    }
+                }
+
+                let mut used = HashSet::new();
+                for e in &desugared {
+                    collect_idents(e, &mut used);
+                }
+
+                let shaken_std = tree_shake(std, &used);
+
+                let wrapped = Expression::Apply(
+                    std::iter::once(Expression::Word("do".to_string()))
+                        .chain(shaken_std.into_iter())
+                        .chain(desugared.into_iter())
+                        .collect(),
+                );
+                Ok(wrapped)
+            }
+            Err(e) => return Err(e),
+        },
+        Err(e) => return Err(e),
     }
 }
 
