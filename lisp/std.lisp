@@ -1304,7 +1304,7 @@ q)))
 (let std/vector/3d/get* (lambda xs i j some none (if (std/vector/3d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))
 (let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))
 
-; More Fake keywords
+; Start of more fake keywords
 (let map std/vector/map)
 (let filter std/vector/filter)
 (let reduce std/vector/reduce)
@@ -1338,7 +1338,14 @@ q)))
 (let Set->Vector std/convert/set->vector)
 (let Vector->Set std/convert/vector->set)
 
+(let Char/count std/vector/char/count)
+(let Int/count std/vector/int/count)
+(let Bool/count std/vector/Bool/count)
+(let count std/vector/count-of)
 
+(let Set/intersection std/vector/hash/set/intersection)
+(let Set/difference std/vector/hash/set/difference)
+(let Set/xor std/vector/hash/set/xor)
+(let Set/union std/vector/hash/set/union)
 
-
-
+; End of more fake words
