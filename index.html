@@ -1,146 +1,17 @@
-<head>
-  <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height"
-  />
-  <meta name="description" content="Write and run Que scripts" />
-  <title>Que Script Playground</title>
-  <link rel="icon" type="image/x-icon" href="./logo.svg" />
-  <style>
-    html {
-      background-color: black;
-    }
-    .ace_comment {
-      color: #7285b2aa !important;
-    }
-    .ace_keyword {
-      color: #ff0077 !important;
-    }
-    @font-face {
-      font-family: "Fantastic";
-      src: url(./FantasqueSansMono-Regular.ttf) format("truetype");
-      font-display: swap;
-    }
-    * {
-      font-family: "Fantastic" !important;
-    }
-    #editor {
-      height: 80%;
-      width: 100%;
-    }
-    body {
-      margin: 0;
-      padding: 0;
-    }
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Que Script Playground</title>
+    <link rel="icon" type="image/x-icon" href="/assets/logo-DqRs5B5w.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script type="module" crossorigin src="/assets/index-Dlfu5plu.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-f-6jZ9nh.css">
+  </head>
 
-    #terminal {
-      border-top: 1px solid #ff0077;
-      height: 15%;
-      width: 100%;
-    }
-    #logo {
-      height: 15px;
-      padding: 5px;
-    }
-    #tools {
-      justify-content: left;
-      display: flex;
-      border-bottom: #ff0077 1px solid;
-    }
-    #libs {
-      height: 150px;
-      resize: none;
-    }
-    #closeModal {
-      border: none;
-      border: #ff0077 1px solid;
-    }
-    input {
-      height: 25px;
-      padding: 5px;
-    }
-    dialog {
-      width: 60%;
-      height: fit-content;
-      background-color: black;
-      color: white;
-      border: #ff0077 1px solid;
-    }
-
-    input,
-    textarea {
-      padding: 5px;
-      background-color: black;
-      border: none;
-      width: 100%;
-      border: #ff0077 1px solid;
-      /* border: #ff0077 1px solid; */
-      color: white;
-    }
-    button {
-      padding: 5px;
-      width: 80px;
-      background-color: black;
-      border: none;
-      /* border: #ff0077 1px solid; */
-      cursor: pointer;
-      color: rgb(255, 255, 255);
-    }
-    button:active {
-      transform: scale(1.1);
-    }
-    button:hover {
-      background-color: #ff0077;
-      border: #ff0077;
-    }
-    button:active {
-      background-color: #ff0077;
-    }
-  </style>
-</head>
-<body>
-  <div id="tools">
-    <img id="logo" src="./logo.svg" />
-    <button id="run" title="run code"><span>run</span></button>
-    <button id="check" title="check code"><span>check</span></button>
-    <button id="js" title="compile and run javascript">
-      <span>javascript</span>
-    </button>
-    <button id="str" title="string view"><span>string</span></button>
-    <button id="std" title="library"><span>library</span></button>
-    <button id="help" title="help"><span>help</span></button>
-  </div>
-  <div id="editor"></div>
-  <div id="terminal"></div>
-
-  <dialog id="modal">
-    <div style="display: flex; gap: 5px">
-      <input
-        autofocus
-        id="search"
-        autocomplete="off"
-        placeholder="Search in Standard Library"
-      />
-      <button id="closeModal">x</button>
-    </div>
-    <p></p>
-    <div>
-      <textarea id="libs"></textarea>
-    </div>
-  </dialog>
-  <script
-    defer
-    src="//ajaxorg.github.io/ace-builds/src-min-noconflict/ace.js"
-    type="text/javascript"
-    charset="utf-8"
-  ></script>
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"
-    integrity="sha512-qtX0GLM3qX8rxJN1gyDfcnMFFrKvixfoEOwbBib9VafR5vbChV5LeE5wSI/x+IlCkTY5ZFddFDCCfaVJJNnuKQ=="
-    crossorigin="anonymous"
-    referrerpolicy="no-referrer"
-  ></script>
-
-  <script type="module" src="./main.js"></script>
-</body>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
