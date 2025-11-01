@@ -24,7 +24,7 @@ pub fn resolve_variant(e: String, src: &TypeErrorFormat) -> Result<(), String> {
     match src.variant {
         TypeErrorFormatVariant::Vector => {
             return Err(format!(
-                "(vector {})\n{}",
+                "Error! (vector {})\n{}",
                 source_expression
                     .into_iter()
                     .map(|e| e.to_lisp())
@@ -35,7 +35,7 @@ pub fn resolve_variant(e: String, src: &TypeErrorFormat) -> Result<(), String> {
         }
         TypeErrorFormatVariant::Call => {
             return Err(format!(
-                "({})\n{}",
+                "Error! ({})\n{}",
                 source_expression
                     .into_iter()
                     .map(|e| e.to_lisp())
@@ -57,7 +57,7 @@ pub fn resolve_variant(e: String, src: &TypeErrorFormat) -> Result<(), String> {
         }
         TypeErrorFormatVariant::IfBody => {
             return Err(format!(
-                "Concequent and alternative must match types\n(if {})\n{}",
+                "Error! Concequent and alternative must match types\n(if {})\n{}",
                 source_expression
                     .into_iter()
                     .map(|e| e.to_lisp())
@@ -68,7 +68,7 @@ pub fn resolve_variant(e: String, src: &TypeErrorFormat) -> Result<(), String> {
         }
         TypeErrorFormatVariant::IfCond => {
             return Err(format!(
-                "Condition must be Bool\n(if {})\n{}",
+                "Error! Condition must be Bool\n(if {})\n{}",
                 source_expression
                     .into_iter()
                     .map(|e| e.to_lisp())
@@ -300,7 +300,7 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     for (name, typ) in param_names.iter().zip(param_types.iter()) {
         ctx.env
             .insert(name.clone(), TypeScheme::monotype(typ.clone()))
-            .map_err(|e| format!("Error in lambda: {}", e))?;
+            .map_err(|e| format!("Error! in lambda: {}", e))?;
     }
 
     // Infer body type
