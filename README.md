@@ -11,7 +11,7 @@
 - **[Syntactic sugar](https://en.wikipedia.org/wiki/Syntactic_sugar)** layer
 - **[Strongly typed](https://en.wikipedia.org/wiki/Strong_and_weak_typing)** using the **[Hindley-Milner](https://en.wikipedia.org/wiki/Hindley–Milner_type_system)** type system
 - **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [JavaScript](https://en.wikipedia.org/wiki/JavaScript)
-- **[WASM](https://en.wikipedia.org/wiki/WebAssembly)** build for [online editor](https://at-290690.github.io/rust-lisp/)
+- **[WASM](https://en.wikipedia.org/wiki/WebAssembly)** build for [online editor](https://at-290690.github.io/rust-lisp/playground)
 - It supports some cool features from **functional programming**
 
 - **[Partial function application](https://en.wikipedia.org/wiki/Partial_application)**
@@ -21,7 +21,7 @@
 - **[Type inference](https://en.wikipedia.org/wiki/Type_inference)**
 - **[Tail Call Optimization](https://en.wikipedia.org/wiki/Tail_call)**
 
-Try it online at [playground](https://at-290690.github.io/rust-lisp/)
+Try it online at [playground](https://at-290690.github.io/rust-lisp/playground)
 
 or clone this project and write code in **main.lisp**
 

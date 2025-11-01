@@ -251,7 +251,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "boolean" => boolean_transform(exprs),
                     "loop" => Ok(loop_transform(exprs)),
                     "lambda" => lambda_destructure_transform(exprs),
-
+                    "cons" => Ok(cons_transform(exprs)),
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
@@ -492,6 +492,20 @@ fn plus_transform(mut exprs: Vec<Expression>) -> Expression {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
                 Expression::Apply(vec![Expression::Word("+".to_string()), acc, next])
+            })
+        }
+    }
+}
+
+fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    match exprs.len() {
+        0 => Expression::Apply(vec![Expression::Word("vector".to_string())]),
+        _ => {
+            let first = exprs.remove(0);
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("cons".to_string()), acc, next])
             })
         }
     }
