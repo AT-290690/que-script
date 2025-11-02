@@ -655,6 +655,7 @@ impl VM {
                             &self.locals,
                         )))),
                     );
+                    self.stack.push(closure);
                 }
 
                 Instruction::Call(arg_count) => {
