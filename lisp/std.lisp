@@ -1358,5 +1358,21 @@ q)))
                                   (!std/list/nil? xs) true
                                   (not (f? (!std/list/head xs))) false
                                   (!std/list/every? (!std/list/tail xs) f?))))
-
+(let !std/vector/permutations (lambda arr
+  (if (<= (length arr) 1)
+      [arr]
+      (do
+        (let out [])
+        (variable i 0)
+        (loop (< (get i) (length arr)) (lambda (do
+            (let x (get arr (get i)))
+            (let rest (std/vector/filter arr (lambda y (!= y x))))
+            (let perms (!std/vector/permutations rest))
+            (variable j 0)
+            (loop (< (get j) (length perms)) (lambda (do
+                (set! out (length out) (std/vector/cons! [x] (get perms (get j))))
+                (++ j))))
+            (++ i))))
+        out))))
+(!std/vector/permutations [ 1 2 3 ])
 ; End of unsafe code

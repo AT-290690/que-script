@@ -1,7 +1,5 @@
-use core::panic;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::rc::Rc;
 
 use wasm_bindgen::UnwrapThrowExt;
@@ -249,7 +247,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "variable" => Ok(variable_transform(exprs)),
                     "integer" => Ok(integer_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
-                    "loop" => Ok(loop_transform(exprs)),
+                    "loop" => Ok(loop_transform(exprs)?),
                     "lambda" => lambda_destructure_transform(exprs),
                     "cons" => Ok(cons_transform(exprs)),
                     _ => Ok(Expression::Apply(exprs)),
@@ -348,24 +346,126 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
     lambda_exprs.push(new_body);
     Ok(Expression::Apply(lambda_exprs))
 }
-fn loop_transform(mut exprs: Vec<Expression>) -> Expression {
+fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
     let len = exprs.len();
-    if len == 2 {
-        return Expression::Apply(vec![
-            Expression::Word("loop-finish".to_string()),
-            exprs[0].clone(),
-            exprs[1].clone(),
-        ]);
-    } else {
-        return Expression::Apply(vec![
-            Expression::Word("loop".to_string()),
-            exprs[0].clone(),
-            exprs[1].clone(),
-            exprs[2].clone(),
-        ]);
+
+    // Basic structural validation
+    if len != 2 && len != 3 {
+        return Err(format!(
+            "Error! loop expects 2 or 3 arguments, got {}\n{}",
+            len,
+            exprs
+                .into_iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<String>>()
+                .join(" ")
+        ));
     }
+
+    let lambda_expr = exprs.last().unwrap(); // last element is the lambda
+
+    // Check it's a lambda form
+    match lambda_expr {
+        Expression::Apply(items) if !items.is_empty() => {
+            if let Expression::Word(head) = &items[0] {
+                if head != "lambda" {
+                    return Err(format!(
+                        "Error! loop last argument must be a lambda \n{}",
+                        exprs
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" ")
+                    ));
+                }
+
+                // Count lambda params
+                let params = &items[1..items.len() - 1];
+                let param_count = params.len();
+
+                if len == 2 {
+                    // (loop cond (lambda ...))
+                    if param_count != 0 {
+                        return Err(format!(
+                            "Error! loop condition form expects lambda with 0 parameters, found {}\n{}",
+                            param_count,
+                            exprs
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" ")
+                        ));
+                    }
+
+                    return Ok(Expression::Apply(vec![
+                        Expression::Word("loop-finish".to_string()),
+                        exprs[0].clone(),
+                        lambda_expr.clone(),
+                    ]));
+                } else {
+                    // (loop start end (lambda i ...))
+                    if param_count != 1 {
+                        return Err(format!(
+                            "Error! loop range form expects lambda with 1 parameter, found {}\n{}",
+                            param_count,
+                            exprs
+                                .into_iter()
+                                .map(|e| e.to_lisp())
+                                .collect::<Vec<String>>()
+                                .join(" ")
+                        ));
+                    }
+
+                    return Ok(Expression::Apply(vec![
+                        Expression::Word("loop".to_string()),
+                        exprs[0].clone(),
+                        exprs[1].clone(),
+                        lambda_expr.clone(),
+                    ]));
+                }
+            }
+        }
+
+        Expression::Word(items) if !items.is_empty() => {
+            if len == 2 {
+                return Ok(Expression::Apply(vec![
+                    Expression::Word("loop-finish".to_string()),
+                    exprs[0].clone(),
+                    lambda_expr.clone(),
+                ]));
+            } else {
+                return Ok(Expression::Apply(vec![
+                    Expression::Word("loop".to_string()),
+                    exprs[0].clone(),
+                    exprs[1].clone(),
+                    lambda_expr.clone(),
+                ]));
+            }
+        }
+
+        _ => {
+            return Err(format!(
+                "Error! loop last argument must be a lambda expression\n{}",
+                exprs
+                    .into_iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<String>>()
+                    .join(" ")
+            ))
+        }
+    }
+
+    Err(format!(
+        "Error! loop invalid structure\n{}",
+        exprs
+            .into_iter()
+            .map(|e| e.to_lisp())
+            .collect::<Vec<String>>()
+            .join(" ")
+    ))
 }
+
 fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
     let len = exprs.len();
