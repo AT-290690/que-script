@@ -188,12 +188,19 @@ fn main() -> std::io::Result<()> {
                     if let parser::Expression::Word(kw) = a {
                         if kw == "let" {
                             if let parser::Expression::Word(name) = b {
-                                match parser::merge_std_and_program(&name, items[1..].to_vec()) {
-                                    Ok(p) => match infer::infer_with_builtins(&p) {
-                                        Ok(typ) => names.push([name.clone(), format!("{}", typ)]),
+                                if name.chars().next().unwrap() == '!' {
+                                    names.push([name.clone(), "unsafe".to_string()]);
+                                } else {
+                                    match parser::merge_std_and_program(&name, items[1..].to_vec())
+                                    {
+                                        Ok(p) => match infer::infer_with_builtins(&p) {
+                                            Ok(typ) => {
+                                                names.push([name.clone(), format!("{}", typ)])
+                                            }
+                                            Err(e) => println!("{}", e),
+                                        },
                                         Err(e) => println!("{}", e),
-                                    },
-                                    Err(e) => println!("{}", e),
+                                    }
                                 }
                             }
                         }

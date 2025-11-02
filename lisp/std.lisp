@@ -1325,7 +1325,7 @@ q)))
 
 (let Char/count std/vector/char/count)
 (let Int/count std/vector/int/count)
-(let Bool/count std/vector/Bool/count)
+(let Bool/count std/vector/bool/count)
 (let count std/vector/count-of)
 
 (let Set/intersection std/vector/hash/set/intersection)
@@ -1334,3 +1334,29 @@ q)))
 (let Set/union std/vector/hash/set/union)
 
 ; End of more fake words
+
+; Unsafe code 
+(let !std/list/pair (lambda a b (vector a b)))
+(let !std/list/car (lambda pair (get pair 0)))
+(let !std/list/cdr (lambda pair (get pair 1)))
+(let !std/list/head (lambda pair (get pair 0)))
+(let !std/list/tail (lambda pair (get pair 1)))
+(let !std/list/nil? (lambda pair (= (length pair) 0)))
+(let !std/list/map (lambda xs f (if (!std/list/nil? xs) [] (!std/list/pair (f (!std/list/head xs)) (!std/list/map (!std/list/tail xs) f)))))
+(let !std/list/filter (lambda xs f? (if (!std/list/nil? xs) [] (if (f? (!std/list/head xs)) (!std/list/pair (!std/list/head xs) (!std/list/filter (!std/list/tail xs) f?)) (!std/list/filter (!std/list/tail xs) f?)))))
+(let !std/list/fold (lambda xs f out (if (!std/list/nil? xs) out (!std/list/fold (!std/list/tail xs) f (f out (!std/list/head xs))))))
+(let !std/list/transform (lambda xs f out (if (!std/list/nil? xs) out (!std/list/transform (!std/list/tail xs) f (f out (!std/list/head xs))))))
+(let !std/list/zip (lambda a b (if (!std/list/nil? a) [] (!std/list/pair (!std/list/pair (!std/list/head a) (!std/list/pair (!std/list/head b) [])) (!std/list/zip (!std/list/tail a) (!std/list/tail b))))))
+(let !std/list/unzip (lambda xs (list (!std/list/map xs (lambda x (!std/list/head x))) (!std/list/map xs (lambda x (!std/list/head (!std/list/tail x)))))))
+(let !std/list/length (lambda list (!std/list/fold list (lambda a . (+ a 1)) 0)))
+(let !std/list/reverse (lambda list (!std/list/transform list (lambda a b (!std/list/pair b a)) [])))
+(let !std/list/some? (lambda xs f? (cond 
+                                (!std/list/nil? xs) false
+                                (f? (!std/list/head xs)) true
+                                (!std/list/some? (!std/list/tail xs) f?))))
+(let !std/list/every? (lambda xs f? (cond 
+                                  (!std/list/nil? xs) true
+                                  (not (f? (!std/list/head xs))) false
+                                  (!std/list/every? (!std/list/tail xs) f?))))
+
+; End of unsafe code
