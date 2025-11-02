@@ -68,23 +68,43 @@ mod tests {
     fn test_type_inference_failure() {
         // Test cases that should result in type inference errors
         let test_cases = [
-            ("(+ 1 (= 1 1))", "(+ 1 (= 1 1))\nError! Cannot unify Int with Bool"),
+            (
+                "(+ 1 (= 1 1))",
+                r#"Error! (+ 1 (= 1 1))
+Error! Cannot unify Int with Bool"#,
+            ),
             ("(1 2)", "(1 2)\nError! Cannot apply non-function type: Int"),
-            ("(do (let t 10) (t))", "(t)\nError! Cannot apply non-function type: Int"),
-            ("(let x (vector 1 2 (= 1 2)))", "(vector 1 2 (= 1 2))\nError! Cannot unify Int with Bool"),
-            ("(vector 1 2 (> 1 2))", "(vector 1 2 (> 1 2))\nError! Cannot unify Int with Bool"),
+            (
+                "(do (let t 10) (t))",
+                "(t)\nError! Cannot apply non-function type: Int",
+            ),
+            (
+                "(let x (vector 1 2 (= 1 2)))",
+                "Error! (vector 1 2 (= 1 2))\nError! Cannot unify Int with Bool",
+            ),
+            (
+                "(vector 1 2 (> 1 2))",
+                "Error! (vector 1 2 (> 1 2))\nError! Cannot unify Int with Bool",
+            ),
             (
                 "(lambda x (and x 42))",
-                "(and x 42)\nError! Cannot unify Bool with Int",
+                "Error! (and x 42)\nError! Cannot unify Bool with Int",
             ),
-            ("(summation (range 1 10))", "Error! Undefined variable: summation"),
+            (
+                "(summation (range 1 10))",
+                "Error! Undefined variable: summation",
+            ),
             (
                 "(if 1 10 20)",
-                "Condition must be Bool\n(if 1 10 20)\nError! Cannot unify Int with Bool",
+                r#"Error! Condition must be Bool
+(if 1 10 20)
+Error! Cannot unify Int with Bool"#,
             ),
             (
                 "(if (= 1 2) 10 (= 0 1))",
-                "Concequent and alternative must match types\n(if (= 1 2) 10 (= 0 1))\nError! Cannot unify Int with Bool",
+                r#"Error! Concequent and alternative must match types
+(if (= 1 2) 10 (= 0 1))
+Error! Cannot unify Int with Bool"#,
             ),
             (
                 "(do (let x 10) (let x 2))",

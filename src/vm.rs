@@ -655,14 +655,12 @@ impl VM {
                             &self.locals,
                         )))),
                     );
-
-                    self.stack.push(closure);
                 }
 
                 Instruction::Call(arg_count) => {
-                    let func = self.stack.pop().ok_or("stack underflow")?;
+                    let func = self.stack.pop().ok_or("Error! Runtime stack underflow")?;
                     let mut args: Vec<BiteCodeEvaluated> = (0..*arg_count)
-                        .map(|_| self.stack.pop().ok_or("stack underflow"))
+                        .map(|_| self.stack.pop().ok_or("Error! Runtime stack underflow"))
                         .collect::<Result<Vec<_>, _>>()?
                         .into_iter()
                         .rev()
@@ -740,7 +738,10 @@ impl VM {
                         locals: self.locals.clone(),
                     };
                     start_vm.run(start)?;
-                    let start_val = start_vm.stack.pop().ok_or("loop: missing start value")?;
+                    let start_val = start_vm
+                        .stack
+                        .pop()
+                        .ok_or("Error! Runtime loop: missing start value")?;
 
                     // Evaluate end
                     let mut end_vm = VM {
@@ -748,7 +749,10 @@ impl VM {
                         locals: self.locals.clone(),
                     };
                     end_vm.run(end)?;
-                    let end_val = end_vm.stack.pop().ok_or("loop: missing end value")?;
+                    let end_val = end_vm
+                        .stack
+                        .pop()
+                        .ok_or("Error! Runtime loop: missing end value")?;
 
                     let start_int = match start_val {
                         BiteCodeEvaluated::Int(n) => n,
@@ -771,7 +775,10 @@ impl VM {
                         locals: self.locals.clone(),
                     };
                     func_vm.run(func)?;
-                    let func_val = func_vm.stack.pop().ok_or("loop: missing function")?;
+                    let func_val = func_vm
+                        .stack
+                        .pop()
+                        .ok_or("Error! Runtime loop: missing function")?;
                     let (params, body, captured_env) = match func_val {
                         BiteCodeEvaluated::Function(p, b, e) => (p, b, e),
                         _ => return Err("Error! loop: third argument must be a lambda".to_string()),
@@ -807,7 +814,10 @@ impl VM {
                         locals: self.locals.clone(),
                     };
                     func_vm.run(func)?;
-                    let func_val = func_vm.stack.pop().ok_or("loop-finish: missing function")?;
+                    let func_val = func_vm
+                        .stack
+                        .pop()
+                        .ok_or("Error! Runtime loop-finish: missing function")?;
                     let (params, body, captured_env) = match func_val {
                         BiteCodeEvaluated::Function(p, b, e) => (p, b, e),
                         _ => {
@@ -844,7 +854,7 @@ impl VM {
                         let cond_val = cond_vm
                             .stack
                             .pop()
-                            .ok_or("loop-finish: missing condition")?;
+                            .ok_or("Error! Runtime loop-finish: missing condition")?;
                         let cond_bool = match cond_val {
                             BiteCodeEvaluated::Bool(n) => n,
                             _ => {
