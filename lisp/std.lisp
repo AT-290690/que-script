@@ -662,21 +662,6 @@
 (let std/convert/positive-or-negative-chars->integer (lambda x (|> x (std/convert/chars->positive-or-negative-digits) (std/convert/positive-or-negative-digits->integer))))
 (let std/convert/chars->integer std/convert/positive-or-negative-chars->integer)
 
-; (let buffer [])
-; (let fn (ring-buffer buffer 5))
-; (let buffer/get (get fn 0))
-; (let buffer/std/vector/push! (get fn 1))
-; (loop 0 6 (lambda i (buffer/std/vector/push! i)))
-; buffer
-(let ring-buffer (lambda buffer len (do 
-    (integer pointer 0)
-    [(lambda index (get buffer index)) 
-    (lambda item (do 
-        (let pt (get pointer))
-        (std/vector/set! buffer pt item)
-        (set pointer (mod (+ len pt 1) len))
-        item))])))
-
 (let std/vector/unique-pairs (lambda xs (do 
     (let pairs [])
     (let len (length xs))

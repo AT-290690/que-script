@@ -648,6 +648,13 @@ impl VM {
                 }
 
                 Instruction::MakeLambda(params, body) => {
+                    // this solution will capture inner closure scope but at the cost of a memory leak!
+                    // let closure = BiteCodeEvaluated::Function(
+                    //     params.clone(),
+                    //     body.clone(),
+                    //     Rc::clone(&self.locals), // shared mutable environment
+                    // );
+                    // self.stack.push(closure);
                     let closure = BiteCodeEvaluated::Function(
                         params.clone(),
                         body.clone(),
