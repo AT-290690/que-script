@@ -39,8 +39,8 @@ fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expressi
         kept: &mut Vec<Expression>,
         visited: &mut HashSet<String>,
     ) {
-        if visited.contains(name) {
-            return;
+        if !visited.insert(name.to_string()) {
+            return; // already visited
         }
         if let Some(def) = index.get(name) {
             if let Expression::Apply(list) = def {
@@ -54,7 +54,6 @@ fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expressi
             }
             kept.push(def.clone());
         }
-        visited.insert(name.to_string());
     }
 
     for name in used {

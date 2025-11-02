@@ -1358,6 +1358,7 @@ q)))
                                   (!std/list/nil? xs) true
                                   (not (f? (!std/list/head xs))) false
                                   (!std/list/every? (!std/list/tail xs) f?))))
+
 (let !std/vector/permutations (lambda arr
   (if (<= (length arr) 1)
       [arr]
@@ -1374,5 +1375,4 @@ q)))
                 (++ j))))
             (++ i))))
         out))))
-(!std/vector/permutations [ 1 2 3 ])
 ; End of unsafe code
