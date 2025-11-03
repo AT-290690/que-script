@@ -1079,7 +1079,7 @@ out
                                 }
                             }
                             Err(e) => {
-                                println!("{:?}", inp);
+                                // println!("{:?}", inp);
                                 panic!("Failed tests because {}", e)
                             }
                         }

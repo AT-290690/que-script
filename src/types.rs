@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::infer::apply_subst_map_to_type;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeVar {
     pub id: u64,
@@ -153,6 +155,14 @@ impl TypeEnv {
         for scope in &mut self.scopes {
             for scheme in scope.values_mut() {
                 *scheme = scheme.apply(subst);
+            }
+        }
+    }
+
+    pub fn apply_substitution_map(&mut self, subst: &HashMap<u64, Type>) {
+        for scope in &mut self.scopes {
+            for ty in scope.values_mut() {
+                ty.typ = apply_subst_map_to_type(subst, &ty.typ);
             }
         }
     }

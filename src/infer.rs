@@ -1,7 +1,9 @@
 use crate::parser::Expression;
 use crate::types::{generalize, unify, Substitution, Type, TypeEnv, TypeScheme, TypeVar};
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+#[derive(Clone)]
 pub enum TypeErrorFormatVariant {
     IfCond,
     IfBody,
@@ -9,6 +11,7 @@ pub enum TypeErrorFormatVariant {
     Vector,
     Call,
 }
+#[derive(Clone)]
 pub struct TypeErrorFormat {
     pub variant: TypeErrorFormatVariant,
     pub expr: Vec<Expression>,
@@ -19,7 +22,7 @@ pub struct InferenceContext {
     pub constraints: Vec<(Type, Type, TypeErrorFormat)>,
     pub fresh_var_counter: u64,
 }
-pub fn resolve_variant(e: String, src: &TypeErrorFormat) -> Result<(), String> {
+pub fn resolve_variant(e: String, src: TypeErrorFormat) -> Result<(), String> {
     let source_expression = &src.expr;
     match src.variant {
         TypeErrorFormatVariant::Vector => {
@@ -374,6 +377,206 @@ fn is_nonexpansive(expr: &Expression) -> bool {
         _ => false,
     }
 }
+
+/// A constraint is "t1 == t2" with optional source info (kept simple here).
+pub type Constraint = (Type, Type);
+
+/// Unifier: mutable map from type variable id -> Type (the binding).
+/// If a var maps to another var, we'll canonicalize via `find` for speed.
+#[derive(Debug, Default)]
+pub struct Unifier {
+    pub binds: HashMap<u64, Type>, // var id -> Type
+}
+
+impl Unifier {
+    pub fn new() -> Self {
+        Self {
+            binds: HashMap::new(),
+        }
+    }
+
+    /// Find the representative of a `Type::Var(id)`. If binding is another Var, follow it.
+    fn find_var(&mut self, id: u64) -> Type {
+        match self.binds.get(&id) {
+            None => Type::Var(TypeVar::new(id)),
+            Some(ty) => {
+                match ty {
+                    Type::Var(other_id) if other_id.id != id => {
+                        // path compress
+                        let rep = match self.find_var(other_id.id) {
+                            t @ Type::Var(_) => t,
+                            t => t,
+                        };
+                        // store compressed
+                        if let Type::Var(rep_id) = &rep {
+                            self.binds.insert(id, Type::Var(rep_id.clone()));
+                        } else {
+                            self.binds.insert(id, rep.clone());
+                        }
+                        rep
+                    }
+                    // bound to non-var or var pointing to itself
+                    t => t.clone(),
+                }
+            }
+        }
+    }
+
+    /// Apply current bindings to a type (non-destructive: returns new Type)
+    pub fn apply(&mut self, t: &Type) -> Type {
+        match t {
+            Type::Var(var) => {
+                let rep = self.find_var(var.id);
+                match rep {
+                    Type::Var(_) => rep,
+                    _ => self.apply(&rep), // recursively apply (for nested binds)
+                }
+            }
+            Type::List(inner) => Type::List(Box::new(self.apply(inner))),
+            Type::Function(a, b) => {
+                Type::Function(Box::new(self.apply(a)), Box::new(self.apply(b)))
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// Occurs check: prevent binding var id = type if var occurs in type.
+    fn occurs(&mut self, var_id: u64, ty: &Type) -> bool {
+        match ty {
+            Type::Var(var) => {
+                if var.id == var_id {
+                    true
+                } else {
+                    match self.find_var(var.id) {
+                        Type::Var(found) if found.id == var.id => false,
+                        t => self.occurs(var_id, &t),
+                    }
+                }
+            }
+            Type::List(inner) => self.occurs(var_id, inner),
+            Type::Function(a, b) => self.occurs(var_id, a) || self.occurs(var_id, b),
+            _ => false,
+        }
+    }
+
+    /// Bind variable to type (does occurs-check).
+    fn bind_var(&mut self, var_id: u64, ty: Type) -> Result<(), String> {
+        // If ty is Var and same id, nothing
+        if let Type::Var(other) = &ty {
+            if other.id == var_id {
+                return Ok(());
+            }
+        }
+        // Occurs-check
+        if self.occurs(var_id, &ty) {
+            return Err(format!(
+                "Occurs check failed: t{} occurs in {:?}",
+                var_id, ty
+            ));
+        }
+        // store binding (we canonicalize non-var if possible)
+        self.binds.insert(var_id, ty);
+        Ok(())
+    }
+
+    /// Unify two types under current unifier.
+    pub fn unify_one(&mut self, t1: Type, t2: Type) -> Result<(), String> {
+        let a = self.apply(&t1);
+        let b = self.apply(&t2);
+        self.unify_applied(a, b)
+    }
+
+    fn unify_applied(&mut self, a: Type, b: Type) -> Result<(), String> {
+        match (a, b) {
+            (Type::Var(var), ty) | (ty, Type::Var(var)) => {
+                // prefer binding var to ty
+                self.bind_var(var.id, ty)
+            }
+            (Type::Int, Type::Int)
+            | (Type::Bool, Type::Bool)
+            | (Type::Char, Type::Char)
+            | (Type::Unit, Type::Unit) => Ok(()),
+
+            (Type::List(a_inner), Type::List(b_inner)) => self.unify_one(*a_inner, *b_inner),
+            (Type::Function(a1, a2), Type::Function(b1, b2)) => {
+                self.unify_one(*a1, *b1)?;
+                self.unify_one(*a2, *b2)
+            }
+            (x, y) => Err(format!("Error! Cannot unify {} with {}", x, y)),
+        }
+    }
+
+    /// Convert unifier bindings into a Substitution-like HashMap (optional).
+    pub fn into_substitution(mut self) -> HashMap<u64, Type> {
+        // ensure all binds are fully applied
+        let keys: Vec<u64> = self.binds.keys().cloned().collect();
+        for k in keys.iter() {
+            if let Some(ty) = self.binds.get(k).cloned() {
+                let applied = self.apply(&ty);
+                self.binds.insert(*k, applied);
+            }
+        }
+        self.binds
+    }
+}
+
+/// Solve a list of constraints using Unifier (mutating it).
+pub fn solve_constraints_list(
+    constraints: &Vec<(Type, Type, TypeErrorFormat)>,
+) -> Result<HashMap<u64, Type>, String> {
+    let mut unifier = Unifier::new();
+    let mut work: VecDeque<(Type, Type, TypeErrorFormat)> = VecDeque::new();
+    for (a, b, src) in constraints.iter() {
+        work.push_back((a.clone(), b.clone(), src.clone()));
+    }
+
+    while let Some((left, right, src)) = work.pop_front() {
+        // unify left/right under current unifier
+        let left_ap = unifier.apply(&left);
+        let right_ap = unifier.apply(&right);
+        match (left_ap.clone(), right_ap.clone()) {
+            (Type::Var(var), ty) | (ty, Type::Var(var)) => {
+                // bind var -> ty
+                unifier.bind_var(var.id, ty)?;
+            }
+            (Type::List(a_inner), Type::List(b_inner)) => {
+                work.push_back((*a_inner, *b_inner, src));
+            }
+            (Type::Function(a1, a2), Type::Function(b1, b2)) => {
+                work.push_back((*a1, *b1, src.clone()));
+                work.push_back((*a2, *b2, src.clone()));
+            }
+            (a2, b2) if a2 == b2 => {} // same base
+            (a2, b2) => {
+                return Err(format!(
+                    "Error! (vector {})\nError! Cannot unify {} with {}",
+                    src.expr
+                        .into_iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<String>>()
+                        .join(" "),
+                    a2,
+                    b2
+                ));
+            }
+        }
+    }
+    Ok(unifier.into_substitution())
+}
+pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
+    match ty {
+        Type::Var(var) => match subst.get(&var.id) {
+            Some(t) => apply_subst_map_to_type(subst, t),
+            None => Type::Var(var.clone()),
+        },
+        Type::List(inner) => Type::List(Box::new(apply_subst_map_to_type(subst, inner))),
+        Type::Function(a, b) => Type::Function(
+            Box::new(apply_subst_map_to_type(subst, a)),
+            Box::new(apply_subst_map_to_type(subst, b)),
+        ),
+        other => other.clone(),
+    }
+}
 // Type inference for let expressions
 fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if args.len() != 2 {
@@ -387,18 +590,28 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
         let value_type = infer_expr(value_expr, ctx)?;
 
         // Unify all constraints
-        let mut subst = Substitution::empty();
-        for (t1, t2, src) in &ctx.constraints {
-            let left = subst.apply(t1);
-            let right = subst.apply(t2);
-            match unify(&left, &right) {
-                Ok(s) => subst = subst.compose(&s),
-                Err(e) => resolve_variant(e, src)?,
-            }
-        }
+        // let mut subst = Substitution::empty();
+        // for (t1, t2, src) in &ctx.constraints {
+        //     let left = subst.apply(t1);
+        //     let right = subst.apply(t2);
+        //     match unify(&left, &right) {
+        //         Ok(s) => subst = subst.compose(&s),
+        //         Err(e) => resolve_variant(e, src)?,
+        //     }
+        // }
+        let constraints_vec: Vec<(Type, Type, TypeErrorFormat)> = ctx
+            .constraints
+            .iter()
+            .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
+            .collect();
 
-        let solved_type = subst.apply(&value_type);
-        ctx.env.apply_in_place(&subst);
+        let subst_map = solve_constraints_list(&constraints_vec).map(|e: HashMap<u64, Type>| e)?;
+
+        let solved_type = apply_subst_map_to_type(&subst_map, &value_type);
+        ctx.env.apply_substitution_map(&subst_map);
+
+        // let solved_type = subst.apply(&value_type);
+        // ctx.env.apply_in_place(&subst);
 
         // Apply value restriction
         let scheme = if is_nonexpansive(value_expr) {
@@ -1017,7 +1230,7 @@ pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
             Ok(s) => {
                 subst = subst.compose(&s);
             }
-            Err(e) => resolve_variant(e, src)?,
+            Err(e) => resolve_variant(e, src.clone())?,
         }
     }
 
