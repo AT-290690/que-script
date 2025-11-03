@@ -149,6 +149,9 @@ Error! Cannot unify Int with Bool"#,
                 "\"Hello world\"",
                 "[72 101 108 108 111 32 119 111 114 108 100]",
             ),
+            (r#"(let A [false (and (= 1 2) (> 3 3))]) ; => [false false] Correct
+(let B [false (or (= 1 2) (> 3 3))]) ; => [true false] Wrong
+(and (=? (get A 0) (get B 0)) (=? (get A 1) (get B 1)))"#, "true"),
             (
                 r#"(let samples [
         "(())"    ; result in floor 0.

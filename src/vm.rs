@@ -1238,17 +1238,20 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                             return Err("Error! or expects exactly 2 arguments".to_string());
                         }
 
-                        let mut then_code = vec![Instruction::PushBool(true)];
-                        compile(&exprs[2], &mut then_code)?;
+                        // Evaluate second argument (b)
+                        let mut else_code = Vec::new();
+                        compile(&exprs[2], &mut else_code)?;
 
+                        // Evaluate first argument (a)
                         compile(&exprs[1], code)?;
+                        // If a is true, return true immediately; otherwise, evaluate b
                         code.push(Instruction::If(
-                            vec![Instruction::PushBool(true)],
-                            then_code,
+                            vec![Instruction::PushBool(true)], // then branch
+                            else_code,                         // else branch
                         ));
+
                         Ok(())
                     }
-
                     "not" => {
                         if exprs.len() != 2 {
                             return Err("Error! not expects exactly 1 arguments".to_string());
