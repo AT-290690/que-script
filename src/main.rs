@@ -195,6 +195,7 @@ fn main() -> std::io::Result<()> {
                                     {
                                         Ok(p) => match infer::infer_with_builtins(&p) {
                                             Ok(typ) => {
+                                                // TODO: use a regex to remove the T+\d+ noise of the files
                                                 names.push([name.clone(), format!("{}", typ)])
                                             }
                                             Err(e) => println!("{}", e),

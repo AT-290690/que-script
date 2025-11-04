@@ -626,7 +626,7 @@
 (let std/convert/digits->chars (lambda digits (std/vector/map digits std/convert/digit->char)))
 (let std/convert/bool->int (lambda x (if (=? x true) 1 0)))
 (let std/convert/int->bool (lambda x (if (= x 0) false true)))
-(let std/convert/vector->string (lambda xs delim (std/vector/reduce/i xs (lambda a b i (if (> i 0) (std/vector/cons (std/vector/append! a delim) b) b)) [])))
+(let std/convert/vector->string (lambda xs delim (std/vector/reduce/i xs (lambda a b i (if (> i 0) (std/vector/cons (std/vector/append! a delim) b) b)) "")))
 (let std/convert/string->vector (lambda str char (|> str
               (std/vector/reduce(lambda a b (do
               (let prev (std/vector/at a -1))

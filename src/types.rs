@@ -281,51 +281,6 @@ impl Type {
     }
 }
 
-// Unification algorithm
-pub fn unify(ty1: &Type, ty2: &Type) -> Result<Substitution, String> {
-    match (ty1, ty2) {
-        (Type::Int, Type::Int)
-        | (Type::Bool, Type::Bool)
-        | (Type::Char, Type::Char)
-        | (Type::Unit, Type::Unit) => Ok(Substitution::empty()),
-
-        (Type::Var(v1), Type::Var(v2)) if v1.id == v2.id => Ok(Substitution::empty()),
-
-        (Type::Var(v), ty) | (ty, Type::Var(v)) => {
-            if occurs_in(v, ty) {
-                Err(format!(
-                    "Error! Occurs check failed: {} occurs in {}",
-                    v, ty
-                ))
-            } else {
-                let mut sub = Substitution::empty();
-                sub.insert(v.id, ty.clone());
-                Ok(sub)
-            }
-        }
-
-        (Type::Function(from1, to1), Type::Function(from2, to2)) => {
-            let sub1 = unify(from1, from2)?;
-            let sub2 = unify(&sub1.apply(to1), &sub1.apply(to2))?;
-            Ok(sub1.compose(&sub2))
-        }
-
-        (Type::List(inner1), Type::List(inner2)) => unify(inner1, inner2),
-
-        _ => Err(format!("Error! Cannot unify {} with {}", ty1, ty2)),
-    }
-}
-
-// Check if a type variable occurs in a type
-pub fn occurs_in(var: &TypeVar, ty: &Type) -> bool {
-    match ty {
-        Type::Var(v) => v.id == var.id,
-        Type::Function(from, to) => occurs_in(var, from) || occurs_in(var, to),
-        Type::List(inner) => occurs_in(var, inner),
-        _ => false,
-    }
-}
-
 // Generalization and instantiation
 pub fn generalize(env: &TypeEnv, typ: Type) -> TypeScheme {
     let env_vars = env.free_vars();

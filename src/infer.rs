@@ -1,100 +1,57 @@
 use crate::parser::Expression;
-use crate::types::{generalize, unify, Substitution, Type, TypeEnv, TypeScheme, TypeVar};
+use crate::types::{generalize, Substitution, Type, TypeEnv, TypeScheme, TypeVar};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 
-#[derive(Clone)]
-pub enum TypeErrorFormatVariant {
-    IfCond,
-    IfBody,
-    Source,
+#[derive(Clone, Debug)]
+pub enum TypeErrorVariant {
     Vector,
     Call,
+    Source,
+    IfBody,
+    IfCond,
 }
-#[derive(Clone)]
-pub struct TypeErrorFormat {
-    pub variant: TypeErrorFormatVariant,
-    pub expr: Vec<Expression>,
+
+#[derive(Clone, Debug)]
+pub struct TypeError {
+    pub variant: TypeErrorVariant,
+    // Keep a small slice or reference to the original expression for formatting.
+    // If you can't easily pass a borrow, store a Vec<Expression> (clone) — but prefer a reference.
+    pub expr: Vec<crate::parser::Expression>,
+}
+
+// small helper to pretty-print the source AST tied to an error:
+fn src_to_pretty(src: &TypeError) -> String {
+    // adapt to your existing pretty printer
+    let joined = src
+        .expr
+        .iter()
+        .map(|e| e.to_lisp())
+        .collect::<Vec<_>>()
+        .join(" ");
+    match src.variant {
+        TypeErrorVariant::Vector => format!("Error! (vector {})", joined),
+        TypeErrorVariant::Call => format!("Error! ({})", joined),
+        TypeErrorVariant::IfCond => format!("Error! Condition must be Bool\n(if {})", joined),
+        TypeErrorVariant::IfBody => {
+            format!(
+                "Error! Concequent and alternative must match types\n(if {})",
+                joined
+            )
+        }
+        TypeErrorVariant::Source => joined,
+    }
 }
 // Type inference context
 pub struct InferenceContext {
     pub env: TypeEnv,
-    pub constraints: Vec<(Type, Type, TypeErrorFormat)>,
+    pub constraints: Vec<(Type, Type, TypeError)>,
     pub fresh_var_counter: u64,
 }
-pub fn resolve_variant(e: String, src: TypeErrorFormat) -> Result<(), String> {
-    let source_expression = &src.expr;
-    match src.variant {
-        TypeErrorFormatVariant::Vector => {
-            return Err(format!(
-                "Error! (vector {})\n{}",
-                source_expression
-                    .into_iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                e
-            ));
-        }
-        TypeErrorFormatVariant::Call => {
-            return Err(format!(
-                "Error! ({})\n{}",
-                source_expression
-                    .into_iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                e
-            ))
-        }
-        TypeErrorFormatVariant::Source => {
-            return Err(format!(
-                "{}\n{}",
-                source_expression
-                    .into_iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                e
-            ))
-        }
-        TypeErrorFormatVariant::IfBody => {
-            return Err(format!(
-                "Error! Concequent and alternative must match types\n(if {})\n{}",
-                source_expression
-                    .into_iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                e
-            ))
-        }
-        TypeErrorFormatVariant::IfCond => {
-            return Err(format!(
-                "Error! Condition must be Bool\n(if {})\n{}",
-                source_expression
-                    .into_iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                e
-            ))
-        }
-        _ => {
-            return Err(format!(
-                "Unknown type error {}\n{}",
-                source_expression
-                    .into_iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                e
-            ))
-        }
-    }
-}
+
 impl InferenceContext {
-    pub fn add_constraint(&mut self, t1: Type, t2: Type, src: TypeErrorFormat) {
+    pub fn add_constraint(&mut self, t1: Type, t2: Type, src: TypeError) {
         self.constraints.push((t1, t2, src));
     }
 
@@ -129,16 +86,16 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 
         Expression::Apply(exprs) => {
             if exprs.is_empty() {
-                return Err("Error! Empty application".to_string());
+                return Err("Syntax error: Empty application".to_string());
             }
 
             if let Expression::Word(func_name) = &exprs[0] {
                 match func_name.as_str() {
-                    "as" => infer_as(&exprs[1..], ctx),
-                    "lambda" => infer_lambda(&exprs[1..], ctx),
-                    "if" => infer_if(&exprs[1..], ctx),
-                    "let" => infer_let(&exprs[1..], ctx),
-                    "do" => infer_do(&exprs[1..], ctx),
+                    "as" => infer_as(exprs, ctx),
+                    "lambda" => infer_lambda(exprs, ctx),
+                    "if" => infer_if(&exprs, ctx),
+                    "let" => infer_let(&exprs, ctx),
+                    "do" => infer_do(&exprs, ctx),
                     _ => infer_function_call(exprs, ctx),
                 }
             } else {
@@ -198,7 +155,8 @@ fn deepest_type(t: &Type) -> &Type {
     }
 }
 
-fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+fn infer_as(exrps: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exrps[1..];
     if args.len() != 2 {
         return Err("Error! `as` expects exactly two arguments: (as expr Type)".to_string());
     }
@@ -272,7 +230,8 @@ fn infer_as(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
 }
 
 // Type inference for lambda expressions
-fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
     if args.is_empty() {
         return Err("Error! Lambda requires a body".to_string());
     }
@@ -328,7 +287,8 @@ fn infer_lambda(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
 }
 
 // Type inference for if expressions
-fn infer_if(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args: &[Expression] = &exprs[1..];
     if args.len() != 3 {
         return Err("Error! If requires exactly 3 arguments: condition, then, else".to_string());
     }
@@ -340,14 +300,13 @@ fn infer_if(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
     // Infer condition type - should be Bool
     let cond_type = infer_expr(condition, ctx)?;
     ctx.add_constraint(
-        cond_type,
+        cond_type.clone(),
         Type::Bool,
-        TypeErrorFormat {
-            variant: TypeErrorFormatVariant::IfCond,
+        TypeError {
+            variant: TypeErrorVariant::IfCond,
             expr: args.to_vec(),
         },
     );
-
     // Infer then and else types
     let then_type = infer_expr(then_expr, ctx)?;
     let else_type = infer_expr(else_expr, ctx)?;
@@ -356,8 +315,8 @@ fn infer_if(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, Str
     ctx.add_constraint(
         then_type.clone(),
         else_type,
-        TypeErrorFormat {
-            variant: TypeErrorFormatVariant::IfBody,
+        TypeError {
+            variant: TypeErrorVariant::IfBody,
             expr: args.to_vec(),
         },
     );
@@ -385,7 +344,7 @@ pub type Constraint = (Type, Type);
 /// If a var maps to another var, we'll canonicalize via `find` for speed.
 #[derive(Debug, Default)]
 pub struct Unifier {
-    pub binds: HashMap<u64, Type>, // var id -> Type
+    binds: HashMap<u64, Type>, // var_id -> Type
 }
 
 impl Unifier {
@@ -395,41 +354,31 @@ impl Unifier {
         }
     }
 
-    /// Find the representative of a `Type::Var(id)`. If binding is another Var, follow it.
+    // Find representative for a Type::Var(id). If bound, follow the binding
     fn find_var(&mut self, id: u64) -> Type {
-        match self.binds.get(&id) {
+        match self.binds.get(&id).cloned() {
             None => Type::Var(TypeVar::new(id)),
-            Some(ty) => {
-                match ty {
-                    Type::Var(other_id) if other_id.id != id => {
-                        // path compress
-                        let rep = match self.find_var(other_id.id) {
-                            t @ Type::Var(_) => t,
-                            t => t,
-                        };
-                        // store compressed
-                        if let Type::Var(rep_id) = &rep {
-                            self.binds.insert(id, Type::Var(rep_id.clone()));
-                        } else {
-                            self.binds.insert(id, rep.clone());
-                        }
-                        rep
-                    }
-                    // bound to non-var or var pointing to itself
-                    t => t.clone(),
+            Some(ty) => match ty {
+                Type::Var(ref v) if v.id != id => {
+                    // path compress
+                    let rep = self.find_var(v.id);
+                    // store the rep
+                    self.binds.insert(id, rep.clone());
+                    rep
                 }
-            }
+                other => other,
+            },
         }
     }
 
-    /// Apply current bindings to a type (non-destructive: returns new Type)
+    // Apply current bindings to a type (non-destructive)
     pub fn apply(&mut self, t: &Type) -> Type {
         match t {
-            Type::Var(var) => {
-                let rep = self.find_var(var.id);
+            Type::Var(v) => {
+                let rep = self.find_var(v.id);
                 match rep {
                     Type::Var(_) => rep,
-                    _ => self.apply(&rep), // recursively apply (for nested binds)
+                    _ => self.apply(&rep),
                 }
             }
             Type::List(inner) => Type::List(Box::new(self.apply(inner))),
@@ -440,17 +389,16 @@ impl Unifier {
         }
     }
 
-    /// Occurs check: prevent binding var id = type if var occurs in type.
+    // Occurs check
     fn occurs(&mut self, var_id: u64, ty: &Type) -> bool {
         match ty {
-            Type::Var(var) => {
-                if var.id == var_id {
-                    true
-                } else {
-                    match self.find_var(var.id) {
-                        Type::Var(found) if found.id == var.id => false,
-                        t => self.occurs(var_id, &t),
-                    }
+            Type::Var(v) => {
+                if v.id == var_id {
+                    return true;
+                }
+                match self.find_var(v.id) {
+                    Type::Var(found) if found.id == v.id => false,
+                    t => self.occurs(var_id, &t),
                 }
             }
             Type::List(inner) => self.occurs(var_id, inner),
@@ -459,116 +407,119 @@ impl Unifier {
         }
     }
 
-    /// Bind variable to type (does occurs-check).
+    // Bind var -> type with occurs check
     fn bind_var(&mut self, var_id: u64, ty: Type) -> Result<(), String> {
-        // If ty is Var and same id, nothing
-        if let Type::Var(other) = &ty {
-            if other.id == var_id {
+        if let Type::Var(v) = &ty {
+            if v.id == var_id {
                 return Ok(());
             }
         }
-        // Occurs-check
         if self.occurs(var_id, &ty) {
             return Err(format!(
                 "Occurs check failed: t{} occurs in {:?}",
                 var_id, ty
             ));
         }
-        // store binding (we canonicalize non-var if possible)
         self.binds.insert(var_id, ty);
         Ok(())
     }
 
-    /// Unify two types under current unifier.
+    // Unify two already-applied types
+    fn unify_applied(&mut self, a: Type, b: Type) -> Result<(), String> {
+        match (a, b) {
+            (Type::Var(v), ty) | (ty, Type::Var(v)) => self.bind_var(v.id, ty),
+            (Type::Int, Type::Int)
+            | (Type::Bool, Type::Bool)
+            | (Type::Char, Type::Char)
+            | (Type::Unit, Type::Unit) => Ok(()),
+            (Type::List(ai), Type::List(bi)) => self.unify_applied(*ai, *bi),
+            (Type::Function(a1, a2), Type::Function(b1, b2)) => {
+                self.unify_applied(*a1, *b1)?;
+                self.unify_applied(*a2, *b2)
+            }
+            (x, y) => Err(format!("Cannot unify {} with {}", x, y)),
+        }
+    }
+
+    // Public unify entry (applies current binds before unifying)
     pub fn unify_one(&mut self, t1: Type, t2: Type) -> Result<(), String> {
         let a = self.apply(&t1);
         let b = self.apply(&t2);
         self.unify_applied(a, b)
     }
 
-    fn unify_applied(&mut self, a: Type, b: Type) -> Result<(), String> {
-        match (a, b) {
-            (Type::Var(var), ty) | (ty, Type::Var(var)) => {
-                // prefer binding var to ty
-                self.bind_var(var.id, ty)
-            }
-            (Type::Int, Type::Int)
-            | (Type::Bool, Type::Bool)
-            | (Type::Char, Type::Char)
-            | (Type::Unit, Type::Unit) => Ok(()),
-
-            (Type::List(a_inner), Type::List(b_inner)) => self.unify_one(*a_inner, *b_inner),
-            (Type::Function(a1, a2), Type::Function(b1, b2)) => {
-                self.unify_one(*a1, *b1)?;
-                self.unify_one(*a2, *b2)
-            }
-            (x, y) => Err(format!("Error! Cannot unify {} with {}", x, y)),
-        }
-    }
-
-    /// Convert unifier bindings into a Substitution-like HashMap (optional).
+    // Turn the internal binds into a fully-applied substitution map
     pub fn into_substitution(mut self) -> HashMap<u64, Type> {
-        // ensure all binds are fully applied
+        // Ensure bindings are normalized (apply recursively)
         let keys: Vec<u64> = self.binds.keys().cloned().collect();
-        for k in keys.iter() {
-            if let Some(ty) = self.binds.get(k).cloned() {
-                let applied = self.apply(&ty);
-                self.binds.insert(*k, applied);
+        for k in keys {
+            if let Some(ty) = self.binds.get(&k).cloned() {
+                let applied = {
+                    // create a small temporary unifier to apply recursively (or re-use self.apply)
+                    // we can call self.apply(&ty) but that mutates via path compression; that's fine
+                    self.apply(&ty)
+                };
+                self.binds.insert(k, applied);
             }
         }
         self.binds
     }
 }
 
-/// Solve a list of constraints using Unifier (mutating it).
+/// Solve constraints: each constraint carries a TypeError (source) so we can produce a helpful message.
 pub fn solve_constraints_list(
-    constraints: &Vec<(Type, Type, TypeErrorFormat)>,
+    constraints: &Vec<(Type, Type, TypeError)>,
 ) -> Result<HashMap<u64, Type>, String> {
     let mut unifier = Unifier::new();
-    let mut work: VecDeque<(Type, Type, TypeErrorFormat)> = VecDeque::new();
+    let mut work: VecDeque<(Type, Type, TypeError)> = VecDeque::new();
+
     for (a, b, src) in constraints.iter() {
         work.push_back((a.clone(), b.clone(), src.clone()));
     }
 
     while let Some((left, right, src)) = work.pop_front() {
-        // unify left/right under current unifier
         let left_ap = unifier.apply(&left);
         let right_ap = unifier.apply(&right);
+
         match (left_ap.clone(), right_ap.clone()) {
-            (Type::Var(var), ty) | (ty, Type::Var(var)) => {
-                // bind var -> ty
-                unifier.bind_var(var.id, ty)?;
+            (Type::Var(v), ty) | (ty, Type::Var(v)) => {
+                if let Err(e) = unifier.bind_var(v.id, ty) {
+                    // attach source info and return
+                    return Err(format!("{}\n{}", src_to_pretty(&src), e));
+                }
             }
             (Type::List(a_inner), Type::List(b_inner)) => {
                 work.push_back((*a_inner, *b_inner, src));
             }
             (Type::Function(a1, a2), Type::Function(b1, b2)) => {
                 work.push_back((*a1, *b1, src.clone()));
-                work.push_back((*a2, *b2, src.clone()));
+                work.push_back((*a2, *b2, src));
             }
-            (a2, b2) if a2 == b2 => {} // same base
+            (a2, b2) if a2 == b2 => {} // ok
             (a2, b2) => {
+                // can't unify, attach source and return
                 return Err(format!(
-                    "Error! (vector {})\nError! Cannot unify {} with {}",
-                    src.expr
-                        .into_iter()
-                        .map(|e| e.to_lisp())
-                        .collect::<Vec<String>>()
-                        .join(" "),
+                    "{}\nError! Cannot unify {} with {}",
+                    src_to_pretty(&src),
                     a2,
                     b2
                 ));
             }
         }
     }
+
     Ok(unifier.into_substitution())
 }
+
 pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
     match ty {
-        Type::Var(var) => match subst.get(&var.id) {
-            Some(t) => apply_subst_map_to_type(subst, t),
-            None => Type::Var(var.clone()),
-        },
+        Type::Var(var) => {
+            if let Some(t) = subst.get(&var.id) {
+                apply_subst_map_to_type(subst, t)
+            } else {
+                Type::Var(var.clone())
+            }
+        }
         Type::List(inner) => Type::List(Box::new(apply_subst_map_to_type(subst, inner))),
         Type::Function(a, b) => Type::Function(
             Box::new(apply_subst_map_to_type(subst, a)),
@@ -577,8 +528,8 @@ pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
         other => other.clone(),
     }
 }
-// Type inference for let expressions
-fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
     if args.len() != 2 {
         return Err("Error! Let requires exactly 2 arguments: variable and value".to_string());
     }
@@ -589,17 +540,7 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
 
-        // Unify all constraints
-        // let mut subst = Substitution::empty();
-        // for (t1, t2, src) in &ctx.constraints {
-        //     let left = subst.apply(t1);
-        //     let right = subst.apply(t2);
-        //     match unify(&left, &right) {
-        //         Ok(s) => subst = subst.compose(&s),
-        //         Err(e) => resolve_variant(e, src)?,
-        //     }
-        // }
-        let constraints_vec: Vec<(Type, Type, TypeErrorFormat)> = ctx
+        let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
             .constraints
             .iter()
             .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
@@ -609,9 +550,6 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 
         let solved_type = apply_subst_map_to_type(&subst_map, &value_type);
         ctx.env.apply_substitution_map(&subst_map);
-
-        // let solved_type = subst.apply(&value_type);
-        // ctx.env.apply_in_place(&subst);
 
         // Apply value restriction
         let scheme = if is_nonexpansive(value_expr) {
@@ -628,7 +566,8 @@ fn infer_let(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 }
 
 // Type inference for do expressions
-fn infer_do(args: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+fn infer_do(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
     if args.is_empty() {
         return Err("Error! do requires at least one expression".to_string());
     }
@@ -663,7 +602,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                         elem_types.push(elem_type);
                     }
                     Err(e) => {
-                        return Err(format!("Error! {}", e));
+                        return Err(e);
                     }
                 }
             }
@@ -673,11 +612,11 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.add_constraint(
                     first.clone(),
                     t.clone(),
-                    TypeErrorFormat {
-                        variant: TypeErrorFormatVariant::Vector,
+                    TypeError {
+                        variant: TypeErrorVariant::Vector,
                         expr: args.to_vec(),
                     },
-                ); // Enforce all elements have the same type
+                );
             }
 
             // Return the type of the vector (List of the first element type)
@@ -699,13 +638,13 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                         ctx.add_constraint(
                             Type::Char,
                             valid_type,
-                            TypeErrorFormat {
-                                variant: TypeErrorFormatVariant::Vector, // or create Variant::String if desired
+                            TypeError {
+                                variant: TypeErrorVariant::Vector,
                                 expr: args.to_vec(),
                             },
                         );
                     }
-                    Err(e) => return Err(format!("Error! {}", e)),
+                    Err(e) => return Err(e),
                 }
             }
 
@@ -727,13 +666,13 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                         ctx.add_constraint(
                             Type::Char,
                             valid_type,
-                            TypeErrorFormat {
-                                variant: TypeErrorFormatVariant::Source, // or create Variant::String if desired
+                            TypeError {
+                                variant: TypeErrorVariant::Vector, // or create Variant::String if desired
                                 expr: args.to_vec(),
                             },
                         );
                     }
-                    Err(e) => return Err(format!("Error! {}", e)),
+                    Err(e) => return Err(e),
                 }
             }
 
@@ -759,8 +698,8 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.add_constraint(
                     Type::Var(tv.clone()),
                     func_ty,
-                    TypeErrorFormat {
-                        variant: TypeErrorFormatVariant::Source,
+                    TypeError {
+                        variant: TypeErrorVariant::Source,
                         expr: exprs.to_vec(),
                     },
                 );
@@ -789,15 +728,15 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                     ctx.add_constraint(
                         *param_ty.clone(),
                         arg_ty,
-                        TypeErrorFormat {
-                            variant: TypeErrorFormatVariant::Call,
+                        TypeError {
+                            variant: TypeErrorVariant::Call,
                             expr: exprs.to_vec(),
                         },
                     );
                     func_type = *ret_ty;
                 }
                 Err(e) => {
-                    return Err(format!("Error! {}", e));
+                    return Err(e);
                 }
             },
             Type::Var(tv) => {
@@ -811,15 +750,15 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                         ctx.add_constraint(
                             Type::Var(tv.clone()),
                             func_ty,
-                            TypeErrorFormat {
-                                variant: TypeErrorFormatVariant::Source,
+                            TypeError {
+                                variant: TypeErrorVariant::Source,
                                 expr: vec![arg.clone()],
                             },
                         );
                         func_type = ret_ty;
                     }
                     Err(e) => {
-                        return Err(format!("Error! {}", e));
+                        return Err(e);
                     }
                 }
             }
@@ -1206,36 +1145,29 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     (env, fresh_id) // also return next fresh ID
 }
 
-// Helper function to infer type with built-in environment
 pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
-    let (env, initId) = create_builtin_environment();
+    let (env, init_id) = create_builtin_environment();
     let mut ctx = InferenceContext {
         env,
         constraints: Vec::new(),
-        fresh_var_counter: initId,
+        fresh_var_counter: init_id,
     };
 
-    // 1) Infer WITHOUT solving here
-    let t = infer_expr(expr, &mut ctx)?;
+    // 1) Infer type — accumulate constraints
+    let inferred = infer_expr(expr, &mut ctx)?;
 
-    // 2) FINALIZE at top level only
-    //    Solve all constraints accumulated during the whole program
-    let mut subst = Substitution::empty();
-    for (a, b, src) in &ctx.constraints {
-        // apply current subst to keep things in normal form as we go
-        let left = &subst.apply(a);
-        let right = &subst.apply(b);
+    // 2) Solve constraints once, globally
+    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
+        .constraints
+        .iter()
+        .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
+        .collect();
 
-        match unify(&left, &right) {
-            Ok(s) => {
-                subst = subst.compose(&s);
-            }
-            Err(e) => resolve_variant(e, src.clone())?,
-        }
-    }
+    let subst_map = solve_constraints_list(&constraints_vec).map_err(|e| e.to_string())?;
 
-    // 3) Apply the final substitution to both type and environment (optional but tidy)
-    let t_final = subst.apply(&t);
-    ctx.env.apply_in_place(&subst);
-    Ok(t_final)
+    // 3) Apply solved substitution map to everything
+    let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
+    ctx.env.apply_substitution_map(&subst_map);
+
+    Ok(solved_type)
 }
