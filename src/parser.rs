@@ -18,8 +18,14 @@ fn collect_idents(expr: &Expression, acc: &mut HashSet<String>) {
     }
 }
 
-fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expression> {
+fn tree_shake(
+    std_defs: Vec<Expression>,
+    used: &HashSet<String>,
+    visited: &mut HashSet<String>, // <-- your outer (user) definitions
+) -> Vec<Expression> {
     let mut index = HashMap::new();
+
+    // --- Index all std let definitions
     for expr in &std_defs {
         if let Expression::Apply(list) = expr {
             if let [Expression::Word(kw), Expression::Word(name), _rest @ ..] = &list[..] {
@@ -31,7 +37,6 @@ fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expressi
     }
 
     let mut kept = Vec::new();
-    let mut visited = HashSet::new();
 
     fn visit(
         name: &str,
@@ -40,7 +45,7 @@ fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expressi
         visited: &mut HashSet<String>,
     ) {
         if !visited.insert(name.to_string()) {
-            return; // already visited
+            return; // already visited or user-defined
         }
         if let Some(def) = index.get(name) {
             if let Expression::Apply(list) = def {
@@ -57,7 +62,7 @@ fn tree_shake(std_defs: Vec<Expression>, used: &HashSet<String>) -> Vec<Expressi
     }
 
     for name in used {
-        visit(name, &index, &mut kept, &mut visited);
+        visit(name, &index, &mut kept, visited);
     }
 
     kept
@@ -834,50 +839,50 @@ impl Expression {
         }
     }
 }
-#[allow(dead_code)]
-pub fn with_std(program: &str, std: &str) -> Result<Expression, String> {
-    match preprocess(&program) {
-        Ok(preprocessed) => {
-            let exprs = parse(&preprocessed).unwrap();
-            let mut desugared = Vec::new();
-            for expr in exprs {
-                let expr = desugar_tail_recursion(expr);
-                match desugar(expr) {
-                    Ok(expr) => desugared.push(expr),
-                    Err(e) => return Err(e),
-                }
-            }
-            match preprocess(&std) {
-                Ok(preprocessed_std) => {
-                    let exprs_std = parse(&preprocessed_std).unwrap();
-                    let mut desugared_std = Vec::new();
-                    for expr in exprs_std {
-                        match desugar(expr) {
-                            Ok(expr) => desugared_std.push(expr),
-                            Err(e) => return Err(e),
-                        }
-                    }
-                    let mut used = HashSet::new();
-                    for e in &desugared {
-                        collect_idents(e, &mut used);
-                    }
+// #[allow(dead_code)]
+// pub fn with_std(program: &str, std: &str) -> Result<Expression, String> {
+//     match preprocess(&program) {
+//         Ok(preprocessed) => {
+//             let exprs = parse(&preprocessed).unwrap();
+//             let mut desugared = Vec::new();
+//             for expr in exprs {
+//                 let expr = desugar_tail_recursion(expr);
+//                 match desugar(expr) {
+//                     Ok(expr) => desugared.push(expr),
+//                     Err(e) => return Err(e),
+//                 }
+//             }
+//             match preprocess(&std) {
+//                 Ok(preprocessed_std) => {
+//                     let exprs_std = parse(&preprocessed_std).unwrap();
+//                     let mut desugared_std = Vec::new();
+//                     for expr in exprs_std {
+//                         match desugar(expr) {
+//                             Ok(expr) => desugared_std.push(expr),
+//                             Err(e) => return Err(e),
+//                         }
+//                     }
+//                     let mut used = HashSet::new();
+//                     for e in &desugared {
+//                         collect_idents(e, &mut used);
+//                     }
 
-                    let shaken_std = tree_shake(desugared_std, &used);
+//                     let shaken_std = tree_shake(desugared_std, &used);
 
-                    let wrapped = Expression::Apply(
-                        std::iter::once(Expression::Word("do".to_string()))
-                            .chain(shaken_std.into_iter())
-                            .chain(desugared.into_iter())
-                            .collect(),
-                    );
-                    Ok(wrapped)
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        Err(e) => return Err(e),
-    }
-}
+//                     let wrapped = Expression::Apply(
+//                         std::iter::once(Expression::Word("do".to_string()))
+//                             .chain(shaken_std.into_iter())
+//                             .chain(desugared.into_iter())
+//                             .collect(),
+//                     );
+//                     Ok(wrapped)
+//                 }
+//                 Err(e) => return Err(e),
+//             }
+//         }
+//         Err(e) => return Err(e),
+//     }
+// }
 pub fn build(program: &str) -> Result<Expression, String> {
     match preprocess(&program) {
         Ok(preprocessed) => {
@@ -913,13 +918,29 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                         Err(e) => return Err(e),
                     }
                 }
+                let mut used: HashSet<String> = HashSet::new();
+                for e in &desugared {
+                    collect_idents(e, &mut used);
+                }
+                let mut definitions: HashSet<String> = HashSet::new();
+                for expr in &desugared {
+                    if let Expression::Apply(list) = expr {
+                        if let [Expression::Word(kw), Expression::Word(name), _rest @ ..] =
+                            &list[..]
+                        {
+                            if kw == "let" {
+                                definitions.insert(name.to_string());
+                            }
+                        }
+                    }
+                }
 
                 let mut used = HashSet::new();
                 for e in &desugared {
                     collect_idents(e, &mut used);
                 }
 
-                let shaken_std = tree_shake(std, &used);
+                let shaken_std = tree_shake(std, &used, &mut definitions);
 
                 let wrapped = Expression::Apply(
                     std::iter::once(Expression::Word("do".to_string()))

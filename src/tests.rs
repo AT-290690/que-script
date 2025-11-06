@@ -54,7 +54,7 @@ mod tests {
                 );
                 // Optionally, check that the type is Int
                 if let Ok(typ) = result {
-                    println!("{:?}", inp);
+                    // println!("{:?}", inp);
                     assert_eq!(
                         typ.to_string(),
                         *out,

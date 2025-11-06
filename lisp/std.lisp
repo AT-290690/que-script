@@ -1307,6 +1307,9 @@ q)))
 (let every? std/vector/every?)
 (let some? std/vector/some?)
 (let empty? std/vector/empty?)
+(let not-empty? std/vector/not-empty?)
+(let find std/vector/find-index)
+
 (let reverse std/vector/reverse)
 (let slice std/vector/slice)
 (let cons std/vector/cons)
@@ -1323,10 +1326,19 @@ q)))
 (let last std/vector/last)
 (let car std/vector/first)
 (let cdr (lambda xs (std/vector/slice xs 1 (length xs))))
+(let pair (lambda a b (tuple a b)))
+(let product std/vector/int/product)
 (let sum std/vector/int/sum)
 (let zip std/vector/tuple/zip)
 (let unzip std/vector/tuple/unzip)
 (let nl std/char/new-line)
+(let window std/vector/sliding-window)
+(let flat std/vector/flat-one)
+
+(let cartesian-product std/vector/cartesian-product)
+(let lcm std/int/lcm)
+(let gcd std/int/gcd)
+
 (let String->Vector std/convert/string->vector)
 (let Vector->String std/convert/vector->string)
 (let Chars->Integer std/convert/chars->integer)
@@ -1344,6 +1356,8 @@ q)))
 (let Set/difference std/vector/hash/set/difference)
 (let Set/xor std/vector/hash/set/xor)
 (let Set/union std/vector/hash/set/union)
+
+
 
 ; End of more fake words
 

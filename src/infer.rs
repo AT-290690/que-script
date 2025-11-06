@@ -86,7 +86,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 
         Expression::Apply(exprs) => {
             if exprs.is_empty() {
-                return Err("Syntax error: Empty application".to_string());
+                return Err("Error!: Empty application".to_string());
             }
 
             if let Expression::Word(func_name) = &exprs[0] {
@@ -758,6 +758,16 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             return Ok(Type::Char);
         } else if name == "tuple" {
             let args = &exprs[1..];
+            if args.len() != 2 {
+                return Err(format!(
+                    "Error! Tuples can only store 2 values but got {{{}}}",
+                    exprs
+                        .iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ));
+            }
             let mut elem_types = Vec::new();
             for arg in args {
                 match infer_expr(arg, ctx) {
