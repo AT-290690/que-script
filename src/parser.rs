@@ -169,6 +169,12 @@ fn preprocess(source: &str) -> Result<String, String> {
                 out.push_str("vector ");
             }
             ']' => out.push(')'),
+            '{' => {
+                out.push('(');
+                out.push_str("tuple ");
+            }
+            '}' => out.push(')'),
+            ']' => out.push(')'),
             '"' => {
                 let mut s = String::new();
                 while let Some(&next) = chars.peek() {
@@ -306,6 +312,36 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                                 ]),
                                             ]))
                                         }
+                                    }
+                                }
+                                Expression::Word(_) => { /* skip element */ }
+                                _ => {
+                                    return Err(
+                                        "lambda array element must be a word or '.'".to_string()
+                                    )
+                                }
+                            }
+                        }
+                        new_args.push(Expression::Word("_args".to_string() + &j.to_string()));
+                        continue;
+                    } else if array_kw == "tuple" {
+                        // replace this arg with _args
+                        let names = ["fst".to_string(), "snd".to_string()];
+                        for (i, elem) in elements.iter().enumerate() {
+                            match elem {
+                                Expression::Word(name) => {
+                                    if name != "." {
+                                        new_bindings.push(Expression::Apply(vec![
+                                            Expression::Word("let".to_string()),
+                                            Expression::Word(name.clone()),
+                                            Expression::Apply(vec![
+                                                Expression::Word(names[i].clone()),
+                                                Expression::Word(
+                                                    "_args".to_string() + &j.to_string(),
+                                                ),
+                                            ]),
+                                        ]))
+                                    } else {
                                     }
                                 }
                                 Expression::Word(_) => { /* skip element */ }

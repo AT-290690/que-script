@@ -122,7 +122,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         format!("var {} = ({})", name, val)
                     }
                     // vector literal - variadic: (vector a b c) -> `[a, b, c]`
-                    "vector" | "string" => {
+                    "vector" | "string" | "tuple" => {
                         let elems: Vec<String> =
                             items[1..].iter().map(|e| compile_expr_to_js(e)).collect();
                         format!("[{}]", elems.join(", "))
@@ -133,6 +133,8 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
+                    "fst" => format!("({}[{}])", compile_expr_to_js(&items[1]), 0),
+                    "snd" => format!("({}[{}])", compile_expr_to_js(&items[1]), 1),
                     "set!" => format!(
                         "({}[{}]={},0)",
                         compile_expr_to_js(&items[1]),

@@ -123,6 +123,18 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                         let inner = parse_type_hint(&items[1], ctx)?;
                         return Ok(Type::List(Box::new(inner)));
                     }
+                } else if t == "tuple" {
+                    if items.len() < 2 {
+                        return Err(format!(
+                            "Error! Tuple type must have at least one element: {}",
+                            expr.to_lisp()
+                        ));
+                    }
+                    let mut elems = Vec::new();
+                    for elem_expr in &items[1..] {
+                        elems.push(parse_type_hint(elem_expr, ctx)?);
+                    }
+                    return Ok(Type::Tuple(elems));
                 }
             }
             Err(format!(
@@ -155,8 +167,8 @@ fn deepest_type(t: &Type) -> &Type {
     }
 }
 
-fn infer_as(exrps: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
-    let args = &exrps[1..];
+pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
     if args.len() != 2 {
         return Err("Error! `as` expects exactly two arguments: (as expr Type)".to_string());
     }
@@ -165,12 +177,53 @@ fn infer_as(exrps: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
     let expr_type = infer_expr(&args[0], ctx)?;
     let type_hint = parse_type_hint(&args[1], ctx)?;
 
+    // 2️⃣ Handle tuple special case directly — before arity logic
+    match (&expr_type, &type_hint) {
+        (Type::Tuple(expr_elems), Type::Tuple(hint_elems)) => {
+            if expr_elems.len() != hint_elems.len() {
+                return Err(format!(
+                    "Error! Tuple length mismatch in `as`: {} vs {}\n(as {})",
+                    expr_elems.len(),
+                    hint_elems.len(),
+                    args.iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ));
+            }
+
+            // Create constraints for each element
+            for (e, h) in expr_elems.iter().zip(hint_elems.iter()) {
+                ctx.add_constraint(
+                    e.clone(),
+                    h.clone(),
+                    TypeError {
+                        variant: TypeErrorVariant::Source,
+                        expr: args.to_vec(),
+                    },
+                );
+            }
+
+            return Ok(type_hint);
+        }
+        (Type::Tuple(_), _) | (_, Type::Tuple(_)) => {
+            return Err(format!(
+                "Error! Cannot cast between tuple and non-tuple types\n(as {})",
+                args.iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+        _ => {}
+    }
+
     // 3️⃣ Compute arities
     let expr_arity = type_arity(&expr_type);
     let hint_arity = type_arity(&type_hint);
     let inner_expr_type = deepest_type(&expr_type);
-    // --- Determine if *deepest* inner type is a variable ---
     let is_expr_var = matches!(inner_expr_type, Type::Var(_));
+
     // --- If expr_type is a type variable, allow up to (≤) right-side arity ---
     if is_expr_var && expr_arity > hint_arity {
         return Err(format!(
@@ -179,7 +232,7 @@ fn infer_as(exrps: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
         ));
     }
 
-    // 4️⃣ Check if they differ (e.g., Int vs [Int], or [Int] vs [[Int]])
+    // 4️⃣ Check arity mismatch for lists/functions
     if !is_expr_var && expr_arity != hint_arity {
         return Err(format!(
             "Error! Type arity mismatch in `as`: left has arity {}, right has arity {} ({} vs {})\n(as {})",
@@ -187,20 +240,16 @@ fn infer_as(exrps: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
             hint_arity,
             expr_type,
             type_hint,
-            args.into_iter()
-                .map(|e| e.to_lisp())
-                .collect::<Vec<String>>()
-                .join(" ")
+            args.iter().map(|e| e.to_lisp()).collect::<Vec<_>>().join(" ")
         ));
     }
 
-    // 6️⃣ If both are lists (arity > 0), restrict element-wise match on inner type
+    // 5️⃣ Array element restriction (unchanged)
     if expr_arity > 0 {
         let inner_expr = inner_type(&expr_type);
         let inner_hint = inner_type(&type_hint);
 
         match (inner_expr, inner_hint) {
-            // scalar cross-casts allowed
             (Type::Int, Type::Int)
             | (Type::Int, Type::Bool)
             | (Type::Int, Type::Char)
@@ -217,9 +266,9 @@ fn infer_as(exrps: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
                     "Error! Invalid array cast in `as`: cannot cast {} to {}\n(as {})",
                     expr_type,
                     type_hint,
-                    args.into_iter()
+                    args.iter()
                         .map(|e| e.to_lisp())
-                        .collect::<Vec<String>>()
+                        .collect::<Vec<_>>()
                         .join(" ")
                 ));
             }
@@ -385,6 +434,7 @@ impl Unifier {
             Type::Function(a, b) => {
                 Type::Function(Box::new(self.apply(a)), Box::new(self.apply(b)))
             }
+            Type::Tuple(items) => Type::Tuple(items.iter().map(|t| self.apply(t)).collect()),
             other => other.clone(),
         }
     }
@@ -403,6 +453,7 @@ impl Unifier {
             }
             Type::List(inner) => self.occurs(var_id, inner),
             Type::Function(a, b) => self.occurs(var_id, a) || self.occurs(var_id, b),
+            Type::Tuple(items) => items.iter().any(|it| self.occurs(var_id, it)),
             _ => false,
         }
     }
@@ -433,6 +484,18 @@ impl Unifier {
             | (Type::Char, Type::Char)
             | (Type::Unit, Type::Unit) => Ok(()),
             (Type::List(ai), Type::List(bi)) => self.unify_applied(*ai, *bi),
+            (Type::Tuple(a_items), Type::Tuple(b_items)) => {
+                if a_items.len() != b_items.len() {
+                    return Err(format!(
+                        "Cannot unify tuples with different arity: {:?} vs {:?}",
+                        a_items, b_items
+                    ));
+                }
+                for (ai, bi) in a_items.into_iter().zip(b_items.into_iter()) {
+                    self.unify_one(ai, bi)?;
+                }
+                Ok(())
+            }
             (Type::Function(a1, a2), Type::Function(b1, b2)) => {
                 self.unify_applied(*a1, *b1)?;
                 self.unify_applied(*a2, *b2)
@@ -495,6 +558,19 @@ pub fn solve_constraints_list(
                 work.push_back((*a1, *b1, src.clone()));
                 work.push_back((*a2, *b2, src));
             }
+            (Type::Tuple(a_items), Type::Tuple(b_items)) => {
+                if a_items.len() != b_items.len() {
+                    return Err(format!(
+                        "{}\nError! Cannot unify tuples of different lengths ({} vs {})",
+                        src_to_pretty(&src),
+                        a_items.len(),
+                        b_items.len()
+                    ));
+                }
+                for (ai, bi) in a_items.into_iter().zip(b_items.into_iter()) {
+                    work.push_back((ai, bi, src.clone()));
+                }
+            }
             (a2, b2) if a2 == b2 => {} // ok
             (a2, b2) => {
                 // can't unify, attach source and return
@@ -513,17 +589,20 @@ pub fn solve_constraints_list(
 
 pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
     match ty {
-        Type::Var(var) => {
-            if let Some(t) = subst.get(&var.id) {
-                apply_subst_map_to_type(subst, t)
-            } else {
-                Type::Var(var.clone())
-            }
-        }
+        Type::Var(var) => match subst.get(&var.id) {
+            Some(t) => apply_subst_map_to_type(subst, t),
+            None => Type::Var(var.clone()),
+        },
         Type::List(inner) => Type::List(Box::new(apply_subst_map_to_type(subst, inner))),
         Type::Function(a, b) => Type::Function(
             Box::new(apply_subst_map_to_type(subst, a)),
             Box::new(apply_subst_map_to_type(subst, b)),
+        ),
+        Type::Tuple(items) => Type::Tuple(
+            items
+                .iter()
+                .map(|it| apply_subst_map_to_type(subst, it))
+                .collect(),
         ),
         other => other.clone(),
     }
@@ -677,6 +756,20 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
 
             return Ok(Type::Char);
+        } else if name == "tuple" {
+            let args = &exprs[1..];
+            let mut elem_types = Vec::new();
+            for arg in args {
+                match infer_expr(arg, ctx) {
+                    Ok(elem_type) => {
+                        elem_types.push(elem_type);
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
+            }
+            return Ok(Type::Tuple(elem_types));
         }
     }
     let func_expr = &exprs[0];
@@ -863,7 +956,35 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             ),
         );
     }
+    {
+        let a = fresh_var();
+        let b = fresh_var();
+        env.insert(
+            "fst".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap(), b.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Tuple(vec![a.clone(), b.clone()])),
+                    Box::new(a.clone()),
+                ),
+            ),
+        );
+    }
 
+    {
+        let a = fresh_var();
+        let b = fresh_var();
+        env.insert(
+            "snd".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap(), b.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Tuple(vec![a.clone(), b.clone()])),
+                    Box::new(b.clone()),
+                ),
+            ),
+        );
+    }
     // loop : Int -> Int -> (Int -> ε) -> Int
     {
         let e = fresh_var();

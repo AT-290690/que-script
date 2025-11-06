@@ -902,6 +902,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
 
         Expression::Word(name) => {
             match name.as_str() {
+                // TODO add get fst snd and other missing stuff from here
                 "true" => {
                     code.push(Instruction::PushBool(true));
                     Ok(())
@@ -1396,7 +1397,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         }
                         Ok(())
                     }
-                    "vector" | "string" => {
+                    "vector" | "string" | "tuple" => {
                         let count = exprs.len() - 1;
                         for arg in &exprs[1..] {
                             compile(arg, code)?;
@@ -1488,6 +1489,30 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         Ok(())
                     }
 
+                    "fst" => {
+                        if exprs.len() != 2 {
+                            return Err("Error! fst expects 1 arguments: tuple".to_string());
+                        }
+                        // push vector
+                        compile(&exprs[1], code)?;
+                        // push index
+                        code.push(Instruction::PushInt(0));
+                        // emit get
+                        code.push(Instruction::GetArray);
+                        Ok(())
+                    }
+                    "snd" => {
+                        if exprs.len() != 2 {
+                            return Err("Error! snd expects 1 arguments: tuple".to_string());
+                        }
+                        // push vector
+                        compile(&exprs[1], code)?;
+                        // push index
+                        code.push(Instruction::PushInt(1));
+                        // emit get
+                        code.push(Instruction::GetArray);
+                        Ok(())
+                    }
                     _ => match &exprs[0] {
                         Expression::Word(name) => {
                             // push all arguments first

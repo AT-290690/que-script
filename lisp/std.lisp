@@ -396,6 +396,17 @@
 (let std/vector/zip (lambda xs (std/vector/zipper (std/vector/first xs) (std/vector/second xs))))
 (let std/vector/unzip (lambda xs [ (std/vector/map xs std/vector/first) (std/vector/map xs std/vector/second) ]))
 
+
+(let std/vector/tuple/zipper (lambda a b (do
+      (let out [{ (get a 0) (get b 0) }])
+      (let process (lambda i (std/vector/set! out (length out) { (get a i) (get b i) })))
+      (loop 1 (length a) process)
+      out)))
+
+(let std/vector/tuple/zip (lambda xs (std/vector/tuple/zipper (fst xs) (snd xs))))
+(let std/vector/tuple/unzip (lambda xs { (std/vector/map xs (lambda x (fst x))) (std/vector/map xs (lambda x (snd x))) }))
+
+
 (let std/vector/slice (lambda xs start end (if (std/vector/empty? xs) xs (do
      (let bounds (- end start))
      (let out [])
@@ -1313,7 +1324,8 @@ q)))
 (let car std/vector/first)
 (let cdr (lambda xs (std/vector/slice xs 1 (length xs))))
 (let sum std/vector/int/sum)
-
+(let zip std/vector/tuple/zip)
+(let unzip std/vector/tuple/unzip)
 (let nl std/char/new-line)
 (let String->Vector std/convert/string->vector)
 (let Vector->String std/convert/vector->string)

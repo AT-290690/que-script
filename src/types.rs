@@ -29,6 +29,7 @@ pub enum Type {
     Function(Box<Type>, Box<Type>),
     List(Box<Type>),
     Unit,
+    Tuple(Vec<Type>),
 }
 
 impl fmt::Display for Type {
@@ -44,6 +45,14 @@ impl fmt::Display for Type {
                 _ => write!(f, "{} -> {}", from, to),
             },
             Type::List(inner) => write!(f, "[{}]", inner),
+            Type::Tuple(items) => {
+                let inner = items
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" * ");
+                write!(f, "{{{}}}", inner)
+            }
         }
     }
 }
@@ -257,6 +266,12 @@ impl Type {
                 Box::new(to.substitute(subst)),
             ),
             Type::List(inner) => Type::List(Box::new(inner.substitute(subst))),
+            Type::Tuple(items) => Type::Tuple(
+                items
+                    .iter()
+                    .map(|t| apply_subst_map_to_type(subst, t))
+                    .collect(),
+            ),
         }
     }
 
@@ -277,6 +292,11 @@ impl Type {
                 to.collect_free_vars(vars);
             }
             Type::List(inner) => inner.collect_free_vars(vars),
+            Type::Tuple(items) => {
+                for it in items {
+                    it.collect_free_vars(vars);
+                }
+            }
         }
     }
 }

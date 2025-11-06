@@ -35,7 +35,9 @@ mod tests {
             ("(vector (vector (vector 1)))", "[[[Int]]]"),
             ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
             ("(do (let fn (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn)", "Int -> Int -> Bool -> [Int -> Bool] -> Bool"),
-            ("(do (let Int 0) (let as (lambda . t t)) (let xs (as (vector) (vector Int))) xs)", "[Int]")
+            ("(do (let Int 0) (let as (lambda . t t)) (let xs (as (vector) (vector Int))) xs)", "[Int]"),
+            ("(tuple 0 true)", "{Int * Bool}"),
+            ("(vector (tuple 0 true) (tuple 1 false))", "[{Int * Bool}]")
         ];
 
         for (inp, out) in &test_cases {
@@ -110,6 +112,10 @@ Error! Cannot unify Int with Bool"#,
             (
                 "(do (let x 10) (let x 2))",
                 "Error! Variable 'x' already defined in this scope",
+            ),
+            (
+                "(vector (tuple 0 true) (tuple true 0))",
+                "Error! (vector (tuple 0 true) (tuple true 0))\nError! Cannot unify Int with Bool",
             ),
         ];
 
@@ -1058,7 +1064,17 @@ out
 [(part1 PARSED) (part2 PARSED)]"#, "[34241 51316]"
 
 
-)
+),
+(r#"(let fn (lambda { a b  } (do 
+(if (= b 1) [ a  ] [ false ])
+b
+)))
+(fn { true 3 })"#, "3"),
+(r#"(std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })"#, "[[1 true] [2 false] [3 true]]"),
+(r#"(std/vector/tuple/unzip 
+    (std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })
+)"#, "[[1 2 3] [true false true]]")
+
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
