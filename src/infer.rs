@@ -610,7 +610,14 @@ pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
 fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err("Error! Let requires exactly 2 arguments: variable and value".to_string());
+        return Err(format!(
+            "Error! Let requires exactly 2 arguments: variable and value\n({})",
+            exprs
+                .iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<_>>()
+                .join(" "),
+        ));
     }
 
     let var_expr = &args[0];

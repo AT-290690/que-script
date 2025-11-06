@@ -617,6 +617,63 @@
             (std/vector/hash/table/set! table key (+ (as v Int) 1)))
             (std/vector/hash/table/set! table key 1)))) (std/vector/buckets 64)))))
 
+(let std/vector/tuple/hash/table/set! (lambda table key value
+       (do
+         (let idx (std/int/hash table key))
+         (if (not (std/vector/in-bounds? table idx)) (set! table idx []) nil)
+         (let current (get table idx))
+         (let len (length current))
+         (let index (if (> len 0) (std/vector/find-index  current (lambda x (std/vector/string/match? (fst (get x 0)) key))) -1))
+         (let entry [{ key value }])
+         (if (= index -1)
+           (set! current (length current) entry)
+           (set! current index entry))
+         table)))
+
+
+(let std/vector/tuple/hash/table/has? (lambda table key (do
+         (let idx (std/int/hash table key))
+         (let current (std/vector/map (get table idx) (lambda x (fst (get x 0)))))
+         (and (std/vector/in-bounds? table idx)
+         (and (> (length current) 0)
+           (>= (std/vector/find-index current
+             (lambda x
+               (std/vector/string/match? x key))) 0))))))
+
+(let std/vector/tuple/hash/table/remove!
+ (lambda table key
+   (do
+     (let idx (std/int/hash table key))
+     (if (not (std/vector/in-bounds? table idx)) (set! table idx []) nil)
+     (let current (get table idx))
+     (let len (length current))
+     (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/string/match? (fst (get x 0)) key))) -1))
+     (let entry key)
+     (if (not (= index -1)) (do (std/vector/set! current index (std/vector/at current -1)) (std/vector/pop! current)) nil)
+     table)))
+
+
+(let std/vector/tuple/hash/table/get-helper (lambda table idx key (do
+   (let current (get table idx))
+   (let found-index (std/vector/find-index current (lambda x (std/vector/string/match? key (fst (get x 0))))))
+   (unless (= found-index -1) (get current found-index) []))))
+
+(let std/vector/tuple/hash/table/get (lambda table key (do
+     (let idx (std/int/hash table key))
+     (if (std/vector/in-bounds? table idx) (std/vector/tuple/hash/table/get-helper table idx key) []))))
+
+(let std/vector/tuple/hash/table/count (lambda arr 
+    (|> arr (std/vector/reduce (lambda table key (do 
+        (if (std/vector/tuple/hash/table/has? table key) 
+            (do 
+            (let v (snd (get (std/vector/tuple/hash/table/get table key))))
+            (std/vector/tuple/hash/table/set! table key (+ v 1)))
+            (std/vector/tuple/hash/table/set! table key 1)))) (std/vector/buckets 64)))))
+
+(let std/vector/tuple/hash/table/entries (lambda table (map (flat table) (lambda x { (fst (get x)) (snd (get x))}))))
+(let std/vector/tuple/hash/table/keys (lambda table (map (flat table) (lambda x (fst (get x))))))
+(let std/vector/tuple/hash/table/values (lambda table (map (flat table) (lambda x (snd (get x))))))
+
 (let std/vector/sliding-window (lambda xs size (cond 
      (std/vector/empty? xs) []
      (= size (length xs)) [xs]
@@ -1299,6 +1356,7 @@ q)))
 (let std/vector/2d/get* std/vector/get*)
 (let std/vector/3d/get* (lambda xs i j some none (if (std/vector/3d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))
 (let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))
+(let std/vector/enumerate (lambda xs (std/vector/tuple/zip { (std/vector/int/range 0 (- (length xs) 1)) xs })))
 
 ; Start of more fake keywords
 (let map std/vector/map)
@@ -1319,8 +1377,8 @@ q)))
 (let expt std/int/expt)
 (let odd? std/int/odd?)
 (let even? std/int/even?)
-(let upper? std/char/upper?)
-(let lower? std/char/lower?)
+(let upper std/char/upper)
+(let lower std/char/lower)
 (let match? std/vector/string/match?)
 (let digit? std/char/digit?)
 (let fill std/vector/2d/fill)
@@ -1341,6 +1399,7 @@ q)))
 (let nl std/char/new-line)
 (let window std/vector/sliding-window)
 (let flat std/vector/flat-one)
+(let enumerate std/vector/enumerate)
 
 (let cartesian-product std/vector/cartesian-product)
 (let lcm std/int/lcm)
@@ -1364,7 +1423,18 @@ q)))
 (let Set/xor std/vector/hash/set/xor)
 (let Set/union std/vector/hash/set/union)
 
+(let Table/entries std/vector/tuple/hash/table/entries)
+(let Table/keys std/vector/tuple/hash/table/keys)
+(let Table/values std/vector/tuple/hash/table/values)
 
+(let Table/get std/vector/tuple/hash/table/get)
+
+(let Table/has? std/vector/tuple/hash/table/has?)
+(let Table/set! std/vector/tuple/hash/table/set!)
+(let Table/remove! std/vector/tuple/hash/table/remove!)
+(let Table/count std/vector/tuple/hash/table/count)
+
+(let has? std/vector/in-bounds?)
 
 ; End of more fake words
 
