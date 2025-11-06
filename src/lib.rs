@@ -42,15 +42,15 @@ pub fn evaluate(program: String) -> *const u8 {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
                 Ok(typ) => match vm::run(&wrapped_ast) {
-                    Ok(res) => format!("{}\n{:?}", typ, res),
-                    Err(err) => err,
+                    Ok(res) => format!("0\n{}\n{:?}", typ, res),
+                    Err(err) => format!("2\n{}", err),
                 },
-                Err(err) => err,
+                Err(err) => format!("1\n{}", err),
             },
-            Err(err) => err,
+            Err(err) => format!("3\n{}", err),
         }
     } else {
-        "No expressions...".to_string()
+        "0 No expressions...".to_string()
     };
 
     write_to_output(&result)
@@ -62,10 +62,10 @@ pub fn run(program: String) -> *const u8 {
     let result = if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => match vm::run(&wrapped_ast) {
-                Ok(res) => format!("{:?}", res),
-                Err(err) => err,
+                Ok(res) => format!("0\n{:?}", res),
+                Err(err) => format!("2\n{}", err),
             },
-            Err(err) => err,
+            Err(err) => format!("1\n{}", err),
         }
     } else {
         "No expressions...".to_string()
@@ -80,7 +80,7 @@ pub fn js(program: String) -> *const u8 {
     let result = if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => js::compile_program_to_js(&wrapped_ast),
-            Err(e) => e,
+            Err(err) => format!("3\n{:?}", err),
         }
     } else {
         "No expressions...".to_string()
@@ -95,10 +95,10 @@ pub fn check(program: String) -> *const u8 {
     let result = if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
-                Ok(typ) => format!("{}", typ),
-                Err(e) => e,
+                Ok(typ) => format!("0\n{}", typ),
+                Err(err) => format!("1\n{}", err),
             },
-            Err(e) => e,
+            Err(err) => format!("3\n{}", err),
         }
     } else {
         "No expressions...".to_string()
@@ -110,8 +110,8 @@ pub fn check(program: String) -> *const u8 {
 #[wasm_bindgen]
 pub fn exec(program: String) -> *const u8 {
     let result = match vm::exe(parse_bitecode(&program).unwrap()) {
-        Ok(res) => format!("{:?}", res),
-        Err(err) => err,
+        Ok(res) => format!("0\n{:?}", res),
+        Err(err) => format!("2\n{}", err),
     };
 
     write_to_output(&result)
@@ -127,7 +127,7 @@ pub fn comp(program: String) -> *const u8 {
                 vm::compile(&wrapped_ast, &mut code);
                 format!("{:?}", code)
             }
-            Err(err) => err,
+            Err(err) => format!("3\n{:?}", err),
         }
     } else {
         "No expressions...".to_string()
