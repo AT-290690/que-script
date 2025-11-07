@@ -1026,7 +1026,7 @@ q)))
 (let std/vector/stack/not-empty? (lambda q (not (std/vector/deque/empty? q))))
 (let std/vector/stack/empty! std/vector/deque/empty!)
 (let std/vector/stack/push! (lambda stack item (std/vector/deque/append! stack item)))
-(let std/vector/stack/pop! (lambda stack (std/vector/deque/head! stack)))
+(let std/vector/stack/pop! (lambda stack def (std/vector/deque/head! stack def)))
 (let std/vector/stack/peek (lambda stack (std/vector/deque/last stack)))
 
 
@@ -1434,8 +1434,27 @@ q)))
 (let Table/remove! std/vector/tuple/hash/table/remove!)
 (let Table/count std/vector/tuple/hash/table/count)
 
-(let has? std/vector/in-bounds?)
+(let in-bounds? std/vector/in-bounds?)
 
+(let take/first std/vector/take)
+(let drop/first std/vector/drop)
+
+(let take/last std/vector/take/last)
+(let drop/last std/vector/drop/last)
+
+(let Que/new std/vector/deque/new)
+(let Que/empty? std/vector/deque/empty?)
+(let Que/not-empty? std/vector/queue/not-empty?)
+(let Que/empty! std/vector/deque/empty!)
+(let Que/enque! std/vector/queue/enqueue!)
+(let Que/deque-default! (lambda def queue (std/vector/deque/tail! queue def)))
+(let Que/peek std/vector/deque/first)
+(let Que/push! std/vector/deque/append!)
+(let Que/pop-default! (lambda def queue (std/vector/deque/head! queue def)))
+(let Que/prepend! std/vector/deque/prepend!) 
+(let Que/first std/vector/deque/first)
+(let Que/tail-default! (lambda def queue (std/vector/deque/tail! queue def)))
+(let Que/append! std/vector/deque/append!)
 ; End of more fake words
 
 ; Unsafe code 
