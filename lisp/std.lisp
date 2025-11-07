@@ -1400,6 +1400,11 @@ q)))
 (let window std/vector/sliding-window)
 (let flat std/vector/flat-one)
 (let enumerate std/vector/enumerate)
+(let clamp std/int/clamp)
+(let clamp-range std/int/clamp-range)
+(let at std/vector/at)
+(let emod std/int/euclidean-mod)
+(let swap! std/vector/swap!)
 
 (let cartesian-product std/vector/cartesian-product)
 (let lcm std/int/lcm)
@@ -1455,6 +1460,7 @@ q)))
 (let Que/first std/vector/deque/first)
 (let Que/tail-default! (lambda def queue (std/vector/deque/tail! queue def)))
 (let Que/append! std/vector/deque/append!)
+
 ; End of more fake words
 
 ; Unsafe code 
