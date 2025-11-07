@@ -1073,7 +1073,10 @@ b
 (r#"(std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })"#, "[[1 true] [2 false] [3 true]]"),
 (r#"(std/vector/tuple/unzip 
     (std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })
-)"#, "[[1 2 3] [true false true]]")
+)"#, "[[1 2 3] [true false true]]"),
+
+(r#"(let rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
+(rec { 1 1 } { true 10 })"#, "[false 12]")
 
         ];
         let std_ast = crate::baked::load_ast();

@@ -889,9 +889,8 @@ pub fn build(program: &str) -> Result<Expression, String> {
             let mut desugared = Vec::new();
 
             for expr in parse(&preprocessed).unwrap() {
-                let expr = desugar_tail_recursion(expr);
                 match desugar(expr) {
-                    Ok(expr) => desugared.push(expr),
+                    Ok(expr) => desugared.push(desugar_tail_recursion(expr)),
                     Err(e) => return Err(e),
                 }
             }
@@ -912,9 +911,8 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
             Ok(exprs) => {
                 let mut desugared = Vec::new();
                 for expr in exprs {
-                    let expr = desugar_tail_recursion(expr);
                     match desugar(expr) {
-                        Ok(expr) => desugared.push(expr),
+                        Ok(expr) => desugared.push(desugar_tail_recursion(expr)),
                         Err(e) => return Err(e),
                     }
                 }
@@ -1208,7 +1206,7 @@ fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
                 }
 
                 Expression::Word(op) => match op.as_str() {
-                    "if" | "unless" => {
+                    "if" => {
                         // tail position is inside then and else branches
                         if items.len() >= 3 {
                             contains_tail_call_to(&items[2], fn_name)

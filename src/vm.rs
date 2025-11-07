@@ -1664,6 +1664,13 @@ impl<'a> P<'a> {
             .map_err(|e| format!("Invalid number `{}`: {}", slice, e))
     }
 
+    fn parse_bool(&mut self) -> Result<bool, String> {
+        self.skip_ws();
+        let name = self.parse_ident();
+        name.parse::<bool>()
+            .map_err(|e| format!("Error Invalid boolean `{}`: {}", name, e))
+    }
+
     fn parse_ident(&mut self) -> String {
         self.skip_ws();
         let mut out = String::new();
@@ -1785,6 +1792,13 @@ impl<'a> P<'a> {
                     self.expect_str(")")?;
                     Ok(Instruction::PushInt(n))
                 }
+                "PushBool" => {
+                    self.skip_ws();
+                    let n = self.parse_bool()?;
+                    self.skip_ws();
+                    self.expect_str(")")?;
+                    Ok(Instruction::PushBool(n))
+                }
                 "Call" => {
                     self.skip_ws();
                     let n = self.parse_number()? as usize;
@@ -1862,6 +1876,7 @@ impl<'a> P<'a> {
     fn parse_instruction_named(&self, name: &str) -> Result<Instruction, String> {
         match name {
             "PushInt" => Err("Error! PushInt requires an argument".into()),
+            "PushBool" => Err("Error! PushBool requires an argument".into()),
             // LoadVar without parens isn't used in your data,but map to error to be explicit
             // You could accept bare identifiers and try to map them to LoadVar with that name,if desired.
             "MakeLambda" => Err("Error! MakeLambda expects args".into()),
