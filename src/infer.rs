@@ -294,7 +294,14 @@ fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         if let Expression::Word(name) = &args[i] {
             param_names.push(name.clone());
         } else {
-            return Err("Error! Lambda parameters must be variable names".to_string());
+            return Err(format!(
+                "Error! Lambda parameters must be variable names\n({})",
+                exprs
+                    .iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ));
         }
     }
 
