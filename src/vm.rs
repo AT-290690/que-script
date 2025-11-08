@@ -912,13 +912,24 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     Ok(())
                 }
                 // push a closure representing these
-                "/" | "/#" => {
+                "/" | "/#" | "/." => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Div,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "*" | "*#" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::Mult,
                         ],
                     ));
                     Ok(())
@@ -952,17 +963,6 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Sub,
-                        ],
-                    ));
-                    Ok(())
-                }
-                "*" | "*#" => {
-                    code.push(Instruction::MakeLambda(
-                        vec!["a".to_string(), "b".to_string()],
-                        vec![
-                            Instruction::LoadVar("a".to_string()),
-                            Instruction::LoadVar("b".to_string()),
-                            Instruction::Mult,
                         ],
                     ));
                     Ok(())
@@ -1160,7 +1160,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Mult);
                         Ok(())
                     }
-                    "/" | "/#" => {
+                    "/" | "/#" | "/." => {
                         if exprs.len() != 3 {
                             return Err("Error! / expects exactly 2 arguments".to_string());
                         }

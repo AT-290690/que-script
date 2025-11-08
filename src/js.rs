@@ -7,6 +7,8 @@ fn ident(name: &str) -> String {
         "+" | "+#" => "(a,b)=>a+b".to_string(),
         "-" | "-#" => "(a,b)=>a-b".to_string(),
         "/" | "/#" => "(a,b)=>(a/b)|0".to_string(),
+        // float division
+        "/." => "(a,b)=>a/b".to_string(),
         "*" | "*#" => "(a,b)=>a*b".to_string(),
         "mod" => "(a,b)=>a%b".to_string(),
         "=" | "=?" | "=#" => "(a,b)=>a==b".to_string(),
@@ -39,8 +41,6 @@ fn ident(name: &str) -> String {
         "/=" => "__div_by".to_string(),
         "**" => "__exp".to_string(),
         "=!" => "__set".to_string(),
-        "+." => "__get_pos".to_string(),
-        "-." => "__get_neg".to_string(),
         "=!" => "__set".to_string(),
         "true" => "true".to_string(),
         "false" => "false".to_string(),
@@ -163,6 +163,12 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                     ),
                     "/" | "/#" => format!(
                         "(({} / {}) | 0)",
+                        compile_expr_to_js(&items[1]),
+                        compile_expr_to_js(&items[2])
+                    ),
+                    // float division
+                    "/." => format!(
+                        "({} / {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),

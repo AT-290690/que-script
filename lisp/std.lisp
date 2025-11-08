@@ -131,8 +131,7 @@
           (and a b) true 
           (and (not a) (not b)) true
           false)))
-(let +. (lambda xs index (get xs index)))
-(let -. (lambda xs index (get xs (- (length xs) index))))
+
 (let int (lambda value (if (std/int/safe? value) [ value ] [ 0 ])))
 (let box (lambda value [ value ]))
 (let set (lambda vrbl x (std/vector/set! vrbl 0 x)))

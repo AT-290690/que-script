@@ -618,7 +618,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 r#"(let rev (lambda xs rev 
     (if (std/vector/empty? xs) 
          rev 
-        (rev (std/vector/drop/last xs 1) (std/vector/append! rev (-. xs 1))))))
+        (rev (std/vector/drop/last xs 1) (std/vector/append! rev (std/vector/at xs -1))))))
 ;
 (rev [ 1 2 3 4 5 ] [])"#,
                 "[5 4 3 2 1]",
@@ -1093,7 +1093,7 @@ b
                                     }
                                     Err(e) => {
                                         // to figure out which test failed due to run time Error!
-                                        // println!("{:?}", inp);
+                                        println!("{:?}", inp);
                                         panic!("Failed tests because {}", e)
                                     }
                                 }
