@@ -1110,6 +1110,28 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
+                "fst" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::PushInt(0),
+                            Instruction::GetArray,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "snd" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::PushInt(1),
+                            Instruction::GetArray,
+                        ],
+                    ));
+                    Ok(())
+                }
                 _ => {
                     code.push(Instruction::LoadVar(name.clone()));
                     Ok(())

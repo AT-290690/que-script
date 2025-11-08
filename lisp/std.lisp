@@ -1256,6 +1256,77 @@ q)))
         (set i (+ (get i) 1)))))
       (if (true? result) true false)))))))
 
+(let std/int/big/greater-or-equal? (lambda a b (do
+  (if (> (length a) (length b)) true
+  (if (< (length a) (length b)) false
+    ; Equal length, compare digit by digit
+    (do
+      (integer i 0)
+      (boolean result true) ; assume a >= b
+      (loop (< (get i) (length a)) (lambda (do
+        (let da (get a (get i)))
+        (let db (get b (get i)))
+        (if (> da db) (do
+          (boole-set result true)
+          (set i (length a))))
+        (if (< da db) (do
+          (boole-set result false)
+          (set i (length a))))
+        (set i (+ (get i) 1)))))
+      (if (true? result) true false)))))))
+
+(let std/int/big/less-than? (lambda a b (do
+  (if (< (length a) (length b)) true
+  (if (> (length a) (length b)) false
+    ; Equal length, check for strict less (not equal)
+    (do
+      (integer i 0)
+      (boolean found-less false) ; true if a < b at some digit
+      (loop (< (get i) (length a)) (lambda (do
+        (let da (get a (get i)))
+        (let db (get b (get i)))
+        (if (< da db) (do
+          (boole-set found-less true)
+          (set i (length a))))
+        (if (> da db) (do
+          (set i (length a)))) ; stop on a > b, keep found-less false
+        (set i (+ (get i) 1)))))
+      (if (true? found-less) true false)))))))
+
+(let std/int/big/greater-than? (lambda a b (do
+  (if (> (length a) (length b)) true
+  (if (< (length a) (length b)) false
+    ; Equal length, check for strict greater (not equal)
+    (do
+      (integer i 0)
+      (boolean found-greater false) ; true if a > b at some digit
+      (loop (< (get i) (length a)) (lambda (do
+        (let da (get a (get i)))
+        (let db (get b (get i)))
+        (if (> da db) (do
+          (boole-set found-greater true)
+          (set i (length a))))
+        (if (< da db) (do
+          (set i (length a)))) ; stop on a < b, keep found-greater false
+        (set i (+ (get i) 1)))))
+      (if (true? found-greater) true false)))))))
+
+(let std/int/big/equal? (lambda a b (do
+  (if (< (length a) (length b)) false
+  (if (> (length a) (length b)) false
+    ; Equal length, compare digit by digit
+    (do
+      (integer i 0)
+      (boolean result true) ; assume equal until mismatch
+      (loop (< (get i) (length a)) (lambda (do
+        (let da (get a (get i)))
+        (let db (get b (get i)))
+        (if (not (= da db)) (do
+          (boole-set result false)
+          (set i (length a))))
+        (set i (+ (get i) 1)))))
+      (if (true? result) true false)))))))
+
 (let std/int/big/div (lambda dividend divisor (do
   (let result (as [] [Int]))
   (let current [[]])
@@ -1291,6 +1362,7 @@ q)))
 (let std/int/big/ceil/div (lambda a b (std/int/big/div 
     (std/int/big/sub (std/int/big/add a b) [ 1 ]) b)))
 (let std/vector/int/big/sum (lambda xs (std/vector/reduce xs (lambda a b (std/int/big/add a b)) [ 0 ] )))
+(let std/vector/int/big/product (lambda xs (std/vector/reduce xs (lambda a b (std/int/big/mul a b)) [ 1 ] )))
 (let std/int/big/new (lambda str (std/convert/chars->digits str)))
 (let std/int/pow/big (lambda n pow (do
   ; Initialize digits array with the first digit
@@ -1460,6 +1532,24 @@ q)))
 (let Que/first std/vector/deque/first)
 (let Que/tail-default! (lambda def queue (std/vector/deque/tail! queue def)))
 (let Que/append! std/vector/deque/append!)
+
+(let BigInt/add std/int/big/add)
+(let BigInt/sub std/int/big/sub)
+(let BigInt/mul std/int/big/mul)
+(let BigInt/lte? std/int/big/less-or-equal?)
+(let BigInt/gte? std/int/big/greater-or-equal?)
+(let BigInt/lt? std/int/big/less-than?)
+(let BigInt/gt? std/int/big/greater-than?)
+(let BigInt/equal? std/int/big/equal?)
+(let BigInt/div std/int/big/div)
+(let BigInt/square std/int/big/square)
+(let BigInt/div/floor std/int/big/floor/div)
+(let BigInt/div/ceal std/int/big/ceil/div)
+(let BigInt/sum std/vector/int/big/sum)
+(let BigInt/product std/vector/int/big/product)
+(let BigInt/new std/int/big/new)
+(let BigInt/pow std/int/big/pow)
+(let BigInt/expt std/int/big/expt)
 
 ; End of more fake words
 
