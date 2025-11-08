@@ -1537,10 +1537,14 @@ q)))
 (let Set/difference std/vector/hash/set/difference)
 (let Set/xor std/vector/hash/set/xor)
 (let Set/union std/vector/hash/set/union)
+(let Set/add! (lambda table item (do (std/vector/hash/set/add! table item) nil)))
+(let Set/remove! (lambda table (do (std/vector/hash/set/remove! table) nil)))
 
 (let Table/entries std/vector/tuple/hash/table/entries)
 (let Table/keys std/vector/tuple/hash/table/keys)
 (let Table/values std/vector/tuple/hash/table/values)
+
+(let Set/values std/vector/tuple/hash/table/keys)
 
 (let Table/get std/vector/tuple/hash/table/get)
 
