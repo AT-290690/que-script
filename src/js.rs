@@ -25,6 +25,9 @@ fn ident(name: &str) -> String {
         "&" => "(a,b)=>a&b".to_string(),
         "~" => "(a)=>~a".to_string(),
 
+        "fst" => "(a)=>a[0]".to_string(),
+        "snd" => "(a)=>a[1]".to_string(),
+
         "var" => "__var".to_string(),
         "const" => "__const".to_string(),
 
@@ -42,6 +45,7 @@ fn ident(name: &str) -> String {
         "true" => "true".to_string(),
         "false" => "false".to_string(),
         "null" => "__null".to_string(),
+
         "function" => "__function".to_string(),
         _ => {
             let mut s = String::new();
