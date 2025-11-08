@@ -400,10 +400,10 @@ Error! Cannot unify Int with Bool"#,
 
 (let parse (lambda input (|>
                             input
-                            (std/vector/string/lines)
+                            (std/vector/char/lines)
                             (std/vector/map (lambda word (|>
                                                       word
-                                                      (std/vector/string/words)
+                                                      (std/vector/char/words)
                                                       (std/vector/filter std/vector/not-empty?)
                                                       (std/vector/map std/convert/chars->integer)))))))
 
@@ -431,7 +431,7 @@ Error! Cannot unify Int with Bool"#,
             ),
             (
                 r#"
-(let parse (lambda input (|> input (std/vector/string/lines) (std/vector/map std/convert/chars->integer))))
+(let parse (lambda input (|> input (std/vector/char/lines) (std/vector/map std/convert/chars->integer))))
 (let part1 (lambda input (do 
     (let min (std/vector/int/minimum input))
     (|> input
@@ -557,8 +557,8 @@ C:=,-,+,+,=,-,+,+,=,-
 D:=,=,=,+,=,=,=,+,=,=")
 
 (let parse (lambda input (do 
-(|> input (std/vector/string/lines) (std/vector/map (lambda x (do 
-    (let y (std/vector/string/commas x))
+(|> input (std/vector/char/lines) (std/vector/map (lambda x (do 
+    (let y (std/vector/char/commas x))
     (set! y 0 (get (std/convert/string->vector (get y 0) std/char/colon) 1))
     (std/vector/flat-one y)))))
 )))
@@ -569,7 +569,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (=# x std/char/equal) (std/vector/append! a (std/vector/last a))
     (std/vector/append! a (std/vector/last a)))))
 (let part1 (lambda xs (do
-    (let letters (|> input (std/vector/string/lines) (std/vector/map std/vector/first)))
+    (let letters (|> input (std/vector/char/lines) (std/vector/map std/vector/first)))
     (|> xs (std/vector/map (lambda x (|> x (std/vector/reduce app [0])))) 
     (std/vector/map std/vector/int/sum)
     (std/vector/map/i (lambda x i [i (+ x 100)]))
@@ -610,7 +610,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[true false]",
             ),
             (
-                r#"(let palindrome? (lambda str (std/vector/string/match? str (std/vector/reverse str))))
+                r#"(let palindrome? (lambda str (std/vector/char/match? str (std/vector/reverse str))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[true false]",
             ),
@@ -903,7 +903,7 @@ Z=__..
 (std/vector/flat-one)
 )]"#, "[[46 46 46 46 46 46 95 46 46 46 95 46 46 95 95 95 95 95 46 46 95 95 46 95 95 95 95 95 46 95 46 46 95 46 46 95 46 46 46 95 46 95 46 95 46 95 95 95 95 46 46 95 95 95 46 46 46 95 95 46 46 46 46 95] [72 69 76 76 79 44 87 79 82 76 68 46 49 50 51 52]]"),
 (r#"
-(let N 8)
+(let N 9)
 (let matrix (|> (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda . 0))))))
 (let add-glider! (lambda matrix y x (do 
   (set! (get matrix (+ y 2)) (+ x 1) 1)
@@ -938,7 +938,7 @@ Z=__..
                               (std/convert/vector/3d->string std/char/new-line std/char/space)))))
 (|> matrix (gof) (gof) (gof) (gof) (gof) (gof) (gof) (gof))"#, "[[0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 1 0 0 0 0] [0 0 0 0 0 1 0 0 0] [0 0 0 1 1 1 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0]]"),
 
-(r#"(let *RES* 50)
+(r#"(let *RES* 51)
 (integer generation 0)
 (variable cells (std/vector/int/zeroes *RES*))
 (let ruleset [ 0 1 0 1 1 0 1 0 ])
@@ -1007,7 +1007,7 @@ out
 8 6 4 4 1
 1 3 6 7 9")
 
-(let parse (lambda input (|> input (std/vector/string/lines) (std/vector/map (lambda l (|> l (std/vector/string/words) (std/vector/map std/convert/chars->integer)))))))
+(let parse (lambda input (|> input (std/vector/char/lines) (std/vector/map (lambda l (|> l (std/vector/char/words) (std/vector/map std/convert/chars->integer)))))))
 
 (let part1 (lambda input (|> input 
     (std/vector/filter (lambda line (do
@@ -1037,7 +1037,7 @@ out
 100756")
 
 (let parse (lambda input 
-    (|> input (std/vector/string/lines) (std/vector/map std/convert/chars->integer))))
+    (|> input (std/vector/char/lines) (std/vector/map std/convert/chars->integer))))
 
 (let PARSED (parse INPUT))
 

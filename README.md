@@ -344,7 +344,7 @@ const parse = (str) => {
   if (str[0] === "[") return JSON.parse(str.replaceAll(" ", ","));
   else return [];
 };
-const N = 8;
+const N = 9;
 const init = `(let N ${N})
 (let GRID (|> (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda . 0))))))
 (let add-glider! (lambda GRID y x (do 

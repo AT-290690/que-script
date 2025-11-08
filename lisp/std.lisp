@@ -139,6 +139,7 @@
 (let =! (lambda vrbl x (std/vector/set! vrbl 0 x)))
 (let boole-set (lambda vrbl x (std/vector/set! vrbl 0 (if x true false))))
 (let boole-eqv (lambda a b (=? (get a) (get b))))
+(let boolean/set (lambda vrbl x (std/vector/set! vrbl 0 (if x true false))))
 (let true? (lambda vrbl (if (get vrbl) true false)))
 (let false? (lambda vrbl (if (get vrbl) false true)))
 (let += (lambda vrbl n (=! vrbl (+ (get vrbl) n))))
@@ -223,14 +224,20 @@
  (let std/vector/int/ones (lambda n (do
      (let out [ 1 ])
      (let process (lambda i (std/vector/set! out (length out) 1)))
-     (loop 0 n process)
+     (loop 1 n process)
      out))) 
 
  (let std/vector/int/zeroes (lambda n (do
      (let out [ 0 ])
      (let process (lambda i (std/vector/set! out (length out) 0)))
-     (loop 0 n process)
-     out))) 
+     (loop 1 n process)
+     out)))
+
+(let std/vector/char/blanks (lambda n (do
+    (let out [ std/char/empty ])
+    (let process (lambda i (std/vector/set! out (length out) std/char/empty)))
+    (loop 1 n process)
+    out))) 
 
 (let std/vector/count-of (lambda xs fn? (length (std/vector/filter xs fn?))))
 (let std/vector/int/count (lambda input item (std/vector/count-of input (lambda x (= x item)))))
@@ -464,10 +471,34 @@
      (loop 1 size (lambda . (std/vector/set! out (length out) [])))
      out)))
 
-(let std/vector/string/match? (lambda a b (and (= (length a) (length b)) (|>
+(let std/vector/char/equal? (lambda a b (and (= (length a) (length b)) (|>
   a
   (std/vector/zipper b)
   (std/vector/every? (lambda x (=# (get x 0) (get x 1))))))))
+
+(let std/vector/char/greater? (lambda A B (and (not (std/vector/char/equal? A B)) (do
+    (let a (if (< (length A) (length B)) (std/vector/cons! A (std/vector/char/blanks (- (length B) (length A)))) A))
+    (let b (if (> (length A) (length B)) (std/vector/cons! B (std/vector/char/blanks (- (length A) (length B)))) B))
+    (let pairs (std/vector/reverse (std/vector/zipper a b)))
+    (let tail-call/string/greater (lambda is (unless (std/vector/empty? pairs) (do 
+        (let current (std/vector/pop-and-get! pairs))
+        (if (=# (std/vector/first current) (std/vector/second current)) (tail-call/string/greater is) (># (std/vector/first current) (std/vector/second current))))
+        is)))
+    (tail-call/string/greater false)))))
+
+(let std/vector/char/lesser? (lambda A B (and (not (std/vector/char/equal? A B)) (do
+    (let a (if (< (length A) (length B)) (std/vector/cons! A (std/vector/char/blanks (- (length B) (length A)))) A))
+    (let b (if (> (length A) (length B)) (std/vector/cons! B (std/vector/char/blanks (- (length A) (length B)))) B))
+    (let pairs (std/vector/reverse (std/vector/zipper a b)))
+    (let tail-call/string/lesser (lambda is (unless (std/vector/empty? pairs) (do 
+        (let current (std/vector/pop-and-get! pairs))
+        (if (=# (std/vector/first current) (std/vector/second current)) (tail-call/string/lesser is) (<# (std/vector/first current) (std/vector/second current))))
+        is)))
+    (tail-call/string/lesser false)))))
+    
+(let std/vector/char/match? std/vector/char/equal?)
+(let std/vector/char/greater-or-equal? (lambda A B (or (std/vector/char/equal? A B) (std/vector/char/greater? A B))))
+(let std/vector/char/lesser-or-equal? (lambda A B (or (std/vector/char/equal? A B) (std/vector/char/lesser? A B))))
 
 (let std/vector/partition (lambda xs n (if (= n (length xs)) [xs] (do 
     (let a [])
@@ -534,7 +565,7 @@
      (let current (get table idx))
      (and (std/vector/in-bounds? table idx)
                   (and (> (length current) 0)
-                       (>= (std/vector/find-index current (lambda x (std/vector/string/match? x key))) 0))))))
+                       (>= (std/vector/find-index current (lambda x (std/vector/char/equal? x key))) 0))))))
 
 (let std/vector/hash/table/has? (lambda table key (do
          (let idx (std/int/hash table key))
@@ -543,7 +574,7 @@
          (and (> (length current) 0)
            (>= (std/vector/find-index current
              (lambda x
-               (std/vector/string/match? x key))) 0))))))
+               (std/vector/char/equal? x key))) 0))))))
 
 (let std/vector/hash/set/add!
      (lambda table key
@@ -553,7 +584,7 @@
          (let item (get table idx))
          (let current (as item [[Char]]))
          (let len (length current))
-         (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/string/match? x key))) -1))
+         (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? x key))) -1))
          (let entry key)
          (if (= index -1)
            (std/vector/set! current (length current) entry)
@@ -567,7 +598,7 @@
      (let item (get table idx))
      (let current (as item [[Char]]))
      (let len (length current))
-     (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/string/match? x key))) -1))
+     (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? x key))) -1))
      (let entry key)
      (if (not (= index -1)) (do (std/vector/set! current index (std/vector/at current -1)) (std/vector/pop! current)) nil)
      table)))
@@ -579,7 +610,7 @@
          (let item (get table idx))
          (let current (as item [[[Char]]]))
          (let len (length current))
-         (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/string/match? (as (get x 0) [Char]) key))) -1))
+         (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (as (get x 0) [Char]) key))) -1))
          (let entry [ key [(Int->Char value)] ])
          (if (= index -1)
            (std/vector/set! current (length current) entry)
@@ -592,7 +623,7 @@
        (if (not (std/vector/in-bounds? table idx)) (std/vector/set! table idx []) nil)
        (let current (get table idx))
        (let len (length current))
-       (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/string/match? (get x 0) key))) -1))
+       (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (get x 0) key))) -1))
        (if (not (= index -1)) (do (std/vector/set! current index (std/vector/at current -1)) (std/vector/pop! current)) nil)
        table)))
 
@@ -602,7 +633,7 @@
 
 (let std/vector/hash/table/get-helper (lambda table idx key (do
    (let current (get table idx))
-   (let found-index (std/vector/find-index current (lambda x (std/vector/string/match? key (as (get x 0) [Char])))))
+   (let found-index (std/vector/find-index current (lambda x (std/vector/char/equal? key (as (get x 0) [Char])))))
    (unless (= found-index -1) (get current found-index 1) []))))
 
 (let std/vector/hash/table/get (lambda table key (do
@@ -623,7 +654,7 @@
          (if (not (std/vector/in-bounds? table idx)) (set! table idx []) nil)
          (let current (get table idx))
          (let len (length current))
-         (let index (if (> len 0) (std/vector/find-index  current (lambda x (std/vector/string/match? (fst (get x 0)) key))) -1))
+         (let index (if (> len 0) (std/vector/find-index  current (lambda x (std/vector/char/equal? (fst (get x 0)) key))) -1))
          (let entry [{ key value }])
          (if (= index -1)
            (set! current (length current) entry)
@@ -638,7 +669,7 @@
          (and (> (length current) 0)
            (>= (std/vector/find-index current
              (lambda x
-               (std/vector/string/match? x key))) 0))))))
+               (std/vector/char/equal? x key))) 0))))))
 
 (let std/vector/tuple/hash/table/remove!
  (lambda table key
@@ -647,7 +678,7 @@
      (if (not (std/vector/in-bounds? table idx)) (set! table idx []) nil)
      (let current (get table idx))
      (let len (length current))
-     (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/string/match? (fst (get x 0)) key))) -1))
+     (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (fst (get x 0)) key))) -1))
      (let entry key)
      (if (not (= index -1)) (do (std/vector/set! current index (std/vector/at current -1)) (std/vector/pop! current)) nil)
      table)))
@@ -655,7 +686,7 @@
 
 (let std/vector/tuple/hash/table/get-helper (lambda table idx key (do
    (let current (get table idx))
-   (let found-index (std/vector/find-index current (lambda x (std/vector/string/match? key (fst (get x 0))))))
+   (let found-index (std/vector/find-index current (lambda x (std/vector/char/equal? key (fst (get x 0))))))
    (unless (= found-index -1) (get current found-index) []))))
 
 (let std/vector/tuple/hash/table/get (lambda table key (do
@@ -698,7 +729,7 @@
 (let std/convert/string->vector (lambda str char (|> str
               (std/vector/reduce(lambda a b (do
               (let prev (std/vector/at a -1))
-                (if (std/vector/string/match? [b] [char])
+                (if (std/vector/char/equal? [b] [char])
                     (std/vector/set! a (length a) [])
                     (std/vector/set! prev (length prev) b)) a))
               [[]])
@@ -1053,9 +1084,9 @@ q)))
 
 (let std/vector/concat/with (lambda xs ch (std/vector/reduce/i xs (lambda a b i (if (and (> i 0) (< i (length xs))) (std/vector/cons (std/vector/cons a [ ch ]) b) (std/vector/cons a b))) [])))
 
-(let std/vector/string/lines (lambda xs (std/convert/string->vector xs std/char/new-line)))
-(let std/vector/string/words (lambda xs (std/convert/string->vector xs std/char/space)))
-(let std/vector/string/commas (lambda xs (std/convert/string->vector xs std/char/comma)))
+(let std/vector/char/lines (lambda xs (std/convert/string->vector xs std/char/new-line)))
+(let std/vector/char/words (lambda xs (std/convert/string->vector xs std/char/space)))
+(let std/vector/char/commas (lambda xs (std/convert/string->vector xs std/char/comma)))
 (let std/vector/int/pair/sub (lambda xs (- (. xs 0) (. xs 1))))
 (let std/vector/int/pair/add (lambda xs (+ (. xs 0) (. xs 1))))
 (let std/vector/int/pair/mult (lambda xs (* (. xs 0) (. xs 1))))
@@ -1234,7 +1265,7 @@ q)))
   (|> digits (std/vector/reduce (lambda a b (if
   (and (true? tr) (std/int/zero? b)) a
     (do
-      (if (true? tr) (boole-set tr false))
+      (if (true? tr) (boolean/set tr false))
       (std/vector/cons! a [b])))) [])))))
 
 (let std/int/big/less-or-equal? (lambda a b (do
@@ -1248,10 +1279,10 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (< da db) (do
-          (boole-set result true)
+          (boolean/set result true)
           (set i (length a))))
         (if (> da db) (do
-          (boole-set result false)
+          (boolean/set result false)
           (set i (length a))))
         (set i (+ (get i) 1)))))
       (if (true? result) true false)))))))
@@ -1267,10 +1298,10 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (> da db) (do
-          (boole-set result true)
+          (boolean/set result true)
           (set i (length a))))
         (if (< da db) (do
-          (boole-set result false)
+          (boolean/set result false)
           (set i (length a))))
         (set i (+ (get i) 1)))))
       (if (true? result) true false)))))))
@@ -1286,7 +1317,7 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (< da db) (do
-          (boole-set found-less true)
+          (boolean/set found-less true)
           (set i (length a))))
         (if (> da db) (do
           (set i (length a)))) ; stop on a > b, keep found-less false
@@ -1304,7 +1335,7 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (> da db) (do
-          (boole-set found-greater true)
+          (boolean/set found-greater true)
           (set i (length a))))
         (if (< da db) (do
           (set i (length a)))) ; stop on a < b, keep found-greater false
@@ -1322,7 +1353,7 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (not (= da db)) (do
-          (boole-set result false)
+          (boolean/set result false)
           (set i (length a))))
         (set i (+ (get i) 1)))))
       (if (true? result) true false)))))))
@@ -1451,7 +1482,14 @@ q)))
 (let even? std/int/even?)
 (let upper std/char/upper)
 (let lower std/char/lower)
-(let match? std/vector/string/match?)
+(let match? std/vector/char/equal?)
+(let String/equal? std/vector/char/equal?)
+(let String/lte? std/vector/char/lesser-or-equal?)
+(let String/gte? std/vector/char/greater-or-equal?)
+(let String/lt? std/vector/char/lesser?)
+(let String/gt? std/vector/char/greater?)
+
+
 (let digit? std/char/digit?)
 (let fill std/vector/2d/fill)
 (let max std/int/max)
