@@ -1076,7 +1076,25 @@ b
 )"#, "[[1 2 3] [true false true]]"),
 
 (r#"(let rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
-(rec { 1 1 } { true 10 })"#, "[false 12]")
+(rec { 1 1 } { true 10 })"#, "[false 12]"),
+(r#"(let factorial (lambda N (snd (pull! (Rec { N 1 } (lambda { n acc } 
+      (if (= n 0) 
+          { Rec/return [ { n acc } ]} 
+          { Rec/push [ { (- n 1) (* acc n) } ] })))))))
+
+(let rec-sum (lambda N (snd (get (Rec { N 0 } (lambda { n acc } 
+    (if (= 0 n) 
+        { Rec/return [ { n acc } ] } 
+        { Rec/push [ { (- n 1) (+ acc n) } ] })))))))
+
+(let factorialVec (lambda N (first (pull! (Rec [ 1 N ] (lambda [ acc n . ] 
+      (if (= n 0) 
+          { Rec/return [ [ acc n ] ]} 
+          { Rec/push [ [ (* acc n) (- n 1) ] ] })))))))
+
+(factorialVec 5)
+
+[(factorial 5) (factorialVec 5) (rec-sum 10)]"#, "[120 120 55]")
 
         ];
         let std_ast = crate::baked::load_ast();

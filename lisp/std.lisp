@@ -166,6 +166,32 @@
 (let std/fn/apply/2 (lambda x y fn (fn x y)))
 (let std/fn/apply/3 (lambda x y z fn (fn x y z)))
 (let std/fn/const (lambda x . x))
+(let std/fn/return 1)
+(let std/fn/push 2)
+(let std/fn/none 0)
+
+(let std/fn/rec (lambda init-frame handler (do 
+  (let stack [init-frame])
+  (let result [])
+  (loop (not (empty? stack)) (lambda (do 
+    (let frame (pull! stack))
+    (let action (handler frame))
+    ; Action grammar:
+    ; { std/fn/return, [value] } return
+    ; { std/fn/push, [...] } push 
+    ; { std/fn/none [] } none
+    (cond 
+      (= (fst action) std/fn/return) (do (set! result 0 (snd action)) nil)
+      (= (fst action) std/fn/push) (do (loop 0 (length (snd action)) (lambda i (push! stack (get (snd action) i)))) nil)
+      nil
+    ))))
+  (get result))))
+
+
+(let Rec/return std/fn/return)
+(let Rec/push std/fn/push)
+(let Rec/none std/fn/none)
+(let Rec std/fn/rec)
 
 (let std/vector/empty? (lambda xs (= (length xs) 0)))
 (let std/vector/empty! (lambda xs (if (std/vector/empty? xs) xs (do 
@@ -392,6 +418,99 @@
           (set b (* (get b) (get b)))
           (set e (/ (get e) 2)))))
       (get result))))))
+
+; 2d Vectors
+(let std/vector/2d/int/set! (lambda vec [ x y . ] (do (set! vec 0 x) (set! vec 1 y) nil)))
+(let std/vector/2d/int/add (lambda [ x1 y1 . ] [ x2 y2 . ] [ (+ x1 x2) (+ y1 y2) ]))
+(let std/vector/2d/int/sub (lambda [ x1 y1 . ] [ x2 y2 . ] [ (- x1 x2) (- y1 y2) ]))
+(let std/vector/2d/int/mul (lambda [ x1 y1 . ] [ x2 y2 . ] [ (* x1 x2) (* y1 y2) ]))
+(let std/vector/2d/int/div (lambda [ x1 y1 . ] [ x2 y2 . ] [ (/ x1 x2) (/ y1 y2) ]))
+(let std/vector/2d/int/mag/sqrt (lambda [ x y . ] (+ (* x x) (* y y))))
+(let std/vector/2d/int/mag (lambda v (std/int/sqrt (std/vector/2d/int/mag/sqrt v))))
+(let std/vector/2d/int/dot (lambda [ x1 y1 .] [ x2 y2 .] (+ (* x1 x2) (* y1 y2))))
+(let std/vector/2d/int/cross (lambda [ x1 y1 . ] [ x2 y2 . ]  [ 0 0 (- (* x1 y2) (* y1 x2)) ]))
+(let std/vector/2d/int/dist (lambda [ x1 y1 . ] [ x2 y2 . ] (std/vector/2d/int/mag (std/vector/2d/int/sub [ x2 y2 ] [ x1 y1 ]))))
+(let std/vector/2d/int/normalize (lambda v (do 
+  (let len (std/vector/2d/int/mag v))
+  (std/vector/2d/int/div v [ len len ]))))
+
+(let std/vector/2d/int/limit (lambda v m (do
+            (let mSq (std/vector/2d/int/mag/sqrt v))
+            (if (> mSq (* m m)) (do 
+              (let sq (std/int/sqrt mSq))
+              (std/vector/2d/int/mul (std/vector/2d/int/div v [ sq sq ]) [ m m ]))
+              v))))
+              
+(let std/vector/2d/int/add! (lambda vec [ x2 y2 . ] (do (let x1 (get vec 0)) (let y1 (get vec 1)) (set! vec 0 (+ x1 x2)) (set! vec 1 (+ y1 y2)))))
+(let std/vector/2d/int/sub! (lambda vec [ x2 y2 . ] (do (let x1 (get vec 0)) (let y1 (get vec 1)) (set! vec 0 (- x1 x2)) (set! vec 1 (- y1 y2)))))
+(let std/vector/2d/int/mul! (lambda vec [ x2 y2 . ] (do (let x1 (get vec 0)) (let y1 (get vec 1)) (set! vec 0 (* x1 x2)) (set! vec 1 (* y1 y2)))))
+(let std/vector/2d/int/div! (lambda vec [ x2 y2 . ] (do (let x1 (get vec 0)) (let y1 (get vec 1)) (set! vec 0 (/ x1 x2)) (set! vec 1 (/ y1 y2)))))
+(let std/vector/2d/int/normalize! (lambda v (do 
+  (let len (std/vector/2d/int/mag v))
+  (std/vector/2d/int/div! v [ len len ]))))
+
+(let std/vector/2d/int/limit! (lambda v m (do 
+            (let mSq (std/vector/2d/int/mag/sqrt v)) 
+            (if (> mSq (* m m)) (do 
+              (let sq (std/int/sqrt mSq))
+              (std/vector/2d/int/div! v [ sq sq ])
+              (std/vector/2d/int/mul! v [ m m ]) 
+              nil) 
+              nil)
+            nil)))
+(let std/vector/2d/int/mag! (lambda v n (do
+  (std/vector/2d/int/normalize! v) 
+  (std/vector/2d/int/mul! v n)
+  nil)))
+
+; 3d Vectors
+(let std/vector/3d/int/set! (lambda vec [ x y z . ] (do
+  (set! vec 0 x) 
+  (set! vec 1 y) 
+  (set! vec 2 z) 
+nil)))
+(let std/vector/3d/int/add (lambda [ x1 y1 z1 . ] [ x2 y2 z2 . ] [ (+ x1 x2) (+ y1 y2) (+ z1 z2) ]))
+(let std/vector/3d/int/sub (lambda [ x1 y1 z1 . ] [ x2 y2 z2 . ] [ (- x1 x2) (- y1 y2) (- z1 z2) ]))
+(let std/vector/3d/int/mul (lambda [ x1 y1 z1 . ] [ x2 y2 z2 . ] [ (* x1 x2) (* y1 y2) (* z1 z2) ]))
+(let std/vector/3d/int/div (lambda [ x1 y1 z1 . ] [ x2 y2 z2 . ] [ (/ x1 x2) (/ y1 y2) (/ z1 z2) ]))
+(let std/vector/3d/int/mag/sqrt (lambda [ x y z . ] (+ (* x x) (* y y) (* z z))))
+(let std/vector/3d/int/mag (lambda v (std/int/sqrt (std/vector/3d/int/mag/sqrt v))))
+(let std/vector/3d/int/dot (lambda [ x1 y1 z1 .] [ x2 y2 z2 .] (+ (* x1 x2) (* y1 y2) (* z1 z2))))
+(let std/vector/3d/int/cross (lambda [ x1 y1 z1 . ] [ x2 y2 z2 . ]  [ (- (* y1 z2) (* z1 y2)) (- (* z1 x2) (* x1 z2)) (- (* x1 y2) (* y1 x2)) ]))
+(let std/vector/3d/int/dist (lambda [ x1 y1 z1 . ] [ x2 y2 z2 . ] (std/vector/3d/int/mag (std/vector/3d/int/sub [ x2 y2 z2 ] [ x1 y1 z1 ]))))
+(let std/vector/3d/int/normalize (lambda v (do 
+  (let len (std/vector/3d/int/mag v))
+  (std/vector/3d/int/div v [ len len len ]))))
+
+(let std/vector/3d/int/limit (lambda v m (do
+            (let mSq (std/vector/3d/int/mag/sqrt v))
+            (if (> mSq (* m m)) (do 
+              (let sq (std/int/sqrt mSq))
+              (std/vector/3d/int/mul (std/vector/3d/int/div v [ sq sq sq ]) [ m m m ]))
+              v))))  
+(let std/vector/3d/int/add! (lambda vec [ x2 y2 z2 . ] (do (let x1 (get vec 0)) (let y1 (get vec 1)) (let z1 (get vec 2)) (set! vec 0 (+ x1 x2)) (set! vec 1 (+ y1 y2)) (set! vec 2 (+ z1 z2)))))
+(let std/vector/3d/int/sub! (lambda vec [ x2 y2 z2 . ] (do (let x1 (get vec 0)) (let y1 (get vec 1)) (let z1 (get vec 2)) (set! vec 0 (- x1 x2)) (set! vec 1 (- y1 y2)) (set! vec 2 (- z1 z2)))))
+(let std/vector/3d/int/mul! (lambda vec [ x2 y2 z2 . ] (do (let x1 (get vec 0)) (let y1 (get vec 1)) (let z1 (get vec 2)) (set! vec 0 (* x1 x2)) (set! vec 1 (* y1 y2)) (set! vec 2 (* z1 z2)))))
+(let std/vector/3d/int/div! (lambda vec [ x2 y2 z2 . ] (do (let x1 (get vec 0)) (let y1 (get vec 1)) (let z1 (get vec 2)) (set! vec 0 (/ x1 x2)) (set! vec 1 (/ y1 y2)) (set! vec 2 (/ z1 z2)))))
+(let std/vector/3d/int/normalize! (lambda v (do 
+  (let len (std/vector/3d/int/mag v))
+  (std/vector/3d/int/div! v [ len len len ]))))
+
+(let std/vector/3d/int/limit! (lambda v m (do 
+            (let mSq (std/vector/3d/int/mag/sqrt v)) 
+            (if (> mSq (* m m)) (do 
+              (let sq (std/int/sqrt mSq))
+              (std/vector/3d/int/div! v [ sq sq sq ])
+              (std/vector/3d/int/mul! v [ m m m ]) 
+              nil) 
+              nil)
+            nil)))
+(let std/vector/3d/int/mag! (lambda v n (do
+  (std/vector/3d/int/normalize! v) 
+  (std/vector/3d/int/mul! v n)
+  nil)))
+
+
 
 (let std/vector/zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
@@ -1600,6 +1719,45 @@ q)))
 (let BigInt/pow std/int/big/pow)
 (let BigInt/expt std/int/big/expt)
 
+(let Vector/2d/set! std/vector/2d/int/set!)
+(let Vector/2d/add std/vector/2d/int/add)
+(let Vector/2d/sub std/vector/2d/int/sub)
+(let Vector/2d/mul std/vector/2d/int/mul)
+(let Vector/2d/div std/vector/2d/int/div)
+(let Vector/2d/mag/sqrt std/vector/2d/int/mag/sqrt)
+(let Vector/2d/mag std/vector/2d/int/mag)
+(let Vector/2d/dot std/vector/2d/int/dot)
+(let Vector/2d/cross std/vector/2d/int/cross)
+(let Vector/2d/dist std/vector/2d/int/dist)
+(let Vector/2d/norm std/vector/2d/int/normalize)
+(let Vector/2d/limit std/vector/2d/int/limit)
+(let Vector/2d/add! std/vector/2d/int/add!)
+(let Vector/2d/sub! std/vector/2d/int/sub!)
+(let Vector/2d/mul! std/vector/2d/int/mul!)
+(let Vector/2d/div! std/vector/2d/int/div!)
+(let Vector/2d/norm! std/vector/2d/int/normalize!)
+(let Vector/2d/limit! std/vector/2d/int/limit!)
+(let Vector/2d/mag! std/vector/2d/int/mag!)
+(let Vector/3d/set! std/vector/3d/int/set!)
+(let Vector/3d/add std/vector/3d/int/add)
+(let Vector/3d/sub std/vector/3d/int/sub)
+(let Vector/3d/mul std/vector/3d/int/mul)
+(let Vector/3d/div std/vector/3d/int/div)
+(let Vector/3d/mag/sqrt std/vector/3d/int/mag/sqrt)
+(let Vector/3d/mag std/vector/3d/int/mag)
+(let Vector/3d/dot std/vector/3d/int/dot)
+(let Vector/3d/cross std/vector/3d/int/cross) 
+(let Vector/3d/dist std/vector/3d/int/dist)
+(let Vector/3d/norm std/vector/3d/int/normalize) 
+(let Vector/3d/limit std/vector/3d/int/limit)
+(let Vector/3d/add! std/vector/3d/int/add!)
+(let Vector/3d/sub! std/vector/3d/int/sub!)
+(let Vector/3d/mul! std/vector/3d/int/mul!)
+(let Vector/3d/div! std/vector/3d/int/div!)
+(let Vector/3d/norm! std/vector/3d/int/normalize!)
+(let Vector/3d/limit! std/vector/3d/int/limit!)
+(let Vector/3d/mag! std/vector/3d/int/mag!)
+
 ; End of more fake words
 
 ; Unsafe code 
@@ -1642,4 +1800,42 @@ q)))
                 (++ j))))
             (++ i))))
         out))))
+; P5 stuff 
+; (let p5/noFill (lambda (do nil)))
+; (let p5/noStroke p5/noFill)
+; (let p5/push p5/noFill)  
+; (let p5/pop p5/noFill)
+
+; (let p5/fill (lambda r g b a (do (+ r g b a) nil)))
+; (let p5/stroke p5/fill)
+; (let p5/background p5/fill)
+
+; (let p5/strokeWeight (lambda w (do (+ w 0) nil)))
+; (let p5/circle (lambda x y w (do (+ x y w) nil)))
+; (let p5/rect (lambda x y w h (do (+ x y w h) nil)))
+; (let p5/point (lambda x y (do (+ x y) nil)))
+; (let p5/line (lambda x1 y1 x2 y2 (do (+ x1 y1 x2 y2) nil)))
+
+; (let p5/sin (lambda x (+ x 1)))
+; (let p5/cos p5/sin)
+; (let p5/asin p5/sin)
+; (let p5/acos p5/sin)
+; (let p5/atan p5/sin)
+; (let p5/atan2 (lambda x y (+ x y)))
+; (let p5/PI (/. 314 100))
+; (let p5/degrees (lambda x (+ x 0)))
+; (let p5/radians (lambda x (+ x 0)))
+
+; (let p5/rotate (lambda a (do (+ a 1) nil)))
+; (let p5/frameCount 1)
+; (let p5/translate (lambda x y (do (+ x y) nil)))
+; (let p5/CORNER "corner")
+; (let p5/RADIUS "radius")
+; (let p5/CENTER "center")
+; (let p5/CORNERS "corners")
+; (let p5/DEGREES "degrees")
+; (let p5/RADIANS "radians")
+; (let p5/rectMode (lambda xs (do (+# (get xs 0) 'a') nil)))
+; (let p5/angleMode p5/rectMode)
+
 ; End of unsafe code

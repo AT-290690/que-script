@@ -757,13 +757,14 @@ fn unless_transform(mut exprs: Vec<Expression>) -> Expression {
         Expression::Word("if".to_string()),
         exprs[0].clone(),
         if exprs.len() == 2 {
-            Expression::Atom(0)
+            Expression::Word("nil".to_string())
         } else {
             exprs[2].clone()
         },
         exprs[1].clone(),
     ]);
 }
+
 fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
     let mut inp = exprs.remove(1);
 
