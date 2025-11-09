@@ -1805,6 +1805,8 @@ q)))
 ; (let p5/noStroke p5/noFill)
 ; (let p5/push p5/noFill)  
 ; (let p5/pop p5/noFill)
+; (let p5/beginShape p5/noFill)
+; (let p5/endShape p5/noFill)
 
 ; (let p5/fill (lambda r g b a (do (+ r g b a) nil)))
 ; (let p5/stroke p5/fill)
@@ -1814,6 +1816,8 @@ q)))
 ; (let p5/circle (lambda x y w (do (+ x y w) nil)))
 ; (let p5/rect (lambda x y w h (do (+ x y w h) nil)))
 ; (let p5/point (lambda x y (do (+ x y) nil)))
+; (let p5/vertex p5/point)
+
 ; (let p5/line (lambda x1 y1 x2 y2 (do (+ x1 y1 x2 y2) nil)))
 
 ; (let p5/sin (lambda x (+ x 1)))
@@ -1837,5 +1841,6 @@ q)))
 ; (let p5/RADIANS "radians")
 ; (let p5/rectMode (lambda xs (do (+# (get xs 0) 'a') nil)))
 ; (let p5/angleMode p5/rectMode)
+; (let p5/triangle (lambda x1 y1 x2 y2 x3 y3 (do (+ x1 y1 x2 y2 x3 y3) nil)))
 
 ; End of unsafe code
