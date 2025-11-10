@@ -1842,5 +1842,5 @@ q)))
 ; (let p5/rectMode (lambda xs (do (+# (get xs 0) 'a') nil)))
 ; (let p5/angleMode p5/rectMode)
 ; (let p5/triangle (lambda x1 y1 x2 y2 x3 y3 (do (+ x1 y1 x2 y2 x3 y3) nil)))
-
+; (let p5/random (lambda s e (+ x e)))
 ; End of unsafe code
