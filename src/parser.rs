@@ -260,6 +260,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "loop" => Ok(loop_transform(exprs)?),
                     "lambda" => lambda_destructure_transform(exprs),
                     "cons" => Ok(cons_transform(exprs)),
+                    "apply" => Ok(apply_transform(exprs)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
@@ -649,6 +650,28 @@ fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
             })
         }
     }
+}
+
+fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    // Remove the "apply"
+    exprs.remove(0);
+
+    if exprs.is_empty() {
+        return Err("Error! (apply) requires at least one function".into());
+    }
+
+    // First item is the function being partially applied
+    let func: Expression = exprs.remove(0);
+
+    Ok(Expression::Apply(
+        vec![
+            Expression::Word(format!("std/fn/apply/first/{}", exprs.len())),
+            func,
+        ]
+        .into_iter()
+        .chain(exprs)
+        .collect(),
+    ))
 }
 
 fn and_transform(mut exprs: Vec<Expression>) -> Expression {
