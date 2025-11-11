@@ -128,7 +128,6 @@
 (let Bool false)
 (let as (lambda . t t))
 (let nil (loop 0 0 (lambda . 0)))
-(let null (lambda nil))
 (let eq (lambda a b (cond 
           (and a b) true 
           (and (not a) (not b)) true
@@ -1255,6 +1254,8 @@ q)))
                     (if (= x 1) (std/vector/append! a (get xs i)) a)) [])))))
     out))))
 
+(let std/vector/flat-map (lambda xs (std/vector/map (std/vector/flat-one xs))))
+    
 ; alternative implementation using bitwise operators
 ; (let std/convert/bits->integer (lambda bits (std/vector/reduce bits (lambda value bit (| (<< value 1) (& bit 1))) 0)))
 
@@ -1601,7 +1602,7 @@ q)))
 (let std/vector/enumerate (lambda xs (std/vector/tuple/zip { (std/vector/int/range 0 (- (length xs) 1)) xs })))
 
 ; Start of more fake keywords
-
+(let /flat-map std/vector/flat-map)
 (let /reduce std/vector/reduce)
 (let /map std/vector/map)
 (let /filter std/vector/filter)
@@ -1610,6 +1611,7 @@ q)))
 (let /sort! std/vector/sort!)
 (let /find std/vector/find-index)
 (let /count std/vector/count-of)
+(let /for std/vector/for)
 
 (let \reduce (lambda fn a xs (std/vector/reduce xs fn a)))
 (let \map (lambda fn xs (std/vector/map xs fn)))
@@ -1619,8 +1621,14 @@ q)))
 (let \sort! (lambda fn xs (std/vector/sort! xs fn)))
 (let \find (lambda fn? xs (std/vector/find-index xs fn?)))
 (let \count (lambda fn? xs (std/vector/count-of xs fn?)))
+(let \flat-map (lambda fn xs (std/vector/flat-map xs fn)))
+(let \for (lambda fn xs (std/vector/for xs fn)))
 
+(let subset std/vector/subset)
+(let flat-map std/vector/flat-map)
 (let map std/vector/map)
+(let for std/vector/for)
+
 (let filter std/vector/filter)
 (let reduce std/vector/reduce)
 (let every? std/vector/every?)
