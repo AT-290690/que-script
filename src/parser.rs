@@ -240,7 +240,8 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
 
             if let Expression::Word(ref name) = exprs[0] {
                 match name.as_str() {
-                    "|>" => Ok(pipe_transform(exprs)),
+                    "|>" | "/|>" | "\\|>" => Ok(pipe_curry_transform(exprs)),
+                    // "|>" => Ok(pipe_curry_transform(exprs)),
                     "cond" => Ok(cond_transform(exprs)),
                     "if" => Ok(if_transform(exprs)),
                     "unless" => Ok(unless_transform(exprs)),
@@ -809,6 +810,47 @@ fn unless_transform(mut exprs: Vec<Expression>) -> Expression {
         },
         exprs[1].clone(),
     ]);
+}
+fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
+    let mut inp = exprs.remove(1); // piped value
+
+    for stage in exprs.into_iter().skip(1) {
+        match stage {
+            // ---------- CASE 1: curried (\foo ...) ----------
+            Expression::Apply(items)
+                if !items.is_empty()
+                    && matches!(&items[0], Expression::Word(f) if f.starts_with('\\')) =>
+            {
+                // Keep the slash! You requested this.
+                let func = items[0].clone(); // (\map)
+                let mut args: Vec<Expression> = items[1..].to_vec();
+
+                // Data should be appended at the END
+                args.push(inp);
+
+                // Build:  ((\map) arg1 arg2 ... inp)
+                let mut new_list = vec![func];
+                new_list.extend(args);
+
+                inp = Expression::Apply(new_list);
+            }
+
+            // ---------- CASE 2: normal |>, data-first ----------
+            Expression::Apply(mut inner) if !inner.is_empty() => {
+                let func = inner.remove(0);
+                let mut new_stage = vec![func, inp];
+                new_stage.extend(inner);
+                inp = Expression::Apply(new_stage);
+            }
+
+            // ---------- CASE 3: simple function ----------
+            stage => {
+                inp = Expression::Apply(vec![stage, inp]);
+            }
+        }
+    }
+
+    inp
 }
 
 fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {

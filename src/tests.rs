@@ -1132,7 +1132,56 @@ b
     (if (false? placed) (push! sword [-1 num -1])))))
 sword)))
   
-(part1 (parse INPUT))"#, "[[3 5 7] [4 8 9] [5 10 -1] [-1 7 8] [-1 8 -1]]")
+(part1 (parse INPUT))"#, "[[3 5 7] [4 8 9] [5 10 -1] [-1 7 8] [-1 8 -1]]",
+),
+(r#"(let scan/sum (lambda a b (do (push! a (+ (last a) b)) a)))
+
+(let left-right-sum-diff (lambda input 
+  (|> (zip {
+        (|> input (reduce scan/sum [0]) (drop/last 1))
+        (|> input (reverse) (reduce scan/sum [0]) (drop/last 1) (reverse))
+    }) 
+    (map (lambda { a b } (abs (- a b)))))))
+
+(left-right-sum-diff [ 10 4 8 3 ])"#, "[15 1 11 22]"),
+(r#"(let maximum/count (lambda xs 
+      (max 
+        (count xs positive?) 
+        (count xs negative?))))
+        
+(maximum/count [ -1 -1 1 1 1 -1 1 ])"#, "4"),
+(r#"(let input [
+    [ 1 2 3 ]
+    [ 5 5 5 ]
+    [ 3 1 4 ]
+])
+
+; long version - not prefered
+(let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
+
+; Both of these are prefered 
+
+; Pipe composition - easy to follow
+(let maximumWealthPipe (lambda xs (|> xs (map sum) (maximum))))
+
+; Point free version - most conscise
+(let maximumWealthFree (\ maximum (\map sum)))
+
+(|> ; all of these functions are [[Int]] -> Int so they can exist in the same vector
+    [maximumWealthLong maximumWealthPipe maximumWealthFree] 
+    (map (lambda fn (fn input))))"#, "[15 15 15]"),
+    (r#"(let \filterOdd (\filter odd?))
+(let maximumWealthFree (\ maximum (\map sum)))
+[(|> 
+    [ 1 2 3 4 5 ] 
+    (\filterOdd)
+    (\map square)
+    (sum))
+ (|> [
+    [ 1 2 3 ]
+    [ 5 5 5 ]
+    [ 3 1 4 ]
+] (maximumWealthFree))]"#, "[35 15]")
 
         ];
         let std_ast = crate::baked::load_ast();
