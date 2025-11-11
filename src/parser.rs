@@ -241,7 +241,6 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
             if let Expression::Word(ref name) = exprs[0] {
                 match name.as_str() {
                     "|>" | "/|>" | "\\|>" => Ok(pipe_curry_transform(exprs)),
-                    // "|>" => Ok(pipe_curry_transform(exprs)),
                     "cond" => Ok(cond_transform(exprs)),
                     "if" => Ok(if_transform(exprs)),
                     "unless" => Ok(unless_transform(exprs)),

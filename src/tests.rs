@@ -1181,7 +1181,13 @@ sword)))
     [ 1 2 3 ]
     [ 5 5 5 ]
     [ 3 1 4 ]
-] (maximumWealthFree))]"#, "[35 15]")
+] (maximumWealthFree))]"#, "[35 15]"),
+ (r#";    halve :: [T] -> {[T] * [T]}
+(let halve (lambda xs (do 
+          (let half (/ (length xs) 2)) 
+          { (take/first xs half) (drop/first xs half)})))
+
+(halve (range 0 11))"#, "[[0 1 2 3 4 5] [6 7 8 9 10 11]]")
 
         ];
         let std_ast = crate::baked::load_ast();

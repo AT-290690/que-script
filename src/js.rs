@@ -364,7 +364,7 @@ pub fn compile_program_to_js(top: &Expression) -> String {
     let body = stmts.join("\n");
     format!(
         "(()=>{{\n{}\n{}\n}})()",
-        "function _curry(func) {return function curried(...args) {if (args.length === func.length){return func(...args);}else{return function (...next) {return curried(...args, ...next);};}};}",
+        "let _mconsole_log_m = console.log; function _curry(func) {return function curried(...args) {if (args.length === func.length){return func(...args);}else{return function (...next) {return curried(...args, ...next);};}};}",
         body
     )
 }
