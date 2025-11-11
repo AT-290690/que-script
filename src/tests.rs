@@ -1094,7 +1094,45 @@ b
 
 (factorialVec 5)
 
-[(factorial 5) (factorialVec 5) (rec-sum 10)]"#, "[120 120 55]")
+[(factorial 5) (factorialVec 5) (rec-sum 10)]"#, "[120 120 55]"),
+
+    (r#"(let INPUT "58:5,3,7,8,9,10,4,5,7,8,8")
+(let parse (lambda input (do 
+  (let parts (|> input (String->Vector ':')))
+  (let head (|> (car parts) (Chars->Integer)))
+  (let tail (|> (cdr parts) (car) (String->Vector ',') (map Chars->Integer)))
+  { head tail })))
+
+;  5   3-5   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7 
+;                      |       |       |       |       |       |       |       |
+;                      8       8-9     8-9   4-8-9   4-8-9   4-8-9   4-8-9   4-8-9
+;                                      |       |       |       |       |       |
+;                                      10      10    5-10    5-10    5-10    5-10
+;                                                              |       |       |
+;                                                              7       7-8     7-8
+;                                                                              |
+;                                                                              8  
+; Check all segments of the spine, starting from the top.
+; If your number is less than the one on the spine segment and the left side of the segment is free - place it on the left.
+; If your number is greater than the one on the spine segment and the right side of the segment is free - place it on the right.
+; If no suitable place is found at any segment, create a new spine segment from your number and place it as the last one.
+
+
+(let part1 (lambda { . nums } (do 
+(let sword [[-1 (get nums 0) -1]])
+(loop 1 (length nums) (lambda i (do
+  (let num (get nums i))
+  (boolean placed false)
+  (loop 0 (length sword) (lambda j (do 
+    (let segment (get sword j))
+    (cond
+        (and (false? placed) (< num (get segment 1)) (= (get segment 0) -1)) (do (set! segment 0 num) (boolean/set placed true))
+        (and (false? placed) (> num (get segment 1)) (= (get segment 2) -1)) (do (set! segment 2 num) (boolean/set placed true))
+        nil))))
+    (if (false? placed) (push! sword [-1 num -1])))))
+sword)))
+  
+(part1 (parse INPUT))"#, "[[3 5 7] [4 8 9] [5 10 -1] [-1 7 8] [-1 8 -1]]")
 
         ];
         let std_ast = crate::baked::load_ast();

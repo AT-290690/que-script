@@ -261,6 +261,8 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "lambda" => lambda_destructure_transform(exprs),
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
+                    "\\" => Ok(combinator_transform(exprs)?),
+
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
@@ -650,6 +652,27 @@ fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
             })
         }
     }
+}
+fn combinator_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    // Remove the "\"
+    exprs.remove(0);
+
+    if exprs.is_empty() {
+        return Err("Error! (\\) requires at least one function".into());
+    }
+
+    // First item is the function being partially applied
+    let func: Expression = exprs.remove(0);
+
+    Ok(Expression::Apply(
+        vec![
+            Expression::Word(format!("std/fn/combinator/{}", exprs.len() + 1)),
+            func,
+        ]
+        .into_iter()
+        .chain(exprs)
+        .collect(),
+    ))
 }
 
 fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
