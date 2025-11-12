@@ -352,7 +352,7 @@ impl VM {
                         (BiteCodeEvaluated::Array(arr), BiteCodeEvaluated::Int(i)) => {
                             let r = arr.borrow();
                             if i < 0 || i as usize >= r.len() {
-                                return Err("Error! get: index out of bounds".to_string());
+                                return Err(format!("{:?}\nError! get: index out of bounds", code));
                             }
                             self.stack.push(r[i as usize].clone());
                         }
@@ -402,7 +402,7 @@ impl VM {
                                 arr.borrow_mut()[idx as usize] = value;
                             }
                         } else {
-                            return Err("Error! Index out of bounds".to_string());
+                            return Err(format!("{:?}\nError! get: index out of bounds", code));
                         }
                         self.stack.push(BiteCodeEvaluated::Int(0));
                     } else {
