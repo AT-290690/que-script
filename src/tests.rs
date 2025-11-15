@@ -73,25 +73,25 @@ mod tests {
         let test_cases = [
             (
                 "(+ 1 (= 1 1))",
-                r#"Error! (+ 1 (= 1 1))
-Error! Cannot unify Int with Bool"#,
+                r#"Error! Cannot unify Int with Bool
+Error! (+ 1 (= 1 1))"#,
             ),
-            ("(1 2)", "(1 2)\nError! Cannot apply non-function type: Int"),
+            ("(1 2)", "Error! Cannot apply non-function type: Int\n(1 2)"),
             (
                 "(do (let t 10) (t))",
-                "(t)\nError! Cannot apply non-function type: Int",
+                "Error! Cannot apply non-function type: Int\n(t)",
             ),
             (
                 "(let x (vector 1 2 (= 1 2)))",
-                "Error! (vector 1 2 (= 1 2))\nError! Cannot unify Int with Bool",
+                "Error! Cannot unify Int with Bool\nError! (vector 1 2 (= 1 2))",
             ),
             (
                 "(vector 1 2 (> 1 2))",
-                "Error! (vector 1 2 (> 1 2))\nError! Cannot unify Int with Bool",
+                "Error! Cannot unify Int with Bool\nError! (vector 1 2 (> 1 2))",
             ),
             (
                 "(lambda x (and x 42))",
-                "Error! (and x 42)\nError! Cannot unify Bool with Int",
+                "Error! Cannot unify Bool with Int\nError! (and x 42)",
             ),
             (
                 "(summation (range 1 10))",
@@ -99,15 +99,15 @@ Error! Cannot unify Int with Bool"#,
             ),
             (
                 "(if 1 10 20)",
-                r#"Error! Condition must be Bool
-(if 1 10 20)
-Error! Cannot unify Int with Bool"#,
+                r#"Error! Cannot unify Int with Bool
+Error! Condition must be Bool
+(if 1 10 20)"#,
             ),
             (
                 "(if (= 1 2) 10 (= 0 1))",
-                r#"Error! Concequent and alternative must match types
-(if (= 1 2) 10 (= 0 1))
-Error! Cannot unify Int with Bool"#,
+                r#"Error! Cannot unify Int with Bool
+Error! Concequent and alternative must match types
+(if (= 1 2) 10 (= 0 1))"#,
             ),
             (
                 "(do (let x 10) (let x 2))",
@@ -115,7 +115,7 @@ Error! Cannot unify Int with Bool"#,
             ),
             (
                 "(vector (tuple 0 true) (tuple true 0))",
-                "Error! (vector (tuple 0 true) (tuple true 0))\nError! Cannot unify Int with Bool",
+                "Error! Cannot unify Int with Bool\nError! (vector (tuple 0 true) (tuple true 0))",
             ),
         ];
 

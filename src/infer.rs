@@ -568,10 +568,10 @@ pub fn solve_constraints_list(
             (Type::Tuple(a_items), Type::Tuple(b_items)) => {
                 if a_items.len() != b_items.len() {
                     return Err(format!(
-                        "{}\nError! Cannot unify tuples of different lengths ({} vs {})",
-                        src_to_pretty(&src),
+                        "Error! Cannot unify tuples of different lengths ({} vs {})\n{}",
                         a_items.len(),
-                        b_items.len()
+                        b_items.len(),
+                        src_to_pretty(&src),
                     ));
                 }
                 for (ai, bi) in a_items.into_iter().zip(b_items.into_iter()) {
@@ -582,10 +582,10 @@ pub fn solve_constraints_list(
             (a2, b2) => {
                 // can't unify, attach source and return
                 return Err(format!(
-                    "{}\nError! Cannot unify {} with {}",
-                    src_to_pretty(&src),
+                    "Error! Cannot unify {} with {}\n{}",
                     a2,
-                    b2
+                    b2,
+                    src_to_pretty(&src),
                 ));
             }
         }
@@ -824,7 +824,8 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
             _ => {
                 return Err(format!(
-                    "{}\nError! Cannot apply non-function type: {}",
+                    "Error! Cannot apply non-function type: {}\n{}",
+                    func_type,
                     format!(
                         "({})",
                         exprs
@@ -833,7 +834,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                             .collect::<Vec<String>>()
                             .join(" ")
                     ),
-                    func_type
                 ));
             }
         }
@@ -881,7 +881,8 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
             _ => {
                 return Err(format!(
-                    "{}\nError! Cannot apply non-function type: {}",
+                    "Error! Cannot apply non-function type: {}\n{}",
+                    func_type,
                     format!(
                         "({})",
                         exprs
@@ -890,7 +891,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                             .collect::<Vec<String>>()
                             .join(" ")
                     ),
-                    func_type
                 ));
             }
         }
