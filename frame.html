@@ -45,7 +45,6 @@
   ></script> -->
   <script>
     window.addEventListener("message", (e) => {
-      console.log("fuck you");
       if (e.origin !== "https://at-290690.github.io/") return alert("fuck you");
       if (e.data?.type === "runString") {
         // Prefer mapping commands -> functions. If necessary:
