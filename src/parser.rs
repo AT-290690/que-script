@@ -154,7 +154,233 @@ pub fn parse(src: &str) -> Result<Vec<Expression>, String> {
     }
     Ok(exprs)
 }
+// Backtick infix support
+#[derive(Clone, Debug)]
+enum Expr {
+    Number(String),
+    Ident(String),
+    Call(String, Vec<Expr>),
+    BinaryOp {
+        op: String,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+}
+#[derive(Clone, Debug, PartialEq)]
+enum Tok {
+    Ident(String),
+    Number(String),
+    LParen,
+    RParen,
+    Comma,
+    Op(String),
+}
+fn infix_tokenize(s: &str) -> Result<Vec<Tok>, String> {
+    let mut out = vec![];
+    let mut chars = s.chars().peekable();
 
+    while let Some(&c) = chars.peek() {
+        match c {
+            ' ' | '\t' | '\n' => {
+                chars.next();
+            }
+
+            '0'..='9' => {
+                let mut num = String::new();
+                while let Some(&d) = chars.peek() {
+                    if d.is_ascii_digit() || d == '.' {
+                        num.push(d);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                out.push(Tok::Number(num));
+            }
+
+            'a'..='z' | 'A'..='Z' | '_' => {
+                let mut id = String::new();
+                while let Some(&d) = chars.peek() {
+                    if d.is_alphanumeric() || d == '_' || d == '?' {
+                        id.push(d);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                out.push(Tok::Ident(id));
+            }
+
+            '(' => {
+                out.push(Tok::LParen);
+                chars.next();
+            }
+            ')' => {
+                out.push(Tok::RParen);
+                chars.next();
+            }
+            ',' => {
+                out.push(Tok::Comma);
+                chars.next();
+            }
+
+            '+' | '-' | '*' => {
+                out.push(Tok::Op(c.to_string()));
+                chars.next();
+            }
+            '/' => {
+                chars.next();
+                if *chars.peek().unwrap() == '.' {
+                    out.push(Tok::Op("/.".to_string()));
+                    chars.next();
+                } else {
+                    out.push(Tok::Op(c.to_string()));
+                }
+            }
+            '%' => {
+                out.push(Tok::Op("mod".to_string()));
+                chars.next();
+            }
+
+            _ => return Err(format!("Unexpected char `{}`", c)),
+        }
+    }
+
+    Ok(out)
+}
+fn precedence(op: &str) -> i32 {
+    match op {
+        "*" | "/" | "/." | "mod" => 20,
+        "+" | "-" => 10,
+        _ => 0,
+    }
+}
+fn parse_infix(tokens: &[Tok]) -> Result<Expr, String> {
+    use Tok::*;
+
+    let mut output: Vec<Expr> = vec![];
+    let mut ops: Vec<Tok> = vec![];
+
+    let mut i = 0;
+    while i < tokens.len() {
+        match &tokens[i] {
+            Number(n) => output.push(Expr::Number(n.clone())),
+
+            Ident(id) => {
+                // function call: ident '(' args ')'
+                if i + 1 < tokens.len() && tokens[i + 1] == LParen {
+                    i += 2; // skip ident and '('
+                    let mut args = vec![];
+                    let mut depth = 1;
+                    let mut start = i;
+
+                    while i < tokens.len() {
+                        match &tokens[i] {
+                            LParen => depth += 1,
+                            RParen => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    if start < i {
+                                        let arg = parse_infix(&tokens[start..i])?;
+                                        args.push(arg);
+                                    }
+                                    break;
+                                }
+                            }
+                            Comma if depth == 1 => {
+                                let arg = parse_infix(&tokens[start..i])?;
+                                args.push(arg);
+                                start = i + 1;
+                            }
+                            _ => {}
+                        }
+                        i += 1;
+                    }
+
+                    if depth != 0 {
+                        return Err("Unclosed function call".into());
+                    }
+
+                    output.push(Expr::Call(id.clone(), args));
+                } else {
+                    output.push(Expr::Ident(id.clone()));
+                }
+            }
+
+            Op(op1) => {
+                while let Some(Op(op2)) = ops.last() {
+                    if precedence(op2) >= precedence(op1) {
+                        let op = ops.pop().unwrap();
+                        apply_op(&mut output, op)?;
+                    } else {
+                        break;
+                    }
+                }
+                ops.push(tokens[i].clone());
+            }
+
+            LParen => ops.push(LParen),
+            RParen => {
+                while let Some(op) = ops.pop() {
+                    if op == LParen {
+                        break;
+                    }
+                    apply_op(&mut output, op)?;
+                }
+            }
+
+            Comma => return Err("Unexpected comma outside function call".into()),
+        }
+
+        i += 1;
+    }
+
+    while let Some(op) = ops.pop() {
+        if op == Tok::LParen {
+            return Err("Unclosed '('".into());
+        }
+        apply_op(&mut output, op)?;
+    }
+
+    if output.len() != 1 {
+        return Err("Bad expression".into());
+    }
+
+    Ok(output.pop().unwrap())
+}
+fn apply_op(stack: &mut Vec<Expr>, op: Tok) -> Result<(), String> {
+    let Tok::Op(oper) = op else { unreachable!() };
+
+    let right = stack.pop().ok_or("Missing operand")?;
+    let left = stack.pop().ok_or("Missing operand")?;
+
+    stack.push(Expr::BinaryOp {
+        op: oper,
+        left: Box::new(left),
+        right: Box::new(right),
+    });
+
+    Ok(())
+}
+fn to_lisp(e: &Expr) -> String {
+    match e {
+        Expr::Number(n) => n.clone(),
+        Expr::Ident(id) => id.clone(),
+        Expr::Call(name, args) => {
+            let mut s = format!("({}", name);
+            for arg in args {
+                s.push(' ');
+                s.push_str(&to_lisp(arg));
+            }
+            s.push(')');
+            s
+        }
+        Expr::BinaryOp { op, left, right } => {
+            format!("({} {} {})", op, to_lisp(left), to_lisp(right))
+        }
+    }
+}
+// End of Backtick infix support
 fn preprocess(source: &str) -> Result<String, String> {
     let mut out = String::new();
     let mut chars = source.chars().peekable();
@@ -219,6 +445,23 @@ fn preprocess(source: &str) -> Result<String, String> {
                     break;
                 }
                 out.push(')');
+            }
+
+            '`' => {
+                let mut s = String::new();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next == '`' {
+                        break;
+                    }
+                    s.push(next);
+                }
+
+                let tokens = infix_tokenize(&s)?;
+                let ast = parse_infix(&tokens)?;
+                let lisp = to_lisp(&ast);
+
+                out.push_str(&lisp);
             }
             _ => out.push(ch),
         }
