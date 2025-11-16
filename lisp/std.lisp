@@ -419,13 +419,23 @@
 (let std/int/overlap? (lambda v min max (and (>= v min) (<= v max))))
 (let std/int/sqrt (lambda n
   (do
-    (integer x n)
-    (integer prev 0)
-    (loop (> (std/int/abs (- (get x) (get prev))) 0)
+    (integer low 0)
+    (integer high n)
+    (integer mid 0)
+    (integer res 0)
+    (loop (<= (get low) (get high))
       (lambda (do
-        (set prev (get x))
-        (set x (/ (+ (get x) (/ n (get x))) 2)))))
-    (get x))))
+        (set mid (+ (get low) (/ (- (get high) (get low)) 2)))
+        (if (<= (get mid) 0)
+          (do
+            (set res (get mid))
+            (set low (+ (get mid) 1)))
+          (if (<= (get mid) (/ n (get mid)))
+            (do
+              (set res (get mid))
+              (set low (+ (get mid) 1)))
+            (set high (- (get mid) 1)))))))
+    (get res))))
 (let std/int/expt (lambda base exp (do
   (if (< exp 0) 0 (do
       (integer result 1)
@@ -1660,6 +1670,7 @@ q)))
 (let range std/vector/int/range)
 (let square std/int/square)
 (let expt std/int/expt)
+(let sqrt std/int/sqrt)
 (let odd? std/int/odd?)
 (let even? std/int/even?)
 (let one? std/int/one?)

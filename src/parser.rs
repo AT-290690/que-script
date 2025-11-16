@@ -237,6 +237,10 @@ fn infix_tokenize(s: &str) -> Result<Vec<Tok>, String> {
                     out.push(Tok::Op(c.to_string()));
                 }
             }
+            '^' => {
+                out.push(Tok::Op("expt".to_string()));
+                chars.next();
+            }
             '%' => {
                 out.push(Tok::Op("mod".to_string()));
                 chars.next();
@@ -250,6 +254,7 @@ fn infix_tokenize(s: &str) -> Result<Vec<Tok>, String> {
 }
 fn precedence(op: &str) -> i32 {
     match op {
+        "expt" => 30,
         "*" | "/" | "/." | "mod" => 20,
         "+" | "-" => 10,
         _ => 0,

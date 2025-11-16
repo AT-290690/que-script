@@ -1193,7 +1193,15 @@ sword)))
   (scan +)
   (maximum))))
 (max-depth "(1 + (2 * 3) + ((8)/4))+1")
-"#, "3")
+"#, "3"),
+
+(r#"(let a 10)
+(let b 8)
+(let c 23)
+(let x 42)
+(let y 69)
+(let r 10)
+`a + b * c + (x + y) / 2 + r^2 - x^2`"#, "-1415")
 
         ];
         let std_ast = crate::baked::load_ast();
