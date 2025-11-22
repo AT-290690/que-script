@@ -1745,6 +1745,7 @@ q)))
 (let Set/union std/vector/hash/set/union)
 (let Set/add! (lambda table item (do (std/vector/hash/set/add! table item) nil)))
 (let Set/remove! (lambda table item (do (std/vector/hash/set/remove! table item) nil)))
+(let Set/has? std/vector/hash/set/has?)
 
 (let Table/entries std/vector/tuple/hash/table/entries)
 (let Table/keys std/vector/tuple/hash/table/keys)
