@@ -1201,7 +1201,22 @@ sword)))
 (let x 42)
 (let y 69)
 (let r 10)
-`a + b * c + (x + y) / 2 + r^2 - x^2`"#, "-1415")
+`a + b * c + (x + y) / 2 + r^2 - x^2`"#, "-1415"),
+(r#"(let A { 0 { 42 { false { "" nil } } } })
+(let B { 1 { 0 { true { "" nil } } } })
+(let C { 2 { 0 { false { "algebraic data types" nil } } } })
+
+(let algebraic (lambda T (do 
+  (let out [])
+  (let kind (fst T))
+  (cond 
+    (= kind 0) (push! out (* (fst (snd T)) 10))
+    (= kind 1) (if (fst (snd (snd T))) (push! out -1))
+    (= kind 2) (push! out (Char/count (fst (snd (snd (snd T)))) 'a')) 
+  nil)
+  out)))
+
+(algebraic C)"#, "[4]")
 
         ];
         let std_ast = crate::baked::load_ast();
