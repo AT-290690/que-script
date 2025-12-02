@@ -1216,7 +1216,39 @@ sword)))
   nil)
   out)))
 
-(algebraic C)"#, "[4]")
+(algebraic C)"#, "[4]"),
+(r#"
+(let INPUT "L68
+L30
+R48
+L5
+R60
+L55
+L1
+L99
+R14
+L82")
+; (let INPUT "R1000")
+(let parse (lambda xs 
+  (|> xs 
+    (String->Vector nl)
+    (map (lambda [d r] 
+      [(if (=# d 'L') -1 1) (Chars->Integer r)])))))
+
+(let part1 (lambda xs 
+  (snd (reduce xs (lambda { dial counter } [d r .] (do 
+      (let res (emod (+ dial (* d r)) 100))
+      { res (+ counter (Bool->Int (= res 0))) })) { 50 0 }))))
+
+(let part2 (lambda xs 
+  (snd (reduce xs (lambda { dial counter } [d r .] (do 
+      (let res (emod (+ dial (* d r)) 100))
+      (let rng [dial])
+      (loop 1 r (lambda i (push! rng (emod (+ (at rng -1) (* 1 d)) 100)))) 
+      { res (+ counter (Int/count rng 0)) })) { 50 0 }))))
+
+[ (part1 (parse INPUT)) (part2 (parse INPUT)) ]"#, "[3 6]")
+
 
         ];
         let std_ast = crate::baked::load_ast();
