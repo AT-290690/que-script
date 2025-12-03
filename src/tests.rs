@@ -1266,7 +1266,20 @@ L82")
     (+= S (get M)))))) 
     (get S))))
 
-[(part1 (parse INPUT))]"#, "[357]")
+(let part2 (lambda parsed (do
+  (variable S [0])
+  (for parsed (lambda line (do 
+    (let N (length line))
+    (let stack [])
+    (loop 0 N (lambda i (do
+      (loop (and (not (empty? stack)) (<# (at stack -1) (get line i)) (> (+ (length stack) (- N i)) 12)) (lambda (pop! stack)))
+      (push! stack (get line i))
+      (loop (> (length stack) 12) (lambda (pop! stack))))))
+    (set S (BigInt/add (get S) (BigInt/new stack))))))
+  (get S))))
+
+
+{ (part1 (parse INPUT)) (part2 (parse INPUT)) }"#, "[357 [3 1 2 1 9 1 0 7 7 8 6 1 9]]")
 
 
         ];
