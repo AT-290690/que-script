@@ -45,7 +45,7 @@ fn ident(name: &str) -> String {
         "true" => "true".to_string(),
         "false" => "false".to_string(),
         "null" => "__null".to_string(),
-
+        "for" => "__for".to_string(),
         "function" => "__function".to_string(),
         _ => {
             let mut s = String::new();

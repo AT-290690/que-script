@@ -1247,7 +1247,26 @@ L82")
       (loop 1 r (lambda i (push! rng (emod (+ (at rng -1) (* 1 d)) 100)))) 
       { res (+ counter (Int/count rng 0)) })) { 50 0 }))))
 
-[ (part1 (parse INPUT)) (part2 (parse INPUT)) ]"#, "[3 6]")
+[ (part1 (parse INPUT)) (part2 (parse INPUT)) ]"#, "[3 6]"),
+
+ (r#"(let INPUT "987654321111111
+811111111111119
+234234234234278
+818181911112111")
+
+(let parse (lambda input (String->Vector input nl)))
+(let part1 (lambda parsed (do 
+  (integer S 0)
+  (|> parsed (for (lambda inp (do
+    (integer M -infinity)
+    (loop 0 (length inp) (lambda i 
+      (loop i (length inp) (lambda j 
+        (if (<> i j) 
+          (set M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))))
+    (+= S (get M)))))) 
+    (get S))))
+
+[(part1 (parse INPUT))]"#, "[357]")
 
 
         ];
