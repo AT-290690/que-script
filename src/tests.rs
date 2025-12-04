@@ -1279,7 +1279,44 @@ L82")
   (get S))))
 
 
-{ (part1 (parse INPUT)) (part2 (parse INPUT)) }"#, "[357 [3 1 2 1 9 1 0 7 7 8 6 1 9]]")
+{ (part1 (parse INPUT)) (part2 (parse INPUT)) }"#, "[357 [3 1 2 1 9 1 0 7 7 8 6 1 9]]"),
+ (r#"(let INPUT 
+"..@@.@@@@.
+@@@.@.@.@@
+@@@@@.@.@@
+@.@@@@..@.
+@@.@@@@.@@
+.@@@@@@@.@
+.@.@.@.@@@
+@.@@@.@@@@
+.@@@@@@@@.
+@.@.@@@.@.")
+
+(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (map x (lambda x (if (=# x '@') 1 0))))))))
+(let part1 (lambda input (do
+  (integer TOTAL 0)
+  (loop 0 (length input) (lambda y (do 
+    (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
+      (integer SUM 0)
+      (neighborhood input neighborhood/moore y x (lambda cell dir y x (+= SUM cell)))
+      (if (< (get SUM) 4) (++ TOTAL)))))))))
+  (get TOTAL))))
+
+  (let part2 (lambda input (do
+    (let rec (lambda total (do
+        (let rem [])
+        (loop 0 (length input) (lambda y (do 
+        (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
+        (integer ACC 0)
+        (neighborhood input neighborhood/moore y x (lambda cell dir y x (+= ACC cell)))
+        (if (< (get ACC) 4) (push! rem [ y x ])))))))))
+        (if (empty? rem) total (do 
+        (for rem (lambda [y x .] (set! (get input y) x 0)))
+        (rec (+ total (length rem))))))))
+    (rec 0))))
+
+[(part1 (parse INPUT)) (part2 (parse INPUT))]"#, "[13 43]")
+
 
 
         ];

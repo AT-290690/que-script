@@ -942,6 +942,12 @@ nil)))
           (let dx (+ (std/vector/second dir) x))
           (fn a (get xs (std/int/euclidean-mod dy N) (std/int/euclidean-mod dx N))))) 0)))
 
+(let neighborhood std/vector/3d/adjacent)
+(let neighborhood/moore std/vector/3d/moore-neighborhood)
+(let neighborhood/diagonal std/vector/3d/diagonal-neighborhood)
+(let neighborhood/kernel std/vector/3d/kernel-neighborhood)
+(let neighborhood/von-neumann std/vector/3d/von-neumann-neighborhood)
+
 (let std/node/parent (lambda i (- (>> (+ i 1) 1) 1)))
 (let std/node/left (lambda i (+ (<< i 1) 1)))
 (let std/node/right (lambda i (<< (+ i 1) 1)))
