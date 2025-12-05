@@ -1315,9 +1315,70 @@ L82")
         (rec (+ total (length rem))))))))
     (rec 0))))
 
-[(part1 (parse INPUT)) (part2 (parse INPUT))]"#, "[13 43]")
+[(part1 (parse INPUT)) (part2 (parse INPUT))]"#, "[13 43]"),
 
+(r#"(let INPUT "3-5
+10-14
+16-20
+12-18
+*
+1
+5
+8
+11
+17
+32")
 
+(let parse (lambda input (do 
+  (let parts (String->Vector input '*'))
+  (let A (drop/last (get parts 0) 1))
+  (let B (drop/first (get parts 1) 1))
+  { (map (String->Vector A nl) (lambda x (map (String->Vector x '-') Chars->Integer))) (map (String->Vector B nl) Chars->Integer) }
+)))
+
+(let part1 (lambda { ranges fruits } (length (filter fruits (lambda fruit (some? ranges (lambda [ low high . ] (and (>= fruit low) (<= fruit high)))))))))
+
+(part1 (parse INPUT))"#, "3"),
+(r#"(let INPUT "3-5
+10-14
+16-20
+12-18
+*
+1
+5
+8
+11
+17
+32")
+
+(let parse (lambda input (do 
+  (let parts (String->Vector input '*'))
+  (let A (drop/last (get parts 0) 1))
+  (let B (drop/first (get parts 1) 1))
+  { (map (String->Vector A nl) (lambda x (map (String->Vector x '-') BigInt/new))) (map (String->Vector B nl) BigInt/new) })))
+
+(let part1 (lambda { ranges fruits } (length (filter fruits (lambda fruit (some? ranges (lambda [ low high . ] (and (BigInt/gte? fruit low) (BigInt/lte? fruit high)))))))))
+
+(let part2 (lambda { ranges . } (do 
+  (sort! ranges (lambda a b (BigInt/lt? (get a 0) (get b 0))))
+  (variable low (get ranges 0 0))
+  (variable high (get ranges 0 1))
+  (variable out [ 0 ])
+  (loop 1 (length ranges) (lambda i (do 
+    (let dlow (get ranges i 0))
+    (let dhigh (get ranges i 1))
+    (if (BigInt/gte? (get high) dlow) (do 
+      (set low (if (BigInt/lt? (get low) dlow) (get low) dlow))
+      (set high (if (BigInt/gt? (get high) dhigh) (get high) dhigh))) (do 
+      (set out (BigInt/add (get out) (BigInt/add (BigInt/sub (get high) (get low)) [ 1 ])))
+      (set low (get ranges i 0))
+      (set high (get ranges i 1)))))))
+  (set out (BigInt/add (get out) (BigInt/add (BigInt/sub (get high) (get low)) [ 1 ])))
+  (get out))))
+
+(let PARSED (parse INPUT))
+
+[[(part1 PARSED)] (part2 PARSED)]"#, "[[3] [1 4]]")
 
         ];
         let std_ast = crate::baked::load_ast();
