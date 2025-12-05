@@ -214,7 +214,7 @@ fn main() -> std::io::Result<()> {
         let mut file = fs::File::create(path)?;
         write!(file, "{:?}", names)?;
     } else {
-        let program = fs::read_to_string("./dist/ir.txt")?;
+        // let program = fs::read_to_string("./dist/ir.txt")?;
         println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
     }
 

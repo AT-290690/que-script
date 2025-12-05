@@ -719,27 +719,29 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             if args.is_empty() {
                 return Ok(Type::List(Box::new(Type::Char))); // empty string
             }
-
-            for arg in args {
-                match infer_expr(arg, ctx) {
-                    Ok(elem_type) => {
-                        let valid_type = match elem_type {
-                            Type::Char => Type::Char,
-                            Type::Int => Type::Char,
-                            _ => elem_type,
-                        };
-                        ctx.add_constraint(
-                            Type::Char,
-                            valid_type,
-                            TypeError {
-                                variant: TypeErrorVariant::Vector,
-                                expr: args.to_vec(),
-                            },
-                        );
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
+            // I will not check if elements in string are the same
+            // They should be because string is not really used by the user
+            // but by the parser when transforming double quotes
+            // for arg in args {
+            //     match infer_expr(arg, ctx) {
+            //         Ok(elem_type) => {
+            //             let valid_type = match elem_type {
+            //                 Type::Char => Type::Char,
+            //                 Type::Int => Type::Char,
+            //                 _ => elem_type,
+            //             };
+            //             ctx.add_constraint(
+            //                 Type::Char,
+            //                 valid_type,
+            //                 TypeError {
+            //                     variant: TypeErrorVariant::Vector,
+            //                     expr: args.to_vec(),
+            //                 },
+            //             );
+            //         }
+            //         Err(e) => return Err(e),
+            //     }
+            // }
 
             return Ok(Type::List(Box::new(Type::Char)));
         } else if name == "char" {
