@@ -1343,6 +1343,12 @@ q)))
 (let std/int/collinear? (lambda points (= (std/int/shoelace points) 0)))
 
 
+(let std/vector/int/big/range (lambda start end (do
+     (let out [ (std/int/big/new (std/convert/integer->string start)) ])
+     (let process (lambda i (std/vector/set! out (length out) (std/int/big/new (std/convert/integer->string i)))))
+     (loop (+ start 1) (+ end 1) process)
+   out))) 
+
 (let std/int/big/add (lambda a1 b1 (do
   (let a (std/vector/reverse a1))
   (let b (std/vector/reverse b1))
@@ -1637,6 +1643,7 @@ q)))
 (let /map/tuple std/tuple/map)
 (let /map/fst std/tuple/map/fst)
 (let /map/snd std/tuple/map/snd)
+(let /partition std/vector/partition)
 
 (let \reduce (lambda fn a xs (std/vector/reduce xs fn a)))
 (let \map (lambda fn xs (std/vector/map xs fn)))
@@ -1652,6 +1659,7 @@ q)))
 (let \map/tuple (lambda fn xs (std/tuple/map xs fn)))
 (let \map/fst (lambda fn xs (std/tuple/map/fst xs fn)))
 (let \map/snd (lambda fn xs (std/tuple/map/snd xs fn)))
+(let \partition (lambda n xs (std/vector/partition xs n)))
 
 (let extreme std/vector/int/extreme)
 (let map/tuple std/tuple/map)
@@ -1668,7 +1676,7 @@ q)))
 (let empty? std/vector/empty?)
 (let not-empty? std/vector/not-empty?)
 (let find std/vector/find-index)
-
+(let partition std/vector/partition)
 (let reverse std/vector/reverse)
 (let slice std/vector/slice)
 (let cons std/vector/cons)
@@ -1813,6 +1821,7 @@ q)))
 (let BigInt/new std/int/big/new)
 (let BigInt/pow std/int/big/pow)
 (let BigInt/expt std/int/big/expt)
+(let BigInt/range std/vector/int/big/range)
 
 (let Vector/2d/set! std/vector/2d/int/set!)
 (let Vector/2d/add std/vector/2d/int/add)

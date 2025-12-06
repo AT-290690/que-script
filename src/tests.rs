@@ -1378,8 +1378,51 @@ L82")
 
 (let PARSED (parse INPUT))
 
-[[(part1 PARSED)] (part2 PARSED)]"#, "[[3] [1 4]]")
+[[(part1 PARSED)] (part2 PARSED)]"#, "[[3] [1 4]]"),
+(r#"(let INPUT 
+"123 328  51 64 
+ 45 64  387 23 
+  6 98  215 314
+*   +   *   +  ")
 
+(let parse (lambda input (do 
+  (let groups (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (filter (lambda x (not (empty? x)))))))))
+  (let op (map (pull! groups) first))
+  (let ints (map groups (lambda x (map x Chars->Integer))))
+  (let numbers (reduce (range 0 (- (length (get ints 0)) 1)) (lambda a i (do (push! a (map ints (lambda n (get n i)))) a)) []))
+  {numbers op }
+  )))
+
+(let part1 (lambda { numbers op } (reduce (zip { op (range 0 (length op)) }) (lambda a { op i } 
+    (+ a 
+      (cond 
+        (=# op '*') (reduce (get numbers i) * 1)
+        (=# op '+') (reduce (get numbers i) + 0)
+      ))) 0)))
+    (part1 (parse INPUT))"#, "4277556"),
+
+(r#"
+(let INPUT 
+"123 328  51 64 
+ 45 64  387 23 
+  6 98  215 314
+*   +   *   +  ")
+(let parse (lambda input (do 
+  (let groups (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (filter (lambda x (not (empty? x)))))))))
+  (let op (map (pull! groups) first))
+  (let ints (map groups (lambda x (map x BigInt/new))))
+  (let numbers (reduce (range 0 (- (length (get ints 0)) 1)) (lambda a i (do (push! a (map ints (lambda n (get n i)))) a)) []))
+  {numbers op }
+  )))
+
+(let part1 (lambda { numbers op } (reduce (zip { op (range 0 (length op)) }) (lambda a { op i } 
+    (BigInt/add a 
+      (cond 
+        (=# op '*') (reduce (get numbers i) BigInt/mul [1])
+        (=# op '+') (reduce (get numbers i) BigInt/add [0])
+        []
+      ))) [0])))
+(part1 (parse INPUT))"#, "[4 2 7 7 5 5 6]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
