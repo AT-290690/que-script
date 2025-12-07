@@ -1006,7 +1006,8 @@ fn cond_transform(mut exprs: Vec<Expression>) -> Expression {
     }
 
     let mut pairs = Vec::new();
-    let mut default = Expression::Atom(0);
+    // let mut default = Expression::Atom(0);
+    let mut default = Expression::Word("nil".to_string());
 
     if exprs.len() % 2 == 1 {
         default = exprs.pop().unwrap();

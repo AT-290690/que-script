@@ -1398,6 +1398,7 @@ L82")
       (cond 
         (=# op '*') (reduce (get numbers i) * 1)
         (=# op '+') (reduce (get numbers i) + 0)
+        0
       ))) 0)))
     (part1 (parse INPUT))"#, "4277556"),
 
@@ -1422,7 +1423,115 @@ L82")
         (=# op '+') (reduce (get numbers i) BigInt/add [0])
         []
       ))) [0])))
-(part1 (parse INPUT))"#, "[4 2 7 7 5 5 6]")
+(part1 (parse INPUT))"#, "[4 2 7 7 5 5 6]"),
+
+(r#"(let INPUT 
+".......S.......
+...............
+.......^.......
+...............
+......^.^......
+...............
+.....^.^.^.....
+...............
+....^.^...^....
+...............
+...^.^...^.^...
+...............
+..^...^.....^..
+...............
+.^.^.^.^.^...^.
+...............")
+(let parse (lambda input (String->Vector input nl)))
+(let part1 (lambda input (do
+  (integer total 0)
+  (let visited [[] [] [] [] [] [] [] [] []])
+  (let queue (Que/new [Int]))
+  (let Que/deque! (Que/deque-default! [Int]))
+  (let start (std/vector/3d/points input (lambda x (=# x 'S'))))
+  (Que/enque! queue (get start 0))
+  (loop (Que/not-empty? queue) (lambda (do 
+    (let current (Que/peek queue))
+    (Que/deque! queue)
+    (let y (get current 0))
+    (let x (get current 1))
+    (let key (cons (Integer->String y) "-" (Integer->String x)))
+    (if (and (std/vector/3d/in-bounds? input y x) (not (Set/has? visited key))) (do
+        (Set/add! visited key)
+        (if (=# (get input y x) '^') (do 
+          (++ total)
+          (Que/enque! queue [ y (+ x 1) ])
+          (Que/enque! queue [ y (- x 1) ])) (Que/enque! queue [ (+ y 1) x ])))))))
+  (get total))))
+
+
+(let part2 (lambda input (do
+  (integer total 0)
+  (let queue (Que/new [Int]))
+  (let Que/deque! (Que/deque-default! [Int]))
+  (let start (first (std/vector/3d/points input (lambda x (=# x 'S')))))
+  (Que/enque! queue [(get start 0) (get start 1) 1])
+  (loop (Que/not-empty? queue) (lambda (do 
+    (let current (Que/peek queue))
+    (Que/deque! queue)
+    (let y (get current 0))
+    (let x (get current 1))
+    (let c (get current 2))
+    (if (std/vector/3d/in-bounds? input y x) (do
+        (if (=# (get input y x) '^') (do 
+            (Que/enque! queue [ y (+ x 1) c ])
+            (Que/enque! queue [ y (- x 1) c ])) 
+            
+            (Que/enque! queue [ (+ y 1) x c ])))
+        (+= total c)))))
+  (get total))))
+(let PARSED (parse INPUT))
+[(part1 PARSED) (part2 PARSED)]"#, "[21 40]"),
+
+(r#"
+(let INPUT 
+".......S.......
+...............
+.......^.......
+...............
+......^.^......
+...............
+.....^.^.^.....
+...............
+....^.^...^....
+...............
+...^.^...^.^...
+...............
+..^...^.....^..
+...............
+.^.^.^.^.^...^.
+...............")
+(let parse (lambda input (String->Vector input nl)))
+(let solution (lambda input (do
+  (let data (map input (lambda x (map x (lambda x x)))))
+  (variable beam [ 0 ])
+  (let timeline (map (zeroes (length (get data 0))) (lambda . [ 0 ])))
+  (loop 0 (length data) (lambda y (do 
+    (let line (get data y))
+    (loop 0 (length line) (lambda x (do 
+      (let c (get line x))
+      (cond 
+        (=# c 'S') (do 
+          (set! (get data (+ y 1)) x '|')
+          (set! timeline x [ 1 ]))
+        (=# c '^') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do 
+          (set! (get data y) (- x 1) '|')
+          (set! (get data y) (+ x 1) '|')
+          (set beam (BigInt/add (get beam) [ 1 ]))
+          (set! timeline (- x 1) (BigInt/add (get timeline (- x 1)) (get timeline x)))
+          (set! timeline (+ x 1) (BigInt/add (get timeline (+ x 1)) (get timeline x)))
+          (set! timeline x [ 0 ])
+        ))
+        (=# c '.') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do 
+          (set! (get data y) x '|'))))))))))
+  [(get beam) (BigInt/sum timeline)])))
+
+(solution (parse INPUT))"#, "[[2 1] [4 0]]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

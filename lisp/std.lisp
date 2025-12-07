@@ -1770,7 +1770,7 @@ q)))
 (let Table/get std/vector/tuple/hash/table/get)
 
 (let Table/has? std/vector/tuple/hash/table/has?)
-(let Table/set! (lambda table key (do (std/vector/tuple/hash/table/set! table key) nil)))
+(let Table/set! (lambda table key value (do (std/vector/tuple/hash/table/set! table key value) nil)))
 (let Table/remove! (lambda table key (do (std/vector/tuple/hash/table/remove! table key) nil)))
 (let Table/count std/vector/tuple/hash/table/count)
 
