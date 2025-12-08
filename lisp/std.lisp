@@ -116,6 +116,7 @@
 (let std/vector/last (lambda xs (get xs (- (length xs) 1))))
 (let std/int/max-safe 2147383647)
 (let std/int/min-safe -2147483648)
+(let std/float/pi 3.1415927)
 (let std/int/safe? (lambda value (and (>= value std/int/min-safe) (<= value std/int/max-safe))))
 (let std/int/get-safe (lambda vrbl (if (std/int/safe? (get vrbl)) (get vrbl) Int)))
 

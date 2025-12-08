@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 pub enum BiteCodeEvaluated {
     Bool(bool),
     Int(i32),
+    Float(f32),
     Function(Vec<String>, Vec<Instruction>, Rc<RefCell<BiteCodeEnv>>),
     Array(Rc<RefCell<Vec<BiteCodeEvaluated>>>),
 }
@@ -16,6 +17,7 @@ impl fmt::Debug for BiteCodeEvaluated {
         match self {
             BiteCodeEvaluated::Bool(value) => write!(f, "{}", value),
             BiteCodeEvaluated::Int(value) => write!(f, "{}", value),
+            BiteCodeEvaluated::Float(value) => write!(f, "{}", value),
             BiteCodeEvaluated::Function(_, _, _) => write!(f, "Function"),
             BiteCodeEvaluated::Array(arr) => {
                 let arr_ref = arr.borrow();
@@ -65,6 +67,7 @@ impl BiteCodeEnv {
 #[derive(Clone, Debug)]
 pub enum Instruction {
     PushInt(i32),
+    PushFloat(f32),
     PushBool(bool),
 
     StoreVar(String),
@@ -83,9 +86,13 @@ pub enum Instruction {
 
     Length,
     Add,
+    AddF,
     Mult,
+    MultF,
     Div,
+    DivF,
     Sub,
+    SubF,
     Mod,
     Pop,
     Lt,
@@ -96,6 +103,7 @@ pub enum Instruction {
     Not,
 
     EqBool,
+    EqF,
 
     BitXor,
     BitRs,
@@ -114,11 +122,20 @@ impl Instruction {
         match self {
             Instruction::PushBool(n) => format!("PushBool({})", n),
             Instruction::PushInt(n) => format!("PushInt({})", n),
+            Instruction::PushFloat(n) => format!("PushFloat({})", n),
             Instruction::Length => "Length".to_string(),
             Instruction::Add => "Add".to_string(),
+            Instruction::AddF => "AddF".to_string(),
+
             Instruction::Mult => "Mult".to_string(),
+            Instruction::MultF => "MultF".to_string(),
+
             Instruction::Div => "Div".to_string(),
+            Instruction::DivF => "DivF".to_string(),
+
             Instruction::Sub => "Sub".to_string(),
+            Instruction::SubF => "SubF".to_string(),
+
             Instruction::Mod => "Mod".to_string(),
             Instruction::Pop => "Pop".to_string(),
             Instruction::Lt => "Lt".to_string(),
@@ -127,6 +144,7 @@ impl Instruction {
             Instruction::Gte => "Gte".to_string(),
             Instruction::Eq => "Eq".to_string(),
             Instruction::EqBool => "EqBool".to_string(),
+            Instruction::EqF => "EqF".to_string(),
 
             Instruction::Not => "Not".to_string(),
 
@@ -223,11 +241,20 @@ impl Instruction {
         match self {
             Instruction::PushBool(n) => format!("PushBool({})", n),
             Instruction::PushInt(n) => format!("PushInt({})", n),
+            Instruction::PushFloat(n) => format!("PushFloat({})", n),
             Instruction::Length => "Length".to_string(),
             Instruction::Add => "Add".to_string(),
+            Instruction::AddF => "AddF".to_string(),
+
             Instruction::Mult => "Mult".to_string(),
+            Instruction::MultF => "MultF".to_string(),
+
             Instruction::Div => "Div".to_string(),
+            Instruction::DivF => "DivF".to_string(),
+
             Instruction::Sub => "Sub".to_string(),
+            Instruction::SubF => "SubF".to_string(),
+
             Instruction::Mod => "Mod".to_string(),
             Instruction::Pop => "Pop".to_string(),
             Instruction::Lt => "Lt".to_string(),
@@ -236,6 +263,7 @@ impl Instruction {
             Instruction::Gte => "Gte".to_string(),
             Instruction::Eq => "Eq".to_string(),
             Instruction::EqBool => "EqBool".to_string(),
+            Instruction::EqF => "EqF".to_string(),
 
             Instruction::Not => "Not".to_string(),
 
@@ -422,6 +450,8 @@ impl VM {
                     }
                 }
                 Instruction::PushInt(n) => self.stack.push(BiteCodeEvaluated::Int(*n)),
+                Instruction::PushFloat(n) => self.stack.push(BiteCodeEvaluated::Float(*n)),
+
                 Instruction::PushBool(n) => self.stack.push(BiteCodeEvaluated::Bool(*n)),
 
                 Instruction::Add => {
@@ -432,6 +462,19 @@ impl VM {
                             self.stack.push(BiteCodeEvaluated::Int(a + b))
                         }
                         _ => return Err("Error! Both arguments must be numbers at (+)".to_string()),
+                    }
+                }
+
+                Instruction::AddF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Float(a + b))
+                        }
+                        _ => {
+                            return Err("Error! Both arguments must be numbers at (+.)".to_string())
+                        }
                     }
                 }
 
@@ -446,6 +489,19 @@ impl VM {
                     }
                 }
 
+                Instruction::MultF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Float(a * b))
+                        }
+                        _ => {
+                            return Err("Error! Both arguments must be numbers at (*.)".to_string())
+                        }
+                    }
+                }
+
                 Instruction::Div => {
                     let b = self.stack.pop().ok_or("stack underflow")?;
                     let a = self.stack.pop().ok_or("stack underflow")?;
@@ -457,6 +513,19 @@ impl VM {
                     }
                 }
 
+                Instruction::DivF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Float(a / b))
+                        }
+                        _ => {
+                            return Err("Error! Both arguments must be numbers at (/.)".to_string())
+                        }
+                    }
+                }
+
                 Instruction::Sub => {
                     let b = self.stack.pop().ok_or("stack underflow")?;
                     let a = self.stack.pop().ok_or("stack underflow")?;
@@ -465,6 +534,19 @@ impl VM {
                             self.stack.push(BiteCodeEvaluated::Int(a - b))
                         }
                         _ => return Err("Error! Both arguments must be numbers at (-)".to_string()),
+                    }
+                }
+
+                Instruction::SubF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Float(a - b))
+                        }
+                        _ => {
+                            return Err("Error! Both arguments must be numbers at (-.)".to_string())
+                        }
                     }
                 }
 
@@ -562,6 +644,18 @@ impl VM {
                             self.stack.push(BiteCodeEvaluated::Bool(a == b))
                         }
                         _ => return Err("Error! Both arguments must be bools at (=)".to_string()),
+                    }
+                }
+
+                Instruction::EqF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a == b))
+                        }
+                        _ => return Err("Error! Both arguments must be bools at (=.)".to_string()),
                     }
                 }
                 Instruction::Lt => {
@@ -900,6 +994,11 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
             Ok(())
         }
 
+        Expression::Float(n) => {
+            code.push(Instruction::PushFloat(*n));
+            Ok(())
+        }
+
         Expression::Word(name) => {
             match name.as_str() {
                 // TODO add get fst snd and other missing stuff from here
@@ -912,13 +1011,24 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     Ok(())
                 }
                 // push a closure representing these
-                "/" | "/#" | "/." => {
+                "/" | "/#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Div,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "/." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::DivF,
                         ],
                     ));
                     Ok(())
@@ -930,6 +1040,18 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Mult,
+                        ],
+                    ));
+                    Ok(())
+                }
+
+                "*." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::MultF,
                         ],
                     ));
                     Ok(())
@@ -956,6 +1078,19 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
+
+                "+." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::AddF,
+                        ],
+                    ));
+                    Ok(())
+                }
+
                 "-" | "-#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
@@ -963,6 +1098,17 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::Sub,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "-." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::SubF,
                         ],
                     ));
                     Ok(())
@@ -1018,6 +1164,17 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::EqBool,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "=." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::EqF,
                         ],
                     ));
                     Ok(())
@@ -1151,6 +1308,15 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Add);
                         Ok(())
                     }
+                    "+." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! +. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::AddF);
+                        Ok(())
+                    }
                     "*" | "*#" => {
                         if exprs.len() != 3 {
                             return Err("Error! * expects exactly 2 arguments".to_string());
@@ -1160,13 +1326,31 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Mult);
                         Ok(())
                     }
-                    "/" | "/#" | "/." => {
+                    "*." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! *. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::MultF);
+                        Ok(())
+                    }
+                    "/" | "/#" => {
                         if exprs.len() != 3 {
                             return Err("Error! / expects exactly 2 arguments".to_string());
                         }
                         compile(&exprs[1], code)?;
                         compile(&exprs[2], code)?;
                         code.push(Instruction::Div);
+                        Ok(())
+                    }
+                    "/." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! /. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::DivF);
                         Ok(())
                     }
                     "-" | "-#" => {
@@ -1176,6 +1360,15 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         compile(&exprs[1], code)?;
                         compile(&exprs[2], code)?;
                         code.push(Instruction::Sub);
+                        Ok(())
+                    }
+                    "-." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! -. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::SubF);
                         Ok(())
                     }
                     "mod" => {
@@ -1194,6 +1387,15 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         compile(&exprs[1], code)?;
                         compile(&exprs[2], code)?;
                         code.push(Instruction::EqBool);
+                        Ok(())
+                    }
+                    "=." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! = expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::EqF);
                         Ok(())
                     }
                     "=" | "=#" => {
@@ -1912,10 +2114,16 @@ impl<'a> P<'a> {
             "PopArray" => Ok(Instruction::PopArray),
             "Eq" => Ok(Instruction::Eq),
             "EqBool" => Ok(Instruction::EqBool),
+            "EqF" => Ok(Instruction::EqF),
             "Add" => Ok(Instruction::Add),
+            "AddF" => Ok(Instruction::AddF),
             "Mult" => Ok(Instruction::Mult),
+            "MultF" => Ok(Instruction::MultF),
+
             "Div" => Ok(Instruction::Div),
+            "DivF" => Ok(Instruction::DivF),
             "Sub" => Ok(Instruction::Sub),
+            "SubF" => Ok(Instruction::SubF),
             "Mod" => Ok(Instruction::Mod),
 
             // also catch `LoadVar("...")` handled above

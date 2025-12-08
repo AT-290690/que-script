@@ -24,6 +24,7 @@ impl fmt::Display for TypeVar {
 pub enum Type {
     Var(TypeVar),
     Int,
+    Float,
     Bool,
     Char,
     Function(Box<Type>, Box<Type>),
@@ -38,6 +39,7 @@ impl fmt::Display for Type {
             Type::Unit => write!(f, "()"),
             Type::Var(v) => write!(f, "{}", v),
             Type::Int => write!(f, "Int"),
+            Type::Float => write!(f, "Float"),
             Type::Bool => write!(f, "Bool"),
             Type::Char => write!(f, "Char"),
             Type::Function(from, to) => match **from {
@@ -253,7 +255,7 @@ impl Type {
     }
     pub fn substitute(&self, subst: &HashMap<u64, Type>) -> Type {
         match self {
-            Type::Int | Type::Bool | Type::Char | Type::Unit => self.clone(),
+            Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => self.clone(),
             Type::Var(v) => {
                 if let Some(ty) = subst.get(&v.id) {
                     ty.clone()
@@ -283,7 +285,7 @@ impl Type {
 
     fn collect_free_vars(&self, vars: &mut std::collections::HashSet<u64>) {
         match self {
-            Type::Int | Type::Bool | Type::Char | Type::Unit => {}
+            Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => {}
             Type::Var(v) => {
                 vars.insert(v.id);
             }

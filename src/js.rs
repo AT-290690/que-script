@@ -4,14 +4,14 @@ fn ident(name: &str) -> String {
     // simple rules: replace ":" "*" "?" "!" "-" "." with underscores, remove other unsafe chars
 
     match name {
-        "+" | "+#" => "(a,b)=>a+b".to_string(),
-        "-" | "-#" => "(a,b)=>a-b".to_string(),
+        "+" | "+#" | "+." => "(a,b)=>a+b".to_string(),
+        "-" | "-#" | "-." => "(a,b)=>a-b".to_string(),
         "/" | "/#" => "(a,b)=>(a/b)|0".to_string(),
         // float division
         "/." => "(a,b)=>a/b".to_string(),
-        "*" | "*#" => "(a,b)=>a*b".to_string(),
+        "*" | "*#" | "*." => "(a,b)=>a*b".to_string(),
         "mod" => "(a,b)=>a%b".to_string(),
-        "=" | "=?" | "=#" => "(a,b)=>a==b".to_string(),
+        "=" | "=?" | "=#" | "=." => "(a,b)=>a==b".to_string(),
         "<" | "<#" => "(a,b)=>a<b".to_string(),
         ">" | ">#" => "(a,b)=>a>b".to_string(),
         "<=" | "<=#" => "(a,b)=>a<=b".to_string(),
@@ -86,6 +86,7 @@ pub fn compile_expr_to_js(expr: &Expression) -> String {
 fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
     match expr {
         Expression::Int(n) => format!("{}", n),
+        Expression::Float(n) => format!("{}", n),
         Expression::Word(w) => ident(w),
         Expression::Apply(items) => {
             // head must be an expression (usually Word)
@@ -146,17 +147,17 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[3])
                     ),
                     "pop!" => format!("({}.pop(),0)", compile_expr_to_js(&items[1])),
-                    "*" | "*#" => format!(
+                    "*" | "*#" | "*." => format!(
                         "({} * {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "+" | "+#" => format!(
+                    "+" | "+#" | "+." => format!(
                         "({} + {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "-" | "-#" => format!(
+                    "-" | "-#" | "-." => format!(
                         "({} - {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
@@ -197,7 +198,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "=" | "=?" | "=#" => format!(
+                    "=" | "=?" | "=#" | "=." => format!(
                         "({} == {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])

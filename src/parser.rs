@@ -129,8 +129,13 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
         if is_integer(tok) {
             let n: i32 = tok
                 .parse()
-                .map_err(|e| format!("Bad number '{}': {}", tok, e))?;
+                .map_err(|e| format!("Bad integer '{}': {}", tok, e))?;
             Ok(Expression::Int(n))
+        } else if is_float(tok) {
+            let n: f32 = tok
+                .parse()
+                .map_err(|e| format!("Bad float '{}': {}", tok, e))?;
+            Ok(Expression::Float(n))
         } else {
             Ok(Expression::Word(tok.clone()))
         }
@@ -1120,8 +1125,54 @@ fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
 
     inp
 }
+
+fn is_float(s: &str) -> bool {
+    if s == "-" || s == "+" {
+        return false;
+    }
+
+    let trimmed = if let Some(stripped) = s.strip_prefix('-') {
+        stripped
+    } else {
+        s
+    };
+
+    if !trimmed.contains('.') {
+        return false;
+    }
+
+    let mut parts = trimmed.split('.');
+
+    let before = parts.next().unwrap_or("");
+    let after = parts.next().unwrap_or("");
+
+    if parts.next().is_some() {
+        return false;
+    }
+
+    let has_digit =
+        before.chars().any(|c| c.is_ascii_digit()) || after.chars().any(|c| c.is_ascii_digit());
+    if !has_digit {
+        return false;
+    }
+
+    for c in before.chars() {
+        if !c.is_ascii_digit() {
+            return false;
+        }
+    }
+
+    for c in after.chars() {
+        if !c.is_ascii_digit() {
+            return false;
+        }
+    }
+
+    true
+}
+
 fn is_integer(s: &str) -> bool {
-    if s == "-" || s == "+ " || s == "+" {
+    if s == "-" || s == "+ " {
         return false;
     }
     if !s.chars().any(|c| c.is_ascii_digit()) {
@@ -1144,9 +1195,11 @@ macro_rules! s {
         $s.to_string()
     };
 }
+
 #[derive(Debug, Clone)]
 pub enum Expression {
     Int(i32),
+    Float(f32),
     Word(String),
     Apply(Vec<Expression>),
 }
@@ -1155,6 +1208,7 @@ impl Expression {
     pub fn to_rust(&self) -> String {
         match self {
             Expression::Int(n) => format!("Int({})", n),
+            Expression::Float(n) => format!("Float({})", n),
             Expression::Word(w) => format!("Word(s!({:?}))", w),
             Expression::Apply(exprs) => {
                 let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
@@ -1166,6 +1220,7 @@ impl Expression {
         match self {
             Expression::Word(w) => w.clone(),
             Expression::Int(a) => a.to_string(),
+            Expression::Float(a) => a.to_string(),
             Expression::Apply(items) => {
                 if items.is_empty() {
                     return "()".to_string();

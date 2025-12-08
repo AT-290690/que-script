@@ -75,6 +75,7 @@ impl InferenceContext {
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     match expr {
         Expression::Int(_) => Ok(Type::Int),
+        Expression::Float(_) => Ok(Type::Float),
 
         Expression::Word(name) => {
             if let Some(scheme) = ctx.env.get(name) {
@@ -1064,7 +1065,13 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
         )),
     );
-
+    env.insert(
+        "+.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
+        )),
+    );
     env.insert(
         "+#".to_string(),
         TypeScheme::monotype(Type::Function(
@@ -1078,6 +1085,14 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "-.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
         )),
     );
 
@@ -1098,6 +1113,14 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     env.insert(
+        "*.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
+        )),
+    );
+
+    env.insert(
         "*#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1110,6 +1133,14 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    env.insert(
+        "/.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
         )),
     );
 
@@ -1141,6 +1172,14 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
+        "=.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
         )),
     );
 
