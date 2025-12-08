@@ -126,11 +126,11 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
         Err("Error! Unexpected ')'".into())
     } else {
         *i += 1;
-        if is_number(tok) {
+        if is_integer(tok) {
             let n: i32 = tok
                 .parse()
                 .map_err(|e| format!("Bad number '{}': {}", tok, e))?;
-            Ok(Expression::Atom(n))
+            Ok(Expression::Int(n))
         } else {
             Ok(Expression::Word(tok.clone()))
         }
@@ -550,7 +550,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                                     Expression::Word(
                                                         "_args".to_string() + &j.to_string(),
                                                     ),
-                                                    Expression::Atom(i as i32),
+                                                    Expression::Int(i as i32),
                                                 ]),
                                             ]))
                                         }
@@ -564,7 +564,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                                     Expression::Word(
                                                         "_args".to_string() + &j.to_string(),
                                                     ),
-                                                    Expression::Atom(i as i32),
+                                                    Expression::Int(i as i32),
                                                 ]),
                                             ]))
                                         }
@@ -769,7 +769,7 @@ fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> 
         return Ok(Expression::Apply(vec![
             Expression::Word("get".to_string()),
             first,
-            Expression::Atom(0),
+            Expression::Int(0),
         ]));
     }
     let mut acc = first;
@@ -860,11 +860,11 @@ fn minus_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(0),
+        0 => Expression::Int(0),
         1 => Expression::Apply(vec![
             Expression::Word("*".to_string()),
             exprs.remove(0),
-            Expression::Atom(-1),
+            Expression::Int(-1),
         ]),
         _ => {
             let first = exprs.remove(0);
@@ -878,7 +878,7 @@ fn plus_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(1),
+        0 => Expression::Int(1),
         _ => {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
@@ -949,7 +949,7 @@ fn and_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(1),
+        0 => Expression::Int(1),
         _ => {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
@@ -963,7 +963,7 @@ fn or_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(1),
+        0 => Expression::Int(1),
         _ => {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
@@ -976,7 +976,7 @@ fn mult_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(1),
+        0 => Expression::Int(1),
         _ => {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
@@ -989,7 +989,7 @@ fn div_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Atom(1),
+        0 => Expression::Int(1),
         _ => {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
@@ -1002,11 +1002,11 @@ fn cond_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     if exprs.is_empty() {
-        return Expression::Atom(0);
+        return Expression::Int(0);
     }
 
     let mut pairs = Vec::new();
-    // let mut default = Expression::Atom(0);
+    // let mut default = Expression::Int(0);
     let mut default = Expression::Word("nil".to_string());
 
     if exprs.len() % 2 == 1 {
@@ -1120,7 +1120,7 @@ fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
 
     inp
 }
-fn is_number(s: &str) -> bool {
+fn is_integer(s: &str) -> bool {
     if s == "-" || s == "+ " || s == "+" {
         return false;
     }
@@ -1146,7 +1146,7 @@ macro_rules! s {
 }
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Atom(i32),
+    Int(i32),
     Word(String),
     Apply(Vec<Expression>),
 }
@@ -1154,7 +1154,7 @@ pub enum Expression {
 impl Expression {
     pub fn to_rust(&self) -> String {
         match self {
-            Expression::Atom(n) => format!("Atom({})", n),
+            Expression::Int(n) => format!("Int({})", n),
             Expression::Word(w) => format!("Word(s!({:?}))", w),
             Expression::Apply(exprs) => {
                 let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
@@ -1165,7 +1165,7 @@ impl Expression {
     pub fn to_lisp(&self) -> String {
         match self {
             Expression::Word(w) => w.clone(),
-            Expression::Atom(a) => a.to_string(),
+            Expression::Int(a) => a.to_string(),
             Expression::Apply(items) => {
                 if items.is_empty() {
                     return "()".to_string();
@@ -1347,7 +1347,7 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
         }
 
         // recursively descend
-        Expression::Word(_) | Expression::Atom(_) => expr,
+        Expression::Word(_) | Expression::Int(_) => expr,
         other => other,
     }
 }
@@ -1469,9 +1469,9 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
             Expression::Apply(vec![
                 Expression::Word("get".to_string()),
                 Expression::Word(cont_name.clone()),
-                Expression::Atom(0),
+                Expression::Int(0),
             ]),
-            Expression::Atom(0),
+            Expression::Int(0),
         ]),
         loop_fn_lambda,
     ]);
@@ -1487,7 +1487,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
         Expression::Word(cont_name.clone()),
         Expression::Apply(vec![
             Expression::Word("vector".to_string()),
-            Expression::Atom(0),
+            Expression::Int(0),
         ]),
     ]);
     // NOTE: Earlier we made __rec_result as Unknown — but that isn't an vector. Let's change: create __rec_result as []
@@ -1504,7 +1504,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     let final_get_result = Expression::Apply(vec![
         Expression::Word("get".to_string()),
         Expression::Word(result_name.clone()),
-        Expression::Atom(0),
+        Expression::Int(0),
     ]);
 
     // Assemble the whole `do` body in order:
@@ -1587,7 +1587,7 @@ fn transform_tail_positions(
             Expression::Word(w) if params.contains(w) => Expression::Apply(vec![
                 Expression::Word("get".to_string()),
                 Expression::Word("_".to_string() + w),
-                Expression::Atom(0),
+                Expression::Int(0),
             ]),
             Expression::Apply(items) => {
                 let mapped = items
@@ -1609,27 +1609,27 @@ fn transform_tail_positions(
                     // generate (do (set! p1 0 arg1) (set! p2 0 arg2) ... )
                     let mut sets = vec![Expression::Word("do".to_string())];
                     for (i, p) in params.iter().enumerate() {
-                        let arg = items.get(1 + i).cloned().unwrap_or(Expression::Atom(0));
+                        let arg = items.get(1 + i).cloned().unwrap_or(Expression::Int(0));
                         let arg_replaced = replace_param_reads(&arg, params);
                         let set_new_call = Expression::Apply(vec![
                             Expression::Word("set!".to_string()),
                             Expression::Word("_new_".to_string() + p),
-                            Expression::Atom(0),
+                            Expression::Int(0),
                             arg_replaced,
                         ]);
                         sets.push(set_new_call);
                     }
                     for (i, p) in params.iter().enumerate() {
-                        let arg = items.get(1 + i).cloned().unwrap_or(Expression::Atom(0));
+                        let arg = items.get(1 + i).cloned().unwrap_or(Expression::Int(0));
                         let arg_replaced = replace_param_reads(&arg, params);
                         let set_call = Expression::Apply(vec![
                             Expression::Word("set!".to_string()),
                             Expression::Word("_".to_string() + p),
-                            Expression::Atom(0),
+                            Expression::Int(0),
                             Expression::Apply(vec![
                                 Expression::Word("get".to_string()),
                                 Expression::Word("_new_".to_string() + p),
-                                Expression::Atom(0),
+                                Expression::Int(0),
                             ]),
                         ]);
                         sets.push(set_call);
@@ -1662,7 +1662,7 @@ fn transform_tail_positions(
                             )
                         } else {
                             // missing else -> keep as is
-                            Expression::Atom(0)
+                            Expression::Int(0)
                         };
                         return Expression::Apply(vec![
                             Expression::Word("if".to_string()),
@@ -1701,14 +1701,14 @@ fn transform_tail_positions(
                             Expression::Apply(vec![
                                 Expression::Word("set!".to_string()),
                                 Expression::Word(result_name.to_string()),
-                                Expression::Atom(0),
+                                Expression::Int(0),
                                 expr_replaced,
                             ]),
                             Expression::Apply(vec![
                                 Expression::Word("set!".to_string()),
                                 Expression::Word(cont_name.to_string()),
-                                Expression::Atom(0),
-                                Expression::Atom(1),
+                                Expression::Int(0),
+                                Expression::Int(1),
                             ]),
                         ]);
                     }
@@ -1721,20 +1721,20 @@ fn transform_tail_positions(
                     Expression::Apply(vec![
                         Expression::Word("set!".to_string()),
                         Expression::Word(result_name.to_string()),
-                        Expression::Atom(0),
+                        Expression::Int(0),
                         expr_replaced,
                     ]),
                     Expression::Apply(vec![
                         Expression::Word("set!".to_string()),
                         Expression::Word(cont_name.to_string()),
-                        Expression::Atom(0),
-                        Expression::Atom(1),
+                        Expression::Int(0),
+                        Expression::Int(1),
                     ]),
                 ]);
             }
         }
 
-        // Atom or Word in tail position -> set result and clear cont
+        // Int or Word in tail position -> set result and clear cont
         other => {
             let replaced = replace_param_reads(other, params);
             Expression::Apply(vec![
@@ -1742,14 +1742,14 @@ fn transform_tail_positions(
                 Expression::Apply(vec![
                     Expression::Word("set!".to_string()),
                     Expression::Word(result_name.to_string()),
-                    Expression::Atom(0),
+                    Expression::Int(0),
                     replaced,
                 ]),
                 Expression::Apply(vec![
                     Expression::Word("set!".to_string()),
                     Expression::Word(cont_name.to_string()),
-                    Expression::Atom(0),
-                    Expression::Atom(1),
+                    Expression::Int(0),
+                    Expression::Int(1),
                 ]),
             ])
         }

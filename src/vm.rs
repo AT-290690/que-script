@@ -895,7 +895,7 @@ impl VM {
 
 pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), String> {
     match expr {
-        Expression::Atom(n) => {
+        Expression::Int(n) => {
             code.push(Instruction::PushInt(*n));
             Ok(())
         }

@@ -74,7 +74,7 @@ impl InferenceContext {
 // Type inference for expressions
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     match expr {
-        Expression::Atom(_) => Ok(Type::Int),
+        Expression::Int(_) => Ok(Type::Int),
 
         Expression::Word(name) => {
             if let Some(scheme) = ctx.env.get(name) {
@@ -381,7 +381,7 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 }
 fn is_nonexpansive(expr: &Expression) -> bool {
     match expr {
-        Expression::Word(_) | Expression::Atom(_) => true,
+        Expression::Word(_) | Expression::Int(_) => true,
 
         Expression::Apply(list) if !list.is_empty() => match &list[0] {
             Expression::Word(name) if name == "lambda" => true,

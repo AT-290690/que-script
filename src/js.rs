@@ -85,7 +85,7 @@ pub fn compile_expr_to_js(expr: &Expression) -> String {
 /// This returns a JS fragment; callers are responsible for combining/terminating top-level statements as needed.
 fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
     match expr {
-        Expression::Atom(n) => format!("{}", n),
+        Expression::Int(n) => format!("{}", n),
         Expression::Word(w) => ident(w),
         Expression::Apply(items) => {
             // head must be an expression (usually Word)
