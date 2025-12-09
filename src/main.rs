@@ -170,7 +170,7 @@ fn main() -> std::io::Result<()> {
     } else if args.iter().any(|a| a == "--doc") {
         let std_ast = baked::load_ast();
         let mut names = Vec::new();
-        "+ +# - -# / /# * *# mod = =? =# < <# > ># <= <=# >= >=# not and or ^ >> << | & ~ true false"
+        "+ +# +. - -# -. / /# /. * *# *. mod mod. = =? =# =. < <# <. > ># >. <= <=# <=. >= >=# >=. not and or ^ >> << | & ~ true false"
             .split(" ")
             .for_each(|p| {
                 let name = p.to_string();

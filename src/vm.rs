@@ -17,7 +17,7 @@ impl fmt::Debug for BiteCodeEvaluated {
         match self {
             BiteCodeEvaluated::Bool(value) => write!(f, "{}", value),
             BiteCodeEvaluated::Int(value) => write!(f, "{}", value),
-            BiteCodeEvaluated::Float(value) => write!(f, "{}", value),
+            BiteCodeEvaluated::Float(value) => write!(f, "{:?}", value),
             BiteCodeEvaluated::Function(_, _, _) => write!(f, "Function"),
             BiteCodeEvaluated::Array(arr) => {
                 let arr_ref = arr.borrow();
@@ -94,6 +94,7 @@ pub enum Instruction {
     Sub,
     SubF,
     Mod,
+    ModF,
     Pop,
     Lt,
     Gt,
@@ -104,6 +105,10 @@ pub enum Instruction {
 
     EqBool,
     EqF,
+    GtF,
+    LtF,
+    GteF,
+    LteF,
 
     BitXor,
     BitRs,
@@ -137,6 +142,7 @@ impl Instruction {
             Instruction::SubF => "SubF".to_string(),
 
             Instruction::Mod => "Mod".to_string(),
+            Instruction::ModF => "ModF".to_string(),
             Instruction::Pop => "Pop".to_string(),
             Instruction::Lt => "Lt".to_string(),
             Instruction::Gt => "Gt".to_string(),
@@ -145,6 +151,10 @@ impl Instruction {
             Instruction::Eq => "Eq".to_string(),
             Instruction::EqBool => "EqBool".to_string(),
             Instruction::EqF => "EqF".to_string(),
+            Instruction::GtF => "GtF".to_string(),
+            Instruction::LtF => "LtF".to_string(),
+            Instruction::GteF => "GteF".to_string(),
+            Instruction::LteF => "LteF".to_string(),
 
             Instruction::Not => "Not".to_string(),
 
@@ -256,6 +266,7 @@ impl Instruction {
             Instruction::SubF => "SubF".to_string(),
 
             Instruction::Mod => "Mod".to_string(),
+            Instruction::ModF => "ModF".to_string(),
             Instruction::Pop => "Pop".to_string(),
             Instruction::Lt => "Lt".to_string(),
             Instruction::Gt => "Gt".to_string(),
@@ -264,6 +275,10 @@ impl Instruction {
             Instruction::Eq => "Eq".to_string(),
             Instruction::EqBool => "EqBool".to_string(),
             Instruction::EqF => "EqF".to_string(),
+            Instruction::GtF => "GtF".to_string(),
+            Instruction::LtF => "LtF".to_string(),
+            Instruction::GteF => "GteF".to_string(),
+            Instruction::LteF => "LteF".to_string(),
 
             Instruction::Not => "Not".to_string(),
 
@@ -562,6 +577,18 @@ impl VM {
                         }
                     }
                 }
+                Instruction::ModF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Float(a % b))
+                        }
+                        _ => {
+                            return Err("Error! Both arguments must be floats at (mod.)".to_string())
+                        }
+                    }
+                }
 
                 Instruction::BitXor => {
                     let b = self.stack.pop().ok_or("stack underflow")?;
@@ -655,7 +682,51 @@ impl VM {
                         (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
                             self.stack.push(BiteCodeEvaluated::Bool(a == b))
                         }
-                        _ => return Err("Error! Both arguments must be bools at (=.)".to_string()),
+                        _ => return Err("Error! Both arguments must be floats at (=.)".to_string()),
+                    }
+                }
+                Instruction::GtF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a > b))
+                        }
+                        _ => return Err("Error! Both arguments must be floats at (>.)".to_string()),
+                    }
+                }
+                Instruction::LtF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a < b))
+                        }
+                        _ => return Err("Error! Both arguments must be floats at (<.)".to_string()),
+                    }
+                }
+                Instruction::GteF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a >= b))
+                        }
+                        _ => {
+                            return Err("Error! Both arguments must be floats at (>=.)".to_string())
+                        }
+                    }
+                }
+                Instruction::LteF => {
+                    let b = self.stack.pop().ok_or("stack underflow")?;
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a, b) {
+                        (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
+                            self.stack.push(BiteCodeEvaluated::Bool(a <= b))
+                        }
+                        _ => {
+                            return Err("Error! Both arguments must be floats at (<=.)".to_string())
+                        }
                     }
                 }
                 Instruction::Lt => {
@@ -1067,6 +1138,17 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
+                "mod." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::ModF,
+                        ],
+                    ));
+                    Ok(())
+                }
                 "+" | "+#" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string(), "b".to_string()],
@@ -1175,6 +1257,50 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                             Instruction::LoadVar("a".to_string()),
                             Instruction::LoadVar("b".to_string()),
                             Instruction::EqF,
+                        ],
+                    ));
+                    Ok(())
+                }
+                ">." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::GtF,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "<." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::LtF,
+                        ],
+                    ));
+                    Ok(())
+                }
+                ">=." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::GteF,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "<=." => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string(), "b".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::LoadVar("b".to_string()),
+                            Instruction::LteF,
                         ],
                     ));
                     Ok(())
@@ -1380,6 +1506,15 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Mod);
                         Ok(())
                     }
+                    "mod." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! mod. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::ModF);
+                        Ok(())
+                    }
                     "=?" => {
                         if exprs.len() != 3 {
                             return Err("Error! = expects exactly 2 arguments".to_string());
@@ -1391,11 +1526,47 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     }
                     "=." => {
                         if exprs.len() != 3 {
-                            return Err("Error! = expects exactly 2 arguments".to_string());
+                            return Err("Error! =. expects exactly 2 arguments".to_string());
                         }
                         compile(&exprs[1], code)?;
                         compile(&exprs[2], code)?;
                         code.push(Instruction::EqF);
+                        Ok(())
+                    }
+                    ">." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! >. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::GtF);
+                        Ok(())
+                    }
+                    "<." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! <. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::LtF);
+                        Ok(())
+                    }
+                    ">=." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! >=. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::GteF);
+                        Ok(())
+                    }
+                    "<=." => {
+                        if exprs.len() != 3 {
+                            return Err("Error! <=. expects exactly 2 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::LteF);
                         Ok(())
                     }
                     "=" | "=#" => {
@@ -2115,6 +2286,10 @@ impl<'a> P<'a> {
             "Eq" => Ok(Instruction::Eq),
             "EqBool" => Ok(Instruction::EqBool),
             "EqF" => Ok(Instruction::EqF),
+            "GtF" => Ok(Instruction::GtF),
+            "LtF" => Ok(Instruction::LtF),
+            "GteF" => Ok(Instruction::GteF),
+            "LteF" => Ok(Instruction::LteF),
             "Add" => Ok(Instruction::Add),
             "AddF" => Ok(Instruction::AddF),
             "Mult" => Ok(Instruction::Mult),
@@ -2125,7 +2300,7 @@ impl<'a> P<'a> {
             "Sub" => Ok(Instruction::Sub),
             "SubF" => Ok(Instruction::SubF),
             "Mod" => Ok(Instruction::Mod),
-
+            "ModF" => Ok(Instruction::ModF),
             // also catch `LoadVar("...")` handled above
             "Pop," => Ok(Instruction::Pop), // tolerance for trailing commas
             "Lt" => Ok(Instruction::Lt),

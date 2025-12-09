@@ -1165,6 +1165,13 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
         )),
     );
+    env.insert(
+        "mod.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
+        )),
+    );
 
     // Comparison operations
     env.insert(
@@ -1177,6 +1184,38 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
 
     env.insert(
         "=.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
+        ">.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
+        "<.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
+        ">=.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    env.insert(
+        "<=.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
             Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),

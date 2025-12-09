@@ -37,7 +37,8 @@ mod tests {
             ("(do (let fn (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn)", "Int -> Int -> Bool -> [Int -> Bool] -> Bool"),
             ("(do (let Int 0) (let as (lambda . t t)) (let xs (as (vector) (vector Int))) xs)", "[Int]"),
             ("(tuple 0 true)", "{Int * Bool}"),
-            ("(vector (tuple 0 true) (tuple 1 false))", "[{Int * Bool}]")
+            ("(vector (tuple 0 true) (tuple 1 false))", "[{Int * Bool}]"),
+            ("(+. 1.23 2.112)", "Float")
         ];
 
         for (inp, out) in &test_cases {
@@ -116,6 +117,10 @@ Error! Concequent and alternative must match types
             (
                 "(vector (tuple 0 true) (tuple true 0))",
                 "Error! Cannot unify Int with Bool\nError! (vector (tuple 0 true) (tuple true 0))",
+            ),
+            (
+                "(+ 1.23 2)",
+                "Error! Cannot unify Int with Float\nError! (+ 1.23 2)",
             ),
         ];
 
@@ -1531,7 +1536,8 @@ L82")
           (set! (get data y) x '|'))))))))))
   [(get beam) (BigInt/sum timeline)])))
 
-(solution (parse INPUT))"#, "[[2 1] [4 0]]")
+(solution (parse INPUT))"#, "[[2 1] [4 0]]"),
+(r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#, "[1.0 15.0 -1.0]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

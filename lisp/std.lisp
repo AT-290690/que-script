@@ -116,15 +116,30 @@
 (let std/vector/last (lambda xs (get xs (- (length xs) 1))))
 (let std/int/max-safe 2147383647)
 (let std/int/min-safe -2147483648)
+(let std/float/max-safe 16777216.0)
+(let std/float/min-safe -16777216.0)
 (let std/float/pi 3.1415927)
+
+(let std/float/safe? (lambda value (and (>=. value std/float/min-safe) (<=. value std/float/max-safe))))
+(let std/float/get-safe (lambda vrbl (if (std/float/safe? (get vrbl)) (get vrbl) Float)))
+
 (let std/int/safe? (lambda value (and (>= value std/int/min-safe) (<= value std/int/max-safe))))
 (let std/int/get-safe (lambda vrbl (if (std/int/safe? (get vrbl)) (get vrbl) Int)))
+
+(let std/float/floor (lambda n (-. n (mod. n 1.0))))
+(let std/float/ceil (lambda n (do 
+    (let sign (if (>=. n 0.0) 1 -1))
+    (let absn (if (>=. n 0.0) n (-. n)))
+    (let frac (mod. absn 1.0))
+    (let intpart (-. absn frac))
+    (cond (=. n 0.0) n (if (= sign 1) (+. intpart 1.0) (-. intpart))))))
 
 ; Extra "keywords" 
 (let infinity 2147383647)
 (let -infinity -2147483648)
 (let identity (lambda x x))
 (let Int 0)
+(let Float 0.0)
 (let Char (get "a"))
 (let Bool false)
 (let as (lambda . t t))
@@ -135,6 +150,8 @@
           false)))
 
 (let int (lambda value (if (std/int/safe? value) [ value ] [ 0 ])))
+(let float (lambda value (if (std/float/safe? value) [ value ] [ 0.0 ])))
+
 (let box (lambda value [ value ]))
 (let set (lambda vrbl x (std/vector/set! vrbl 0 x)))
 (let =! (lambda vrbl x (std/vector/set! vrbl 0 x)))
@@ -151,6 +168,14 @@
 (let -- (lambda vrbl (=! vrbl (- (get vrbl) 1))))
 (let ** (lambda vrbl (=! vrbl (* (get vrbl) (get vrbl)))))
 
+
+(let +=. (lambda vrbl n (=! vrbl (+. (get vrbl) n))))
+(let -=. (lambda vrbl n (=! vrbl (-. (get vrbl) n))))
+(let *=. (lambda vrbl n (=! vrbl (*. (get vrbl) n))))
+(let /=. (lambda vrbl n (=! vrbl (/. (get vrbl) n))))
+(let ++. (lambda vrbl (=! vrbl (+. (get vrbl) 1.0))))
+(let --. (lambda vrbl (=! vrbl (-. (get vrbl) 1.0))))
+(let **. (lambda vrbl (=! vrbl (*. (get vrbl) (get vrbl)))))
 
 (let Bool->Int (lambda x (if (=? x true) 1 0)))
 (let Bool->Char (lambda x (if (=? x true) std/char/1 std/char/0)))
@@ -266,6 +291,35 @@
      (let process (lambda i (std/vector/set! out (length out) i)))
      (loop (+ start 1) (+ end 1) process)
      out))) 
+
+
+(let std/vector/float/range (lambda start end (do
+     (let out [ start ])
+     (let process (lambda i (std/vector/set! out (length out) i)))
+     (loop (+ start 1.0) (+ end 1.0) process)
+     out))) 
+
+
+(let std/vector/float/range (lambda start end (do 
+  (floating idx 0.0)
+  (let out [])
+  (loop start (+ end 1) (lambda . (do 
+  (++. idx)
+  (push! out (get idx)))))
+  out)))
+
+ (let std/vector/float/ones (lambda n (do
+     (let out [ 1.0 ])
+     (let process (lambda i (std/vector/set! out (length out) 1.0)))
+     (loop 1 n process)
+     out))) 
+
+ (let std/vector/float/zeroes (lambda n (do
+     (let out [ 0.0 ])
+     (let process (lambda i (std/vector/set! out (length out) 0.0)))
+     (loop 1 n process)
+     out)))
+
 
  (let std/vector/int/ones (lambda n (do
      (let out [ 1 ])
@@ -390,7 +444,11 @@
 (let std/int/even? (lambda x (= (mod x 2) 0)))
 (let std/int/odd? (lambda x (not (= (mod x 2) 0))))
 (let std/vector/int/sum (lambda xs (std/vector/reduce xs (lambda a b (+ a b)) 0)))
+(let std/vector/float/sum (lambda xs (std/vector/reduce xs (lambda a b (+. a b)) 0.0)))
+
 (let std/vector/int/product (lambda xs (std/vector/reduce xs (lambda a b (* a b)) 1)))
+(let std/vector/float/product (lambda xs (std/vector/reduce xs (lambda a b (*. a b)) 1.0)))
+
 (let std/int/euclidean-mod (lambda a b (mod (+ (mod a b) b) b)))
 (let std/int/euclidean-distance (lambda x1 y1 x2 y2 (do
   (let a (- x1 x2))
@@ -400,8 +458,13 @@
 (let std/int/chebyshev-distance (lambda x1 y1 x2 y2 (std/int/max (std/int/abs (- x2 x1)) (std/int/abs (- y2 y1)))))
 (let std/int/max (lambda a b (if (> a b) a b)))
 (let std/int/min (lambda a b (if (< a b) a b)))
+(let std/float/max (lambda a b (if (>. a b) a b)))
+(let std/float/min (lambda a b (if (<. a b) a b)))
 (let std/vector/int/maximum (lambda xs (cond (std/vector/empty? xs) Int (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/max (get xs 0)))))
 (let std/vector/int/minimum (lambda xs (cond (std/vector/empty? xs) Int (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/min (get xs 0)))))
+(let std/vector/float/maximum (lambda xs (cond (std/vector/empty? xs) Float (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/float/max (get xs 0)))))
+(let std/vector/float/minimum (lambda xs (cond (std/vector/empty? xs) Float (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/float/min (get xs 0)))))
+(let std/float/average (lambda x y (/. (+. x y) 2.0)))
 (let std/int/average (lambda x y (/ (+ x y) 2)))
 (let std/vector/int/mean (lambda xs (/ (std/vector/int/sum xs) (length xs))))
 (let std/vector/int/median (lambda xs (do
@@ -418,6 +481,12 @@
 (let std/int/clamp-range (lambda x start end (cond (> x end) end (< x start) start x)))
 (let std/int/between? (lambda v min max (and (> v min) (< v max))))
 (let std/int/overlap? (lambda v min max (and (>= v min) (<= v max))))
+
+(let std/float/clamp (lambda x limit (if (>. x limit) limit x)))
+(let std/float/clamp-range (lambda x start end (cond (>. x end) end (<. x start) start x)))
+(let std/float/between? (lambda v min max (and (>. v min) (<. v max))))
+(let std/float/overlap? (lambda v min max (and (>=. v min) (<=. v max))))
+
 (let std/int/sqrt (lambda n
   (do
     (integer low 0)
@@ -1661,6 +1730,9 @@ q)))
 (let \map/fst (lambda fn xs (std/tuple/map/fst xs fn)))
 (let \map/snd (lambda fn xs (std/tuple/map/snd xs fn)))
 (let \partition (lambda n xs (std/vector/partition xs n)))
+
+(let floor std/float/floor)
+(let ceil std/float/ceil)
 
 (let extreme std/vector/int/extreme)
 (let map/tuple std/tuple/map)

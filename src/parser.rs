@@ -228,10 +228,36 @@ fn infix_tokenize(s: &str) -> Result<Vec<Tok>, String> {
                 out.push(Tok::Comma);
                 chars.next();
             }
-
-            '+' | '-' | '*' => {
-                out.push(Tok::Op(c.to_string()));
+            // '+' | '-' | '*' => {
+            //     out.push(Tok::Op(c.to_string()));
+            //     chars.next();
+            // }
+            '+' => {
                 chars.next();
+                if *chars.peek().unwrap() == '.' {
+                    out.push(Tok::Op("+.".to_string()));
+                    chars.next();
+                } else {
+                    out.push(Tok::Op(c.to_string()));
+                }
+            }
+            '-' => {
+                chars.next();
+                if *chars.peek().unwrap() == '.' {
+                    out.push(Tok::Op("-.".to_string()));
+                    chars.next();
+                } else {
+                    out.push(Tok::Op(c.to_string()));
+                }
+            }
+            '*' => {
+                chars.next();
+                if *chars.peek().unwrap() == '.' {
+                    out.push(Tok::Op("*.".to_string()));
+                    chars.next();
+                } else {
+                    out.push(Tok::Op(c.to_string()));
+                }
             }
             '/' => {
                 chars.next();
@@ -498,9 +524,13 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "if" => Ok(if_transform(exprs)),
                     "unless" => Ok(unless_transform(exprs)),
                     "-" => Ok(minus_transform(exprs)),
+                    "-." => Ok(minusf_transform(exprs)),
                     "+" => Ok(plus_transform(exprs)),
+                    "+." => Ok(plusf_transform(exprs)),
                     "*" => Ok(mult_transform(exprs)),
+                    "*." => Ok(multf_transform(exprs)),
                     "/" => Ok(div_transform(exprs)),
+                    "/." => Ok(divf_transform(exprs)),
                     "and" => Ok(and_transform(exprs)),
                     "or" => Ok(or_transform(exprs)),
                     "!=" => Ok(not_equal_transform(exprs)),
@@ -509,6 +539,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "get" => Ok(accessor_transform(exprs)?),
                     "variable" => Ok(variable_transform(exprs)),
                     "integer" => Ok(integer_transform(exprs)),
+                    "floating" => Ok(float_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
                     "loop" => Ok(loop_transform(exprs)?),
                     "lambda" => lambda_destructure_transform(exprs),
@@ -799,6 +830,17 @@ fn integer_transform(mut exprs: Vec<Expression>) -> Expression {
         Expression::Apply(vec![Expression::Word("int".to_string()), exprs[1].clone()]),
     ])
 }
+fn float_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+    Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        exprs[0].clone(),
+        Expression::Apply(vec![
+            Expression::Word("float".to_string()),
+            exprs[1].clone(),
+        ]),
+    ])
+}
 fn boolean_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
     match &exprs[1] {
@@ -879,6 +921,24 @@ fn minus_transform(mut exprs: Vec<Expression>) -> Expression {
         }
     }
 }
+fn minusf_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    match exprs.len() {
+        0 => Expression::Int(0),
+        1 => Expression::Apply(vec![
+            Expression::Word("*.".to_string()),
+            exprs.remove(0),
+            Expression::Float(-1.0),
+        ]),
+        _ => {
+            let first = exprs.remove(0);
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("-.".to_string()), acc, next])
+            })
+        }
+    }
+}
 fn plus_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
@@ -888,6 +948,20 @@ fn plus_transform(mut exprs: Vec<Expression>) -> Expression {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
                 Expression::Apply(vec![Expression::Word("+".to_string()), acc, next])
+            })
+        }
+    }
+}
+
+fn plusf_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    match exprs.len() {
+        0 => Expression::Float(1.0),
+        _ => {
+            let first = exprs.remove(0);
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("+.".to_string()), acc, next])
             })
         }
     }
@@ -990,6 +1064,19 @@ fn mult_transform(mut exprs: Vec<Expression>) -> Expression {
         }
     }
 }
+fn multf_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    match exprs.len() {
+        0 => Expression::Float(1.0),
+        _ => {
+            let first = exprs.remove(0);
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("*.".to_string()), acc, next])
+            })
+        }
+    }
+}
 fn div_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
@@ -999,6 +1086,19 @@ fn div_transform(mut exprs: Vec<Expression>) -> Expression {
             let first = exprs.remove(0);
             exprs.into_iter().fold(first, |acc, next| {
                 Expression::Apply(vec![Expression::Word("/".to_string()), acc, next])
+            })
+        }
+    }
+}
+fn divf_transform(mut exprs: Vec<Expression>) -> Expression {
+    exprs.remove(0);
+
+    match exprs.len() {
+        0 => Expression::Float(1.0),
+        _ => {
+            let first = exprs.remove(0);
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("/.".to_string()), acc, next])
             })
         }
     }
@@ -1208,7 +1308,7 @@ impl Expression {
     pub fn to_rust(&self) -> String {
         match self {
             Expression::Int(n) => format!("Int({})", n),
-            Expression::Float(n) => format!("Float({})", n),
+            Expression::Float(n) => format!("Float({:?})", n),
             Expression::Word(w) => format!("Word(s!({:?}))", w),
             Expression::Apply(exprs) => {
                 let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
