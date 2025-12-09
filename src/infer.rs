@@ -110,6 +110,7 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
     match expr {
         Expression::Word(name) => match name.as_str() {
             "Int" => Ok(Type::Int),
+            "Float" => Ok(Type::Float),
             "Bool" => Ok(Type::Bool),
             "Char" => Ok(Type::Char),
             _ => Ok(ctx.fresh_var()), // unknown type name
@@ -252,6 +253,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
 
         match (inner_expr, inner_hint) {
             (Type::Int, Type::Int)
+            | (Type::Float, Type::Float)
             | (Type::Int, Type::Bool)
             | (Type::Int, Type::Char)
             | (Type::Bool, Type::Int)

@@ -476,7 +476,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a + b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (+)".to_string()),
+                        _ => return Err("Error!  Both arguments must be ints at (+)".to_string()),
                     }
                 }
 
@@ -487,9 +487,7 @@ impl VM {
                         (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
                             self.stack.push(BiteCodeEvaluated::Float(a + b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (+.)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be floats at (+.)".to_string()),
                     }
                 }
 
@@ -500,7 +498,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a * b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (*)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (*)".to_string()),
                     }
                 }
 
@@ -511,9 +509,7 @@ impl VM {
                         (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
                             self.stack.push(BiteCodeEvaluated::Float(a * b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (*.)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be floats at (*.)".to_string()),
                     }
                 }
 
@@ -524,7 +520,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a / b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (/)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (/)".to_string()),
                     }
                 }
 
@@ -535,9 +531,7 @@ impl VM {
                         (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
                             self.stack.push(BiteCodeEvaluated::Float(a / b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (/.)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be floats at (/.)".to_string()),
                     }
                 }
 
@@ -548,7 +542,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a - b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (-)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (-)".to_string()),
                     }
                 }
 
@@ -559,9 +553,7 @@ impl VM {
                         (BiteCodeEvaluated::Float(a), BiteCodeEvaluated::Float(b)) => {
                             self.stack.push(BiteCodeEvaluated::Float(a - b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (-.)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be floats at (-.)".to_string()),
                     }
                 }
 
@@ -572,9 +564,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a % b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (mod)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be ints at (mod)".to_string()),
                     }
                 }
                 Instruction::ModF => {
@@ -597,7 +587,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a ^ b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (^)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (^)".to_string()),
                     }
                 }
                 Instruction::BitRs => {
@@ -607,9 +597,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a >> b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (>>)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be ints at (>>)".to_string()),
                     }
                 }
                 Instruction::BitLs => {
@@ -619,9 +607,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a << b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (<<)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be ints at (<<)".to_string()),
                     }
                 }
                 Instruction::BitAnd => {
@@ -631,7 +617,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a & b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (&)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (&)".to_string()),
                     }
                 }
                 Instruction::BitOr => {
@@ -641,7 +627,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Int(a | b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (|)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (|)".to_string()),
                     }
                 }
                 Instruction::BitNot => {
@@ -659,7 +645,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Bool(a == b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (=)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (=)".to_string()),
                     }
                 }
                 Instruction::EqBool => {
@@ -736,7 +722,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Bool(a < b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (<)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (<)".to_string()),
                     }
                 }
                 Instruction::Gt => {
@@ -746,7 +732,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Bool(a > b))
                         }
-                        _ => return Err("Error! Both arguments must be numbers at (>)".to_string()),
+                        _ => return Err("Error! Both arguments must be ints at (>)".to_string()),
                     }
                 }
                 Instruction::Lte => {
@@ -756,9 +742,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Bool(a <= b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (<=)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be ints at (<=)".to_string()),
                     }
                 }
                 Instruction::Gte => {
@@ -768,9 +752,7 @@ impl VM {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             self.stack.push(BiteCodeEvaluated::Bool(a >= b))
                         }
-                        _ => {
-                            return Err("Error! Both arguments must be numbers at (>=)".to_string())
-                        }
+                        _ => return Err("Error! Both arguments must be ints at (>=)".to_string()),
                     }
                 }
                 Instruction::Not => {

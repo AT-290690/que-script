@@ -1537,7 +1537,67 @@ L82")
   [(get beam) (BigInt/sum timeline)])))
 
 (solution (parse INPUT))"#, "[[2 1] [4 0]]"),
-(r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#, "[1.0 15.0 -1.0]")
+(r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#, "[1.0 15.0 -1.0]"),
+(r#"(let INPUT "162,817,812
+57,618,57
+906,360,560
+592,479,940
+352,342,300
+466,668,158
+542,29,236
+431,825,988
+739,650,466
+52,470,668
+216,146,977
+819,987,18
+117,168,530
+805,96,715
+346,949,466
+970,615,88
+941,993,340
+862,61,35
+984,92,344
+425,690,689")
+(let distance/3d (lambda [ x1 y1 z1 . ] [ x2 y2 z2 . ] (+ (square (- x2 x1)) (square (- y2 y1)) (square (- z2 z1)))))
+(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
+(let part1 (lambda input (do
+  (let len (length input))
+  (let dist [])
+  (loop 0 len (lambda i (do 
+    (loop i len (lambda j (if (<> i j) 
+      (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) }))))
+  )))
+(let edges (map (sort! dist (lambda { . d1 } { . d2 } (< d1 d2))) fst))
+(let parent (range 0 (- (length input) 1)))
+(let root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
+(let merge (lambda a b (set! parent (root a) (root b))))
+(for (take/first edges (/ (length input) 2)) (lambda [ a b .] (merge a b)))
+(|> 
+  (range 0 (- (length input) 1))
+  (reduce (lambda a b (do 
+    (let i (root b))
+    (set! a i (+ (get a i) 1))
+    a)) 
+  (zeroes (length input)))
+  (sort! >)
+  (take/first 3)
+  (product)))))
+[(part1 (parse INPUT))]"#, "[40]"),
+(r#"(let INPUT "7,1
+11,1
+11,7
+9,7
+9,5
+2,5
+2,3
+7,3")
+(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
+(let part1 (lambda input (do
+  (let pairs (std/vector/unique-pairs input))
+  (let rect (lambda [ x1 y1 .] [ x2 y2 .] (* (+ 1 (abs (- x1 x2))) (+ 1 (abs (- y1 y2))))))
+ (|> pairs (map (lambda [ a b .] (rect a b))) (maximum)))))
+
+[(part1 (parse INPUT))]"#, "[50]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
