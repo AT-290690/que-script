@@ -1571,7 +1571,7 @@ L82")
 (let parent (range 0 (- (length input) 1)))
 (let root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
 (let merge (lambda a b (set! parent (root a) (root b))))
-(for (take/first edges (/ (length input) 2)) (lambda [ a b .] (merge a b)))
+(for (take/first edges 10) (lambda [ a b .] (merge a b)))
 (|> 
   (range 0 (- (length input) 1))
   (reduce (lambda a b (do 
