@@ -992,6 +992,18 @@ nil)))
         (++ i))))
     pairs)))
 
+
+(let std/vector/int/unique (lambda xs 
+    (if (= (length xs) 0) 
+        [(+ (get xs 0) 0)] 
+        (|> xs (std/vector/map (lambda x [(as x Char)])) (std/convert/vector->set) (std/convert/set->vector) (std/vector/map (lambda x (as (get x 0) Int)))))))
+
+
+(let std/vector/char/unique (lambda xs 
+    (if (= (length xs) 0) 
+        xs 
+        (|> xs (std/vector/map (lambda x [x])) (std/convert/vector->set) (std/convert/set->vector) (std/vector/map (lambda x (get x 0)))))))
+
 (let std/vector/3d/dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
 (let std/vector/3d/in-bounds? (lambda matrix y x (and (std/vector/in-bounds? matrix y) (std/vector/in-bounds? (get matrix y) x))))
 (let std/vector/3d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))
@@ -1860,6 +1872,9 @@ q)))
 (let Int/count std/vector/int/count)
 (let Bool/count std/vector/bool/count)
 (let count std/vector/count-of)
+
+(let unique/int std/vector/int/unique)
+(let unique/char std/vector/char/unique)
 
 (let Set/intersection std/vector/hash/set/intersection)
 (let Set/difference std/vector/hash/set/difference)
