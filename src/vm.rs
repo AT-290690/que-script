@@ -83,7 +83,6 @@ pub enum Instruction {
         Vec<Instruction>, // code for the lambda expression
     ),
     LoopFinish(Vec<Instruction>, Vec<Instruction>),
-
     Length,
     Add,
     AddF,
@@ -120,6 +119,9 @@ pub enum Instruction {
     SetArray, // expects stack: [value,index,vector]
     GetArray,
     PopArray,
+
+    IntToFloat,
+    FloatToInt,
 }
 
 impl Instruction {
@@ -245,6 +247,9 @@ impl Instruction {
             Instruction::SetArray => "SetArray".to_string(),
             Instruction::GetArray => "GetArray".to_string(),
             Instruction::PopArray => "PopArray".to_string(),
+
+            Instruction::IntToFloat => "IntToFloat".to_string(),
+            Instruction::FloatToInt => "FloatToInt".to_string(),
         }
     }
     pub fn serialise(&self) -> String {
@@ -366,6 +371,9 @@ impl Instruction {
             Instruction::SetArray => "SetArray".to_string(),
             Instruction::GetArray => "GetArray".to_string(),
             Instruction::PopArray => "PopArray".to_string(),
+
+            Instruction::IntToFloat => "IntToFloat".to_string(),
+            Instruction::FloatToInt => "FloatToInt".to_string(),
         }
     }
 }
@@ -635,6 +643,32 @@ impl VM {
                     match (a) {
                         (BiteCodeEvaluated::Int(a)) => self.stack.push(BiteCodeEvaluated::Int(!a)),
                         _ => return Err("Error! Arguments must be a number at (~)".to_string()),
+                    }
+                }
+                Instruction::IntToFloat => {
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a) {
+                        (BiteCodeEvaluated::Int(a)) => {
+                            self.stack.push(BiteCodeEvaluated::Float(a as f32))
+                        }
+                        _ => {
+                            return Err(
+                                "Error! Arguments must be a number at (Int->Float)".to_string()
+                            )
+                        }
+                    }
+                }
+                Instruction::FloatToInt => {
+                    let a = self.stack.pop().ok_or("stack underflow")?;
+                    match (a) {
+                        (BiteCodeEvaluated::Float(a)) => {
+                            self.stack.push(BiteCodeEvaluated::Int(a as i32))
+                        }
+                        _ => {
+                            return Err(
+                                "Error! Arguments must be a number at (Float->Int)".to_string()
+                            )
+                        }
                     }
                 }
                 Instruction::Eq => {
@@ -1375,6 +1409,26 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
+                "Int->Float" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::IntToFloat,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "Float->Int" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::FloatToInt,
+                        ],
+                    ));
+                    Ok(())
+                }
                 "fst" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string()],
@@ -1692,7 +1746,22 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::BitNot);
                         Ok(())
                     }
-
+                    "Int->Float" => {
+                        if exprs.len() != 2 {
+                            return Err("Error! ~ expects exactly 1 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        code.push(Instruction::IntToFloat);
+                        Ok(())
+                    }
+                    "Float->Int" => {
+                        if exprs.len() != 2 {
+                            return Err("Error! ~ expects exactly 1 arguments".to_string());
+                        }
+                        compile(&exprs[1], code)?;
+                        code.push(Instruction::FloatToInt);
+                        Ok(())
+                    }
                     "do" => {
                         if exprs.len() <= 0 {
                             return Err("Error! do expects atleast 1 argument".to_string());
@@ -2297,6 +2366,9 @@ impl<'a> P<'a> {
             "BitNot" => Ok(Instruction::BitNot),
             "BitOr" => Ok(Instruction::BitOr),
             "BitAnd" => Ok(Instruction::BitAnd),
+
+            "IntToFloat" => Ok(Instruction::IntToFloat),
+            "FloatToInt" => Ok(Instruction::FloatToInt),
 
             other => Err(format!("Error! Unknown bare instruction `{}`", other)),
         }

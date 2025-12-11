@@ -970,7 +970,6 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             ),
         );
     }
-
     // get : [α] -> Int -> α
     {
         let a: Type = fresh_var();
@@ -1368,6 +1367,16 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
         )),
+    );
+
+    env.insert(
+        "Int->Float".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Float))),
+    );
+
+    env.insert(
+        "Float->Int".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Float), Box::new(Type::Int))),
     );
 
     env.insert(

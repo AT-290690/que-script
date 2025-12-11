@@ -38,7 +38,8 @@ mod tests {
             ("(do (let Int 0) (let as (lambda . t t)) (let xs (as (vector) (vector Int))) xs)", "[Int]"),
             ("(tuple 0 true)", "{Int * Bool}"),
             ("(vector (tuple 0 true) (tuple 1 false))", "[{Int * Bool}]"),
-            ("(+. 1.23 2.112)", "Float")
+            ("(+. 1.23 2.112)", "Float"),
+            ("(tuple (Int->Float 5) (Float->Int 5.2))", "{Float * Int}")
         ];
 
         for (inp, out) in &test_cases {
@@ -46,7 +47,6 @@ mod tests {
 
             if let Some(expr) = exprs.first() {
                 let result = crate::infer::infer_with_builtins(expr);
-
                 // Assert that the result is Ok
                 assert!(
                     result.is_ok(),
@@ -1597,7 +1597,10 @@ L82")
   (let rect (lambda [ x1 y1 .] [ x2 y2 .] (* (+ 1 (abs (- x1 x2))) (+ 1 (abs (- y1 y2))))))
  (|> pairs (map (lambda [ a b .] (rect a b))) (maximum)))))
 
-[(part1 (parse INPUT))]"#, "[50]")
+[(part1 (parse INPUT))]"#, "[50]"),
+("{  (std/vector/float/mean (range/float 1 10)) (Float->Int (std/vector/float/mean (range/float 1 10))) }", "[5.5 5]"),
+("{ (map (range/float 1 10) Float->Int) (map (range/int 1 10) Int->Float) }", "[[1 2 3 4 5 6 7 8 9 10] [1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0]]")
+
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

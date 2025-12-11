@@ -16,6 +16,7 @@ fn ident(name: &str) -> String {
         ">" | ">#" | ">." => "(a,b)=>a>b".to_string(),
         "<=" | "<=#" | "<=." => "(a,b)=>a<=b".to_string(),
         ">=" | ">=#" | ">=." => "(a,b)=>a>=b".to_string(),
+
         "not" => "(a)=>!a".to_string(),
         "and" => "(a,b)=>a&&b".to_string(),
         "or" => "(a,b)=>a||b".to_string(),
@@ -32,6 +33,9 @@ fn ident(name: &str) -> String {
 
         "var" => "__var".to_string(),
         "const" => "__const".to_string(),
+
+        "Float->Int" => "(a)=>a|0".to_string(),
+        "Int->Float" => "(a)=>a".to_string(),
 
         "++" => "__inc".to_string(),
         "--" => "__dec".to_string(),
@@ -297,8 +301,8 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             format!("_curry(({}) => {})", params.join(", "), body_js)
                         }
                     }
-                    "char" => format!("{}", compile_expr_to_js(&items[1]),),
-                    "as" => format!("{}", compile_expr_to_js(&items[1]),),
+                    "as" | "char" | "Int->Float" => format!("{}", compile_expr_to_js(&items[1]),),
+                    "Float->Int" => format!("({} | 0)", compile_expr_to_js(&items[1]),),
                     // call a named function/operator: default: compile args then `fn(args...)`
                     _ => {
                         // compile operator expression (could be a word or more complex expr)

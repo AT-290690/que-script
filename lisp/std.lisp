@@ -469,6 +469,7 @@
 (let std/float/average (lambda x y (/. (+. x y) 2.0)))
 (let std/int/average (lambda x y (/ (+ x y) 2)))
 (let std/vector/int/mean (lambda xs (/ (std/vector/int/sum xs) (length xs))))
+(let std/vector/float/mean (lambda xs (/. (std/vector/float/sum xs) (Int->Float (length xs)))))
 (let std/vector/int/median (lambda xs (do
     (let len (length xs))
     (let half (/ len 2))
