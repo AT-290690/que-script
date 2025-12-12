@@ -690,7 +690,7 @@ impl VM {
                         (BiteCodeEvaluated::Bool(a), BiteCodeEvaluated::Bool(b)) => {
                             self.stack.push(BiteCodeEvaluated::Bool(a == b))
                         }
-                        _ => return Err("Error! Both arguments must be bools at (=)".to_string()),
+                        _ => return Err("Error! Both arguments must be bools at (=?)".to_string()),
                     }
                 }
 

@@ -1599,7 +1599,16 @@ L82")
 
 [(part1 (parse INPUT))]"#, "[50]"),
 ("{  (std/vector/float/mean (range/float 1 10)) (Float->Int (std/vector/float/mean (range/float 1 10))) }", "[5.5 5]"),
-("{ (map (range/float 1 10) Float->Int) (map (range/int 1 10) Int->Float) }", "[[1 2 3 4 5 6 7 8 9 10] [1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0]]")
+("{ (map (range/float 1 10) Float->Int) (map (range/int 1 10) Int->Float) }", "[[1 2 3 4 5 6 7 8 9 10] [1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0]]"),
+("(=? 
+    (=
+        (Float->Int 
+        (sum/float (range/float 0 10)))
+        (sum/int (range/int 0 10)))
+    (=.
+        (Int->Float 
+        (sum/int (range/int 0 10)))
+        (sum/float (range/float 0 10))))", "true")
 
         ];
         let std_ast = crate::baked::load_ast();

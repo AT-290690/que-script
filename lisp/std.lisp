@@ -972,6 +972,22 @@ nil)))
 (let std/convert/positive-or-negative-chars->integer (lambda x (|> x (std/convert/chars->positive-or-negative-digits) (std/convert/positive-or-negative-digits->integer))))
 (let std/convert/chars->integer std/convert/positive-or-negative-chars->integer)
 
+(let std/convert/chars->digits/float (lambda xs
+    (|> xs 
+        (std/vector/reduce (lambda a ch (do 
+              (if (=# ch '.') (push! a []) (push! (std/vector/at a -1) (std/convert/char->digit ch)))
+                a)) [[]]))))
+
+(let std/convert/chars->ufloat (lambda xs (do
+  (let parts (std/convert/chars->digits/float xs))
+  (let pow (std/int/expt 10 (length (get parts 1))))
+  (/. (Int->Float (+ 
+    (* (std/convert/digits->integer (get parts 0)) pow)
+    (std/convert/digits->integer (get parts 1)))) (Int->Float pow)))))
+
+(let std/convert/chars->float (lambda xs 
+  (if (=# (get xs 0) std/char/minus) (*. (std/convert/chars->ufloat (std/vector/slice xs 1 (length xs))) -1.0) (std/convert/chars->ufloat xs))))
+
 (let std/vector/unique-pairs (lambda xs (do 
     (let pairs [])
     (let len (length xs))
@@ -1323,6 +1339,21 @@ q)))
 (let std/vector/sort/asc! (lambda xs (std/vector/sort! xs <)))
 (let std/vector/sort/desc! (lambda xs (std/vector/sort! xs >)))
 
+(let std/vector/equal? (lambda a b (do
+  (if (< (length a) (length b)) false
+  (if (> (length a) (length b)) false
+    (do
+      (integer i 0)
+      (boolean result true)
+      (loop (< (get i) (length a)) (lambda (do
+        (let da (get a (get i)))
+        (let db (get b (get i)))
+        (if (not (= da db)) (do
+          (boolean/set result false)
+          (set i (length a))))
+        (set i (+ (get i) 1)))))
+      (if (true? result) true false)))))))
+
 (let std/convert/integer->bits (lambda num  
     (if (= num 0) [ 0 ] (do 
         (integer n num)
@@ -1355,6 +1386,8 @@ q)))
                               (= index (length xs)) out
                               (bits->integer (+ index 1) (+ out (* (std/vector/at xs index) (std/int/expt 2 (- (length xs) index 1))))))))
   (bits->integer 0 0))))
+
+
 
 (let std/vector/copy (lambda xs (std/vector/map xs identity)))
 
@@ -1579,21 +1612,7 @@ q)))
         (set i (+ (get i) 1)))))
       (if (true? found-greater) true false)))))))
 
-(let std/int/big/equal? (lambda a b (do
-  (if (< (length a) (length b)) false
-  (if (> (length a) (length b)) false
-    ; Equal length, compare digit by digit
-    (do
-      (integer i 0)
-      (boolean result true) ; assume equal until mismatch
-      (loop (< (get i) (length a)) (lambda (do
-        (let da (get a (get i)))
-        (let db (get b (get i)))
-        (if (not (= da db)) (do
-          (boolean/set result false)
-          (set i (length a))))
-        (set i (+ (get i) 1)))))
-      (if (true? result) true false)))))))
+(let std/int/big/equal? std/vector/equal?)
 
 (let std/int/big/div (lambda dividend divisor (do
   (let result (as [] [Int]))
@@ -1854,6 +1873,9 @@ q)))
 (let Vector->String std/convert/vector->string)
 (let Chars->Integer std/convert/chars->integer)
 (let String->Integer std/convert/chars->integer)
+(let String->Float std/convert/chars->float)
+(let Chars->Float std/convert/chars->float)
+(let Integer->Bits std/convert/integer->bits)
 
 (let Integer->Digits std/convert/integer->digits)
 (let Digits->Chars std/convert/digits->chars)
@@ -1867,6 +1889,8 @@ q)))
 
 (let unique/int std/vector/int/unique)
 (let unique/char std/vector/char/unique)
+
+(let Vector/equal? std/vector/equal?)
 
 (let Set/intersection std/vector/hash/set/intersection)
 (let Set/difference std/vector/hash/set/difference)
