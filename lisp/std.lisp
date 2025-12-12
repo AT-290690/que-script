@@ -294,20 +294,11 @@
 
 
 (let std/vector/float/range (lambda start end (do
-     (let out [ start ])
-     (let process (lambda i (std/vector/set! out (length out) i)))
-     (loop (+ start 1.0) (+ end 1.0) process)
+     (let out [ (Int->Float start) ])
+     (let process (lambda i (std/vector/set! out (length out) (Int->Float i))))
+     (loop (+ start 1) (+ end 1) process)
      out))) 
-
-
-(let std/vector/float/range (lambda start end (do 
-  (floating idx 0.0)
-  (let out [])
-  (loop start (+ end 1) (lambda . (do 
-  (++. idx)
-  (push! out (get idx)))))
-  out)))
-
+    
  (let std/vector/float/ones (lambda n (do
      (let out [ 1.0 ])
      (let process (lambda i (std/vector/set! out (length out) 1.0)))
