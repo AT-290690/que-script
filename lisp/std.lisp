@@ -88,51 +88,7 @@
 (let std/char/ampersand (get "&"))
 (let std/char/at (get "@"))
 (let std/char/backtick (get "`"))
-(let std/char/digit? (lambda ch (and (>=# ch std/char/0) (<=# ch std/char/9))))
-(let std/char/upper (lambda char (if (and (>=# char std/char/a) (<=# char std/char/z)) (-# char std/char/space) char)))
-(let std/char/lower (lambda char (if (and (>=# char std/char/A) (<=# char std/char/Z)) (+# char std/char/space) char)))
-(let std/vector/length (lambda xs (length xs)))
-(let std/vector/get (lambda xs i (get xs i)))
-(let std/vector/get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
-(let std/vector/2d/length std/vector/length)
-(let std/vector/2d/get std/vector/get)
-(let std/vector/2d/get/default std/vector/get/default)
-(let std/vector/pop! (lambda xs (pop! xs)))
-(let std/vector/set! (lambda xs i x (set! xs i x)))
-(let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (std/vector/set! xs i (get xs j)) (std/vector/set! xs j temp) xs)))
-(let std/vector/push! (lambda xs x (do (std/vector/set! xs (length xs) x) xs)))
-(let std/vector/pop-and-get! (lambda xs (do 
-      (let out (get xs (- (length xs) 1))) 
-      (std/vector/pop! xs)
-      out)))
-(let std/vector/push-and-get! (lambda xs x (do (std/vector/set! xs (length xs) x) x)))
-(let std/vector/update! (lambda xs i value (do (set! xs i value) xs)))
-(let std/vector/tail! (lambda xs (do (std/vector/pop! xs) xs)))
-(let std/vector/append! (lambda xs x (do (std/vector/push! xs x) xs)))
-(let std/vector/at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
-(let std/vector/first (lambda xs (get xs 0)))
-(let std/vector/second (lambda xs (get xs 1)))
-(let std/vector/third (lambda xs (get xs 3)))
-(let std/vector/last (lambda xs (get xs (- (length xs) 1))))
-(let std/int/max-safe 2147383647)
-(let std/int/min-safe -2147483648)
-(let std/float/max-safe 16777216.0)
-(let std/float/min-safe -16777216.0)
-(let std/float/pi 3.1415927)
 
-(let std/float/safe? (lambda value (and (>=. value std/float/min-safe) (<=. value std/float/max-safe))))
-(let std/float/get-safe (lambda vrbl (if (std/float/safe? (get vrbl)) (get vrbl) Float)))
-
-(let std/int/safe? (lambda value (and (>= value std/int/min-safe) (<= value std/int/max-safe))))
-(let std/int/get-safe (lambda vrbl (if (std/int/safe? (get vrbl)) (get vrbl) Int)))
-
-(let std/float/floor (lambda n (-. n (mod. n 1.0))))
-(let std/float/ceil (lambda n (do 
-    (let sign (if (>=. n 0.0) 1 -1))
-    (let absn (if (>=. n 0.0) n (-. n)))
-    (let frac (mod. absn 1.0))
-    (let intpart (-. absn frac))
-    (cond (=. n 0.0) n (if (= sign 1) (+. intpart 1.0) (-. intpart))))))
 
 ; Extra "keywords" 
 (let infinity 2147383647)
@@ -148,9 +104,6 @@
           (and a b) true 
           (and (not a) (not b)) true
           false)))
-
-(let int (lambda value (if (std/int/safe? value) [ value ] [ 0 ])))
-(let float (lambda value (if (std/float/safe? value) [ value ] [ 0.0 ])))
 
 (let box (lambda value [ value ]))
 (let set (lambda vrbl x (std/vector/set! vrbl 0 x)))
@@ -188,6 +141,56 @@
         false)))
 (let Int->Char (lambda x (if (>= x 0) (as x Char) std/char/empty)))
 
+(let std/char/digit? (lambda ch (and (>=# ch std/char/0) (<=# ch std/char/9))))
+(let std/char/upper (lambda char (if (and (>=# char std/char/a) (<=# char std/char/z)) (-# char std/char/space) char)))
+(let std/char/lower (lambda char (if (and (>=# char std/char/A) (<=# char std/char/Z)) (+# char std/char/space) char)))
+(let std/vector/length (lambda xs (length xs)))
+(let std/vector/get (lambda xs i (get xs i)))
+(let std/vector/get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
+(let std/vector/2d/length std/vector/length)
+(let std/vector/2d/get std/vector/get)
+(let std/vector/2d/get/default std/vector/get/default)
+(let std/vector/pop! (lambda xs (pop! xs)))
+(let std/vector/set! (lambda xs i x (set! xs i x)))
+(let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (std/vector/set! xs i (get xs j)) (std/vector/set! xs j temp) xs)))
+(let std/vector/push! (lambda xs x (do (std/vector/set! xs (length xs) x) xs)))
+(let std/vector/pop-and-get! (lambda xs (do 
+      (let out (get xs (- (length xs) 1))) 
+      (std/vector/pop! xs)
+      out)))
+(let std/vector/push-and-get! (lambda xs x (do (std/vector/set! xs (length xs) x) x)))
+(let std/vector/update! (lambda xs i value (do (set! xs i value) xs)))
+(let std/vector/tail! (lambda xs (do (std/vector/pop! xs) xs)))
+(let std/vector/append! (lambda xs x (do (std/vector/push! xs x) xs)))
+(let std/vector/at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
+(let std/vector/first (lambda xs (get xs 0)))
+(let std/vector/second (lambda xs (get xs 1)))
+(let std/vector/third (lambda xs (get xs 3)))
+(let std/vector/last (lambda xs (get xs (- (length xs) 1))))
+(let std/int/max-safe 2147383647)
+(let std/int/min-safe -2147483648)
+(let std/float/max-safe 16777216.0)
+(let std/float/min-safe -16777216.0)
+(let std/float/pi 3.1415927)
+
+(let std/float/safe? (lambda value (and (>=. value std/float/min-safe) (<=. value std/float/max-safe))))
+(let std/float/get-safe (lambda vrbl (if (std/float/safe? (get vrbl)) (get vrbl) Float)))
+
+(let int (lambda value (if (std/int/safe? value) [ value ] [ 0 ])))
+(let float (lambda value (if (std/float/safe? value) [ value ] [ 0.0 ])))
+
+(let std/int/safe? (lambda value (and (>= value std/int/min-safe) (<= value std/int/max-safe))))
+(let std/int/get-safe (lambda vrbl (if (std/int/safe? (get vrbl)) (get vrbl) Int)))
+
+(let std/float/floor (lambda n (-. n (mod. n 1.0))))
+(let std/float/ceil (lambda n (do 
+    (let sign (if (>=. n 0.0) 1 -1))
+    (let absn (if (>=. n 0.0) n (-. n)))
+    (let frac (mod. absn 1.0))
+    (let intpart (-. absn frac))
+    (cond (=. n 0.0) n (if (= sign 1) (+. intpart 1.0) (-. intpart))))))
+
+; Extra keywords
 (let std/fn/apply/0 (lambda fn (fn)))
 (let std/fn/apply/1 (lambda x fn (fn x)))
 (let std/fn/apply/2 (lambda x y fn (fn x y)))
@@ -1142,6 +1145,24 @@ heap)))
         (|> b (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
         (as out [[[Char]]]))))
 
+(let std/integer/decimal-scaling 1000000)
+(let std/float/decimal-scaling 1000000.0)
+
+(let std/convert/float->string (lambda x (if (=. (std/float/floor x) x) (cons (std/convert/integer->string (Float->Int x)) ".0") (do 
+    (let flip (if (<. x 0.0) -1.0 1.0))
+    (let exponent (std/float/floor x))
+    (let mantisa (-. x exponent))
+    (let left (std/convert/integer->string (Float->Int exponent)))
+    (let right (std/convert/integer->string (Float->Int (*. mantisa std/float/decimal-scaling flip))))
+    (let len (length right))
+    (let tail-call/while (lambda i 
+        (if (=# (get right (- len i)) std/char/0) (do 
+            (pop! right)
+            (tail-call/while (+ i 1))) 
+        i)))
+    (tail-call/while 1)
+    (cons left [std/char/dot] right)))))
+
 ; Experimental still
 
 (let std/vector/deque/new (lambda def [[ def ] []]))
@@ -1869,6 +1890,9 @@ q)))
 
 (let Integer->Chars std/convert/integer->string)
 (let Integer->String std/convert/integer->string)
+(let Float->Chars std/convert/float->string)
+(let Float->String std/convert/float->string)
+
 (let String->Vector std/convert/string->vector)
 (let Vector->String std/convert/vector->string)
 (let Chars->Integer std/convert/chars->integer)
