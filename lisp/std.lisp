@@ -669,6 +669,16 @@ nil)))
      (loop 0 len process)
      out))))
 
+(let std/vector/reverse! (lambda xs (do 
+  (loop 0 (/ (length xs) 2) 
+    (lambda i (do 
+      (let j (- (length xs) i 1))
+      (let x (get xs j))
+      (let y (get xs i))
+      (set! xs i x)
+      (set! xs j y))))
+  nil)))
+
 (let std/vector/find-index (lambda xs fn? (do
      (let i [ 0 ])
      (let index [ -1 ])
@@ -1720,14 +1730,23 @@ q)))
         (std/vector/reverse digits)))))
 
 (let std/convert/integer->digits (lambda num (std/convert/integer->digits-base num 10)))
-(let std/vector/adjacent-difference (lambda xs cb (do
-  (let len (length xs))
+(let std/vector/adjacent-difference (lambda xsi cb (do
+  (let len (length xsi))
+  (let xs (std/vector/copy xsi))
   (if (= len 1) xs
     (do
-      (vector (std/vector/first xs))
       (let tail-call/vector/adjacent-difference (lambda i result (if (< i len) (do
         (tail-call/vector/adjacent-difference (+ i 1) (std/vector/update! result i (cb (get xs (- i 1)) (get xs i))))) result)))
         (tail-call/vector/adjacent-difference 1 xs))))))
+
+(let std/vector/adjacent-difference! (lambda xs cb (do
+  (let len (length xs))
+  (if (= len 1) xs
+    (do
+      (let tail-call/vector/adjacent-difference (lambda i result (if (< i len) (do
+        (tail-call/vector/adjacent-difference (+ i 1) (std/vector/update! result i (cb (get xs (- i 1)) (get xs i))))) result)))
+        (tail-call/vector/adjacent-difference 1 xs))))))
+
 
 (let std/convert/vector/3d->string (lambda xs a b (std/convert/vector->string (std/vector/map xs (lambda x (std/convert/vector->string x b))) a)))
 
@@ -1796,6 +1815,7 @@ q)))
 (let find std/vector/find-index)
 (let partition std/vector/partition)
 (let reverse std/vector/reverse)
+(let reverse! std/vector/reverse!)
 (let slice std/vector/slice)
 (let cons std/vector/cons)
 (let sort! std/vector/sort!)
@@ -1883,6 +1903,7 @@ q)))
 (let emod std/int/euclidean-mod)
 (let swap! std/vector/swap!)
 (let scan std/vector/adjacent-difference)
+(let scan! std/vector/adjacent-difference!)
 
 (let cartesian-product std/vector/cartesian-product)
 (let lcm std/int/lcm)
