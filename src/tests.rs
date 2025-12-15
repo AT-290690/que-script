@@ -1608,8 +1608,82 @@ L82")
     (=.
         (Int->Float 
         (sum/int (range/int 0 10)))
-        (sum/float (range/float 0 10))))", "true")
+        (sum/float (range/float 0 10))))", "true"),
+(r#"(let INPUT "ULL
+RRDDD
+LURDL
+UUUUD")
 
+(let parse (lambda input (|> input (String->Vector nl))))
+(let part1 (lambda input (do 
+  (let pad [['1' '2' '3'] ['4' '5' '6'] ['7' '8' '9']])
+  (let len (- (length pad) 1))
+  (let start (first (std/vector/3d/points pad (lambda x (=# x '5')))))
+  (let L [ 0 -1 ])
+  (let R [ 0 1 ])
+  (let U [ -1 0 ])
+  (let D [ 1 0 ])
+  (let N [ 0 0 ])
+  (|> input (map (lambda x 
+        (|> x (map (lambda y 
+            (cond (=# y 'U') U
+                  (=# y 'D') D
+                  (=# y 'L') L
+                  (=# y 'R') R
+                          N)))
+            (reduce (lambda a dir (do 
+              (set! start 0 (clamp-range (+ (get dir 0) (get start 0)) 0 len))
+              (set! start 1 (clamp-range (+ (get dir 1) (get start 1)) 0 len))
+              (get pad (get start 0) (get start 1)))) '0'))))))))
+(let part2 (lambda input (do 
+  (let pad [['*' '*' '1' '*' '*'] ['*' '2' '3' '4' '*'] ['5' '6' '7' '8' '9'] ['*' 'A' 'B' 'C' '*'] ['*' '*' 'D' '*' '*']])
+  (let len (- (length pad) 1))
+  (let start (first (std/vector/3d/points pad (lambda x (=# x '5')))))
+  (let L [ 0 -1 ])
+  (let R [ 0 1 ])
+  (let U [ -1 0 ])
+  (let D [ 1 0 ])
+  (let N [ 0 0 ])
+  (|> input (map (lambda x 
+        (|> x (map (lambda y 
+            (cond (=# y 'U') U
+                  (=# y 'D') D
+                  (=# y 'L') L
+                  (=# y 'R') R
+                          N)))
+            (reduce (lambda a dir (do 
+              (let y (+ (get dir 0) (get start 0)))
+              (let x (+ (get dir 1) (get start 1)))
+              (unless (and (std/vector/3d/in-bounds? pad y x) (=# (get pad y x) '*')) (do 
+                 (set! start 0 (clamp-range y 0 len))
+                 (set! start 1 (clamp-range x 0 len))))
+              (get pad (get start 0) (get start 1)))) '0'))))))))
+(let PARSED (parse INPUT))
+
+[(part1(parse INPUT)) (part2 (parse INPUT))]"#, "[[49 57 56 53] [53 68 66 51]]"),
+(r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter x digit?))) (filter not-empty?) (map String->Integer)))))))
+(let part1 (lambda input (|> input (count (lambda [a b c .] (and (> (+ a b) c) (> (+ b c) a) (> (+ a c) b)))))))
+(let part2 (lambda input (|> input 
+  (reduce (lambda a [A B C .] (do 
+    (let prev (at a -1))
+    (push! (get prev 0) A)
+    (push! (get prev 1) B)
+    (push! (get prev 2) C)
+    (if (= (length (get prev 0)) 3) (push! a [[] [] []]))
+   a
+  )) [[[] [] []]])
+  (filter (lambda x (not (empty? (get x 0)))))
+  (flat)
+  (part1))))
+
+[
+  (part1 (parse "5 10 25
+    330  143  338
+    769  547   83")) 
+  (part2 (parse "  330  143  5
+    769  547   10
+    930  625  25"))
+]"#, "[1 2]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
