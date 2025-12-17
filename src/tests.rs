@@ -290,6 +290,34 @@ Error! Concequent and alternative must match types
                 "[[2 2 2] [2 2 0] [2 0 1]]",
             ),
             (
+                r#"(let flood-fill (lambda image sr sc color (do 
+    (let old (get image sr sc))
+    (if (= old color) 
+        image 
+        (do 
+            (let m (length image))
+            (let n (length (get image 0)))
+            (let stack [[sr sc]])
+            (loop (not-empty? stack) (lambda (do 
+                (let t (pull! stack))
+                (let i (get t 0))
+                (let j (get t 1))
+                (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get image i j) old)) (do
+                    (set! image i j color)
+                    (push! stack [(+ i 1) j])
+                    (push! stack [(- i 1) j])
+                    (push! stack [i (+ j 1)])
+                    (push! stack [i (- j 1)])
+                    nil)))))
+        image)))))
+
+
+(let image [[1 1 1] [1 1 0] [1 0 1]])
+(flood-fill image 1 1 2)
+; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#,
+                "[[2 2 2] [2 2 0] [2 0 1]]",
+            ),
+            (
                 r#"(let valid-path (lambda n edges source destination (do
   (if (= source destination) true
     (do
@@ -1658,9 +1686,7 @@ UUUUD")
                  (set! start 0 (clamp-range y 0 len))
                  (set! start 1 (clamp-range x 0 len))))
               (get pad (get start 0) (get start 1)))) '0'))))))))
-(let PARSED (parse INPUT))
-
-[(part1(parse INPUT)) (part2 (parse INPUT))]"#, "[[49 57 56 53] [53 68 66 51]]"),
+[(part1 (parse INPUT)) (part2 (parse INPUT))]"#, "[[49 57 56 53] [53 68 66 51]]"),
 (r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter x digit?))) (filter not-empty?) (map String->Integer)))))))
 (let part1 (lambda input (|> input (count (lambda [a b c .] (and (> (+ a b) c) (> (+ b c) a) (> (+ a c) b)))))))
 (let part2 (lambda input (|> input 

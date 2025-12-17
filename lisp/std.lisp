@@ -335,6 +335,7 @@
 
 (let std/vector/count-of (lambda xs fn? (length (std/vector/filter xs fn?))))
 (let std/vector/int/count (lambda input item (std/vector/count-of input (lambda x (= x item)))))
+(let std/vector/float/count (lambda input item (std/vector/count-of input (lambda x (=. x item)))))
 (let std/vector/char/count (lambda input item (std/vector/count-of input (lambda x (=# x item)))))
 (let std/vector/bool/count (lambda input item (std/vector/count-of input (lambda x (=? x item)))))
 
@@ -938,6 +939,7 @@ nil)))
 (let std/vector/tuple/hash/table/entries (lambda table (map (flat table) (lambda x { (fst (get x)) (snd (get x))}))))
 (let std/vector/tuple/hash/table/keys (lambda table (map (flat table) (lambda x (fst (get x))))))
 (let std/vector/tuple/hash/table/values (lambda table (map (flat table) (lambda x (snd (get x))))))
+(let std/vector/tuple/hash/set/keys (lambda table (map (flat table) (lambda x (get x)))))
 
 (let std/vector/sliding-window (lambda xs size (cond 
      (std/vector/empty? xs) []
@@ -1750,11 +1752,12 @@ q)))
 
 (let std/vector/adjacent-difference! (lambda xs cb (do
   (let len (length xs))
-  (if (= len 1) xs
+  (unless (= len 1)
     (do
       (let tail-call/vector/adjacent-difference (lambda i result (if (< i len) (do
         (tail-call/vector/adjacent-difference (+ i 1) (std/vector/update! result i (cb (get xs (- i 1)) (get xs i))))) result)))
-        (tail-call/vector/adjacent-difference 1 xs))))))
+        (tail-call/vector/adjacent-difference 1 xs)
+        nil)))))
 
 
 (let std/convert/vector/3d->string (lambda xs a b (std/convert/vector->string (std/vector/map xs (lambda x (std/convert/vector->string x b))) a)))
@@ -1959,8 +1962,17 @@ q)))
 
 (let Char/count std/vector/char/count)
 (let Int/count std/vector/int/count)
+(let Float/count std/vector/float/count)
 (let Bool/count std/vector/bool/count)
+
+(let count/char std/vector/char/count)
+(let count/int std/vector/int/count)
+(let count/float std/vector/float/count)
+(let count/bool std/vector/bool/count)
+
 (let count std/vector/count-of)
+
+(let points std/vector/3d/points)
 
 (let unique/int std/vector/int/unique)
 (let unique/char std/vector/char/unique)
@@ -1979,7 +1991,7 @@ q)))
 (let Table/keys std/vector/tuple/hash/table/keys)
 (let Table/values std/vector/tuple/hash/table/values)
 
-(let Set/values std/vector/tuple/hash/table/keys)
+(let Set/values std/vector/flat-one)
 
 (let Table/get std/vector/tuple/hash/table/get)
 

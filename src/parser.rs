@@ -537,6 +537,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "<>" => Ok(not_equal_transform(exprs)),
                     "." => Ok(accessor_transform(exprs)?),
                     "get" => Ok(accessor_transform(exprs)?),
+                    "set!" => Ok(setter_transform(exprs)?),
                     "variable" => Ok(variable_transform(exprs)),
                     "integer" => Ok(integer_transform(exprs)),
                     "floating" => Ok(float_transform(exprs)),
@@ -813,6 +814,30 @@ fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> 
         acc = Expression::Apply(vec![Expression::Word("get".to_string()), acc, e]);
     }
     Ok(acc)
+}
+fn setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    if exprs.len() == 4 {
+        return Ok(Expression::Apply(exprs));
+    };
+    exprs.remove(0);
+    let len = exprs.len();
+    let last = exprs.pop().unwrap();
+    let set_idx = exprs.pop().unwrap();
+    let mut iter = exprs.into_iter();
+    if len < 3 {
+        return Err("Error! set! requires at least 3 arguments".to_string());
+    }
+    let first = iter.next().unwrap();
+    let mut acc = first;
+    for e in iter {
+        acc = Expression::Apply(vec![Expression::Word("get".to_string()), acc, e]);
+    }
+    Ok(Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        acc,
+        set_idx,
+        last,
+    ]))
 }
 fn variable_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
