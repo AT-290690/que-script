@@ -362,20 +362,19 @@ Error! Concequent and alternative must match types
 (let parse (lambda input (|> input (std/convert/string->vector std/char/new-line) (std/vector/map std/convert/chars->digits))))
 (let part1 (lambda matrix (do
   (let coords (std/vector/3d/points matrix std/int/zero?))
-  (let default-queue-value [ 0 ])
   (std/vector/reduce coords (lambda a xs (do
         (integer score 0)
         (let y (std/vector/first xs))
         (let x (std/vector/second xs))
         (let visited (std/vector/buckets 8))
-        (let queue (std/vector/queue/new default-queue-value))
+        (let queue (std/vector/queue/new [Int]))
         (let current (. matrix y x))
         (std/vector/hash/set/add! visited (yx->key y x))
         (std/vector/queue/enqueue! queue [ y x ])
         
         (loop (std/vector/queue/not-empty? queue) (lambda (do
             (let element (std/vector/queue/peek queue))
-            (std/vector/queue/dequeue! queue  default-queue-value)
+            (std/vector/queue/dequeue! queue )
             (let y (std/vector/first element))
             (let x (std/vector/second element))  
             (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
@@ -389,13 +388,12 @@ Error! Concequent and alternative must match types
 
 (let part2 (lambda matrix (do
   (let coords (std/vector/3d/points matrix std/int/zero?))
-  (let default-queue-value [ 0 ])
   (std/vector/reduce coords (lambda a xs (do
         (integer score 0)
         (let y (std/vector/first xs))
         (let x (std/vector/second xs))
         (let visited (std/vector/buckets 8))
-        (let queue (std/vector/queue/new default-queue-value))
+        (let queue (std/vector/queue/new [Int]))
         (let current (. matrix y x))
         (let root-key (yx->key y x))
         (std/vector/hash/table/set! visited root-key 1)
@@ -405,7 +403,7 @@ Error! Concequent and alternative must match types
             (let y (std/vector/first element))
             (let x (std/vector/second element))  
             (if (= (. matrix y x) 9) (+= score (as (std/vector/hash/table/get visited root-key) Int)))
-            (std/vector/queue/dequeue! queue default-queue-value)
+            (std/vector/queue/dequeue! queue)
             (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
                  (if (= (- cell (. matrix y x)) 1) (do
@@ -626,8 +624,8 @@ D:=,=,=,+,=,=,=,+,=,=")
         (if (not (=# (std/vector/stack/peek s) (std/vector/queue/peek q)))
              (boole-set p? false) 
              (do 
-                 (std/vector/stack/pop! s std/char/0)
-                 (std/vector/queue/dequeue! q std/char/0)
+                 (std/vector/stack/pop! s)
+                 (std/vector/queue/dequeue! q)
                  nil))))
     (get p?))))
     
@@ -1480,7 +1478,6 @@ L82")
   (integer total 0)
   (let visited [[] [] [] [] [] [] [] [] []])
   (let queue (Que/new [Int]))
-  (let Que/deque! (Que/deque-default! [Int]))
   (let start (std/vector/3d/points input (lambda x (=# x 'S'))))
   (Que/enque! queue (get start 0))
   (loop (Que/not-empty? queue) (lambda (do 
@@ -1501,7 +1498,6 @@ L82")
 (let part2 (lambda input (do
   (integer total 0)
   (let queue (Que/new [Int]))
-  (let Que/deque! (Que/deque-default! [Int]))
   (let start (first (std/vector/3d/points input (lambda x (=# x 'S')))))
   (Que/enque! queue [(get start 0) (get start 1) 1])
   (loop (Que/not-empty? queue) (lambda (do 
@@ -1709,7 +1705,26 @@ UUUUD")
   (part2 (parse "  330  143  5
     769  547   10
     930  625  25"))
-]"#, "[1 2]")
+]"#, "[1 2]"),
+(r#"(let A (Vector->Set ["Hello" "Darkness" "My" "Old" "Friend"]))
+(let B (Vector->Set ["Hello" "Darkness" "My" "New" "Enemy"]))
+
+(|> [
+  (Set/intersection A B)
+  (Set/difference A B)
+  (Set/difference B A)
+  (Set/xor A B)
+  (Set/union A B)
+] 
+ (map Set/values)
+ (reduce cons [])
+ (reduce cons [])
+ (map box)
+ (Table/count)
+ (Table/entries)
+ (sort! (lambda { . a } { . b } (> a b)))
+ (car)
+ (fst))"#, "[101]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
@@ -1725,7 +1740,7 @@ UUUUD")
                                     }
                                     Err(e) => {
                                         // to figure out which test failed due to run time Error!
-                                        println!("{:?}", inp);
+                                        // println!("{:?}", inp);
                                         panic!("Failed tests because {}", e)
                                     }
                                 }
