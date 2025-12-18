@@ -96,6 +96,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "lambda" => infer_lambda(exprs, ctx),
                     "if" => infer_if(&exprs, ctx),
                     "let" => infer_let(&exprs, ctx),
+                    "let*" => infer_rec(&exprs, ctx),
                     "do" => infer_do(&exprs, ctx),
                     _ => infer_function_call(exprs, ctx),
                 }
@@ -617,6 +618,53 @@ pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
         other => other.clone(),
     }
 }
+fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
+    if args.len() != 2 {
+        return Err(format!(
+            "Error! Let requires exactly 2 arguments: variable and value\n({})",
+            exprs
+                .iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<_>>()
+                .join(" "),
+        ));
+    }
+
+    let var_expr = &args[0];
+    let value_expr = &args[1];
+
+    if let Expression::Word(var_name) = var_expr {
+        // Handle recursive (~foo)
+        let name = var_name.to_string();
+
+        // assign a fresh monotype placeholder
+        let tv = ctx.fresh_var();
+
+        ctx.env
+            .insert(name.clone(), TypeScheme::monotype(tv.clone()))?;
+
+        let value_type = infer_expr(value_expr, ctx)?;
+
+        // solve constraints
+        let constraints_vec = ctx.constraints.clone();
+        let subst_map = solve_constraints_list(&constraints_vec)?;
+        let solved_type = apply_subst_map_to_type(&subst_map, &value_type);
+        ctx.env.apply_substitution_map(&subst_map);
+
+        // generalize only if nonexpansive
+        let scheme = if is_nonexpansive(value_expr) {
+            generalize(&ctx.env, solved_type)
+        } else {
+            return Err("Error! Only recursive functions allowed".to_string());
+        };
+
+        Ok(Type::Unit)
+    } else {
+        Err("Error! Let variable must be a variable name".to_string())
+    }
+}
+
 fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {

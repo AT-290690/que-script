@@ -1504,14 +1504,20 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
                                         );
                                         v
                                     });
+
+                                    let (body, is_rec) = transform_named_lambda_to_loop(
+                                        var_name.clone(),
+                                        lambda_expr,
+                                    );
                                     // Try to transform that lambda into loop form:
                                     return Expression::Apply(vec![
-                                        Expression::Word("let".to_string()),
+                                        Expression::Word(if is_rec {
+                                            "let*".to_string()
+                                        } else {
+                                            "let".to_string()
+                                        }),
                                         Expression::Word(var_name.clone()),
-                                        transform_named_lambda_to_loop(
-                                            var_name.clone(),
-                                            lambda_expr,
-                                        ),
+                                        body,
                                     ]);
                                 }
                             }
@@ -1535,18 +1541,18 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
 /// if it contains tail-recursive calls. If no tail recursion is found, return the original lambda.
 ///
 /// Input lambda shape: (lambda p1 p2 ... body)
-fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> Expression {
+fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> (Expression, bool) {
     // Extract params and body from lambda_expr
     let items = match lambda_expr {
         Expression::Apply(v) => v,
-        _ => return lambda_expr, // not a lambda (shouldn't happen)
+        _ => return (lambda_expr, false), // not a lambda (shouldn't happen)
     };
 
     // items[0] == "lambda"
     let params_and_body = &items[1..];
     if params_and_body.is_empty() {
         // zero-arg lambda -> nothing to do
-        return Expression::Apply(items);
+        return (Expression::Apply(items), false);
     }
 
     // last element is body, the earlier ones are param words (or special parameter forms)
@@ -1561,15 +1567,20 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
             params.push(s.clone());
         } else {
             // if param is not a simple word, bail out (keep original)
-            return Expression::Apply(items);
+            return (Expression::Apply(items), false);
         }
     }
 
     // STEP 1: detect whether lambda body contains any tail calls to fn_name
     let has_tail = contains_tail_call_to(&body_expr, &fn_name);
+
     if !has_tail {
+        let has_rec = contains_recursive_call(&body_expr, &fn_name);
+        if has_rec {
+            return (Expression::Apply(items), true);
+        }
         // nothing to do — but we still want inner body desugared (done earlier), so return original
-        return Expression::Apply(items);
+        return (Expression::Apply(items), false);
     }
 
     // STEP 2: build transformed body
@@ -1707,7 +1718,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     lambda_vec.extend(param_exprs.clone()); // keep original parameter names as they are
     lambda_vec.push(wrapped);
 
-    Expression::Apply(lambda_vec)
+    (Expression::Apply(lambda_vec), false)
 }
 
 /// Detect whether there is a *tail call* to `fn_name` inside `expr` (tail position inside expression).
@@ -1747,6 +1758,45 @@ fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
             }
         }
         _ => false,
+    }
+}
+
+/// Detect whether a function body contains ANY recursive call to `fn_name`,
+/// not just in tail position.
+///
+/// This performs a full traversal of the expression tree and returns true
+/// if there is any `(fn_name ...)` application anywhere within `expr`.
+fn contains_recursive_call(expr: &Expression, fn_name: &str) -> bool {
+    match expr {
+        Expression::Word(w) => {
+            // standalone name reference is NOT a recursive call on its own
+            // only `(fn_name ...)` counts
+            w == fn_name
+        }
+
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return false;
+            }
+
+            // if the operator is the function name => recursive call
+            if let Expression::Word(op) = &items[0] {
+                if op == fn_name {
+                    return true;
+                }
+            }
+
+            // otherwise: recursively scan all arguments
+            for item in items {
+                if contains_recursive_call(item, fn_name) {
+                    return true;
+                }
+            }
+
+            false
+        }
+
+        Expression::Int(_) | Expression::Float(_) => false,
     }
 }
 

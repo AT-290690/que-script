@@ -1724,7 +1724,42 @@ UUUUD")
  (Table/entries)
  (sort! (lambda { . a } { . b } (> a b)))
  (car)
- (fst))"#, "[101]")
+ (fst))"#, "[101]"),
+
+ (r#"(let flood-fill (lambda image sr sc color (do 
+    (let old (. image sr sc))
+    (if (= old color) 
+        image 
+        (do 
+        (let m (length image))
+        (let n (length (std/vector/first image)))
+        (let adj (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (. image r c) old)) (do 
+                    (std/vector/3d/set! image r c color)
+                    (adj (+ r 1) c)
+                    (adj (- r 1) c)
+                    (adj r (+ c 1))
+                    (adj r (- c 1))
+                nil))))
+        (adj sr sc)
+        image)))))
+
+(let image [[1 1 1] [1 1 0] [1 0 1]])
+(flood-fill image 1 1 2)
+; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#, "[[2 2 2] [2 2 0] [2 0 1]]"),
+(r#"(let fibonacci (lambda n
+    (if (< n 2) n (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
+(fibonacci 10)"#, "55"),
+(r#"(let memo [[] [] [] []])
+(let fibonacci (lambda n
+    (do 
+    (let key (Integer->String n))
+    (if (< n 2) n (if (Table/has? memo key) (snd (first (Table/get memo key))) (do 
+      (let res (+ (fibonacci (- n 1)) (fibonacci (- n 2))))
+      (Table/set! memo key res)
+      res
+    ))))))
+(fibonacci 10)"#, "55"),
+
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
