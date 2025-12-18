@@ -539,6 +539,56 @@
           (set b (* (get b) (get b)))
           (set e (/ (get e) 2)))))
       (get result))))))
+
+(let std/float/sqrt (lambda n
+  (do
+    (floating low 0.)
+    (floating high n)
+    (floating mid 0.)
+    (floating i 0.)
+    ; Loop 100 times for high precision
+    (loop (<. (get i) 100.)
+      (lambda (do
+        (set mid (/. (+. (get low) (get high)) 2.))
+        (if (<=. (*. (get mid) (get mid)) n)
+            (set low (get mid))
+            (set high (get mid)))
+        (set i (+. (get i) 1.)))))
+    (get low))))
+
+(let std/float/expt (lambda base exp
+  (do
+    (floating res 1.)
+    (floating b base)
+    (floating e exp)
+    
+    ; 1. Handle the integer part of the exponent
+    (loop (>=. (get e) 1.)
+      (lambda (do
+        (if (=. (mod. (floor (get e)) 2.) 1.)
+            (set res (*. (get res) (get b))))
+        (set b (*. (get b) (get b)))
+        (set e (/. (floor (get e)) 2.)))))
+    
+    ; 2. Handle the fractional part using square roots
+    ; Refresh 'b' to original base and 'e' to the remaining fraction
+    (set b base)
+    (set e (-. exp (floor exp)))
+    (floating root (std/float/sqrt (get b)))
+    (floating frac 0.5)
+    
+    ; Loop 22. times for precision (handles bits of the fraction)
+    (floating i 0.)
+    (loop (<. (get i) 22.)
+      (lambda (do
+        (if (>=. (get e) (get frac))
+            (do 
+              (set res (*. (get res) (get root)))
+              (set e (-. (get e) (get frac)))))
+        (set root (std/float/sqrt (get root)))
+        (set frac (/. (get frac) 2.))
+        (set i (+. (get i) 1.)))))
+    (get res))))
 ; 2d Vectors
 (let std/vector/2d/int/set! (lambda vec [ x y . ] (do (set! vec 0 x) (set! vec 1 y) nil)))
 (let std/vector/2d/int/add (lambda [ x1 y1 . ] [ x2 y2 . ] [ (+ x1 x2) (+ y1 y2) ]))
@@ -1850,6 +1900,10 @@ q)))
 (let square std/int/square)
 (let expt std/int/expt)
 (let sqrt std/int/sqrt)
+(let expt/int std/int/expt)
+(let sqrt/int std/int/sqrt)
+(let expt/float std/float/expt)
+(let sqrt/float std/float/sqrt)
 (let odd? std/int/odd?)
 (let even? std/int/even?)
 (let one? std/int/one?)
