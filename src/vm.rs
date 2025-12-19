@@ -1062,7 +1062,7 @@ impl VM {
                     if universal_loop_count > LOOP_LIMIT {
                         return Err("Error! Program is looping too much".to_string());
                     }
-                    self.stack.push(BiteCodeEvaluated::Int(0)); // by convention
+                    self.stack.push(BiteCodeEvaluated::Int(0)); // by convention returning Int even though the type is Unit (nil is still 0)
                 }
             }
         }
