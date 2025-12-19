@@ -21,11 +21,11 @@ fn collect_idents(expr: &Expression, acc: &mut HashSet<String>) {
 fn tree_shake(
     std_defs: Vec<Expression>,
     used: &HashSet<String>,
-    visited: &mut HashSet<String>, // <-- your outer (user) definitions
+    visited: &mut HashSet<String>,
 ) -> Vec<Expression> {
     let mut index = HashMap::new();
 
-    // --- Index all std let definitions
+    // Index all std let definitions
     for expr in &std_defs {
         if let Expression::Apply(list) = expr {
             if let [Expression::Word(kw), Expression::Word(name), _rest @ ..] = &list[..] {
@@ -45,7 +45,7 @@ fn tree_shake(
         visited: &mut HashSet<String>,
     ) {
         if !visited.insert(name.to_string()) {
-            return; // already visited or user-defined
+            return;
         }
         if let Some(def) = index.get(name) {
             if let Expression::Apply(list) = def {
@@ -303,9 +303,9 @@ fn parse_infix(tokens: &[Tok]) -> Result<Expr, String> {
             Number(n) => output.push(Expr::Number(n.clone())),
 
             Ident(id) => {
-                // function call: ident '(' args ')'
+                // function call: ident ( args )
                 if i + 1 < tokens.len() && tokens[i + 1] == LParen {
-                    i += 2; // skip ident and '('
+                    i += 2; // skip ident and (
                     let mut args = vec![];
                     let mut depth = 1;
                     let mut start = i;
@@ -607,7 +607,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                         }
                                     }
                                 }
-                                Expression::Word(_) => { /* skip element */ }
+                                Expression::Word(_) => {}
                                 _ => {
                                     return Err(
                                         "lambda array element must be a word or '.'".to_string()
@@ -637,7 +637,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
                                     } else {
                                     }
                                 }
-                                Expression::Word(_) => { /* skip element */ }
+                                Expression::Word(_) => {}
                                 _ => {
                                     return Err(
                                         "lambda array element must be a word or '.'".to_string()
@@ -1194,12 +1194,12 @@ fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
 
     for stage in exprs.into_iter().skip(1) {
         match stage {
-            // ---------- CASE 1: curried (\foo ...) ----------
+            // curried (\foo ...)
             Expression::Apply(items)
                 if !items.is_empty()
                     && matches!(&items[0], Expression::Word(f) if f.starts_with('\\')) =>
             {
-                // Keep the slash! You requested this.
+                // Keep the slash!
                 let func = items[0].clone(); // (\map)
                 let mut args: Vec<Expression> = items[1..].to_vec();
 
@@ -1213,7 +1213,7 @@ fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
                 inp = Expression::Apply(new_list);
             }
 
-            // ---------- CASE 2: normal |>, data-first ----------
+            // normal |>, data-first
             Expression::Apply(mut inner) if !inner.is_empty() => {
                 let func = inner.remove(0);
                 let mut new_stage = vec![func, inp];
@@ -1221,7 +1221,7 @@ fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
                 inp = Expression::Apply(new_stage);
             }
 
-            // ---------- CASE 3: simple function ----------
+            // simple function
             stage => {
                 inp = Expression::Apply(vec![stage, inp]);
             }
@@ -1356,50 +1356,7 @@ impl Expression {
         }
     }
 }
-// #[allow(dead_code)]
-// pub fn with_std(program: &str, std: &str) -> Result<Expression, String> {
-//     match preprocess(&program) {
-//         Ok(preprocessed) => {
-//             let exprs = parse(&preprocessed).unwrap();
-//             let mut desugared = Vec::new();
-//             for expr in exprs {
-//                 let expr = desugar_tail_recursion(expr);
-//                 match desugar(expr) {
-//                     Ok(expr) => desugared.push(expr),
-//                     Err(e) => return Err(e),
-//                 }
-//             }
-//             match preprocess(&std) {
-//                 Ok(preprocessed_std) => {
-//                     let exprs_std = parse(&preprocessed_std).unwrap();
-//                     let mut desugared_std = Vec::new();
-//                     for expr in exprs_std {
-//                         match desugar(expr) {
-//                             Ok(expr) => desugared_std.push(expr),
-//                             Err(e) => return Err(e),
-//                         }
-//                     }
-//                     let mut used = HashSet::new();
-//                     for e in &desugared {
-//                         collect_idents(e, &mut used);
-//                     }
 
-//                     let shaken_std = tree_shake(desugared_std, &used);
-
-//                     let wrapped = Expression::Apply(
-//                         std::iter::once(Expression::Word("do".to_string()))
-//                             .chain(shaken_std.into_iter())
-//                             .chain(desugared.into_iter())
-//                             .collect(),
-//                     );
-//                     Ok(wrapped)
-//                 }
-//                 Err(e) => return Err(e),
-//             }
-//         }
-//         Err(e) => return Err(e),
-//     }
-// }
 pub fn build(program: &str) -> Result<Expression, String> {
     match preprocess(&program) {
         Ok(preprocessed) => {
@@ -1532,9 +1489,8 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
         other => other,
     }
 }
-/// Transform a `lambda` expression **bound to name `fn_name`** into a loop-driven lambda
+/// Transform a lambda expression bound to name fn_name into a loop-driven lambda
 /// if it contains tail-recursive calls. If no tail recursion is found, return the original lambda.
-///
 /// Input lambda shape: (lambda p1 p2 ... body)
 fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> Expression {
     // Extract params and body from lambda_expr
@@ -1546,7 +1502,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     // items[0] == "lambda"
     let params_and_body = &items[1..];
     if params_and_body.is_empty() {
-        // zero-arg lambda -> nothing to do
+        // zero arg lambda -> nothing to do
         return Expression::Apply(items);
     }
 
@@ -1565,39 +1521,37 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
             return Expression::Apply(items);
         }
     }
-    // STEP 1: detect whether lambda body contains any tail calls to fn_name
+    // detect whether lambda body contains any tail calls to fn_name
     let has_tail = contains_tail_call_to(&body_expr, &fn_name);
-
     if !has_tail {
+        // TODO - here we can use contains_recursive_call check if it was not so buggy
         // nothing to do — but we still want inner body desugared (done earlier), so return original
         return Expression::Apply(items);
     }
 
-    // STEP 2: build transformed body
+    // build transformed body
     // We'll create internal names:
     // __rec_cont  -- 1 while should continue, 0 when finished
     // __rec_result -- holds final result
-    // We'll also make params "mutable single-element arrays" by wrapping initial param value into [param_val]
+    // We'll also make params mutable single-element arrays by wrapping initial param value into [param_val]
     // That means every occurrence of param in body must be replaced by (get param 0)
-    //
-    // Construct sequence:
     //
     // (lambda ORIGINAL_PARAMS
     //   (do
     //     (let __rec_cont 1)
     //     (let __rec_result 0)
-    //     ;; rebind original params to single-element arrays holding their initial values:
+    //     ; rebind original params to single-element arrays holding their initial values:
     //     (let p1 [p1]) (let p2 [p2]) ...
     //
     //     (loop-finish __rec_cont
     //       (lambda
-    //         ;; body where:
-    //         ;; - tail call (fn args...) -> (do (set! p1 0 arg1) ... ) ;; then return
-    //         ;; - tail-return V -> (do (set! __rec_result 0 V) (set! __rec_cont 0) )
-    //         ;; non-tail occurrences of param replaced with (get p 0)
+    //         ; body where:
+    //         ; - tail call (fn args...) -> (do (set! p1 0 arg1) ... ) ; then return
+    //         ; - tail-return V -> (do (set! __rec_result 0 V) (set! __rec_cont 0) )
+    //         ; non-tail occurrences of param replaced with (get p 0)
     //       ))
     //
-    //     (get __rec_result 0) ;; return final result stored in the result cell
+    //     (get __rec_result 0) ; return final result stored in the result cell
     //   )
     // )
 
@@ -1609,14 +1563,14 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     // because some occurrences are in contexts (e.g. being assigned) and we only want read accesses replaced.
     //
     // Make the mutable param initializations:
-    // for each param `p` we will emit: (let p [ p ])
+    // for each param p we will emit: (let p [ p ])
     let mut param_inits = Vec::new();
     for p in &params {
         let init = Expression::Apply(vec![
             Expression::Word("let".to_string()),
             Expression::Word("_".to_string() + p),
             Expression::Apply(vec![
-                Expression::Word("vector".to_string()), // vector literal constructor
+                Expression::Word("vector".to_string()),
                 Expression::Word(p.clone()),
             ]),
         ]);
@@ -1624,7 +1578,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
             Expression::Word("let".to_string()),
             Expression::Word("_new_".to_string() + p),
             Expression::Apply(vec![
-                Expression::Word("vector".to_string()), // vector literal constructor
+                Expression::Word("vector".to_string()),
             ]),
         ]);
         param_inits.push(init);
@@ -1661,7 +1615,6 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     // which we created as an int, but to be consistent with our single-element approach we stored values inside arrays
     // earlier — to be safe, we will store result into a single-element vector as well and fetch via (get __rec_result 0).
     // For simplicity here: we made __rec_result a boxed single element vector initialised to [0] instead of 0.
-    //
 
     let let_cont_arr = Expression::Apply(vec![
         Expression::Word("let".to_string()),
@@ -1688,7 +1641,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
         Expression::Int(0),
     ]);
 
-    // Assemble the whole `do` body in order:
+    // Assemble the whole do body in order:
     let mut do_items = vec![];
     do_items.push(let_cont_arr);
     do_items.push(let_result_arr); // replaced earlier simple let with vector version
@@ -1709,17 +1662,16 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     lambda_vec.push(wrapped);
     Expression::Apply(lambda_vec)
 }
-
-// TODO: contains_tail_call_to! Instead mark definition with ~ (let~ rec (lambda ...))
-/// Detect whether there is a *tail call* to `fn_name` inside `expr` (tail position inside expression).
-/// We conservatively check "is there any call to fn_name that appears in tail position" — i.e., the final
-/// expression of the body or the final branch of conditionals, etc.
+// TODO: contains_tail_call_to Instead mark definition with ~ (let~ rec (lambda ...))
+/// Detect whether there is a *tail call* to fn_name inside expr(tail position inside expression).
+/// We conservatively check is there any call to fn_name that appears in tail position the final
+/// expression of the body or the final branch of conditionals
 fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
     match expr {
         Expression::Apply(items) if !items.is_empty() => {
             match &items[0] {
                 Expression::Word(op) if op == fn_name => {
-                    // ✅ Tail if the entire expression is a call to the function itself
+                    // Tail if the entire expression is a call to the function itself
                     true
                 }
 
@@ -1751,17 +1703,16 @@ fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
         _ => false,
     }
 }
-
-/// Detect whether a function body contains ANY recursive call to `fn_name`,
-/// not just in tail position.
-///
-/// This performs a full traversal of the expression tree and returns true
-/// if there is any `(fn_name ...)` application anywhere within `expr`.
+// TODO: Curently dissabled because it conflicts with contains_tail_call
+// Detect whether a function body contains ANY recursive call to fn_name,
+// not just in tail position.
+// This performs a full traversal of the expression tree and returns true
+// if there is any `(fn_name ...)` application anywhere within expr.
 fn contains_recursive_call(expr: &Expression, fn_name: &str) -> bool {
     match expr {
         Expression::Word(w) => {
             // standalone name reference is NOT a recursive call on its own
-            // only `(fn_name ...)` counts
+            // only (fn_name ...) counts
             w == fn_name
         }
 
@@ -1791,10 +1742,10 @@ fn contains_recursive_call(expr: &Expression, fn_name: &str) -> bool {
     }
 }
 
-/// Transform expressions recursively, rewriting only *tail-position* subexpressions:
-/// - tail call `(fn_name arg1 arg2 ...)` -> `(do (set! p1 0 arg1) ... )`  (then returns, ending lambda iteration)
-/// - tail return `V` -> `(do (set! __rec_result 0 V) (set! __rec_cont 0))`
-/// - other positions are transformed by replacing param occurrences with `(get param 0)` reads
+/// Transform expressions recursively, rewriting only tail-position subexpressions:
+/// - tail call (fn_name arg1 arg2 ...) -> (do (set! p1 0 arg1) ... )  (then returns, ending lambda iteration)
+/// - tail return V -> (do (set! __rec_result 0 V) (set! __rec_cont 0))
+/// - other positions are transformed by replacing param occurrences with (get param 0) reads
 fn transform_tail_positions(
     expr: &Expression,
     fn_name: &str,
@@ -1802,7 +1753,7 @@ fn transform_tail_positions(
     cont_name: &str,
     result_name: &str,
 ) -> Expression {
-    // helper to replace param reads by (get p 0) everywhere except when param appears as the target of `set!`
+    // helper to replace param reads by (get p 0) everywhere except when param appears as the target of set!
     fn replace_param_reads(e: &Expression, params: &[String]) -> Expression {
         match e {
             Expression::Word(w) if params.contains(w) => Expression::Apply(vec![
@@ -1861,7 +1812,7 @@ fn transform_tail_positions(
                 // If it's a control form with branches where tail positions exist, we need special handling:
                 match op.as_str() {
                     "if" => {
-                        // (if cond then else) -> cond is non-tail; then/else are tail
+                        // (if cond then else) -> cond is non-tail then/else are tail
                         if items.len() < 3 {
                             return replace_param_reads(expr, params);
                         }
@@ -1912,8 +1863,7 @@ fn transform_tail_positions(
                     }
                     _ => {
                         // Generic non-tail application: treat as expr returning value in tail position:
-                        // e.g. last-expr is `(foo a b)` but foo != fn_name -> then presence of this expression in tail position means we must convert it into setting result & cont=0
-                        // Build:
+                        // e.g. last-expr is (foo a b) but foo != fn_name -> then presence of this expression in tail position means we must convert it into setting result & cont=0
                         // (do (let __tmp <expr>) (set! __rec_result 0 __tmp) (set! __rec_cont 0))
                         // but to avoid extra let we can write: (do (set! __rec_result 0 <expr_replaced>) (set! __rec_cont 0))
                         let expr_replaced = replace_param_reads(expr, params);
