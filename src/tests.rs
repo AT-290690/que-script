@@ -184,7 +184,7 @@ Error! Concequent and alternative must match types
                 r#"(let last-stone-weight (lambda stones (do
   (let max-cmp (lambda a b (> a b)))
   (let heap (std/convert/vector->heap stones max-cmp))
-  (let tail-call/smash (lambda t
+  (let~ tail-call/smash (lambda t
     (if (> (length heap) 1)
       (do
         (let y (std/heap/peek heap))
@@ -646,7 +646,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[true false]",
             ),
             (
-                r#"(let rev (lambda xs rev 
+                r#"(let~ rev (lambda xs rev 
     (if (std/vector/empty? xs) 
          rev 
         (rev (std/vector/drop/last xs 1) (std/vector/append! rev (std/vector/at xs -1))))))
@@ -688,7 +688,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             ),
             (
                 r#"
-            (let factorial (lambda n total
+            (let~ factorial (lambda n total
                (if (= (get n 0) 0)
                    total
                    (factorial (std/int/big/sub n [ 1 ]) (std/int/big/mul total n)))))
@@ -1080,7 +1080,7 @@ out
 (let part2 (lambda input (do
 
 (let retry (lambda x (do
-    (let tail-call:retry! (lambda x out (do 
+    (let~ tail-call:retry! (lambda x out (do 
         (let result (- (/ x 3) 2))
         (if (<= result 0) out 
             (tail-call:retry! result (std/vector/append! out result))))))
@@ -1106,7 +1106,7 @@ b
     (std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })
 )"#, "[[1 2 3] [true false true]]"),
 
-(r#"(let rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
+(r#"(let~ rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
 (rec { 1 1 } { true 10 })"#, "[false 12]"),
 (r#"(let factorial (lambda N (snd (pull! (Rec { N 1 } (lambda { n acc } 
       (if (= n 0) 
@@ -1334,7 +1334,7 @@ L82")
   (get TOTAL))))
 
   (let part2 (lambda input (do
-    (let rec (lambda total (do
+    (let~ rec (lambda total (do
         (let rem [])
         (loop 0 (length input) (lambda y (do 
         (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
@@ -1593,7 +1593,7 @@ L82")
   )))
 (let edges (map (sort! dist (lambda { . d1 } { . d2 } (< d1 d2))) fst))
 (let parent (range 0 (- (length input) 1)))
-(let root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
+(let~ root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
 (let merge (lambda a b (set! parent (root a) (root b))))
 (for (take/first edges 10) (lambda [ a b .] (merge a b)))
 (|> 
@@ -1733,7 +1733,7 @@ UUUUD")
         (do 
         (let m (length image))
         (let n (length (std/vector/first image)))
-        (let adj (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (. image r c) old)) (do 
+        (let* adj (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (. image r c) old)) (do 
                     (std/vector/3d/set! image r c color)
                     (adj (+ r 1) c)
                     (adj (- r 1) c)
@@ -1746,11 +1746,11 @@ UUUUD")
 (let image [[1 1 1] [1 1 0] [1 0 1]])
 (flood-fill image 1 1 2)
 ; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#, "[[2 2 2] [2 2 0] [2 0 1]]"),
-(r#"(let fibonacci (lambda n
+(r#"(let* fibonacci (lambda n
     (if (< n 2) n (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
 (fibonacci 10)"#, "55"),
 (r#"(let memo [[] [] [] []])
-(let fibonacci (lambda n
+(let* fibonacci (lambda n
     (do 
     (let key (Integer->String n))
     (if (< n 2) n (if (Table/has? memo key) (snd (first (Table/get memo key))) (do 
@@ -1759,7 +1759,15 @@ UUUUD")
       res
     ))))))
 (fibonacci 10)"#, "55"),
+(r#"(let* ackermann (lambda m n 
+    (cond 
+        (and (< m 0) (< n 0)) -1 
+        (= m 0) (+ n 1)
+        (and (> m 0) (= n 0)) (ackermann (- m 1) 1)
+        (and (> m 0) (> n 0)) (ackermann (- m 1) (ackermann m (- n 1)))
+        0)))
 
+(ackermann 2 3)"#, "9")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

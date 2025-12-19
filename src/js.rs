@@ -119,7 +119,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                     }
                     // let: (let name value) -> `var name = <value>;` as statement. Here we return an expression that
                     // is valid when used in top-level statement context; caller may wrap it as statement.
-                    "let" | "let*" => {
+                    "let" | "let*" | "let~" => {
                         if items.len() != 3 {
                             panic!("let requires exactly 2 arguments: name and value");
                         }

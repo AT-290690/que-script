@@ -1443,7 +1443,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                         if let [Expression::Word(kw), Expression::Word(name), _rest @ ..] =
                             &list[..]
                         {
-                            if kw == "let" {
+                            if kw == "let" || kw == "let*" || kw == "let~" {
                                 definitions.insert(name.to_string());
                             }
                         }
@@ -1486,7 +1486,7 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
 
             // Reconstruct and check for (let name (lambda ...))
             if let Expression::Word(ref w) = head {
-                if w == "let" && rest.len() == 2 {
+                if (w == "let~" || w == "let") && rest.len() == 2 {
                     // rest[0] is var name, rest[1] is value
                     if let Expression::Word(var_name) = &rest[0] {
                         // If value is a lambda, consider converting
@@ -1505,19 +1505,14 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
                                         v
                                     });
 
-                                    let (body, is_rec) = transform_named_lambda_to_loop(
-                                        var_name.clone(),
-                                        lambda_expr,
-                                    );
                                     // Try to transform that lambda into loop form:
                                     return Expression::Apply(vec![
-                                        Expression::Word(if is_rec {
-                                            "let*".to_string()
-                                        } else {
-                                            "let".to_string()
-                                        }),
+                                        Expression::Word("let".to_string()),
                                         Expression::Word(var_name.clone()),
-                                        body,
+                                        transform_named_lambda_to_loop(
+                                            var_name.clone(),
+                                            lambda_expr,
+                                        ),
                                     ]);
                                 }
                             }
@@ -1541,18 +1536,18 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
 /// if it contains tail-recursive calls. If no tail recursion is found, return the original lambda.
 ///
 /// Input lambda shape: (lambda p1 p2 ... body)
-fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> (Expression, bool) {
+fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> Expression {
     // Extract params and body from lambda_expr
     let items = match lambda_expr {
         Expression::Apply(v) => v,
-        _ => return (lambda_expr, false), // not a lambda (shouldn't happen)
+        _ => return lambda_expr, // not a lambda (shouldn't happen)
     };
 
     // items[0] == "lambda"
     let params_and_body = &items[1..];
     if params_and_body.is_empty() {
         // zero-arg lambda -> nothing to do
-        return (Expression::Apply(items), false);
+        return Expression::Apply(items);
     }
 
     // last element is body, the earlier ones are param words (or special parameter forms)
@@ -1567,20 +1562,15 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> (
             params.push(s.clone());
         } else {
             // if param is not a simple word, bail out (keep original)
-            return (Expression::Apply(items), false);
+            return Expression::Apply(items);
         }
     }
-
     // STEP 1: detect whether lambda body contains any tail calls to fn_name
     let has_tail = contains_tail_call_to(&body_expr, &fn_name);
 
     if !has_tail {
-        let has_rec = contains_recursive_call(&body_expr, &fn_name);
-        if has_rec {
-            return (Expression::Apply(items), true);
-        }
         // nothing to do — but we still want inner body desugared (done earlier), so return original
-        return (Expression::Apply(items), false);
+        return Expression::Apply(items);
     }
 
     // STEP 2: build transformed body
@@ -1717,10 +1707,10 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> (
     let mut lambda_vec = vec![Expression::Word("lambda".to_string())];
     lambda_vec.extend(param_exprs.clone()); // keep original parameter names as they are
     lambda_vec.push(wrapped);
-
-    (Expression::Apply(lambda_vec), false)
+    Expression::Apply(lambda_vec)
 }
 
+// TODO: contains_tail_call_to! Instead mark definition with ~ (let~ rec (lambda ...))
 /// Detect whether there is a *tail call* to `fn_name` inside `expr` (tail position inside expression).
 /// We conservatively check "is there any call to fn_name that appears in tail position" — i.e., the final
 /// expression of the body or the final branch of conditionals, etc.
@@ -1736,6 +1726,7 @@ fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
                 Expression::Word(op) => match op.as_str() {
                     "if" => {
                         // tail position is inside then and else branches
+
                         if items.len() >= 3 {
                             contains_tail_call_to(&items[2], fn_name)
                                 || (items.len() > 3 && contains_tail_call_to(&items[3], fn_name))
@@ -1892,7 +1883,7 @@ fn transform_tail_positions(
                             )
                         } else {
                             // missing else -> keep as is
-                            Expression::Int(0)
+                            Expression::Word("nil".to_string())
                         };
                         return Expression::Apply(vec![
                             Expression::Word("if".to_string()),
