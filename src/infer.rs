@@ -16,14 +16,10 @@ pub enum TypeErrorVariant {
 #[derive(Clone, Debug)]
 pub struct TypeError {
     pub variant: TypeErrorVariant,
-    // Keep a small slice or reference to the original expression for formatting.
-    // If you can't easily pass a borrow, store a Vec<Expression> (clone) — but prefer a reference.
     pub expr: Vec<crate::parser::Expression>,
 }
 
-// small helper to pretty-print the source AST tied to an error:
 fn src_to_pretty(src: &TypeError) -> String {
-    // adapt to your existing pretty printer
     let joined = src
         .expr
         .iter()
@@ -43,7 +39,6 @@ fn src_to_pretty(src: &TypeError) -> String {
         TypeErrorVariant::Source => joined,
     }
 }
-// Type inference context
 pub struct InferenceContext {
     pub env: TypeEnv,
     pub constraints: Vec<(Type, Type, TypeError)>,
@@ -71,7 +66,6 @@ impl InferenceContext {
     }
 }
 
-// Type inference for expressions
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     match expr {
         Expression::Int(_) => Ok(Type::Int),
@@ -149,7 +143,7 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
         _ => Err(format!("Error! Invalid type hint: {}", expr.to_lisp())),
     }
 }
-// 2️⃣ Helper to compute "arity" depth (number of list nestings)
+// arity depth (number of list nestings)
 fn type_arity(t: &Type) -> usize {
     match t {
         Type::List(inner) => 1 + type_arity(inner),
@@ -162,7 +156,7 @@ fn inner_type(t: &Type) -> &Type {
         _ => t,
     }
 }
-// --- Helper: get deepest inner type ---
+// get deepest inner type
 fn deepest_type(t: &Type) -> &Type {
     match t {
         Type::List(inner) => deepest_type(inner),
@@ -176,11 +170,11 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         return Err("Error! `as` expects exactly two arguments: (as expr Type)".to_string());
     }
 
-    // 1️⃣ Infer both sides
+    // Infer both sides
     let expr_type = infer_expr(&args[0], ctx)?;
     let type_hint = parse_type_hint(&args[1], ctx)?;
 
-    // 2️⃣ Handle tuple special case directly — before arity logic
+    // Handle tuple special case directly — before arity logic
     match (&expr_type, &type_hint) {
         (Type::Tuple(expr_elems), Type::Tuple(hint_elems)) => {
             if expr_elems.len() != hint_elems.len() {
@@ -221,13 +215,13 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         _ => {}
     }
 
-    // 3️⃣ Compute arities
+    // Compute arities
     let expr_arity = type_arity(&expr_type);
     let hint_arity = type_arity(&type_hint);
     let inner_expr_type = deepest_type(&expr_type);
     let is_expr_var = matches!(inner_expr_type, Type::Var(_));
 
-    // --- If expr_type is a type variable, allow up to (≤) right-side arity ---
+    // If expr_type is a type variable, allow up to (≤) right-side arity
     if is_expr_var && expr_arity > hint_arity {
         return Err(format!(
             "Error! Type variable in `as` cannot represent deeper nesting: {} vs {}",
@@ -235,7 +229,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         ));
     }
 
-    // 4️⃣ Check arity mismatch for lists/functions
+    // Check arity mismatch for lists/functions
     if !is_expr_var && expr_arity != hint_arity {
         return Err(format!(
             "Error! Type arity mismatch in `as`: left has arity {}, right has arity {} ({} vs {})\n(as {})",
@@ -247,7 +241,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         ));
     }
 
-    // 5️⃣ Array element restriction (unchanged)
+    // Array element restriction)
     if expr_arity > 0 {
         let inner_expr = inner_type(&expr_type);
         let inner_hint = inner_type(&type_hint);
@@ -401,10 +395,9 @@ fn is_nonexpansive(expr: &Expression) -> bool {
 pub type Constraint = (Type, Type);
 
 /// Unifier: mutable map from type variable id -> Type (the binding).
-/// If a var maps to another var, we'll canonicalize via `find` for speed.
 #[derive(Debug, Default)]
 pub struct Unifier {
-    binds: HashMap<u64, Type>, // var_id -> Type
+    binds: HashMap<u64, Type>,
 }
 
 impl Unifier {
@@ -948,7 +941,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
         }
     }
-    // ✅ Handle calling () -> T
+    // Handle calling () -> T
     if args.is_empty() {
         if let Type::Function(param_ty, ret_ty) = &func_type {
             if matches!(**param_ty, Type::Unit) {
@@ -1443,10 +1436,10 @@ pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
         fresh_var_counter: init_id,
     };
 
-    // 1) Infer type — accumulate constraints
+    // Infer type — accumulate constraints
     let inferred = infer_expr(expr, &mut ctx)?;
 
-    // 2) Solve constraints once, globally
+    // Solve constraints once, globally
     let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
         .constraints
         .iter()
@@ -1455,7 +1448,7 @@ pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
 
     let subst_map = solve_constraints_list(&constraints_vec).map_err(|e| e.to_string())?;
 
-    // 3) Apply solved substitution map to everything
+    // Apply solved substitution map to everything
     let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
     ctx.env.apply_substitution_map(&subst_map);
 
