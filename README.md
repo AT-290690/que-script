@@ -88,7 +88,7 @@ This is especially useful for recursive functions. For instance, take this funct
 ; 15
 ```
 
-With a regular call, this consumes 𝒪(n) stack space: each element of the vector adds a new frame on the call stack. With a long enough vector, this could very quickly overflow the stack. By replacing the call with a jump, tail call optimization effectively turns this recursive function into a loop which uses 𝒪(1) stack space:
+With a regular call, this consumes O(n) stack space: each element of the vector adds a new frame on the call stack. With a long enough vector, this could very quickly overflow the stack. By replacing the call with a jump, tail call optimization effectively turns this recursive function into a loop which uses O(1) stack space:
 
 ```lisp
 (let sum (lambda xs acc (do
@@ -166,7 +166,7 @@ x
 
 ### Loop Limit
 
-Loops are capped at 5,000,000 (five million) total iterations for the entire program.
+Loops are capped at 5 000 000 (five million) total iterations for the entire program.
 
 To ensure programs remain safe when running locally or on shared servers, loops must be "safe" and unable to hang or block the main thread. This limit also applies to tail-call optimized recursion.
 
@@ -319,99 +319,6 @@ const program = "(+ 1 2)";
 console.log(typeCheck(program));
 console.log(execBiteCode(compileBiteCode(program)));
 ```
-
-**Game of life**
-
-The language itself does not have the concept of time (interval and timeout) and lacks any I/O capabilities but with a little bit of help from the Node.js we can simulate [Conway's Game of Life
-](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life)
-
-```js
-import { exec, comp, cons, get_output_len, __wasm } from "./pkg/node/fez_rs.js";
-const memory = __wasm.memory;
-const readWasmString = (ptr, len) =>
-  new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
-const compileBiteCode = (program) =>
-  readWasmString(comp(program), get_output_len());
-const execBiteCode = (program) =>
-  readWasmString(exec(program), get_output_len());
-const concatenateBiteCode = (a, b) =>
-  readWasmString(cons(a, b), get_output_len());
-const convertToString = (xs) =>
-  Array.isArray(xs)
-    ? xs.map(convertToString).join("")
-    : String.fromCharCode(xs);
-const parse = (str) => {
-  if (str[0] === "[") return JSON.parse(str.replaceAll(" ", ","));
-  else return [];
-};
-const N = 9;
-const init = `(let N ${N})
-(let GRID (|> (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda . 0))))))
-(let add-glider! (lambda GRID y x (do 
-(set! (get GRID (+ y 2)) (+ x 1) 1)
-(set! (get GRID (+ y 2)) (+ x 2) 1)
-(set! (get GRID (+ y 2)) (+ x 3) 1)
-(set! (get GRID (+ y 1)) (+ x 3) 1)
-(set! (get GRID (+ y 0)) (+ x 2) 1))))
-(add-glider! GRID 0 0)
-GRID`;
-const gof = `
-(let N ${N})
-(let gof (lambda GRID (do
-(std/vector/map/i GRID (lambda arr y (do
-    (std/vector/map/i arr (lambda cell x (do
-    (let score (std/vector/3d/sliding-adjacent-sum GRID std/vector/3d/moore-neighborhood y x N +))
-    (cond 
-        (and (= cell 1) (or (< score 2) (> score 3))) 0
-        (and (= cell 1) (or (= score 2) (= score 3))) 1
-        (and (= cell 0) (= score 3)) 1
-        0))))))))))
-(gof GRID)`;
-const render = `
-(let render (lambda GRID 
-    (do (|> GRID 
-        (std/vector/map (lambda y 
-            (std/vector/map y (lambda x (cond 
-                                    (= x 0) "." 
-                                    (= x 1) "*"
-                                    "")))))
-                (std/convert/vector/3d->string std/char/new-line std/char/space)))))
-                (render GRID)`;
-let grid = `(let GRID ${execBiteCode(compileBiteCode(init))})`;
-setInterval(() => {
-  console.clear();
-  console.log("\n");
-  console.log(
-    convertToString(
-      parse(
-        execBiteCode(
-          concatenateBiteCode(compileBiteCode(grid), compileBiteCode(render))
-        )
-      )
-    )
-  );
-  grid = `(let GRID ${execBiteCode(
-    concatenateBiteCode(compileBiteCode(grid), compileBiteCode(gof))
-  )})`;
-  console.log("\n");
-}, 250);
-```
-
-This will give an infinite [Glider](<https://en.wikipedia.org/wiki/Glider_(Conway%27s_Game_of_Life)>)
-
-```bash
-. . . . . . . . .
-. . . * . . . . .
-. . . . * . . . .
-. . * * * . . . .
-. . . . . . . . .
-. . . . . . . . .
-. . . . . . . . .
-. . . . . . . . .
-. . . . . . . . .
-```
-
-_Note: that this is an extreme overkill example. The language is not designed to be used like that. It's just to demonstrate something animated and interesting._
 
 **Disclaimer!**
 

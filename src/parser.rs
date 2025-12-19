@@ -1429,7 +1429,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
 }
 
 // Main entry: recursively transform expressions, but when a let with a lambda bound to a name
-// is encountered, run the "lambda-to-loop" transform on it if it's tail-recursive.
+// is encountered, run the lambda-to-loop transform on it if it's tail-recursive.
 fn desugar_tail_recursion(expr: Expression) -> Expression {
     match expr {
         Expression::Apply(mut items) if !items.is_empty() => {
@@ -1661,7 +1661,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
     Expression::Apply(lambda_vec)
 }
 // TODO: contains_tail_call_to Instead mark definition with ~ (let~ rec (lambda ...))
-/// Detect whether there is a *tail call* to fn_name inside expr(tail position inside expression).
+/// Detect whether there is a tail call to fn_name inside expr(tail position inside expression).
 /// We conservatively check is there any call to fn_name that appears in tail position the final
 /// expression of the body or the final branch of conditionals
 fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
