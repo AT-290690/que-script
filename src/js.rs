@@ -117,8 +117,8 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             format!("(()=>{{ {} }})()", stmts.join(" "))
                         }
                     }
-                    // let: (let name value) -> `var name = <value>;` as statement. Here we return an expression that
-                    // is valid when used in top-level statement context; caller may wrap it as statement.
+                    // let: (let name value) -> var name = value; as statement. Here we return an expression that
+                    // is valid when used in top-level statement context - caller may wrap it as statement.
                     "let" | "let*" | "let~" => {
                         if items.len() != 3 {
                             panic!("let requires exactly 2 arguments: name and value");
@@ -130,7 +130,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         let val = compile_expr_to_js(&items[2]);
                         format!("var {} = ({})", name, val)
                     }
-                    // vector literal - variadic: (vector a b c) -> `[a, b, c]`
+                    // vector literal - variadic: (vector a b c) -> [a, b, c]
                     "vector" | "string" | "tuple" => {
                         let elems: Vec<String> =
                             items[1..].iter().map(|e| compile_expr_to_js(e)).collect();
@@ -269,7 +269,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         let end_js = compile_expr_to_js(&items[2]);
                         let func_js = compile_expr_to_js(&items[3]);
 
-                        // we assume func_js looks like `(i)=>{ ... }`
+                        // we assume func_js looks like (i)=>{ ... }
                         // so we apply it inside the loop.
                         format!(
                             "(()=>{{for(let __i={}; __i<{}; ++__i){{({})(__i);}}return 0}})()",
@@ -303,7 +303,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                     }
                     "as" | "char" | "Int->Float" => format!("{}", compile_expr_to_js(&items[1]),),
                     "Float->Int" => format!("({} | 0)", compile_expr_to_js(&items[1]),),
-                    // call a named function/operator: default: compile args then `fn(args...)`
+                    // call a named function/operator by default: compile args then fn(args...)
                     _ => {
                         // compile operator expression (could be a word or more complex expr)
                         let func_js = compile_expr_to_js(&items[0]);
@@ -313,7 +313,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                     }
                 },
 
-                // If head is not a Word, compile it and call it: (<expr> arg1 arg2)
+                // If head is not a Word, compile it and call it: (expr arg1 arg2)
                 other_head => {
                     let func_js = compile_expr_to_js(other_head);
                     let args_js: Vec<String> =
@@ -326,11 +326,10 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
 }
 
 /// Compile a sequence of top-level expressions into a JS program string.
-///
 /// The returned string is an IIFE that runs the program and returns the value of the last expression.
-/// We assume the top-level `Expression` is typically a `Apply` with `do` or many forms; to be safe we accept a single Expression.
+/// We assume the top-level Expression is typically a apply with do or many forms; to be safe we accept a single Expression.
 pub fn compile_program_to_js(top: &Expression) -> String {
-    // small helper that turns a `do` style (Apply with head "do") into sequence of statements
+    // small helper that turns a do style (Apply with head "do") into sequence of statements
     fn top_level_to_statements(expr: &Expression) -> Vec<String> {
         match expr {
             Expression::Apply(items) if !items.is_empty() => {
@@ -341,11 +340,11 @@ pub fn compile_program_to_js(top: &Expression) -> String {
                         for (i, e) in items[1..].iter().enumerate() {
                             let js = compile_expr_to_js(e);
                             if i == items.len() - 2 {
-                                // last expr -> produce `return <expr>;`
+                                // last expr -> produce return expr;
                                 stmts.push(format!("return {};", js));
                             } else {
-                                // other exprs -> expression statement (if it's a let it already emits var; otherwise add `;`)
-                                // If `js` starts with "var " we keep it as a statement, otherwise force a semicolon.
+                                // other exprs -> expression statement (if it's a let it already emits var; otherwise add ;)
+                                // If js starts with "var " we keep it as a statement, otherwise force a semicolon.
                                 if js.starts_with("var ") {
                                     stmts.push(format!("{};", js));
                                 } else {
@@ -358,7 +357,7 @@ pub fn compile_program_to_js(top: &Expression) -> String {
                         panic!("Unreachable!")
                     }
                 } else {
-                    // not a `do` block: compile as single `return expr;`
+                    // not a do block: compile as single return expr;
                     vec![format!("return {};", compile_expr_to_js(expr))]
                 }
             }

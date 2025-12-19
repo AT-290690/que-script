@@ -1577,9 +1577,7 @@ fn transform_named_lambda_to_loop(fn_name: String, lambda_expr: Expression) -> E
         let temp = Expression::Apply(vec![
             Expression::Word("let".to_string()),
             Expression::Word("_new_".to_string() + p),
-            Expression::Apply(vec![
-                Expression::Word("vector".to_string()),
-            ]),
+            Expression::Apply(vec![Expression::Word("vector".to_string())]),
         ]);
         param_inits.push(init);
         param_inits.push(temp);
@@ -1707,7 +1705,7 @@ fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
 // Detect whether a function body contains ANY recursive call to fn_name,
 // not just in tail position.
 // This performs a full traversal of the expression tree and returns true
-// if there is any `(fn_name ...)` application anywhere within expr.
+// if there is any (fn_name ...) application anywhere within expr.
 fn contains_recursive_call(expr: &Expression, fn_name: &str) -> bool {
     match expr {
         Expression::Word(w) => {

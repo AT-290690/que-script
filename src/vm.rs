@@ -1794,7 +1794,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         };
                         compile(&exprs[2], code)?; // evaluate value
                         code.push(Instruction::StoreVar(var_name));
-                        // push sentinel Unit (here just Int 0) so `do` sees something
+                        // push sentinel Unit (here just Int 0) so do sees something
                         code.push(Instruction::PushInt(0));
                         Ok(())
                     }
@@ -1822,10 +1822,10 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         Ok(())
                     }
                     "as" => {
-                        // Just ensure syntax correctness — (as <expr> <type>)
+                        // Just ensure syntax correctness — (as expr type)
                         if exprs.len() != 3 {
                             return Err(
-                                "Error! `as` expects two arguments: (as expr Type)".to_string()
+                                "Error! as expects two arguments: (as expr Type)".to_string()
                             );
                         }
 
@@ -2042,7 +2042,7 @@ impl<'a> P<'a> {
             }
             Ok(())
         } else {
-            Err(format!("Error! Expected `{}` at pos {}", expected, self.i))
+            Err(format!("Error! Expected {} at pos {}", expected, self.i))
         }
     }
 
@@ -2107,14 +2107,14 @@ impl<'a> P<'a> {
         let slice = &self.s[start..self.i];
         slice
             .parse::<i32>()
-            .map_err(|e| format!("Invalid number `{}`: {}", slice, e))
+            .map_err(|e| format!("Invalid number {}: {}", slice, e))
     }
 
     fn parse_bool(&mut self) -> Result<bool, String> {
         self.skip_ws();
         let name = self.parse_ident();
         name.parse::<bool>()
-            .map_err(|e| format!("Error Invalid boolean `{}`: {}", name, e))
+            .map_err(|e| format!("Error Invalid boolean {}: {}", name, e))
     }
 
     fn parse_ident(&mut self) -> String {
@@ -2158,7 +2158,7 @@ impl<'a> P<'a> {
                 break;
             } else {
                 return Err(format!(
-                    "Error! Expected `,` or `]` after item at pos {}",
+                    "Error! Expected , or ] after item at pos {}",
                     self.i
                 ));
             }
@@ -2187,7 +2187,7 @@ impl<'a> P<'a> {
                 break;
             } else {
                 return Err(format!(
-                    "Expected `,` or `]` in vec![strings] at pos {}",
+                    "Expected , or ] in vec![strings] at pos {}",
                     self.i
                 ));
             }
@@ -2352,7 +2352,7 @@ impl<'a> P<'a> {
             "SubF" => Ok(Instruction::SubF),
             "Mod" => Ok(Instruction::Mod),
             "ModF" => Ok(Instruction::ModF),
-            // also catch `LoadVar("...")` handled above
+            // also catch LoadVar("...") handled above
             "Pop," => Ok(Instruction::Pop), // tolerance for trailing commas
             "Lt" => Ok(Instruction::Lt),
             "Gt" => Ok(Instruction::Gt),
@@ -2370,7 +2370,7 @@ impl<'a> P<'a> {
             "IntToFloat" => Ok(Instruction::IntToFloat),
             "FloatToInt" => Ok(Instruction::FloatToInt),
 
-            other => Err(format!("Error! Unknown bare instruction `{}`", other)),
+            other => Err(format!("Error! Unknown bare instruction {}", other)),
         }
     }
 }

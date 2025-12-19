@@ -167,7 +167,7 @@ fn deepest_type(t: &Type) -> &Type {
 pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err("Error! `as` expects exactly two arguments: (as expr Type)".to_string());
+        return Err("Error! as expects exactly two arguments: (as expr Type)".to_string());
     }
 
     // Infer both sides
@@ -179,7 +179,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         (Type::Tuple(expr_elems), Type::Tuple(hint_elems)) => {
             if expr_elems.len() != hint_elems.len() {
                 return Err(format!(
-                    "Error! Tuple length mismatch in `as`: {} vs {}\n(as {})",
+                    "Error! Tuple length mismatch in as: {} vs {}\n(as {})",
                     expr_elems.len(),
                     hint_elems.len(),
                     args.iter()
@@ -224,7 +224,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     // If expr_type is a type variable, allow up to (≤) right-side arity
     if is_expr_var && expr_arity > hint_arity {
         return Err(format!(
-            "Error! Type variable in `as` cannot represent deeper nesting: {} vs {}",
+            "Error! Type variable in as cannot represent deeper nesting: {} vs {}",
             expr_type, type_hint
         ));
     }
@@ -232,7 +232,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     // Check arity mismatch for lists/functions
     if !is_expr_var && expr_arity != hint_arity {
         return Err(format!(
-            "Error! Type arity mismatch in `as`: left has arity {}, right has arity {} ({} vs {})\n(as {})",
+            "Error! Type arity mismatch in as: left has arity {}, right has arity {} ({} vs {})\n(as {})",
             expr_arity,
             hint_arity,
             expr_type,
@@ -261,7 +261,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
             | (_, Type::Var(_)) => (),
             _ => {
                 return Err(format!(
-                    "Error! Invalid array cast in `as`: cannot cast {} to {}\n(as {})",
+                    "Error! Invalid array cast in as: cannot cast {} to {}\n(as {})",
                     expr_type,
                     type_hint,
                     args.iter()
@@ -855,8 +855,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             Type::Var(tv) => {
                 let ret_ty = ctx.fresh_var();
                 // represent zero-arg function as Function(Box::new(UnitType), Box::new(ret_ty))
-                // if you have an explicit unit type:
-                let unit = Type::Unit; // or however you represent `()` in your type system
+                let unit = Type::Unit; // represent by ()
                 let func_ty = Type::Function(Box::new(unit), Box::new(ret_ty.clone()));
                 ctx.add_constraint(
                     Type::Var(tv.clone()),
