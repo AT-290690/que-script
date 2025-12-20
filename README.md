@@ -23,7 +23,7 @@
 
 Try it online at [playground](https://at-290690.github.io/rust-lisp/playground)
 
-Official Website [websited](https://at-290690.github.io/rust-lisp/)
+Check out official website at [website](https://at-290690.github.io/rust-lisp/)
 
 or clone this project and write code in **main.lisp**
 
