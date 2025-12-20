@@ -1839,20 +1839,20 @@ q)))
 
 (let std/vector/permutations (lambda arr (do 
   (let* permute (lambda arr (if (<= (length arr) 1)
-      [arr]
-      (do
-        (let out [])
-        (variable i 0)
-        (loop (< (get i) (length arr)) (lambda (do
-            (let x (get arr (get i)))
-            (let rest (std/vector/filter arr (lambda y (!= y x))))
-            (let perms (permute rest))
-            (variable j 0)
-            (loop (< (get j) (length perms)) (lambda (do
-                (set! out (length out) (std/vector/cons! [x] (get perms (get j))))
-                (++ j))))
-            (++ i))))
-        out))))
+        [arr]
+        (do
+          (let out [])
+          (variable i 0)
+          (loop (< (get i) (length arr)) (lambda (do
+              (let rest (std/vector/filter/i arr (lambda y j (not (= j (get i))))))
+              (let perms (permute rest))
+              (let x (get arr (get i)))
+              (variable j 0)
+              (loop (< (get j) (length perms)) (lambda (do
+                  (set! out (length out) (std/vector/cons! [x] (get perms (get j))))
+                  (++ j))))
+              (++ i))))
+          out))))
     (permute arr))))
 
 ; Start of more fake keywords

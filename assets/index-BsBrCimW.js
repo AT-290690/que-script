@@ -528,7 +528,7 @@ Share; 🔗; Opens a modal for creating a link; To share your program and settin
     else;Expression evaluated if condition is false.`),example:"BQSwZgBALgTgrgUwgRggBgJQQNwQEoJRwwB2AzihAFBXAA2hEAhgEZkD2dcUS9TAtiwAmTCCSoQIoSMAA8Y9BgmSVwALRilKlSQx7arDlx4Q1AViy4CRUmQBcEM1SA%3D%3D"},{text:"It can be used with one or two branches",table:ue(`Form;Description;Type
   (if condition then);Evaluates condition. If true, returns then, otherwise returns 0 Sentinel; Int
   (if condition then! nil);Evaluates condition. If true, do somethig, otherwise returns 0 Sentinel; Unit
-  (if condition then else);Evaluates condition. If true, returns then, otherwise returns else; T`),example:"BQGwpgLgBAHgzlA2gXQJQChgEsBmUIBOArmFMACYD2ZADkXABYCEsCAjAAypQB2WIqbgG4oAFQCeNUgFU%2BEADRQASpCIEeCDlADKYHhCw8wIdPCgiVENRqSdkQA%3D"}]},{title:"Loops",subsections:[{text:"The loop construct in Que Script provides iteration over numeric ranges or conditional repetition. It comes in two forms:",paragraphs:["- For-loop style — (loop start end body)","- While-loop style — (loop condition body)","Both return the Unit type","Loop automatically handles iteration limits safely (up to 5,000,000 total iterations)."],table:ue(`Form;Purpose;Example;Notes
+  (if condition then else);Evaluates condition. If true, returns then, otherwise returns else; T`),example:"BQGwpgLgBAHgzlA2gXQJQChgEsBmUIBOArmFMACYD2ZADkXABYCEsCAjAAypQB2WIqbgG4oAFQCeNUgFU%2BEADRQASpCIEeCDlADKYHhCw8wIdPCgiVENRqSdkQA%3D"}]},{title:"Loops",subsections:[{text:"The loop construct in Que Script provides iteration over numeric ranges or conditional repetition. It comes in two forms:",paragraphs:["- For-loop style — (loop start end body)","- While-loop style — (loop condition body)","Both return the Unit type"],table:ue(`Form;Purpose;Example;Notes
     (loop start end body);Iterates over numeric range;(loop 0 5 (lambda i (print i)));Like a traditional for loop
     (loop condition body);Repeats while condition is true;(loop (< n 5) (lambda (do ...)));Like a while loop`),example:"BQGwpgLgBA9grtA2gXQJQCgDcUBmMBOUIMMADuqCaVAAxQCsUoAhgLYBGAJs1AJZOk4AZwAWAQlgI%2BqGVigB3Eb3BEqFXgDsIYAOZhCAY3hb9tDJTJMAPEz3QjcE%2FlQMMUJiDZcewTjHTu7sCCohLw0MB2UA5OsoFMANQJ0cbazjIY4VDYAEqQcPgaQlCIdACMUABMUADMUAAstFAV1XX1yOhAA%3D"}]},{title:"Breaking out of a loop",subsections:[{text:"In short - there is no way to break out of a loop",paragraphs:["Some languages or loop constructs lack a built-in break. Use a placement flag to emulate breaking: set the flag when you want to stop further work for the current iteration and ensure subsequent loop iterations skip actions based on that flag.","Pattern: initialize a boolean (e.g., placed = false) before scanning; inside the loop, when the condition to stop is met set placed = true; in later iterations guard actions with (not placed). After the loop, check the flag to decide post-loop behavior (e.g., push a new segment only if placed is false)."],table:ue(`Form;Purpose;Example;Notes
             (loop start end body);Iterates over numeric range;(loop 0 5 (lambda i (do ...)));Like a traditional for loop
@@ -1742,20 +1742,20 @@ q)))`},{name:"std/vector/deque/first",source:"(let std/vector/deque/first (lambd
         (tail-call/vector/adjacent-difference 1 xs)
         nil)))))`},{name:"std/convert/vector/3d->string",source:"(let std/convert/vector/3d->string (lambda xs a b (std/convert/vector->string (std/vector/map xs (lambda x (std/convert/vector->string x b))) a)))"},{name:"std/vector/int/extreme",source:"(let std/vector/int/extreme (lambda xs { (std/vector/int/minimum xs) (std/vector/int/maximum xs) }))"},{name:"std/tuple/map",source:"(let std/tuple/map (lambda { a b } fn (fn a b)))"},{name:"std/tuple/map/fst",source:"(let std/tuple/map/fst (lambda { a } fn (fn a)))"},{name:"std/tuple/map/snd",source:"(let std/tuple/map/snd (lambda { . b } fn (fn b)))"},{name:"get*",source:"(let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))"},{name:"std/vector/get*",source:"(let std/vector/get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))"},{name:"std/vector/2d/get*",source:"(let std/vector/get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))"},{name:"std/vector/3d/get*",source:"(let std/vector/3d/get* (lambda xs i j some none (if (std/vector/3d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))"},{name:"std/vector/hash/table/get*",source:"(let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))"},{name:"std/vector/enumerate",source:"(let std/vector/enumerate (lambda xs (std/vector/tuple/zip { (std/vector/int/range 0 (- (length xs) 1)) xs })))"},{name:"std/vector/permutations",source:`(let std/vector/permutations (lambda arr (do 
   (let* permute (lambda arr (if (<= (length arr) 1)
-      [arr]
-      (do
-        (let out [])
-        (variable i 0)
-        (loop (< (get i) (length arr)) (lambda (do
-            (let x (get arr (get i)))
-            (let rest (std/vector/filter arr (lambda y (!= y x))))
-            (let perms (permute rest))
-            (variable j 0)
-            (loop (< (get j) (length perms)) (lambda (do
-                (set! out (length out) (std/vector/cons! [x] (get perms (get j))))
-                (++ j))))
-            (++ i))))
-        out))))
+        [arr]
+        (do
+          (let out [])
+          (variable i 0)
+          (loop (< (get i) (length arr)) (lambda (do
+              (let rest (std/vector/filter/i arr (lambda y j (not (= j (get i))))))
+              (let perms (permute rest))
+              (let x (get arr (get i)))
+              (variable j 0)
+              (loop (< (get j) (length perms)) (lambda (do
+                  (set! out (length out) (std/vector/cons! [x] (get perms (get j))))
+                  (++ j))))
+              (++ i))))
+          out))))
     (permute arr))))`},{name:"/flat-map",source:"(let std/vector/flat-map (lambda xs (std/vector/map (std/vector/flat-one xs))))"},{name:"/reduce",source:`(let std/vector/reduce (lambda xs fn initial (do
      (let out [ initial ])
      (let process (lambda i (std/vector/set! out 0 (fn (get out 0) (get xs i)))))
@@ -2157,20 +2157,20 @@ q)))`},{name:"std/vector/deque/first",source:"(let std/vector/deque/first (lambd
         xs 
         (|> xs (std/vector/map (lambda x [x])) (std/convert/vector->set) (std/convert/set->vector) (std/vector/map (lambda x (get x 0)))))))`},{name:"permutation",source:`(let std/vector/permutations (lambda arr (do 
   (let* permute (lambda arr (if (<= (length arr) 1)
-      [arr]
-      (do
-        (let out [])
-        (variable i 0)
-        (loop (< (get i) (length arr)) (lambda (do
-            (let x (get arr (get i)))
-            (let rest (std/vector/filter arr (lambda y (!= y x))))
-            (let perms (permute rest))
-            (variable j 0)
-            (loop (< (get j) (length perms)) (lambda (do
-                (set! out (length out) (std/vector/cons! [x] (get perms (get j))))
-                (++ j))))
-            (++ i))))
-        out))))
+        [arr]
+        (do
+          (let out [])
+          (variable i 0)
+          (loop (< (get i) (length arr)) (lambda (do
+              (let rest (std/vector/filter/i arr (lambda y j (not (= j (get i))))))
+              (let perms (permute rest))
+              (let x (get arr (get i)))
+              (variable j 0)
+              (loop (< (get j) (length perms)) (lambda (do
+                  (set! out (length out) (std/vector/cons! [x] (get perms (get j))))
+                  (++ j))))
+              (++ i))))
+          out))))
     (permute arr))))`},{name:"Vector/equal?",source:`(let std/vector/equal? (lambda a b (do
   (if (< (length a) (length b)) false
   (if (> (length a) (length b)) false

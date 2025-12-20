@@ -133,14 +133,6 @@ On each tail-call, the accumulator is updated before the next iteration.
 This guarantees that type inference can resolve the result type statically.
 Users are encouraged to design tail-recursive functions so that the accumulator is the last argument.
 
-### Loop Limit
-
-Loops are capped at **5 000 000** (five million) total iterations for the entire program.
-
-To ensure programs remain safe when running locally or on shared servers, loops must be "safe" and difficult to hang or block the main thread. This limit also applies to tail-call optimized recursion.
-
-This limitation does **NOT** guarantee a program won't run "forever." Its purpose is to reduce accidental thread blocks, but it cannot eliminate them entirely. See the [Halting Problem](https://en.wikipedia.org/wiki/Halting_problem) for more details.
-
 ### Solving Puzzles
 
 Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner:

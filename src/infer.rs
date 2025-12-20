@@ -628,7 +628,6 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     let value_expr = &args[1];
 
     if let Expression::Word(var_name) = var_expr {
-        // Handle recursive (~foo)
         let name = var_name.to_string();
 
         // assign a fresh monotype placeholder
