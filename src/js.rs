@@ -54,6 +54,15 @@ fn ident(name: &str, idx: usize) -> String {
             let mut s = String::new();
             for c in name.chars() {
                 match c {
+                    // TODO: figure out a better solution for this 
+                    // We are passing idx so we can know the position of the parameter (if a paramater of a function)
+                    // This is only used for the case where we omit paramaters with "." that becomes "_" in JS
+                    // However JS doesn't like having more than one "_" with the same name, causing an error:
+                    // SyntaxError: Duplicate parameter name not allowed in this context
+                    //  _curry((_, _) => 0)
+                    //             ^
+                    // This fixes this error by adding idx as suffix to "_"
+                    // _curry((_0, _1) => 0)
                     '.' => {
                         s.push('_');
                         for c in idx.to_string().chars() {
