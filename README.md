@@ -133,42 +133,13 @@ On each tail-call, the accumulator is updated before the next iteration.
 This guarantees that type inference can resolve the result type statically.
 Users are encouraged to design tail-recursive functions so that the accumulator is the last argument.
 
-**Cast**
-
-An empty vector has a polymorphic type (it can contain anything):
-
-```lisp
-(let xs [])
-xs
-; [t7]
-; []
-```
-
-To enforce a type we can use **as**:
-
-```lisp
-(let xs (as [] [Int]))
-xs
-; [Int]
-; []
-```
-
-Now the vector can only have **Ints** and will error out if anything else is pushed to it.
-
-We can also cast **Int** to **Char** and **Char** to **Int**:
-
-```lisp
-(let x (as 64 Char))
-x
-; Char
-; 64
-```
-
 ### Loop Limit
 
-Loops are capped at 5 000 000 (five million) total iterations for the entire program.
+Loops are capped at **5 000 000** (five million) total iterations for the entire program.
 
-To ensure programs remain safe when running locally or on shared servers, loops must be "safe" and unable to hang or block the main thread. This limit also applies to tail-call optimized recursion.
+To ensure programs remain safe when running locally or on shared servers, loops must be "safe" and difficult to hang or block the main thread. This limit also applies to tail-call optimized recursion.
+
+This limitation does **NOT** guarantee a program won't run "forever." Its purpose is to reduce accidental thread blocks, but it cannot eliminate them entirely. See the [Halting Problem](https://en.wikipedia.org/wiki/Halting_problem) for more details.
 
 ### Solving Puzzles
 
@@ -323,5 +294,7 @@ console.log(execBiteCode(compileBiteCode(program)));
 **Disclaimer!**
 
 _This project is a work in progress and might contain bugs! Do NOT use it in production!_
+
+_APIs and behavior may change. New releases can break existing code._
 
 ![logo](./footer.svg)

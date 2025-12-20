@@ -649,7 +649,9 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         let scheme = if is_nonexpansive(value_expr) {
             generalize(&ctx.env, solved_type)
         } else {
-            return Err("Error! Only recursive functions allowed".to_string());
+            return Err(
+                "Error! Only recursive functions allowed for let* optimization".to_string(),
+            );
         };
 
         Ok(Type::Unit)
@@ -763,7 +765,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             if args.is_empty() {
                 return Ok(Type::List(Box::new(Type::Char))); // empty string
             }
-            // I will not check if elements in string are the same
+            // We will not check if elements in string are the same
             // They should be because string is not really used by the user
             // but by the parser when transforming double quotes
             // for arg in args {
@@ -964,53 +966,42 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         fresh_id += 1;
         Type::Var(TypeVar { id })
     };
-
-    // set! : [α] -> Int -> α -> Int
     {
         let a: Type = fresh_var();
         env.insert(
             "set!".to_string(),
             TypeScheme::new(
-                vec![a.var_id().unwrap()], // quantify α
+                vec![a.var_id().unwrap()],
                 Type::Function(
-                    Box::new(Type::List(Box::new(a.clone()))), // [α]
+                    Box::new(Type::List(Box::new(a.clone()))),
                     Box::new(Type::Function(
-                        Box::new(Type::Int), // index
-                        Box::new(Type::Function(
-                            Box::new(a),
-                            Box::new(Type::Unit), // result
-                        )),
+                        Box::new(Type::Int),
+                        Box::new(Type::Function(Box::new(a), Box::new(Type::Unit))),
                     )),
                 ),
             ),
         );
     }
-    // pop! : [α] -> Int
     {
         let a: Type = fresh_var();
         env.insert(
             "pop!".to_string(),
             TypeScheme::new(
-                vec![a.var_id().unwrap()], // quantify α
-                Type::Function(
-                    Box::new(Type::List(Box::new(a))), // [α]
-                    Box::new(Type::Unit),
-                ),
+                vec![a.var_id().unwrap()],
+                Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Unit)),
             ),
         );
     }
-    // length : [α] -> Int
     {
         let a = fresh_var();
         env.insert(
             "length".to_string(),
             TypeScheme::new(
-                vec![a.var_id().unwrap()], // quantify α
+                vec![a.var_id().unwrap()],
                 Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Int)),
             ),
         );
     }
-    // get : [α] -> Int -> α
     {
         let a: Type = fresh_var();
         env.insert(
@@ -1053,7 +1044,6 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             ),
         );
     }
-    // loop : Int -> Int -> (Int -> ε) -> Int
     {
         let e = fresh_var();
 
@@ -1062,24 +1052,18 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             TypeScheme::new(
                 vec![e.var_id().unwrap()],
                 Type::Function(
-                    Box::new(Type::Int), // start
+                    Box::new(Type::Int),
                     Box::new(Type::Function(
-                        Box::new(Type::Int), // end
+                        Box::new(Type::Int),
                         Box::new(Type::Function(
-                            Box::new(Type::Function(
-                                // function: Int -> ε
-                                Box::new(Type::Int),
-                                Box::new(e.clone()),
-                            )),
-                            Box::new(Type::Unit), // returns unit
+                            Box::new(Type::Function(Box::new(Type::Int), Box::new(e.clone()))),
+                            Box::new(Type::Unit),
                         )),
                     )),
                 ),
             ),
         );
     }
-
-    // loop : Bool -> ε -> Int
     {
         let e = fresh_var();
 
@@ -1088,17 +1072,12 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             TypeScheme::new(
                 vec![e.var_id().unwrap()],
                 Type::Function(
-                    Box::new(Type::Bool), // predicate
-                    Box::new(Type::Function(
-                        Box::new(e.clone()),
-                        Box::new(Type::Int), // returns int
-                    )),
+                    Box::new(Type::Bool),
+                    Box::new(Type::Function(Box::new(e.clone()), Box::new(Type::Int))),
                 ),
             ),
         );
     }
-
-    // Arithmetic operations
     env.insert(
         "+".to_string(),
         TypeScheme::monotype(Type::Function(
@@ -1424,7 +1403,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
     );
 
-    (env, fresh_id) // also return next fresh ID
+    (env, fresh_id) // return env with built-ins and also return next fresh ID
 }
 
 pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
