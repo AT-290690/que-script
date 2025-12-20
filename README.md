@@ -45,7 +45,7 @@ wasm-pack build --target web --out-dir pkg/web
 
 - No type annotations required: the compiler figures everything out.
 - Supports **polymorphism** and **higher-order functions**.
-- Only 6 types - **functions**, **booleans**, **integers**, **floats**, **characters** and **vectors**.
+- Only 7 types - **functions**, **booleans**, **integers**, **floats**, **characters**, **vectors** and **tuples**.
 - Guarantees **soundness**: if your program compiles, it won’t have type errors at runtime.
 - Example:
 
