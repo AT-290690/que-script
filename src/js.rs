@@ -1,8 +1,7 @@
 use crate::parser::Expression;
-fn ident(name: &str) -> String {
+fn ident(name: &str, idx: usize) -> String {
     // make a JS-safe identifier from Lisp name:
     // simple rules: replace ":" "*" "?" "!" "-" "." with underscores, remove other unsafe chars
-
     match name {
         "+" | "+#" | "+." => "(a,b)=>a+b".to_string(),
         "-" | "-#" | "-." => "(a,b)=>a-b".to_string(),
@@ -55,8 +54,14 @@ fn ident(name: &str) -> String {
             let mut s = String::new();
             for c in name.chars() {
                 match c {
+                    '.' => {
+                        s.push('_');
+                        for c in idx.to_string().chars() {
+                            s.push(c)
+                        }
+                    }
                     'a'..='z' | 'A'..='Z' | '0'..='9' => s.push(c),
-                    ':' | '-' | '.' | '*' | '/' => s.push('_'),
+                    ':' | '-' | '*' | '/' => s.push('_'),
                     '?' => {
                         s.push('_');
                         s.push('p')
@@ -91,7 +96,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
     match expr {
         Expression::Int(n) => format!("{}", n),
         Expression::Float(n) => format!("{}", n),
-        Expression::Word(w) => ident(w),
+        Expression::Word(w) => ident(w, 0),
         Expression::Apply(items) => {
             // head must be an expression (usually Word)
             match &items[0] {
@@ -124,7 +129,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             panic!("let requires exactly 2 arguments: name and value");
                         }
                         let name = match &items[1] {
-                            Expression::Word(n) => ident(n),
+                            Expression::Word(n) => ident(n, 0),
                             _ => panic!("let: first arg must be a Word"),
                         };
                         let val = compile_expr_to_js(&items[2]);
@@ -284,8 +289,9 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         let params_exprs = &items[1..items.len() - 1];
                         let params: Vec<String> = params_exprs
                             .iter()
-                            .map(|p| match p {
-                                Expression::Word(n) => ident(n),
+                            .enumerate()
+                            .map(|(i, p)| match p {
+                                Expression::Word(n) => ident(n, i),
                                 _ => panic!("lambda parameters must be words"),
                             })
                             .collect();
