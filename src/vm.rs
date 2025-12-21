@@ -378,9 +378,12 @@ impl Instruction {
     }
 }
 
+const MAXIMUM_CALL_STACK_DEPTH_LIMIT: usize = 200;
+
 pub struct VM {
     stack: Vec<BiteCodeEvaluated>,
     locals: Rc<RefCell<BiteCodeEnv>>, // or Rc<RefCell<_>> if needed
+    call_depth: usize,
 }
 
 impl VM {
@@ -388,10 +391,15 @@ impl VM {
         VM {
             stack: Vec::with_capacity(64), // Pre-allocate stack space
             locals: Rc::new(RefCell::new(BiteCodeEnv::new())),
+            call_depth: 0,
         }
     }
 
     pub fn run(&mut self, code: &[Instruction]) -> Result<(), String> {
+        if self.call_depth > MAXIMUM_CALL_STACK_DEPTH_LIMIT {
+            return Err("Error! Maximum stack depth limit exceeded".to_string());
+        }
+        self.call_depth += 1;
         for instr in code {
             match instr {
                 Instruction::GetArray => {
@@ -854,7 +862,6 @@ impl VM {
                         .collect();
 
                     let mut current_func = func;
-
                     loop {
                         match current_func {
                             BiteCodeEvaluated::Function(params, body, env) => {
@@ -923,6 +930,7 @@ impl VM {
                     let mut start_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
+                        call_depth: 0,
                     };
                     start_vm.run(start)?;
                     let start_val = start_vm
@@ -934,6 +942,7 @@ impl VM {
                     let mut end_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
+                        call_depth: 0,
                     };
                     end_vm.run(end)?;
                     let end_val = end_vm
@@ -953,6 +962,7 @@ impl VM {
                     let mut func_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
+                        call_depth: 0,
                     };
                     func_vm.run(func)?;
                     let func_val = func_vm
@@ -973,6 +983,7 @@ impl VM {
                     let mut inner_vm = VM {
                         stack: Vec::new(),
                         locals: captured_env.clone(),
+                        call_depth: 0,
                     };
 
                     for i in start_int..end_int {
@@ -992,6 +1003,7 @@ impl VM {
                     let mut func_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
+                        call_depth: 0,
                     };
                     func_vm.run(func)?;
                     let func_val = func_vm
@@ -1015,11 +1027,13 @@ impl VM {
                     let mut cond_vm = VM {
                         stack: Vec::new(),
                         locals: self.locals.clone(),
+                        call_depth: 0,
                     };
 
                     let mut inner_vm = VM {
                         stack: Vec::new(),
                         locals: captured_env.clone(),
+                        call_depth: 0,
                     };
                     let mut loop_count = 0;
 
@@ -1049,6 +1063,7 @@ impl VM {
                 }
             }
         }
+        self.call_depth -= 1;
         Ok(())
     }
 
