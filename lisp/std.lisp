@@ -400,7 +400,7 @@
            (loop (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (std/vector/set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
-(let std/vector/cartesian-product (lambda a b (std/vector/reduce a (lambda p x (std/vector/cons p (std/vector/map b (lambda y [ x y ])))) [])))
+(let std/vector/cartesian-product (lambda a b (std/vector/reduce a (lambda p x (std/vector/cons p (std/vector/map b (lambda y { x y })))) [])))
 
 (let std/int/gcd (lambda a b (do
     (integer A a)
@@ -1432,6 +1432,25 @@ q)))
    (std/vector/3d/for/i matrix (lambda cell y x (if (fn? cell) (do (std/vector/push! coords [ y x ]) nil)))) 
     coords)))
 
+(let std/vector/3d/rotate (lambda matrix (do 
+    (let H (length matrix))
+    (let W (length (get matrix 0)))
+    (let out [])
+    (loop 0 W (lambda i (do
+        (std/vector/push! out [])
+        (loop 0 H (lambda j 
+            (std/vector/push! (std/vector/at out -1) (get matrix j i)))))))
+    out)))
+
+(let std/vector/reduce/until (lambda xs cb untill? initial (do
+                  (let~ tail-call/reduce/until (lambda i out (unless (std/vector/in-bounds? xs i) out (do 
+                        (let next (cb out (get xs i)))
+                        (cond 
+                            (untill? next) next 
+                            (> (length xs) i) (tail-call/reduce/until (+ i 1) next)
+                            out)))))
+                      (tail-call/reduce/until 0 initial))))
+
 (let std/vector/concat/with (lambda xs ch (std/vector/reduce/i xs (lambda a b i (if (and (> i 0) (< i (length xs))) (std/vector/cons (std/vector/cons a [ ch ]) b) (std/vector/cons a b))) [])))
 
 (let std/vector/char/lines (lambda xs (std/convert/string->vector xs std/char/new-line)))
@@ -1855,6 +1874,30 @@ q)))
           out))))
     (permute arr))))
 
+(let std/vector/combinations (lambda xs (do
+    (let out [])
+    (let* combinations (lambda arr size start temp
+        (if (= (length temp) size)
+            (set! out (length out) (std/vector/copy temp))
+            (loop start (length arr) (lambda i (do
+                    (set! temp (length temp) (get arr i))
+                    (combinations arr size (+ i 1) temp)
+                    (pop! temp)))))))
+   (loop 1 (+ 1 (length xs)) (lambda i (combinations xs i 0 [])))
+    out)))
+
+(let std/vector/combinations/n (lambda xs n (do
+    (let out [])
+    (let* combinations (lambda arr size start temp
+        (if (= (length temp) size)
+            (set! out (length out) (std/vector/copy temp))
+            (loop start (length arr) (lambda i (do
+                    (set! temp (length temp) (get arr i))
+                    (combinations arr size (+ i 1) temp)
+                    (pop! temp)))))))
+    (combinations xs n 0 [])
+    out)))
+
 ; Start of more fake keywords
 (let /flat-map std/vector/flat-map)
 (let /reduce std/vector/reduce)
@@ -1895,12 +1938,13 @@ q)))
 (let map/tuple std/tuple/map)
 (let map/fst std/tuple/map/fst)
 (let map/snd std/tuple/map/snd)
-(let subset std/vector/subset)
 (let flat-map std/vector/flat-map)
 (let map std/vector/map)
 (let for std/vector/for)
 (let filter std/vector/filter)
 (let reduce std/vector/reduce)
+(let reduce/until std/vector/reduce/until)
+(let transpose std/vector/3d/rotate)
 (let every? std/vector/every?)
 (let some? std/vector/some?)
 (let empty? std/vector/empty?)
@@ -2063,6 +2107,10 @@ q)))
 (let unique/char std/vector/char/unique)
 
 (let permutation std/vector/permutations)
+(let combination/pairs std/vector/unique-pairs)
+(let combination std/vector/combinations)
+(let combination/n std/vector/combinations/n)
+(let subset std/vector/subset)
 
 (let Vector/equal? std/vector/equal?)
 
