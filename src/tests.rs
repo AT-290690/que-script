@@ -1767,7 +1767,36 @@ UUUUD")
         (and (> m 0) (> n 0)) (ackermann (- m 1) (ackermann m (- n 1)))
         0)))
 
-(ackermann 2 3)"#, "9")
+(ackermann 2 3)"#, "9"),
+(r#"(let INPUT 
+"r, wr, b, g, bwu, rb, gb, br
+
+brwrr
+bggr
+gbbr
+rrbgbr
+ubwu
+bwurrg
+brgr
+bbrgwb")
+
+(let parse (lambda input (do
+    (let lines (|> input (String->Vector nl)))
+    {
+      (|> lines (first) (String->Vector ',') (map (lambda xs (filter xs (lambda x (not (=# x ' ')))))))
+      (|> lines (drop/first 2))
+    })))
+
+(let part1 (lambda { patterns-input towels } (do 
+  (let patterns (reduce patterns-input (lambda a b (do (Set/add! a b) a)) [[] [] [] [] [] [] [] [] []]))
+  (let* dp? (lambda str (loop/some-range? 1 (length str) (lambda i (do 
+    (let a (slice str 0 i))
+    (let b (slice str i (length str)))
+    (or (and (Set/has? patterns a) (Set/has? patterns b)) (and (dp? a) (dp? b)))
+  )))))
+  (count towels dp?))))
+
+[(part1 (parse INPUT))]"#, "[6]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

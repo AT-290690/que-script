@@ -1898,6 +1898,26 @@ q)))
     (combinations xs n 0 [])
     out)))
 
+(let std/int/div/option (lambda a b (if (= b 0) { false 0 } { true (/ a b) })))
+(let std/int/expt/option (lambda a b (if (< a 0) { false 0 } { true (std/int/expt a b) })))
+(let std/int/mod/option (lambda a b (if (= b 0) { false 0 } { true (mod a b) })))
+(let std/int/sqrt/option (lambda n (if (< n 0) { false 0 } { true (std/int/sqrt n)})) )
+
+(let std/float/div/option (lambda a b (if (=. b 0.) { false 0. } { true (/. a b) })))
+(let std/float/expt/option (lambda a b (if (<. a 0.) { false 0. } { true (std/float/expt a b) })))
+(let std/float/mod/option (lambda a b (if (=. b 0.) { false 0. } { true (mod. a b) })))
+(let std/float/sqrt/option (lambda n (if (<. n 0.) { false 0. } { true (std/float/sqrt n)})) )
+
+(let loop/some-range? (lambda start end predicate? (do 
+  (let~ tail-call/loop/some-range? (lambda i out
+                          (if (< i end)
+                                (if (predicate? i) 
+                                    true
+                                    (tail-call/loop/some-range? (+ i 1) out)) 
+                            out)))
+                          (tail-call/loop/some-range? start false))))
+
+(let loop/some-n? (lambda n predicate? (loop/some-range? 0 n predicate?)))
 ; Start of more fake keywords
 (let /flat-map std/vector/flat-map)
 (let /reduce std/vector/reduce)
