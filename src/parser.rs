@@ -1443,7 +1443,8 @@ fn desugar_tail_recursion(expr: Expression) -> Expression {
 
             // Reconstruct and check for (let name (lambda ...))
             if let Expression::Word(ref w) = head {
-                if (w == "let~" || w == "let") && rest.len() == 2 {
+                // make tail-call 100% explicit
+                if w == "let~" && rest.len() == 2 {
                     // rest[0] is var name, rest[1] is value
                     if let Expression::Word(var_name) = &rest[0] {
                         // If value is a lambda, consider converting
