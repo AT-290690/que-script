@@ -1808,7 +1808,21 @@ bbrgwb")
   )))))
   (count towels dp?))))
 
-[(part1 (parse INPUT))]"#, "[6]")
+[(part1 (parse INPUT))]"#, "[6]"),
+(
+r#"
+(let res (lambda x y 
+(std/vector/option/resolve [ 
+    (std/int/div/option (+ 1 2 x) y)
+    (std/true/option (* 4 5 x))
+    (std/int/sqrt/option x)
+  ] 
+  (lambda [ a b c . ] (+ a b c))
+  -1)
+))
+
+[(res 234 25) (res -1 25) (res 234 0)]
+"#, "[[true 4704] [false -1] [false -1]]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

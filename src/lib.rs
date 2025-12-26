@@ -147,3 +147,64 @@ pub fn cons(a: String, b: String) -> *const u8 {
 
     write_to_output(&merged)
 }
+#[wasm_bindgen]
+pub fn signatures(program: String) -> *const u8 {
+    let std_ast = baked::load_ast();
+    let mut names = Vec::new();
+    match std_ast {
+        parser::Expression::Apply(items) => {
+            match parser::merge_std_and_program(&program, items.to_vec()) {
+                Ok(ast) => {
+                    if let parser::Expression::Apply(inner) = &ast {
+                        for expr in inner[1..].to_vec() {
+                            if let parser::Expression::Apply(list) = expr {
+                                let a = &list[0];
+                                let b = &list[1];
+                                if let parser::Expression::Word(kw) = a {
+                                    if kw == "let" {
+                                        if let parser::Expression::Word(name) = b {
+                                            let E = inner
+                                                .to_vec()
+                                                .iter()
+                                                .chain(
+                                                    vec![parser::Expression::Word(
+                                                        name.to_string(),
+                                                    )]
+                                                    .iter(),
+                                                )
+                                                .into_iter()
+                                                .map(|e| e.clone())
+                                                .collect::<Vec<_>>();
+                                            match infer::infer_with_builtins(
+                                                &parser::Expression::Apply(E),
+                                            ) {
+                                                Ok(typ) => {
+                                                    // TODO: use a regex to remove the T+\d+ noise of the files
+                                                    names.push([name.clone(), format!("{}", typ)])
+                                                }
+                                                Err(e) => println!("{}", e),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let res = format!(
+                        "{:?}",
+                        names
+                            .iter()
+                            .map(|s| s.join(","))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    );
+
+                    write_to_output(&res)
+                }
+                Err(err) => write_to_output(&format!("2\n{:?}", err)),
+            }
+        }
+        err => write_to_output(&format!("2\n{:?}", err)),
+    }
+}

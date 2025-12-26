@@ -1908,6 +1908,12 @@ q)))
 (let std/float/mod/option (lambda a b (if (=. b 0.) { false 0. } { true (mod. a b) })))
 (let std/float/sqrt/option (lambda n (if (<. n 0.) { false 0. } { true (std/float/sqrt n)})) )
 
+(let std/true/option (lambda x { true x }))
+(let std/false/option (lambda x { false x }))
+
+(let std/vector/option/resolve (lambda xs fn df 
+  (if (std/vector/every? xs fst) { true (fn (std/vector/map xs snd)) } { false df })))
+
 (let loop/some-range? (lambda start end predicate? (do 
   (let~ tail-call/loop/some-range? (lambda i out
                           (if (< i end)
@@ -2165,6 +2171,10 @@ q)))
 
 (let take/last std/vector/take/last)
 (let drop/last std/vector/drop/last)
+
+(let true/option std/true/option)
+(let false/option std/false/option)
+(let resolve/option std/vector/option/resolve)
 
 (let Que/new std/vector/deque/new)
 (let Que/empty? std/vector/deque/empty?)

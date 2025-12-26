@@ -180,7 +180,6 @@ fn main() -> std::io::Result<()> {
                 }
             });
         if let parser::Expression::Apply(items) = &std_ast {
-            let std_items = items[1..].to_vec();
             for expr in items[1..].to_vec() {
                 if let parser::Expression::Apply(list) = expr {
                     let a = &list[0];
@@ -213,6 +212,62 @@ fn main() -> std::io::Result<()> {
         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
         let mut file = fs::File::create(path)?;
         write!(file, "{:?}", names)?;
+    } else if args.iter().any(|a| a == "--sig") {
+        let program = fs::read_to_string("./lisp/main.lisp")?;
+        let mut names = Vec::new();
+        match baked::load_ast() {
+            parser::Expression::Apply(items) => {
+                match parser::merge_std_and_program(&program, items.to_vec()) {
+                    Ok(ast) => {
+                        if let parser::Expression::Apply(inner) = &ast {
+                            for expr in inner[1..].to_vec() {
+                                if let parser::Expression::Apply(list) = expr {
+                                    let a = &list[0];
+                                    let b = &list[1];
+                                    if let parser::Expression::Word(kw) = a {
+                                        if kw == "let" {
+                                            if let parser::Expression::Word(name) = b {
+                                                let E = inner
+                                                    .to_vec()
+                                                    .iter()
+                                                    .chain(
+                                                        vec![parser::Expression::Word(
+                                                            name.to_string(),
+                                                        )]
+                                                        .iter(),
+                                                    )
+                                                    .into_iter()
+                                                    .map(|e| e.clone())
+                                                    .collect::<Vec<_>>();
+                                                match infer::infer_with_builtins(
+                                                    &parser::Expression::Apply(E),
+                                                ) {
+                                                    Ok(typ) => {
+                                                        // TODO: use a regex to remove the T+\d+ noise of the files
+                                                        names.push([
+                                                            name.clone(),
+                                                            format!("{}", typ),
+                                                        ])
+                                                    }
+                                                    Err(e) => {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let path = "./sig.json";
+                        std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap())
+                            .unwrap();
+                        let mut file = fs::File::create(path)?;
+                        write!(file, "{:?}", names)?;
+                    }
+                    Err(_) => {}
+                }
+            }
+            _ => {}
+        }
     } else {
         // let program = fs::read_to_string("./dist/ir.txt")?;
         println!("{}", run_code(fs::read_to_string("./lisp/main.lisp")?))
