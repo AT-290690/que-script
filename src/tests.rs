@@ -39,7 +39,12 @@ mod tests {
             ("(tuple 0 true)", "{Int * Bool}"),
             ("(vector (tuple 0 true) (tuple 1 false))", "[{Int * Bool}]"),
             ("(+. 1.23 2.112)", "Float"),
-            ("(tuple (Int->Float 5) (Float->Int 5.2))", "{Float * Int}")
+            ("(tuple (Int->Float 5) (Float->Int 5.2))", "{Float * Int}"),
+            (r#"(do 
+(let xs (vector (vector (vector))))
+(set! xs (length xs) (vector (vector true)))
+(set! xs (length xs) (vector (vector false)))
+xs)"#, "[[[Bool]]]")
         ];
 
         for (inp, out) in &test_cases {
@@ -122,6 +127,13 @@ Error! Concequent and alternative must match types
                 "(+ 1.23 2)",
                 "Error! Cannot unify Int with Float\nError! (+ 1.23 2)",
             ),
+            (r#"(do (let xs (vector (vector (vector))))
+(set! xs (length xs) (vector (vector true)))
+(set! xs (length xs) (vector (vector 1))))"#, "Error! Cannot unify Int with Bool\nError! (set! xs (length xs) (vector (vector 1)))"),
+(r#"(do 
+(let xs (vector))
+(set! xs (length xs) false)
+(set! xs (length xs) 1))"#, "Error! Cannot unify Int with Bool\nError! (set! xs (length xs) 1)")
         ];
 
         for (inp, out) in &test_cases {
@@ -130,8 +142,8 @@ Error! Concequent and alternative must match types
             if let Some(expr) = exprs.first() {
                 // Check that type inference returns an Err
                 let result = crate::infer::infer_with_builtins(expr);
-
                 // Assert that the result is an Err
+
                 assert!(
                     result.is_err(),
                     "Expected type inference error for expression: {}",

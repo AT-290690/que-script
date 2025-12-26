@@ -379,11 +379,13 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 }
 fn is_nonexpansive(expr: &Expression) -> bool {
     match expr {
-        Expression::Word(_) | Expression::Int(_) => true,
+        Expression::Word(_) | Expression::Int(_) | Expression::Float(_) => true,
 
         Expression::Apply(list) if !list.is_empty() => match &list[0] {
             Expression::Word(name) if name == "lambda" => true,
-            Expression::Word(name) if name == "vector" => !list[1..].is_empty(),
+            // This is commented out because it will otherwise cause a bug with mutaiton (set!) inference
+            // and keep the vector polymorphic for empty nested vectors [[]]
+            // Expression::Word(name) if name == "vector" => !list[1..].is_empty(),
             _ => false,
         },
 
@@ -523,7 +525,7 @@ impl Unifier {
             if let Some(ty) = self.binds.get(&k).cloned() {
                 let applied = {
                     // create a small temporary unifier to apply recursively (or re-use self.apply)
-                    // we can call self.apply(&ty) but that mutates via path compression; that's fine
+                    // we can call self.apply(&ty) but that mutates via path compression, that's fine
                     self.apply(&ty)
                 };
                 self.binds.insert(k, applied);
@@ -730,7 +732,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
         if name == "vector" {
             let args = &exprs[1..];
             if args.is_empty() {
-                return Ok(Type::List(Box::new(ctx.fresh_var()))); // Empty vector case
+                return Ok(Type::List(Box::new(ctx.fresh_var())));
             }
 
             let mut elem_types = Vec::new();

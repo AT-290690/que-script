@@ -1163,7 +1163,22 @@ fn cond_transform(mut exprs: Vec<Expression>) -> Expression {
 }
 fn if_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
-
+    if exprs.len() == 0 {
+        return Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+        ]);
+    }
+    if exprs.len() == 1 {
+        return Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            exprs[0].clone(),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+        ]);
+    }
     return Expression::Apply(vec![
         Expression::Word("if".to_string()),
         exprs[0].clone(),
@@ -1177,7 +1192,22 @@ fn if_transform(mut exprs: Vec<Expression>) -> Expression {
 }
 fn unless_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
-
+    if exprs.len() == 0 {
+        return Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+        ]);
+    }
+    if exprs.len() == 1 {
+        return Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            exprs[0].clone(),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+        ]);
+    }
     return Expression::Apply(vec![
         Expression::Word("if".to_string()),
         exprs[0].clone(),
