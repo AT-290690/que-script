@@ -1555,12 +1555,11 @@ q)))
             (std/vector/push! (std/vector/at out -1) (. matrix j i)))))))
     out))))
 
-(let std/vector/3d/interleave (lambda xs (do 
+(let std/vector/2d/interleave (lambda xs ys (do 
   (let out [])
-  (loop 0 (length xs) (lambda i (do 
-    (std/vector/push! out (get xs i 0)))))
-  (loop 0 (length xs) (lambda i (do 
-    (std/vector/push! out (get xs i 1)))))
+  (loop 0 (std/int/min (length xs) (length ys)) (lambda i (do 
+    (std/vector/push! out (get xs i))
+    (std/vector/push! out (get ys i)))))
   out)))
 
 (let std/vector/intersperse (lambda xs x (if (std/vector/empty? xs) [] (do 
@@ -2001,7 +2000,7 @@ q)))
 (let reduce std/vector/reduce)
 (let reduce/until std/vector/reduce/until)
 (let transpose std/vector/3d/rotate)
-(let interleave std/vector/3d/interleave)
+(let interleave std/vector/2d/interleave)
 (let intersperse std/vector/intersperse)
 (let every? std/vector/every?)
 (let some? std/vector/some?)
