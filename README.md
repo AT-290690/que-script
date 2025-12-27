@@ -250,6 +250,7 @@ import {
   cons,
   run,
   check,
+  signatures,
   js,
   evaluate,
   get_output_len,
@@ -275,6 +276,8 @@ const concatenateBiteCode = (a, b) =>
 const uncheckRun = (program) => readWasmString(run(program), get_output_len());
 const typeCheckAndRun = (program) =>
   readWasmString(evaluate(program), get_output_len());
+const generateSignatures = (program) =>
+  readWasmString(signatures(program), get_output_len());
 ```
 
 **Example**
