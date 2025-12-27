@@ -192,7 +192,7 @@ pub fn signatures(program: String) -> *const u8 {
                     }
 
                     let res = format!(
-                        "{:?}",
+                        "{}",
                         names
                             .iter()
                             .map(|s| s.join(","))

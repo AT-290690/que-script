@@ -1432,16 +1432,6 @@ q)))
    (std/vector/3d/for/i matrix (lambda cell y x (if (fn? cell) (do (std/vector/push! coords [ y x ]) nil)))) 
     coords)))
 
-(let std/vector/3d/rotate (lambda matrix (do 
-    (let H (length matrix))
-    (let W (length (get matrix 0)))
-    (let out [])
-    (loop 0 W (lambda i (do
-        (std/vector/push! out [])
-        (loop 0 H (lambda j 
-            (std/vector/push! (std/vector/at out -1) (get matrix j i)))))))
-    out)))
-
 (let std/vector/reduce/until (lambda xs cb untill? initial (do
                   (let~ tail-call/reduce/until (lambda i out (unless (std/vector/in-bounds? xs i) out (do 
                         (let next (cb out (get xs i)))

@@ -1780,6 +1780,77 @@ UUUUD")
         0)))
 
 (ackermann 2 3)"#, "9"),
+(r#"(let INPUT "00100
+11110
+10110
+10111
+10101
+01111
+00111
+11100
+10000
+11001
+00010
+01010")
+
+(let parse
+  (lambda input
+    (|> input
+        (String->Vector nl)
+        (map (lambda row
+               (map row std/convert/char->digit))))))
+
+(let PARSED (parse INPUT))
+
+(let part1 (lambda input (do 
+  (let Matrix->Count (lambda matrix sig (|> matrix (map (lambda xs (> (count/int xs (- 1 (- 1 sig))) (count/int xs (- 1 sig))))) (map Bool->Int) (std/convert/bits->integer))))
+  (let matrix (std/vector/3d/rotate input))
+  (let gamma (Matrix->Count matrix 1))
+  (let epsilon (Matrix->Count matrix 0))
+  (* gamma epsilon))))
+  
+  (let count-bit
+  (lambda rows idx bit
+    (count/int
+      (map rows (lambda r (get r idx)))
+      bit)))
+
+(let find-rating
+  (lambda rows prefer-most? (do
+    (let width (length (get rows 0)))
+
+    (let~ step
+      (lambda idx remaining
+        (if (or (= (length remaining) 1) (= idx width))
+            remaining
+            (do
+              (let ones  (count-bit remaining idx 1))
+              (let zeros (count-bit remaining idx 0))
+
+              (let keep-bit
+                (if prefer-most?
+                    ;; oxygen
+                    (if (>= ones zeros) 1 0)
+                    ;; CO2
+                    (if (<= zeros ones) 0 1)))
+
+              (step
+                (+ idx 1)
+                (filter remaining (lambda r (= (get r idx) keep-bit)))
+                )))))
+
+    (get (step 0 rows)))))
+
+(let part2
+  (lambda input (do
+    (let oxygen-bits (find-rating input true))
+    (let co2-bits    (find-rating input false))
+    (* (std/convert/bits->integer oxygen-bits)
+       (std/convert/bits->integer co2-bits)))))
+
+
+[(part1 PARSED) (part2 PARSED)]"#, "[198 230]"),
+
 (r#"(let INPUT 
 "r, wr, b, g, bwu, rb, gb, br
 
