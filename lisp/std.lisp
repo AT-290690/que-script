@@ -1005,6 +1005,16 @@ nil)))
 (let std/vector/tuple/hash/table/values (lambda table (map (flat table) (lambda x (snd (get x))))))
 (let std/vector/tuple/hash/set/keys (lambda table (map (flat table) (lambda x (get x)))))
 
+(let std/vector/tuple/hash/table/drop! (lambda table keys (loop 0 (length keys) (lambda i (std/vector/tuple/hash/table/remove! table (get keys i))))))
+(let std/vector/tuple/hash/table/keep (lambda table keys (do 
+  (let t2 (std/vector/buckets 32))
+  (loop 0 (length keys) (lambda i (Table/set! t2 (get keys i) (fst (first (Table/get table (get keys i)))))))
+  t2)))
+(let std/vector/tuple/hash/table/omit (lambda table keys (do 
+  (let t2 (std/vector/map table (lambda x (std/vector/map x identity))))
+  (loop 0 (length keys) (lambda i (std/vector/tuple/hash/table/remove! t2 (get keys i))))
+  t2)))
+
 (let std/vector/sliding-window (lambda xs size (cond 
      (std/vector/empty? xs) []
      (= size (length xs)) [xs]
@@ -1545,6 +1555,22 @@ q)))
             (std/vector/push! (std/vector/at out -1) (. matrix j i)))))))
     out))))
 
+(let std/vector/3d/interleave (lambda xs (do 
+  (let out [])
+  (loop 0 (length xs) (lambda i (do 
+    (std/vector/push! out (get xs i 0)))))
+  (loop 0 (length xs) (lambda i (do 
+    (std/vector/push! out (get xs i 1)))))
+  out)))
+
+(let std/vector/intersperse (lambda xs x (if (std/vector/empty? xs) [] (do 
+  (let out [])
+  (loop 0 (- (length xs) 1) (lambda i (do
+    (std/vector/push! out (get xs i)) 
+    (std/vector/push! out x))))
+   (std/vector/push! out (get xs (- (length xs) 1))) 
+  out))))
+
 (let std/vector/int/sequence (lambda xs (std/vector/int/range 0 (- (length xs) 1))))
 (let std/int/shoelace (lambda points (do
     (let len (length points))
@@ -1846,6 +1872,20 @@ q)))
 (let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))
 (let std/vector/enumerate (lambda xs (std/vector/tuple/zip { (std/vector/int/range 0 (- (length xs) 1)) xs })))
 
+(let std/int/factorial (lambda n (do 
+  (let~ fact (lambda n total
+    (if (= n 0)
+        total
+        (fact (- n 1) (* total n)))))
+  (fact n 1))))
+
+(let std/float/factorial (lambda n (do 
+  (let~ fact (lambda n total
+    (if (=. n 0.)
+        total
+        (fact (-. n 1.) (*. total n)))))
+  (fact n 1.))))
+
 (let std/vector/permutations (lambda arr (do 
   (let* permute (lambda arr (if (<= (length arr) 1)
         [arr]
@@ -1961,6 +2001,8 @@ q)))
 (let reduce std/vector/reduce)
 (let reduce/until std/vector/reduce/until)
 (let transpose std/vector/3d/rotate)
+(let interleave std/vector/3d/interleave)
+(let intersperse std/vector/intersperse)
 (let every? std/vector/every?)
 (let some? std/vector/some?)
 (let empty? std/vector/empty?)
@@ -2153,6 +2195,10 @@ q)))
 (let Table/set! (lambda table key value (do (std/vector/tuple/hash/table/set! table key value) nil)))
 (let Table/remove! (lambda table key (do (std/vector/tuple/hash/table/remove! table key) nil)))
 (let Table/count std/vector/tuple/hash/table/count)
+
+(let Table/drop! std/vector/tuple/hash/table/drop!)
+(let Table/keep std/vector/tuple/hash/table/keep)
+(let Table/omit std/vector/tuple/hash/table/omit)
 
 (let in-bounds? std/vector/in-bounds?)
 
