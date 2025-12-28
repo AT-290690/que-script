@@ -886,65 +886,6 @@ D:=,=,=,+,=,=,=,+,=,=")
             ),
 (r#"(let fn (lambda [ a b . ] [ x y . ] (std/int/manhattan-distance a b x y)))
 (fn [ 1 2 ] [ 3 4 ])"#, "4"),
-
-            (r#"
-(let RAW "A=._
-B=_...
-C=_._.
-D=_..
-E=.
-F=.._.
-G=__.
-H=....
-I=..
-J=.___
-K=_._
-L=._..
-M=__
-N=_.
-O=___
-P=.__.
-Q=__._
-R=._.
-S=...
-T=_
-U=.._
-V=..._
-W=.__
-X=_.._
-Y=_.__
-Z=__..
-0=_____
-1=.____
-2=..___
-3=...__
-4=...._
-5=.....
-6=_....
-7=__...
-8=___..
-9=____.
-.=._._._
-,=__..__")
-(let parse (lambda xs (|> xs (std/convert/string->vector std/char/new-line) (std/vector/map (lambda x (std/convert/string->vector x std/char/equal))))))
-(let PARSED (parse RAW))
-(let *ABC->MORSE-IDEXES* (std/vector/reduce/i PARSED (lambda a [k .] i (std/vector/hash/table/set! a k i)) (std/vector/buckets 64)))
-(let *ABC->MORSE-CODES* (std/vector/map PARSED (lambda [. v .] v)))
-
-(let *MORSE->ABC-IDEXES* (std/vector/reduce/i PARSED (lambda a [. k .] i (std/vector/hash/table/set! a k i)) (std/vector/buckets 64)))
-(let *MORSE->ABC-CODES* (std/vector/map PARSED (lambda [v .] v)))
-
-(let abc->morse (lambda letter (get *ABC->MORSE-CODES* (as (std/vector/hash/table/get *ABC->MORSE-IDEXES* letter) Int))))
-(let morse->abc (lambda letter (get *MORSE->ABC-CODES* (as (std/vector/hash/table/get *MORSE->ABC-IDEXES* letter) Int))))
-
-
-[
-(|> "Hello,World.1234" (std/vector/map std/char/upper) (std/vector/map (lambda xs (|> xs (vector) (abc->morse)))) (std/vector/flat-one))
-(|> 
-["...." "." "._.." "._.." "___" "__..__" ".__" "___" "._." "._.." "_.." "._._._" ".____" "..___" "...__" "...._"] 
-(std/vector/map morse->abc)
-(std/vector/flat-one)
-)]"#, "[[46 46 46 46 46 46 95 46 46 46 95 46 46 95 95 95 95 95 46 46 95 95 46 95 95 95 95 95 46 95 46 46 95 46 46 95 46 46 46 95 46 95 46 95 46 95 95 95 95 46 46 95 95 95 46 46 46 95 95 46 46 46 46 95] [72 69 76 76 79 44 87 79 82 76 68 46 49 50 51 52]]"),
 (r#"
 (let N 9)
 (let matrix (|> (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda . 0))))))
@@ -1145,21 +1086,6 @@ b
   (let head (|> (car parts) (Chars->Integer)))
   (let tail (|> (cdr parts) (car) (String->Vector ',') (map Chars->Integer)))
   { head tail })))
-
-;  5   3-5   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7   3-5-7 
-;                      |       |       |       |       |       |       |       |
-;                      8       8-9     8-9   4-8-9   4-8-9   4-8-9   4-8-9   4-8-9
-;                                      |       |       |       |       |       |
-;                                      10      10    5-10    5-10    5-10    5-10
-;                                                              |       |       |
-;                                                              7       7-8     7-8
-;                                                                              |
-;                                                                              8  
-; Check all segments of the spine, starting from the top.
-; If your number is less than the one on the spine segment and the left side of the segment is free - place it on the left.
-; If your number is greater than the one on the spine segment and the right side of the segment is free - place it on the right.
-; If no suitable place is found at any segment, create a new spine segment from your number and place it as the last one.
-
 
 (let part1 (lambda { . nums } (do 
 (let sword [[-1 (get nums 0) -1]])
@@ -1893,7 +1819,151 @@ r#"
 ))
 
 [(res 234 25) (res -1 25) (res 234 0)]
-"#, "[[true 4704] [false -1] [false -1]]")
+"#, "[[true 4704] [false -1] [false -1]]"),
+
+(r#"
+(let INPUT "7,4,9,5,11,17,23,2,0,14,21,24,10,16,13,6,15,25,12,22,18,20,8,19,3,26,1
+
+22 13 17 11  0
+ 8  2 23  4 24
+21  9 14 16  7
+ 6 10  3 18  5
+ 1 12 20 15 19
+
+ 3 15  0  2 22
+ 9 18 13 17  5
+19  8  7 25 23
+20 11 10 24  4
+14 21 16 12  6
+
+14 21 17 24  4
+10 16 15  9 19
+18  8 23 26 20
+22 11 13  6  5
+ 2  0 12  3  7")
+; [Char] -> {[Int] * [[[Int]]]}
+(let parse (lambda input (do  
+  (let lines (|> input (String->Vector nl) (filter not-empty?)))
+  (let numbers (|> (car lines) (String->Vector ',') (map String->Integer)))
+  (let boards (|> (cdr lines) (map (lambda xs (|> xs (String->Vector ' ') (filter not-empty?) (map String->Integer)))) (partition 5)))
+  { numbers boards })))
+; [[T]] -> [[T]]
+(let board-lines
+  (lambda board
+    (cons board (transpose board))))
+; [Int] -> [[[Char]]] -> Bool
+(let line-complete?
+  (lambda line drawn
+    (every? line
+      (lambda x
+        (Set/has? drawn (Integer->String x))))))
+; [[[Int]]] -> [[[Char]]] -> Bool
+(let board-wins?
+  (lambda board drawn
+    (|> (board-lines board)
+        (some? (lambda line
+          (line-complete? line drawn))))))
+; [Int] -> [[[[Int]]]] -> {Int * [[[Int]]]}
+(let first-winning-board
+  (lambda numbers boards (do
+    (let drawn (buckets 32))
+    (let~ step
+      (lambda i result
+        (if (or
+              (not (= (fst result) -1))
+              (= i (length numbers)))
+            result
+            (do
+              (Set/add! drawn (Integer->String (get numbers i)))
+              (let winners
+                (filter boards
+                  (lambda b (board-wins? b drawn))))
+              (step
+                (+ i 1)
+                (if (empty? winners)
+                    result
+                    { i (get winners 0) }))))))
+    (step 0 { -1 [] }))))
+; [[Int]] -> [[[Char]]] -> Int -> Int
+(let score
+  (lambda board drawn last-number (do
+    (let unmarked-sum
+      (|> board
+          (flat)
+          (filter
+            (lambda x
+              (not (Set/has? drawn (Integer->String x)))))
+          (sum)))
+    (* unmarked-sum last-number))))
+; {[Int] * [[[Int]]]} -> Int
+(let part1
+  (lambda { numbers boards } (do
+    (let items (first-winning-board numbers boards))
+    (let i (fst items))
+    (let board (snd items))
+    (let drawn (Vector->Set (map (slice numbers 0 (+ i 1)) Integer->String)))
+    (score board drawn (get numbers i)))))
+(part1 (parse INPUT))"#, "4512"),
+(r#"; [Char]
+(let INPUT "0,9 -> 5,9
+8,0 -> 0,8
+9,4 -> 3,4
+2,2 -> 2,1
+7,0 -> 7,4
+6,4 -> 2,0
+0,9 -> 2,9
+3,4 -> 1,4
+0,0 -> 8,8
+5,5 -> 8,2")
+; [Char] -> [Int]
+(let Point->Coords (lambda p (|> p (String->Vector ',') (map String->Integer))))
+; [Char] -> [[[Int]]]
+(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (String->Vector x ' '))) (map (lambda [ a . b .] [(Point->Coords a) (Point->Coords b)])))))
+; Int -> Int -> [Int]
+(let range*
+  (lambda a b
+    (if (<= a b)
+        (range a b)
+        (reverse (range b a)))))
+; [[Int]] -> [[Int]]
+(let Segment->Points
+  (lambda [ a b . ] (do
+    (let x1 (get a 0))
+    (let y1 (get a 1))
+    (let x2 (get b 0))
+    (let y2 (get b 1))
+
+    (cond
+      ; vertical
+      (= x1 x2)
+      (map (range (min y1 y2) (max y1 y2))
+           (lambda y [ x1 y ]))
+
+      ; horizontal
+      (= y1 y2)
+      (map (range (min x1 x2) (max x1 x2))
+           (lambda x [ x y1 ]))
+      
+      ; diagonal
+      (and (= (abs (- x1 x2)) (abs (- y1 y2))))
+      (map (zip { (range* x1 x2) (range* y1 y2) })
+          (lambda { x y } [ x y ]))
+
+      []))))
+; [Int] -> [Char]
+(let Point->Key (lambda [ a b . ] (cons (Integer->String a) "," (Integer->String b))))
+; [[[Int]]] -> Int
+(let part2 (lambda input
+  (|> input 
+    (map Segment->Points) 
+    (flat)
+    (map Point->Key) 
+    (Table/count)
+    (Table/values)
+    (count (lambda n (>= n 2))))))
+; Int
+(part2 (parse INPUT))"#, "12")
+
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

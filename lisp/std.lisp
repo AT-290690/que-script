@@ -1,3 +1,8 @@
+(let *Id* [0])
+(let Id (lambda (do 
+  (let id (get *Id*))
+  (++ *Id*)
+  id)))
 (let std/char/A (get "A"))
 (let std/char/B (get "B"))
 (let std/char/C (get "C"))
@@ -1986,6 +1991,10 @@ q)))
 (let \map/snd (lambda fn xs (std/tuple/map/snd xs fn)))
 (let \partition (lambda n xs (std/vector/partition xs n)))
 
+
+(let \String->Vector (lambda ch x (std/convert/string->vector x ch)))
+(let \Vector->String (lambda ch x (std/convert/vector->string x ch)))
+
 (let floor std/float/floor)
 (let ceil std/float/ceil)
 
@@ -1996,6 +2005,7 @@ q)))
 (let flat-map std/vector/flat-map)
 (let map std/vector/map)
 (let for std/vector/for)
+(let each (lambda xs cb (do (std/vector/for xs cb) xs)))
 (let filter std/vector/filter)
 (let reduce std/vector/reduce)
 (let reduce/until std/vector/reduce/until)
