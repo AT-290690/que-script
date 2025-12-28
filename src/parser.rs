@@ -609,7 +609,7 @@ fn destructure_pattern(
                     Ok((bindings, Expression::Word(temp_var)))
                 } else if vector_kw == "tuple" {
                     // (tuple a b)
-                    if elements.len() > 2 {
+                    if elements.len() != 2 {
                         return Err(format!(
                             "Tuple pattern must have exactly 2 elements, got {}",
                             elements.len()
