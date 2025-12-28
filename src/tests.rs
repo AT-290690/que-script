@@ -1997,8 +1997,98 @@ r#"
 (let unpack (lambda { . { . { . { y x }}}} (+ y x)))
 (let unnest (lambda [[a b c .] [. d .]] [ a b c d ]))
 (let both (lambda { [ y x z . ] { a b } } (if (or a b) (* (+ y x) z) z)))
-{ (unnest [[ 1 2 3 ] [ 4 5 6 ]]) { (unpack { 1 { 2 { 3 { 4 5 }}}}) (both { [ 2 3 -1 ] { false true } }) } }"#, "[[1 2 3 5] [9 -5]]")
+{ (unnest [[ 1 2 3 ] [ 4 5 6 ]]) { (unpack { 1 { 2 { 3 { 4 5 }}}}) (both { [ 2 3 -1 ] { false true } }) } }"#, "[[1 2 3 5] [9 -5]]"),
+(r#"; [Char]
+(let INPUT "3,4,3,1,2")
+; [Char] -> [Int]
+(let parse (lambda input (do
+    (let timers (|> input (String->Vector ',') (map String->Integer)))
+    (let counts (zeroes 9))
+      (for timers (lambda t (set! counts t (+ 1 (get counts t)))))
+      counts)))
+; [Int] -> [Int] ; length 9
+(let step (lambda [ c0 c1 c2 c3 c4 c5 c6 c7 c8 . ] [ c1 c2 c3 c4 c5 c6 (+ c7 c0) c8 c0 ]))
+; Int -> [Int] -> [Int]
+(let simulate (lambda days state (do 
+    (let~ rec (lambda i acc
+        (if (= i days)
+            acc
+            (rec (+ i 1) (step acc)))))
+    (rec 0 state))))
+; [Int] -> Int
+(let part1 (lambda input (sum (simulate 80 input))))
+; Int
+(part1 (parse INPUT))"#, "5934"),
 
+(r#"; [Char]
+(let INPUT "\#1 @ 1,3: 4x4
+#2 @ 3,1: 4x4
+#3 @ 5,5: 2x2")
+; "\#123" -> 123
+(let parse-id
+  (lambda s
+    (String->Integer (drop/first s 1))))
+; "3,2" -> [3 2]
+(let parse-coords
+  (lambda s
+    (map (String->Vector (drop/last s 1) ',')
+         String->Integer)))
+; "5x4" -> [5 4]
+(let parse-size
+  (lambda s
+    (map (String->Vector s 'x') String->Integer)))
+; [Char] -> {Int * {Int * Int * Int * Int}}
+(let parse-claim
+  (lambda line
+    (do
+      (let parts (String->Vector line ' '))
+      (let id (parse-id (get parts 0)))
+      ; (let [ x y . ] (parse-coords (get parts 2)))
+      ; (let [ w h . ] (parse-size (get parts 3)))
+      (let coords (parse-coords (get parts 2)))
+      (let size (parse-size (get parts 3)))
+      
+      (let x (get coords 0))
+      (let y (get coords 1))
+      (let w (get size 0))
+      (let h (get size 1))
+
+      { id { x { y { w h } } } })))
+; {Int * {Int * Int * Int * Int}} -> [[Int]]
+(let claim->points
+  (lambda { . { x { y { w h } } } }
+    (do
+      (flat
+        (map (range x (- (+ x w) 1))
+          (lambda i
+            (map (range y (- (+ y h) 1))
+              (lambda j
+                [ i j ]))))))))
+
+; [Int Int] -> [Char]
+(let point->key
+  (lambda [ x y . ]
+    (cons (Integer->String x) "," (Integer->String y))))
+
+; [Char] -> Int
+(let part1
+  (lambda input
+    (do
+      (let claims
+        (|> input
+            (String->Vector nl)
+            (filter not-empty?)
+            (map parse-claim)))
+
+      (|> claims
+          (map claim->points)   ; [ [[x y]] ]
+          (flat)                ; [[x y]]
+          (map point->key)      ; [String]
+          (Table/count)         ; { key -> Int }
+          (Table/values) 
+          (count (lambda n (>= n 2))))))) 
+
+(part1 INPUT)"#, "4")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

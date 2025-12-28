@@ -880,49 +880,39 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
         match arg {
             Expression::Apply(array_exprs) => {
                 if let [Expression::Word(ref array_kw), ref elements @ ..] = &array_exprs[..] {
-                    if array_kw == "vector" {
-                        // Vector destructuring pattern
-                        let temp_arg_name = format!("_args{}", j);
-                        let bindings = destructure_vector_pattern(
-                            arg,
-                            temp_arg_name.clone(),
-                            j,
-                            &mut binding_counter,
-                        )?;
-                        new_bindings.extend(bindings);
-                        new_args.push(Expression::Word(temp_arg_name));
-                        continue;
-                    } else if array_kw == "tuple" {
-                        // Tuple destructuring pattern - use recursive destructuring
-                        let temp_arg_name = format!("_args{}", j);
-                        let (bindings, _) = destructure_pattern(
-                            arg,
-                            Expression::Word(temp_arg_name.clone()),
-                            j,
-                            &mut binding_counter,
-                        )?;
-                        new_bindings.extend(bindings);
-                        new_args.push(Expression::Word(temp_arg_name));
-                        continue;
-                    } else {
-                        // Try to destructure it
-                        let temp_arg_name = format!("_args{}", j);
-                        let (bindings, _) = destructure_pattern(
-                            arg,
-                            Expression::Word(temp_arg_name.clone()),
-                            j,
-                            &mut binding_counter,
-                        )?;
-                        if !bindings.is_empty() {
-                            // It was a destructuring pattern
+                    match array_kw.as_str() {
+                        "vector" => {
+                            // Vector destructuring pattern
+                            let temp_arg_name = format!("_args{}", j);
+                            let bindings = destructure_vector_pattern(
+                                arg,
+                                temp_arg_name.clone(),
+                                j,
+                                &mut binding_counter,
+                            )?;
                             new_bindings.extend(bindings);
                             new_args.push(Expression::Word(temp_arg_name));
                             continue;
                         }
+                        "tuple" => {
+                            // Tuple destructuring pattern - use recursive destructuring
+                            let temp_arg_name = format!("_args{}", j);
+                            let (bindings, _) = destructure_pattern(
+                                arg,
+                                Expression::Word(temp_arg_name.clone()),
+                                j,
+                                &mut binding_counter,
+                            )?;
+                            new_bindings.extend(bindings);
+                            new_args.push(Expression::Word(temp_arg_name));
+                            continue;
+                        }
+                        _ => new_args.push(arg.clone()),
                     }
+                } else {
+                    // It was NOT a destructuring pattern - skip
+                    new_args.push(arg.clone());
                 }
-                // It was NOT a destructuring pattern - skip
-                new_args.push(arg.clone());
             }
             _ => new_args.push(arg.clone()),
         }
