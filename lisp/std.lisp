@@ -1866,7 +1866,7 @@ q)))
 
 (let std/vector/int/extreme (lambda xs { (std/vector/int/minimum xs) (std/vector/int/maximum xs) }))
 (let std/tuple/map (lambda { a b } fn (fn a b)))
-(let std/tuple/map/fst (lambda { a } fn (fn a)))
+(let std/tuple/map/fst (lambda { a . } fn (fn a)))
 (let std/tuple/map/snd (lambda { . b } fn (fn b)))
 
 (let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))

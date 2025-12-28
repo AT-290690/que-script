@@ -557,98 +557,371 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
         other => Ok(other),
     }
 }
+fn destructure_pattern(
+    pattern: &Expression,
+    value_expr: Expression,
+    arg_index: usize,
+    binding_counter: &mut usize,
+) -> Result<(Vec<Expression>, Expression), String> {
+    match pattern {
+        Expression::Word(name) => {
+            if name == "." {
+                // skip
+                Ok((vec![], value_expr))
+            } else {
+                Ok((
+                    vec![Expression::Apply(vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(name.clone()),
+                        value_expr.clone(),
+                    ])],
+                    Expression::Word(name.clone()),
+                ))
+            }
+        }
+        // Tuple or vector destructuring
+        Expression::Apply(tuple_exprs) => {
+            if tuple_exprs.is_empty() {
+                return Err("Empty pattern not allowed".to_string());
+            }
+
+            if let [Expression::Word(ref vector_kw), ref elements @ ..] = &tuple_exprs[..] {
+                if vector_kw == "vector" {
+                    // Recursively calling so value_expr should be the vector element
+                    let temp_var = format!("_temp_{}_{}", arg_index, binding_counter);
+                    *binding_counter += 1;
+
+                    let mut bindings = vec![];
+                    bindings.push(Expression::Apply(vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(temp_var.clone()),
+                        value_expr,
+                    ]));
+
+                    let vector_bindings = destructure_vector_pattern(
+                        pattern,
+                        temp_var.clone(),
+                        arg_index,
+                        binding_counter,
+                    )?;
+                    bindings.extend(vector_bindings);
+
+                    Ok((bindings, Expression::Word(temp_var)))
+                } else if vector_kw == "tuple" {
+                    // (tuple a b)
+                    if elements.len() > 2 {
+                        return Err(format!(
+                            "Tuple pattern must have exactly 2 elements, got {}",
+                            elements.len()
+                        ));
+                    }
+
+                    let mut bindings = vec![];
+                    let temp_var = format!("_temp_{}_{}", arg_index, binding_counter);
+                    *binding_counter += 1;
+
+                    bindings.push(Expression::Apply(vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(temp_var.clone()),
+                        value_expr,
+                    ]));
+
+                    let (fst_bindings, fst_expr) = destructure_pattern(
+                        &elements[0],
+                        Expression::Apply(vec![
+                            Expression::Word("fst".to_string()),
+                            Expression::Word(temp_var.clone()),
+                        ]),
+                        arg_index,
+                        binding_counter,
+                    )?;
+                    bindings.extend(fst_bindings);
+
+                    let (snd_bindings, _) = destructure_pattern(
+                        &elements[1],
+                        Expression::Apply(vec![
+                            Expression::Word("snd".to_string()),
+                            Expression::Word(temp_var.clone()),
+                        ]),
+                        arg_index,
+                        binding_counter,
+                    )?;
+                    bindings.extend(snd_bindings);
+
+                    Ok((bindings, Expression::Word(temp_var)))
+                } else {
+                    // Check if second element is a tuple pattern
+                    if elements.len() >= 1 {
+                        if let Expression::Apply(inner_exprs) = &elements[0] {
+                            if let [Expression::Word(ref inner_kw), ..] = &inner_exprs[..] {
+                                if inner_kw == "tuple" {
+                                    let mut bindings = vec![];
+                                    let temp_var =
+                                        format!("_temp_{}_{}", arg_index, binding_counter);
+                                    *binding_counter += 1;
+
+                                    bindings.push(Expression::Apply(vec![
+                                        Expression::Word("let".to_string()),
+                                        Expression::Word(temp_var.clone()),
+                                        value_expr.clone(),
+                                    ]));
+
+                                    // Get the inner tuple from snd
+                                    let inner_tuple_var =
+                                        format!("_temp_{}_{}", arg_index, binding_counter);
+                                    *binding_counter += 1;
+                                    bindings.push(Expression::Apply(vec![
+                                        Expression::Word("let".to_string()),
+                                        Expression::Word(inner_tuple_var.clone()),
+                                        Expression::Apply(vec![
+                                            Expression::Word("snd".to_string()),
+                                            Expression::Word(temp_var.clone()),
+                                        ]),
+                                    ]));
+
+                                    if inner_exprs.len() >= 3 {
+                                        let (fst_bindings, _) = destructure_pattern(
+                                            &inner_exprs[1],
+                                            Expression::Apply(vec![
+                                                Expression::Word("fst".to_string()),
+                                                Expression::Word(inner_tuple_var.clone()),
+                                            ]),
+                                            arg_index,
+                                            binding_counter,
+                                        )?;
+                                        bindings.extend(fst_bindings);
+
+                                        let (snd_bindings, _) = destructure_pattern(
+                                            &inner_exprs[2],
+                                            Expression::Apply(vec![
+                                                Expression::Word("snd".to_string()),
+                                                Expression::Word(inner_tuple_var.clone()),
+                                            ]),
+                                            arg_index,
+                                            binding_counter,
+                                        )?;
+                                        bindings.extend(snd_bindings);
+                                    }
+
+                                    Ok((bindings, Expression::Word(temp_var)))
+                                } else {
+                                    Ok((vec![], value_expr))
+                                }
+                            } else {
+                                Ok((vec![], value_expr))
+                            }
+                        } else if elements.len() == 2 {
+                            let mut bindings = vec![];
+                            let temp_var = format!("_temp_{}_{}", arg_index, binding_counter);
+                            *binding_counter += 1;
+
+                            bindings.push(Expression::Apply(vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(temp_var.clone()),
+                                value_expr,
+                            ]));
+
+                            let (fst_bindings, _) = destructure_pattern(
+                                &elements[0],
+                                Expression::Apply(vec![
+                                    Expression::Word("fst".to_string()),
+                                    Expression::Apply(vec![
+                                        Expression::Word("snd".to_string()),
+                                        Expression::Word(temp_var.clone()),
+                                    ]),
+                                ]),
+                                arg_index,
+                                binding_counter,
+                            )?;
+                            bindings.extend(fst_bindings);
+
+                            let (snd_bindings, _) = destructure_pattern(
+                                &elements[1],
+                                Expression::Apply(vec![
+                                    Expression::Word("snd".to_string()),
+                                    Expression::Apply(vec![
+                                        Expression::Word("snd".to_string()),
+                                        Expression::Word(temp_var.clone()),
+                                    ]),
+                                ]),
+                                arg_index,
+                                binding_counter,
+                            )?;
+                            bindings.extend(snd_bindings);
+
+                            Ok((bindings, Expression::Word(temp_var)))
+                        } else {
+                            Ok((vec![], value_expr))
+                        }
+                    } else {
+                        Ok((vec![], value_expr))
+                    }
+                }
+            } else {
+                Ok((vec![], value_expr))
+            }
+        }
+        _ => Ok((vec![], value_expr)),
+    }
+}
+
+fn destructure_vector_pattern(
+    pattern: &Expression,
+    vector_var: String,
+    arg_index: usize,
+    binding_counter: &mut usize,
+) -> Result<Vec<Expression>, String> {
+    match pattern {
+        Expression::Apply(vector_exprs) => {
+            if let [Expression::Word(ref vector_kw), ref elements @ ..] = &vector_exprs[..] {
+                if vector_kw == "vector" {
+                    let mut bindings = vec![];
+                    let mut element_index = 0;
+
+                    let has_rest = if let Some(last_elem) = elements.last() {
+                        matches!(last_elem, Expression::Word(name) if name != ".")
+                    } else {
+                        false
+                    };
+
+                    let elements_to_process = if has_rest {
+                        &elements[..elements.len() - 1]
+                    } else {
+                        elements
+                    };
+
+                    for elem in elements_to_process {
+                        match elem {
+                            Expression::Word(name) => {
+                                if name == "." {
+                                    // skip
+                                    element_index += 1;
+                                } else {
+                                    let (elem_bindings, _) = destructure_pattern(
+                                        elem,
+                                        Expression::Apply(vec![
+                                            Expression::Word("get".to_string()),
+                                            Expression::Word(vector_var.clone()),
+                                            Expression::Int(element_index as i32),
+                                        ]),
+                                        arg_index,
+                                        binding_counter,
+                                    )?;
+                                    bindings.extend(elem_bindings);
+                                    element_index += 1;
+                                }
+                            }
+                            // Nested pattern (vector or tuple)
+                            Expression::Apply(_) => {
+                                // Recursively destructure nested pattern
+                                let (elem_bindings, _) = destructure_pattern(
+                                    elem,
+                                    Expression::Apply(vec![
+                                        Expression::Word("get".to_string()),
+                                        Expression::Word(vector_var.clone()),
+                                        Expression::Int(element_index as i32),
+                                    ]),
+                                    arg_index,
+                                    binding_counter,
+                                )?;
+                                bindings.extend(elem_bindings);
+                                element_index += 1;
+                            }
+                            _ => {
+                                return Err(
+                                    "Vector pattern element must be a word, '.', or nested pattern"
+                                        .to_string(),
+                                )
+                            }
+                        }
+                    }
+
+                    // Handle rest if not skipped
+                    if has_rest {
+                        if let Expression::Word(rest_name) = elements.last().unwrap() {
+                            bindings.push(Expression::Apply(vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(rest_name.clone()),
+                                Expression::Apply(vec![
+                                    Expression::Word("std/vector/drop".to_string()),
+                                    Expression::Word(vector_var.clone()),
+                                    Expression::Int(element_index as i32),
+                                ]),
+                            ]));
+                        }
+                    }
+
+                    Ok(bindings)
+                } else {
+                    Ok(vec![])
+                }
+            } else {
+                Ok(vec![])
+            }
+        }
+        _ => Ok(vec![]),
+    }
+}
+
 fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    // separate args and body
+    // Check if valid body
     if exprs.len() < 2 {
         return Err("Error! lambda expects at least a body".to_string());
     }
     let args = &exprs[1..exprs.len() - 1];
     let body = exprs.last().unwrap().clone();
 
-    // look for array args
+    // look for destructuring patterns in args
     let mut new_bindings = vec![];
     let mut new_args = Vec::new();
+    let mut binding_counter = 0;
+
     for (j, arg) in args.iter().enumerate() {
         match arg {
             Expression::Apply(array_exprs) => {
                 if let [Expression::Word(ref array_kw), ref elements @ ..] = &array_exprs[..] {
                     if array_kw == "vector" {
-                        // replace this arg with _args
-                        for (i, elem) in elements.iter().enumerate() {
-                            match elem {
-                                Expression::Word(name) => {
-                                    if i == elements.len() - 1 {
-                                        if name != "." {
-                                            new_bindings.push(Expression::Apply(vec![
-                                                Expression::Word("let".to_string()),
-                                                Expression::Word(name.clone()),
-                                                Expression::Apply(vec![
-                                                    Expression::Word("std/vector/drop".to_string()),
-                                                    Expression::Word(
-                                                        "_args".to_string() + &j.to_string(),
-                                                    ),
-                                                    Expression::Int(i as i32),
-                                                ]),
-                                            ]))
-                                        }
-                                    } else {
-                                        if name != "." {
-                                            new_bindings.push(Expression::Apply(vec![
-                                                Expression::Word("let".to_string()),
-                                                Expression::Word(name.clone()),
-                                                Expression::Apply(vec![
-                                                    Expression::Word("get".to_string()),
-                                                    Expression::Word(
-                                                        "_args".to_string() + &j.to_string(),
-                                                    ),
-                                                    Expression::Int(i as i32),
-                                                ]),
-                                            ]))
-                                        }
-                                    }
-                                }
-                                Expression::Word(_) => {}
-                                _ => {
-                                    return Err(
-                                        "lambda array element must be a word or '.'".to_string()
-                                    )
-                                }
-                            }
-                        }
-                        new_args.push(Expression::Word("_args".to_string() + &j.to_string()));
+                        // Vector destructuring pattern
+                        let temp_arg_name = format!("_args{}", j);
+                        let bindings = destructure_vector_pattern(
+                            arg,
+                            temp_arg_name.clone(),
+                            j,
+                            &mut binding_counter,
+                        )?;
+                        new_bindings.extend(bindings);
+                        new_args.push(Expression::Word(temp_arg_name));
                         continue;
                     } else if array_kw == "tuple" {
-                        // replace this arg with _args
-                        let names = ["fst".to_string(), "snd".to_string()];
-                        for (i, elem) in elements.iter().enumerate() {
-                            match elem {
-                                Expression::Word(name) => {
-                                    if name != "." {
-                                        new_bindings.push(Expression::Apply(vec![
-                                            Expression::Word("let".to_string()),
-                                            Expression::Word(name.clone()),
-                                            Expression::Apply(vec![
-                                                Expression::Word(names[i].clone()),
-                                                Expression::Word(
-                                                    "_args".to_string() + &j.to_string(),
-                                                ),
-                                            ]),
-                                        ]))
-                                    } else {
-                                    }
-                                }
-                                Expression::Word(_) => {}
-                                _ => {
-                                    return Err(
-                                        "lambda array element must be a word or '.'".to_string()
-                                    )
-                                }
-                            }
-                        }
-                        new_args.push(Expression::Word("_args".to_string() + &j.to_string()));
+                        // Tuple destructuring pattern - use recursive destructuring
+                        let temp_arg_name = format!("_args{}", j);
+                        let (bindings, _) = destructure_pattern(
+                            arg,
+                            Expression::Word(temp_arg_name.clone()),
+                            j,
+                            &mut binding_counter,
+                        )?;
+                        new_bindings.extend(bindings);
+                        new_args.push(Expression::Word(temp_arg_name));
                         continue;
+                    } else {
+                        // Try to destructure it
+                        let temp_arg_name = format!("_args{}", j);
+                        let (bindings, _) = destructure_pattern(
+                            arg,
+                            Expression::Word(temp_arg_name.clone()),
+                            j,
+                            &mut binding_counter,
+                        )?;
+                        if !bindings.is_empty() {
+                            // It was a destructuring pattern
+                            new_bindings.extend(bindings);
+                            new_args.push(Expression::Word(temp_arg_name));
+                            continue;
+                        }
                     }
                 }
+                // It was NOT a destructuring pattern - skip
                 new_args.push(arg.clone());
             }
             _ => new_args.push(arg.clone()),

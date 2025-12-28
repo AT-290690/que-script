@@ -1620,7 +1620,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 (let Bow { 2 "Bow" })
 (let Staff { 3 "Staff" })
 
-(let match-weapon? (lambda { aId } { bId } (= aId bId)))
+(let match-weapon? (lambda { aId . } { bId . } (= aId bId)))
 
 (let calc-damage (lambda base { crit? weapon }
   (cond

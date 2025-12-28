@@ -1904,7 +1904,83 @@ r#"
     (let drawn (Vector->Set (map (slice numbers 0 (+ i 1)) Integer->String)))
     (score board drawn (get numbers i)))))
 (part1 (parse INPUT))"#, "4512"),
-(r#"; [Char]
+(r#"; 
+
+(let Point   (Id))
+(let Segment (Id))
+(let Key     (Id))
+(let None    (Id))
+
+; Int -> Int -> { Point * { Int * Int } }
+(let make-point
+  (lambda x y
+    { Point { x y } }))
+; Point -> Point -> { Segment * { Point * Point } }
+(let make-segment
+  (lambda p q
+    { Segment { p q } }))
+
+; Point -> { Key * [Char] }
+(let Point->Key
+  (lambda { Tag { x y } }
+    (if (= Tag Point ) { Key (cons (Integer->String x) "," (Integer->String y)) } { None [] })))
+
+; [Char] -> [Int]
+(let Point->Coords (lambda p (|> p (String->Vector ',') (map String->Integer))))
+
+; [Char] -> [Segment]
+(let parse
+  (lambda input
+    (|> input
+        (String->Vector nl)
+        (filter not-empty?)
+        (map
+          (lambda line (do
+            (let parts (String->Vector line ' '))
+            (let a (Point->Coords (get parts 0)))
+            (let b (Point->Coords (get parts 2)))
+            (make-segment
+              (make-point (get a 0) (get a 1))
+              (make-point (get b 0) (get b 1)))))))))
+; Int -> Int -> [Int]
+(let range*
+  (lambda a b
+    (if (<= a b)
+        (range a b)
+        (reverse (range b a)))))
+; Segment -> [Point]
+(let Segment->Points
+  (lambda { Tag { { . { x1 y1 } } { . { x2 y2 } } } } 
+    (cond
+        ; vertical
+        (= x1 x2)
+        (map (range (min y1 y2) (max y1 y2))
+            (lambda y (make-point x1 y)))
+
+        ; horizontal
+        (= y1 y2)
+        (map (range (min x1 x2) (max x1 x2))
+            (lambda x (make-point x y1)))
+
+        ; diagonal (45°)
+        (= (abs (- x1 x2)) (abs (- y1 y2)))
+        (map (zip { (range* x1 x2) (range* y1 y2) })
+            (lambda { x y } (make-point x y)))
+
+        [])))
+; [Segment] -> Int
+(let solve
+  (lambda segments
+    (|> segments
+        (map Segment->Points) ; [ [Point] ]
+        (flat)                ; [Point]
+        (map Point->Key)      ; [Key]
+        (map snd)
+        (Table/count)
+        (Table/values)
+        (count (lambda n (>= n 2))))))
+
+; [Char]
 (let INPUT "0,9 -> 5,9
 8,0 -> 0,8
 9,4 -> 3,4
@@ -1915,54 +1991,13 @@ r#"
 3,4 -> 1,4
 0,0 -> 8,8
 5,5 -> 8,2")
-; [Char] -> [Int]
-(let Point->Coords (lambda p (|> p (String->Vector ',') (map String->Integer))))
-; [Char] -> [[[Int]]]
-(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (String->Vector x ' '))) (map (lambda [ a . b .] [(Point->Coords a) (Point->Coords b)])))))
-; Int -> Int -> [Int]
-(let range*
-  (lambda a b
-    (if (<= a b)
-        (range a b)
-        (reverse (range b a)))))
-; [[Int]] -> [[Int]]
-(let Segment->Points
-  (lambda [ a b . ] (do
-    (let x1 (get a 0))
-    (let y1 (get a 1))
-    (let x2 (get b 0))
-    (let y2 (get b 1))
 
-    (cond
-      ; vertical
-      (= x1 x2)
-      (map (range (min y1 y2) (max y1 y2))
-           (lambda y [ x1 y ]))
-
-      ; horizontal
-      (= y1 y2)
-      (map (range (min x1 x2) (max x1 x2))
-           (lambda x [ x y1 ]))
-      
-      ; diagonal
-      (and (= (abs (- x1 x2)) (abs (- y1 y2))))
-      (map (zip { (range* x1 x2) (range* y1 y2) })
-          (lambda { x y } [ x y ]))
-
-      []))))
-; [Int] -> [Char]
-(let Point->Key (lambda [ a b . ] (cons (Integer->String a) "," (Integer->String b))))
-; [[[Int]]] -> Int
-(let part2 (lambda input
-  (|> input 
-    (map Segment->Points) 
-    (flat)
-    (map Point->Key) 
-    (Table/count)
-    (Table/values)
-    (count (lambda n (>= n 2))))))
-; Int
-(part2 (parse INPUT))"#, "12")
+(solve (parse INPUT))"#, "12"),
+(r#"
+(let unpack (lambda { . { . { . { y x }}}} (+ y x)))
+(let unnest (lambda [[a b c .] [. d .]] [ a b c d ]))
+(let both (lambda { [ y x z . ] { a b } } (if (or a b) (* (+ y x) z) z)))
+{ (unnest [[ 1 2 3 ] [ 4 5 6 ]]) { (unpack { 1 { 2 { 3 { 4 5 }}}}) (both { [ 2 3 -1 ] { false true } }) } }"#, "[[1 2 3 5] [9 -5]]")
 
         ];
         let std_ast = crate::baked::load_ast();
