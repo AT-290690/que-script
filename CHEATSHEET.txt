@@ -37,18 +37,18 @@ Integers (Int)
 
 Floating point numbers (Float)
 
-| Operator | Description          | Example             | Result     |
-| -------- | -------------------- | ------------------- | ---------- |
-| +.       | Float Addition       | (+. 2.0 3.0)        | 5.0        |
-| -.       | Float Subtraction    | (-. 10.2 4.1)       | 6.1        |
-| *.      | Float Multiplication  | ( *. 0.5 2.0)       | 1.0        |
-| /.       | Float division       | (/. 9.0 2.0)        | 4.5        |
-| mod.     | Float Modulus        | (mod. 10.2 3.3)     | 0.29999995 |
-| =.       | Float Equality       | (=. 5.0 5.0)        | true       |
-| >.       | Greater than         | (>. 3.1 3.0)        | true       |
-| <.       | Less than            | (<. 2.10 2.11)      | true       |
-| >=.      | Greater or equal     | (>=. 10.123 10.123) | true       |
-| <=.      | Less or equal        | (<=. 3.14 4.20)     | true       |
+| Operator | Description           | Example             | Result     |
+| -------- | --------------------- | ------------------- | ---------- |
+| +.       | Float Addition        | (+. 2.0 3.0)        | 5.0        |
+| -.       | Float Subtraction     | (-. 10.2 4.1)       | 6.1        |
+| *.       | Float Multiplication  | ( *. 0.5 2.0)       | 1.0        |
+| /.       | Float division        | (/. 9.0 2.0)        | 4.5        |
+| mod.     | Float Modulus         | (mod. 10.2 3.3)     | 0.29999995 |
+| =.       | Float Equality        | (=. 5.0 5.0)        | true       |
+| >.       | Greater than          | (>. 3.1 3.0)        | true       |
+| <.       | Less than             | (<. 2.10 2.11)      | true       |
+| >=.      | Greater or equal      | (>=. 10.123 10.123) | true       |
+| <=.      | Less or equal         | (<=. 3.14 4.20)     | true       |
 
 ----------------------------
 
@@ -175,17 +175,23 @@ Pipe
 
 Lambda Functions
 
-| Concept                                                     | Description                                                                                                                    | Example                                   |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| Definition                                                  | A lambda defines an anonymous function (a function without a name). It’s created using the lambda keyword.                     | (lambda x (* x x))                        |
-| Syntax                                                      | (lambda arg1 arg2 ... body)                                                                                                    |                                           |
-| The parameters come first, followed by the body expression. | (lambda a b (+ a b))                                                                                                           |                                           | 
-| Body                                                        | The body is a single expression or a (do) block containing multiple expressions. The value of the last expression is returned. | (lambda x (do (let y 3) (* x y)))         |
-| Return Value                                                | Always the result of the last expression in the body.                                                                          | (lambda x (* x x)) => x²                  |
-| Type Signature                                              | Que Script infers types automatically. Example: (lambda x (* x x)) → Int -> Int                                                | (lambda a b (+ a b)) => Int -> Int -> Int |
-| Invocation                                                  | Call a lambda by wrapping it in parentheses with its arguments.                                                                | ((lambda x (* x x)) 4) => 16              |
-| As a Value                                                  | Lambdas are first-class values — they can be stored in variables, passed to functions, or returned (mostly).                   | (let square (lambda x (* x x)))           |
-| Also Known As                                               | Abstractions — functions defined directly without a name.                                                                      |                                           |
+| Concept       | Example                                |
+| ------------- | -------------------------------------- |
+| Definition    | (lambda x (* x x))                     |
+| Syntax        | (lambda arg1 arg2 ... body)            |
+| Body          | (lambda x (do (let y 3) (* x y)))      |
+| Invocation    | ((lambda x (* x x)) 4)                 |
+| As a Value    | (let square (lambda x (* x x)))        |
+| Type Inferred | (lambda a b (+ a b)) → Int → Int → Int |
+
+
+Notes
+• Lambdas are anonymous functions
+• The last expression is always returned
+• Body may be a single expression or a (do) block
+• Lambdas are first-class values
+• Types are inferred automatically
+• Tail-recursive lambdas may be optimized into loops
 
 ----------------------------
 
