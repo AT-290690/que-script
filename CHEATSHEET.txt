@@ -1,0 +1,212 @@
+----------------------------
+
+Types
+
+| Type  | Description                  | Example | Notes                                |
+| ----- | ---------------------------- | ------- | ------------------------------------ |
+| Bool  | Logical truth value          | true    | Used in conditions and logical ops   |
+| Int   | 32-bit integer               | 42      | Arithmetic, indexing, counting       |
+| Float | 32-bit floating point number | 42.     | Arithmetic                           |
+| Char  | Single character             | 'a'     | Building blocks of strings           |
+| Unit  | No meaningful value          | ()      | Returned by effect-only expressions  |
+| [T]   | Vector of T                  | [1 2 3] | Universal data structure             |
+
+Notes:
+• Unit represents the absence of a value (effects only)
+• [T] is a homogeneous vector — all elements share the same type
+
+----------------------------
+
+Integers (Int)
+
+| Operator | Description      | Example    | Result |
+| -------- | ---------------- | ---------- | ------ |
+| +        | Addition         | (+ 2 3)    | 5      |
+| -        | Subtraction      | (- 10 4)   | 6      |
+| *        | Multiplication   | (* 3 4)    | 12     |
+| /        | Integer division | (/ 9 2)    | 4      |
+| mod      | Modulus          | (mod 10 3) | 1      |
+| abs      | Absolute value   | (abs -8)   | 8      |
+| =        | Equality         | (= 5 5)    | true   |
+| >        | Greater than     | (> 3 1)    | true   |
+| <        | Less than        | (< 2 5)    | true   |
+| >=       | Greater or equal | (>= 10 10) | true   |
+| <=       | Less or equal    | (<= 7 8)   | true   |
+
+----------------------------
+
+Floating point numbers (Float)
+
+| Operator | Description          | Example             | Result     |
+| -------- | -------------------- | ------------------- | ---------- |
+| +.       | Float Addition       | (+. 2.0 3.0)        | 5.0        |
+| -.       | Float Subtraction    | (-. 10.2 4.1)       | 6.1        |
+| *.      | Float Multiplication  | ( *. 0.5 2.0)       | 1.0        |
+| /.       | Float division       | (/. 9.0 2.0)        | 4.5        |
+| mod.     | Float Modulus        | (mod. 10.2 3.3)     | 0.29999995 |
+| =.       | Float Equality       | (=. 5.0 5.0)        | true       |
+| >.       | Greater than         | (>. 3.1 3.0)        | true       |
+| <.       | Less than            | (<. 2.10 2.11)      | true       |
+| >=.      | Greater or equal     | (>=. 10.123 10.123) | true       |
+| <=.      | Less or equal        | (<=. 3.14 4.20)     | true       |
+
+----------------------------
+
+Integers / Floats
+
+Notes:
+• Int and Float operators are strictly separated
+• Mixing Int and Float is a type error
+• Use floor / ceil to convert Float -> Int when needed
+
+----------------------------
+
+
+Booleans (Bool)
+
+| Operator | Description         | Example          | Result |
+| -------- | ------------------- | ---------------- | ------ |
+| not      | Logical negation    | (not true)       | false  |
+| and      | Logical conjunction | (and true false) | false  |
+| or       | Logical disjunction | (or false true)  | true   |
+| =?       | Equality comparison | (=? true true)   | true   |
+
+Notes:
+• and / or are short-circuiting
+• Expressions are evaluated left-to-right
+• Side effects may not run if short-circuited
+
+----------------------------
+
+Characters (Char)
+
+|     | Description             | Example       | Result |
+| --- | ----------------------- | ------------- | ------ |
+| +#  | Sum of two chars        | (+# 'a' 'B')  | '£'    |
+| *#  | Product of two chars    | (*# 'a' 'B')  | 'ᤂ'    |
+| -#  | Difference of two chars | (-# 'a' ' ')  | 'A'    |
+| =#  | Compare two chars       | (=# 'a' 'a')  | true   |
+| >#  | Compare two chars       | (># 'a' 'b')  | false  |
+| <#  | Compare two chars       | (<# 'a' 'b')  | true   |
+| >=# | Compare two chars       | (># 'a' 'b')  | false  |
+| <=# | Compare two chars       | (<=# 'a' 'a') | true   |
+| /#  | Quotient of two chars   | (/# 'a' ' ')  | ''     |
+
+----------------------------
+
+If Expression
+
+| Form                     | Description                                                              | Type |
+| ------------------------ | ------------------------------------------------------------------------ | ---- |
+| (if condition then)      | Evaluates condition. If true, returns then, otherwise returns 0 Sentinel | Unit |
+| (if condition then! nil) | Evaluates condition. If true, do somethig, otherwise returns 0 Sentinel  | Unit |
+| (if condition then else) | Evaluates condition. If true, returns then, otherwise returns else       | T    |
+
+----------------------------
+
+Unless Expression
+
+| Construct | Executes When      | Example                                 | Behavior  |
+| --------- | ------------------ | --------------------------------------- | --------- |
+| if        | Condition is true  | (if (> x 10) (set out "big") nil)       | if x > 10 |
+| unless    | Condition is false | (unless (> x 10) (set out "small") nil) | if x ≤ 10 |
+
+----------------------------
+
+Cond Expression
+
+| Form                              | Description                                                                  | Type |
+| --------------------------------- | ---------------------------------------------------------------------------- | ---- |
+| (cond test expr)                  | If test is true, returns expr. Otherwise returns 0 Sentinel                  | Unit |
+| (cond test expr nil)              | If test is true, execute expr for effects, otherwise do nothing              | Unit |
+| (cond test1 expr1 ... testN exprN)| Evaluates tests in order and returns the first matching expression’s result  | T    |
+
+Notes:
+• cond evaluates clauses top-to-bottom.
+• The first condition that evaluates to true wins.
+• If no condition matches and no default is provided, cond returns 0 Sentinel.
+• When used for effects only, the result type is Unit.
+• When used as an expression, all result branches must unify to the same type.
+• 0 Sentinel represents “no meaningful value”
+• Used when an expression is evaluated only for effects
+• Has type Unit
+
+----------------------------
+
+Loops
+
+| Form                  | Purpose                         | Example                          | Notes                       |
+| --------------------- | ------------------------------- | -------------------------------- | --------------------------- |
+| (loop start end body) | Iterates over numeric range     | (loop 0 5 (lambda i (print i)))  | Like a traditional for loop |
+| (loop condition body) | Repeats while condition is true | (loop (< n 5) (lambda (do ...))) | Like a while loop           |
+
+Notes:
+• loop is typically used with mutation (set!, push!, pop!)
+• loop itself returns Unit
+
+----------------------------
+
+Scalars
+
+| Form                  | Type    | Description                                 |
+| --------------------- | ------- | ------------------------------------------- |
+| (integer name value)  | [Int]   | Declares a mutable integer variable.        |
+| (floating name value) | [Float] | Declares a mutable floating point variable. |
+| (boolean name value)  | [Bool]  | Declares a mutable boolean variable.        |
+| (variable name value) | [T]     | Declares a mutable variable of any type.    |
+
+Notes:
+• Scalars introduce explicit mutability
+• Mutations are local to the variable binding
+• set updates scalar contents, not bindings
+
+Pipe
+
+| Concept         | Explanation                                                               |
+| --------------- | ------------------------------------------------------------------------- |
+| Symbol          | |>                                                                        |
+| Type            | a -> (a -> b) -> b                                                        |
+| Meaning         | “Take a value, and feed it into the next function.”                       |
+| Associativity   | Left-to-right — expressions are evaluated from the left and passed along. |
+| Return Value    | The final expression’s result.                                            |
+| Syntactic Sugar | (|> value f g h) -> desugar -> (h (g (f value)))                          |
+
+----------------------------
+
+Lambda Functions
+
+| Concept                                                     | Description                                                                                                                    | Example                                   |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| Definition                                                  | A lambda defines an anonymous function (a function without a name). It’s created using the lambda keyword.                     | (lambda x (* x x))                        |
+| Syntax                                                      | (lambda arg1 arg2 ... body)                                                                                                    |                                           |
+| The parameters come first, followed by the body expression. | (lambda a b (+ a b))                                                                                                           |                                           | 
+| Body                                                        | The body is a single expression or a (do) block containing multiple expressions. The value of the last expression is returned. | (lambda x (do (let y 3) (* x y)))         |
+| Return Value                                                | Always the result of the last expression in the body.                                                                          | (lambda x (* x x)) => x²                  |
+| Type Signature                                              | Que Script infers types automatically. Example: (lambda x (* x x)) → Int -> Int                                                | (lambda a b (+ a b)) => Int -> Int -> Int |
+| Invocation                                                  | Call a lambda by wrapping it in parentheses with its arguments.                                                                | ((lambda x (* x x)) 4) => 16              |
+| As a Value                                                  | Lambdas are first-class values — they can be stored in variables, passed to functions, or returned (mostly).                   | (let square (lambda x (* x x)))           |
+| Also Known As                                               | Abstractions — functions defined directly without a name.                                                                      |                                           |
+
+----------------------------
+
+Mutation (!)
+
+| Operator | Description              | Return |
+| -------- | ------------------------ | ------ |
+| set!     | Mutate a variable        | Unit   |
+| push!    | Append to a vector       | Unit   |
+| pop!     | Remove last element      | Unit   |
+
+Notes:
+• Functions ending with ! perform mutation
+• They always return Unit
+
+----------------------------
+
+Type System Notes:
+• Hindley–Milner type inference
+• No any — all values are typed
+• Types are inferred globally, not locally
+• Type errors are reported with source locations
+
+----------------------------
