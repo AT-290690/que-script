@@ -1,4 +1,4 @@
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Types
 
@@ -15,7 +15,7 @@ Notes:
 • Unit represents the absence of a value (effects only)
 • [T] is a homogeneous vector — all elements share the same type
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Integers (Int)
 
@@ -33,7 +33,7 @@ Integers (Int)
 | >=       | Greater or equal | (>= 10 10) | true   |
 | <=       | Less or equal    | (<= 7 8)   | true   |
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Floating point numbers (Float)
 
@@ -50,7 +50,7 @@ Floating point numbers (Float)
 | >=.      | Greater or equal      | (>=. 10.123 10.123) | true       |
 | <=.      | Less or equal         | (<=. 3.14 4.20)     | true       |
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Integers / Floats
 
@@ -59,7 +59,7 @@ Notes:
 • Mixing Int and Float is a type error
 • Use floor / ceil to convert Float -> Int when needed
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 
 Booleans (Bool)
@@ -76,7 +76,7 @@ Notes:
 • Expressions are evaluated left-to-right
 • Side effects may not run if short-circuited
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Characters (Char)
 
@@ -92,7 +92,7 @@ Characters (Char)
 | <=# | Compare two chars       | (<=# 'a' 'a') | true   |
 | /#  | Quotient of two chars   | (/# 'a' ' ')  | ''     |
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 If Expression
 
@@ -102,7 +102,7 @@ If Expression
 | (if condition then! nil) | Evaluates condition. If true, do somethig, otherwise returns 0 Sentinel  | Unit |
 | (if condition then else) | Evaluates condition. If true, returns then, otherwise returns else       | T    |
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Unless Expression
 
@@ -111,7 +111,7 @@ Unless Expression
 | if        | Condition is true  | (if (> x 10) (set out "big") nil)       | if x > 10 |
 | unless    | Condition is false | (unless (> x 10) (set out "small") nil) | if x ≤ 10 |
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Cond Expression
 
@@ -131,7 +131,7 @@ Notes:
 • Used when an expression is evaluated only for effects
 • Has type Unit
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Loops
 
@@ -144,7 +144,7 @@ Notes:
 • loop is typically used with mutation (set!, push!, pop!)
 • loop itself returns Unit
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Scalars
 
@@ -160,6 +160,8 @@ Notes:
 • Mutations are local to the variable binding
 • set updates scalar contents, not bindings
 
+---------------------------------------------------------------------------------------------------------------------------
+
 Pipe
 
 | Concept         | Explanation                                                               |
@@ -171,7 +173,7 @@ Pipe
 | Return Value    | The final expression’s result.                                            |
 | Syntactic Sugar | (|> value f g h) -> desugar -> (h (g (f value)))                          |
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Lambda Functions
 
@@ -193,7 +195,7 @@ Notes
 • Types are inferred automatically
 • Tail-recursive lambdas may be optimized into loops
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Mutation (!)
 
@@ -207,7 +209,7 @@ Notes:
 • Functions ending with ! perform mutation
 • They always return Unit
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
 
 Type System Notes:
 • Hindley–Milner type inference
@@ -215,4 +217,4 @@ Type System Notes:
 • Types are inferred globally, not locally
 • Type errors are reported with source locations
 
-----------------------------
+---------------------------------------------------------------------------------------------------------------------------
