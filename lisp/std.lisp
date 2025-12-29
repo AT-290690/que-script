@@ -1013,12 +1013,25 @@ nil)))
 (let std/vector/tuple/hash/table/drop! (lambda table keys (loop 0 (length keys) (lambda i (std/vector/tuple/hash/table/remove! table (get keys i))))))
 (let std/vector/tuple/hash/table/keep (lambda table keys (do 
   (let t2 (std/vector/buckets 32))
-  (loop 0 (length keys) (lambda i (Table/set! t2 (get keys i) (fst (first (Table/get table (get keys i)))))))
+  (loop 0 (length keys) (lambda i (Table/set! t2 (get keys i) (fst (first (std/vector/tuple/hash/table/get table (get keys i)))))))
   t2)))
 (let std/vector/tuple/hash/table/omit (lambda table keys (do 
   (let t2 (std/vector/map table (lambda x (std/vector/map x identity))))
   (loop 0 (length keys) (lambda i (std/vector/tuple/hash/table/remove! t2 (get keys i))))
   t2)))
+
+(let std/vector/tuple/hash/table/merge! (lambda a b (do 
+  (let entries (std/vector/tuple/hash/table/entries b))
+  (for entries (lambda { key value } (std/vector/tuple/hash/table/set! a key value))))))
+
+(let std/vector/tuple/hash/table/merge (lambda a b (do 
+  (let A (std/vector/tuple/hash/table/entries a))
+  (let B (std/vector/tuple/hash/table/entries b))
+  (let out (std/vector/buckets 32))
+  (for A (lambda { key value } (std/vector/tuple/hash/table/set! out key value)))
+  (for B (lambda { key value } (std/vector/tuple/hash/table/set! out key value)))
+  out)))
+
 
 (let std/vector/sliding-window (lambda xs size (cond 
      (std/vector/empty? xs) []
@@ -1091,6 +1104,9 @@ nil)))
 (let std/convert/chars->float (lambda xs 
   (if (=# (get xs 0) std/char/minus) (*. (std/convert/chars->ufloat (std/vector/slice xs 1 (length xs))) -1.0) (std/convert/chars->ufloat xs))))
 
+(let std/convert/int->char/alphabet 
+  (lambda x offset (Int->Char (+ x (Char->Int offset)))))
+
 (let std/vector/unique-pairs (lambda xs (do 
     (let pairs [])
     (let len (length xs))
@@ -1102,7 +1118,6 @@ nil)))
             (++ j))))
         (++ i))))
     pairs)))
-
 
 (let std/vector/int/unique (lambda xs 
     (if (= (length xs) 0) 
@@ -1868,6 +1883,7 @@ q)))
 (let std/tuple/map (lambda { a b } fn (fn a b)))
 (let std/tuple/map/fst (lambda { a . } fn (fn a)))
 (let std/tuple/map/snd (lambda { . b } fn (fn b)))
+(let std/tuple/swap (lambda { a b } { b a }))
 
 (let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
 (let std/vector/get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
@@ -1991,7 +2007,27 @@ q)))
 (let \map/snd (lambda fn xs (std/tuple/map/snd xs fn)))
 (let \partition (lambda n xs (std/vector/partition xs n)))
 
+(let Tuple/swap std/tuple/swap)
+(let Tuple/map/fst std/tuple/map/fst)
+(let Tuple/map/snd std/tuple/map/snd)
+(let Tuple/map std/tuple/map)
+(let Tuple/map/fst std/tuple/map/fst)
+(let Tuple/map/snd std/tuple/map/snd)
 
+(let \Tuple/map/fst (lambda fn xs (std/tuple/map/fst xs fn)))
+(let \Tuple/map/snd (lambda fn xs (std/tuple/map/snd xs fn)))
+(let /Tuple/map/fst (lambda fn xs (std/tuple/map/fst xs fn)))
+(let /Tuple/map/snd (lambda fn xs (std/tuple/map/snd xs fn)))
+
+(let /Tuple/map std/tuple/map)
+(let \Tuple/map (lambda fn xs (std/tuple/map xs fn)))
+
+(let Int->Alphabet std/convert/int->char/alphabet)
+(let /Int->Alphabet std/convert/int->char/alphabet)
+(let \Int->Alphabet (lambda offset x (std/convert/int->char/alphabet x offset)))
+
+(let /String->Vector std/convert/string->vector)
+(let /Vector->String std/convert/vector->string)
 (let \String->Vector (lambda ch x (std/convert/string->vector x ch)))
 (let \Vector->String (lambda ch x (std/convert/vector->string x ch)))
 
@@ -2199,6 +2235,7 @@ q)))
 (let Set/values std/vector/flat-one)
 
 (let Table/get std/vector/tuple/hash/table/get)
+(let Table/get* (lambda table key (if (std/vector/tuple/hash/table/has? table key) { true [(snd (get (std/vector/tuple/hash/table/get table key)))] } { false [] })))
 
 (let Table/has? std/vector/tuple/hash/table/has?)
 (let Table/set! (lambda table key value (do (std/vector/tuple/hash/table/set! table key value) nil)))
@@ -2208,6 +2245,9 @@ q)))
 (let Table/drop! std/vector/tuple/hash/table/drop!)
 (let Table/keep std/vector/tuple/hash/table/keep)
 (let Table/omit std/vector/tuple/hash/table/omit)
+
+(let Table/merge! std/vector/tuple/hash/table/merge!)
+(let Table/merge std/vector/tuple/hash/table/merge)
 
 (let in-bounds? std/vector/in-bounds?)
 
