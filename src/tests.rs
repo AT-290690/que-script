@@ -979,9 +979,60 @@ out
                                 [ 0 0 1 ])
     (std/fn/apply/1 (lambda [ y x . ] (+ (std/int/abs y) (std/int/abs x)))))))
 
-(|> ["R2, L3"  "R2, R2, R2" "R5, L5, R5, R3"] (std/vector/map parse) (std/vector/map part1))
+; Then, you notice the instructions continue on the back of the Recruiting Document. Easter Bunny HQ is actually at the first location you visit twice.
+; For example, if your instructions are R8, R4, R4, R8, the first location you visit twice is 4 blocks away, due East.
+; How many blocks away is the first location you visit twice?
+(let turn
+  (lambda facing D
+    (mod (+ facing (if (=# (Int->Char D) std/char/R) 1 3)) 4)))
+(let step
+  (lambda y x facing
+    (cond
+      (= facing 0) [(+ y 1) x]
+      (= facing 1) [y (+ x 1)]
+      (= facing 2) [(- y 1) x]
+      (= facing 3) [y (- x 1)]
+      [])))
+(let point->key
+  (lambda y x
+    (cons (Integer->String y) "," (Integer->String x))))
+(let part2
+  (lambda input
+    (do
+      (integer y 0)
+      (integer x 0)
+      (integer facing 0) ; North
 
-"#, "[5 2 12]"),
+      (let visited (buckets 128))
+      (Table/set! visited (point->key (get y) (get x)) true)
+
+      (integer result 0)
+
+      (for input
+        (lambda [ D M . ]
+          (if (= (get result) 0)
+              (do
+                (set facing (turn (get facing) D))
+                (loop 0 M
+                  (lambda .
+                    (if (= (get result) 0)
+                        (do
+                          (let p (step (get y) (get x) (get facing)))
+                          (set y (get p 0))
+                          (set x (get p 1))
+
+                          (let key (point->key (get y) (get x)))
+                          (if (Table/has? visited key)
+                              (set result (+ (std/int/abs (get y))
+                                             (std/int/abs (get x))))
+                              (Table/set! visited key true))))))))))
+
+      (get result))))
+
+{
+  (|> ["R2, L3"  "R2, R2, R2" "R5, L5, R5, R3"] (std/vector/map parse) (std/vector/map part1))
+  (part2 (parse "R8, R4, R4, R8"))
+}"#, "[[5 2 12] 4]"),
 
         (r#"(let INPUT
 "7 6 4 2 1
