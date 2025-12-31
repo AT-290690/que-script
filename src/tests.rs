@@ -1578,24 +1578,71 @@ L82")
   (let dist [])
   (loop 0 len (lambda i (do 
     (loop i len (lambda j (if (<> i j) 
-      (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) }))))
-  )))
-(let edges (map (sort! dist (lambda { . d1 } { . d2 } (< d1 d2))) fst))
-(let parent (range 0 (- (length input) 1)))
-(let~ root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
-(let merge (lambda a b (set! parent (root a) (root b))))
-(for (take/first edges 10) (lambda [ a b .] (merge a b)))
-(|> 
-  (range 0 (- (length input) 1))
-  (reduce (lambda a b (do 
-    (let i (root b))
-    (set! a i (+ (get a i) 1))
-    a)) 
-  (zeroes (length input)))
-  (sort! >)
-  (take/first 3)
-  (product)))))
-[(part1 (parse INPUT))]"#, "[40]"),
+      (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) })))))))
+  (let edges (map (sort! dist (lambda { . d1 } { . d2 } (< d1 d2))) fst))
+  (let parent (range 0 (- (length input) 1)))
+  (let~ root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
+  (let merge (lambda a b (set! parent (root a) (root b))))
+  (for (take/first edges 10) (lambda [ a b .] (merge a b)))
+  (|> 
+    (range 0 (- (length input) 1))
+    (reduce (lambda a b (do 
+      (let i (root b))
+      (set! a i (+ (get a i) 1))
+      a)) 
+    (zeroes (length input)))
+    (sort! >)
+    (take/first 3)
+    (product)))))
+
+(let part2 (lambda input (do
+  (let len (length input))
+  (let dist [])
+  
+  ; compute all pairwise distances
+  (loop 0 len (lambda i
+    (loop (+ i 1) len (lambda j
+      (push! dist { [i j] (distance/3d (get input i) (get input j)) })))))
+
+  ; sort edges by distance
+  (let edges (map (sort! dist (lambda { . d1 } { . d2 } (< d1 d2))) fst))
+
+  ; initialize union-find
+  (let parent (range 0 len))
+  (let size (map (range 0 len) (lambda i 1)))
+  (integer components len)
+
+  ; root with path compression
+  (let* root (lambda i
+      (if (= (get parent i) i) i
+          (do
+            (set! parent i (root (get parent i)))
+            (get parent i)))))
+
+  ; merge with size tracking
+  (let merge (lambda a b (do
+        (let ra (root a))
+        (let rb (root b))
+        (if (<> ra rb) (do
+              (if (< (get size ra) (get size rb))
+                  (do
+                    (set! parent ra rb)
+                    (set! size rb (+ (get size rb) (get size ra))))
+                  (do
+                    (set! parent rb ra)
+                    (set! size ra (+ (get size ra) (get size rb)))))
+              (-- components)
+              true)
+            false))))
+
+  ; walk edges until all connected
+  (integer answer 0)
+  (for edges (lambda [ a b . ]
+      (if (and (= (get answer) 0) (merge a b) (= (get components) 1))
+                (set answer (* (get (get input a) 0) (get (get input b) 0))))))
+  (get answer))))
+
+[(part1 (parse INPUT)) (part2 (parse INPUT))]"#, "[40 25272]"),
 (r#"(let INPUT "7,1
 11,1
 11,7
@@ -2139,7 +2186,9 @@ r#"
           (Table/values) 
           (count (lambda n (>= n 2))))))) 
 
-(part1 INPUT)"#, "4")
+(part1 INPUT)"#, "4"),
+(r#"(let solve (lambda xs (|> xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
+(solve [ 3 1 7 9 5 ])"#, "true")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

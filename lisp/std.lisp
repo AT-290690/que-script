@@ -594,6 +594,16 @@
         (set frac (/. (get frac) 2.))
         (set i (+. (get i) 1.)))))
     (get res))))
+
+
+(let std/int/delta (lambda a b (std/int/abs (- a b))))
+(let std/float/delta (lambda a b (std/float/abs (-. a b))))
+
+(let std/vector/map/adjacent (lambda xs cb (if (std/vector/empty? xs) [] (do 
+  (do 
+    (let out [])
+    (loop 1 (length xs) (lambda i (std/vector/push! out (cb (get xs (- i 1)) (get xs i)))))
+    out)))))
 ; 2d Vectors
 (let std/vector/2d/int/set! (lambda vec [ x y . ] (do (set! vec 0 x) (set! vec 1 y) nil)))
 (let std/vector/2d/int/add (lambda [ x1 y1 . ] [ x2 y2 . ] [ (+ x1 x2) (+ y1 y2) ]))
@@ -1878,7 +1888,15 @@ q)))
 
 
 (let std/convert/vector/3d->string (lambda xs a b (std/convert/vector->string (std/vector/map xs (lambda x (std/convert/vector->string x b))) a)))
-
+(let std/vector/cycle (lambda n xs (do 
+  (let out [])
+  (let len (length xs))
+  (loop 0 n (lambda i (std/vector/push! out (get xs (mod i len)))))
+  out)))
+(let std/vector/replicate (lambda n x (do 
+  (let out [])
+  (loop 0 n (lambda . (std/vector/push! out x)))
+  out)))
 (let std/vector/int/extreme (lambda xs { (std/vector/int/minimum xs) (std/vector/int/maximum xs) }))
 (let std/tuple/map (lambda { a b } fn (fn a b)))
 (let std/tuple/map/fst (lambda { a . } fn (fn a)))
@@ -2167,10 +2185,19 @@ q)))
 (let swap! std/vector/swap!)
 (let scan std/vector/adjacent-difference)
 (let scan! std/vector/adjacent-difference!)
-
+(let cycle std/vector/cycle)
+(let replicate std/vector/replicate)
 (let cartesian-product std/vector/cartesian-product)
 (let lcm std/int/lcm)
 (let gcd std/int/gcd)
+
+(let delta std/int/delta)
+(let delta/int std/int/delta)
+(let delta/float std/float/delta)
+
+(let map/adjacent std/vector/map/adjacent)
+(let /map/adjacent std/vector/map/adjacent)
+(let \map/adjacent (lambda cb xs (std/vector/map/adjacent xs cb)))
 
 (let buckets std/vector/buckets)
 
