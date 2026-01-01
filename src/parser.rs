@@ -2079,7 +2079,7 @@ fn transform_tail_positions(
                         ]);
                         sets.push(set_new_call);
                     }
-                    for (_, p) in params.iter().enumerate() {
+                    for p in params.iter() {
                         let set_call = Expression::Apply(vec![
                             Expression::Word("set!".to_string()),
                             Expression::Word("_".to_string() + p),

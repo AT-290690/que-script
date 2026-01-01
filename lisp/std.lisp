@@ -294,6 +294,63 @@
      (loop 1 (length xs) process)
      out))))
 
+(let std/vector/reduce/until (lambda xs fn fn? initial (do 
+  (variable out initial)
+  (boolean placed false)
+  (integer i 0)
+  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
+    (let x (get xs (get i)))
+    (let a (get out 0))
+    (unless (fn? a x) (set out (fn a x)) (set placed true))
+    (++ i))))
+(get out))))
+
+(let std/vector/reduce/until/i (lambda xs fn fn? initial (do 
+  (variable out initial)
+  (boolean placed false)
+  (integer i 0)
+  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
+    (let idx (get i))
+    (let x (get xs idx))
+    (let a (get out 0))
+    (unless (fn? a x idx) (set out (fn a x idx)) (set placed true))
+    (++ i))))
+(get out))))
+
+(let std/vector/each/until (lambda xs fn fn? (do 
+  (boolean placed false)
+  (integer i 0)
+  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
+    (let x (get xs (get i)))
+    (unless (fn? x) (do (fn x) nil) (set placed true)) (++ i)))))))
+
+(let std/vector/each/until/i (lambda xs fn fn? (do 
+  (boolean placed false)
+  (integer i 0)
+  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do
+    (let idx (get i))
+    (let x (get xs idx))
+    (unless (fn? x idx) (do (fn x idx) nil) (set placed true)) (++ i)))))))
+
+(let std/vector/map/until (lambda xs fn fn? (do
+  (let out [])
+  (boolean placed false)
+  (integer i 0)
+  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
+    (let x (get xs (get i)))
+    (unless (fn? x) (do (push! out (fn x)) nil) (set placed true)) (++ i))))
+  out)))
+
+(let std/vector/map/until/i (lambda xs fn fn? (do
+  (let out [])
+  (boolean placed false)
+  (integer i 0)
+  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do
+    (let idx (get i))
+    (let x (get xs idx))
+    (unless (fn? x idx) (do (push! out (fn x idx)) nil) (set placed true)) (++ i))))
+  out)))
+
 (let std/vector/int/range (lambda start end (do
      (let out [ start ])
      (let process (lambda i (std/vector/set! out (length out) i)))
@@ -2102,6 +2159,12 @@ q)))
 (let one/float? std/float/one?)
 (let zero/float? std/float/zero?)
 
+(let map/until std/vector/map/until)
+(let map/until/i std/vector/map/until/i)
+(let reduce/until std/vector/reduce/until)
+(let reduce/until/i std/vector/reduce/until/i)
+(let each/until std/vector/each/until)
+(let each/until/i std/vector/each/until/i)
 
 (let map/i std/vector/map/i)
 (let reduce/i std/vector/reduce/i)

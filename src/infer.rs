@@ -1033,7 +1033,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
                 vec![e.var_id().unwrap()],
                 Type::Function(
                     Box::new(Type::Bool),
-                    Box::new(Type::Function(Box::new(e.clone()), Box::new(Type::Int))),
+                    Box::new(Type::Function(Box::new(e.clone()), Box::new(Type::Unit))),
                 ),
             ),
         );
