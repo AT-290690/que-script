@@ -15,12 +15,11 @@ fn run_code(program: String) -> String {
         match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => {
                 match crate::infer::infer_with_builtins(&wrapped_ast, crate::infer::create_builtin_environment(crate::types::TypeEnv::new())) {
-                    Ok(typ) => {
-                        return match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
+                    Ok(typ) =>
+                         match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
                             Ok(res) => return format!("{}\n{:?}", typ, res),
                             Err(err) => return err,
                         }
-                    }
                     Err(err) => return err,
                 }
             }

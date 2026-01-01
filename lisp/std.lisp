@@ -2040,6 +2040,12 @@ q)))
 
 (let std/vector/option/resolve (lambda xs fn df 
   (if (std/vector/every? xs fst) { true (fn (std/vector/map xs snd)) } { false df })))
+(let std/fn/exec (lambda xs fn (fn xs)))
+(let std/convert/vector->tuple (lambda xs fn1 fn2 { (fn1 xs) (fn2 xs) }))
+(let std/tuple/int/add (lambda { a b } (+ a b)))
+(let std/tuple/int/sub (lambda { a b } (- a b)))
+(let std/tuple/int/mul (lambda { a b } (* a b)))
+(let std/tuple/int/div (lambda { a b } (* a b)))
 
 (let loop/some-range? (lambda start end predicate? (do 
   (let~ tail-call/loop/some-range? (lambda i out
@@ -2098,6 +2104,13 @@ q)))
 
 (let /Tuple/map std/tuple/map)
 (let \Tuple/map (lambda fn xs (std/tuple/map xs fn)))
+
+(let Vector->Tuple std/convert/vector->tuple)
+(let \Vector->Tuple (lambda fn2 fn1 xs (std/convert/vector->tuple xs fn1 fn2)))
+(let Tuple/int/add std/tuple/int/add)
+(let Tuple/int/sub std/tuple/int/sub)
+(let Tuple/int/mul std/tuple/int/mul)
+(let Tuple/int/div std/tuple/int/div)
 
 (let Int->Alphabet std/convert/int->char/alphabet)
 (let /Int->Alphabet std/convert/int->char/alphabet)
@@ -2390,6 +2403,12 @@ q)))
 (let true/option std/true/option)
 (let false/option std/false/option)
 (let resolve/option std/vector/option/resolve)
+
+(let call std/fn/exec)
+(let \call (lambda fn xs (std/fn/exec xs fn)))
+
+(let \drop/last (lambda n xs (std/vector/drop/last xs n)))
+(let \drop/first (lambda n xs (std/vector/drop xs n)))
 
 (let copy std/vector/copy)
 (let sort (lambda xs fn (std/vector/sort! (std/vector/copy xs) fn)))
