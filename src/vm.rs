@@ -1,6 +1,6 @@
 use crate::parser::Expression;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::{Rc, Weak};
 #[derive(Clone)]
@@ -646,15 +646,15 @@ impl VM {
                 }
                 Instruction::BitNot => {
                     let a = self.stack.pop().ok_or("stack underflow")?;
-                    match (a) {
-                        (BiteCodeEvaluated::Int(a)) => self.stack.push(BiteCodeEvaluated::Int(!a)),
+                    match a {
+                        BiteCodeEvaluated::Int(a) => self.stack.push(BiteCodeEvaluated::Int(!a)),
                         _ => return Err("Error! Arguments must be a number at (~)".to_string()),
                     }
                 }
                 Instruction::IntToFloat => {
                     let a = self.stack.pop().ok_or("stack underflow")?;
-                    match (a) {
-                        (BiteCodeEvaluated::Int(a)) => {
+                    match a {
+                        BiteCodeEvaluated::Int(a) => {
                             self.stack.push(BiteCodeEvaluated::Float(a as f32))
                         }
                         _ => {
@@ -666,8 +666,8 @@ impl VM {
                 }
                 Instruction::FloatToInt => {
                     let a = self.stack.pop().ok_or("stack underflow")?;
-                    match (a) {
-                        (BiteCodeEvaluated::Float(a)) => {
+                    match a {
+                        BiteCodeEvaluated::Float(a) => {
                             self.stack.push(BiteCodeEvaluated::Int(a as i32))
                         }
                         _ => {
@@ -797,10 +797,8 @@ impl VM {
                 }
                 Instruction::Not => {
                     let a = self.stack.pop().ok_or("stack underflow")?;
-                    match (a) {
-                        (BiteCodeEvaluated::Bool(a)) => {
-                            self.stack.push(BiteCodeEvaluated::Bool(!a))
-                        }
+                    match a {
+                        BiteCodeEvaluated::Bool(a) => self.stack.push(BiteCodeEvaluated::Bool(!a)),
                         _ => return Err("Error! Argument must be a number at (not)".to_string()),
                     }
                 }
@@ -1035,7 +1033,6 @@ impl VM {
                         locals: captured_env.clone(),
                         call_depth: 0,
                     };
-                    let mut loop_count = 0;
 
                     loop {
                         cond_vm.stack.clear();
@@ -1992,22 +1989,15 @@ pub fn exe(code: Vec<Instruction>) -> Result<BiteCodeEvaluated, String> {
     return Ok(vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone());
 }
 
-use std::str::Chars;
-
 #[derive(Debug)]
 struct P<'a> {
     s: &'a str,
-    chars: Chars<'a>,
     i: usize, // byte index
 }
 
 impl<'a> P<'a> {
     fn new(s: &'a str) -> Self {
-        Self {
-            s,
-            chars: s.chars(),
-            i: 0,
-        }
+        Self { s, i: 0 }
     }
 
     fn peek(&self) -> Option<char> {
@@ -2088,7 +2078,7 @@ impl<'a> P<'a> {
 
     fn parse_number(&mut self) -> Result<i32, String> {
         self.skip_ws();
-        let mut start = self.i;
+        let start = self.i;
         if self.peek() == Some('-') {
             self.next_char();
         }

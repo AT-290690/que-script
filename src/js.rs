@@ -44,7 +44,6 @@ fn ident(name: &str, idx: usize) -> String {
         "/=" => "__div_by".to_string(),
         "**" => "__exp".to_string(),
         "=!" => "__set".to_string(),
-        "=!" => "__set".to_string(),
         "true" => "true".to_string(),
         "false" => "false".to_string(),
         "null" => "__null".to_string(),
@@ -54,7 +53,7 @@ fn ident(name: &str, idx: usize) -> String {
             let mut s = String::new();
             for c in name.chars() {
                 match c {
-                    // TODO: figure out a better solution for this 
+                    // TODO: figure out a better solution for this
                     // We are passing idx so we can know the position of the parameter (if a paramater of a function)
                     // This is only used for the case where we omit paramaters with "." that becomes "_" in JS
                     // However JS doesn't like having more than one "_" with the same name, causing an error:
@@ -349,7 +348,7 @@ pub fn compile_program_to_js(top: &Expression) -> String {
         match expr {
             Expression::Apply(items) if !items.is_empty() => {
                 if let Expression::Word(w) = &items[0] {
-                    if (w == "do") {
+                    if w == "do" {
                         // compile each sub-expression as a statement; last one as returned expression
                         let mut stmts = Vec::new();
                         for (i, e) in items[1..].iter().enumerate() {

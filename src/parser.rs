@@ -1,8 +1,4 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
-
-use wasm_bindgen::UnwrapThrowExt;
 
 fn collect_idents(expr: &Expression, acc: &mut HashSet<String>) {
     match expr {
@@ -441,7 +437,6 @@ fn preprocess(source: &str) -> Result<String, String> {
                 out.push_str("tuple ");
             }
             '}' => out.push(')'),
-            ']' => out.push(')'),
             '"' => {
                 let mut s = String::new();
                 while let Some(&next) = chars.peek() {
@@ -472,11 +467,11 @@ fn preprocess(source: &str) -> Result<String, String> {
                         s.push(next);
                     }
                 }
-                if (s.len() != 1) {
+                if s.len() != 1 {
                     return Err(format!("Error! Char should be of length 1"));
                 }
                 out.push_str("(char ");
-                for (c) in s.chars() {
+                for c in s.chars() {
                     out.push_str(&(c as u32).to_string());
                     break;
                 }
@@ -626,7 +621,7 @@ fn destructure_pattern(
                         value_expr,
                     ]));
 
-                    let (fst_bindings, fst_expr) = destructure_pattern(
+                    let (fst_bindings, _fst_expr) = destructure_pattern(
                         &elements[0],
                         Expression::Apply(vec![
                             Expression::Word("fst".to_string()),
@@ -863,7 +858,7 @@ fn destructure_vector_pattern(
     }
 }
 
-fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+fn lambda_destructure_transform(exprs: Vec<Expression>) -> Result<Expression, String> {
     // Check if valid body
     if exprs.len() < 2 {
         return Err("Error! lambda expects at least a body".to_string());
@@ -879,7 +874,7 @@ fn lambda_destructure_transform(mut exprs: Vec<Expression>) -> Result<Expression
     for (j, arg) in args.iter().enumerate() {
         match arg {
             Expression::Apply(array_exprs) => {
-                if let [Expression::Word(ref array_kw), ref elements @ ..] = &array_exprs[..] {
+                if let [Expression::Word(ref array_kw), ref _elements @ ..] = &array_exprs[..] {
                     match array_kw.as_str() {
                         "vector" => {
                             // Vector destructuring pattern
@@ -1524,25 +1519,25 @@ fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
     inp
 }
 
-fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
-    let mut inp = exprs.remove(1);
+// fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
+//     let mut inp = exprs.remove(1);
 
-    for stage in exprs.into_iter().skip(1) {
-        if let Expression::Apply(mut inner) = stage {
-            if inner.is_empty() {
-                continue;
-            }
-            let func = inner.remove(0);
-            let mut new_stage = vec![func, inp];
-            new_stage.extend(inner);
-            inp = Expression::Apply(new_stage);
-        } else {
-            inp = Expression::Apply(vec![stage, inp]);
-        }
-    }
+//     for stage in exprs.into_iter().skip(1) {
+//         if let Expression::Apply(mut inner) = stage {
+//             if inner.is_empty() {
+//                 continue;
+//             }
+//             let func = inner.remove(0);
+//             let mut new_stage = vec![func, inp];
+//             new_stage.extend(inner);
+//             inp = Expression::Apply(new_stage);
+//         } else {
+//             inp = Expression::Apply(vec![stage, inp]);
+//         }
+//     }
 
-    inp
-}
+//     inp
+// }
 
 fn is_float(s: &str) -> bool {
     if s == "-" || s == "+" {
@@ -1608,6 +1603,7 @@ fn is_integer(s: &str) -> bool {
     }
     true
 }
+#[allow(unused_macros)]
 macro_rules! s {
     ($s:expr) => {
         $s.to_string()
@@ -2000,39 +1996,39 @@ fn contains_tail_call_to(expr: &Expression, fn_name: &str) -> bool {
 // not just in tail position.
 // This performs a full traversal of the expression tree and returns true
 // if there is any (fn_name ...) application anywhere within expr.
-fn contains_recursive_call(expr: &Expression, fn_name: &str) -> bool {
-    match expr {
-        Expression::Word(w) => {
-            // standalone name reference is NOT a recursive call on its own
-            // only (fn_name ...) counts
-            w == fn_name
-        }
+// fn contains_recursive_call(expr: &Expression, fn_name: &str) -> bool {
+//     match expr {
+//         Expression::Word(w) => {
+//             // standalone name reference is NOT a recursive call on its own
+//             // only (fn_name ...) counts
+//             w == fn_name
+//         }
 
-        Expression::Apply(items) => {
-            if items.is_empty() {
-                return false;
-            }
+//         Expression::Apply(items) => {
+//             if items.is_empty() {
+//                 return false;
+//             }
 
-            // if the operator is the function name => recursive call
-            if let Expression::Word(op) = &items[0] {
-                if op == fn_name {
-                    return true;
-                }
-            }
+//             // if the operator is the function name => recursive call
+//             if let Expression::Word(op) = &items[0] {
+//                 if op == fn_name {
+//                     return true;
+//                 }
+//             }
 
-            // otherwise: recursively scan all arguments
-            for item in items {
-                if contains_recursive_call(item, fn_name) {
-                    return true;
-                }
-            }
+//             // otherwise: recursively scan all arguments
+//             for item in items {
+//                 if contains_recursive_call(item, fn_name) {
+//                     return true;
+//                 }
+//             }
 
-            false
-        }
+//             false
+//         }
 
-        Expression::Int(_) | Expression::Float(_) => false,
-    }
-}
+//         Expression::Int(_) | Expression::Float(_) => false,
+//     }
+// }
 
 /// Transform expressions recursively, rewriting only tail-position subexpressions:
 /// - tail call (fn_name arg1 arg2 ...) -> (do (set! p1 0 arg1) ... )  (then returns, ending lambda iteration)
@@ -2083,9 +2079,7 @@ fn transform_tail_positions(
                         ]);
                         sets.push(set_new_call);
                     }
-                    for (i, p) in params.iter().enumerate() {
-                        let arg = items.get(1 + i).cloned().unwrap_or(Expression::Int(0));
-                        let arg_replaced = replace_param_reads(&arg, params);
+                    for (_, p) in params.iter().enumerate() {
                         let set_call = Expression::Apply(vec![
                             Expression::Word("set!".to_string()),
                             Expression::Word("_".to_string() + p),

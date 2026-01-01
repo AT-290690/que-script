@@ -1,8 +1,6 @@
 use crate::parser::Expression;
-use crate::types::{generalize, Substitution, Type, TypeEnv, TypeScheme, TypeVar};
-use std::any::{Any, TypeId};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt;
+use crate::types::{generalize, Type, TypeEnv, TypeScheme, TypeVar};
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug)]
 pub enum TypeErrorVariant {
@@ -393,9 +391,6 @@ fn is_nonexpansive(expr: &Expression) -> bool {
     }
 }
 
-/// A constraint is "t1 == t2" with optional source info (kept simple here).
-pub type Constraint = (Type, Type);
-
 /// Unifier: mutable map from type variable id -> Type (the binding).
 #[derive(Debug, Default)]
 pub struct Unifier {
@@ -479,42 +474,6 @@ impl Unifier {
         }
         self.binds.insert(var_id, ty);
         Ok(())
-    }
-
-    // Unify two already-applied types
-    fn unify_applied(&mut self, a: Type, b: Type) -> Result<(), String> {
-        match (a, b) {
-            (Type::Var(v), ty) | (ty, Type::Var(v)) => self.bind_var(v.id, ty),
-            (Type::Int, Type::Int)
-            | (Type::Bool, Type::Bool)
-            | (Type::Char, Type::Char)
-            | (Type::Unit, Type::Unit) => Ok(()),
-            (Type::List(ai), Type::List(bi)) => self.unify_applied(*ai, *bi),
-            (Type::Tuple(a_items), Type::Tuple(b_items)) => {
-                if a_items.len() != b_items.len() {
-                    return Err(format!(
-                        "Cannot unify tuples with different arity: {:?} vs {:?}",
-                        a_items, b_items
-                    ));
-                }
-                for (ai, bi) in a_items.into_iter().zip(b_items.into_iter()) {
-                    self.unify_one(ai, bi)?;
-                }
-                Ok(())
-            }
-            (Type::Function(a1, a2), Type::Function(b1, b2)) => {
-                self.unify_applied(*a1, *b1)?;
-                self.unify_applied(*a2, *b2)
-            }
-            (x, y) => Err(format!("Cannot unify {} with {}", x, y)),
-        }
-    }
-
-    // Public unify entry (applies current binds before unifying)
-    pub fn unify_one(&mut self, t1: Type, t2: Type) -> Result<(), String> {
-        let a = self.apply(&t1);
-        let b = self.apply(&t2);
-        self.unify_applied(a, b)
     }
 
     // Turn the internal binds into a fully-applied substitution map
@@ -647,7 +606,7 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         ctx.env.apply_substitution_map(&subst_map);
 
         // generalize only if nonexpansive
-        let scheme = if is_nonexpansive(value_expr) {
+        if is_nonexpansive(value_expr) {
             generalize(&ctx.env, solved_type)
         } else {
             return Err(
@@ -969,7 +928,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     };
     {
         let a: Type = fresh_var();
-        env.insert(
+        let _ = env.insert(
             "set!".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
@@ -985,7 +944,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     }
     {
         let a: Type = fresh_var();
-        env.insert(
+        let _ = env.insert(
             "pop!".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
@@ -995,7 +954,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     }
     {
         let a = fresh_var();
-        env.insert(
+        let _ = env.insert(
             "length".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
@@ -1005,7 +964,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     }
     {
         let a: Type = fresh_var();
-        env.insert(
+        let _ = env.insert(
             "get".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
@@ -1019,7 +978,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     {
         let a = fresh_var();
         let b = fresh_var();
-        env.insert(
+        let _ = env.insert(
             "fst".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap(), b.var_id().unwrap()],
@@ -1034,7 +993,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     {
         let a = fresh_var();
         let b = fresh_var();
-        env.insert(
+        let _ = env.insert(
             "snd".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap(), b.var_id().unwrap()],
@@ -1048,7 +1007,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     {
         let e = fresh_var();
 
-        env.insert(
+        let _ = env.insert(
             "loop".to_string(),
             TypeScheme::new(
                 vec![e.var_id().unwrap()],
@@ -1068,7 +1027,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     {
         let e = fresh_var();
 
-        env.insert(
+        let _ = env.insert(
             "loop-finish".to_string(),
             TypeScheme::new(
                 vec![e.var_id().unwrap()],
@@ -1079,21 +1038,21 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
             ),
         );
     }
-    env.insert(
+    let _ = env.insert(
         "+".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
         )),
     );
-    env.insert(
+    let _ = env.insert(
         "+.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
             Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
         )),
     );
-    env.insert(
+    let _ = env.insert(
         "+#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1101,7 +1060,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "-".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1109,7 +1068,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "-.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1117,7 +1076,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "-#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1125,7 +1084,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "*".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1133,7 +1092,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "*.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1141,7 +1100,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "*#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1149,7 +1108,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "/".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1157,7 +1116,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "/.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1165,28 +1124,28 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "/#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
             Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
         )),
     );
-    env.insert(
+    let _ = env.insert(
         "/.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
         )),
     );
-    env.insert(
+    let _ = env.insert(
         "mod".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
         )),
     );
-    env.insert(
+    let _ = env.insert(
         "mod.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1195,7 +1154,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     // Comparison operations
-    env.insert(
+    let _ = env.insert(
         "=".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1203,7 +1162,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "=.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1211,7 +1170,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         ">.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1219,7 +1178,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "<.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1227,7 +1186,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         ">=.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1235,7 +1194,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "<=.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Float),
@@ -1243,10 +1202,10 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert("true".to_string(), TypeScheme::monotype(Type::Bool));
-    env.insert("false".to_string(), TypeScheme::monotype(Type::Bool));
+    let _ = env.insert("true".to_string(), TypeScheme::monotype(Type::Bool));
+    let _ = env.insert("false".to_string(), TypeScheme::monotype(Type::Bool));
 
-    env.insert(
+    let _ = env.insert(
         "=?".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Bool),
@@ -1254,7 +1213,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "=#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1262,7 +1221,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "<".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1270,7 +1229,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "<#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1278,7 +1237,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         ">".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1286,7 +1245,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         ">#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1294,7 +1253,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "<=".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1302,7 +1261,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "<=#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1310,7 +1269,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         ">=".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1318,7 +1277,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         ">=#".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Char),
@@ -1327,7 +1286,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     );
 
     // Logical operations
-    env.insert(
+    let _ = env.insert(
         "and".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Bool),
@@ -1335,7 +1294,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "or".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Bool),
@@ -1343,13 +1302,13 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "not".to_string(),
         TypeScheme::monotype(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
     );
 
     // Bitwise operations
-    env.insert(
+    let _ = env.insert(
         "&".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1357,7 +1316,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "|".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1365,7 +1324,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "^".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1373,7 +1332,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         ">>".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1381,7 +1340,7 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "<<".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
@@ -1389,17 +1348,17 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
         )),
     );
 
-    env.insert(
+    let _ = env.insert(
         "Int->Float".to_string(),
         TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Float))),
     );
 
-    env.insert(
+    let _ = env.insert(
         "Float->Int".to_string(),
         TypeScheme::monotype(Type::Function(Box::new(Type::Float), Box::new(Type::Int))),
     );
 
-    env.insert(
+    let _ = env.insert(
         "~".to_string(),
         TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
     );

@@ -67,30 +67,12 @@ pub struct TypeScheme {
 }
 
 impl TypeScheme {
-    pub fn substitute(&self, subst: &HashMap<u64, Type>) -> TypeScheme {
-        // Only substitute variables not bound by the scheme
-        let bound_vars: std::collections::HashSet<_> = self.vars.iter().collect();
-        let filtered_subst: HashMap<u64, Type> = subst
-            .iter()
-            .filter(|(var, _)| !bound_vars.contains(var))
-            .map(|(k, v)| (*k, v.clone()))
-            .collect();
-
-        TypeScheme::new(self.vars.clone(), self.typ.substitute(&filtered_subst))
-    }
-
     pub fn new(vars: Vec<u64>, typ: Type) -> Self {
         TypeScheme { vars, typ }
     }
 
     pub fn monotype(typ: Type) -> Self {
         TypeScheme::new(vec![], typ)
-    }
-
-    pub fn apply(&self, sub: &Substitution) -> TypeScheme {
-        // filter out mappings for bound vars
-        let filtered = sub.without(&self.vars);
-        TypeScheme::new(self.vars.clone(), filtered.apply(&self.typ))
     }
 
     pub fn free_vars(&self) -> std::collections::HashSet<u64> {
@@ -162,86 +144,12 @@ impl TypeEnv {
             .collect()
     }
 
-    pub fn apply_in_place(&mut self, subst: &Substitution) {
-        for scope in &mut self.scopes {
-            for scheme in scope.values_mut() {
-                *scheme = scheme.apply(subst);
-            }
-        }
-    }
-
     pub fn apply_substitution_map(&mut self, subst: &HashMap<u64, Type>) {
         for scope in &mut self.scopes {
             for ty in scope.values_mut() {
                 ty.typ = apply_subst_map_to_type(subst, &ty.typ);
             }
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Substitution {
-    pub map: HashMap<u64, Type>,
-}
-
-impl Substitution {
-    pub fn new() -> Self {
-        Substitution {
-            map: HashMap::new(),
-        }
-    }
-    pub fn without(&self, bound: &[u64]) -> Substitution {
-        let mut new_map = self.map.clone();
-        for b in bound {
-            new_map.remove(b);
-        }
-        Substitution { map: new_map }
-    }
-    pub fn empty() -> Self {
-        Substitution::new()
-    }
-
-    pub fn insert(&mut self, var: u64, ty: Type) {
-        self.map.insert(var, ty);
-    }
-
-    pub fn get(&self, var: &u64) -> Option<&Type> {
-        self.map.get(var)
-    }
-
-    pub fn apply(&self, ty: &Type) -> Type {
-        match ty {
-            Type::Var(v) => {
-                if let Some(substituted) = self.get(&v.id) {
-                    self.apply(substituted)
-                } else {
-                    ty.clone()
-                }
-            }
-            Type::Function(from, to) => {
-                Type::Function(Box::new(self.apply(from)), Box::new(self.apply(to)))
-            }
-            Type::List(inner) => Type::List(Box::new(self.apply(inner))),
-            _ => ty.clone(),
-        }
-    }
-
-    pub fn compose(&self, other: &Substitution) -> Substitution {
-        let mut result = Substitution::new();
-
-        // Apply other substitution to our types
-        for (var, ty) in &self.map {
-            result.insert(*var, other.apply(ty));
-        }
-
-        // Add other's mappings
-        for (var, ty) in &other.map {
-            if !result.map.contains_key(var) {
-                result.insert(*var, ty.clone());
-            }
-        }
-
-        result
     }
 }
 
