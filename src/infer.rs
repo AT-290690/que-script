@@ -915,11 +915,9 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 }
 
 // Built-in function type signatures
-pub fn create_builtin_environment() -> (TypeEnv, u64) {
-    let mut env = TypeEnv::new();
-
+pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     // Local fresh-var generator
-    let mut fresh_id: u64 = 0;
+    let mut fresh_id: u64 = env.scopes.len() as u64;
 
     let mut fresh_var = || {
         let id = fresh_id;
@@ -1366,8 +1364,10 @@ pub fn create_builtin_environment() -> (TypeEnv, u64) {
     (env, fresh_id) // return env with built-ins and also return next fresh ID
 }
 
-pub fn infer_with_builtins(expr: &Expression) -> Result<Type, String> {
-    let (env, init_id) = create_builtin_environment();
+pub fn infer_with_builtins(
+    expr: &Expression,
+    (env, init_id): (TypeEnv, u64),
+) -> Result<Type, String> {
     let mut ctx = InferenceContext {
         env,
         constraints: Vec::new(),

@@ -254,6 +254,7 @@
 (let std/vector/not-empty? (lambda xs (not (= (length xs) 0))))
 (let std/vector/in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
 (let std/vector/for (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i))))))
+(let std/vector/for/i (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i) i)))))
 (let std/vector/filter (lambda xs fn? (if (std/vector/empty? xs) xs (do 
      (let out [])
      (let process (lambda i (do
@@ -317,14 +318,14 @@
     (++ i))))
 (get out))))
 
-(let std/vector/each/until (lambda xs fn fn? (do 
+(let std/vector/for/until (lambda xs fn fn? (do 
   (boolean placed false)
   (integer i 0)
   (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
     (let x (get xs (get i)))
     (unless (fn? x) (do (fn x) nil) (set placed true)) (++ i)))))))
 
-(let std/vector/each/until/i (lambda xs fn fn? (do 
+(let std/vector/for/until/i (lambda xs fn fn? (do 
   (boolean placed false)
   (integer i 0)
   (loop (and (false? placed) (< (get i) (length xs))) (lambda (do
@@ -2117,7 +2118,11 @@ q)))
 (let flat-map std/vector/flat-map)
 (let map std/vector/map)
 (let for std/vector/for)
+(let for/i std/vector/for/i)
+
 (let each (lambda xs cb (do (std/vector/for xs cb) xs)))
+(let each/i (lambda xs cb (do (std/vector/for/i xs cb) xs)))
+
 (let filter std/vector/filter)
 (let reduce std/vector/reduce)
 (let reduce/until std/vector/reduce/until)
@@ -2163,8 +2168,11 @@ q)))
 (let map/until/i std/vector/map/until/i)
 (let reduce/until std/vector/reduce/until)
 (let reduce/until/i std/vector/reduce/until/i)
-(let each/until std/vector/each/until)
-(let each/until/i std/vector/each/until/i)
+(let for/until std/vector/for/until)
+(let for/until/i std/vector/for/until/i)
+
+(let each/until (lambda xs fn fn? (do (std/vector/for/until xs fn fn?) xs)))
+(let each/until/i (lambda xs fn fn? (do (std/vector/for/until/i xs fn fn?) xs)))
 
 (let map/i std/vector/map/i)
 (let reduce/i std/vector/reduce/i)

@@ -1975,16 +1975,14 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
     }
 }
 
-pub fn run(expr: &crate::parser::Expression) -> Result<BiteCodeEvaluated, String> {
+pub fn run(expr: &crate::parser::Expression, mut vm: VM) -> Result<BiteCodeEvaluated, String> {
     let mut code = Vec::new();
     compile(&expr, &mut code)?;
-    let mut vm = VM::new();
     vm.run(&code)?;
     return Ok(vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone());
 }
 
-pub fn exe(code: Vec<Instruction>) -> Result<BiteCodeEvaluated, String> {
-    let mut vm = VM::new();
+pub fn exe(code: Vec<Instruction>, mut vm: VM) -> Result<BiteCodeEvaluated, String> {
     vm.run(&code)?;
     return Ok(vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone());
 }

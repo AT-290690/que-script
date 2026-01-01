@@ -49,7 +49,10 @@ xs)"#, "[[[Bool]]]")
             let exprs = crate::parser::parse(inp).unwrap();
 
             if let Some(expr) = exprs.first() {
-                let result = crate::infer::infer_with_builtins(expr);
+                let result = crate::infer::infer_with_builtins(
+                    expr,
+                    crate::infer::create_builtin_environment(crate::types::TypeEnv::new()),
+                );
                 // Assert that the result is Ok
                 assert!(
                     result.is_ok(),
@@ -139,7 +142,10 @@ Error! Concequent and alternative must match types
 
             if let Some(expr) = exprs.first() {
                 // Check that type inference returns an Err
-                let result = crate::infer::infer_with_builtins(expr);
+                let result = crate::infer::infer_with_builtins(
+                    expr,
+                    crate::infer::create_builtin_environment(crate::types::TypeEnv::new()),
+                );
                 // Assert that the result is an Err
 
                 assert!(
@@ -2193,9 +2199,12 @@ r#"
             if let crate::parser::Expression::Apply(items) = &std_ast {
                 match crate::parser::merge_std_and_program(&inp, items[1..].to_vec()) {
                     Ok(exprs) => {
-                        match crate::infer::infer_with_builtins(&exprs) {
+                        match crate::infer::infer_with_builtins(
+                            &exprs,
+                            crate::infer::create_builtin_environment(crate::types::TypeEnv::new()),
+                        ) {
                             Ok(_) => {
-                                match crate::vm::run(&exprs) {
+                                match crate::vm::run(&exprs, crate::vm::VM::new()) {
                                     Ok(result) => {
                                         // println!("{:?}", inp);
                                         assert_eq!(format!("{:?}", result), *out, "Solution")

@@ -13,15 +13,17 @@ fn run_code(program: String) -> String {
     let std_ast = crate::baked::load_ast();
     if let crate::parser::Expression::Apply(items) = &std_ast {
         match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => match crate::infer::infer_with_builtins(&wrapped_ast) {
-                Ok(typ) => {
-                    return match crate::vm::run(&wrapped_ast) {
-                        Ok(res) => return format!("{}\n{:?}", typ, res),
-                        Err(err) => return err,
+            Ok(wrapped_ast) => {
+                match crate::infer::infer_with_builtins(&wrapped_ast, crate::infer::create_builtin_environment(crate::types::TypeEnv::new())) {
+                    Ok(typ) => {
+                        return match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
+                            Ok(res) => return format!("{}\n{:?}", typ, res),
+                            Err(err) => return err,
+                        }
                     }
+                    Err(err) => return err,
                 }
-                Err(err) => return err,
-            },
+            }
             Err(err) => return err,
         }
     }
@@ -130,7 +132,10 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         let std_ast = crate::baked::load_ast();
         if let crate::parser::Expression::Apply(items) = &std_ast {
             match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                Ok(wrapped_ast) => match crate::infer::infer_with_builtins(&wrapped_ast) {
+                Ok(wrapped_ast) => match crate::infer::infer_with_builtins(
+                    &wrapped_ast,
+                    crate::infer::create_builtin_environment(crate::types::TypeEnv::new())
+                ) {
                     Ok(typ) => println!("{}", typ),
                     Err(e) => println!("{}", e),
                 },
@@ -166,7 +171,10 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         }
     } else if args.iter().any(|a| a == "--bit") {
         let program = fs::read_to_string(&format!("{}/main.txt", dist))?;
-        println!("{:?}", crate::vm::exe(parse_bitecode(&program).unwrap()));
+        println!(
+            "{:?}",
+            crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new())
+        );
     } else if args.iter().any(|a| a == "--doc") {
         let std_ast = crate::baked::load_ast();
         let mut names = Vec::new();
@@ -174,7 +182,9 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             .split(" ")
             .for_each(|p| {
                 let name = p.to_string();
-                match crate::infer::infer_with_builtins(&crate::parser::Expression::Word(p.to_string())) {
+                match crate::infer::infer_with_builtins(&crate::parser::Expression::Word(p.to_string()), 
+                crate::infer::create_builtin_environment(crate::types::TypeEnv::new())
+                ) {
                     Ok(typ) => names.push([name, format!("{}", typ)]),
                     Err(e) => println!("{}", e),
                 }
@@ -194,7 +204,10 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                                         &name,
                                         items[1..].to_vec(),
                                     ) {
-                                        Ok(p) => match crate::infer::infer_with_builtins(&p) {
+                                        Ok(p) => match crate::infer::infer_with_builtins(
+                                            &p,
+                                            crate::infer::create_builtin_environment(crate::types::TypeEnv::new())
+                                        ) {
                                             Ok(typ) => {
                                                 // TODO: use a regex to remove the T+\d+ noise of the files
                                                 names.push([name.clone(), format!("{}", typ)])
@@ -243,6 +256,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                                                     .collect::<Vec<_>>();
                                                 match crate::infer::infer_with_builtins(
                                                     &crate::parser::Expression::Apply(E),
+                                                    crate::infer::create_builtin_environment(crate::types::TypeEnv::new())
                                                 ) {
                                                     Ok(typ) => {
                                                         // TODO: use a regex to remove the T+\d+ noise of the files

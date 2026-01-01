@@ -40,13 +40,18 @@ pub fn evaluate(program: String) -> *const u8 {
     let std_ast = baked::load_ast();
     let result = if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
-                Ok(typ) => match vm::run(&wrapped_ast) {
-                    Ok(res) => format!("0\n{}\n{:?}", typ, res),
-                    Err(err) => format!("2\n{}", err),
-                },
-                Err(err) => format!("1\n{}", err),
-            },
+            Ok(wrapped_ast) => {
+                match infer::infer_with_builtins(
+                    &wrapped_ast,
+                    infer::create_builtin_environment(types::TypeEnv::new()),
+                ) {
+                    Ok(typ) => match vm::run(&wrapped_ast, crate::vm::VM::new()) {
+                        Ok(res) => format!("0\n{}\n{:?}", typ, res),
+                        Err(err) => format!("2\n{}", err),
+                    },
+                    Err(err) => format!("1\n{}", err),
+                }
+            }
             Err(err) => format!("3\n{}", err),
         }
     } else {
@@ -61,7 +66,7 @@ pub fn run(program: String) -> *const u8 {
     let std_ast = baked::load_ast();
     let result = if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => match vm::run(&wrapped_ast) {
+            Ok(wrapped_ast) => match vm::run(&wrapped_ast, crate::vm::VM::new()) {
                 Ok(res) => format!("0\n{:?}", res),
                 Err(err) => format!("2\n{}", err),
             },
@@ -94,10 +99,15 @@ pub fn check(program: String) -> *const u8 {
     let std_ast = baked::load_ast();
     let result = if let parser::Expression::Apply(items) = &std_ast {
         match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => match infer::infer_with_builtins(&wrapped_ast) {
-                Ok(typ) => format!("0\n{}", typ),
-                Err(err) => format!("1\n{}", err),
-            },
+            Ok(wrapped_ast) => {
+                match infer::infer_with_builtins(
+                    &wrapped_ast,
+                    infer::create_builtin_environment(types::TypeEnv::new()),
+                ) {
+                    Ok(typ) => format!("0\n{}", typ),
+                    Err(err) => format!("1\n{}", err),
+                }
+            }
             Err(err) => format!("3\n{}", err),
         }
     } else {
@@ -109,7 +119,7 @@ pub fn check(program: String) -> *const u8 {
 
 #[wasm_bindgen]
 pub fn exec(program: String) -> *const u8 {
-    let result = match vm::exe(parse_bitecode(&program).unwrap()) {
+    let result = match vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
         Ok(res) => format!("0\n{:?}", res),
         Err(err) => format!("2\n{}", err),
     };
@@ -177,6 +187,9 @@ pub fn signatures(program: String) -> *const u8 {
                                                 .collect::<Vec<_>>();
                                             match infer::infer_with_builtins(
                                                 &parser::Expression::Apply(E),
+                                                infer::create_builtin_environment(
+                                                    types::TypeEnv::new(),
+                                                ),
                                             ) {
                                                 Ok(typ) => {
                                                     // TODO: use a regex to remove the T+\d+ noise of the files
