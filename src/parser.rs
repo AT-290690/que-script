@@ -543,7 +543,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
                     "\\" => Ok(combinator_transform(exprs)?),
-                    "*|>" => Ok(combinator_transform_rev(exprs)?),
+                    "comp" => Ok(combinator_transform_rev(exprs)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {

@@ -67,6 +67,7 @@
 (let std/char/9 (get "9"))
 (let std/char/empty (get (string 0)))
 (let std/char/double-quote (get (string 34)))
+(let std/char/single-quote (get "'"))
 (let std/char/new-line (get (string 10)))
 (let std/char/space (get " "))
 (let std/char/tab (get "  "))
@@ -150,6 +151,7 @@
 (let std/char/upper (lambda char (if (and (>=# char std/char/a) (<=# char std/char/z)) (-# char std/char/space) char)))
 (let std/char/lower (lambda char (if (and (>=# char std/char/A) (<=# char std/char/Z)) (+# char std/char/space) char)))
 (let std/vector/length (lambda xs (length xs)))
+(let std/vector/flat/length (lambda matrix (length (std/vector/flat-one matrix))))
 (let std/vector/get (lambda xs i (get xs i)))
 (let std/vector/get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
 (let std/vector/2d/length std/vector/length)
@@ -213,6 +215,7 @@
 (let std/fn/apply/first/5 (lambda fn a b c d e (fn a b c d e)))
 (let std/fn/apply/first/6 (lambda fn a b c d e f (fn a b c d e f)))
 
+(let std/fn/combinator/1 (lambda a x (a x)))
 (let std/fn/combinator/2 (lambda a b x (a (b x))))
 (let std/fn/combinator/3 (lambda a b c x (a (b (c x)))))
 (let std/fn/combinator/4 (lambda a b c d x (a (b (c (d x))))))
@@ -222,6 +225,7 @@
 (let std/fn/combinator/8 (lambda a b c d e f g h x (a (b (c (d (e (f (g (h x))))))))))
 (let std/fn/combinator/9 (lambda a b c d e f g h i x (a (b (c (d (e (f (g (h (i x)))))))))))
 
+(let std/fn/rev/combinator/1 (lambda a x (a x)))
 (let std/fn/rev/combinator/2 (lambda a b x (b (a x))))
 (let std/fn/rev/combinator/3 (lambda a b c x (c (b (a x)))))
 (let std/fn/rev/combinator/4 (lambda a b c d x (d (c (b (a x))))))
@@ -2080,7 +2084,6 @@ q)))
 
 (let loop/some-n? (lambda n predicate? (loop/some-range? 0 n predicate?)))
 
-
 (let Tuple/swap std/tuple/swap)
 (let Tuple/map/fst std/tuple/map/fst)
 (let Tuple/map/snd std/tuple/map/snd)
@@ -2088,12 +2091,21 @@ q)))
 (let Tuple/map/fst std/tuple/map/fst)
 (let Tuple/map/snd std/tuple/map/snd)
 
-
 (let Vector->Tuple (lambda fn1 fn2 xs (std/convert/vector->tuple xs fn1 fn2)))
 (let Tuple/int/add std/tuple/int/add)
 (let Tuple/int/sub std/tuple/int/sub)
 (let Tuple/int/mul std/tuple/int/mul)
 (let Tuple/int/div std/tuple/int/div)
+
+(let Tuple/bool/eq? (lambda { a b } (=? a b)))
+(let Tuple/int/eq? (lambda { a b } (= a b)))
+(let Tuple/char/eq? (lambda { a b } (=# a b)))
+(let Tuple/float/eq? (lambda { a b } (=. a b)))
+
+(let Tuple/bool/not-eq? (lambda { a b } (not (=? a b))))
+(let Tuple/int/not-eq? (lambda { a b } (not (= a b))))
+(let Tuple/char/not-eq? (lambda { a b } (not (=# a b))))
+(let Tuple/float/not-eq? (lambda { a b } (not (=. a b))))
 
 (let Int->Alphabet std/convert/int->char/alphabet)
 
@@ -2205,6 +2217,10 @@ q)))
 
 (let digit? std/char/digit?)
 (let fill std/vector/2d/fill)
+
+(let Vector/new (lambda fn n (std/vector/2d/fill n fn)))
+(let Matrix/new (lambda fn w h (std/vector/3d/fill w h fn)))
+
 (let max std/int/max)
 (let min std/int/min)
 (let max/int std/int/max)
@@ -2258,6 +2274,8 @@ q)))
 (let sp std/char/space)
 (let ep std/char/empty)
 (let dq std/char/double-quote)
+(let sq std/char/single-quote)
+(let bt std/char/backtick)
 
 (let window std/vector/sliding-window)
 (let flat std/vector/flat-one)
@@ -2329,6 +2347,12 @@ q)))
 (let subset std/vector/subset)
 
 (let Vector/equal? std/vector/equal?)
+
+(let Set/size std/vector/flat/length)
+(let Table/size std/vector/flat/length)
+
+(let Set/new (lambda (std/vector/buckets 32)))
+(let Table/new (lambda (std/vector/buckets 32)))
 
 (let Set/intersection std/vector/hash/set/intersection)
 (let Set/difference std/vector/hash/set/difference)

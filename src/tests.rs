@@ -2105,7 +2105,7 @@ r#"
 
 (part1 INPUT)"#, "4"),
 (r#"[
-(apply (*|>
+(apply (comp
     (map (String->Vector '-')) 
     (map (map String->Integer)) 
     flat 
