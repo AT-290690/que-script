@@ -265,7 +265,7 @@ fn infix_tokenize(s: &str) -> Result<Vec<Tok>, String> {
                 }
             }
             '^' => {
-                out.push(Tok::Op("expt".to_string()));
+                out.push(Tok::Op("iexpt".to_string()));
                 chars.next();
             }
             '%' => {
@@ -281,7 +281,7 @@ fn infix_tokenize(s: &str) -> Result<Vec<Tok>, String> {
 }
 fn precedence(op: &str) -> i32 {
     match op {
-        "expt" => 30,
+        "iexpt" => 30,
         "*" | "/" | "/." | "mod" => 20,
         "+" | "-" => 10,
         _ => 0,
@@ -514,8 +514,8 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
 
             if let Expression::Word(ref name) = exprs[0] {
                 match name.as_str() {
-                    "|>" => Ok(pipe_data_first_curry_transform(exprs)),
-                    "<|" => Ok(pipe_curry_transform(exprs)),
+                    "<|" => Ok(pipe_data_first_curry_transform(exprs)),
+                    "|>" => Ok(pipe_curry_transform(exprs)),
                     "cond" => Ok(cond_transform(exprs)),
                     "if" => Ok(if_transform(exprs)),
                     "unless" => Ok(unless_transform(exprs)),

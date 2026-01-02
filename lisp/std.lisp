@@ -421,10 +421,10 @@
 (let std/vector/2d/char/count std/vector/char/count)
 (let std/vector/2d/bool/count std/vector/bool/count)
 
-(let std/vector/3d/count-of (lambda xs fn? (|> xs (std/vector/map (lambda ys (std/vector/2d/count-of ys fn?))) (std/vector/int/sum))))
-(let std/vector/3d/int/count (lambda xs x (|> xs (std/vector/map (lambda ys (std/vector/2d/int/count ys x))) (std/vector/int/sum))))
-(let std/vector/3d/char/count (lambda xs x (|> xs (std/vector/map (lambda ys (std/vector/2d/char/count ys x))) (std/vector/int/sum))))
-(let std/vector/3d/bool/count (lambda xs x (|> xs (std/vector/map (lambda ys (std/vector/2d/bool/count ys x))) (std/vector/int/sum))))
+(let std/vector/3d/count-of (lambda xs fn? (<| xs (std/vector/map (lambda ys (std/vector/2d/count-of ys fn?))) (std/vector/int/sum))))
+(let std/vector/3d/int/count (lambda xs x (<| xs (std/vector/map (lambda ys (std/vector/2d/int/count ys x))) (std/vector/int/sum))))
+(let std/vector/3d/char/count (lambda xs x (<| xs (std/vector/map (lambda ys (std/vector/2d/char/count ys x))) (std/vector/int/sum))))
+(let std/vector/3d/bool/count (lambda xs x (<| xs (std/vector/map (lambda ys (std/vector/2d/bool/count ys x))) (std/vector/int/sum))))
 
 (let std/vector/cons (lambda a b (cond (std/vector/empty? a) b (std/vector/empty? b) a (do 
   (let out []) 
@@ -611,7 +611,9 @@
           (set b (* (get b) (get b)))
           (set e (/ (get e) 2)))))
       (get result))))))
-
+; a helper for infix ^ power
+; has to be data first
+(let iexpt std/int/expt)
 (let std/float/sqrt (lambda n
   (do
     (floating low 0.)
@@ -850,7 +852,7 @@ nil)))
      (loop 1 size (lambda . (std/vector/set! out (length out) [])))
      out)))
 
-(let std/vector/char/equal? (lambda a b (and (= (length a) (length b)) (|>
+(let std/vector/char/equal? (lambda a b (and (= (length a) (length b)) (<|
   a
   (std/vector/zipper b)
   (std/vector/every? (lambda x (=# (get x 0) (get x 1))))))))
@@ -1021,7 +1023,7 @@ nil)))
      (if (std/vector/in-bounds? table idx) (get (std/vector/hash/table/get-helper table idx key)) (as -1 Char)))))
 
 (let std/vector/hash/table/count (lambda arr 
-    (|> arr (std/vector/reduce (lambda table key (do 
+    (<| arr (std/vector/reduce (lambda table key (do 
         (if (std/vector/hash/table/has? table key) 
             (do 
             (let v (std/vector/hash/table/get table key))
@@ -1074,7 +1076,7 @@ nil)))
      (if (std/vector/in-bounds? table idx) (std/vector/tuple/hash/table/get-helper table idx key) []))))
 
 (let std/vector/tuple/hash/table/count (lambda arr 
-    (|> arr (std/vector/reduce (lambda table key (do 
+    (<| arr (std/vector/reduce (lambda table key (do 
         (if (std/vector/tuple/hash/table/has? table key) 
             (do 
             (let v (snd (get (std/vector/tuple/hash/table/get table key))))
@@ -1119,9 +1121,9 @@ nil)))
      (= (length xs) 1) (get xs)
      (std/vector/reduce xs (lambda a b (std/vector/cons a b)) []))))
 
-(let std/vector/hash/table/keys (lambda table (|> table (std/vector/flat-one) (std/vector/map std/vector/first))))
-(let std/vector/hash/table/values (lambda table (|> table (std/vector/flat-one) (std/vector/map std/vector/second))))
-(let std/vector/hash/table/entries (lambda table (|> table (std/vector/flat-one))))
+(let std/vector/hash/table/keys (lambda table (<| table (std/vector/flat-one) (std/vector/map std/vector/first))))
+(let std/vector/hash/table/values (lambda table (<| table (std/vector/flat-one) (std/vector/map std/vector/second))))
+(let std/vector/hash/table/entries (lambda table (<| table (std/vector/flat-one))))
 (let std/convert/char->digit (lambda digit (if (<# digit std/char/0) 0 (- (as digit Int) (as std/char/0 Int)))))
 (let std/convert/chars->digits (lambda digits (std/vector/map digits std/convert/char->digit)))
 (let std/convert/digit->char (lambda digit (if (< digit 0) std/char/0 (+# (as digit Char) std/char/0))))
@@ -1129,7 +1131,7 @@ nil)))
 (let std/convert/bool->int (lambda x (if (=? x true) 1 0)))
 (let std/convert/int->bool (lambda x (if (= x 0) false true)))
 (let std/convert/vector->string (lambda xs delim (std/vector/reduce/i xs (lambda a b i (if (> i 0) (std/vector/cons (std/vector/append! a delim) b) b)) "")))
-(let std/convert/string->vector (lambda str char (|> str
+(let std/convert/string->vector (lambda str char (<| str
               (std/vector/reduce(lambda a b (do
               (let prev (std/vector/at a -1))
                 (if (std/vector/char/equal? [b] [char])
@@ -1152,7 +1154,7 @@ nil)))
 
 (let std/convert/chars->positive-or-negative-digits (lambda chars (do
     (integer current-sign 1)
-    (|> chars 
+    (<| chars 
         (std/vector/reduce (lambda a ch (do 
             (if (=# ch std/char/minus) 
                 (set current-sign -1) 
@@ -1161,11 +1163,11 @@ nil)))
                     (set current-sign 1)))
                 a)) [])))))
 (let std/convert/digits->integer std/convert/positive-or-negative-digits->integer)
-(let std/convert/positive-or-negative-chars->integer (lambda x (|> x (std/convert/chars->positive-or-negative-digits) (std/convert/positive-or-negative-digits->integer))))
+(let std/convert/positive-or-negative-chars->integer (lambda x (<| x (std/convert/chars->positive-or-negative-digits) (std/convert/positive-or-negative-digits->integer))))
 (let std/convert/chars->integer std/convert/positive-or-negative-chars->integer)
 
 (let std/convert/chars->digits/float (lambda xs
-    (|> xs 
+    (<| xs 
         (std/vector/reduce (lambda a ch (do 
               (if (=# ch '.') (push! a []) (push! (std/vector/at a -1) (std/convert/char->digit ch)))
                 a)) [[]]))))
@@ -1198,13 +1200,13 @@ nil)))
 (let std/vector/int/unique (lambda xs 
     (if (= (length xs) 0) 
         [(+ (get xs 0) 0)] 
-        (|> xs (std/vector/map (lambda x [(as x Char)])) (std/convert/vector->set) (std/convert/set->vector) (std/vector/map (lambda x (as (get x 0) Int)))))))
+        (<| xs (std/vector/map (lambda x [(as x Char)])) (std/convert/vector->set) (std/convert/set->vector) (std/vector/map (lambda x (as (get x 0) Int)))))))
 
 
 (let std/vector/char/unique (lambda xs 
     (if (= (length xs) 0) 
         xs 
-        (|> xs (std/vector/map (lambda x [x])) (std/convert/vector->set) (std/convert/set->vector) (std/vector/map (lambda x (get x 0)))))))
+        (<| xs (std/vector/map (lambda x [x])) (std/convert/vector->set) (std/convert/set->vector) (std/vector/map (lambda x (get x 0)))))))
 
 (let std/vector/3d/dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
 (let std/vector/3d/in-bounds? (lambda matrix y x (and (std/vector/in-bounds? matrix y) (std/vector/in-bounds? (get matrix y) x))))
@@ -1227,7 +1229,7 @@ nil)))
           (let dx (+ (std/vector/second dir) x))
           (fn a (get xs (std/int/euclidean-mod dy N) (std/int/euclidean-mod dx N))))) 0)))
 
-(let neighborhood std/vector/3d/adjacent)
+(let neighborhood (lambda directions y x fn xs (std/vector/3d/adjacent xs directions y x fn)))
 (let neighborhood/moore std/vector/3d/moore-neighborhood)
 (let neighborhood/diagonal std/vector/3d/diagonal-neighborhood)
 (let neighborhood/kernel std/vector/3d/kernel-neighborhood)
@@ -1314,26 +1316,26 @@ heap)))
 (let std/convert/integer->string (lambda x (std/convert/integer->string-base x 10)))
 (let std/convert/vector->set (lambda xs (std/vector/reduce xs (lambda s x (do (std/vector/hash/set/add! s x) s)) [ [] [] [] [] [] [] [] ])))
 (let std/vector/hash/set/intersection (lambda a b
-        (|> b
+        (<| b
           (std/convert/set->vector)
           (std/vector/reduce (lambda out element
           (do (if (std/vector/hash/set/has? a element)
                     (std/vector/hash/set/add! out element) out) out)) (std/vector/hash/set/max-capacity a b)))))
 (let std/vector/hash/set/difference (lambda a b
-      (|> a
+      (<| a
         (std/convert/set->vector)
         (std/vector/reduce (lambda out element
                         (do (if (not (std/vector/hash/set/has? b element))
                                         (std/vector/hash/set/add! out element) out) out)) (std/vector/hash/set/max-capacity a b)))))
 (let std/vector/hash/set/xor (lambda a b (do
         (let out (std/vector/hash/set/max-capacity a b))
-        (|> a (std/convert/set->vector) (std/vector/for (lambda element (if (not (std/vector/hash/set/has? b element)) (std/vector/hash/set/add! out element) out))))
-        (|> b (std/convert/set->vector) (std/vector/for (lambda element (if (not (std/vector/hash/set/has? a element)) (std/vector/hash/set/add! out element) out))))
+        (<| a (std/convert/set->vector) (std/vector/for (lambda element (if (not (std/vector/hash/set/has? b element)) (std/vector/hash/set/add! out element) out))))
+        (<| b (std/convert/set->vector) (std/vector/for (lambda element (if (not (std/vector/hash/set/has? a element)) (std/vector/hash/set/add! out element) out))))
         (as out [[[Char]]]))))
 (let std/vector/hash/set/union (lambda a b (do
         (let out (std/vector/hash/set/max-capacity a b))
-        (|> a (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
-        (|> b (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
+        (<| a (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
+        (<| b (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
         (as out [[[Char]]]))))
 
 (let std/integer/decimal-scaling 1000000)
@@ -1589,7 +1591,7 @@ q)))
     (let out [])
     (loop 0 (std/int/expt 2 n) (lambda i 
        ; generate bitmask, from 0..00 to 1..11
-        (std/vector/push! out (|>
+        (std/vector/push! out (<|
                 i
                 (std/convert/integer->bits)
                 (std/vector/reduce/i (lambda a x i
@@ -1669,7 +1671,7 @@ q)))
 (let std/vector/int/sequence (lambda xs (std/vector/int/range 0 (- (length xs) 1))))
 (let std/int/shoelace (lambda points (do
     (let len (length points))
-    (/ (|> (std/vector/int/sequence points)
+    (/ (<| (std/vector/int/sequence points)
         (std/vector/reduce (lambda ab i (do
             (let a (. ab 0))
             (let b (. ab 1))
@@ -1767,7 +1769,7 @@ q)))
 
 (let std/vector/int/remove-leading-zeroes (lambda digits (do
   (boolean tr true)
-  (|> digits (std/vector/reduce (lambda a b (if
+  (<| digits (std/vector/reduce (lambda a b (if
   (and (true? tr) (std/int/zero? b)) a
     (do
       (if (true? tr) (boolean/set tr false))
@@ -2065,6 +2067,7 @@ q)))
 
 (let loop/some-n? (lambda n predicate? (loop/some-range? 0 n predicate?)))
 
+
 (let Tuple/swap std/tuple/swap)
 (let Tuple/map/fst std/tuple/map/fst)
 (let Tuple/map/snd std/tuple/map/snd)
@@ -2073,9 +2076,7 @@ q)))
 (let Tuple/map/snd std/tuple/map/snd)
 
 
-; Start of more fake keywords
-
-(let Vector->Tuple std/convert/vector->tuple)
+(let Vector->Tuple (lambda fn1 fn2 xs (std/convert/vector->tuple xs fn1 fn2)))
 (let Tuple/int/add std/tuple/int/add)
 (let Tuple/int/sub std/tuple/int/sub)
 (let Tuple/int/mul std/tuple/int/mul)
@@ -2083,49 +2084,48 @@ q)))
 
 (let Int->Alphabet std/convert/int->char/alphabet)
 
-
 (let floor std/float/floor)
 (let ceil std/float/ceil)
 
 (let extreme std/vector/int/extreme)
-(let map/tuple std/tuple/map)
-(let map/fst std/tuple/map/fst)
-(let map/snd std/tuple/map/snd)
-(let flat-map std/vector/flat-map)
-(let map std/vector/map)
-(let for std/vector/for)
-(let for/i std/vector/for/i)
+(let map/tuple (lambda fn xs (std/tuple/map xs fn)))
+(let map/fst (lambda fn xs (std/tuple/map/fst xs fn)))
+(let map/snd (lambda fn xs (std/tuple/map/snd xs fn)))
+(let flat-map (lambda fn xs (std/vector/flat-map xs fn)))
+(let map (lambda fn xs (std/vector/map xs fn)))
+(let for (lambda fn xs (std/vector/for xs fn)))
+(let for/i (lambda fn xs (std/vector/for/i xs fn)))
 
 (let each (lambda xs fn (do (std/vector/for xs fn) xs)))
 (let each/i (lambda xs fn (do (std/vector/for/i xs fn) xs)))
 
-(let filter std/vector/filter)
-(let reduce std/vector/reduce)
-(let reduce/until std/vector/reduce/until)
+(let filter (lambda fn? xs (std/vector/filter xs fn?)))
+(let reduce (lambda fn init xs (std/vector/reduce xs fn init)))
+(let reduce/until (lambda fn fn? init xs (std/vector/reduce/until xs fn fn? init)))
 (let transpose std/vector/3d/rotate)
 (let interleave std/vector/2d/interleave)
-(let intersperse std/vector/intersperse)
-(let every? std/vector/every?)
-(let some? std/vector/some?)
+(let intersperse (lambda xs x (std/vector/intersperse x xs)))
+(let every? (lambda fn? xs (std/vector/every? xs fn?)))
+(let some? (lambda fn? xs (std/vector/some? xs fn?)))
 (let empty? std/vector/empty?)
 (let not-empty? std/vector/not-empty?)
 (let empty! (lambda xs (do (std/vector/empty! xs) nil)))
-(let find std/vector/find-index)
-(let partition std/vector/partition)
+(let find (lambda fn? xs (std/vector/find-index xs fn?)))
+(let partition (lambda n xs (std/vector/partition xs n)))
 (let reverse std/vector/reverse)
 (let reverse! std/vector/reverse!)
-(let slice std/vector/slice)
+(let slice (lambda start end xs (std/vector/slice xs start end)))
 (let cons std/vector/cons)
-(let sort! std/vector/sort!)
+(let sort! (lambda dir xs (std/vector/sort! xs dir)))
 (let range std/vector/int/range)
 (let range/int std/vector/int/range)
 (let range/float std/vector/float/range)
 (let square std/int/square)
-(let expt std/int/expt)
+(let expt (lambda b x (std/int/expt x b)))
 (let sqrt std/int/sqrt)
-(let expt/int std/int/expt)
+(let expt/int (lambda b x (std/int/expt x b)))
 (let sqrt/int std/int/sqrt)
-(let expt/float std/float/expt)
+(let expt/float (lambda b x (std/float/expt x b)))
 (let sqrt/float std/float/sqrt)
 (let odd? std/int/odd?)
 (let even? std/int/even?)
@@ -2140,21 +2140,21 @@ q)))
 (let one/float? std/float/one?)
 (let zero/float? std/float/zero?)
 
-(let map/until std/vector/map/until)
-(let map/until/i std/vector/map/until/i)
-(let reduce/until std/vector/reduce/until)
-(let reduce/until/i std/vector/reduce/until/i)
-(let for/until std/vector/for/until)
-(let for/until/i std/vector/for/until/i)
+(let map/until (lambda fn fn? xs (std/vector/map/until xs fn fn?)))
+(let map/until/i (lambda fn fn? xs (std/vector/map/until/i xs fn fn?)))
+(let reduce/until (lambda fn fn? init xs (std/vector/reduce/until xs fn fn? init)))
+(let reduce/until/i (lambda fn fn? init xs (std/vector/reduce/until/i xs fn fn? init)))
+(let for/until (lambda fn fn? xs (std/vector/for/until xs fn fn?)))
+(let for/until/i (lambda fn fn? xs (std/vector/for/until/i xs fn fn?)))
 
-(let each/until (lambda xs fn fn? (do (std/vector/for/until xs fn fn?) xs)))
-(let each/until/i (lambda xs fn fn? (do (std/vector/for/until/i xs fn fn?) xs)))
+(let each/until (lambda fn fn? xs (do (std/vector/for/until xs fn fn?) xs)))
+(let each/until/i (lambda fn fn? xs (do (std/vector/for/until/i xs fn fn?) xs)))
 
-(let map/i std/vector/map/i)
-(let reduce/i std/vector/reduce/i)
-(let filter/i std/vector/filter/i)
-(let some/i? std/vector/some/i?)
-(let every/i? std/vector/every/i?)
+(let map/i (lambda fn xs (std/vector/map/i xs fn)))
+(let reduce/i (lambda fn init xs (std/vector/reduce/i xs fn init)))
+(let filter/i (lambda fn? xs (std/vector/filter/i xs fn?)))
+(let some/i? (lambda fn? xs (std/vector/some/i? xs fn?)))
+(let every/i? (lambda fn? xs (std/vector/every/i? xs fn?)))
 
 (let ones std/vector/int/ones)
 (let zeroes std/vector/int/zeroes)
@@ -2244,19 +2244,19 @@ q)))
 (let window std/vector/sliding-window)
 (let flat std/vector/flat-one)
 (let enumerate std/vector/enumerate)
-(let clamp std/int/clamp)
-(let clamp-range std/int/clamp-range)
+(let clamp (lambda limit x (std/int/clamp x limit)))
+(let clamp-range (lambda start end x (std/int/clamp-range x start end)))
 
-(let clamp/int std/int/clamp)
-(let clamp-range/int std/int/clamp-range)
-(let clamp/float std/float/clamp)
-(let clamp-range/float std/float/clamp-range)
+(let clamp/int (lambda limit x (std/int/clamp x limit)))
+(let clamp-range/int (lambda start end x (std/int/clamp-range x start end)))
+(let clamp/float (lambda limit x (std/float/clamp x limit)))
+(let clamp-range/float (lambda start end x (std/float/clamp-range x start end)))
 
 (let at std/vector/at)
 (let emod std/int/euclidean-mod)
-(let swap! std/vector/swap!)
-(let scan std/vector/adjacent-difference)
-(let scan! std/vector/adjacent-difference!)
+(let swap! (lambda i j xs (std/vector/swap! xs i j)))
+(let scan (lambda fn xs (std/vector/adjacent-difference xs fn)))
+(let scan! (lambda fn xs (std/vector/adjacent-difference! xs fn)))
 (let cycle std/vector/cycle)
 (let replicate std/vector/replicate)
 (let cartesian-product std/vector/cartesian-product)
@@ -2267,7 +2267,7 @@ q)))
 (let delta/int std/int/delta)
 (let delta/float std/float/delta)
 
-(let map/adjacent std/vector/map/adjacent)
+(let map/adjacent (lambda fn xs (std/vector/map/adjacent xs fn)))
 
 (let buckets std/vector/buckets)
 
@@ -2276,8 +2276,8 @@ q)))
 (let Float->Chars std/convert/float->string)
 (let Float->String std/convert/float->string)
 
-(let String->Vector std/convert/string->vector)
-(let Vector->String std/convert/vector->string)
+(let String->Vector (lambda ch xs (std/convert/string->vector xs ch)))
+(let Vector->String (lambda ch xs (std/convert/vector->string xs ch)))
 (let Chars->Integer std/convert/chars->integer)
 (let String->Integer std/convert/chars->integer)
 (let String->Float std/convert/chars->float)
@@ -2292,19 +2292,14 @@ q)))
 (let Set->Vector std/convert/set->vector)
 (let Vector->Set std/convert/vector->set)
 
-(let Char/count std/vector/char/count)
-(let Int/count std/vector/int/count)
-(let Float/count std/vector/float/count)
-(let Bool/count std/vector/bool/count)
+(let count/char (lambda x xs (std/vector/char/count xs x)))
+(let count/int (lambda x xs (std/vector/int/count xs x)))
+(let count/float (lambda x xs (std/vector/float/count xs x)))
+(let count/bool (lambda x xs (std/vector/bool/count xs x)))
 
-(let count/char std/vector/char/count)
-(let count/int std/vector/int/count)
-(let count/float std/vector/float/count)
-(let count/bool std/vector/bool/count)
+(let count (lambda fn? xs (std/vector/count-of xs fn?)))
 
-(let count std/vector/count-of)
-
-(let points std/vector/3d/points)
+(let points (lambda fn? xs (std/vector/3d/points xs fn?)))
 
 (let unique/int std/vector/int/unique)
 (let unique/char std/vector/char/unique)
@@ -2312,7 +2307,7 @@ q)))
 (let permutation std/vector/permutations)
 (let combination/pairs std/vector/unique-pairs)
 (let combination std/vector/combinations)
-(let combination/n std/vector/combinations/n)
+(let combination/n (lambda n xs (std/vector/combinations/n xs n)))
 (let subset std/vector/subset)
 
 (let Vector/equal? std/vector/equal?)
@@ -2321,9 +2316,9 @@ q)))
 (let Set/difference std/vector/hash/set/difference)
 (let Set/xor std/vector/hash/set/xor)
 (let Set/union std/vector/hash/set/union)
-(let Set/add! (lambda table item (do (std/vector/hash/set/add! table item) nil)))
-(let Set/remove! (lambda table item (do (std/vector/hash/set/remove! table item) nil)))
-(let Set/has? std/vector/hash/set/has?)
+(let Set/add! (lambda item table (do (std/vector/hash/set/add! table item) nil)))
+(let Set/remove! (lambda item table (do (std/vector/hash/set/remove! table item) nil)))
+(let Set/has? (lambda item table (std/vector/hash/set/has? table item)))
 
 (let Table/entries std/vector/tuple/hash/table/entries)
 (let Table/keys std/vector/tuple/hash/table/keys)
@@ -2331,59 +2326,58 @@ q)))
 
 (let Set/values std/vector/flat-one)
 
-(let Table/get std/vector/tuple/hash/table/get)
-(let Table/get* (lambda table key (if (std/vector/tuple/hash/table/has? table key) { true [(snd (get (std/vector/tuple/hash/table/get table key)))] } { false [] })))
+(let Table/get (lambda key table (std/vector/tuple/hash/table/get table key)))
+(let Table/get* (lambda key table (if (std/vector/tuple/hash/table/has? table key) { true [(snd (get (std/vector/tuple/hash/table/get table key)))] } { false [] })))
 
-(let Table/has? std/vector/tuple/hash/table/has?)
-(let Table/set! (lambda table key value (do (std/vector/tuple/hash/table/set! table key value) nil)))
-(let Table/remove! (lambda table key (do (std/vector/tuple/hash/table/remove! table key) nil)))
+(let Table/has? (lambda key table (std/vector/tuple/hash/table/has? table key)))
+(let Table/set! (lambda key value table (do (std/vector/tuple/hash/table/set! table key value) nil)))
+(let Table/remove! (lambda key table (do (std/vector/tuple/hash/table/remove! table key) nil)))
 (let Table/count std/vector/tuple/hash/table/count)
 
-(let Table/drop! std/vector/tuple/hash/table/drop!)
-(let Table/keep std/vector/tuple/hash/table/keep)
-(let Table/omit std/vector/tuple/hash/table/omit)
+(let Table/drop! (lambda keys table (std/vector/tuple/hash/table/drop! table keys)))
+(let Table/keep (lambda keys table (std/vector/tuple/hash/table/keep table keys)))
+(let Table/omit (lambda keys table (std/vector/tuple/hash/table/omit table keys)))
 
 (let Table/merge! std/vector/tuple/hash/table/merge!)
 (let Table/merge std/vector/tuple/hash/table/merge)
 
 (let in-bounds? std/vector/in-bounds?)
 
-(let take/first std/vector/take)
-(let drop/first std/vector/drop)
+(let take/first (lambda n xs (std/vector/take xs n)))
+(let drop/first (lambda n xs (std/vector/drop xs n)))
 
-(let take/last std/vector/take/last)
-(let drop/last std/vector/drop/last)
-
+(let take/last (lambda n xs (std/vector/take/last xs n)))
+(let drop/last (lambda n xs (std/vector/drop/last xs n)))
 
 (let true/option std/true/option)
 (let false/option std/false/option)
-(let resolve/option std/vector/option/resolve)
+(let resolve/option (lambda fn df xs (std/vector/option/resolve xs fn df)))
 
-(let call std/fn/exec)
+(let call (lambda fn xs (std/fn/exec xs fn)))
 
 (let copy std/vector/copy)
-(let sort (lambda xs fn (std/vector/sort! (std/vector/copy xs) fn)))
+(let sort (lambda fn xs (std/vector/sort! (std/vector/copy xs) fn)))
 
 (let Que/new std/vector/deque/new)
 (let Que/empty? std/vector/deque/empty?)
 (let Que/not-empty? std/vector/queue/not-empty?)
 (let Que/empty! (lambda q (do (std/vector/deque/empty! q) nil)))
-(let Que/enque! (lambda xs v (do (std/vector/queue/enqueue! xs v) nil)))
+(let Que/enque! (lambda v xs(do (std/vector/queue/enqueue! xs v) nil)))
 (let Que/deque! (lambda queue (do (std/vector/deque/tail! queue) nil)))
 (let Que/peek std/vector/deque/first)
-(let Que/push! (lambda xs v (do (std/vector/deque/append! xs v) nil)))
+(let Que/push! (lambda v xs (do (std/vector/deque/append! xs v) nil)))
 (let Que/pop! (lambda queue (do (std/vector/deque/head! queue) nil)))
-(let Que/prepend! (lambda xs v (do (std/vector/deque/prepend! xs v) nil))) 
+(let Que/prepend! (lambda v xs (do (std/vector/deque/prepend! xs v) nil))) 
 (let Que/first std/vector/deque/first)
 (let Que/last std/vector/deque/last)
 (let Que/tail! (lambda queue (do (std/vector/deque/tail! queue) nil)))
-(let Que/append! (lambda xs v (do (std/vector/deque/append! xs v) nil)))
+(let Que/append! (lambda v xs (do (std/vector/deque/append! xs v) nil)))
 
 (let Vector->Que std/convert/vector->deque)
 (let Que->Vector std/convert/deque->vector)
 (let Que/get std/vector/deque/get)
 (let Que/length std/vector/deque/length)
-(let Que/at (lambda xs i (if (< i 0) (std/vector/deque/get xs (+ (length xs) i)) (std/vector/deque/get xs i))))
+(let Que/at (lambda i xs (if (< i 0) (std/vector/deque/get xs (+ (length xs) i)) (std/vector/deque/get xs i))))
 
 
 (let BigInt/add std/int/big/add)
@@ -2414,7 +2408,7 @@ q)))
 (let Vector/get std/vector/get)
 (let Vector/set! std/vector/set!)
 (let Vector/length std/vector/length)
-
+(let Vector/append! (lambda x xs (std/vector/append! xs x)))
 (let Vector/2d/set! std/vector/2d/int/set!)
 (let Vector/2d/add std/vector/2d/int/add)
 (let Vector/2d/sub std/vector/2d/int/sub)
@@ -2453,3 +2447,4 @@ q)))
 (let Vector/3d/norm! std/vector/3d/int/normalize!)
 (let Vector/3d/limit! std/vector/3d/int/limit!)
 (let Vector/3d/mag! std/vector/3d/int/mag!)
+

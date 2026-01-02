@@ -192,7 +192,7 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 
 ```lisp
 ; ❌ Nobody wants to write this
-(sum (map (filter (range 1 10) (lambda x (= (mod x 2) 1))) (lambda x (* x x))))
+(sum (map (lambda x (* x x)) (filter (lambda x (= (mod x 2) 1)) (range 1 10))))
 
 ; ✅ So much better
 (|> (range 1 10)
@@ -212,8 +212,8 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 ```lisp
 ; Short names
 (|> (range 1 10) (map square) (map Integer->String) (Vector->String ','))
-; Full names
-(|> (std/vector/int/range 1 10) (std/vector/map std/int/square) (std/vector/map std/convert/integer->string) (std/convert/vector->string ','))
+; Full names - but they use data first pipe (<|)
+(<| (std/vector/int/range 1 10) (std/vector/map std/int/square) (std/vector/map std/convert/integer->string) (std/convert/vector->string ','))
 ```
 
 ### Aliases are resolved automatically and do not introduce name clashes. If you define a local function with the same name as an alias, your local definition always takes precedence. This means you are free to choose meaningful names in your own code without worrying about conflicts with the standard library.
@@ -368,7 +368,7 @@ add ;  Int -> Int -> Int
 ; Explicit tail call can be optimized
 (let~ tail-call/sum (lambda xs acc
     (if (= (length xs) 0) acc
-        (tail-call/sum (drop/first xs 1) (+ acc (get xs 0))))))
+        (tail-call/sum (drop/first 1 xs) (+ acc (get xs 0))))))
 
 ; Explicit recursion can't be optimized
 (let* non-tail-call/sum  (lambda xs
@@ -803,7 +803,7 @@ nums
 
 ```lisp
 (let add1 (lambda x (+ x 1)))
-(map [1 2 3] add1)
+(map add1 [1 2 3])
 ; Returns: [2 3 4]
 ```
 
@@ -866,7 +866,7 @@ nums
 ; xs → [Int]
 ; return type → Int
 
-(let summation (lambda xs (reduce xs + 0)))
+(let summation (lambda xs (reduce + 0 xs)))
 (summation [1 2 3 4])
 ; Int
 ; 10
@@ -1025,7 +1025,10 @@ out ; Returns [0 1 2 3 4 0 1 2 3 4]
   (loop 1 (length nums) (lambda i (do
     (let num (get nums i))
     (boolean placed false)
-    (loop 0 (length sword) (lambda j (do
+    (integer J 0)
+    (loop (and (false? placed) (< (get J) (length sword))) (lambda (do
+      (let j (get J))
+      (++ J)
       (let segment (get sword j))
       (cond
           (and (false? placed) (< num (get segment 1)) (= (get segment 0) -1))
@@ -1034,7 +1037,7 @@ out ; Returns [0 1 2 3 4 0 1 2 3 4]
                 (do (set! segment 2 num) (boolean/set placed true))
           nil))))
       (if (false? placed) (push! sword [-1 num -1])))))
-  (flat (map sword (lambda [. x .] (std/convert/integer->string x)))))))
+  (|> sword (map (lambda [. x .] (std/convert/integer->string x))) (flat)))))
 (part1 (parse INPUT))
 ```
 
@@ -1292,7 +1295,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 ;    halve :: [T] -> {[T] * [T]}
 (let halve (lambda xs (do
           (let half (/ (length xs) 2))
-          { (take/first xs half) (take/last xs half) })))
+          { (take/first half xs) (take/last half xs) })))
 
 
 (halve [ 1 2 3 4 5 6 7 8 ]) ; { [ 1 2 3 4 ] [ 5 6 7 8 ] }
@@ -1375,7 +1378,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
   (let init [ (get xs 0) (get xs 0) ]) ; start with first element as current and best
   (let rest (cdr xs))
-  (let result (reduce rest step init))
+  (let result (reduce step init rest))
   (get result 1))))
 
 ; Examples
@@ -1456,9 +1459,91 @@ _Real-world examples demonstrating Que Script's capabilities._
 [(part1 PARSED) (part2 PARSED)] ; [34241 51316]
 ```
 
-## N Queen
+## Advent Of Code 2016 Day 1
 
-###
+### https://adventofcode.com/2016/day/1
+
+```lisp
+; The Document indicates that you should start at the given coordinates (where you just landed) and face North. Then, follow the provided sequence: either turn left (L) or right (R) 90 degrees, then walk forward the given number of blocks, ending at a new intersection.
+; Following R2, L3 leaves you 2 blocks East and 3 blocks North, or 5 blocks away.
+; R2, R2, R2 leaves you 2 blocks due South of your starting position, which is 2 blocks away.
+; R5, L5, R5, R3 leaves you 12 blocks away.
+
+(let parse (lambda input
+    (|> (cons input ",")
+        (String->Vector ' ')
+        (map (lambda x (drop/last 1 x)))
+        (map (lambda [ D M ] [ (Char->Int D) (Chars->Integer M) ])))))
+(let delta-diff (lambda [ y x . ] (+ (abs y) (abs x))))
+(let part1 (lambda input (|> input
+    (reduce (lambda [ y x a . ] [ D M . ] (do
+                                (let F (mod (+ a (if (=# (Int->Char D) 'R') 1 3)) 4))
+                                (cond
+                                    (= F 0) [ y (+ x M) F ]
+                                    (= F 1) [ (- y M) x F ]
+                                    (= F 2) [ y (- x M) F ]
+                                    (= F 3) [ (+ y M) x F ]
+                                    [ y x a ])))
+                                [ 0 0 1 ])
+    (delta-diff))))
+
+; Then, you notice the instructions continue on the back of the Recruiting Document. Easter Bunny HQ is actually at the first location you visit twice.
+; For example, if your instructions are R8, R4, R4, R8, the first location you visit twice is 4 blocks away, due East.
+; How many blocks away is the first location you visit twice?
+(let turn
+  (lambda facing D
+    (mod (+ facing (if (=# (Int->Char D) std/char/R) 1 3)) 4)))
+(let step
+  (lambda y x facing
+    (cond
+      (= facing 0) [(+ y 1) x]
+      (= facing 1) [y (+ x 1)]
+      (= facing 2) [(- y 1) x]
+      (= facing 3) [y (- x 1)]
+      [])))
+(let point->key
+  (lambda y x
+    (cons (Integer->String y) "," (Integer->String x))))
+(let part2
+  (lambda input
+    (do
+      (integer y 0)
+      (integer x 0)
+      (integer facing 0) ; North
+
+      (let visited (buckets 128))
+      (Table/set! (point->key (get y) (get x)) true visited)
+
+      (integer result 0)
+
+      (for (lambda [ D M . ]
+          (if (= (get result) 0)
+              (do
+                (set facing (turn (get facing) D))
+                (loop 0 M
+                  (lambda .
+                    (if (= (get result) 0)
+                        (do
+                          (let p (step (get y) (get x) (get facing)))
+                          (set y (get p 0))
+                          (set x (get p 1))
+
+                          (let key (point->key (get y) (get x)))
+                          (if (Table/has? key visited)
+                              (set result (+ (abs (get y))
+                                             (abs (get x))))
+                              (Table/set! key true visited))))))))) input)
+
+      (get result))))
+
+{
+  (|> [ "R2, L3"  "R2, R2, R2" "R5, L5, R5, R3" ] (map parse) (map part1))
+  (part2 (parse "R8, R4, R4, R8"))
+} ; [[5 2 12] 4]
+
+```
+
+## N Queen
 
 ```lisp
 (let n-queen (lambda n (do
@@ -1470,22 +1555,22 @@ _Real-world examples demonstrating Que Script's capabilities._
     (let* backtrack (lambda row
       (if (= row n)
           (set! solutions (length solutions)
-            (map board (lambda a (Vector->String a std/char/empty))))
+            (map (lambda a (Vector->String std/char/empty a)) board))
           (loop 0 n (lambda col
               (unless
                 (or
-                  (Set/has? cols (Integer->String col))
-                  (Set/has? positive-diagonal (Integer->String (+ row col)))
-                  (Set/has? negative-diagonal (Integer->String (- row col))))
+                  (Set/has? (Integer->String col) cols)
+                  (Set/has? (Integer->String (+ row col)) positive-diagonal)
+                  (Set/has? (Integer->String (- row col)) negative-diagonal))
                 (do
-                  (Set/add! cols (Integer->String col))
-                  (Set/add! positive-diagonal (Integer->String (+ row col)))
-                  (Set/add! negative-diagonal (Integer->String (- row col)))
+                  (Set/add! (Integer->String col) cols)
+                  (Set/add! (Integer->String (+ row col)) positive-diagonal)
+                  (Set/add! (Integer->String (- row col)) negative-diagonal)
                   (set! (get board row) col "Q")
                   (backtrack (+ row 1))
-                  (Set/remove! cols (Integer->String col))
-                  (Set/remove! positive-diagonal (Integer->String (+ row col)))
-                  (Set/remove! negative-diagonal (Integer->String (- row col)))
+                  (Set/remove! (Integer->String col) cols)
+                  (Set/remove! (Integer->String (+ row col)) positive-diagonal)
+                  (Set/remove! (Integer->String (- row col)) negative-diagonal)
                   (set! (get board row) col "."))))))))
     (backtrack 0)
     solutions)))
@@ -1590,67 +1675,6 @@ _Real-world examples demonstrating Que Script's capabilities._
     0)))
 
 (calc-damage 12 { true Sword })
-```
-
-## Morse Code Encoder/Decoder
-
-### Utilise standard library functions to handle complex parsing
-
-```lisp
-(let RAW "A=._
-B=_...
-C=_._.
-D=_..
-E=.
-F=.._.
-G=__.
-H=....
-I=..
-J=.___
-K=_._
-L=._..
-M=__
-N=_.
-O=___
-P=.__.
-Q=__._
-R=._.
-S=...
-T=_
-U=.._
-V=..._
-W=.__
-X=_.._
-Y=_.__
-Z=__..
-0=_____
-1=.____
-2=..___
-3=...__
-4=...._
-5=.....
-6=_....
-7=__...
-8=___..
-9=____.
-.=._._._
-,=__..__")
-(let parse (lambda xs (|> xs (std/convert/string->vector std/char/new-line) (std/vector/map (lambda x (std/convert/string->vector x std/char/equal))))))
-(let PARSED (parse RAW))
-(let *ABC->MORSE-IDEXES* (std/vector/reduce/i PARSED (lambda a [k .] i (std/vector/hash/table/set! a k i)) (std/vector/buckets 64)))
-(let *ABC->MORSE-CODES* (std/vector/map PARSED (lambda [. v .] v)))
-(let *MORSE->ABC-IDEXES* (std/vector/reduce/i PARSED (lambda a [. k .] i (std/vector/hash/table/set! a k i)) (std/vector/buckets 64)))
-(let *MORSE->ABC-CODES* (std/vector/map PARSED (lambda [v .] v)))
-(let abc->morse (lambda letter (get *ABC->MORSE-CODES* (as (std/vector/hash/table/get *ABC->MORSE-IDEXES* letter) Int))))
-(let morse->abc (lambda letter (get *MORSE->ABC-CODES* (as (std/vector/hash/table/get *MORSE->ABC-IDEXES* letter) Int))))
-
-[
-  (|> "Hello,World.1234" (std/vector/map std/char/upper) (std/vector/map (lambda xs (|> xs (vector) (abc->morse)))) (std/vector/flat-one))
-  (|>
-    ["...." "." "._.." "._.." "___" "__..__" ".__" "___" "._." "._.." "_.." "._._._" ".____" "..___" "...__" "...._"]
-    (std/vector/map morse->abc)
-    (std/vector/flat-one))
-]
 ```
 
 ## Hexagons

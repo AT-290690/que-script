@@ -52,9 +52,9 @@ wasm-pack build --target web --out-dir pkg/web
 ```lisp
 (let sum-odd-squares (lambda xs
     (|> xs
-        (std/vector/filter std/int/odd?)
-        (std/vector/map std/int/square)
-        (std/vector/int/sum))))
+        (filter odd?)
+        (map square)
+        (sum))))
 
 (sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
 ; Int
@@ -65,7 +65,7 @@ wasm-pack build --target web --out-dir pkg/web
 - Pipe (|> ... ) will be desuggered to:
 
 ```lisp
-(std/vector/int/sum (std/vector/map (std/vector/filter xs std/int/odd?) std/int/square))
+(sum (map square (filter odd? xs)))
 ```
 
 - Argument type of the function will be [Int].
@@ -83,7 +83,7 @@ This is especially useful for recursive functions. For instance, take this funct
 ```lisp
 (let~ sum (lambda xs acc
     (if (= (length xs) 0) acc
-        (sum (std/vector/drop xs 1) (+ acc (get xs 0))))))
+        (sum (drop/first 1 xs) (+ acc (get xs 0))))))
 
 (sum [ 1 2 3 4 5 ] 0)
 ; Int
@@ -166,17 +166,17 @@ Instead we have to use **Big** integers (or numbers as a vectors with arbitrary 
 (let~ factorial (lambda n total
         (if (= (get n 0) 0)
             total
-            (factorial (std/int/big/sub n [ 1 ]) (std/int/big/mul total n)))))
+            (factorial (BigInt/sub n [ 1 ]) (BigInt/mul total n)))))
 
 (let bionomial-coefficient (lambda a b
-    (std/int/big/div (factorial a [ 1 ])
-            (std/int/big/mul
+    (BigInt/div (factorial a [ 1 ])
+            (BigInt/mul
                 (factorial b [ 1 ])
-                (factorial (std/int/big/sub a b) [ 1 ])))))
+                (factorial (BigInt/sub a b) [ 1 ])))))
 
 (let m [ 2 0 ])
 (let n [ 2 0 ])
-(bionomial-coefficient (std/int/big/add m n) m)
+(bionomial-coefficient (BigInt/add m n) m)
 ; [Int]
 ; [1 3 7 8 4 6 5 2 8 8 2 0]
 ```
@@ -214,8 +214,8 @@ To what floor do the instructions take Santa?
     ")))"     ; result in floor -3.
     ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (std/vector/char/count input std/char/left-brace) (std/vector/char/count input std/char/right-brace))))
-(std/vector/map samples solve)
+(let solve (lambda input (- (count/char '(' input) (count/char ')' input))))
+(map solve samples)
 ; [Int]
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
