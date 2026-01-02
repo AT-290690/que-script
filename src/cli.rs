@@ -106,12 +106,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         let std_src = fs::read_to_string("./lisp/std.lisp")?;
         let std_ast = crate::parser::build(&std_src).unwrap();
         dump_wrapped_ast(std_ast, "./src/baked.rs");
-    } else if args.iter().any(|a| a == "--fp") { // temporary until migrating the data last for pipes
-        let std_src = fs::read_to_string("./lisp/fp.lisp")?;
-        let std_ast = crate::parser::build(&std_src).unwrap();
-        dump_wrapped_ast(std_ast, "./src/baked.rs");
-    }
-    else if args.iter().any(|a| a == "--check") {
+    } else if args.iter().any(|a| a == "--check") {
         let program = fs::read_to_string(path)?;
         let std_ast = crate::baked::load_ast();
         if let crate::parser::Expression::Apply(items) = &std_ast {

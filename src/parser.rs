@@ -543,7 +543,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
                     "\\" => Ok(combinator_transform(exprs)?),
-
+                    "*|>" => Ok(combinator_transform_rev(exprs)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
@@ -1280,6 +1280,24 @@ fn combinator_transform(mut exprs: Vec<Expression>) -> Result<Expression, String
             Expression::Word(format!("std/fn/combinator/{}", exprs.len() + 1)),
             func,
         ]
+        .into_iter()
+        .chain(exprs)
+        .collect(),
+    ))
+}
+fn combinator_transform_rev(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    // Remove "*|>"
+    exprs.remove(0);
+
+    if exprs.is_empty() {
+        return Err("Error! (*|>) requires at least one function".into());
+    }
+
+    Ok(Expression::Apply(
+        vec![Expression::Word(format!(
+            "std/fn/rev/combinator/{}",
+            exprs.len()
+        ))]
         .into_iter()
         .chain(exprs)
         .collect(),

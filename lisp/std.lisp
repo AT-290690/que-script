@@ -218,6 +218,19 @@
 (let std/fn/combinator/4 (lambda a b c d x (a (b (c (d x))))))
 (let std/fn/combinator/5 (lambda a b c d e x (a (b (c (d (e x)))))))
 (let std/fn/combinator/6 (lambda a b c d e f x (a (b (c (d (e (f x))))))))
+(let std/fn/combinator/7 (lambda a b c d e f g x (a (b (c (d (e (f (g x)))))))))
+(let std/fn/combinator/8 (lambda a b c d e f g h x (a (b (c (d (e (f (g (h x))))))))))
+(let std/fn/combinator/9 (lambda a b c d e f g h i x (a (b (c (d (e (f (g (h (i x)))))))))))
+
+(let std/fn/rev/combinator/2 (lambda a b x (b (a x))))
+(let std/fn/rev/combinator/3 (lambda a b c x (c (b (a x)))))
+(let std/fn/rev/combinator/4 (lambda a b c d x (d (c (b (a x))))))
+(let std/fn/rev/combinator/5 (lambda a b c d e x (e (d (c (b (a x)))))))
+(let std/fn/rev/combinator/6 (lambda a b c d e f x (f (e (d (c (b (a x))))))))
+(let std/fn/rev/combinator/7 (lambda a b c d e f g x (g (f (e (d (c (b (a x)))))))))
+(let std/fn/rev/combinator/8 (lambda a b c d e f g h x (h (g (f (e (d (c (b (a x))))))))))
+(let std/fn/rev/combinator/9 (lambda a b c d e f g h i x (i (h (g (f (e (d (c (b (a x)))))))))))
+
 
 (let std/fn/const (lambda x . x))
 (let std/fn/return 1)
@@ -2240,7 +2253,12 @@ q)))
 (let median/float std/vector/float/median)
 (let zip std/vector/tuple/zip)
 (let unzip std/vector/tuple/unzip)
+
 (let nl std/char/new-line)
+(let sp std/char/space)
+(let ep std/char/empty)
+(let dq std/char/double-quote)
+
 (let window std/vector/sliding-window)
 (let flat std/vector/flat-one)
 (let enumerate std/vector/enumerate)

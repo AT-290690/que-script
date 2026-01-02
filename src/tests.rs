@@ -2104,7 +2104,17 @@ r#"
           (count (lambda n (>= n 2))))))) 
 
 (part1 INPUT)"#, "4"),
-
+(r#"[
+(apply (*|>
+    (map (String->Vector '-')) 
+    (map (map String->Integer)) 
+    flat 
+    sum) ["1-2" "3-4" "5-6"])
+(|> ["1-2" "3-4" "5-6"]
+    (map (String->Vector '-')) 
+    (map (map String->Integer)) 
+    flat 
+    sum)]"#, "[21 21]"),
 
 // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
 // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
