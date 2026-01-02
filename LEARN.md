@@ -456,49 +456,6 @@ add ;  Int -> Int -> Int
 buffer ; Returns [5 1 2 3 4]
 ```
 
-## Point Free Code
-
-### Computing maximum wealth from nested lists
-
-#### Given a 2D collection where each inner list represents a person's wealth per account, compute the maximum total wealth across all people by summing each inner list and taking the maximum of those sums.
-
-#### Both pipeline (threading/pipe) and point-free styles are supported. Use the pipe for readability and explicit data flow (e.g., |> xs (map sum) (maximum)), or the point-free style for terser compositional definitions (e.g., (let maximumWealth (\ maximum (\ map sum))). Choose whichever matches your codebase's clarity goals.
-
----
-
-| Form                | Purpose                                       | Example                                           | Notes                                               |
-| ------------------- | --------------------------------------------- | ------------------------------------------------- | --------------------------------------------------- |
-| (map fn xs)         | Apply fn to every element                     | (map sum [[1 2] [3 4]])                           | Returns a list of results                           |
-| (reduce xs fn init) | Aggregate with fn starting from init          | (reduce [1 2 3] + 0)                              | Common for sums, folds                              |
-| (max a b)           | Return larger of two numbers                  | (reduce [1 5 3] (lambda a b (max a b)) -infinity) | Use -infinity or an appropriate identity for reduce |
-| (\|> x f g)         | Thread x through functions                    | (\|> xs (map sum) (maximum))                      | Readable composition alternative                    |
-| Point-free          | Compose functions without naming the argument | (let maximumWealth (\ maximum (\ map sum)))       | Very concise but can be harder to read              |
-
----
-
-```lisp
-(let input [
-    [ 1 2 3 ]
-    [ 5 5 5 ]
-    [ 3 1 4 ]
-])
-
-; long version - not prefered
-(let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
-
-; Both of these are prefered
-
-; Pipe composition - easy to follow
-(let maximumWealthPipe (lambda xs (|> xs (map sum) (maximum))))
-
-; Point free version - most conscise
-(let maximumWealthFree (\ maximum (\map sum)))
-
-(|> ; all of these functions are [[Int]] -> Int so they can exist in the same vector
-    [maximumWealthLong maximumWealthPipe maximumWealthFree]
-    (map (lambda fn (fn input))))
-```
-
 ## Zip and Unzip
 
 ### Tuples become especially powerful when combined with `zip` and `unzip`. These operations allow you to merge two vectors into a vector of tuples — and later split them back into separate vectors. This is a common pattern in functional programming for pairing related data together while keeping everything type-safe and pure.

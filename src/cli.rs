@@ -106,26 +106,11 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         let std_src = fs::read_to_string("./lisp/std.lisp")?;
         let std_ast = crate::parser::build(&std_src).unwrap();
         dump_wrapped_ast(std_ast, "./src/baked.rs");
+    } else if args.iter().any(|a| a == "--fp") { // temporary until migrating the data last for pipes
+        let std_src = fs::read_to_string("./lisp/fp.lisp")?;
+        let std_ast = crate::parser::build(&std_src).unwrap();
+        dump_wrapped_ast(std_ast, "./src/baked.rs");
     }
-    //  else if args.iter().any(|a| a == "--comp") {
-    //     let program = fs::read_to_string(path)?;
-    //     let std_ast = crate::baked::load_ast();
-
-    //     if let crate::parser::Expression::Apply(items) = &std_ast {
-    //         match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-    //             Ok(wrapped_ast) => {
-    //                 let mut code: Vec<crate::vm::Instruction> = Vec::new();
-    //                 crate::vm::compile(&wrapped_ast, &mut code);
-    //                 dump_wrapped_bytecode(code, "./src/ir.rs");
-    //             }
-    //             Err(e) => println!("{}", e),
-    //         }
-    //     }
-    // }
-    // else if args.iter().any(|a| a == "--exec") {
-    //     let bitecode = crate::ir::load_bytecode();
-    //     println!("{:?}", crate::vm::exe(bitecode));
-    // }
     else if args.iter().any(|a| a == "--check") {
         let program = fs::read_to_string(path)?;
         let std_ast = crate::baked::load_ast();

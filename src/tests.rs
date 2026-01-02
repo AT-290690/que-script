@@ -1174,38 +1174,6 @@ sword)))
         (count xs negative?))))
         
 (maximum/count [ -1 -1 1 1 1 -1 1 ])"#, "4"),
-(r#"(let input [
-    [ 1 2 3 ]
-    [ 5 5 5 ]
-    [ 3 1 4 ]
-])
-
-; long version - not prefered
-(let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
-
-; Both of these are prefered 
-
-; Pipe composition - easy to follow
-(let maximumWealthPipe (lambda xs (|> xs (map sum) (maximum))))
-
-; Point free version - most conscise
-(let maximumWealthFree (\ maximum (\map sum)))
-
-(|> ; all of these functions are [[Int]] -> Int so they can exist in the same vector
-    [maximumWealthLong maximumWealthPipe maximumWealthFree] 
-    (map (lambda fn (fn input))))"#, "[15 15 15]"),
-    (r#"(let \filterOdd (\filter odd?))
-(let maximumWealthFree (\ maximum (\map sum)))
-[(|> 
-    [ 1 2 3 4 5 ] 
-    (\filterOdd)
-    (\map square)
-    (sum))
- (|> [
-    [ 1 2 3 ]
-    [ 5 5 5 ]
-    [ 3 1 4 ]
-] (maximumWealthFree))]"#, "[35 15]"),
  (r#";    halve :: [T] -> {[T] * [T]}
 (let halve (lambda xs (do 
           (let half (/ (length xs) 2)) 
@@ -2191,9 +2159,41 @@ r#"
           (count (lambda n (>= n 2))))))) 
 
 (part1 INPUT)"#, "4"),
-(r#"(let solve (lambda xs (|> xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
-(let arithmetic-progression? (lambda inp (|> (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
-[ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]")
+// (r#"(let solve (lambda xs (|> xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
+// (let arithmetic-progression? (lambda inp (|> (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
+// [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
+// (r#"(let input [
+//     [ 1 2 3 ]
+//     [ 5 5 5 ]
+//     [ 3 1 4 ]
+// ])
+
+// ; long version - not prefered
+// (let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
+
+// ; Both of these are prefered 
+
+// ; Pipe composition - easy to follow
+// (let maximumWealthPipe (lambda xs (|> xs (map sum) (maximum))))
+
+// ; Point free version - most conscise
+// (let maximumWealthFree (\ maximum (\map sum)))
+
+// (|> ; all of these functions are [[Int]] -> Int so they can exist in the same vector
+//     [maximumWealthLong maximumWealthPipe maximumWealthFree] 
+//     (map (lambda fn (fn input))))"#, "[15 15 15]"),
+//     (r#"(let \filterOdd (\filter odd?))
+// (let maximumWealthFree (\ maximum (\map sum)))
+// [(|> 
+//     [ 1 2 3 4 5 ] 
+//     (\filterOdd)
+//     (\map square)
+//     (sum))
+//  (|> [
+//     [ 1 2 3 ]
+//     [ 5 5 5 ]
+//     [ 3 1 4 ]
+// ] (maximumWealthFree))]"#, "[35 15]"),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
