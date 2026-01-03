@@ -26,15 +26,15 @@ _Learn the basics of Que Script_
 
 ---
 
-| Button        | Icon | Description                                           | Use case                                                                                            |
-| ------------- | ---- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Play          | \|>  | Type check and run code                               | To quckly type check and then run                                                                   |
-| Check         | T    | Type check only                                       | When you only want to check if program type checks. If there is a selection it checks the selection |
-| JavaScript    | ⚡   | Run JavaScript compiled code                          | JS is quite fast because it's JIT compiled                                                          |
-| Sparkles Mode | ✨   | Sparkles appear when you type and run                 | No use case, but makes your code feel magical                                                       |
-| Unsafe Mode   | 🪲   | You can only run js code, cmd/control + s now runs js | Disable type checker and run JavaScript                                                             |
-| Documentaiton | 📖   | Opens a modal of the documentation                    | Search functions by signature and name                                                              |
-| Share         | 🔗   | Opens a modal for creating a link                     | To share your program and settings                                                                  |
+| Button        | Icon | Description                                           | Use case                                            |
+| ------------- | ---- | ----------------------------------------------------- | --------------------------------------------------- |
+| Play          | \|>  | Type check and run code                               | To quckly type check and then run                   |
+| Check         | T    | Type check only                                       | When you only want to check if program type checks. |
+| JavaScript    | ⚡   | Run JavaScript compiled code                          | JS is quite fast because it's JIT compiled          |
+| Sparkles Mode | ✨   | Sparkles appear when you type and run                 | No use case, but makes your code feel magical       |
+| Unsafe Mode   | 🪲   | You can only run js code, cmd/control + s now runs js | Disable type checker and run JavaScript             |
+| Documentaiton | 📖   | Opens a modal of the documentation                    | Search functions by signature and name              |
+| Share         | 🔗   | Opens a modal for creating a link                     | To share your program and settings                  |
 
 ---
 
