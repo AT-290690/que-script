@@ -542,7 +542,6 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "lambda" => lambda_destructure_transform(exprs),
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
-                    "\\" => Ok(combinator_transform(exprs)?),
                     "comp" => Ok(combinator_transform_rev(exprs)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
@@ -1264,45 +1263,75 @@ fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
         }
     }
 }
-fn combinator_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    // Remove the "\"
-    exprs.remove(0);
+// fn combinator_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+//     // Remove the "\"
+//     exprs.remove(0);
 
-    if exprs.is_empty() {
-        return Err("Error! (\\) requires at least one function".into());
+//     if exprs.is_empty() {
+//         return Err("Error! (\\) requires at least one function".into());
+//     }
+
+//     // First item is the function being partially applied
+//     let func: Expression = exprs.remove(0);
+
+//     Ok(Expression::Apply(
+//         vec![
+//             Expression::Word(format!("std/fn/combinator/{}", exprs.len() + 1)),
+//             func,
+//         ]
+//         .into_iter()
+//         .chain(exprs)
+//         .collect(),
+//     ))
+// }
+
+fn normalize_apply(expr: Expression) -> Expression {
+    match expr {
+        Expression::Apply(items) if items.len() == 2 => {
+            let f = normalize_apply(items[0].clone());
+            let arg = normalize_apply(items[1].clone());
+
+            match f {
+                Expression::Apply(mut inner) => {
+                    inner.push(arg);
+                    Expression::Apply(inner)
+                }
+                other => Expression::Apply(vec![other, arg]),
+            }
+        }
+
+        Expression::Apply(items) => {
+            Expression::Apply(items.into_iter().map(normalize_apply).collect())
+        }
+
+        other => other,
     }
-
-    // First item is the function being partially applied
-    let func: Expression = exprs.remove(0);
-
-    Ok(Expression::Apply(
-        vec![
-            Expression::Word(format!("std/fn/combinator/{}", exprs.len() + 1)),
-            func,
-        ]
-        .into_iter()
-        .chain(exprs)
-        .collect(),
-    ))
 }
+
 fn combinator_transform_rev(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    // Remove "*|>"
     exprs.remove(0);
-
     if exprs.is_empty() {
-        return Err("Error! (*|>) requires at least one function".into());
+        return Err("Error! (comp) requires at least one function".into());
     }
-
-    Ok(Expression::Apply(
-        vec![Expression::Word(format!(
-            "std/fn/rev/combinator/{}",
-            exprs.len()
-        ))]
+    // generate fresh parameter
+    let arg = Expression::Word("_x".to_string());
+    // Build nested application: fns applied right-to-left
+    let body = exprs
         .into_iter()
-        .chain(exprs)
-        .collect(),
-    ))
+        .fold(arg.clone(), |acc, func| Expression::Apply(vec![func, acc]));
+
+    Ok(normalize_apply(Expression::Apply(vec![
+        Expression::Word("lambda".to_string()),
+        arg,
+        body,
+    ])))
 }
+
+// (let f (lambda x (|> x (filter odd?) (map square) sum)))
+// Apply([Word("sum"), Apply([Word("map"), Word("square"), Apply([Word("filter"), Word("odd?"), Word("x")])])])
+
+// (let f (comp (filter odd?) (map square) sum))
+// Apply([Word("sum"), Apply([Apply([Word("map"), Word("square")]), Apply([Apply([Word("filter"), Word("odd?")]), Word("_x")])])])
 
 fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     // Remove the "apply"

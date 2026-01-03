@@ -103,7 +103,6 @@
 (let Que/length std/vector/deque/length)
 (let Que/at (lambda i xs (if (< i 0) (std/vector/deque/get xs (+ (length xs) i)) (std/vector/deque/get xs i))))
 
-
 (let BigInt/add std/int/big/add)
 (let BigInt/sub std/int/big/sub)
 (let BigInt/mul std/int/big/mul)
@@ -174,6 +173,7 @@
 
 (let Vector/new (lambda fn n (std/vector/2d/fill n fn)))
 (let Matrix/new (lambda fn w h (std/vector/3d/fill w h fn)))
+(let String/equal? std/vector/char/equal?)
 (let String/equal? std/vector/char/equal?)
 (let String/lte? std/vector/char/lesser-or-equal?)
 (let String/gte? std/vector/char/greater-or-equal?)
