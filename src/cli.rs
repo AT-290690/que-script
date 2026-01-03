@@ -2,6 +2,7 @@
 #![allow(warnings)]
 
 use crate::baked::load_ast;
+use crate::infer::infer_with_builtins_env;
 use crate::ir::load_bytecode;
 use crate::vm::parse_bitecode;
 use std::env;
@@ -220,44 +221,18 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             crate::parser::Expression::Apply(items) => {
                 match crate::parser::merge_std_and_program(&program, items.to_vec()) {
                     Ok(ast) => {
-                        if let crate::parser::Expression::Apply(inner) = &ast {
-                            for expr in inner[1..].to_vec() {
-                                if let crate::parser::Expression::Apply(list) = expr {
-                                    let a = &list[0];
-                                    let b = &list[1];
-                                    if let crate::parser::Expression::Word(kw) = a {
-                                        if kw == "let" {
-                                            if let crate::parser::Expression::Word(name) = b {
-                                                let E = inner
-                                                    .to_vec()
-                                                    .iter()
-                                                    .chain(
-                                                        vec![crate::parser::Expression::Word(
-                                                            name.to_string(),
-                                                        )]
-                                                        .iter(),
-                                                    )
-                                                    .into_iter()
-                                                    .map(|e| e.clone())
-                                                    .collect::<Vec<_>>();
-                                                match crate::infer::infer_with_builtins(
-                                                    &crate::parser::Expression::Apply(E),
-                                                    crate::infer::create_builtin_environment(crate::types::TypeEnv::new())
-                                                ) {
-                                                    Ok(typ) => {
-                                                        // TODO: use a regex to remove the T+\d+ noise of the files
-                                                        names.push([
-                                                            name.clone(),
-                                                            format!("{}", typ),
-                                                        ])
-                                                    }
-                                                    Err(e) => {}
-                                                }
-                                            }
+                       match infer_with_builtins_env(&ast, crate::infer::create_builtin_environment(crate::types::TypeEnv::new())) {
+                            Ok(env) => {
+                                env
+                                    .scopes
+                                    .iter()
+                                    .for_each(|x| {
+                                        for key in x.keys().into_iter().collect::<Vec<_>>() {
+                                            names.push([key.to_string(), x.get(key).unwrap().to_string()]);
                                         }
-                                    }
-                                }
-                            }
+                                    })
+                            },
+                            Err(_) => {}
                         }
                         let path = "./sig.json";
                         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap())

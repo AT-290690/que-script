@@ -1389,20 +1389,35 @@ pub fn infer_with_builtins(
     // Apply solved substitution map to everything
     let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
     ctx.env.apply_substitution_map(&subst_map);
-    // println!(
-    //     "{:?}",
-    //     ctx.env
-    //         .scopes
-    //         .iter()
-    //         .map(|x| {
-    //             let mut out = Vec::new();
-    //             for key in x.keys().into_iter().collect::<Vec<_>>() {
-    //                 out.push((key, x.get(key).unwrap().to_string()));
-    //             }
-    //             out
-    //         })
-    //         .into_iter()
-    //         .collect::<Vec<_>>()
-    // );
+
     Ok(solved_type)
+}
+
+pub fn infer_with_builtins_env(
+    expr: &Expression,
+    (env, init_id): (TypeEnv, u64),
+) -> Result<TypeEnv, String> {
+    let mut ctx = InferenceContext {
+        env,
+        constraints: Vec::new(),
+        fresh_var_counter: init_id,
+    };
+
+    // Infer type — accumulate constraints
+    infer_expr(expr, &mut ctx)?;
+
+    // Solve constraints once, globally
+    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
+        .constraints
+        .iter()
+        .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
+        .collect();
+
+    let subst_map = solve_constraints_list(&constraints_vec).map_err(|e| e.to_string())?;
+
+    // Apply solved substitution map to everything
+    // let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
+    ctx.env.apply_substitution_map(&subst_map);
+
+    Ok(ctx.env)
 }

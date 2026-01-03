@@ -161,47 +161,21 @@ pub fn cons(a: String, b: String) -> *const u8 {
 pub fn signatures(program: String) -> *const u8 {
     let std_ast = baked::load_ast();
     let mut names = Vec::new();
+
     match std_ast {
         parser::Expression::Apply(items) => {
             match parser::merge_std_and_program(&program, items.to_vec()) {
                 Ok(ast) => {
-                    if let parser::Expression::Apply(inner) = &ast {
-                        for expr in inner[1..].to_vec() {
-                            if let parser::Expression::Apply(list) = expr {
-                                let a = &list[0];
-                                let b = &list[1];
-                                if let parser::Expression::Word(kw) = a {
-                                    if kw == "let" {
-                                        if let parser::Expression::Word(name) = b {
-                                            let E = inner
-                                                .to_vec()
-                                                .iter()
-                                                .chain(
-                                                    vec![parser::Expression::Word(
-                                                        name.to_string(),
-                                                    )]
-                                                    .iter(),
-                                                )
-                                                .into_iter()
-                                                .map(|e| e.clone())
-                                                .collect::<Vec<_>>();
-                                            match infer::infer_with_builtins(
-                                                &parser::Expression::Apply(E),
-                                                infer::create_builtin_environment(
-                                                    types::TypeEnv::new(),
-                                                ),
-                                            ) {
-                                                Ok(typ) => {
-                                                    // TODO: use a regex to remove the T+\d+ noise of the files
-                                                    names.push([name.clone(), format!("{}", typ)])
-                                                }
-                                                Err(e) => println!("{}", e),
-                                            }
-                                        }
-                                    }
-                                }
+                    match infer::infer_with_builtins_env(
+                        &ast,
+                        crate::infer::create_builtin_environment(crate::types::TypeEnv::new()),
+                    ) {
+                        Ok(env) => env.scopes.iter().for_each(|x| {
+                            for key in x.keys().into_iter().collect::<Vec<_>>() {
+                                names.push([key.to_string(), x.get(key).unwrap().to_string()]);
                             }
-                        }
+                        }),
+                        Err(_) => {}
                     }
 
                     let res = format!(
