@@ -26,6 +26,9 @@
 (let empty? std/vector/empty?)
 (let not-empty? std/vector/not-empty?)
 
+(let exclude (lambda fn? xs (std/vector/filter xs (lambda x (not (fn? x))))))
+(let select (lambda fn? xs (std/vector/filter xs fn?)))
+
 (let find (lambda fn? xs (std/vector/find-index xs fn?)))
 (let partition (lambda n xs (std/vector/partition xs n)))
 (let reverse std/vector/reverse)
@@ -122,6 +125,7 @@
 (let lt? (lambda a b (and (=? a false) (=? b true))))
 (let and? (lambda a b (and (=? a true) (=? b true))))
 (let or? (lambda a b (or (=? a true) (=? b true))))
+(let not? (lambda x (not x)))
 
 (let abs std/int/abs)
 (let abs/int std/int/abs)

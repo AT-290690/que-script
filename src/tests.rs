@@ -2115,7 +2115,19 @@ r#"
     (map (map String->Integer)) 
     flat 
     sum)]"#, "[21 21]"),
+(r#"(let puncts ['!' ',' '.' '?' ' ' sq nl]) 
+(let punct? (lambda x (some? (apply =# x) puncts)))
 
+(let palindrome? (comp (map lower) (exclude punct?) (S/comb match? reverse)))
+(|> [
+  "Was it a cat I saw?"
+  "No lemon, no melon"
+  "No one made killer apparel like Dame Noon."
+  "Go hang a salami, I'm a lasagna hog"
+  "Stab nail at ill, italian bats!"
+] 
+(map palindrome?) 
+(every? identity))"#, "true")
 // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
 // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
 // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
