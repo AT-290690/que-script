@@ -91,7 +91,7 @@ impl fmt::Display for TypeScheme {
             write!(f, "{}", self.typ)
         } else {
             let var_names: Vec<String> = self.vars.iter().map(|v| format!("{}", v)).collect();
-            write!(f, "∀{}. {}", var_names.join(" "), self.typ)
+            write!(f, "T{}. {}", var_names.join(" "), self.typ)
         }
     }
 }

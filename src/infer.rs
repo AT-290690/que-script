@@ -1389,6 +1389,20 @@ pub fn infer_with_builtins(
     // Apply solved substitution map to everything
     let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
     ctx.env.apply_substitution_map(&subst_map);
-
+    // println!(
+    //     "{:?}",
+    //     ctx.env
+    //         .scopes
+    //         .iter()
+    //         .map(|x| {
+    //             let mut out = Vec::new();
+    //             for key in x.keys().into_iter().collect::<Vec<_>>() {
+    //                 out.push((key, x.get(key).unwrap().to_string()));
+    //             }
+    //             out
+    //         })
+    //         .into_iter()
+    //         .collect::<Vec<_>>()
+    // );
     Ok(solved_type)
 }

@@ -103,9 +103,16 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
 
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--std") {
-        let std_src = fs::read_to_string("./lisp/std.lisp")?;
-        let std_ast = crate::parser::build(&std_src).unwrap();
-        dump_wrapped_ast(std_ast, "./src/baked.rs");
+        let combined = format!(
+                                    "{}\n{}\n{}\n{}", 
+                                    fs::read_to_string("./lisp/const.lisp")?,
+                                    fs::read_to_string("./lisp/std.lisp")?,
+                                    fs::read_to_string("./lisp/fp.lisp")?,
+                                    fs::read_to_string("./lisp/ds.lisp")?);
+        // let mut file = fs::File::create("./combined.lisp")?;
+        // writeln!(file, "{}", combined)?;
+        let lib_ast = crate::parser::build(&combined).unwrap();
+        dump_wrapped_ast(lib_ast, "./src/baked.rs");
     } else if args.iter().any(|a| a == "--check") {
         let program = fs::read_to_string(path)?;
         let std_ast = crate::baked::load_ast();
