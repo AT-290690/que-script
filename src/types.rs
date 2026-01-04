@@ -218,3 +218,453 @@ pub fn generalize(env: &TypeEnv, typ: Type) -> TypeScheme {
     let vars: Vec<u64> = typ_vars.difference(&env_vars).cloned().collect();
     TypeScheme::new(vars, typ)
 }
+
+// Built-in function type signatures
+pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
+    // Local fresh-var generator
+    let mut fresh_id: u64 = env.scopes.len() as u64;
+
+    let mut fresh_var = || {
+        let id = fresh_id;
+        fresh_id += 1;
+        Type::Var(TypeVar { id })
+    };
+    {
+        let a: Type = fresh_var();
+        let _ = env.insert(
+            "set!".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::Function(
+                        Box::new(Type::Int),
+                        Box::new(Type::Function(Box::new(a), Box::new(Type::Unit))),
+                    )),
+                ),
+            ),
+        );
+    }
+    {
+        let a: Type = fresh_var();
+        let _ = env.insert(
+            "pop!".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Unit)),
+            ),
+        );
+    }
+    {
+        let a = fresh_var();
+        let _ = env.insert(
+            "length".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Int)),
+            ),
+        );
+    }
+    {
+        let a: Type = fresh_var();
+        let _ = env.insert(
+            "get".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::Function(Box::new(Type::Int), Box::new(a))),
+                ),
+            ),
+        );
+    }
+    {
+        let a = fresh_var();
+        let b = fresh_var();
+        let _ = env.insert(
+            "fst".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap(), b.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Tuple(vec![a.clone(), b.clone()])),
+                    Box::new(a.clone()),
+                ),
+            ),
+        );
+    }
+
+    {
+        let a = fresh_var();
+        let b = fresh_var();
+        let _ = env.insert(
+            "snd".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap(), b.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Tuple(vec![a.clone(), b.clone()])),
+                    Box::new(b.clone()),
+                ),
+            ),
+        );
+    }
+    {
+        let e = fresh_var();
+
+        let _ = env.insert(
+            "loop".to_string(),
+            TypeScheme::new(
+                vec![e.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Int),
+                    Box::new(Type::Function(
+                        Box::new(Type::Int),
+                        Box::new(Type::Function(
+                            Box::new(Type::Function(Box::new(Type::Int), Box::new(e.clone()))),
+                            Box::new(Type::Unit),
+                        )),
+                    )),
+                ),
+            ),
+        );
+    }
+    {
+        let e = fresh_var();
+
+        let _ = env.insert(
+            "loop-finish".to_string(),
+            TypeScheme::new(
+                vec![e.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::Bool),
+                    Box::new(Type::Function(Box::new(e.clone()), Box::new(Type::Unit))),
+                ),
+            ),
+        );
+    }
+    let _ = env.insert(
+        "+".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+    let _ = env.insert(
+        "+.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
+        )),
+    );
+    let _ = env.insert(
+        "+#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
+    );
+
+    let _ = env.insert(
+        "-".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    let _ = env.insert(
+        "-.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
+        )),
+    );
+
+    let _ = env.insert(
+        "-#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
+    );
+
+    let _ = env.insert(
+        "*".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    let _ = env.insert(
+        "*.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
+        )),
+    );
+
+    let _ = env.insert(
+        "*#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
+    );
+
+    let _ = env.insert(
+        "/".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    let _ = env.insert(
+        "/.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
+        )),
+    );
+
+    let _ = env.insert(
+        "/#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
+    );
+    let _ = env.insert(
+        "/.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+    let _ = env.insert(
+        "mod".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+    let _ = env.insert(
+        "mod.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float))),
+        )),
+    );
+
+    // Comparison operations
+    let _ = env.insert(
+        "=".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "=.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        ">.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "<.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        ">=.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "<=.".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Float),
+            Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert("true".to_string(), TypeScheme::monotype(Type::Bool));
+    let _ = env.insert("false".to_string(), TypeScheme::monotype(Type::Bool));
+
+    let _ = env.insert(
+        "=?".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "=#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "<".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "<#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        ">".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        ">#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "<=".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "<=#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        ">=".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        ">=#".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
+    );
+
+    // Logical operations
+    let _ = env.insert(
+        "and".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "or".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
+        )),
+    );
+
+    let _ = env.insert(
+        "not".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
+    );
+
+    // Bitwise operations
+    let _ = env.insert(
+        "&".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    let _ = env.insert(
+        "|".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    let _ = env.insert(
+        "^".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    let _ = env.insert(
+        ">>".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    let _ = env.insert(
+        "<<".to_string(),
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
+    );
+
+    let _ = env.insert(
+        "Int->Float".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Float))),
+    );
+
+    let _ = env.insert(
+        "Float->Int".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Float), Box::new(Type::Int))),
+    );
+
+    let _ = env.insert(
+        "~".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+    );
+
+    (env, fresh_id) // return env with built-ins and also return next fresh ID
+}

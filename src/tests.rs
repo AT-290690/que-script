@@ -51,7 +51,7 @@ xs)"#, "[[[Bool]]]")
             if let Some(expr) = exprs.first() {
                 let result = crate::infer::infer_with_builtins(
                     expr,
-                    crate::infer::create_builtin_environment(crate::types::TypeEnv::new()),
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
                 );
                 // Assert that the result is Ok
                 assert!(
@@ -144,7 +144,7 @@ Error! Concequent and alternative must match types
                 // Check that type inference returns an Err
                 let result = crate::infer::infer_with_builtins(
                     expr,
-                    crate::infer::create_builtin_environment(crate::types::TypeEnv::new()),
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
                 );
                 // Assert that the result is an Err
 
@@ -2171,7 +2171,7 @@ r#"
                     Ok(exprs) => {
                         match crate::infer::infer_with_builtins(
                             &exprs,
-                            crate::infer::create_builtin_environment(crate::types::TypeEnv::new()),
+                            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
                         ) {
                             Ok(_) => {
                                 match crate::vm::run(&exprs, crate::vm::VM::new()) {

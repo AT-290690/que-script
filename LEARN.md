@@ -4,7 +4,7 @@ _Learn the basics of Que Script_
 
 ## Installation
 
-### If you just want to try Que, then there is no need to install it locally.
+If you just want to try Que, then there is no need to install it locally.
 
 #### I recomend sticking to the online editor which has best support for the language at the moment
 
@@ -12,7 +12,7 @@ _Learn the basics of Que Script_
 
 ## Your First Program
 
-### Let's write a simple 'Hello, World!' program. Press play to see the output!
+Let's write a simple 'Hello, World!' program. Press play to see the output!
 
 ```lisp
 "Hello World"
@@ -38,7 +38,7 @@ _Learn the basics of Que Script_
 
 ---
 
-### The last expression will aways be printed on the terminal with it's type information
+The last expression will aways be printed on the terminal with it's type information
 
 ```lisp
 42
@@ -46,7 +46,7 @@ _Learn the basics of Que Script_
 
 ## Errors
 
-### Often times you will get errors and they will be printed in red.
+Often times you will get errors and they will be printed in red.
 
 ```lisp
 (+ 1 true)
@@ -58,7 +58,7 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 
 ## Comments
 
-### Comments in Que Script start with a semicolon (;) and continue until the end of the line. They are ignored by the interpreter.
+Comments in Que Script start with a semicolon (;) and continue until the end of the line. They are ignored by the interpreter.
 
 ```lisp
 ; This is a single-line comment
@@ -68,7 +68,7 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 
 ## S-Expressions
 
-### Que Script uses S-expressions (symbolic expressions) as its primary syntactic structure.
+Que Script uses S-expressions (symbolic expressions) as its primary syntactic structure.
 
 #### Everything in Que Script is an expression that returns a value.
 
@@ -106,7 +106,7 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 
 ## Variables
 
-### Define variables using the 'let' keyword. Que Script supports immutable bindings by default.
+Define variables using the 'let' keyword. Que Script supports immutable bindings by default.
 
 #### 'let' returns the sentinel value 0.
 
@@ -120,7 +120,7 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 
 ## Scopes
 
-### The environment where a variable is defined and can be accessed.
+The environment where a variable is defined and can be accessed.
 
 ---
 
@@ -148,7 +148,7 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 
 ## Do
 
-### `do` in Que allows you to sequence multiple expressions and evaluate them in order, returning the value of the **last** expression. It is commonly used to introduce multiple steps or bindings inside a function, lambda, or any expression context where only a single expression would normally be allowed.
+`do` in Que allows you to sequence multiple expressions and evaluate them in order, returning the value of the **last** expression. It is commonly used to introduce multiple steps or bindings inside a function, lambda, or any expression context where only a single expression would normally be allowed.
 
 #### This allows Que Script to express data transformations without deep nesting of function calls.
 
@@ -169,7 +169,7 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 
 ## Pipe
 
-### The pipe operator is used to chain expressions in a readable, left-to-right manner.
+The pipe operator is used to chain expressions in a readable, left-to-right manner.
 
 #### It takes the result of one expression and passes it as the first argument to the next function.
 
@@ -203,11 +203,11 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 
 ## Aliases
 
-### Que provides aliases for many commonly used standard library functions. These aliases are simply shorter names that refer to fully qualified definitions in the standard library, making everyday code easier to read and write without sacrificing clarity or safety.
+Que provides aliases for many commonly used standard library functions. These aliases are simply shorter names that refer to fully qualified definitions in the standard library, making everyday code easier to read and write without sacrificing clarity or safety.
 
-### Aliases allow you to focus on _what_ a program does instead of _where_ each function comes from. In practice, this means you can write expressive pipelines using concise names, while still having access to the full, explicit names when precision matters.
+Aliases allow you to focus on _what_ a program does instead of _where_ each function comes from. In practice, this means you can write expressive pipelines using concise names, while still having access to the full, explicit names when precision matters.
 
-### The following example shows the same program written using short aliases and fully qualified names. Both versions are identical in behavior and type checking — the only difference is readability.
+The following example shows the same program written using short aliases and fully qualified names. Both versions are identical in behavior and type checking — the only difference is readability.
 
 ```lisp
 ; Short names
@@ -216,11 +216,11 @@ _Understand the fundamental syntax and structure of Que Script. New to Lisp? Don
 (<| (std/vector/int/range 1 10) (std/vector/map std/int/square) (std/vector/map std/convert/integer->string) (std/convert/vector->string ','))
 ```
 
-### Aliases are resolved automatically and do not introduce name clashes. If you define a local function with the same name as an alias, your local definition always takes precedence. This means you are free to choose meaningful names in your own code without worrying about conflicts with the standard library.
+Aliases are resolved automatically and do not introduce name clashes. If you define a local function with the same name as an alias, your local definition always takes precedence. This means you are free to choose meaningful names in your own code without worrying about conflicts with the standard library.
 
-### When ambiguity matters, you can always fall back to the fully qualified name. This gives Que a clean balance: short names for ergonomics, long names for precision, and no import statements or namespace management required.
+When ambiguity matters, you can always fall back to the fully qualified name. This gives Que a clean balance: short names for ergonomics, long names for precision, and no import statements or namespace management required.
 
-### This design keeps the language minimal while still scaling to large programs. Small scripts remain concise, while larger codebases can opt into explicitness exactly where it helps readability and maintenance.
+This design keeps the language minimal while still scaling to large programs. Small scripts remain concise, while larger codebases can opt into explicitness exactly where it helps readability and maintenance.
 
 # Functions
 
@@ -228,7 +228,7 @@ _Functions are first-class citizens in Que Script. They let you group logic, reu
 
 ## Lambda Functions
 
-### Create anonymous functions using the 'lambda' keyword. These functions can be passed around as values.
+Create anonymous functions using the 'lambda' keyword. These functions can be passed around as values.
 
 #### Create anonymous functions using the 'lambda' keyword. These functions can be passed around as values.
 
@@ -257,7 +257,7 @@ _Functions are first-class citizens in Que Script. They let you group logic, reu
 
 ## Named Functions
 
-### Define reusable functions by binding lambdas to names using 'let'.
+Define reusable functions by binding lambdas to names using 'let'.
 
 ```lisp
 ; lambda is a value that can be assigned to a variable
@@ -269,7 +269,7 @@ _Functions are first-class citizens in Que Script. They let you group logic, reu
 
 ## Functions with Multiple Arguments
 
-### Functions can take more than one argument — just list them all after lambda.
+Functions can take more than one argument — just list them all after lambda.
 
 ```lisp
 (let add (lambda a b (+ a b)))
@@ -281,7 +281,7 @@ add ;  Int -> Int -> Int
 
 ## Functions with Multiple Expressions
 
-### To include multiple steps in a function body, wrap them in a do block. Only the last expression in the block is returned.
+To include multiple steps in a function body, wrap them in a do block. Only the last expression in the block is returned.
 
 ```lisp
 (let greet (lambda name (do
@@ -294,7 +294,7 @@ add ;  Int -> Int -> Int
 
 ## Higher-Order Functions
 
-### Functions that take other functions as arguments or return functions are powerful tools of the functional programmer. In Que Script, functions are first-class values — you can pass them as arguments, return (sometimes) them from other functions, and store them in variables.
+Functions that take other functions as arguments or return functions are powerful tools of the functional programmer. In Que Script, functions are first-class values — you can pass them as arguments, return (sometimes) them from other functions, and store them in variables.
 
 ```lisp
 (let apply-twice (lambda f x
@@ -312,7 +312,7 @@ add ;  Int -> Int -> Int
 
 ## Anonymous Functions in Pipelines
 
-### You can use anonymous lambdas inline with the pipe operator (|>), especially for quick filtering or mapping.
+You can use anonymous lambdas inline with the pipe operator (|>), especially for quick filtering or mapping.
 
 ```lisp
 (|> [1 2 3 4 5]
@@ -323,7 +323,7 @@ add ;  Int -> Int -> Int
 
 ## Recursion
 
-### Functions in Que Script can call themselves and thanks to Tail Call Optimization, recursion is efficient and safe.
+Functions in Que Script can call themselves and thanks to Tail Call Optimization, recursion is efficient and safe.
 
 ```lisp
 (let~ factorial (lambda n total
@@ -337,14 +337,14 @@ add ;  Int -> Int -> Int
 
 ## Memoization
 
-### Memoization is an optimization technique used to cache the results of expensive function calls so future calls with the same input can reuse previously computed values. In Que, memoization pairs naturally with pure functions, because identical inputs are guaranteed to produce identical outputs. This makes caching both safe and predictable.
+Memoization is an optimization technique used to cache the results of expensive function calls so future calls with the same input can reuse previously computed values. In Que, memoization pairs naturally with pure functions, because identical inputs are guaranteed to produce identical outputs. This makes caching both safe and predictable.
 
 ```lisp
 (let* fibonacci (lambda n (if (< n 2) n (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
 (fibonacci 10)
 ```
 
-### Without memoization, recursive functions like Fibonacci recompute the same values many times, resulting in exponential runtime. Memoization transforms this behavior by storing intermediate results in a table so they can be reused instead of recomputed.
+Without memoization, recursive functions like Fibonacci recompute the same values many times, resulting in exponential runtime. Memoization transforms this behavior by storing intermediate results in a table so they can be reused instead of recomputed.
 
 ```lisp
 (let* fibonacci (lambda n memo
@@ -358,11 +358,11 @@ add ;  Int -> Int -> Int
 (fibonacci 10 [[] [] [] [] [] [] []])
 ```
 
-### Memoization is especially effective in Que because purity ensures that cached results never become invalid. It is not a replacement for algorithms, but it turns expressive—but slow—recursive definitions into practical ones. The key idea: pure functions plus memoization enable efficient computation without sacrificing clarity.
+Memoization is especially effective in Que because purity ensures that cached results never become invalid. It is not a replacement for algorithms, but it turns expressive—but slow—recursive definitions into practical ones. The key idea: pure functions plus memoization enable efficient computation without sacrificing clarity.
 
 ## Explicit recursion (let\* & let~)
 
-### If a function is a tail call, Que rewrites it internally as a loop for efficiency but only if explicitly defined as let~.
+If a function is a tail call, Que rewrites it internally as a loop for efficiency but only if explicitly defined as let~.
 
 ```lisp
 ; Explicit tail call can be optimized
@@ -381,7 +381,7 @@ add ;  Int -> Int -> Int
 ] ; both produce 15
 ```
 
-### You need to explicitly mark a function as recursive using `let*`. This is especially useful for functions that are deeply or mutually recursive, such as the Ackermann function. Using `let*` tells the compiler that recursion is intentional and not tail-call optimizable — preventing TCO and ensuring the recursive structure remains untouched.
+You need to explicitly mark a function as recursive using `let*`. This is especially useful for functions that are deeply or mutually recursive, such as the Ackermann function. Using `let*` tells the compiler that recursion is intentional and not tail-call optimizable — preventing TCO and ensuring the recursive structure remains untouched.
 
 ```lisp
 (let* ackermann (lambda m n
@@ -395,11 +395,11 @@ add ;  Int -> Int -> Int
 (ackermann 2 3)
 ```
 
-### However, note that `let*` disables Tail Call Optimization — which means you should only use it when you are absolutely sure. For tail-recursive functions, prefer `let~` so the compiler can optimize them into loops.
+However, note that `let*` disables Tail Call Optimization — which means you should only use it when you are absolutely sure. For tail-recursive functions, prefer `let~` so the compiler can optimize them into loops.
 
 ## Partial Application
 
-### Functions can be partially applied — you can call them with fewer arguments to create a new function.
+Functions can be partially applied — you can call them with fewer arguments to create a new function.
 
 ```lisp
 (let subtract (lambda a b (- a b)))
@@ -411,7 +411,7 @@ add ;  Int -> Int -> Int
 
 ## Partial Application in the real world
 
-### Partial application lets you create specialized functions by fixing some arguments of an existing one.
+Partial application lets you create specialized functions by fixing some arguments of an existing one.
 
 #### The result is a new function that remembers those fixed arguments. This gives us:
 
@@ -458,7 +458,7 @@ buffer ; Returns [5 1 2 3 4]
 
 ## Zip and Unzip
 
-### Tuples become especially powerful when combined with `zip` and `unzip`. These operations allow you to merge two vectors into a vector of tuples — and later split them back into separate vectors. This is a common pattern in functional programming for pairing related data together while keeping everything type-safe and pure.
+Tuples become especially powerful when combined with `zip` and `unzip`. These operations allow you to merge two vectors into a vector of tuples — and later split them back into separate vectors. This is a common pattern in functional programming for pairing related data together while keeping everything type-safe and pure.
 
 ```lisp
 (let nums (range 0 5))
@@ -468,7 +468,7 @@ buffer ; Returns [5 1 2 3 4]
 ; => [[0 true] [1 false] [2 true] [3 false] [4 true]]
 ```
 
-### `unzip` performs the reverse operation: it takes a vector of tuples and separates them into two individual vectors. Together, `zip` and `unzip` make it easy to structure and transform parallel data without losing relationships.
+`unzip` performs the reverse operation: it takes a vector of tuples and separates them into two individual vectors. Together, `zip` and `unzip` make it easy to structure and transform parallel data without losing relationships.
 
 ```lisp
 (let tups (|> (range 0 5)
@@ -477,11 +477,11 @@ buffer ; Returns [5 1 2 3 4]
 ; => [[0 1 2 3 4] [true false true false true]]
 ```
 
-### Because tuples in Que are strongly typed, `zip` and `unzip` automatically infer the correct types for both vectors. This makes data pairing simple, expressive, and memory-safe — without any type annotations.
+Because tuples in Que are strongly typed, `zip` and `unzip` automatically infer the correct types for both vectors. This makes data pairing simple, expressive, and memory-safe — without any type annotations.
 
 ## Where 'Functions are first-class citizens' breaks
 
-### Here I will attempt to address something about the VM which I think you should know even though you will probably never encounter this issue.
+Here I will attempt to address something about the VM which I think you should know even though you will probably never encounter this issue.
 
 #### While higher-order functions (functions that take or return other functions) are supported in the JavaScript compiler, the VM implementation takes a more constrained approach to ensure memory safety and predictability.
 
@@ -538,7 +538,7 @@ _Que Script keeps things simple — it only has four core data types, but they�
 
 ## Core Types
 
-### Que Script’s type system is designed to be simple, sound, and statically inferred using Hindley–Milner (HM) inference. There are five fundamental types in Que Script, but the three most common primitives are:
+Que Script’s type system is designed to be simple, sound, and statically inferred using Hindley–Milner (HM) inference. There are five fundamental types in Que Script, but the three most common primitives are:
 
 #### Bool — truth values
 
@@ -563,7 +563,7 @@ _Que Script keeps things simple — it only has four core data types, but they�
 
 ## Integers (Int)
 
-### Integers are the most common numeric type in Que Script. You can use standard arithmetic operations: +, -, \*, /, and mod
+Integers are the most common numeric type in Que Script. You can use standard arithmetic operations: +, -, \*, /, and mod
 
 #### Represents signed 32-bit integers (whole numbers).
 
@@ -600,7 +600,7 @@ _Que Script keeps things simple — it only has four core data types, but they�
 
 ## Floating point numbers (Float)
 
-### Floats are the fractional numbers in Que Script. You can use special arithmetic operations: +., -., \*., /., and mod.
+Floats are the fractional numbers in Que Script. You can use special arithmetic operations: +., -., \*., /., and mod.
 
 #### Represents signed 32-bit floats (fractional numbers).
 
@@ -636,7 +636,7 @@ _Que Script keeps things simple — it only has four core data types, but they�
 
 ## Booleans (Bool)
 
-### Booleans represent truth values. You can compare numbers and use logical operators like and, or, and not.
+Booleans represent truth values. You can compare numbers and use logical operators like and, or, and not.
 
 #### Literals:
 
@@ -675,7 +675,7 @@ _Que Script keeps things simple — it only has four core data types, but they�
 
 ## Characters (Char)
 
-### Characters represent single symbols or letters. They’re often used for parsing or text-based problems.
+Characters represent single symbols or letters. They’re often used for parsing or text-based problems.
 
 #### A Char is not a string — it’s a single symbol.
 
@@ -708,7 +708,7 @@ c
 
 ## Vectors ([T])
 
-### Vectors are ordered collections (similar to arrays or lists). You can use special ! operations (like push! or sort!) for mutable behavior.
+Vectors are ordered collections (similar to arrays or lists). You can use special ! operations (like push! or sort!) for mutable behavior.
 
 ```lisp
 (let nums [1 2 3 4 5])
@@ -727,7 +727,7 @@ nums
 
 ## Tuples ({T1 \* T2})
 
-### Tuples in Que are small, fixed-size containers that hold exactly two values — potentially of different types. They’re immutable and type-safe, making them ideal for representing pairs such as coordinates, key–value pairs, or flags with data. You can access elements using `fst` and `snd`, or destructure them directly in function parameters.
+Tuples in Que are small, fixed-size containers that hold exactly two values — potentially of different types. They’re immutable and type-safe, making them ideal for representing pairs such as coordinates, key–value pairs, or flags with data. You can access elements using `fst` and `snd`, or destructure them directly in function parameters.
 
 ```lisp
 { true 10 } ; -> tuple { Bool * Int } {true 2
@@ -735,7 +735,7 @@ nums
 (snd { true 10 }) ; -> Int
 ```
 
-### Tuples are written using curly braces `{ }`. `{ true 10 }` is shorthand for `(tuple true 10)` and represents a value of type `{ Bool * Int }`. You can extract the first and second elements using `fst` and `snd`, or destructure them in lambdas.
+Tuples are written using curly braces `{ }`. `{ true 10 }` is shorthand for `(tuple true 10)` and represents a value of type `{ Bool * Int }`. You can extract the first and second elements using `fst` and `snd`, or destructure them in lambdas.
 
 ```lisp
 (let show (lambda { a b } { a b }))
@@ -744,7 +744,7 @@ nums
 (snd (show { "x" 42 })) ; => 42
 ```
 
-### Tuples also integrate smoothly with vectors. You can zip two vectors together into a vector of tuples using `std/vector/tuple/zip`, and later separate them with `std/vector/tuple/unzip`.
+Tuples also integrate smoothly with vectors. You can zip two vectors together into a vector of tuples using `std/vector/tuple/zip`, and later separate them with `std/vector/tuple/unzip`.
 
 ```lisp
 (zip { [1 2 3] [true false true] })
@@ -754,7 +754,7 @@ nums
 ; => [[1 2 3] [true false true]]
 ```
 
-### You can also use tuple destructuring with skipped values. Use `.` to ignore elements you don’t need.
+You can also use tuple destructuring with skipped values. Use `.` to ignore elements you don’t need.
 
 ```lisp
 (let second (lambda { . b } b))
@@ -763,7 +763,7 @@ nums
 
 ## Strings ([Char])
 
-### They are just Vectors of Chars. You can also count or filter specific characters in strings or vectors:
+They are just Vectors of Chars. You can also count or filter specific characters in strings or vectors:
 
 ```lisp
 (let hello "Hello")
@@ -773,7 +773,7 @@ nums
 
 ## Functions (T to T)
 
-### Functions are first-class values — they can be assigned, passed, or returned (sometimes).
+Functions are first-class values — they can be assigned, passed, or returned (sometimes).
 
 #### In Que Script, every function has a type signature that describes what types it takes as input, and what type it returns as output.
 
@@ -809,7 +809,7 @@ nums
 
 ## Unit ()
 
-### The Unit type, written as (), represents the absence of a meaningful value. It’s used for expressions that perform side effects rather than return data.
+The Unit type, written as (), represents the absence of a meaningful value. It’s used for expressions that perform side effects rather than return data.
 
 #### In Que Script, every expression returns something — even actions like mutation, printing, definitions or looping.
 
@@ -849,7 +849,7 @@ nums
 
 ## Type Inference
 
-### You don't need to declare types manually — Que Script uses Hindley–Milner type inference. This means the compiler automatically figures out types safely
+You don't need to declare types manually — Que Script uses Hindley–Milner type inference. This means the compiler automatically figures out types safely
 
 ---
 
@@ -874,18 +874,18 @@ nums
 
 ## Casting with 'as'
 
-### Que’s type inference is powerful, but there are situations where the programmer would prefer to explicitly state the type. In those cases, the `as` construct allows you to explicitly assert a type and guide the type checker.
+#### Que’s type inference is powerful, but there are situations where the programmer would prefer to explicitly state the type. In those cases, the `as` construct allows you to explicitly assert a type and guide the type checker.
 
-### `as` does not convert values at runtime. Instead, it _annotates_ a value with a specific type, telling the compiler how it should be treated during type checking. This is especially useful when working with empty vectors, nested structures, or polymorphic code where inference has insufficient context.
+#### `as` does not convert values at runtime. Instead, it _annotates_ a value with a specific type, telling the compiler how it should be treated during type checking. This is especially useful when working with empty vectors, nested structures, or polymorphic code where inference has insufficient context.
 
-### A common use case is initializing empty collections. An empty vector `[]` has no elements, so the compiler cannot infer what its element type should be. By casting it, you make the intended type explicit from the start.
+#### A common use case is initializing empty collections. An empty vector `[]` has no elements, so the compiler cannot infer what its element type should be. By casting it, you make the intended type explicit from the start.
 
 ```lisp
 (let xs (as [] [Int]))
 xs
 ```
 
-### Casting is also useful for complex nested types. In the example below, the cast fixes the vector’s element type to `[Bool]`, preventing accidental insertion of values with the wrong type.
+#### Casting is also useful for complex nested types. In the example below, the cast fixes the vector’s element type to `[Bool]`, preventing accidental insertion of values with the wrong type.
 
 ```lisp
 (let xs (as [[]] [[Bool]]))
@@ -893,7 +893,47 @@ xs
 (push! xs [1]) ; ❌ Cannot unify Int with Bool
 ```
 
-### `as` should be used sparingly. Que’s inference will infer the correct type automatically. Casting is best reserved for cases where where clarity is more important than brevity.
+`as` should be used sparingly. Que’s inference will infer the correct type automatically. Casting is best reserved for cases where where clarity is more important than brevity.
+
+## Type Assertions
+
+#### Type assertions allow you to verify that the type inferred by the compiler matches your expectation.
+
+#### Assertions do not override type inference. They simply check that the inferred type unifies with the expected type.
+
+#### They can be applied after defining a variable, or inline using (: ...), though inline usage is not recommended except for advanced scenarios.
+
+#### Type assertions are especially useful for empty collections, complex return types, and higher-order or recursive functions.
+
+```lisp
+(let fn (:
+  (Lambda (: Int a) (: Int b) Bool) ; Returns Bool
+  (lambda a b (+ a b)))) ; Returns Int
+
+(fn 1 2)
+; Cannot unify Bool with Int
+; (: (lambda a b (do (: Int a) (: Int b) Bool)) (lambda a b (+ a b)))
+```
+
+Use Cases for Type Assertions:
+
+- Guarding empty or initially ambiguous values, like empty arrays, to prevent inference ambiguity.
+
+- Documenting complex return types, especially when functions return multiple values or nested structures.
+
+- Validating higher-order functions and recursive functions to ensure arguments and return types behave as intended.
+
+- Acting as a confidence check or contract at API boundaries.
+
+Important Notes
+
+- Type assertions do not influence inference — they only validate it.
+
+- Assertions must come before a definition if used outside (: ...).
+
+- Incorrect assertions fail compilation immediately.
+
+- Overusing inline assertions with (: ...) is possible but generally discouraged to keep code clean.\_\_
 
 # Control Flow
 
@@ -901,7 +941,7 @@ _Control the flow of execution in your programs with conditionals and loops._
 
 ## Conditional Expressions
 
-### Use 'if' expressions to make decisions based on conditions. All branches must return values.
+Use 'if' expressions to make decisions based on conditions. All branches must return values.
 
 #### Both branches must return compatible types so that the compiler can infer a single return type.
 
@@ -927,7 +967,7 @@ _Control the flow of execution in your programs with conditionals and loops._
 (absolute -5) ; Returns: 5
 ```
 
-### It can be used with one or two branches
+It can be used with one or two branches
 
 ---
 
@@ -947,7 +987,7 @@ xs ; Returns [10]
 
 ## Loops
 
-### The loop construct in Que Script provides iteration over numeric ranges or conditional repetition. It comes in two forms:
+The loop construct in Que Script provides iteration over numeric ranges or conditional repetition. It comes in two forms:
 
 #### - For-loop style — (loop start end body)
 
@@ -979,7 +1019,7 @@ out ; Returns [0 1 2 3 4 0 1 2 3 4]
 
 ## Breaking out of a loop
 
-### In short - there is no way to break out of a loop
+In short - there is no way to break out of a loop
 
 #### Some languages or loop constructs lack a built-in break. Use a placement flag to emulate breaking: set the flag when you want to stop further work for the current iteration and ensure subsequent loop iterations skip actions based on that flag.
 
@@ -1043,7 +1083,7 @@ out ; Returns [0 1 2 3 4 0 1 2 3 4]
 
 ## Boolean Short-Circuiting
 
-### Boolean expressions in Que use short-circuit evaluation. This means that `and` and `or` only evaluate the expressions they need to. If the result can be determined from the left-hand side alone, the right-hand side is never executed. This allows conditional logic to be both fast and safe, especially when the right side performs a computation or triggers a side effect.
+Boolean expressions in Que use short-circuit evaluation. This means that `and` and `or` only evaluate the expressions they need to. If the result can be determined from the left-hand side alone, the right-hand side is never executed. This allows conditional logic to be both fast and safe, especially when the right side performs a computation or triggers a side effect.
 
 ```lisp
 (let expensive-computation (lambda (do (loop 0 1000000000 (lambda . nil)) false)))
@@ -1051,7 +1091,7 @@ out ; Returns [0 1 2 3 4 0 1 2 3 4]
 (and false (expensive-computation)) ; never calls expensive-computation
 ```
 
-### Short-circuiting isn't just an optimization — it's a semantic guarantee. Expressions like `(and x y)` and `(or x y)` preserve referential transparency when functions are pure, and they prevent unnecessary work. Critically, they also guard against errors: `(and (not (empty? xs)) (car xs))` is safe, because if `xs` is empty, the second operand is never evaluated.
+Short-circuiting isn't just an optimization — it's a semantic guarantee. Expressions like `(and x y)` and `(or x y)` preserve referential transparency when functions are pure, and they prevent unnecessary work. Critically, they also guard against errors: `(and (not (empty? xs)) (car xs))` is safe, because if `xs` is empty, the second operand is never evaluated.
 
 ```lisp
 (let dangerous-operation (lambda (car [])))
@@ -1059,7 +1099,7 @@ out ; Returns [0 1 2 3 4 0 1 2 3 4]
 (or true (dangerous-operation)) ; dangerous-operation is skipped
 ```
 
-### The table below illustrates how short-circuiting works step-by-step. Only the minimum number of evaluations occur to determine the result.
+The table below illustrates how short-circuiting works step-by-step. Only the minimum number of evaluations occur to determine the result.
 
 ---
 
@@ -1074,7 +1114,7 @@ out ; Returns [0 1 2 3 4 0 1 2 3 4]
 
 ## Cond Matching
 
-### The cond expression is Que Script’s way to handle multiple conditional branches elegantly.
+The cond expression is Que Script’s way to handle multiple conditional branches elegantly.
 
 #### It's a syntactic suggar for nested if expressions
 
@@ -1102,7 +1142,7 @@ out ; Returns [0 1 2 3 4 0 1 2 3 4]
 
 ## Unless
 
-### Rarerly you might need 'unless' which is the logical opposite of if
+Rarerly you might need 'unless' which is the logical opposite of if
 
 #### It's a syntactic suggar for reversed if expressions
 
@@ -1133,7 +1173,7 @@ _Immutability is a core idea in functional programming: it makes reasoning, test
 
 ## Mutable Scalars
 
-### By default, all let bindings in Que Script are immutable — once defined, their value cannot be changed.
+By default, all let bindings in Que Script are immutable — once defined, their value cannot be changed.
 
 #### However, Que Script also provides mutable scalar bindings for working with stateful values like counters, flags, and accumulators.
 
@@ -1175,7 +1215,7 @@ _Immutability is a core idea in functional programming: it makes reasoning, test
 
 ## Mutation Operations
 
-### Que Script provides special functions and operators for mutating scalar values without using !.
+Que Script provides special functions and operators for mutating scalar values without using !.
 
 #### These are the only mutable operations that lack the ! suffix.
 
@@ -1204,7 +1244,7 @@ _Immutability is a core idea in functional programming: it makes reasoning, test
 
 ---
 
-### Mutable Scalars vs Immutable Bindings
+Mutable Scalars vs Immutable Bindings
 
 ---
 
@@ -1237,7 +1277,7 @@ _Immutability is a core idea in functional programming: it makes reasoning, test
 
 ## Mutable vs Immutable Cheatsheet
 
-### In Que Script, immutability is the default — but when you need to manage state or counters, mutable scalars provide safe, explicit mutability.
+In Que Script, immutability is the default — but when you need to manage state or counters, mutable scalars provide safe, explicit mutability.
 
 #### This table summarizes the key differences between immutable and mutable constructs.
 
@@ -1266,7 +1306,7 @@ _Immutability is a core idea in functional programming: it makes reasoning, test
 
 ## Dynamic Mode, Side Effects, and Disabling the Type Checker
 
-### Que Script is built to be statically typed with a sound Hindley–Milner system and tail call optimization (TCO). However, for some real-world or exploratory problems, you might want to disable the type checker and run your code in dynamic mode — just like JavaScript (because it is JavaScript at that point).
+Que Script is built to be statically typed with a sound Hindley–Milner system and tail call optimization (TCO). However, for some real-world or exploratory problems, you might want to disable the type checker and run your code in dynamic mode — just like JavaScript (because it is JavaScript at that point).
 
 #### You can enable dynamic mode in the online editor by clicking the 🐞 Bug Icon —
 
@@ -1391,7 +1431,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## The Collatz Conjecture
 
-### The Collatz conjecture is an unsolved mathematical problem that asks whether a sequence starting from any positive integer will always eventually reach 1.
+The Collatz conjecture is an unsolved mathematical problem that asks whether a sequence starting from any positive integer will always eventually reach 1.
 
 #### To generate the sequence, you apply a simple rule: if the number is even, divide it by 2;
 
@@ -1422,7 +1462,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## Advent Of Code 2019 Day 1
 
-### https://adventofcode.com/2019/day/1
+https://adventofcode.com/2019/day/1
 
 ```lisp
 (let INPUT
@@ -1461,7 +1501,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## Advent Of Code 2016 Day 1
 
-### https://adventofcode.com/2016/day/1
+https://adventofcode.com/2016/day/1
 
 ```lisp
 ; The Document indicates that you should start at the given coordinates (where you just landed) and face North. Then, follow the provided sequence: either turn left (L) or right (R) 90 degrees, then walk forward the given number of blocks, ending at a new intersection.
@@ -1579,7 +1619,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## Stack-based Iteration (Manual Recursion Conversion)
 
-### Some recursive algorithms cannot be optimized with Tail Call Optimization (TCO).
+Some recursive algorithms cannot be optimized with Tail Call Optimization (TCO).
 
 #### This happens when recursive calls aren’t in tail position — i.e., the function still needs to perform work after the recursive call returns.
 
@@ -1640,7 +1680,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## Apple and Orange
 
-### [hackerrank/apple-and-orange link](https://www.hackerrank.com/challenges/apple-and-orange/problem)
+[hackerrank/apple-and-orange link](https://www.hackerrank.com/challenges/apple-and-orange/problem)
 
 ```lisp
 (let solve (lambda s t a b apples oranges (do
@@ -1655,7 +1695,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## Pattern matching
 
-### Use tuples as enums
+Use tuples as enums
 
 ```lisp
 (let Sword { 1 "Sword" })
@@ -1679,7 +1719,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## Hexagons
 
-### Print a hexagon patterns
+Print a hexagon patterns
 
 ```lisp
 (let times (lambda n s (do
@@ -1694,7 +1734,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## Everybody Codes Quest 5
 
-### Part 1
+Part 1
 
 ```lisp
 (let INPUT "58:5,3,7,8,9,10,4,5,7,8,8")
@@ -1741,7 +1781,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## P5 (Processing) sketch Fractal Tree
 
-### Fractal Tree
+Fractal Tree
 
 ```lisp
   (let R (- 1 (p5/div 1 4)))
@@ -1806,7 +1846,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## P5 (Processing) sketch Game of Life
 
-### Conway's Game of Life
+Conway's Game of Life
 
 ```lisp
   (let N 9)
@@ -1854,7 +1894,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## P5 (Processing) sketch Particles
 
-### Saturn
+Saturn
 
 ```lisp
   (integer counter 100)
@@ -1909,7 +1949,7 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## P5 (Processing) sketch Rose
 
-### Math Rose
+Math Rose
 
 ```lisp
   ; Mathematical Roses
@@ -1953,9 +1993,9 @@ _Real-world examples demonstrating Que Script's capabilities._
 
 ## P5 (Processing) sketch Hearts
 
-### Math Heart
+Math Heart
 
-### Shape Heart
+Shape Heart
 
 # Exercises
 
@@ -1963,7 +2003,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Halve
 
-### Function halve ; halve [T] to {[T] \* [T]} that splits an even-lengthed list into two halves
+Function halve ; halve [T] to {[T] \* [T]} that splits an even-lengthed list into two halves
 
 ```lisp
 ;    halve :: [T] -> {[T] * [T]}
@@ -1977,7 +2017,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Length
 
-### Find the length a list. len: [T] to Int to [T]
+Find the length a list. len: [T] to Int to [T]
 
 ```lisp
 ;    len :: [T] -> Int
@@ -1991,7 +2031,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Tail
 
-### Write a function lst: [T] to T that returns the last element of a list
+Write a function lst: [T] to T that returns the last element of a list
 
 ```lisp
 ;    tail :: [T] -> T
@@ -2005,7 +2045,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Last Two Elements
 
-### Find the last two (last and penultimate) elements of a list lst-2: [T] to [T]
+Find the last two (last and penultimate) elements of a list lst-2: [T] to [T]
 
 ```lisp
 ;    last-two :: [T] -> [T]
@@ -2019,7 +2059,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## N'th Element
 
-### Find the N'th element of a list. lst-n: [T] to Int to [T]
+Find the N'th element of a list. lst-n: [T] to Int to [T]
 
 ```lisp
 ;    nth-element :: [T] -> Int -> T
@@ -2033,7 +2073,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Range
 
-### Range of integers from start to including end: Int to Int to [Int]
+Range of integers from start to including end: Int to Int to [Int]
 
 ```lisp
 ;    rng :: Int -> Int -> [Int]
@@ -2047,7 +2087,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Reverse
 
-### Reverse a list. rev: [T] to [T]
+Reverse a list. rev: [T] to [T]
 
 ```lisp
 ;    rev :: [T] -> [T]
@@ -2061,7 +2101,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Palindrome
 
-### Find out whether a list is a palindrome. palindrome?: [Char] to Bool or [Int] to Bool
+Find out whether a list is a palindrome. palindrome?: [Char] to Bool or [Int] to Bool
 
 ```lisp
 ;    palindrome? :: [Char] -> Bool
@@ -2075,7 +2115,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Insert an Element at a Given Position Into a List
 
-### Start counting list elements with 0. If the position is larger or equal to the length of the list, insert the element at the end.
+Start counting list elements with 0. If the position is larger or equal to the length of the list, insert the element at the end.
 
 ```lisp
 ;    insert/at :: [T] -> T -> Int -> [T]
@@ -2089,7 +2129,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Eliminate Duplicates
 
-### Eliminate consecutive duplicates of list elements. de-dup: [Int] to [Int] or [Char] to [Char]
+Eliminate consecutive duplicates of list elements. de-dup: [Int] to [Int] or [Char] to [Char]
 
 ```lisp
 ;    de-dup :: [Int] -> [Int]
@@ -2103,7 +2143,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Determine the Greatest Common Divisor of Two Positive Integer Numbers
 
-### gcd: Int to Int to Int
+gcd: Int to Int to Int
 
 ```lisp
 ;    gcd :: Int -> Int -> Int
@@ -2117,7 +2157,7 @@ _Practice what you've learned with hands-on coding exercises. Challenge yourself
 
 ## Run-Length Encoding
 
-### If you need so, refresh your memory about [run-length encoding](https://en.wikipedia.org/wiki/Run-length_encoding)
+If you need so, refresh your memory about [run-length encoding](https://en.wikipedia.org/wiki/Run-length_encoding)
 
 ```lisp
 ;    encode :: [[Char]] -> [{Int * [Char]}]

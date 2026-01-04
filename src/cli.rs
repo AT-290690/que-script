@@ -15,7 +15,7 @@ fn run_code(program: String) -> String {
     if let crate::parser::Expression::Apply(items) = &std_ast {
         match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
             Ok(wrapped_ast) => {
-                match crate::infer::infer_with_builtins(&wrapped_ast, crate::infer::create_builtin_environment(crate::types::TypeEnv::new())) {
+                match crate::infer::infer_with_builtins(&wrapped_ast, crate::types::create_builtin_environment(crate::types::TypeEnv::new())) {
                     Ok(typ) =>
                          match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
                             Ok(res) => return format!("{}\n{:?}", typ, res),
@@ -121,7 +121,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
                 Ok(wrapped_ast) => match crate::infer::infer_with_builtins(
                     &wrapped_ast,
-                    crate::infer::create_builtin_environment(crate::types::TypeEnv::new())
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
                 ) {
                     Ok(typ) => println!("{}", typ),
                     Err(e) => println!("{}", e),
@@ -170,7 +170,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             .for_each(|p| {
                 let name = p.to_string();
                 match crate::infer::infer_with_builtins(&crate::parser::Expression::Word(p.to_string()), 
-                crate::infer::create_builtin_environment(crate::types::TypeEnv::new())
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
                 ) {
                     Ok(typ) => names.push([name, format!("{}", typ)]),
                     Err(e) => println!("{}", e),
@@ -193,7 +193,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                                     ) {
                                         Ok(p) => match crate::infer::infer_with_builtins(
                                             &p,
-                                            crate::infer::create_builtin_environment(crate::types::TypeEnv::new())
+                                            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
                                         ) {
                                             Ok(typ) => {
                                                 // TODO: use a regex to remove the T+\d+ noise of the files
@@ -221,7 +221,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             crate::parser::Expression::Apply(items) => {
                 match crate::parser::merge_std_and_program(&program, items.to_vec()) {
                     Ok(ast) => {
-                       match infer_with_builtins_env(&ast, crate::infer::create_builtin_environment(crate::types::TypeEnv::new())) {
+                       match infer_with_builtins_env(&ast, crate::types::create_builtin_environment(crate::types::TypeEnv::new())) {
                             Ok(env) => {
                                 env
                                     .scopes

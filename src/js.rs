@@ -316,6 +316,8 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         }
                     }
                     "as" | "char" | "Int->Float" => format!("{}", compile_expr_to_js(&items[1]),),
+                    ":" => format!("{}", compile_expr_to_js(&items[2])),
+
                     "Float->Int" => format!("({} | 0)", compile_expr_to_js(&items[1]),),
                     // call a named function/operator by default: compile args then fn(args...)
                     _ => {

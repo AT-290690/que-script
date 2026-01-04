@@ -413,6 +413,7 @@ fn to_lisp(e: &Expr) -> String {
     }
 }
 // End of Backtick infix support
+
 fn preprocess(source: &str) -> Result<String, String> {
     let mut out = String::new();
     let mut chars = source.chars().peekable();
@@ -543,6 +544,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
                     "comp" => Ok(combinator_transform_rev(exprs)?),
+                    "Lambda" => Ok(type_transform(exprs)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
@@ -552,6 +554,70 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
         other => Ok(other),
     }
 }
+
+fn is_type(expr: &Expression) -> bool {
+    matches!(expr, Expression::Apply(xs) if
+        matches!(xs.first(), Some(Expression::Word(w)) if w == "type")
+    )
+}
+fn type_transform(exprs: Vec<Expression>) -> Result<Expression, String> {
+    if exprs.len() < 2 {
+        return Err("Error! type requires at least one clause".into());
+    }
+
+    let mut params = vec![Expression::Word("lambda".into())];
+    let mut body_forms = Vec::new();
+
+    for expr in &exprs[1..] {
+        match expr {
+            // (: name TYPE)
+            Expression::Apply(xs)
+                if xs.len() == 3 && matches!(&xs[0], Expression::Word(w) if w == ":") =>
+            {
+                let ty = xs[1].clone();
+                let name = xs[2].clone();
+
+                params.push(name.clone());
+
+                // If RHS is another (type ...), recursively rewrite it
+                let rewritten_ty = if is_type(&ty) {
+                    type_transform(match ty {
+                        Expression::Apply(inner) => inner.clone(),
+                        _ => unreachable!(),
+                    })?
+                } else {
+                    ty
+                };
+
+                body_forms.push(Expression::Apply(vec![
+                    Expression::Word(":".into()),
+                    rewritten_ty,
+                    name,
+                ]));
+            }
+
+            // Final return type expression
+            _ => {
+                body_forms.push(expr.clone());
+            }
+        }
+    }
+
+    Ok(Expression::Apply(
+        vec![
+            params.into_iter().collect::<Vec<_>>(),
+            vec![Expression::Apply(
+                std::iter::once(Expression::Word("do".into()))
+                    .chain(body_forms.into_iter())
+                    .collect(),
+            )],
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+    ))
+}
+
 fn destructure_pattern(
     pattern: &Expression,
     value_expr: Expression,

@@ -43,7 +43,7 @@ pub fn evaluate(program: String) -> *const u8 {
             Ok(wrapped_ast) => {
                 match infer::infer_with_builtins(
                     &wrapped_ast,
-                    infer::create_builtin_environment(types::TypeEnv::new()),
+                    types::create_builtin_environment(types::TypeEnv::new()),
                 ) {
                     Ok(typ) => match vm::run(&wrapped_ast, crate::vm::VM::new()) {
                         Ok(res) => format!("0\n{}\n{:?}", typ, res),
@@ -102,7 +102,7 @@ pub fn check(program: String) -> *const u8 {
             Ok(wrapped_ast) => {
                 match infer::infer_with_builtins(
                     &wrapped_ast,
-                    infer::create_builtin_environment(types::TypeEnv::new()),
+                    types::create_builtin_environment(types::TypeEnv::new()),
                 ) {
                     Ok(typ) => format!("0\n{}", typ),
                     Err(err) => format!("1\n{}", err),
@@ -168,7 +168,7 @@ pub fn signatures(program: String) -> *const u8 {
                 Ok(ast) => {
                     match infer::infer_with_builtins_env(
                         &ast,
-                        crate::infer::create_builtin_environment(crate::types::TypeEnv::new()),
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
                     ) {
                         Ok(env) => env.scopes.iter().for_each(|x| {
                             for key in x.keys().into_iter().collect::<Vec<_>>() {
