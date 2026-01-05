@@ -1848,7 +1848,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
 
                         Ok(())
                     }
-                    "type" => {
+                    "type" | "::" => {
                         // Trying to skip type all together but for now will just skip it
                         // push sentinel Unit (here just Int 0) so do sees something
                         code.push(Instruction::PushInt(0));

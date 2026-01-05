@@ -722,6 +722,12 @@ D:=,=,=,+,=,=,=,+,=,=")
 ; [1 3 7 8 4 6 5 2 8 8 2 0]"#,
                 "[1 3 7 8 4 6 5 2 8 8 2 0]",
             ),
+            (r#"(:: fibonacci (Lambda (: Int n) Int))
+(let* fibonacci (lambda n 
+    (if (< n 2) n 
+        (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
+
+(fibonacci 10)"#, "55"),
             (
                 r#"(let str "
  1 + 2 = 3
