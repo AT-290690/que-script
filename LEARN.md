@@ -981,7 +981,7 @@ By using the same name as a function in the current scope, we can reduce the typ
 
 ```lisp
 (type String [Char])
-(:: common-strings (Lambda (: [String] .) (: [String] .) Int))
+(:: common-strings (Lambda (: [String] a) (: [String] b) Int))
 (let common-strings (lambda xs ys (|>
 (Set/intersection (Vector->Set xs) (Vector->Set ys))
 Set/size)))
