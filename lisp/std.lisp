@@ -438,6 +438,16 @@
     (loop 1 n process)
     out))) 
 
+(let std/vector/int/all-equal? (lambda xs (do (let x (get xs 0)) (not (std/vector/some? xs (lambda y (not (= y x))))))))
+(let std/vector/float/all-equal? (lambda xs (do (let x (get xs 0)) (not (std/vector/some? xs (lambda y (not (=. y x))))))))
+(let std/vector/char/all-equal? (lambda xs (do (let x (get xs 0)) (not (std/vector/some? xs (lambda y (not (=# y x))))))))
+(let std/vector/bool/all-equal? (lambda xs (do (let x (get xs 0)) (not (std/vector/some? xs (lambda y (not (=? y x))))))))
+
+(let all-equal/int? std/vector/int/all-equal?)
+(let all-equal/float? std/vector/float/all-equal?)
+(let all-equal/char? std/vector/char/all-equal?)
+(let all-equal/bool? std/vector/bool/all-equal?)
+
 (let std/vector/count-of (lambda xs fn? (length (std/vector/filter xs fn?))))
 (let std/vector/int/count (lambda xs item (std/vector/count-of xs (lambda x (= x item)))))
 (let std/vector/float/count (lambda xs item (std/vector/count-of xs (lambda x (=. x item)))))

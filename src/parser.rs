@@ -1473,12 +1473,6 @@ fn combinator_transform_rev(mut exprs: Vec<Expression>) -> Result<Expression, St
     ])))
 }
 
-// (let f (lambda x (|> x (filter odd?) (map square) sum)))
-// Apply([Word("sum"), Apply([Word("map"), Word("square"), Apply([Word("filter"), Word("odd?"), Word("x")])])])
-
-// (let f (comp (filter odd?) (map square) sum))
-// Apply([Word("sum"), Apply([Apply([Word("map"), Word("square")]), Apply([Apply([Word("filter"), Word("odd?")]), Word("_x")])])])
-
 fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     // Remove the "apply"
     exprs.remove(0);

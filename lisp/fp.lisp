@@ -86,19 +86,19 @@
 (let negative? std/int/negative?)
 (let invert std/int/invert)
 (let negative-one? std/int/negative-one?)
-(let divisible? std/int/divisible?)
+(let divisible? (lambda y x (std/int/divisible? x y)))
 
 (let positive/int? std/int/positive?)
 (let negative/int? std/int/negative?)
 (let invert/int std/int/invert)
 (let negative-one/int? std/int/negative-one?)
-(let divisible/int? std/int/divisible?)
+(let divisible/int? (lambda y x (std/int/divisible? x y)))
 
 (let positive/float? std/float/positive?)
 (let negative/float? std/float/negative?)
 (let invert/float std/float/invert)
 (let negative-one/float? std/float/negative-one?)
-(let divisible/float? std/float/divisible?)
+(let divisible/float? (lambda y x (std/float/divisible? x y)))
 
 (let upper std/char/upper)
 (let lower std/char/lower)
