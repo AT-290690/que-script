@@ -279,7 +279,7 @@ Error! Concequent and alternative must match types
             ),
             (
                 r#"(let flood-fill (lambda image sr sc color (do 
-    (let old (. image sr sc))
+    (let old (get image sr sc))
     (if (= old color) 
         image 
         (do 
@@ -290,7 +290,7 @@ Error! Concequent and alternative must match types
                 (let t (std/vector/pop-and-get! stack))
                 (let i (std/vector/first t))
                 (let j (std/vector/second t))
-                (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (. image i j) old)) (do
+                (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get image i j) old)) (do
                     (std/vector/3d/set! image i j color)
                     (std/vector/push! stack [(+ i 1) j])
                     (std/vector/push! stack [(- i 1) j])
@@ -384,7 +384,7 @@ Error! Concequent and alternative must match types
         (let x (std/vector/second xs))
         (let visited (std/vector/buckets 8))
         (let queue (std/vector/queue/new [Int]))
-        (let current (. matrix y x))
+        (let current (get matrix y x))
         (std/vector/hash/set/add! visited (yx->key y x))
         (std/vector/queue/enqueue! queue [ y x ])
         
@@ -395,7 +395,7 @@ Error! Concequent and alternative must match types
             (let x (std/vector/second element))  
             (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
-                 (if (and (= (- cell (. matrix y x)) 1) (not (std/vector/hash/set/has? visited key))) (do
+                 (if (and (= (- cell (get matrix y x)) 1) (not (std/vector/hash/set/has? visited key))) (do
                     (if (= cell 9) (do (++ score) nil) (do (std/vector/queue/enqueue! queue [ dy dx ]) nil))
                     (std/vector/hash/set/add! visited key)
                     nil))))))))
@@ -410,7 +410,7 @@ Error! Concequent and alternative must match types
         (let x (std/vector/second xs))
         (let visited (std/vector/buckets 8))
         (let queue (std/vector/queue/new [Int]))
-        (let current (. matrix y x))
+        (let current (get matrix y x))
         (let root-key (yx->key y x))
         (std/vector/hash/table/set! visited root-key 1)
         (std/vector/queue/enqueue! queue [ y x ])
@@ -418,11 +418,11 @@ Error! Concequent and alternative must match types
             (let element (std/vector/queue/peek queue))
             (let y (std/vector/first element))
             (let x (std/vector/second element))  
-            (if (= (. matrix y x) 9) (+= score (as (std/vector/hash/table/get visited root-key) Int)))
+            (if (= (get matrix y x) 9) (+= score (as (std/vector/hash/table/get visited root-key) Int)))
             (std/vector/queue/dequeue! queue)
             (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
-                 (if (= (- cell (. matrix y x)) 1) (do
+                 (if (= (- cell (get matrix y x)) 1) (do
                     (std/vector/queue/enqueue! queue [ dy dx ])
                     (if (std/vector/hash/table/has? visited key) 
                         (std/vector/hash/table/set! visited key (as (+# (std/vector/hash/table/get visited root-key) (std/vector/hash/table/get visited key)) Int)) 
@@ -580,8 +580,8 @@ Error! Concequent and alternative must match types
     (let odd [])
     (let even [])
     (let out [])
-    (loop 0 (length nums) (lambda i (std/vector/push! (if (std/int/even? i) even odd) (. nums i))))
-    (loop 0 (length even) (lambda i (do (std/vector/push! out (. even i)) (std/vector/push! out (. odd i)))))
+    (loop 0 (length nums) (lambda i (std/vector/push! (if (std/int/even? i) even odd) (get nums i))))
+    (loop 0 (length even) (lambda i (do (std/vector/push! out (get even i)) (std/vector/push! out (get odd i)))))
     out))))
 
 [
@@ -620,8 +620,8 @@ D:=,=,=,+,=,=,=,+,=,=")
     (<| xs (std/vector/map (lambda x (<| x (std/vector/reduce app [0])))) 
     (std/vector/map std/vector/int/sum)
     (std/vector/map/i (lambda x i [i (+ x 100)]))
-    (std/vector/sort! (lambda a b (> (. a 1) (. b 1))))
-    (std/vector/map (lambda [i .] (. letters i)))))))
+    (std/vector/sort! (lambda a b (> (get a 1) (get b 1))))
+    (std/vector/map (lambda [i .] (get letters i)))))))
 (<| input (parse) (part1))"#,
                 "[66 68 67 65]",
             ),
@@ -806,7 +806,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 r#"(let part1 (lambda input (<| input 
     (std/vector/cons [(std/vector/first input)]) 
     (std/vector/sliding-window 2) 
-    (std/vector/filter (lambda x (= (. x 0) (. x 1))))
+    (std/vector/filter (lambda x (= (get x 0) (get x 1))))
     (std/vector/map std/vector/first)
     (std/vector/int/sum))))
 (let part2 (lambda input (<| input
@@ -1104,7 +1104,7 @@ out
 [(part1 PARSED) (part2 PARSED)]"#, "[34241 51316]"
 
 ),
-(r#"(let fn (lambda { a b  } (do 
+(r#"(let fn (lambda { a b } (do 
 (if (= b 1) [ a  ] [ false ])
 b
 )))
@@ -2133,7 +2133,26 @@ r#"
   "Stab nail at ill, italian bats!"
 ] 
 (map palindrome?) 
-(every? identity))"#, "true")
+(every? identity))"#, "true"),
+
+(r#"; SRM 727: Problem 1 - MakeTwoConsecutive
+(type String [Char])
+(:: solve (Lambda (: String s) Bool))
+(let solve (lambda s (and (> (length s) 2) (do
+  (let n (length s))
+  (integer c 0)
+  (loop 0 (- n 1) (lambda i (if (=# (get s i) (get s (+ i 1))) (++ c))))
+  (loop 0 (- n 2) (lambda i (if (=# (get s i) (get s (+ i 2))) (++ c))))
+  (> (get c) 0)))))
+
+[
+  (solve "BCAB")
+  (solve "BB")
+  (solve "A")
+  (solve "AABB")
+  (solve "BAB")
+  (solve "KEEP")
+]"#, "[false false false true true true]")
 // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
 // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
 // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),

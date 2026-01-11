@@ -195,7 +195,7 @@
 (let unique/char std/vector/char/unique)
 
 (let permutation std/vector/permutations)
-(let combination/pairs std/vector/unique-pairs)
+(let combination/pairs std/vector/tuple/unique-pairs)
 (let combination std/vector/combinations)
 (let combination/n (lambda n xs (std/vector/combinations/n xs n)))
 (let subset std/vector/subset)
