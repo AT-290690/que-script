@@ -218,3 +218,13 @@
 (let copy std/vector/copy)
 (let sort (lambda fn xs (std/vector/sort! (std/vector/copy xs) fn)))
 
+(let neighborhood (lambda directions y x fn xs (std/vector/3d/adjacent xs directions y x fn)))
+(let neighborhood/moore std/vector/3d/moore-neighborhood)
+(let neighborhood/diagonal std/vector/3d/diagonal-neighborhood)
+(let neighborhood/kernel std/vector/3d/kernel-neighborhood)
+(let neighborhood/von-neumann std/vector/3d/von-neumann-neighborhood)
+
+(let group (lambda fn xs (std/vector/tuple/hash/table/group-by xs fn)))
+(let append! (lambda x xs (do (push! xs x) xs)))
+(let tail (lambda xs (std/vector/slice xs 1 (length xs))))
+(let head (lambda xs (std/vector/slice xs 0 (- (length xs) 1))))

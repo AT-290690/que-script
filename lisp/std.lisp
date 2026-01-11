@@ -1279,11 +1279,11 @@ nil)))
           (let dx (+ (std/vector/second dir) x))
           (fn a (get xs (std/int/euclidean-mod dy N) (std/int/euclidean-mod dx N))))) 0)))
 
-(let neighborhood (lambda directions y x fn xs (std/vector/3d/adjacent xs directions y x fn)))
-(let neighborhood/moore std/vector/3d/moore-neighborhood)
-(let neighborhood/diagonal std/vector/3d/diagonal-neighborhood)
-(let neighborhood/kernel std/vector/3d/kernel-neighborhood)
-(let neighborhood/von-neumann std/vector/3d/von-neumann-neighborhood)
+(let std/vector/tuple/hash/table/group-by (lambda xs fn (do 
+  (std/vector/reduce xs (lambda a b (do
+    (let key (fn b))
+    (if (std/vector/tuple/hash/table/has? a key) (push! (snd (get (std/vector/tuple/hash/table/get a key))) b) (do (std/vector/tuple/hash/table/set! a key [b]) nil))
+    a)) (std/vector/buckets 32)))))
 
 (let std/node/parent (lambda i (- (>> (+ i 1) 1) 1)))
 (let std/node/left (lambda i (+ (<< i 1) 1)))
