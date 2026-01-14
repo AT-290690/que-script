@@ -2152,7 +2152,22 @@ r#"
   (solve "AABB")
   (solve "BAB")
   (solve "KEEP")
-]"#, "[false false false true true true]")
+]"#, "[false false false true true true]"),
+(r#"(let max-water (lambda input (do 
+  (let~ max-water-rec (lambda l r out 
+    (if (< l r) 
+      (do 
+        (let width (- r l))
+        (let left (get input l))
+        (let right (get input r))
+        (let min-height (min left right))
+        (let area (* width min-height))
+        (let condition (< left right))
+        (max-water-rec (if condition (+ l 1) l) (unless condition (- r 1) r) (max area out))) 
+     out)))
+  (max-water-rec 0 (- (length input) 1) 0))))
+
+(max-water [ 3 9 4 8 2 6 1 ])"#, "24")
 // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
 // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
 // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
