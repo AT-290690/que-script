@@ -69,6 +69,7 @@
 
 (let Table/get (lambda key table (std/vector/tuple/hash/table/get table key)))
 (let Table/get* (lambda key table (if (std/vector/tuple/hash/table/has? table key) { true [(snd (get (std/vector/tuple/hash/table/get table key)))] } { false [] })))
+(let Table/get! (lambda key table (snd (get (std/vector/tuple/hash/table/get table key) 0))))
 
 (let Table/has? (lambda key table (std/vector/tuple/hash/table/has? table key)))
 (let Table/set! (lambda key value table (do (std/vector/tuple/hash/table/set! table key value) nil)))
@@ -127,7 +128,11 @@
 (let Vector/last std/vector/last)
 (let Vector/first std/vector/first)
 (let Vector/pull! std/vector/pop-and-get!)
-(let Vector/get std/vector/get)
+(let Vector/get! (lambda idx xs (get xs idx)))
+(let Vector/get* (lambda idx xs (if (and (>= idx 0) (< idx (length xs))) { true [(get xs idx)] } { false [] })))
+(let Vector/at! (lambda idx xs (std/vector/at xs idx)))
+(let Vector/at* (lambda idx xs (if (< idx (length xs)) { true [(std/vector/at xs idx)] } { false [] })))
+
 (let Vector/set! std/vector/set!)
 (let Vector/length std/vector/length)
 (let Vector/append! (lambda x xs (std/vector/append! xs x)))
