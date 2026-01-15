@@ -1445,12 +1445,80 @@ fn normalize_apply(expr: Expression) -> Expression {
         other => other,
     }
 }
+fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expression>, String> {
+    let mut new_exprs = Vec::new();
+    let mut binding_counter = 0;
+
+    for expr in exprs {
+        if let Expression::Apply(let_items) = &expr {
+            if let_items.len() >= 3 {
+                if let Expression::Word(kw) = &let_items[0] {
+                    if kw == "let" {
+                        let pattern = &let_items[1];
+                        let value_expr = &let_items[2];
+
+                        let is_destructuring = match pattern {
+                            Expression::Word(_) => false, // Simple variable name skip
+                            Expression::Apply(pattern_exprs) => {
+                                if pattern_exprs.is_empty() {
+                                    false
+                                } else if let [Expression::Word(ref kw), ..] = &pattern_exprs[..] {
+                                    kw == "tuple" || kw == "vector"
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => false,
+                        };
+
+                        if is_destructuring {
+                            let temp_var = format!("_let_temp_{}", binding_counter);
+                            binding_counter += 1;
+
+                            let temp_binding = Expression::Apply(vec![
+                                Expression::Word(kw.clone()),
+                                Expression::Word(temp_var.clone()),
+                                value_expr.clone(),
+                            ]);
+
+                            // We use a high arg_index to avoid clashes with lambda's _args prefix
+                            // Nested temp variables will be _temp_10000_X which won't conflict
+                            let (destructured_bindings, _) = destructure_pattern(
+                                pattern,
+                                Expression::Word(temp_var),
+                                10000, // Use high index to avoid conflicts with lambda's small indices
+                                &mut binding_counter,
+                            )?;
+
+                            // Add temp binding first, then destructured bindings
+                            new_exprs.push(temp_binding);
+                            new_exprs.extend(destructured_bindings);
+                        } else {
+                            // Not a destructuring pattern, keep as is
+                            new_exprs.push(expr);
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Not a let binding, keep as is
+        new_exprs.push(expr);
+    }
+
+    Ok(new_exprs)
+}
+
 fn transform_types_in_do(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
+    let exprs_with_rewritten_types = rewrite_type_name_conflicts(exprs);
+    let exprs_with_destructured_lets =
+        transform_let_destructuring_in_do(exprs_with_rewritten_types)?;
     Ok(Expression::Apply(
         vec![Expression::Word("do".to_string())]
             .into_iter()
-            .chain(rewrite_type_name_conflicts(exprs))
+            .chain(exprs_with_destructured_lets)
             .collect(),
     ))
 }
