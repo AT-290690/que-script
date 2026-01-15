@@ -1923,9 +1923,7 @@ r#"
 ; {[Int] * [[[Int]]]} -> Int
 (let part1
   (lambda { numbers boards } (do
-    (let items (first-winning-board numbers boards))
-    (let i (fst items))
-    (let board (snd items))
+    (let { i board } (first-winning-board numbers boards))
     (let drawn (Vector->Set (map Integer->String (slice 0 (+ i 1) numbers))))
     (score board drawn (get numbers i)))))
 (part1 (parse INPUT))"#, "4512"),
@@ -2167,7 +2165,18 @@ r#"
      out)))
   (max-water-rec 0 (- (length input) 1) 0))))
 
-(max-water [ 3 9 4 8 2 6 1 ])"#, "24")
+(max-water [ 3 9 4 8 2 6 1 ])"#, "24"),
+(r#"
+(let fn (lambda { x y } (do 
+  (let vec [ 1 2 3 ])
+  (let [ a b . ] vec)
+      [ a b  x y ]
+  )))
+(let { x { y z }} { 10 { [ 1 2 3 ] false} })
+(let def { true { [ 1 2 3 4 5 ] (lambda [ a b ] (+ (sum b) a)) } })
+(let { a1 { b1 c1 } } def)
+{ z  { (fn { 10 23 }) { a1 (c1 b1)} } }"#, "[false [[1 2 10 23] [true 15]]]"),
+ 
 // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
 // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
 // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),

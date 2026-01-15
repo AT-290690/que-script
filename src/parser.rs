@@ -1917,9 +1917,10 @@ pub fn build(program: &str) -> Result<Expression, String> {
                     Err(e) => return Err(e),
                 }
             }
+            let top_level = transform_let_destructuring_in_do(desugared.to_vec())?;
             let wrapped = Expression::Apply(
                 std::iter::once(Expression::Word("do".to_string()))
-                    .chain(desugared.into_iter())
+                    .chain(top_level)
                     .collect(),
             );
             Ok(wrapped)
@@ -1962,11 +1963,11 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                 }
 
                 let shaken_std = tree_shake(std, &used, &mut definitions);
-
+                let top_level = transform_let_destructuring_in_do(desugared.to_vec())?;
                 let wrapped = Expression::Apply(
                     std::iter::once(Expression::Word("do".to_string()))
                         .chain(shaken_std.into_iter())
-                        .chain(desugared.into_iter())
+                        .chain(top_level)
                         .collect(),
                 );
                 Ok(wrapped)
