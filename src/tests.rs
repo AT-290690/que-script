@@ -2192,7 +2192,8 @@ r#"
  (rev xs)
  (rev xs)
 ]"#, "[[4 3 2 1] [4 3 2 1] [4 3 2 1] [4 3 2 1]]")
- 
+
+
 // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
 // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
 // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),

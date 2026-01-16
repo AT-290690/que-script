@@ -158,10 +158,10 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         }
     } else if args.iter().any(|a| a == "--bit") {
         let program = fs::read_to_string(&format!("{}/main.txt", dist))?;
-        println!(
-            "{:?}",
-            crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new())
-        );
+        match  crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
+            Ok(e) =>  println!("{:?}", e),
+            Err(e) => println!("{:?}", e)
+        }
     } else if args.iter().any(|a| a == "--doc") {
         let std_ast = crate::baked::load_ast();
         let mut names = Vec::new();

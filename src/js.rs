@@ -29,6 +29,8 @@ fn ident(name: &str, idx: usize) -> String {
 
         "fst" => "(a)=>a[0]".to_string(),
         "snd" => "(a)=>a[1]".to_string(),
+        "car" => "(a)=>a[0]".to_string(),
+        "cdr" => "(a)=>a.slice(1)".to_string(),
 
         "var" => "__var".to_string(),
         "const" => "__const".to_string(),

@@ -1464,8 +1464,8 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         vec!["a".to_string()],
                         vec![
                             Instruction::LoadVar("a".to_string()),
-                            Instruction::RestArray,
                             Instruction::PushInt(1),
+                            Instruction::RestArray,
                         ],
                     ));
                     Ok(())
