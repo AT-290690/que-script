@@ -133,8 +133,6 @@
 
 (let first std/vector/first)
 (let last std/vector/last)
-(let car std/vector/first)
-(let cdr (lambda xs (std/vector/slice xs 1 (length xs))))
 (let pair (lambda a b (tuple a b)))
 (let product std/vector/int/product)
 (let product/int std/vector/int/product)

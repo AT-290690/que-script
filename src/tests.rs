@@ -2176,6 +2176,22 @@ r#"
 (let def { true { [ 1 2 3 4 5 ] (lambda [ a b ] (+ (sum b) a)) } })
 (let { a1 { b1 c1 } } def)
 { z  { (fn { 10 23 }) { a1 (c1 b1)} } }"#, "[false [[1 2 10 23] [true 15]]]"),
+ (r#"(let [ a b rest ] [ 1 2 3 4 5 6 ])
+{ a rest }"#, "[1 [3 4 5 6]]"),
+ (r#"(let rev (lambda xs (do 
+  (let~ rec/rev (lambda xs out 
+                  (if (empty? xs) out 
+                      (rec/rev (cdr xs) (cons [(car xs)] out)))))
+  (rec/rev xs []))))
+
+(let xs [ 1 2 3 4 ])
+
+[
+ (rev xs)
+ (rev xs)
+ (rev xs)
+ (rev xs)
+]"#, "[[4 3 2 1] [4 3 2 1] [4 3 2 1] [4 3 2 1]]")
  
 // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
 // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))

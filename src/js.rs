@@ -155,8 +155,14 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "fst" => format!("({}[{}])", compile_expr_to_js(&items[1]), 0),
-                    "snd" => format!("({}[{}])", compile_expr_to_js(&items[1]), 1),
+                    "car" => format!("({}[0])", compile_expr_to_js(&items[1])),
+                    "cdr" => format!(
+                        "({}.slice({}))",
+                        compile_expr_to_js(&items[1]),
+                        compile_expr_to_js(&items[2])
+                    ),
+                    "fst" => format!("({}[0])", compile_expr_to_js(&items[1])),
+                    "snd" => format!("({}[1])", compile_expr_to_js(&items[1])),
                     "set!" => format!(
                         "({}[{}]={},0)",
                         compile_expr_to_js(&items[1]),

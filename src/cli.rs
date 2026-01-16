@@ -165,7 +165,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if args.iter().any(|a| a == "--doc") {
         let std_ast = crate::baked::load_ast();
         let mut names = Vec::new();
-        "+ +# +. - -# -. / /# /. * *# *. mod mod. = =? =# =. < <# <. > ># >. <= <=# <=. >= >=# >=. not and or ^ >> << | & ~ true false Int->Float Float->Int"
+        "+ +# +. - -# -. / /# /. * *# *. mod mod. = =? =# =. < <# <. > ># >. <= <=# <=. >= >=# >=. not and or ^ >> << | & ~ true false car cdr Int->Float Float->Int"
             .split(" ")
             .for_each(|p| {
                 let name = p.to_string();

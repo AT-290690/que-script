@@ -101,7 +101,6 @@ pub enum Instruction {
     Gte,
     Eq,
     Not,
-
     EqBool,
     EqF,
     GtF,
@@ -119,6 +118,7 @@ pub enum Instruction {
     SetArray, // expects stack: [value,index,vector]
     GetArray,
     PopArray,
+    RestArray,
 
     IntToFloat,
     FloatToInt,
@@ -247,7 +247,7 @@ impl Instruction {
             Instruction::SetArray => "SetArray".to_string(),
             Instruction::GetArray => "GetArray".to_string(),
             Instruction::PopArray => "PopArray".to_string(),
-
+            Instruction::RestArray => "RestArray".to_string(),
             Instruction::IntToFloat => "IntToFloat".to_string(),
             Instruction::FloatToInt => "FloatToInt".to_string(),
         }
@@ -371,6 +371,7 @@ impl Instruction {
             Instruction::SetArray => "SetArray".to_string(),
             Instruction::GetArray => "GetArray".to_string(),
             Instruction::PopArray => "PopArray".to_string(),
+            Instruction::RestArray => "RestArray".to_string(),
 
             Instruction::IntToFloat => "IntToFloat".to_string(),
             Instruction::FloatToInt => "FloatToInt".to_string(),
@@ -414,6 +415,29 @@ impl VM {
                             self.stack.push(r[i as usize].clone());
                         }
                         _ => return Err("Error! get expects (vector,int)".to_string()),
+                    }
+                }
+
+                Instruction::RestArray => {
+                    let index_val = self.stack.pop().ok_or("stack underflow (index)")?;
+                    let array_val: BiteCodeEvaluated =
+                        self.stack.pop().ok_or("stack underflow (vector)")?;
+                    match (array_val, index_val) {
+                        (BiteCodeEvaluated::Array(arr), BiteCodeEvaluated::Int(i)) => {
+                            let r = arr.borrow();
+                            if i < 0 || i as usize > r.len() {
+                                self.stack
+                                    .push(BiteCodeEvaluated::Array(Rc::new(RefCell::new(
+                                        Vec::new(),
+                                    ))));
+                            } else {
+                                self.stack
+                                    .push(BiteCodeEvaluated::Array(Rc::new(RefCell::new(
+                                        r[(i as usize)..].to_vec(),
+                                    ))));
+                            }
+                        }
+                        _ => return Err("Error! cdr expects (vector,int)".to_string()),
                     }
                 }
 
@@ -1424,6 +1448,28 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                     ));
                     Ok(())
                 }
+                "car" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::PushInt(0),
+                            Instruction::GetArray,
+                        ],
+                    ));
+                    Ok(())
+                }
+                "cdr" => {
+                    code.push(Instruction::MakeLambda(
+                        vec!["a".to_string()],
+                        vec![
+                            Instruction::LoadVar("a".to_string()),
+                            Instruction::RestArray,
+                            Instruction::PushInt(1),
+                        ],
+                    ));
+                    Ok(())
+                }
                 "fst" => {
                     code.push(Instruction::MakeLambda(
                         vec!["a".to_string()],
@@ -1951,8 +1997,14 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::GetArray);
                         Ok(())
                     }
-
-                    "fst" => {
+                    "cdr" => {
+                        // push vector
+                        compile(&exprs[1], code)?;
+                        compile(&exprs[2], code)?;
+                        code.push(Instruction::RestArray);
+                        Ok(())
+                    }
+                    "fst" | "car" => {
                         if exprs.len() != 2 {
                             return Err("Error! fst expects 1 arguments: tuple".to_string());
                         }
@@ -2342,6 +2394,7 @@ impl<'a> P<'a> {
             "GetArray" => Ok(Instruction::GetArray),
             "SetArray" => Ok(Instruction::SetArray),
             "PopArray" => Ok(Instruction::PopArray),
+            "RestArray" => Ok(Instruction::RestArray),
             "Eq" => Ok(Instruction::Eq),
             "EqBool" => Ok(Instruction::EqBool),
             "EqF" => Ok(Instruction::EqF),

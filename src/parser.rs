@@ -532,8 +532,8 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "or" => Ok(or_transform(exprs)),
                     "!=" => Ok(not_equal_transform(exprs)),
                     "<>" => Ok(not_equal_transform(exprs)),
-                    "." => Ok(accessor_transform(exprs)?),
-                    "get" => Ok(accessor_transform(exprs)?),
+                    "." | "get" => Ok(accessor_transform(exprs)?),
+                    "cdr" => Ok(cdr_transform(exprs)?),
                     "set!" => Ok(setter_transform(exprs)?),
                     "variable" => Ok(variable_transform(exprs)),
                     "integer" => Ok(integer_transform(exprs)),
@@ -976,7 +976,7 @@ fn destructure_vector_pattern(
                                 Expression::Word("let".to_string()),
                                 Expression::Word(rest_name.clone()),
                                 Expression::Apply(vec![
-                                    Expression::Word("std/vector/drop".to_string()),
+                                    Expression::Word("cdr".to_string()),
                                     Expression::Word(vector_var.clone()),
                                     Expression::Int(element_index as i32),
                                 ]),
@@ -1188,6 +1188,28 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
             .collect::<Vec<String>>()
             .join(" ")
     ))
+}
+
+fn cdr_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    exprs.remove(0);
+    let len = exprs.len();
+    let mut iter = exprs.into_iter();
+    if len == 0 {
+        return Err("Error! cdr requires at least 1 argument".to_string());
+    }
+    let first = iter.next().unwrap();
+    if len == 1 {
+        return Ok(Expression::Apply(vec![
+            Expression::Word("cdr".to_string()),
+            first,
+            Expression::Int(1),
+        ]));
+    }
+    Ok(Expression::Apply(vec![
+        Expression::Word("cdr".to_string()),
+        first,
+        iter.next().unwrap(),
+    ]))
 }
 
 fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {

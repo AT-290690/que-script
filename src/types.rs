@@ -279,6 +279,33 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         );
     }
     {
+        let a: Type = fresh_var();
+        let _ = env.insert(
+            "car".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(Box::new(Type::List(Box::new(a.clone()))), Box::new(a)),
+            ),
+        );
+    }
+
+    {
+        let a: Type = fresh_var();
+        let _ = env.insert(
+            "cdr".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::Function(
+                        Box::new(Type::Int),
+                        Box::new(Type::List(Box::new(a.clone()))),
+                    )),
+                ),
+            ),
+        );
+    }
+    {
         let a = fresh_var();
         let b = fresh_var();
         let _ = env.insert(
