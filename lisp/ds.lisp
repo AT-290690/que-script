@@ -31,6 +31,8 @@
 
 (let String->Vector (lambda ch xs (std/convert/string->vector xs ch)))
 (let Vector->String (lambda ch xs (std/convert/vector->string xs ch)))
+(let Chars->Digits std/convert/chars->digits)
+(let Digits->Integer std/convert/digits->integer)
 (let Chars->Integer std/convert/chars->integer)
 (let String->Integer std/convert/chars->integer)
 (let String->Float std/convert/chars->float)

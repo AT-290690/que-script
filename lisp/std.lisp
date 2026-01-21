@@ -571,7 +571,10 @@
 
 (let std/vector/int/product (lambda xs (std/vector/reduce xs (lambda a b (* a b)) 1)))
 (let std/vector/float/product (lambda xs (std/vector/reduce xs (lambda a b (*. a b)) 1.0)))
-
+(let std/int/mul (lambda a b (* a b)))
+(let std/int/add (lambda a b (+ a b)))
+(let std/int/div (lambda a b (/ a b)))
+(let std/int/sub (lambda a b (- a b)))
 (let std/int/euclidean-mod (lambda a b (mod (+ (mod a b) b) b)))
 (let std/int/euclidean-distance (lambda x1 y1 x2 y2 (do
   (let a (- x1 x2))
@@ -2106,6 +2109,7 @@ q)))
 (let std/tuple/int/mul (lambda { a b } (* a b)))
 (let std/tuple/int/div (lambda { a b } (* a b)))
 
+(let loop/repeat (lambda n fn (loop 0 n (lambda . (fn)))))
 (let loop/some-range? (lambda start end predicate? (do 
   (let~ tail-call/loop/some-range? (lambda i out
                           (if (< i end)
@@ -2124,3 +2128,9 @@ q)))
 (let empty! (lambda xs (do (std/vector/empty! xs) nil)))
 (let reverse! std/vector/reverse!)
 (let sort! (lambda dir xs (std/vector/sort! xs dir)))
+
+(let emod std/int/euclidean-mod)
+(let mul std/int/mul)
+(let div std/int/div)
+(let add std/int/add)
+(let sub std/int/sub)

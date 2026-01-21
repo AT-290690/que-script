@@ -164,7 +164,6 @@
 (let clamp-range/float (lambda start end x (std/float/clamp-range x start end)))
 
 (let at std/vector/at)
-(let emod std/int/euclidean-mod)
 (let scan (lambda fn xs (std/vector/adjacent-difference xs fn)))
 (let cycle std/vector/cycle)
 (let replicate std/vector/replicate)
@@ -226,3 +225,10 @@
 (let append! (lambda x xs (do (push! xs x) xs)))
 (let tail (lambda xs (std/vector/slice xs 1 (length xs))))
 (let head (lambda xs (std/vector/slice xs 0 (- (length xs) 1))))
+
+(let fp/mul (lambda b a (* a b)))
+(let fp/div (lambda b a (/ a b)))
+(let fp/add (lambda b a (+ a b)))
+(let fp/sub (lambda b a (- a b)))
+(let fp/emod (lambda b a (emod a b)))
+(let fp/mod (lambda b a (mod a b)))

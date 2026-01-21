@@ -23,26 +23,44 @@ mod tests {
             ),
             ("(lambda x (+ x 1))", "Int -> Int"),
             ("(lambda x (and x (or x x)))", "Bool -> Bool"),
-            ("(do (let fn (lambda a b (and a b))) (fn (= 1 1) (= 1 2)))", "Bool"),
+            (
+                "(do (let fn (lambda a b (and a b))) (fn (= 1 1) (= 1 2)))",
+                "Bool",
+            ),
             (
                 "(do (let process (lambda xs (get xs 0))) (process (vector 1 2 3 )))",
                 "Int",
             ),
-            ("(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (vector (= 1 1))))", "Bool"),
+            (
+                "(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (vector (= 1 1))))",
+                "Bool",
+            ),
             ("(vector 1 2 3)", "[Int]"),
             ("(vector (vector (vector 1)))", "[[[Int]]]"),
-            ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
-            ("(do (let fn (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn)", "Int -> Int -> Bool -> [Int -> Bool] -> Bool"),
-            ("(do (let Int 0) (let as (lambda . t t)) (let xs (as (vector) (vector Int))) xs)", "[Int]"),
+            (
+                "(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))",
+                "Int",
+            ),
+            (
+                "(do (let fn (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn)",
+                "Int -> Int -> Bool -> [Int -> Bool] -> Bool",
+            ),
+            (
+                "(do (let Int 0) (let as (lambda . t t)) (let xs (as (vector) (vector Int))) xs)",
+                "[Int]",
+            ),
             ("(tuple 0 true)", "{Int * Bool}"),
             ("(vector (tuple 0 true) (tuple 1 false))", "[{Int * Bool}]"),
             ("(+. 1.23 2.112)", "Float"),
             ("(tuple (Int->Float 5) (Float->Int 5.2))", "{Float * Int}"),
-            (r#"(do 
+            (
+                r#"(do 
 (let xs (vector (vector (vector))))
 (set! xs (length xs) (vector (vector true)))
 (set! xs (length xs) (vector (vector false)))
-xs)"#, "[[[Bool]]]")
+xs)"#,
+                "[[[Bool]]]",
+            ),
         ];
 
         for (inp, out) in &test_cases {
@@ -128,13 +146,19 @@ Error! Concequent and alternative must match types
                 "(+ 1.23 2)",
                 "Error! Cannot unify Int with Float\nError! (+ 1.23 2)",
             ),
-            (r#"(do (let xs (vector (vector (vector))))
+            (
+                r#"(do (let xs (vector (vector (vector))))
 (set! xs (length xs) (vector (vector true)))
-(set! xs (length xs) (vector (vector 1))))"#, "Error! Cannot unify Int with Bool\nError! (set! xs (length xs) (vector (vector 1)))"),
-(r#"(do 
+(set! xs (length xs) (vector (vector 1))))"#,
+                "Error! Cannot unify Int with Bool\nError! (set! xs (length xs) (vector (vector 1)))",
+            ),
+            (
+                r#"(do 
 (let xs (vector))
 (set! xs (length xs) false)
-(set! xs (length xs) 1))"#, "Error! Cannot unify Int with Bool\nError! (set! xs (length xs) 1)")
+(set! xs (length xs) 1))"#,
+                "Error! Cannot unify Int with Bool\nError! (set! xs (length xs) 1)",
+            ),
         ];
 
         for (inp, out) in &test_cases {
@@ -177,9 +201,12 @@ Error! Concequent and alternative must match types
                 "\"Hello world\"",
                 "[72 101 108 108 111 32 119 111 114 108 100]",
             ),
-            (r#"(let A [false (and (= 1 2) (> 3 3))]) ; => [false false] Correct
+            (
+                r#"(let A [false (and (= 1 2) (> 3 3))]) ; => [false false] Correct
 (let B [false (or (= 1 2) (> 3 3))]) ; => [true false] Wrong
-(and (=? (get A 0) (get B 0)) (=? (get A 1) (get B 1)))"#, "true"),
+(and (=? (get A 0) (get B 0)) (=? (get A 1) (get B 1)))"#,
+                "true",
+            ),
             (
                 r#"(let samples [
         "(())"    ; result in floor 0.
@@ -722,12 +749,15 @@ D:=,=,=,+,=,=,=,+,=,=")
 ; [1 3 7 8 4 6 5 2 8 8 2 0]"#,
                 "[1 3 7 8 4 6 5 2 8 8 2 0]",
             ),
-            (r#"(:: fibonacci (Lambda (: Int n) Int))
+            (
+                r#"(:: fibonacci (Lambda (: Int n) Int))
 (let* fibonacci (lambda n 
     (if (< n 2) n 
         (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
 
-(fibonacci 10)"#, "55"),
+(fibonacci 10)"#,
+                "55",
+            ),
             (
                 r#"(let str "
  1 + 2 = 3
@@ -889,9 +919,13 @@ D:=,=,=,+,=,=,=,+,=,=")
 ]"#,
                 "[[[97] [49] [98] [50] [99] [51]] [[49] [120] [50] [121]]]",
             ),
-(r#"(let fn (lambda [ a b . ] [ x y . ] (std/int/manhattan-distance a b x y)))
-(fn [ 1 2 ] [ 3 4 ])"#, "4"),
-(r#"
+            (
+                r#"(let fn (lambda [ a b . ] [ x y . ] (std/int/manhattan-distance a b x y)))
+(fn [ 1 2 ] [ 3 4 ])"#,
+                "4",
+            ),
+            (
+                r#"
 (let N 9)
 (let matrix (<| (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda . 0))))))
 (let add-glider! (lambda matrix y x (do 
@@ -925,9 +959,11 @@ D:=,=,=,+,=,=,=,+,=,=")
                                                 (= x 1) "*"
                                                 ""))))) 
                               (std/convert/vector/3d->string std/char/new-line std/char/space)))))
-(<| matrix (gof) (gof) (gof) (gof) (gof) (gof) (gof) (gof))"#, "[[0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 1 0 0 0 0] [0 0 0 0 0 1 0 0 0] [0 0 0 1 1 1 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0]]"),
-
-(r#"(let *RES* 51)
+(<| matrix (gof) (gof) (gof) (gof) (gof) (gof) (gof) (gof))"#,
+                "[[0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 1 0 0 0 0] [0 0 0 0 0 1 0 0 0] [0 0 0 1 1 1 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0]]",
+            ),
+            (
+                r#"(let *RES* 51)
 (integer generation 0)
 (variable cells (std/vector/int/zeroes *RES*))
 (let ruleset [ 0 1 0 1 1 0 1 0 ])
@@ -959,8 +995,11 @@ D:=,=,=,+,=,=,=,+,=,=")
                 (std/convert/vector/3d->string std/char/new-line std/char/space))
 out                
                 
-                "#, "[[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0] [0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0] [0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0] [0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0] [0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0] [0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0] [0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0]]"),
-        (r#"; The Document indicates that you should start at the given coordinates (where you just landed) and face North. Then, follow the provided sequence: either turn left (L) or right (R) 90 degrees, then walk forward the given number of blocks, ending at a new intersection.
+                "#,
+                "[[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0] [0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0] [0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0] [0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0] [0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0] [0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0] [0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0]]",
+            ),
+            (
+                r#"; The Document indicates that you should start at the given coordinates (where you just landed) and face North. Then, follow the provided sequence: either turn left (L) or right (R) 90 degrees, then walk forward the given number of blocks, ending at a new intersection.
 ; Following R2, L3 leaves you 2 blocks East and 3 blocks North, or 5 blocks away.
 ; R2, R2, R2 leaves you 2 blocks due South of your starting position, which is 2 blocks away.
 ; R5, L5, R5, R3 leaves you 12 blocks away.
@@ -1037,9 +1076,11 @@ out
 {
   (|> ["R2, L3"  "R2, R2, R2" "R5, L5, R5, R3"] (map parse) (map part1))
   (part2 (parse "R8, R4, R4, R8"))
-}"#, "[[5 2 12] 4]"),
-
-        (r#"(let INPUT
+}"#,
+                "[[5 2 12] 4]",
+            ),
+            (
+                r#"(let INPUT
 "7 6 4 2 1
 1 2 7 8 9
 9 7 6 2 1
@@ -1070,8 +1111,11 @@ out
 
 (let PARSED (parse INPUT))
 
-[(part1 PARSED) (part2 PARSED)]"#, "[2 4]"),
-        (r#"(let INPUT "12
+[(part1 PARSED) (part2 PARSED)]"#,
+                "[2 4]",
+            ),
+            (
+                r#"(let INPUT "12
 14
 1969
 100756")
@@ -1101,22 +1145,34 @@ out
     (std/vector/map std/vector/int/sum)
     (std/vector/int/sum)))))
     
-[(part1 PARSED) (part2 PARSED)]"#, "[34241 51316]"
-
-),
-(r#"(let fn (lambda { a b } (do 
+[(part1 PARSED) (part2 PARSED)]"#,
+                "[34241 51316]",
+            ),
+            (
+                r#"(let fn (lambda { a b } (do 
 (if (= b 1) [ a  ] [ false ])
 b
 )))
-(fn { true 3 })"#, "3"),
-(r#"(std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })"#, "[[1 true] [2 false] [3 true]]"),
-(r#"(std/vector/tuple/unzip 
+(fn { true 3 })"#,
+                "3",
+            ),
+            (
+                r#"(std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })"#,
+                "[[1 true] [2 false] [3 true]]",
+            ),
+            (
+                r#"(std/vector/tuple/unzip 
     (std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })
-)"#, "[[1 2 3] [true false true]]"),
-
-(r#"(let~ rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
-(rec { 1 1 } { true 10 })"#, "[false 12]"),
-(r#"(let factorial (lambda N (snd (pull! (Rec { N 1 } (lambda { n acc } 
+)"#,
+                "[[1 2 3] [true false true]]",
+            ),
+            (
+                r#"(let~ rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
+(rec { 1 1 } { true 10 })"#,
+                "[false 12]",
+            ),
+            (
+                r#"(let factorial (lambda N (snd (pull! (Rec { N 1 } (lambda { n acc } 
       (if (= n 0) 
           { Rec/return [ { n acc } ]} 
           { Rec/push [ { (- n 1) (* acc n) } ] })))))))
@@ -1133,9 +1189,11 @@ b
 
 (factorialVec 5)
 
-[(factorial 5) (factorialVec 5) (rec-sum 10)]"#, "[120 120 55]"),
-
-    (r#"(let INPUT "58:5,3,7,8,9,10,4,5,7,8,8")
+[(factorial 5) (factorialVec 5) (rec-sum 10)]"#,
+                "[120 120 55]",
+            ),
+            (
+                r#"(let INPUT "58:5,3,7,8,9,10,4,5,7,8,8")
 (let parse (lambda input (do 
   (let parts (|> input (String->Vector ':')))
   (let head (|> (car parts) (Chars->Integer)))
@@ -1156,9 +1214,11 @@ b
     (if (false? placed) (push! sword [-1 num -1])))))
 sword)))
   
-(part1 (parse INPUT))"#, "[[3 5 7] [4 8 9] [5 10 -1] [-1 7 8] [-1 8 -1]]",
-),
-(r#"(let scan/sum (lambda a b (do (push! a (+ (last a) b)) a)))
+(part1 (parse INPUT))"#,
+                "[[3 5 7] [4 8 9] [5 10 -1] [-1 7 8] [-1 8 -1]]",
+            ),
+            (
+                r#"(let scan/sum (lambda a b (do (push! a (+ (last a) b)) a)))
 
 (let left-right-sum-diff (lambda input 
   (|> (zip {
@@ -1167,34 +1227,48 @@ sword)))
     }) 
     (map (lambda { a b } (abs (- a b)))))))
 
-(left-right-sum-diff [ 10 4 8 3 ])"#, "[15 1 11 22]"),
-(r#"(let maximum/count (lambda xs 
+(left-right-sum-diff [ 10 4 8 3 ])"#,
+                "[15 1 11 22]",
+            ),
+            (
+                r#"(let maximum/count (lambda xs 
       (max 
         (count positive? xs) 
         (count negative? xs))))
         
-(maximum/count [ -1 -1 1 1 1 -1 1 ])"#, "4"),
- (r#";    halve :: [T] -> {[T] * [T]}
+(maximum/count [ -1 -1 1 1 1 -1 1 ])"#,
+                "4",
+            ),
+            (
+                r#";    halve :: [T] -> {[T] * [T]}
 (let halve (lambda xs (do 
           (let half (/ (length xs) 2)) 
           { (take/first half xs) (drop/first half xs)})))
 
-(halve (range 0 11))"#, "[[0 1 2 3 4 5] [6 7 8 9 10 11]]"), 
-(r#"(let max-depth (lambda s (|> s 
+(halve (range 0 11))"#,
+                "[[0 1 2 3 4 5] [6 7 8 9 10 11]]",
+            ),
+            (
+                r#"(let max-depth (lambda s (|> s 
   (filter (lambda x (or (=# x '(') (=# x ')'))))
   (map (lambda x (if (=# x '(') 1 -1)))
   (scan +)
   (maximum))))
-(max-depth "(1 + (2 * 3) + ((8)/4))+1")"#, "3"),
-
-(r#"(let a 10)
+(max-depth "(1 + (2 * 3) + ((8)/4))+1")"#,
+                "3",
+            ),
+            (
+                r#"(let a 10)
 (let b 8)
 (let c 23)
 (let x 42)
 (let y 69)
 (let r 10)
-`a + b * c + (x + y) / 2 + r^2 - x^2`"#, "-1415"),
-(r#"(let A { 0 { 42 { false { "" nil } } } })
+`a + b * c + (x + y) / 2 + r^2 - x^2`"#,
+                "-1415",
+            ),
+            (
+                r#"(let A { 0 { 42 { false { "" nil } } } })
 (let B { 1 { 0 { true { "" nil } } } })
 (let C { 2 { 0 { false { "algebraic data types" nil } } } })
 
@@ -1208,8 +1282,11 @@ sword)))
   nil)
   out)))
 
-(algebraic C)"#, "[4]"),
-(r#"(let INPUT "L68
+(algebraic C)"#,
+                "[4]",
+            ),
+            (
+                r#"(let INPUT "L68
 L30
 R48
 L5
@@ -1238,9 +1315,11 @@ L82")
       (loop 1 r (lambda i (push! rng (emod (+ (at rng -1) (* 1 d)) 100)))) 
       { res (+ counter (count/int 0 rng)) })) { 50 0 } xs))))
 
-[ (part1 (parse INPUT)) (part2 (parse INPUT)) ]"#, "[3 6]"),
-
- (r#"(let INPUT "987654321111111
+[ (part1 (parse INPUT)) (part2 (parse INPUT)) ]"#,
+                "[3 6]",
+            ),
+            (
+                r#"(let INPUT "987654321111111
 811111111111119
 234234234234278
 818181911112111")
@@ -1270,8 +1349,11 @@ L82")
   (get S))))
 
 
-{ (part1 (parse INPUT)) (part2 (parse INPUT)) }"#, "[357 [3 1 2 1 9 1 0 7 7 8 6 1 9]]"),
- (r#"(let INPUT 
+{ (part1 (parse INPUT)) (part2 (parse INPUT)) }"#,
+                "[357 [3 1 2 1 9 1 0 7 7 8 6 1 9]]",
+            ),
+            (
+                r#"(let INPUT 
 "..@@.@@@@.
 @@@.@.@.@@
 @@@@@.@.@@
@@ -1306,9 +1388,11 @@ L82")
         (rec (+ total (length rem))))))))
     (rec 0))))
 
-[(part1 (parse INPUT)) (part2 (parse INPUT))]"#, "[13 43]"),
-
-(r#"(let INPUT "3-5
+[(part1 (parse INPUT)) (part2 (parse INPUT))]"#,
+                "[13 43]",
+            ),
+            (
+                r#"(let INPUT "3-5
 10-14
 16-20
 12-18
@@ -1321,21 +1405,20 @@ L82")
 32")
 
 (let parse (lambda input (do 
-  (let parts (String->Vector '*' input))
-  (let A (drop/last 1 (get parts 0)))
-  (let B (drop/first 1 (get parts 1)))
+  (let [ p1 p2 . ] (String->Vector '*' input))
+  (let A (drop/last 1 p1))
+  (let B (drop/first 1 p2))
   { (map (lambda x (map BigInt/new (String->Vector '-' x))) (String->Vector nl A)) (map BigInt/new (String->Vector nl B)) })))
 
 (let part1 (lambda { ranges fruits } (length (filter (lambda fruit (some? (lambda [ low high . ] (and (BigInt/gte? fruit low) (BigInt/lte? fruit high))) ranges)) fruits))))
 
-(let part2 (lambda { ranges . } (do 
-  (sort! (lambda a b (BigInt/lt? (get a 0) (get b 0))) ranges)
+(let part2 (lambda { ranges . } (do
+  (sort! (lambda [ a . ] [ b . ] (BigInt/lt? a b)) ranges)
   (variable low (get ranges 0 0))
   (variable high (get ranges 0 1))
   (variable out [ 0 ])
   (loop 1 (length ranges) (lambda i (do 
-    (let dlow (get ranges i 0))
-    (let dhigh (get ranges i 1))
+    (let [ dlow dhigh . ] (get ranges i))
     (if (BigInt/gte? (get high) dlow) (do 
       (set low (if (BigInt/lt? (get low) dlow) (get low) dlow))
       (set high (if (BigInt/gt? (get high) dhigh) (get high) dhigh))) (do 
@@ -1347,15 +1430,11 @@ L82")
 
 (let PARSED (parse INPUT))
 
-[[(part1 PARSED)] (part2 PARSED)]"#, "[[3] [1 4]]"),
-
-
-
-
-
-
-
-(r#"(let INPUT 
+[[(part1 PARSED)] (part2 PARSED)]"#,
+                "[[3] [1 4]]",
+            ),
+            (
+                r#"(let INPUT 
 "123 328  51 64 
  45 64  387 23 
   6 98  215 314
@@ -1375,9 +1454,11 @@ L82")
         (=# op '+') (reduce BigInt/add [0] (get numbers i))
         []
       ))) [0] (zip { op (range 0 (length op)) }))))
-(part1 (parse INPUT))"#, "[4 2 7 7 5 5 6]"),
-
-(r#"(let INPUT 
+(part1 (parse INPUT))"#,
+                "[4 2 7 7 5 5 6]",
+            ),
+            (
+                r#"(let INPUT 
 ".......S.......
 ...............
 .......^.......
@@ -1399,13 +1480,12 @@ L82")
   (integer total 0)
   (let visited [[] [] [] [] [] [] [] [] []])
   (let queue (Que/new [Int]))
-  (let start (std/vector/3d/points input (lambda x (=# x 'S'))))
+  (let start (points (lambda x (=# x 'S')) input))
   (Que/enque! (get start 0) queue)
   (loop (Que/not-empty? queue) (lambda (do 
     (let current (Que/peek queue))
     (Que/deque! queue)
-    (let y (get current 0))
-    (let x (get current 1))
+    (let [ y x . ] current)
     (let key (cons (Integer->String y) "-" (Integer->String x)))
     (if (and (std/vector/3d/in-bounds? input y x) (not (Set/has? key visited))) (do
         (Set/add! key visited)
@@ -1414,31 +1494,28 @@ L82")
           (Que/enque! [ y (+ x 1) ] queue)
           (Que/enque! [ y (- x 1) ] queue)) (Que/enque! [ (+ y 1) x ] queue)))))))
   (get total))))
-
-
 (let part2 (lambda input (do
   (integer total 0)
   (let queue (Que/new [Int]))
-  (let start (first (std/vector/3d/points input (lambda x (=# x 'S')))))
+  (let start (first (points (lambda x (=# x 'S')) input)))
   (Que/enque! [(get start 0) (get start 1) 1] queue)
   (loop (Que/not-empty? queue) (lambda (do 
     (let current (Que/peek queue))
     (Que/deque! queue)
-    (let y (get current 0))
-    (let x (get current 1))
-    (let c (get current 2))
+    (let [ y x c . ] current)
     (if (std/vector/3d/in-bounds? input y x) (do
         (if (=# (get input y x) '^') (do 
             (Que/enque! [ y (+ x 1) c ] queue)
             (Que/enque! [ y (- x 1) c ] queue)) 
-            
             (Que/enque! [ (+ y 1) x c ] queue)))
         (+= total c)))))
   (get total))))
 (let PARSED (parse INPUT))
-[(part1 PARSED) (part2 PARSED)]"#, "[21 40]"),
-
-(r#"(let INPUT 
+[(part1 PARSED) (part2 PARSED)]"#,
+                "[21 40]",
+            ),
+            (
+                r#"(let INPUT 
 ".......S.......
 ...............
 .......^.......
@@ -1480,9 +1557,15 @@ L82")
           (set! (get data y) x '|'))))))))))
   [(get beam) (BigInt/sum timeline)])))
 
-(solution (parse INPUT))"#, "[[2 1] [4 0]]"),
-(r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#, "[1.0 15.0 -1.0]"),
-(r#"(let INPUT "162,817,812
+(solution (parse INPUT))"#,
+                "[[2 1] [4 0]]",
+            ),
+            (
+                r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#,
+                "[1.0 15.0 -1.0]",
+            ),
+            (
+                r#"(let INPUT "162,817,812
 57,618,57
 906,360,560
 592,479,940
@@ -1573,8 +1656,11 @@ L82")
                 (set answer (* (get (get input a) 0) (get (get input b) 0))))) edges)
   (get answer))))
 
-[(part1 (parse INPUT)) (part2 (parse INPUT))]"#, "[40 25272]"),
-(r#"(let INPUT "7,1
+[(part1 (parse INPUT)) (part2 (parse INPUT))]"#,
+                "[40 25272]",
+            ),
+            (
+                r#"(let INPUT "7,1
 11,1
 11,7
 9,7
@@ -1588,10 +1674,19 @@ L82")
   (let rect (lambda [ x1 y1 .] [ x2 y2 .] (* (+ 1 (abs (- x1 x2))) (+ 1 (abs (- y1 y2))))))
  (|> pairs (map (lambda [ a b .] (rect a b))) (maximum)))))
 
-[(part1 (parse INPUT))]"#, "[50]"),
-("{  (std/vector/float/mean (range/float 1 10)) (Float->Int (std/vector/float/mean (range/float 1 10))) }", "[5.5 5]"),
-("{ (map Float->Int (range/float 1 10)) (map Int->Float (range/int 1 10)) }", "[[1 2 3 4 5 6 7 8 9 10] [1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0]]"),
-("(=? 
+[(part1 (parse INPUT))]"#,
+                "[50]",
+            ),
+            (
+                "{  (std/vector/float/mean (range/float 1 10)) (Float->Int (std/vector/float/mean (range/float 1 10))) }",
+                "[5.5 5]",
+            ),
+            (
+                "{ (map Float->Int (range/float 1 10)) (map Int->Float (range/int 1 10)) }",
+                "[[1 2 3 4 5 6 7 8 9 10] [1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0]]",
+            ),
+            (
+                "(=? 
     (=
         (Float->Int 
         (sum/float (range/float 0 10)))
@@ -1599,8 +1694,11 @@ L82")
     (=.
         (Int->Float 
         (sum/int (range/int 0 10)))
-        (sum/float (range/float 0 10))))", "true"),
-(r#"(let INPUT "ULL
+        (sum/float (range/float 0 10))))",
+                "true",
+            ),
+            (
+                r#"(let INPUT "ULL
 RRDDD
 LURDL
 UUUUD")
@@ -1649,18 +1747,20 @@ UUUUD")
                  (set! start 0 (clamp-range 0 len y))
                  (set! start 1 (clamp-range 0 len x))))
               (get pad (get start 0) (get start 1)))) '0'))))))))
-[(part1 (parse INPUT)) (part2 (parse INPUT))]"#, "[[49 57 56 53] [53 68 66 51]]"),
-(r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter digit? x))) (filter not-empty?) (map String->Integer)))))))
+[(part1 (parse INPUT)) (part2 (parse INPUT))]"#,
+                "[[49 57 56 53] [53 68 66 51]]",
+            ),
+            (
+                r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter digit? x))) (filter not-empty?) (map String->Integer)))))))
 (let part1 (lambda input (|> input (count (lambda [a b c .] (and (> (+ a b) c) (> (+ b c) a) (> (+ a c) b)))))))
 (let part2 (lambda input (|> input 
   (reduce (lambda a [A B C .] (do 
-    (let prev (at a -1))
-    (push! (get prev 0) A)
-    (push! (get prev 1) B)
-    (push! (get prev 2) C)
-    (if (= (length (get prev 0)) 3) (push! a [[] [] []]))
-   a
-  )) [[[] [] []]])
+    (let [ pa pb pc . ] (at a -1))
+    (push! pa A)
+    (push! pb B)
+    (push! pc C)
+    (if (= (length pa) 3) (push! a [[] [] []]))
+   a)) [[[] [] []]])
   (filter (lambda x (not (empty? (get x 0)))))
   (flat)
   (part1))))
@@ -1672,8 +1772,11 @@ UUUUD")
   (part2 (parse "  330  143  5
     769  547   10
     930  625  25"))
-]"#, "[1 2]"),
-(r#"(let A (Vector->Set ["Hello" "Darkness" "My" "Old" "Friend"]))
+]"#,
+                "[1 2]",
+            ),
+            (
+                r#"(let A (Vector->Set ["Hello" "Darkness" "My" "Old" "Friend"]))
 (let B (Vector->Set ["Hello" "Darkness" "My" "New" "Enemy"]))
 
 (|> [
@@ -1691,9 +1794,11 @@ UUUUD")
  (Table/entries)
  (sort! (lambda { . a } { . b } (> a b)))
  (car)
- (fst))"#, "[101]"),
-
- (r#"(let flood-fill (lambda image sr sc color (do 
+ (fst))"#,
+                "[101]",
+            ),
+            (
+                r#"(let flood-fill (lambda image sr sc color (do 
     (let old (get image sr sc))
     (if (= old color) 
         image 
@@ -1712,11 +1817,17 @@ UUUUD")
 
 (let image [[1 1 1] [1 1 0] [1 0 1]])
 (flood-fill image 1 1 2)
-; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#, "[[2 2 2] [2 2 0] [2 0 1]]"),
-(r#"(let* fibonacci (lambda n
+; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#,
+                "[[2 2 2] [2 2 0] [2 0 1]]",
+            ),
+            (
+                r#"(let* fibonacci (lambda n
     (if (< n 2) n (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
-(fibonacci 10)"#, "55"),
-(r#"(let memo [[] [] [] []])
+(fibonacci 10)"#,
+                "55",
+            ),
+            (
+                r#"(let memo [[] [] [] []])
 (let* fibonacci (lambda n
     (do 
     (let key (Integer->String n))
@@ -1724,8 +1835,11 @@ UUUUD")
       (let res (+ (fibonacci (- n 1)) (fibonacci (- n 2))))
       (Table/set! key res memo)
       res))))))
-(fibonacci 10)"#, "55"),
-(r#"(let* ackermann (lambda m n 
+(fibonacci 10)"#,
+                "55",
+            ),
+            (
+                r#"(let* ackermann (lambda m n 
     (cond 
         (and (< m 0) (< n 0)) -1 
         (= m 0) (+ n 1)
@@ -1733,8 +1847,11 @@ UUUUD")
         (and (> m 0) (> n 0)) (ackermann (- m 1) (ackermann m (- n 1)))
         0)))
 
-(ackermann 2 3)"#, "9"),
-(r#"(let INPUT "00100
+(ackermann 2 3)"#,
+                "9",
+            ),
+            (
+                r#"(let INPUT "00100
 11110
 10110
 10111
@@ -1803,9 +1920,11 @@ UUUUD")
        (std/convert/bits->integer co2-bits)))))
 
 
-[(part1 PARSED) (part2 PARSED)]"#, "[198 230]"),
-
-(r#"(let INPUT 
+[(part1 PARSED) (part2 PARSED)]"#,
+                "[198 230]",
+            ),
+            (
+                r#"(let INPUT 
 "r, wr, b, g, bwu, rb, gb, br
 
 brwrr
@@ -1833,9 +1952,11 @@ bbrgwb")
 
   (count dp? towels))))
 
-[(part1 (parse INPUT))]"#, "[6]"),
-(
-r#"
+[(part1 (parse INPUT))]"#,
+                "[6]",
+            ),
+            (
+                r#"
 (let res (lambda x y 
 (std/vector/option/resolve [ 
     (std/int/div/option (+ 1 2 x) y)
@@ -1847,9 +1968,11 @@ r#"
 ))
 
 [(res 234 25) (res -1 25) (res 234 0)]
-"#, "[[true 4704] [false -1] [false -1]]"),
-
-(r#"
+"#,
+                "[[true 4704] [false -1] [false -1]]",
+            ),
+            (
+                r#"
 (let INPUT "7,4,9,5,11,17,23,2,0,14,21,24,10,16,13,6,15,25,12,22,18,20,8,19,3,26,1
 
 22 13 17 11  0
@@ -1926,8 +2049,11 @@ r#"
     (let { i board } (first-winning-board numbers boards))
     (let drawn (Vector->Set (map Integer->String (slice 0 (+ i 1) numbers))))
     (score board drawn (get numbers i)))))
-(part1 (parse INPUT))"#, "4512"),
-(r#"
+(part1 (parse INPUT))"#,
+                "4512",
+            ),
+            (
+                r#"
 (let Point   (Id))
 (let Segment (Id))
 (let Key     (Id))
@@ -2014,13 +2140,19 @@ r#"
 0,0 -> 8,8
 5,5 -> 8,2")
 
-(solve (parse INPUT))"#, "12"),
-(r#"
+(solve (parse INPUT))"#,
+                "12",
+            ),
+            (
+                r#"
 (let unpack (lambda { . { . { . { y x }}}} (+ y x)))
 (let unnest (lambda [[a b c .] [. d .]] [ a b c d ]))
 (let both (lambda { [ y x z . ] { a b } } (if (or a b) (* (+ y x) z) z)))
-{ (unnest [[ 1 2 3 ] [ 4 5 6 ]]) { (unpack { 1 { 2 { 3 { 4 5 }}}}) (both { [ 2 3 -1 ] { false true } }) } }"#, "[[1 2 3 5] [9 -5]]"),
-(r#"; [Char]
+{ (unnest [[ 1 2 3 ] [ 4 5 6 ]]) { (unpack { 1 { 2 { 3 { 4 5 }}}}) (both { [ 2 3 -1 ] { false true } }) } }"#,
+                "[[1 2 3 5] [9 -5]]",
+            ),
+            (
+                r#"; [Char]
 (let INPUT "3,4,3,1,2")
 ; [Char] -> [Int]
 (let parse (lambda input (do
@@ -2040,9 +2172,11 @@ r#"
 ; [Int] -> Int
 (let part1 (lambda input (sum (simulate 80 input))))
 ; Int
-(part1 (parse INPUT))"#, "5934"),
-
-(r#" [Char]
+(part1 (parse INPUT))"#,
+                "5934",
+            ),
+            (
+                r#" [Char]
 (let INPUT "\#1 @ 1,3: 4x4
 #2 @ 3,1: 4x4
 #3 @ 5,5: 2x2")
@@ -2107,8 +2241,11 @@ r#"
           (Table/values) 
           (count (lambda n (>= n 2))))))) 
 
-(part1 INPUT)"#, "4"),
-(r#"[
+(part1 INPUT)"#,
+                "4",
+            ),
+            (
+                r#"[
 (apply (comp
     (map (String->Vector '-')) 
     (map (map String->Integer)) 
@@ -2118,8 +2255,11 @@ r#"
     (map (String->Vector '-')) 
     (map (map String->Integer)) 
     flat 
-    sum)]"#, "[21 21]"),
-(r#"(let puncts ['!' ',' '.' '?' ' ' sq nl]) 
+    sum)]"#,
+                "[21 21]",
+            ),
+            (
+                r#"(let puncts ['!' ',' '.' '?' ' ' sq nl]) 
 (let punct? (lambda x (some? (apply =# x) puncts)))
 
 (let palindrome? (comp (map lower) (exclude punct?) (S/comb match? reverse)))
@@ -2131,9 +2271,11 @@ r#"
   "Stab nail at ill, italian bats!"
 ] 
 (map palindrome?) 
-(every? identity))"#, "true"),
-
-(r#"; SRM 727: Problem 1 - MakeTwoConsecutive
+(every? identity))"#,
+                "true",
+            ),
+            (
+                r#"; SRM 727: Problem 1 - MakeTwoConsecutive
 (type String [Char])
 (:: solve (Lambda (: String s) Bool))
 (let solve (lambda s (and (> (length s) 2) (do
@@ -2150,8 +2292,11 @@ r#"
   (solve "AABB")
   (solve "BAB")
   (solve "KEEP")
-]"#, "[false false false true true true]"),
-(r#"(let max-water (lambda input (do 
+]"#,
+                "[false false false true true true]",
+            ),
+            (
+                r#"(let max-water (lambda input (do 
   (let~ max-water-rec (lambda l r out 
     (if (< l r) 
       (do 
@@ -2165,8 +2310,11 @@ r#"
      out)))
   (max-water-rec 0 (- (length input) 1) 0))))
 
-(max-water [ 3 9 4 8 2 6 1 ])"#, "24"),
-(r#"
+(max-water [ 3 9 4 8 2 6 1 ])"#,
+                "24",
+            ),
+            (
+                r#"
 (let fn (lambda { x y } (do 
   (let vec [ 1 2 3 ])
   (let [ a b . ] vec)
@@ -2175,10 +2323,16 @@ r#"
 (let { x { y z }} { 10 { [ 1 2 3 ] false} })
 (let def { true { [ 1 2 3 4 5 ] (lambda [ a b ] (+ (sum b) a)) } })
 (let { a1 { b1 c1 } } def)
-{ z  { (fn { 10 23 }) { a1 (c1 b1)} } }"#, "[false [[1 2 10 23] [true 15]]]"),
- (r#"(let [ a b rest ] [ 1 2 3 4 5 6 ])
-{ a rest }"#, "[1 [3 4 5 6]]"),
- (r#"(let rev (lambda xs (do 
+{ z  { (fn { 10 23 }) { a1 (c1 b1)} } }"#,
+                "[false [[1 2 10 23] [true 15]]]",
+            ),
+            (
+                r#"(let [ a b rest ] [ 1 2 3 4 5 6 ])
+{ a rest }"#,
+                "[1 [3 4 5 6]]",
+            ),
+            (
+                r#"(let rev (lambda xs (do 
   (let~ rec/rev (lambda xs out 
                   (if (empty? xs) out 
                       (rec/rev (cdr xs) (cons [(car xs)] out)))))
@@ -2191,44 +2345,157 @@ r#"
  (rev xs)
  (rev xs)
  (rev xs)
-]"#, "[[4 3 2 1] [4 3 2 1] [4 3 2 1] [4 3 2 1]]")
+]"#,
+                "[[4 3 2 1] [4 3 2 1] [4 3 2 1] [4 3 2 1]]",
+            ), 
+            
+            (r#"(let INPUT "2333133121414131402")
+(let parse (comp (map Char->Digit)))
+(let part1 (lambda input (do 
+  (integer file-id -1)
+  (let disk (|> input (reduce/i (lambda disk ch i (std/vector/concat! disk 
+  [(if (even? i) (do 
+    (++ file-id)
+    (let id (get file-id))
+    (Vector/new (lambda . id) ch))
+    (Vector/new (lambda . -1) ch))])) [])))
+  (let blanks (reduce/i (lambda a x i (do (if (= x -1) (push! a i)) a)) [] disk))
+  (let~ fragment (lambda ind out (do 
+    (let i (get blanks ind))
+    (if (= (last disk) -1) (do (pop! disk) (fragment ind out))
+      (if (not (<= (length disk) i)) (do 
+        (set! disk i (pull! disk))
+        (fragment (+ ind 1) out)
+      ) false)))))
+  (fragment 0 true)
+  (|> disk (reduce/i (lambda a b i (+ a (* b i))) 0)))))
+(part1 (parse INPUT))"#, "1928"),
 
 
-// (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
-// (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
-// [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
-// (r#"(let input [
-//     [ 1 2 3 ]
-//     [ 5 5 5 ]
-//     [ 3 1 4 ]
-// ])
+(r#"(let parse (comp (String->Vector nl) (map String->Integer)))
+(let part1 (comp
+  (map (lambda secret (do
+    (integer SECRET secret)
+    ; Each step of the above process involves mixing and pruning:
 
-// ; long version - not prefered
-// (let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
+    ; To mix a value into the secret number, 
+    ; calculate the bitwise XOR of the given value and the secret number.
+    ;  Then, the secret number becomes the result of that operation. 
+    ; (If the secret number is 42 and you were to mix 15 into the secret number, 
+    ; the secret number would become 37.)
+    (let mix (lambda value (do (set SECRET (^ value (get SECRET))) (get SECRET))))
 
-// ; Both of these are prefered 
+    ; To prune the secret number, 
+    ; calculate the value of the secret number modulo 777216. 
+    ; Then, the secret number becomes the result of that operation. 
+    (let prune (lambda value (do (set SECRET (emod value 777216)) (get SECRET))))
 
-// ; Pipe composition - easy to follow
-// (let maximumWealthPipe (lambda xs (<| xs (map sum) (maximum))))
+    (let random (lambda (|>
+          (get SECRET)
 
-// ; Point free version - most conscise
-// (let maximumWealthFree (\ maximum (\map sum)))
+          (fp/mul 64)        ; Calculate the result of multiplying the secret number by 64.
+          
+          mix        ; Then, mix this result into the secret number.
+          prune       ; Finally, prune the secret number.
 
-// (<| ; all of these functions are [[Int]] -> Int so they can exist in the same vector
-//     [maximumWealthLong maximumWealthPipe maximumWealthFree] 
-//     (map (lambda fn (fn input))))"#, "[15 15 15]"),
-//     (r#"(let \filterOdd (\filter odd?))
-// (let maximumWealthFree (\ maximum (\map sum)))
-// [(<| 
-//     [ 1 2 3 4 5 ] 
-//     (\filterOdd)
-//     (\map square)
-//     (sum))
-//  (<| [
-//     [ 1 2 3 ]
-//     [ 5 5 5 ]
-//     [ 3 1 4 ]
-// ] (maximumWealthFree))]"#, "[35 15]"),
+          (fp/div 32)        ; Calculate the result of dividing the secret number by 32.
+                        ; Round the result down to the nearest integer.
+          
+         mix         ; Then, mix this result into the secret number.
+         prune       ; Finally, prune the secret number.
+                
+          (fp/mul 2048)      ; Calculate the result of multiplying the secret number by 2048.
+
+          mix         ; Then, mix this result into the secret number. 
+          prune       ; Finally, prune the secret number.
+          )))
+          
+        ; In a single day, buyers each have time to generate 2000 new secret numbers
+        (loop/repeat 2000 random)
+        (get SECRET))))
+    ; What is the sum of the 2000th secret number generated by each buyer?
+    sum))
+(part1 (parse "1
+10
+100
+2024"))"#, "1234258"),
+(r#"(let INPUT
+"Button A: X+94, Y+34
+Button B: X+22, Y+67
+Prize: X=8400, Y=5400
+
+Button A: X+26, Y+66
+Button B: X+67, Y+21
+Prize: X=12748, Y=12176
+
+Button A: X+17, Y+86
+Button B: X+84, Y+37
+Prize: X=7870, Y=6450
+
+Button A: X+69, Y+23
+Button B: X+27, Y+71
+Prize: X=18641, Y=10279")
+
+(let parse (comp (String->Vector nl)
+                 (exclude empty?)
+                 (map (comp (String->Vector ':')
+                            (drop/first 1)
+                            first))
+                 (map (comp (String->Vector ' ')
+                            (exclude empty?)
+                            (map (comp (select digit?)
+                                       (String->Integer)))))
+                (partition 3)))
+; (let part1 (comp (reduce (lambda a [ [ ax ay . ] [ bx by . ] [ px py . ] . ] (do
+;                     (let ca (/ (- (* px by) (* py bx)) (- (* ax by) (* ay bx))))
+;                     (let cb (/ (- px (* ax ca)) bx))
+;                     (if (and (= (mod ca 1) 0) (= (mod cb 1) 0) (<= ca 100) (<= cb 100))
+;                         (+ a (+ (* ca 3) cb))
+;                         a)))
+;                     0)))
+(let part1 (comp (reduce (lambda a [ [ ax ay . ] [ bx by . ] [ px py . ] . ] (do
+                    (let ca `(px * by - py * bx) / (ax * by - ay * bx)`)
+                    (let cb `(px - ax * ca) / bx`)
+                    (if (and (<= ca 100) (<= cb 100))
+                        `a + ca * 3 + cb`
+                        a)))
+                    0)))
+          (part1 (parse INPUT))"#, "480")
+            // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
+               // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
+               // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
+               // (r#"(let input [
+               //     [ 1 2 3 ]
+               //     [ 5 5 5 ]
+               //     [ 3 1 4 ]
+               // ])
+
+               // ; long version - not prefered
+               // (let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
+
+               // ; Both of these are prefered
+
+               // ; Pipe composition - easy to follow
+               // (let maximumWealthPipe (lambda xs (<| xs (map sum) (maximum))))
+
+               // ; Point free version - most conscise
+               // (let maximumWealthFree (\ maximum (\map sum)))
+
+               // (<| ; all of these functions are [[Int]] -> Int so they can exist in the same vector
+               //     [maximumWealthLong maximumWealthPipe maximumWealthFree]
+               //     (map (lambda fn (fn input))))"#, "[15 15 15]"),
+               //     (r#"(let \filterOdd (\filter odd?))
+               // (let maximumWealthFree (\ maximum (\map sum)))
+               // [(<|
+               //     [ 1 2 3 4 5 ]
+               //     (\filterOdd)
+               //     (\map square)
+               //     (sum))
+               //  (<| [
+               //     [ 1 2 3 ]
+               //     [ 5 5 5 ]
+               //     [ 3 1 4 ]
+               // ] (maximumWealthFree))]"#, "[35 15]"),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
