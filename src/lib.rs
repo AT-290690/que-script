@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(warnings)]
 mod baked;
+mod format;
 mod infer;
 mod js;
 mod parser;
@@ -156,6 +157,10 @@ pub fn cons(a: String, b: String) -> *const u8 {
     };
 
     write_to_output(&merged)
+}
+#[wasm_bindgen]
+pub fn format(program: String) -> *const u8 {
+    write_to_output(&format::format_source(&program))
 }
 #[wasm_bindgen]
 pub fn signatures(program: String) -> *const u8 {

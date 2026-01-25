@@ -5,6 +5,7 @@ use crate::baked::load_ast;
 use crate::infer::infer_with_builtins_env;
 use crate::ir::load_bytecode;
 use crate::vm::parse_bitecode;
+use crate::format::format;
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -245,6 +246,9 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             }
             _ => {}
         }
+    } else if args.iter().any(|a| a == "--fmt") {
+      println!("{}", crate::format::format_source(&fs::read_to_string(path)?))
+   
     } else {
         println!("{}", run_code(fs::read_to_string(path)?))
     }
