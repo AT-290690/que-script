@@ -2460,7 +2460,16 @@ Prize: X=18641, Y=10279")
                         `a + ca * 3 + cb`
                         a)))
                     0)))
-          (part1 (parse INPUT))"#, "480")
+          (part1 (parse INPUT))"#, "480"),
+          (r#"; solve :: [[Char]] -> Int
+(let solve (comp 
+    (map (Vector/get! 1)) 
+    (map (lambda x (if (=# x '-') -1 1))) 
+    sum))
+
+(map solve [["--X" "X++" "X++"] ["++X" "++X" "X++"] ["X++" "++X" "--X" "X--"]])
+; [ 1 3 0 ]
+"#, "[1 3 0]")
             // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
                // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
                // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),

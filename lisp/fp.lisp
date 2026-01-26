@@ -232,3 +232,6 @@
 (let fp/sub (lambda b a (- a b)))
 (let fp/emod (lambda b a (emod a b)))
 (let fp/mod (lambda b a (mod a b)))
+
+(let cond/dispatch (lambda fn? a b x (if (fn? x) a b)))
+

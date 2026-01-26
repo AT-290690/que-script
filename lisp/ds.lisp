@@ -186,3 +186,8 @@
 (let String/gte? std/vector/char/greater-or-equal?)
 (let String/lt? std/vector/char/lesser?)
 (let String/gt? std/vector/char/greater?)
+
+(let Char/eq? (lambda a b (=# a b)))
+(let Int/eq? (lambda a b (= a b)))
+(let Bool/eq? (lambda a b (=? a b)))
+(let Float/eq? (lambda a b (=. a b)))
