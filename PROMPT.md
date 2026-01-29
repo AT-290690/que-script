@@ -1,3 +1,5 @@
+This file is for teaching AI how to use the language
+
 Que Script is a **functional, expression-only, Lisp-style language** using **S-expressions**.
 
 ---

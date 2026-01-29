@@ -151,6 +151,7 @@
 (let median/float std/vector/float/median)
 (let zip std/vector/tuple/zip)
 (let unzip std/vector/tuple/unzip)
+(let zip-with (lambda f xs ys (std/vector/tuple/zip-with xs ys f)))
 
 (let window std/vector/sliding-window)
 (let flat std/vector/flat-one)

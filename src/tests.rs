@@ -2469,7 +2469,33 @@ Prize: X=18641, Y=10279")
 
 (map solve [["--X" "X++" "X++"] ["++X" "++X" "X++"] ["X++" "++X" "--X" "X--"]])
 ; [ 1 3 0 ]
-"#, "[1 3 0]")
+"#, "[1 3 0]"),
+(r#"(let sum-sub-slow (lambda xs (do
+  (let out [])
+  (loop 0 (length xs) (lambda i 
+    (loop i (length xs) (lambda j (push! out (slice i (+ j 1) xs))))))
+  (sum (map sum out)))))
+
+(let sum-sub-imperative (lambda xs (do 
+  (integer result 0)
+  (let n (length xs))
+  (loop 0 n (lambda i (+= result (* (get xs i) (+ i 1) (- n i)))))
+  (get result))))
+
+(let sum-sub-functional (lambda xs 
+  (reduce/i (lambda a b i (+ a (* b (+ i 1) (- (length xs) i)))) 0 xs)))
+
+
+(let sum-sub-math (lambda xs 
+  (reduce/i (lambda a b i `a + b * (i + 1) * (length(xs) - i)`) 0 xs)))
+
+(let xs [ 1 4 5 3 2 ])
+[
+  (sum-sub-slow xs)
+  (sum-sub-imperative xs)
+  (sum-sub-functional xs)
+  (sum-sub-math xs)
+]"#, "[116 116 116 116]")
             // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
                // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
                // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),

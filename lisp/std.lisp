@@ -825,7 +825,12 @@ nil)))
 
 (let std/vector/tuple/zip (lambda xs (std/vector/tuple/zipper (fst xs) (snd xs))))
 (let std/vector/tuple/unzip (lambda xs { (std/vector/map xs (lambda x (fst x))) (std/vector/map xs (lambda x (snd x))) }))
-; for rest macro
+(let std/vector/tuple/zip-with (lambda a b f (do 
+    (let out []) 
+    (loop 0 (length a) (lambda i 
+      (set! out (length out) (f (get a i) (get b i)))))
+     out)))
+(std/vector/tuple/zipWith + [1 2 3] [4 5 6])
 (let std/vector/rest (lambda xs start (if (std/vector/empty? xs) xs (do
      (let end (length xs))
      (let bounds (- end start))

@@ -39,6 +39,18 @@ wasm-pack build --target nodejs --out-dir pkg/node
 wasm-pack build --target web --out-dir pkg/web
 ```
 
+build "baked" libraries
+
+```bash
+cargo run -- --std
+```
+
+type check libraries and generate lib.json
+
+```bash
+cargo run -- --doc
+```
+
 ---
 
 ### Hindley–Milner Type Inference
