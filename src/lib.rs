@@ -15,6 +15,7 @@ use std::io::Write;
 
 thread_local! {
     static OUTPUT: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    static STD: RefCell<parser::Expression> = RefCell::new(baked::load_ast());
 }
 
 fn write_to_output(s: &str) -> *const u8 {
@@ -38,83 +39,88 @@ pub fn get_output_len() -> usize {
 
 #[wasm_bindgen]
 pub fn evaluate(program: String) -> *const u8 {
-    let std_ast = baked::load_ast();
-    let result = if let parser::Expression::Apply(items) = &std_ast {
-        match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => {
-                match infer::infer_with_builtins(
-                    &wrapped_ast,
-                    types::create_builtin_environment(types::TypeEnv::new()),
-                ) {
-                    Ok(typ) => match vm::run(&wrapped_ast, crate::vm::VM::new()) {
-                        Ok(res) => format!("0\n{}\n{:?}", typ, res),
-                        Err(err) => format!("2\n{}", err),
-                    },
-                    Err(err) => format!("1\n{}", err),
+    let result = STD.with(|std| {
+        let std_ast = std.borrow();
+        if let parser::Expression::Apply(items) = &*std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    match infer::infer_with_builtins(
+                        &wrapped_ast,
+                        types::create_builtin_environment(types::TypeEnv::new()),
+                    ) {
+                        Ok(typ) => match vm::run(&wrapped_ast, crate::vm::VM::new()) {
+                            Ok(res) => format!("0\n{}\n{:?}", typ, res),
+                            Err(err) => format!("2\n{}", err),
+                        },
+                        Err(err) => format!("1\n{}", err),
+                    }
                 }
+                Err(err) => format!("3\n{}", err),
             }
-            Err(err) => format!("3\n{}", err),
+        } else {
+            "No expressions...".to_string()
         }
-    } else {
-        "0 No expressions...".to_string()
-    };
+    });
 
     write_to_output(&result)
 }
 
 #[wasm_bindgen]
 pub fn run(program: String) -> *const u8 {
-    let std_ast = baked::load_ast();
-    let result = if let parser::Expression::Apply(items) = &std_ast {
-        match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => match vm::run(&wrapped_ast, crate::vm::VM::new()) {
-                Ok(res) => format!("0\n{:?}", res),
-                Err(err) => format!("2\n{}", err),
-            },
-            Err(err) => format!("1\n{}", err),
+    let result = STD.with(|std| {
+        let std_ast = std.borrow();
+        if let parser::Expression::Apply(items) = &*std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => match vm::run(&wrapped_ast, crate::vm::VM::new()) {
+                    Ok(res) => format!("0\n{:?}", res),
+                    Err(err) => format!("2\n{}", err),
+                },
+                Err(err) => format!("1\n{}", err),
+            }
+        } else {
+            "No expressions...".to_string()
         }
-    } else {
-        "No expressions...".to_string()
-    };
-
+    });
     write_to_output(&result)
 }
 
 #[wasm_bindgen]
 pub fn js(program: String) -> *const u8 {
-    let std_ast = baked::load_ast();
-    let result = if let parser::Expression::Apply(items) = &std_ast {
-        match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => js::compile_program_to_js(&wrapped_ast),
-            Err(err) => format!("3\n{:?}", err),
+    let result = STD.with(|std| {
+        let std_ast = std.borrow();
+        if let parser::Expression::Apply(items) = &*std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => js::compile_program_to_js(&wrapped_ast),
+                Err(err) => format!("3\n{:?}", err),
+            }
+        } else {
+            "No expressions...".to_string()
         }
-    } else {
-        "No expressions...".to_string()
-    };
-
+    });
     write_to_output(&result)
 }
 
 #[wasm_bindgen]
 pub fn check(program: String) -> *const u8 {
-    let std_ast = baked::load_ast();
-    let result = if let parser::Expression::Apply(items) = &std_ast {
-        match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => {
-                match infer::infer_with_builtins(
-                    &wrapped_ast,
-                    types::create_builtin_environment(types::TypeEnv::new()),
-                ) {
-                    Ok(typ) => format!("0\n{}", typ),
-                    Err(err) => format!("1\n{}", err),
+    let result = STD.with(|std| {
+        let std_ast = std.borrow();
+        if let parser::Expression::Apply(items) = &*std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    match infer::infer_with_builtins(
+                        &wrapped_ast,
+                        types::create_builtin_environment(types::TypeEnv::new()),
+                    ) {
+                        Ok(typ) => format!("0\n{}", typ),
+                        Err(err) => format!("1\n{}", err),
+                    }
                 }
+                Err(err) => format!("3\n{}", err),
             }
-            Err(err) => format!("3\n{}", err),
+        } else {
+            "No expressions...".to_string()
         }
-    } else {
-        "No expressions...".to_string()
-    };
-
+    });
     write_to_output(&result)
 }
 
@@ -130,19 +136,21 @@ pub fn exec(program: String) -> *const u8 {
 
 #[wasm_bindgen]
 pub fn comp(program: String) -> *const u8 {
-    let std_ast = baked::load_ast();
-    let result = if let parser::Expression::Apply(items) = &std_ast {
-        match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => {
-                let mut code: Vec<vm::Instruction> = Vec::new();
-                vm::compile(&wrapped_ast, &mut code);
-                format!("{:?}", code)
+    let result = STD.with(|std| {
+        let std_ast = std.borrow();
+        if let parser::Expression::Apply(items) = &*std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    let mut code: Vec<vm::Instruction> = Vec::new();
+                    vm::compile(&wrapped_ast, &mut code);
+                    format!("{:?}", code)
+                }
+                Err(err) => format!("3\n{:?}", err),
             }
-            Err(err) => format!("3\n{:?}", err),
+        } else {
+            "No expressions...".to_string()
         }
-    } else {
-        "No expressions...".to_string()
-    };
+    });
 
     write_to_output(&result)
 }
@@ -164,39 +172,40 @@ pub fn format(program: String) -> *const u8 {
 }
 #[wasm_bindgen]
 pub fn signatures(program: String) -> *const u8 {
-    let std_ast = baked::load_ast();
-    let mut names = Vec::new();
+    STD.with(|std| {
+        let mut names = Vec::new();
+        let std_ast = std.borrow();
+        match &*std_ast {
+            parser::Expression::Apply(items) => {
+                match parser::merge_std_and_program(&program, items.to_vec()) {
+                    Ok(ast) => {
+                        match infer::infer_with_builtins_env(
+                            &ast,
+                            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+                        ) {
+                            Ok(env) => env.scopes.iter().for_each(|x| {
+                                for key in x.keys().into_iter().collect::<Vec<_>>() {
+                                    names.push([key.to_string(), x.get(key).unwrap().to_string()]);
+                                }
+                            }),
+                            Err(_) => {}
+                        }
 
-    match std_ast {
-        parser::Expression::Apply(items) => {
-            match parser::merge_std_and_program(&program, items.to_vec()) {
-                Ok(ast) => {
-                    match infer::infer_with_builtins_env(
-                        &ast,
-                        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-                    ) {
-                        Ok(env) => env.scopes.iter().for_each(|x| {
-                            for key in x.keys().into_iter().collect::<Vec<_>>() {
-                                names.push([key.to_string(), x.get(key).unwrap().to_string()]);
-                            }
-                        }),
-                        Err(_) => {}
+                        let res = format!(
+                            "{}",
+                            names
+                                .iter()
+                                .map(|s| s.join(","))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        );
+
+                        write_to_output(&res)
                     }
-
-                    let res = format!(
-                        "{}",
-                        names
-                            .iter()
-                            .map(|s| s.join(","))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    );
-
-                    write_to_output(&res)
+                    Err(err) => write_to_output(&format!("2\n{:?}", err)),
                 }
-                Err(err) => write_to_output(&format!("2\n{:?}", err)),
             }
+            err => write_to_output(&format!("2\n{:?}", err)),
         }
-        err => write_to_output(&format!("2\n{:?}", err)),
-    }
+    })
 }

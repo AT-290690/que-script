@@ -10,25 +10,31 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::num::Wrapping;
+use std::cell::RefCell;
 
+thread_local! {
+    static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
+}
 fn run_code(program: String) -> String {
-    let std_ast = crate::baked::load_ast();
-    if let crate::parser::Expression::Apply(items) = &std_ast {
-        match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-            Ok(wrapped_ast) => {
-                match crate::infer::infer_with_builtins(&wrapped_ast, crate::types::create_builtin_environment(crate::types::TypeEnv::new())) {
-                    Ok(typ) =>
-                         match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
-                            Ok(res) => return format!("{}\n{:?}", typ, res),
-                            Err(err) => return err,
-                        }
-                    Err(err) => return err,
+    STD.with(|std| {
+        let std_ast = std.borrow();
+        if let crate::parser::Expression::Apply(items) = &*std_ast {
+            match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    match crate::infer::infer_with_builtins(&wrapped_ast, crate::types::create_builtin_environment(crate::types::TypeEnv::new())) {
+                        Ok(typ) =>
+                             match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
+                                Ok(res) => return format!("{}\n{:?}", typ, res),
+                                Err(err) => return err,
+                            }
+                        Err(err) => return err,
+                    }
                 }
+                Err(err) => return err,
             }
-            Err(err) => return err,
         }
-    }
-    "No expressions...".to_string()
+        "No expressions...".to_string()
+    })
 }
 fn dump_wrapped_ast(expr: crate::parser::Expression, path: &str) -> std::io::Result<()> {
     let mut file = fs::File::create(path)?;
