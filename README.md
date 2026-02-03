@@ -35,8 +35,8 @@ cargo run
 build wasm bundle
 
 ```bash
-wasm-pack build --target nodejs --out-dir pkg/node
-wasm-pack build --target web --out-dir pkg/web
+wasm-pack build --target nodejs --out-dir pkg/node --release
+wasm-pack build --target web --out-dir pkg/web --release
 ```
 
 build "baked" libraries

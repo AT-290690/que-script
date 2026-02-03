@@ -4,13 +4,17 @@
 use crate::baked::load_ast;
 use crate::infer::infer_with_builtins_env;
 use crate::ir::load_bytecode;
+use crate::parser::build;
 use crate::vm::parse_bitecode;
 use crate::format::format;
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::Read;
 use std::num::Wrapping;
 use std::cell::RefCell;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use std::io::{self, Write};
 
 thread_local! {
     static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
@@ -36,15 +40,22 @@ fn run_code(program: String) -> String {
         "No expressions...".to_string()
     })
 }
-fn dump_wrapped_ast(expr: crate::parser::Expression, path: &str) -> std::io::Result<()> {
+fn compress(data: &str) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(data.as_bytes()).expect("Failed to compress data");
+    encoder.finish().expect("Failed to finish compression")
+}
+
+fn dump_wrapped_libs(expr: &str, path: &str) -> io::Result<()> {
     let mut file = fs::File::create(path)?;
-    writeln!(file, "use crate::parser::Expression::*;")?;
-    writeln!(file, "macro_rules! s {{($s:expr) => {{ $s.to_string() }}}}")?;
+    writeln!(file, "use std::io::Read;fn decompress(compressed: &[u8]) -> crate::parser::Expression {{use flate2::read::GzDecoder;let mut decoder = GzDecoder::new(compressed);let mut decompressed_data = String::new();decoder.read_to_string(&mut decompressed_data).expect(\"Failed to decompress data\");let expressions =crate::parser::parse(&decompressed_data).expect(\"Failed to parse decompressed data\");expressions.first().expect(\"No expressions returned\").clone()}}");
+    let compressed_code = compress(&expr);
     writeln!(file, "pub fn load_ast() -> crate::parser::Expression {{")?;
-    writeln!(file, "{}", expr.to_rust())?;
+    writeln!(file, "decompress(&{:?})", compressed_code)?;
     writeln!(file, "}}")?;
     Ok(())
 }
+
 
 pub fn dump_wrapped_bytecode(code: Vec<crate::vm::Instruction>, path: &str) -> std::io::Result<()> {
     let mut file: fs::File = fs::File::create(path)?;
@@ -119,8 +130,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                                     fs::read_to_string("./lisp/ds.lisp")?);
         // let mut file = fs::File::create("./combined.lisp")?;
         // writeln!(file, "{}", combined)?;
-        let lib_ast = crate::parser::build(&combined).unwrap();
-        dump_wrapped_ast(lib_ast, "./src/baked.rs");
+        dump_wrapped_libs(&build(&combined).unwrap().to_lisp(), "./src/baked.rs");
     } else if args.iter().any(|a| a == "--check") {
         let program = fs::read_to_string(path)?;
         STD.with(|std| {

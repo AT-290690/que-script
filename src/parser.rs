@@ -1901,22 +1901,22 @@ pub enum Expression {
 }
 
 impl Expression {
-    pub fn to_rust(&self) -> String {
-        match self {
-            Expression::Int(n) => format!("Int({})", n),
-            Expression::Float(n) => format!("Float({:?})", n),
-            Expression::Word(w) => format!("Word(s!({:?}))", w),
-            Expression::Apply(exprs) => {
-                let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
-                format!("Apply(vec![{}])", inner.join(", "))
-            }
-        }
-    }
+    // pub fn to_rust(&self) -> String {
+    //     match self {
+    //         Expression::Int(n) => format!("Int({})", n),
+    //         Expression::Float(n) => format!("Float({:?})", n),
+    //         Expression::Word(w) => format!("Word(s!({:?}))", w),
+    //         Expression::Apply(exprs) => {
+    //             let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
+    //             format!("Apply(vec![{}])", inner.join(", "))
+    //         }
+    //     }
+    // }
     pub fn to_lisp(&self) -> String {
         match self {
             Expression::Word(w) => w.clone(),
             Expression::Int(a) => a.to_string(),
-            Expression::Float(a) => a.to_string(),
+            Expression::Float(a) => format!("{:?}", a),
             Expression::Apply(items) => {
                 if items.is_empty() {
                     return "()".to_string();
