@@ -48,12 +48,15 @@ pub fn repl(initial: String) -> std::io::Result<()> {
                 (KeyCode::Enter, _) => match run(buffer.clone()) {
                     Ok(res) => {
                         println!("{}", res);
+                        buffer.push('\n');
                         print!("\r");
                         stdout.flush()?;
                     }
                     Err(err) => {
                         println!("{}", err);
-                        buffer.clear();
+                        let mut temp: Vec<_> = buffer.lines().into_iter().collect();
+                        temp.pop();
+                        buffer = temp.join("\n");
                         print!("\r");
                         stdout.flush()?;
                     }
