@@ -1,0 +1,73 @@
+use crossterm::{
+    event::{self, Event, KeyCode},
+    terminal::{disable_raw_mode, enable_raw_mode},
+};
+use std::cell::RefCell;
+use std::io::{self, Write};
+thread_local! {
+    static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
+}
+fn run_code_no_type(program: String) -> String {
+    STD.with(|std| {
+        let std_ast = std.borrow();
+        if let crate::parser::Expression::Apply(items) = &*std_ast {
+            match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    match crate::infer::infer_with_builtins(
+                        &wrapped_ast,
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+                    ) {
+                        Ok(typ) => match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
+                            Ok(res) => return format!(" {}: {:?}", typ, res),
+                            Err(err) => return format!("{}", err),
+                        },
+                        Err(err) => return err,
+                    }
+                }
+                Err(err) => return err,
+            }
+        }
+        "No expressions...".to_string()
+    })
+}
+pub fn repl() -> std::io::Result<()> {
+    enable_raw_mode()?;
+
+    let mut buffer = String::new();
+    let mut stdout = io::stdout();
+
+    writeln!(stdout, "Type anything (multi-line). Press Esc to exit.\n\r")?;
+    stdout.flush()?;
+    loop {
+        if let Event::Key(key_event) = event::read()? {
+            match (key_event.code, key_event.modifiers) {
+                (KeyCode::Enter, _) => {
+                    println!("{}", run_code_no_type(buffer.clone()));
+                    print!("\r");
+                    stdout.flush()?;
+                }
+                (KeyCode::Esc, _) => {
+                    disable_raw_mode()?;
+                    break;
+                }
+                (KeyCode::Backspace, _) => {
+                    if let Some(last) = buffer.chars().last() {
+                        if last != '\n' {
+                            buffer.pop();
+                            print!("\u{8} \u{8}");
+                            stdout.flush()?;
+                        }
+                    }
+                }
+                (KeyCode::Char(c), _) => {
+                    buffer.push(c);
+                    print!("{}", c);
+                    stdout.flush()?;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
+}

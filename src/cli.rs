@@ -7,6 +7,7 @@ use crate::ir::load_bytecode;
 use crate::parser::build;
 use crate::vm::parse_bitecode;
 use crate::format::format;
+use crate::repl::repl;
 use std::env;
 use std::fs;
 use std::io::Read;
@@ -19,7 +20,7 @@ use std::io::{self, Write};
 thread_local! {
     static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
 }
-fn run_code(program: String) -> String {
+pub fn run_code(program: String) -> String {
     STD.with(|std| {
         let std_ast = std.borrow();
         if let crate::parser::Expression::Apply(items) = &*std_ast {
@@ -121,7 +122,8 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     let dist = format!("{}/dist", dir);
 
     let args: Vec<String> = env::args().collect();
-    if args.iter().any(|a| a == "--std") {
+    let cmd = args.iter().last().unwrap();
+    if cmd == "--std" {
         let combined = format!(
                                     "{}\n{}\n{}\n{}", 
                                     fs::read_to_string("./lisp/const.lisp")?,
@@ -131,7 +133,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         // let mut file = fs::File::create("./combined.lisp")?;
         // writeln!(file, "{}", combined)?;
         dump_wrapped_libs(&build(&combined).unwrap().to_lisp(), "./src/baked.rs");
-    } else if args.iter().any(|a| a == "--check") {
+    } else if cmd == "--check" {
         let program = fs::read_to_string(path)?;
         STD.with(|std| {
             let std_ast = std.borrow();
@@ -148,7 +150,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 }
             }
         });
-    } else if args.iter().any(|a| a == "--js") {
+    } else if cmd == "--js" {
         let program = fs::read_to_string(path)?;
         let std_ast = crate::baked::load_ast();
         STD.with(|std| {
@@ -164,7 +166,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 }
             }
         });
-    } else if args.iter().any(|a| a == "--str") {
+    } else if cmd == "--str" {
         let program = fs::read_to_string(path)?;
         STD.with(|std| {
             let std_ast = std.borrow();
@@ -180,13 +182,13 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             }
         });
      
-    } else if args.iter().any(|a| a == "--bit") {
+    } else if cmd == "--bit" {
         let program = fs::read_to_string(&format!("{}/main.txt", dist))?;
         match  crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
             Ok(e) =>  println!("{:?}", e),
             Err(e) => println!("{:?}", e)
         }
-    } else if args.iter().any(|a| a == "--doc") {
+    } else if cmd == "--doc" {
         let std_ast = crate::baked::load_ast();
         let mut names = Vec::new();
         "+ +# +. - -# -. / /# /. * *# *. mod mod. = =? =# =. < <# <. > ># >. <= <=# <=. >= >=# >=. not and or ^ >> << | & ~ true false car cdr Int->Float Float->Int"
@@ -238,7 +240,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
         let mut file = fs::File::create(path)?;
         write!(file, "{:?}", names)?;
-    } else if args.iter().any(|a| a == "--sig") {
+    } else if cmd == "--sig" {
         let program = fs::read_to_string(path)?;
         let mut names = Vec::new();
         match crate::baked::load_ast() {
@@ -269,9 +271,10 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             }
             _ => {}
         }
-    } else if args.iter().any(|a| a == "--fmt") {
+    } else if cmd == "--fmt" {
       println!("{}", crate::format::format_source(&fs::read_to_string(path)?))
-   
+    } else if cmd == "--repl" {
+        repl();
     } else {
         println!("{}", run_code(fs::read_to_string(path)?))
     }

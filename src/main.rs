@@ -7,6 +7,7 @@ mod infer;
 mod ir;
 mod js;
 mod parser;
+mod repl;
 mod tests;
 mod types;
 mod vm;
