@@ -274,7 +274,12 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--fmt" {
       println!("{}", crate::format::format_source(&fs::read_to_string(path)?))
     } else if cmd == "--repl" {
-        repl();
+        if args.len() == 3 {
+            let path = &args[1];
+            repl(fs::read_to_string(path)?);
+        } else {
+            repl(String::new());
+        } 
     } else {
         println!("{}", run_code(fs::read_to_string(path)?))
     }

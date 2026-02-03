@@ -30,10 +30,9 @@ fn run(program: String) -> Result<String, String> {
         Err("No expressions...".to_string())
     })
 }
-pub fn repl() -> std::io::Result<()> {
+pub fn repl(initial: String) -> std::io::Result<()> {
     enable_raw_mode()?;
-
-    let mut buffer = String::new();
+    let mut buffer = initial;
     let mut stdout = io::stdout();
 
     writeln!(stdout, "Type anything (multi-line). Press Esc to exit.\n\r")?;
