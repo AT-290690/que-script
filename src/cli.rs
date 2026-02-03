@@ -123,46 +123,53 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         dump_wrapped_ast(lib_ast, "./src/baked.rs");
     } else if args.iter().any(|a| a == "--check") {
         let program = fs::read_to_string(path)?;
-        let std_ast = crate::baked::load_ast();
-        if let crate::parser::Expression::Apply(items) = &std_ast {
-            match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                Ok(wrapped_ast) => match crate::infer::infer_with_builtins(
-                    &wrapped_ast,
-                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
-                ) {
-                    Ok(typ) => println!("{}", typ),
+        STD.with(|std| {
+            let std_ast = std.borrow();
+            if let crate::parser::Expression::Apply(items) = &*std_ast {
+                match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                    Ok(wrapped_ast) => match crate::infer::infer_with_builtins(
+                        &wrapped_ast,
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                    ) {
+                        Ok(typ) => println!("{}", typ),
+                        Err(e) => println!("{}", e),
+                    },
                     Err(e) => println!("{}", e),
-                },
-                Err(e) => println!("{}", e),
+                }
             }
-        }
+        });
     } else if args.iter().any(|a| a == "--js") {
         let program = fs::read_to_string(path)?;
         let std_ast = crate::baked::load_ast();
-        if let crate::parser::Expression::Apply(items) = &std_ast {
-            match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                Ok(wrapped_ast) => {
-                    let mut code: Vec<crate::vm::Instruction> = Vec::new();
-                    let js = crate::js::compile_program_to_js(&wrapped_ast);
-                    dump_wrapped_js(js, &format!("{}/main.js", dist));
+        STD.with(|std| {
+            let std_ast = std.borrow();
+            if let crate::parser::Expression::Apply(items) = &*std_ast {
+                match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                    Ok(wrapped_ast) => {
+                        let mut code: Vec<crate::vm::Instruction> = Vec::new();
+                        let js = crate::js::compile_program_to_js(&wrapped_ast);
+                        dump_wrapped_js(js, &format!("{}/main.js", dist));
+                    }
+                    Err(e) => println!("{}", e),
                 }
-                Err(e) => println!("{}", e),
             }
-        }
+        });
     } else if args.iter().any(|a| a == "--str") {
         let program = fs::read_to_string(path)?;
-        let std_ast = crate::baked::load_ast();
-
-        if let crate::parser::Expression::Apply(items) = &std_ast {
-            match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                Ok(wrapped_ast) => {
-                    let mut code: Vec<crate::vm::Instruction> = Vec::new();
-                    crate::vm::compile(&wrapped_ast, &mut code);
-                    dump_raw_bytecode(code, &format!("{}/main.txt", dist));
+        STD.with(|std| {
+            let std_ast = std.borrow();
+            if let crate::parser::Expression::Apply(items) = &*std_ast {
+                match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                    Ok(wrapped_ast) => {
+                        let mut code: Vec<crate::vm::Instruction> = Vec::new();
+                        crate::vm::compile(&wrapped_ast, &mut code);
+                        dump_raw_bytecode(code, &format!("{}/main.txt", dist));
+                    }
+                    Err(e) => println!("{}", e),
                 }
-                Err(e) => println!("{}", e),
             }
-        }
+        });
+     
     } else if args.iter().any(|a| a == "--bit") {
         let program = fs::read_to_string(&format!("{}/main.txt", dist))?;
         match  crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
