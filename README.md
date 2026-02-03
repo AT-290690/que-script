@@ -1,6 +1,8 @@
 # Que Script
 
-![logo](./logo.svg)
+**A pocket lisp that gives you safety without verbosity**
+
+_Only 470KB WASM module including the library which is 85KB itself_
 
 - **[Lisp](<https://en.wikipedia.org/wiki/Lisp_(programming_language)>)**
 - **[Stack-based bytecode Virtual Machine](https://en.wikipedia.org/wiki/Stack_machine)**
