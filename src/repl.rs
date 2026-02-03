@@ -7,7 +7,7 @@ use std::io::{self, Write};
 thread_local! {
     static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
 }
-fn run_code_no_type(program: String) -> String {
+fn run(program: String) -> Result<String, String> {
     STD.with(|std| {
         let std_ast = std.borrow();
         if let crate::parser::Expression::Apply(items) = &*std_ast {
@@ -18,16 +18,16 @@ fn run_code_no_type(program: String) -> String {
                         crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
                     ) {
                         Ok(typ) => match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
-                            Ok(res) => return format!(" {}: {:?}", typ, res),
-                            Err(err) => return format!("{}", err),
+                            Ok(res) => return Ok(format!(" {}: {:?}", typ, res)),
+                            Err(err) => return Err(format!(" {}", err)),
                         },
-                        Err(err) => return err,
+                        Err(err) => return Err(format!(" {}", err)),
                     }
                 }
-                Err(err) => return err,
+                Err(err) => return Err(format!(" {}", err)),
             }
         }
-        "No expressions...".to_string()
+        Err("No expressions...".to_string())
     })
 }
 pub fn repl() -> std::io::Result<()> {
@@ -41,11 +41,19 @@ pub fn repl() -> std::io::Result<()> {
     loop {
         if let Event::Key(key_event) = event::read()? {
             match (key_event.code, key_event.modifiers) {
-                (KeyCode::Enter, _) => {
-                    println!("{}", run_code_no_type(buffer.clone()));
-                    print!("\r");
-                    stdout.flush()?;
-                }
+                (KeyCode::Enter, _) => match run(buffer.clone()) {
+                    Ok(res) => {
+                        println!("{}", res);
+                        print!("\r");
+                        stdout.flush()?;
+                    }
+                    Err(err) => {
+                        println!("{}", err);
+                        buffer.clear();
+                        print!("\r");
+                        stdout.flush()?;
+                    }
+                },
                 (KeyCode::Esc, _) => {
                     disable_raw_mode()?;
                     break;
