@@ -33,10 +33,15 @@ fn run(program: String) -> Result<String, String> {
 pub fn repl(initial: String) -> std::io::Result<()> {
     enable_raw_mode()?;
     let mut buffer = initial;
+    buffer.push('\n');
     let mut stdout = io::stdout();
-
-    writeln!(stdout, "Type anything (multi-line). Press Esc to exit.\n\r")?;
+    print!("\n");
+    writeln!(
+        stdout,
+        "\rType anything. Press Enter for new line and Esc to exit.\n\r"
+    )?;
     stdout.flush()?;
+
     loop {
         if let Event::Key(key_event) = event::read()? {
             match (key_event.code, key_event.modifiers) {
