@@ -9,4 +9,8 @@ crate-type = ["cdylib"]
 [dependencies]
 wasm-bindgen = "0.2"
 flate2 = "1.1.9"
-crossterm = "0.27"
+crossterm = { version = "0.29", optional = true }
+
+[features]
+default = []
+repl = ["crossterm"]

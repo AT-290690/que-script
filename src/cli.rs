@@ -7,7 +7,6 @@ use crate::ir::load_bytecode;
 use crate::parser::build;
 use crate::vm::parse_bitecode;
 use crate::format::format;
-use crate::repl::repl;
 use std::env;
 use std::fs;
 use std::io::Read;
@@ -16,7 +15,8 @@ use std::cell::RefCell;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::io::{self, Write};
-
+#[cfg(feature = "repl")]
+use crate::repl::repl;
 thread_local! {
     static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
 }
@@ -276,8 +276,10 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--repl" {
         if args.len() == 3 {
             let path = &args[1];
+            #[cfg(feature = "repl")]
             repl(fs::read_to_string(path)?);
         } else {
+            #[cfg(feature = "repl")]
             repl(String::new());
         } 
     } else {

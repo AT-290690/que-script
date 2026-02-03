@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(warnings)]
+#[cfg(feature = "repl")]
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -30,6 +33,8 @@ fn run(program: String) -> Result<String, String> {
         Err("No expressions...".to_string())
     })
 }
+
+#[cfg(feature = "repl")]
 pub fn repl(initial: String) -> std::io::Result<()> {
     enable_raw_mode()?;
     let mut buffer = initial;

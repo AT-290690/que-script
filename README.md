@@ -232,6 +232,18 @@ To what floor do the instructions take Santa?
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
 
+### REPL (Read, Eval, Print, Loop)
+
+```bash
+./repl.sh # runs repl without context
+./repl.sh ./example/main.lisp  # run repl with specific file as context
+```
+
+- Write Que expression
+- Pressing Enter will run the current expression and will add a new line
+- Repeat
+- Press Esc to exit REPL
+
 ### WASM usage
 
 **Web**
