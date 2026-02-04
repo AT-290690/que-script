@@ -33,7 +33,15 @@ fn run(program: String) -> Result<String, String> {
         Err("No expressions...".to_string())
     })
 }
-
+fn format_string(res: &str, max_length: usize) -> String {
+    if res.len() > max_length {
+        let (prefix, suffix) = res.split_at(25);
+        let suffix = &suffix[suffix.len() - 25..];
+        format!("{}...{}", prefix, suffix)
+    } else {
+        res.to_string()
+    }
+}
 #[cfg(feature = "repl")]
 pub fn repl(initial: String) -> std::io::Result<()> {
     enable_raw_mode()?;
@@ -43,7 +51,7 @@ pub fn repl(initial: String) -> std::io::Result<()> {
     print!("\n");
     writeln!(
         stdout,
-        "\rType anything. Press Enter for new line and Esc to exit.\n\r"
+        "\rWrite expression. Press Enter for evaluation and Esc to exit.\n\r"
     )?;
     stdout.flush()?;
 
@@ -52,13 +60,27 @@ pub fn repl(initial: String) -> std::io::Result<()> {
             match (key_event.code, key_event.modifiers) {
                 (KeyCode::Enter, _) => match run(buffer.clone()) {
                     Ok(res) => {
-                        println!("{}", res);
+                        println!("\x1b[32m{}\x1b[0m", format_string(&res, 50));
                         buffer.push('\n');
                         print!("\r");
                         stdout.flush()?;
                     }
                     Err(err) => {
-                        println!("{}", err);
+                        let sliced_error = err.split("Error!").collect::<Vec<_>>();
+                        println!(
+                            "\x1b[31m{}\x1b[0m",
+                            if sliced_error.len() > 0 {
+                                *sliced_error
+                                    .get(1)
+                                    .unwrap()
+                                    .split("\n")
+                                    .collect::<Vec<_>>()
+                                    .get(0)
+                                    .unwrap()
+                            } else {
+                                &err
+                            }
+                        );
                         let mut temp: Vec<_> = buffer.lines().into_iter().collect();
                         temp.pop();
                         buffer = temp.join("\n");
@@ -81,7 +103,7 @@ pub fn repl(initial: String) -> std::io::Result<()> {
                 }
                 (KeyCode::Char(c), _) => {
                     buffer.push(c);
-                    print!("{}", c);
+                    print!("\x1b[33m{}\x1b[0m", c);
                     stdout.flush()?;
                 }
                 _ => {}

@@ -184,6 +184,13 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 }
             }
         });
+    } else if cmd == "--exec" {
+        let path = &args[1];
+        let program = fs::read_to_string(path)?;
+        match  crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
+            Ok(e) =>  println!("{:?}", e),
+            Err(e) => println!("{:?}", e)
+        }
     } else if cmd == "--str" {
         let program = fs::read_to_string(path)?;
         STD.with(|std| {
@@ -292,8 +299,8 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--fmt" {
       println!("{}", crate::format::format_source(&fs::read_to_string(path)?))
     } else if cmd == "--repl" {
-        if args.len() == 3 {
-            let path = &args[1];
+        if args.len() == 6 {
+            let path = &args[4];
             #[cfg(feature = "repl")]
             repl(fs::read_to_string(path)?);
         } else {

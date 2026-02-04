@@ -34,6 +34,12 @@ or clone this project and write code in **./example/main.lisp**
 cargo run
 ```
 
+Build (needed for shell scripts)
+
+```bash
+./scripts/build.sh
+```
+
 build wasm bundle
 
 ```bash
@@ -236,9 +242,11 @@ To what floor do the instructions take Santa?
 
 ### REPL (Read, Eval, Print, Loop)
 
+_Make sure you ran ./scripts/build.sh first_
+
 ```bash
-./repl.sh # runs repl without context
-./repl.sh ./example/main.lisp  # run repl with specific file as context
+./scripts/repl.sh # runs repl without context
+./scripts/repl.sh ./example/main.lisp  # run repl with specific file as context
 ```
 
 - Write Que expression
@@ -248,11 +256,13 @@ To what floor do the instructions take Santa?
 
 ### Exec with Node.js
 
+_Make sure you ran ./scripts/build.sh first_
+
 Write your program in example/main.lisp (for example)
 Compile bytecode by running
 
 ```bash
-./comp.sh "./example/main.lisp" "main.txt"
+./scripts/comp.sh "./example/main.lisp" "main.txt"
 ```
 
 Unpack ./miscs/node/que.zip
@@ -268,6 +278,12 @@ Run with the file path as argument
 
 ```bash
 npm run que -- "./main.txt"
+```
+
+or you can aways execute it using in rust using the shell script
+
+```bash
+./scripts/exec.sh out.txt
 ```
 
 ### WASM usage
