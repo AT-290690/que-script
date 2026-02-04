@@ -1,0 +1,1 @@
+[PushInt(40),PushInt(2),Add]
