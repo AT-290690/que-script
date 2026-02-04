@@ -23,3 +23,6 @@
           (and (not a) (not b)) true
           false)))
 (let identity (lambda x x))
+(let Char/nil (Int->Char 0))
+(let Char/start (Int->Char 2))
+(let Char/end (Int->Char 3))
