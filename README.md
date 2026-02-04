@@ -246,6 +246,30 @@ To what floor do the instructions take Santa?
 - Repeat
 - Press Esc to exit REPL
 
+### Exec with Node.js
+
+Write your program in example/main.lisp (for example)
+Compile bytecode by running
+
+```bash
+./comp.sh "./example/main.lisp" "main.txt"
+```
+
+Unpack ./miscs/node/que.zip
+It's a tiny ~145KB package
+
+```bash
+cd que
+```
+
+Paste bytecode in que/main.txt (or what ever you call it)
+
+Run with the file path as argument
+
+```bash
+npm run que -- "./main.txt"
+```
+
 ### WASM usage
 
 **Web**

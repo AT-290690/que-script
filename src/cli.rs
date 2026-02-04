@@ -166,6 +166,24 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 }
             }
         });
+    
+    } else if cmd == "--comp" {
+        let path = &args[1];
+        let program = fs::read_to_string(path)?;
+        STD.with(|std| {
+            let std_ast = std.borrow();
+            if let crate::parser::Expression::Apply(items) = &*std_ast {
+                match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                    Ok(wrapped_ast) => {
+                        let mut code: Vec<crate::vm::Instruction> = Vec::new();
+                        crate::vm::compile(&wrapped_ast, &mut code);
+                        let path = &args[2];
+                        dump_raw_bytecode(code, &format!("{}", path));
+                    }
+                    Err(e) => println!("{}", e),
+                }
+            }
+        });
     } else if cmd == "--str" {
         let program = fs::read_to_string(path)?;
         STD.with(|std| {
