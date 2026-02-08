@@ -33,7 +33,6 @@
 (let partition (lambda n xs (std/vector/partition xs n)))
 (let reverse std/vector/reverse)
 
-
 (let slice (lambda start end xs (std/vector/slice xs start end)))
 (let cons std/vector/cons)
 (let range std/vector/int/range)

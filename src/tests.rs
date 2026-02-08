@@ -2495,7 +2495,20 @@ Prize: X=18641, Y=10279")
   (sum-sub-imperative xs)
   (sum-sub-functional xs)
   (sum-sub-math xs)
-]"#, "[116 116 116 116]")
+]"#, "[116 116 116 116]"),
+(r#"(let group-anagrams (comp 
+    (map (lambda w { w (sort ># w)}))
+    (sort (lambda { . a } { . b } (String/gt? a b)))
+    (reduce/i (lambda a b i (do 
+      (let { bw bs } b)
+      (let prev (last a))
+      (cond (empty? prev) (set! a 0 [b])
+            (not (match? (snd (last prev)) bs)) (push! a [b])
+            (push! prev b)) 
+      a)) [[]])
+      (map (cond (map fst)))))
+
+(group-anagrams ["eat" "tea" "tan" "ate" "nat" "bat"])"#, "[[[110 97 116] [116 97 110]] [[101 97 116] [116 101 97] [97 116 101]] [[98 97 116]]]")
             // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
                // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
                // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
