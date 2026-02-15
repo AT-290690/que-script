@@ -96,7 +96,7 @@ pub fn run_code_report(program: String) -> String {
     })
 }
 
-#[cfg(feature = "ocaml-compiler")]
+#[cfg(feature = "type-ast")]
 fn format_typed_ast_node(node: &crate::infer::TypedExpression, indent: usize, out: &mut String) {
     let pad = "  ".repeat(indent);
     let typ = node.typ
@@ -109,7 +109,7 @@ fn format_typed_ast_node(node: &crate::infer::TypedExpression, indent: usize, ou
     }
 }
 
-#[cfg(feature = "ocaml-compiler")]
+#[cfg(feature = "type-ast")]
 pub fn run_code_typed_ast(program: String) -> String {
     STD.with(|std| {
         let std_ast = std.borrow();
@@ -145,7 +145,7 @@ pub fn run_code_typed_ast(program: String) -> String {
     })
 }
 
-#[cfg(feature = "ocaml-compiler")]
+#[cfg(feature = "type-ast")]
 fn typed_ast_for_expression(expr: &crate::parser::Expression) -> String {
     match
         crate::infer::infer_with_builtins_typed(
@@ -500,8 +500,8 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(std::path::Path::new(report).parent().unwrap()).unwrap();
         let mut fileOut = fs::File::create(report)?;
         writeln!(fileOut, "{}", run_code_report(file))?;
-    } else if cmd == "--typed-ast" || cmd == "--type-ast" {
-        #[cfg(feature = "ocaml-compiler")]
+    } else if cmd == "--type-ast" {
+        #[cfg(feature = "type-ast")]
         {
             let file = fs::read_to_string(path)?;
             let typed_ast = "./example/dist/typed-ast.txt";
@@ -509,11 +509,9 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             let mut fileOut = fs::File::create(typed_ast)?;
             writeln!(fileOut, "{}", run_code_typed_ast(file))?;
         }
-        #[cfg(not(feature = "ocaml-compiler"))]
+        #[cfg(not(feature = "type-ast"))]
         {
-            println!(
-                "Error! typed-ast is disabled. Rebuild with --features ocaml-compiler"
-            );
+            println!("Error! typed-ast is disabled. Rebuild with --features type-ast");
         }
     } else {
         let file = fs::read_to_string(path)?;
