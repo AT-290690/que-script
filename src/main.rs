@@ -8,6 +8,7 @@ mod ir;
 mod js;
 mod parser;
 mod repl;
+mod report;
 mod tests;
 mod types;
 mod vm;

@@ -1,6 +1,6 @@
 use crate::parser::Expression;
-use crate::types::{generalize, Type, TypeEnv, TypeScheme, TypeVar};
-use std::collections::{HashMap, VecDeque};
+use crate::types::{ generalize, Type, TypeEnv, TypeScheme, TypeVar };
+use std::collections::{ HashMap, VecDeque };
 
 #[derive(Clone, Debug)]
 pub enum TypeErrorVariant {
@@ -18,8 +18,7 @@ pub struct TypeError {
 }
 
 fn src_to_pretty(src: &TypeError) -> String {
-    let joined = src
-        .expr
+    let joined = src.expr
         .iter()
         .map(|e| e.to_lisp())
         .collect::<Vec<_>>()
@@ -29,10 +28,7 @@ fn src_to_pretty(src: &TypeError) -> String {
         TypeErrorVariant::Call => format!("Error! ({})", joined),
         TypeErrorVariant::IfCond => format!("Error! Condition must be Bool\n(if {})", joined),
         TypeErrorVariant::IfBody => {
-            format!(
-                "Error! Concequent and alternative must match types\n(if {})",
-                joined
-            )
+            format!("Error! Concequent and alternative must match types\n(if {})", joined)
         }
         TypeErrorVariant::Source => joined,
     }
@@ -101,13 +97,14 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 
 fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     match expr {
-        Expression::Word(name) => match name.as_str() {
-            "Int" => Ok(Type::Int),
-            "Float" => Ok(Type::Float),
-            "Bool" => Ok(Type::Bool),
-            "Char" => Ok(Type::Char),
-            _ => Ok(ctx.fresh_var()), // unknown type name
-        },
+        Expression::Word(name) =>
+            match name.as_str() {
+                "Int" => Ok(Type::Int),
+                "Float" => Ok(Type::Float),
+                "Bool" => Ok(Type::Bool),
+                "Char" => Ok(Type::Char),
+                _ => Ok(ctx.fresh_var()), // unknown type name
+            }
 
         // Handles list-like hints like [Int], [[Char]], etc.
         Expression::Apply(items) if !items.is_empty() => {
@@ -120,10 +117,12 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     }
                 } else if t == "tuple" {
                     if items.len() < 2 {
-                        return Err(format!(
-                            "Error! Tuple type must have at least one element: {}",
-                            expr.to_lisp()
-                        ));
+                        return Err(
+                            format!(
+                                "Error! Tuple type must have at least one element: {}",
+                                expr.to_lisp()
+                            )
+                        );
                     }
                     let mut elems = Vec::new();
                     for elem_expr in &items[1..] {
@@ -132,10 +131,7 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     return Ok(Type::Tuple(elems));
                 }
             }
-            Err(format!(
-                "Error! Invalid type hint syntax: {}",
-                expr.to_lisp()
-            ))
+            Err(format!("Error! Invalid type hint syntax: {}", expr.to_lisp()))
         }
 
         _ => Err(format!("Error! Invalid type hint: {}", expr.to_lisp())),
@@ -176,39 +172,41 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     match (&expr_type, &type_hint) {
         (Type::Tuple(expr_elems), Type::Tuple(hint_elems)) => {
             if expr_elems.len() != hint_elems.len() {
-                return Err(format!(
-                    "Error! Tuple length mismatch in as: {} vs {}\n(as {})",
-                    expr_elems.len(),
-                    hint_elems.len(),
-                    args.iter()
-                        .map(|e| e.to_lisp())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                ));
+                return Err(
+                    format!(
+                        "Error! Tuple length mismatch in as: {} vs {}\n(as {})",
+                        expr_elems.len(),
+                        hint_elems.len(),
+                        args
+                            .iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                );
             }
 
             // Create constraints for each element
             for (e, h) in expr_elems.iter().zip(hint_elems.iter()) {
-                ctx.add_constraint(
-                    e.clone(),
-                    h.clone(),
-                    TypeError {
-                        variant: TypeErrorVariant::Source,
-                        expr: args.to_vec(),
-                    },
-                );
+                ctx.add_constraint(e.clone(), h.clone(), TypeError {
+                    variant: TypeErrorVariant::Source,
+                    expr: args.to_vec(),
+                });
             }
 
             return Ok(type_hint);
         }
         (Type::Tuple(_), _) | (_, Type::Tuple(_)) => {
-            return Err(format!(
-                "Error! Cannot cast between tuple and non-tuple types\n(as {})",
-                args.iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            ));
+            return Err(
+                format!(
+                    "Error! Cannot cast between tuple and non-tuple types\n(as {})",
+                    args
+                        .iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            );
         }
         _ => {}
     }
@@ -221,22 +219,31 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
 
     // If expr_type is a type variable, allow up to (≤) right-side arity
     if is_expr_var && expr_arity > hint_arity {
-        return Err(format!(
-            "Error! Type variable in as cannot represent deeper nesting: {} vs {}",
-            expr_type, type_hint
-        ));
+        return Err(
+            format!(
+                "Error! Type variable in as cannot represent deeper nesting: {} vs {}",
+                expr_type,
+                type_hint
+            )
+        );
     }
 
     // Check arity mismatch for lists/functions
     if !is_expr_var && expr_arity != hint_arity {
-        return Err(format!(
-            "Error! Type arity mismatch in as: left has arity {}, right has arity {} ({} vs {})\n(as {})",
-            expr_arity,
-            hint_arity,
-            expr_type,
-            type_hint,
-            args.iter().map(|e| e.to_lisp()).collect::<Vec<_>>().join(" ")
-        ));
+        return Err(
+            format!(
+                "Error! Type arity mismatch in as: left has arity {}, right has arity {} ({} vs {})\n(as {})",
+                expr_arity,
+                hint_arity,
+                expr_type,
+                type_hint,
+                args
+                    .iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        );
     }
 
     // Array element restriction)
@@ -245,7 +252,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         let inner_hint = inner_type(&type_hint);
 
         match (inner_expr, inner_hint) {
-            (Type::Int, Type::Int)
+            | (Type::Int, Type::Int)
             | (Type::Float, Type::Float)
             | (Type::Int, Type::Bool)
             | (Type::Int, Type::Char)
@@ -258,15 +265,18 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
             | (Type::Var(_), _)
             | (_, Type::Var(_)) => (),
             _ => {
-                return Err(format!(
-                    "Error! Invalid array cast in as: cannot cast {} to {}\n(as {})",
-                    expr_type,
-                    type_hint,
-                    args.iter()
-                        .map(|e| e.to_lisp())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                ));
+                return Err(
+                    format!(
+                        "Error! Invalid array cast in as: cannot cast {} to {}\n(as {})",
+                        expr_type,
+                        type_hint,
+                        args
+                            .iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                );
             }
         }
     }
@@ -290,14 +300,16 @@ fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         if let Expression::Word(name) = &args[i] {
             param_names.push(name.clone());
         } else {
-            return Err(format!(
-                "Error! Lambda parameters must be variable names\n({})",
-                exprs
-                    .iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            ));
+            return Err(
+                format!(
+                    "Error! Lambda parameters must be variable names\n({})",
+                    exprs
+                        .iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            );
         }
     }
 
@@ -351,27 +363,19 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 
     // Infer condition type - should be Bool
     let cond_type = infer_expr(condition, ctx)?;
-    ctx.add_constraint(
-        cond_type.clone(),
-        Type::Bool,
-        TypeError {
-            variant: TypeErrorVariant::IfCond,
-            expr: args.to_vec(),
-        },
-    );
+    ctx.add_constraint(cond_type.clone(), Type::Bool, TypeError {
+        variant: TypeErrorVariant::IfCond,
+        expr: args.to_vec(),
+    });
     // Infer then and else types
     let then_type = infer_expr(then_expr, ctx)?;
     let else_type = infer_expr(else_expr, ctx)?;
 
     // Both branches must have the same type
-    ctx.add_constraint(
-        then_type.clone(),
-        else_type,
-        TypeError {
-            variant: TypeErrorVariant::IfBody,
-            expr: args.to_vec(),
-        },
-    );
+    ctx.add_constraint(then_type.clone(), else_type, TypeError {
+        variant: TypeErrorVariant::IfBody,
+        expr: args.to_vec(),
+    });
 
     Ok(then_type)
 }
@@ -379,13 +383,14 @@ fn is_nonexpansive(expr: &Expression) -> bool {
     match expr {
         Expression::Word(_) | Expression::Int(_) | Expression::Float(_) => true,
 
-        Expression::Apply(list) if !list.is_empty() => match &list[0] {
-            Expression::Word(name) if name == "lambda" => true,
-            // This is commented out because it will otherwise cause a bug with mutaiton (set!) inference
-            // and keep the vector polymorphic for empty nested vectors [[]]
-            // Expression::Word(name) if name == "vector" => !list[1..].is_empty(),
-            _ => false,
-        },
+        Expression::Apply(list) if !list.is_empty() =>
+            match &list[0] {
+                Expression::Word(name) if name == "lambda" => true,
+                // This is commented out because it will otherwise cause a bug with mutaiton (set!) inference
+                // and keep the vector polymorphic for empty nested vectors [[]]
+                // Expression::Word(name) if name == "vector" => !list[1..].is_empty(),
+                _ => false,
+            }
 
         _ => false,
     }
@@ -408,16 +413,17 @@ impl Unifier {
     fn find_var(&mut self, id: u64) -> Type {
         match self.binds.get(&id).cloned() {
             None => Type::Var(TypeVar::new(id)),
-            Some(ty) => match ty {
-                Type::Var(ref v) if v.id != id => {
-                    // path compress
-                    let rep = self.find_var(v.id);
-                    // store the rep
-                    self.binds.insert(id, rep.clone());
-                    rep
+            Some(ty) =>
+                match ty {
+                    Type::Var(ref v) if v.id != id => {
+                        // path compress
+                        let rep = self.find_var(v.id);
+                        // store the rep
+                        self.binds.insert(id, rep.clone());
+                        rep
+                    }
+                    other => other,
                 }
-                other => other,
-            },
         }
     }
 
@@ -435,7 +441,13 @@ impl Unifier {
             Type::Function(a, b) => {
                 Type::Function(Box::new(self.apply(a)), Box::new(self.apply(b)))
             }
-            Type::Tuple(items) => Type::Tuple(items.iter().map(|t| self.apply(t)).collect()),
+            Type::Tuple(items) =>
+                Type::Tuple(
+                    items
+                        .iter()
+                        .map(|t| self.apply(t))
+                        .collect()
+                ),
             other => other.clone(),
         }
     }
@@ -467,10 +479,7 @@ impl Unifier {
             }
         }
         if self.occurs(var_id, &ty) {
-            return Err(format!(
-                "Occurs check failed: t{} occurs in {:?}",
-                var_id, ty
-            ));
+            return Err(format!("Occurs check failed: t{} occurs in {:?}", var_id, ty));
         }
         self.binds.insert(var_id, ty);
         Ok(())
@@ -496,7 +505,7 @@ impl Unifier {
 
 /// Solve constraints: each constraint carries a TypeError (source) so we can produce a helpful message.
 pub fn solve_constraints_list(
-    constraints: &Vec<(Type, Type, TypeError)>,
+    constraints: &Vec<(Type, Type, TypeError)>
 ) -> Result<HashMap<u64, Type>, String> {
     let mut unifier = Unifier::new();
     let mut work: VecDeque<(Type, Type, TypeError)> = VecDeque::new();
@@ -525,12 +534,14 @@ pub fn solve_constraints_list(
             }
             (Type::Tuple(a_items), Type::Tuple(b_items)) => {
                 if a_items.len() != b_items.len() {
-                    return Err(format!(
-                        "Error! Cannot unify tuples of different lengths ({} vs {})\n{}",
-                        a_items.len(),
-                        b_items.len(),
-                        src_to_pretty(&src),
-                    ));
+                    return Err(
+                        format!(
+                            "Error! Cannot unify tuples of different lengths ({} vs {})\n{}",
+                            a_items.len(),
+                            b_items.len(),
+                            src_to_pretty(&src)
+                        )
+                    );
                 }
                 for (ai, bi) in a_items.into_iter().zip(b_items.into_iter()) {
                     work.push_back((ai, bi, src.clone()));
@@ -539,12 +550,9 @@ pub fn solve_constraints_list(
             (a2, b2) if a2 == b2 => {} // ok
             (a2, b2) => {
                 // can't unify, attach source and return
-                return Err(format!(
-                    "Error! Cannot unify {} with {}\n{}",
-                    a2,
-                    b2,
-                    src_to_pretty(&src),
-                ));
+                return Err(
+                    format!("Error! Cannot unify {} with {}\n{}", a2, b2, src_to_pretty(&src))
+                );
             }
         }
     }
@@ -554,35 +562,40 @@ pub fn solve_constraints_list(
 
 pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
     match ty {
-        Type::Var(var) => match subst.get(&var.id) {
-            Some(t) => apply_subst_map_to_type(subst, t),
-            None => Type::Var(var.clone()),
-        },
+        Type::Var(var) =>
+            match subst.get(&var.id) {
+                Some(t) => apply_subst_map_to_type(subst, t),
+                None => Type::Var(var.clone()),
+            }
         Type::List(inner) => Type::List(Box::new(apply_subst_map_to_type(subst, inner))),
-        Type::Function(a, b) => Type::Function(
-            Box::new(apply_subst_map_to_type(subst, a)),
-            Box::new(apply_subst_map_to_type(subst, b)),
-        ),
-        Type::Tuple(items) => Type::Tuple(
-            items
-                .iter()
-                .map(|it| apply_subst_map_to_type(subst, it))
-                .collect(),
-        ),
+        Type::Function(a, b) =>
+            Type::Function(
+                Box::new(apply_subst_map_to_type(subst, a)),
+                Box::new(apply_subst_map_to_type(subst, b))
+            ),
+        Type::Tuple(items) =>
+            Type::Tuple(
+                items
+                    .iter()
+                    .map(|it| apply_subst_map_to_type(subst, it))
+                    .collect()
+            ),
         other => other.clone(),
     }
 }
 fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err(format!(
-            "Error! Let requires exactly 2 arguments: variable and value\n({})",
-            exprs
-                .iter()
-                .map(|e| e.to_lisp())
-                .collect::<Vec<_>>()
-                .join(" "),
-        ));
+        return Err(
+            format!(
+                "Error! Let requires exactly 2 arguments: variable and value\n({})",
+                exprs
+                    .iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        );
     }
 
     let var_expr = &args[0];
@@ -594,8 +607,7 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         // assign a fresh monotype placeholder
         let tv = ctx.fresh_var();
 
-        ctx.env
-            .insert(name.clone(), TypeScheme::monotype(tv.clone()))?;
+        ctx.env.insert(name.clone(), TypeScheme::monotype(tv.clone()))?;
 
         let value_type = infer_expr(value_expr, ctx)?;
 
@@ -607,12 +619,10 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
         // generalize only if nonexpansive
         if is_nonexpansive(value_expr) {
-            generalize(&ctx.env, solved_type)
+            generalize(&ctx.env, solved_type);
         } else {
-            return Err(
-                "Error! Only recursive functions allowed for let* optimization".to_string(),
-            );
-        };
+            return Err("Error! Only recursive functions allowed for let* optimization".to_string());
+        }
 
         Ok(Type::Unit)
     } else {
@@ -623,14 +633,16 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err(format!(
-            "Error! Let requires exactly 2 arguments: variable and value\n({})",
-            exprs
-                .iter()
-                .map(|e| e.to_lisp())
-                .collect::<Vec<_>>()
-                .join(" "),
-        ));
+        return Err(
+            format!(
+                "Error! Let requires exactly 2 arguments: variable and value\n({})",
+                exprs
+                    .iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        );
     }
 
     let var_expr = &args[0];
@@ -639,8 +651,7 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
 
-        let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
-            .constraints
+        let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
             .iter()
             .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
             .collect();
@@ -708,14 +719,10 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
             let first = elem_types[0].clone();
             for t in &elem_types[1..] {
-                ctx.add_constraint(
-                    first.clone(),
-                    t.clone(),
-                    TypeError {
-                        variant: TypeErrorVariant::Vector,
-                        expr: args.to_vec(),
-                    },
-                );
+                ctx.add_constraint(first.clone(), t.clone(), TypeError {
+                    variant: TypeErrorVariant::Vector,
+                    expr: args.to_vec(),
+                });
             }
 
             // Return the type of the vector (List of the first element type)
@@ -764,16 +771,14 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                             Type::Int => Type::Char,
                             _ => elem_type,
                         };
-                        ctx.add_constraint(
-                            Type::Char,
-                            valid_type,
-                            TypeError {
-                                variant: TypeErrorVariant::Vector, // or create Variant::String if desired
-                                expr: args.to_vec(),
-                            },
-                        );
+                        ctx.add_constraint(Type::Char, valid_type, TypeError {
+                            variant: TypeErrorVariant::Vector, // or create Variant::String if desired
+                            expr: args.to_vec(),
+                        });
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        return Err(e);
+                    }
                 }
             }
 
@@ -781,14 +786,16 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
         } else if name == "tuple" {
             let args = &exprs[1..];
             if args.len() != 2 {
-                return Err(format!(
-                    "Error! Tuples can only store 2 values but got {{{}}}",
-                    exprs
-                        .iter()
-                        .map(|e| e.to_lisp())
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                ));
+                return Err(
+                    format!(
+                        "Error! Tuples can only store 2 values but got {{{}}}",
+                        exprs
+                            .iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                );
             }
             let mut elem_types = Vec::new();
             for arg in args {
@@ -819,66 +826,59 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 // represent zero-arg function as Function(Box::new(UnitType), Box::new(ret_ty))
                 let unit = Type::Unit; // represent by ()
                 let func_ty = Type::Function(Box::new(unit), Box::new(ret_ty.clone()));
-                ctx.add_constraint(
-                    Type::Var(tv.clone()),
-                    func_ty,
-                    TypeError {
-                        variant: TypeErrorVariant::Source,
-                        expr: exprs.to_vec(),
-                    },
-                );
+                ctx.add_constraint(Type::Var(tv.clone()), func_ty, TypeError {
+                    variant: TypeErrorVariant::Source,
+                    expr: exprs.to_vec(),
+                });
                 return Ok(ret_ty);
             }
             _ => {
-                return Err(format!(
-                    "Error! Cannot apply non-function type: {}\n{}",
-                    func_type,
+                return Err(
                     format!(
-                        "({})",
-                        exprs
-                            .into_iter()
-                            .map(|e| e.to_lisp())
-                            .collect::<Vec<String>>()
-                            .join(" ")
-                    ),
-                ));
+                        "Error! Cannot apply non-function type: {}\n{}",
+                        func_type,
+                        format!(
+                            "({})",
+                            exprs
+                                .into_iter()
+                                .map(|e| e.to_lisp())
+                                .collect::<Vec<String>>()
+                                .join(" ")
+                        )
+                    )
+                );
             }
         }
     }
     for arg in args {
         match func_type {
-            Type::Function(param_ty, ret_ty) => match infer_expr(arg, ctx) {
-                Ok(arg_ty) => {
-                    ctx.add_constraint(
-                        *param_ty.clone(),
-                        arg_ty,
-                        TypeError {
+            Type::Function(param_ty, ret_ty) =>
+                match infer_expr(arg, ctx) {
+                    Ok(arg_ty) => {
+                        ctx.add_constraint(*param_ty.clone(), arg_ty, TypeError {
                             variant: TypeErrorVariant::Call,
                             expr: exprs.to_vec(),
-                        },
-                    );
-                    func_type = *ret_ty;
+                        });
+                        func_type = *ret_ty;
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
                 }
-                Err(e) => {
-                    return Err(e);
-                }
-            },
             Type::Var(tv) => {
                 // If it's a type variable, assume it's a function type
                 match infer_expr(arg, ctx) {
                     Ok(arg_ty) => {
                         let ret_ty = ctx.fresh_var();
-                        let func_ty =
-                            Type::Function(Box::new(arg_ty.clone()), Box::new(ret_ty.clone()));
-                        // Constrain tv = (arg -> ret)
-                        ctx.add_constraint(
-                            Type::Var(tv.clone()),
-                            func_ty,
-                            TypeError {
-                                variant: TypeErrorVariant::Source,
-                                expr: vec![arg.clone()],
-                            },
+                        let func_ty = Type::Function(
+                            Box::new(arg_ty.clone()),
+                            Box::new(ret_ty.clone())
                         );
+                        // Constrain tv = (arg -> ret)
+                        ctx.add_constraint(Type::Var(tv.clone()), func_ty, TypeError {
+                            variant: TypeErrorVariant::Source,
+                            expr: vec![arg.clone()],
+                        });
                         func_type = ret_ty;
                     }
                     Err(e) => {
@@ -887,18 +887,20 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 }
             }
             _ => {
-                return Err(format!(
-                    "Error! Cannot apply non-function type: {}\n{}",
-                    func_type,
+                return Err(
                     format!(
-                        "({})",
-                        exprs
-                            .into_iter()
-                            .map(|e| e.to_lisp())
-                            .collect::<Vec<String>>()
-                            .join(" ")
-                    ),
-                ));
+                        "Error! Cannot apply non-function type: {}\n{}",
+                        func_type,
+                        format!(
+                            "({})",
+                            exprs
+                                .into_iter()
+                                .map(|e| e.to_lisp())
+                                .collect::<Vec<String>>()
+                                .join(" ")
+                        )
+                    )
+                );
             }
         }
     }
@@ -916,7 +918,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
 pub fn infer_with_builtins(
     expr: &Expression,
-    (env, init_id): (TypeEnv, u64),
+    (env, init_id): (TypeEnv, u64)
 ) -> Result<Type, String> {
     let mut ctx = InferenceContext {
         env,
@@ -928,8 +930,7 @@ pub fn infer_with_builtins(
     let inferred = infer_expr(expr, &mut ctx)?;
 
     // Solve constraints once, globally
-    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
-        .constraints
+    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
         .iter()
         .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
         .collect();
@@ -945,7 +946,7 @@ pub fn infer_with_builtins(
 
 pub fn infer_with_builtins_env(
     expr: &Expression,
-    (env, init_id): (TypeEnv, u64),
+    (env, init_id): (TypeEnv, u64)
 ) -> Result<TypeEnv, String> {
     let mut ctx = InferenceContext {
         env,
@@ -957,8 +958,7 @@ pub fn infer_with_builtins_env(
     infer_expr(expr, &mut ctx)?;
 
     // Solve constraints once, globally
-    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
-        .constraints
+    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
         .iter()
         .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
         .collect();

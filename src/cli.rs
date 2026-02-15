@@ -14,7 +14,7 @@ use std::num::Wrapping;
 use std::cell::RefCell;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use std::io::{self, Write};
+use std::io::{ self, Write };
 #[cfg(feature = "repl")]
 use crate::repl::repl;
 thread_local! {
@@ -26,21 +26,76 @@ pub fn run_code(program: String) -> String {
         if let crate::parser::Expression::Apply(items) = &*std_ast {
             match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
                 Ok(wrapped_ast) => {
-                    match crate::infer::infer_with_builtins(&wrapped_ast, crate::types::create_builtin_environment(crate::types::TypeEnv::new())) {
+                    match
+                        crate::infer::infer_with_builtins(
+                            &wrapped_ast,
+                            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                        )
+                    {
                         Ok(typ) =>
-                             match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
-                                Ok(res) => return format!("{}\n{:?}", typ, res),
-                                Err(err) => return err,
+                            match crate::vm::run(&wrapped_ast, crate::vm::VM::new()) {
+                                Ok(res) => {
+                                    return format!("{}\n{:?}", typ, res);
+                                }
+                                Err(err) => {
+                                    return err;
+                                }
                             }
-                        Err(err) => return err,
+                        Err(err) => {
+                            return err;
+                        }
                     }
                 }
-                Err(err) => return err,
+                Err(err) => {
+                    return err;
+                }
             }
         }
         "No expressions...".to_string()
     })
 }
+
+pub fn run_code_report(program: String) -> String {
+    STD.with(|std| {
+        let std_ast = std.borrow();
+        if let crate::parser::Expression::Apply(items) = &*std_ast {
+            let wrapped_ast = match
+                crate::parser::merge_std_and_program(&program, items[1..].to_vec())
+            {
+                Ok(ast) => ast,
+                Err(err) => {
+                    return err;
+                }
+            };
+
+            if
+                let Err(err) = crate::infer::infer_with_builtins(
+                    &wrapped_ast,
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                )
+            {
+                return err;
+            }
+
+            let (result, report) = crate::report::run_with_report(
+                &wrapped_ast,
+                crate::report::VM::new()
+            );
+            let (final_result, runtime_error) = match result {
+                Ok(value) => (Some(format!("{:?}", value)), None),
+                Err(err) => (None, Some(err)),
+            };
+            let anomaly_report = report.llm_anomaly_report();
+            return crate::report::format_anomaly_report_text(
+                final_result.as_deref(),
+                runtime_error.as_deref(),
+                &anomaly_report
+            );
+        }
+        "No expressions...".to_string()
+    })
+}
+
 fn compress(data: &str) -> Vec<u8> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(data.as_bytes()).expect("Failed to compress data");
@@ -49,14 +104,16 @@ fn compress(data: &str) -> Vec<u8> {
 
 fn dump_wrapped_libs(expr: &str, path: &str) -> io::Result<()> {
     let mut file = fs::File::create(path)?;
-    writeln!(file, "use std::io::Read;fn decompress(compressed: &[u8]) -> crate::parser::Expression {{use flate2::read::GzDecoder;let mut decoder = GzDecoder::new(compressed);let mut decompressed_data = String::new();decoder.read_to_string(&mut decompressed_data).expect(\"Failed to decompress data\");let expressions =crate::parser::parse(&decompressed_data).expect(\"Failed to parse decompressed data\");expressions.first().expect(\"No expressions returned\").clone()}}");
+    writeln!(
+        file,
+        "use std::io::Read;fn decompress(compressed: &[u8]) -> crate::parser::Expression {{use flate2::read::GzDecoder;let mut decoder = GzDecoder::new(compressed);let mut decompressed_data = String::new();decoder.read_to_string(&mut decompressed_data).expect(\"Failed to decompress data\");let expressions =crate::parser::parse(&decompressed_data).expect(\"Failed to parse decompressed data\");expressions.first().expect(\"No expressions returned\").clone()}}"
+    );
     let compressed_code = compress(&expr);
     writeln!(file, "pub fn load_ast() -> crate::parser::Expression {{")?;
     writeln!(file, "decompress(&{:?})", compressed_code)?;
     writeln!(file, "}}")?;
     Ok(())
 }
-
 
 pub fn dump_wrapped_bytecode(code: Vec<crate::vm::Instruction>, path: &str) -> std::io::Result<()> {
     let mut file: fs::File = fs::File::create(path)?;
@@ -66,10 +123,7 @@ pub fn dump_wrapped_bytecode(code: Vec<crate::vm::Instruction>, path: &str) -> s
     //     "macro_rules! bytecode {{ ( $($instr:expr),* ) => {{ vec![$( $instr ),*] }};}}"
     // );
     writeln!(file, "macro_rules! s {{($s:expr) => {{ $s.to_string() }}}}")?;
-    writeln!(
-        file,
-        "pub fn load_bytecode() -> Vec<crate::vm::Instruction> {{"
-    )?;
+    writeln!(file, "pub fn load_bytecode() -> Vec<crate::vm::Instruction> {{")?;
     write!(file, "vec![")?;
 
     for (i, instr) in code.iter().enumerate() {
@@ -114,7 +168,7 @@ pub fn cons(a: String, b: String) -> String {
             .unwrap()
             .into_iter()
             .chain(parse_bitecode(&b).unwrap().into_iter())
-            .collect::<Vec<_>>(),
+            .collect::<Vec<_>>()
     );
 }
 pub fn cli(dir: &str) -> std::io::Result<()> {
@@ -125,11 +179,12 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     let cmd = args.iter().last().unwrap();
     if cmd == "--std" {
         let combined = format!(
-                                    "{}\n{}\n{}\n{}", 
-                                    fs::read_to_string("./lisp/const.lisp")?,
-                                    fs::read_to_string("./lisp/std.lisp")?,
-                                    fs::read_to_string("./lisp/fp.lisp")?,
-                                    fs::read_to_string("./lisp/ds.lisp")?);
+            "{}\n{}\n{}\n{}",
+            fs::read_to_string("./lisp/const.lisp")?,
+            fs::read_to_string("./lisp/std.lisp")?,
+            fs::read_to_string("./lisp/fp.lisp")?,
+            fs::read_to_string("./lisp/ds.lisp")?
+        );
         // let mut file = fs::File::create("./combined.lisp")?;
         // writeln!(file, "{}", combined)?;
         dump_wrapped_libs(&build(&combined).unwrap().to_lisp(), "./src/baked.rs");
@@ -139,13 +194,18 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             let std_ast = std.borrow();
             if let crate::parser::Expression::Apply(items) = &*std_ast {
                 match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                    Ok(wrapped_ast) => match crate::infer::infer_with_builtins(
-                        &wrapped_ast,
-                        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
-                    ) {
-                        Ok(typ) => println!("{}", typ),
-                        Err(e) => println!("{}", e),
-                    },
+                    Ok(wrapped_ast) =>
+                        match
+                            crate::infer::infer_with_builtins(
+                                &wrapped_ast,
+                                crate::types::create_builtin_environment(
+                                    crate::types::TypeEnv::new()
+                                )
+                            )
+                        {
+                            Ok(typ) => println!("{}", typ),
+                            Err(e) => println!("{}", e),
+                        }
                     Err(e) => println!("{}", e),
                 }
             }
@@ -166,7 +226,6 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 }
             }
         });
-    
     } else if cmd == "--comp" {
         let path = &args[1];
         let program = fs::read_to_string(path)?;
@@ -187,9 +246,9 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--exec" {
         let path = &args[1];
         let program = fs::read_to_string(path)?;
-        match  crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
-            Ok(e) =>  println!("{:?}", e),
-            Err(e) => println!("{:?}", e)
+        match crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
+            Ok(e) => println!("{:?}", e),
+            Err(e) => println!("{:?}", e),
         }
     } else if cmd == "--str" {
         let program = fs::read_to_string(path)?;
@@ -206,12 +265,11 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 }
             }
         });
-     
     } else if cmd == "--bit" {
         let program = fs::read_to_string(&format!("{}/main.txt", dist))?;
-        match  crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
-            Ok(e) =>  println!("{:?}", e),
-            Err(e) => println!("{:?}", e)
+        match crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
+            Ok(e) => println!("{:?}", e),
+            Err(e) => println!("{:?}", e),
         }
     } else if cmd == "--doc" {
         let std_ast = crate::baked::load_ast();
@@ -220,9 +278,12 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             .split(" ")
             .for_each(|p| {
                 let name = p.to_string();
-                match crate::infer::infer_with_builtins(&crate::parser::Expression::Word(p.to_string()), 
-                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
-                ) {
+                match
+                    crate::infer::infer_with_builtins(
+                        &crate::parser::Expression::Word(p.to_string()),
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                    )
+                {
                     Ok(typ) => names.push([name, format!("{}", typ)]),
                     Err(e) => println!("{}", e),
                 }
@@ -238,20 +299,27 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                                 if name.chars().next().unwrap() == '!' {
                                     names.push([name.clone(), "unsafe".to_string()]);
                                 } else {
-                                    match crate::parser::merge_std_and_program(
-                                        &name,
-                                        items[1..].to_vec(),
-                                    ) {
-                                        Ok(p) => match crate::infer::infer_with_builtins(
-                                            &p,
-                                            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
-                                        ) {
-                                            Ok(typ) => {
-                                                // TODO: use a regex to remove the T+\d+ noise of the files
-                                                names.push([name.clone(), format!("{}", typ)])
+                                    match
+                                        crate::parser::merge_std_and_program(
+                                            &name,
+                                            items[1..].to_vec()
+                                        )
+                                    {
+                                        Ok(p) =>
+                                            match
+                                                crate::infer::infer_with_builtins(
+                                                    &p,
+                                                    crate::types::create_builtin_environment(
+                                                        crate::types::TypeEnv::new()
+                                                    )
+                                                )
+                                            {
+                                                Ok(typ) => {
+                                                    // TODO: use a regex to remove the T+\d+ noise of the files
+                                                    names.push([name.clone(), format!("{}", typ)]);
+                                                }
+                                                Err(e) => println!("{}", e),
                                             }
-                                            Err(e) => println!("{}", e),
-                                        },
                                         Err(e) => println!("{}", e),
                                     }
                                 }
@@ -272,21 +340,29 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             crate::parser::Expression::Apply(items) => {
                 match crate::parser::merge_std_and_program(&program, items.to_vec()) {
                     Ok(ast) => {
-                       match infer_with_builtins_env(&ast, crate::types::create_builtin_environment(crate::types::TypeEnv::new())) {
+                        match
+                            infer_with_builtins_env(
+                                &ast,
+                                crate::types::create_builtin_environment(
+                                    crate::types::TypeEnv::new()
+                                )
+                            )
+                        {
                             Ok(env) => {
-                                env
-                                    .scopes
-                                    .iter()
-                                    .for_each(|x| {
-                                        for key in x.keys().into_iter().collect::<Vec<_>>() {
-                                            names.push([key.to_string(), x.get(key).unwrap().to_string()]);
-                                        }
-                                    })
-                            },
+                                env.scopes.iter().for_each(|x| {
+                                    for key in x.keys().into_iter().collect::<Vec<_>>() {
+                                        names.push([
+                                            key.to_string(),
+                                            x.get(key).unwrap().to_string(),
+                                        ]);
+                                    }
+                                });
+                            }
                             Err(_) => {}
                         }
                         let path = "./sig.json";
-                        std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap())
+                        std::fs
+                            ::create_dir_all(std::path::Path::new(path).parent().unwrap())
                             .unwrap();
                         let mut file = fs::File::create(path)?;
                         write!(file, "{:?}", names)?;
@@ -297,7 +373,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             _ => {}
         }
     } else if cmd == "--fmt" {
-      println!("{}", crate::format::format_source(&fs::read_to_string(path)?))
+        println!("{}", crate::format::format_source(&fs::read_to_string(path)?));
     } else if cmd == "--repl" {
         if args.len() == 6 {
             let path = &args[4];
@@ -306,9 +382,16 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         } else {
             #[cfg(feature = "repl")]
             repl(String::new());
-        } 
+        }
+    } else if cmd == "--report" {
+        let file = fs::read_to_string(path)?;
+        let report = "./example/dist/report.txt";
+        std::fs::create_dir_all(std::path::Path::new(report).parent().unwrap()).unwrap();
+        let mut fileOut = fs::File::create(report)?;
+        writeln!(fileOut, "{}", run_code_report(file))?;
     } else {
-        println!("{}", run_code(fs::read_to_string(path)?))
+        let file = fs::read_to_string(path)?;
+        println!("{}", run_code(file));
     }
 
     Ok(())

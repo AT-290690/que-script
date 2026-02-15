@@ -223,11 +223,15 @@ fn fits_on_one_line(xs: &[Expression]) -> bool {
                 len += f.to_string().len() + 1;
             }
             Expression::Apply(inner) => {
-                if inner.iter().any(|x| {
-                    matches!(x,
+                if
+                    inner
+                        .iter()
+                        .any(|x| {
+                            matches!(x,
                         Expression::Word(w) if is_bracket_atom(w)
                     )
-                }) {
+                        })
+                {
                     return true;
                 }
                 len += inner.len() * 2 + 2;
@@ -253,7 +257,10 @@ fn is_char_atom(w: &str) -> bool {
     w.starts_with('\'') && w.ends_with('\'')
 }
 pub fn compact_dangling_parens(input: &str) -> String {
-    let lines: Vec<String> = input.lines().map(|l| l.to_string()).collect();
+    let lines: Vec<String> = input
+        .lines()
+        .map(|l| l.to_string())
+        .collect();
     let mut out: Vec<String> = Vec::new();
 
     let mut i = 0;
@@ -292,7 +299,9 @@ fn is_only_closing_parens(line: &str) -> bool {
 }
 
 fn count_parens(line: &str) -> usize {
-    line.chars().filter(|&c| c == ')').count()
+    line.chars()
+        .filter(|&c| c == ')')
+        .count()
 }
 fn is_bracket_atom(w: &str) -> bool {
     matches!(w, "[" | "]" | "{" | "}")

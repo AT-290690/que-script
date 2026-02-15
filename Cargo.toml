@@ -12,5 +12,10 @@ flate2 = "1.1.9"
 crossterm = { version = "0.29", optional = true }
 
 [features]
-default = []
+default = ["parser", "vm", "type-checker"]
 repl = ["crossterm"]
+parser = []
+vm = ["parser"]
+type-checker = ["parser"]
+js-compiler = ["parser"]
+report = ["vm", "type-checker"]

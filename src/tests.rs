@@ -5,42 +5,21 @@ mod tests {
         let test_cases = [
             ("(+ 1 2)", "Int"),
             ("(and (> 2 1) (= 1 1))", "Bool"),
-            (
-                "(do (let id (lambda x x)) (let a (id 10)) (let b (id (= 1 1))) b)",
-                "Bool",
-            ),
-            (
-                "(do (let id (lambda x x)) (let a (id 10)) (let b (id (= 1 1))) b)",
-                "Bool",
-            ),
-            (
-                "(do (let xs (vector (vector 1))) (let x (get xs 0)) (let y (get x 0)) y)",
-                "Int",
-            ),
-            (
-                "(do (let xs (vector (vector 1))) (let x (get (get xs 0) 0)) x)",
-                "Int",
-            ),
+            ("(do (let id (lambda x x)) (let a (id 10)) (let b (id (= 1 1))) b)", "Bool"),
+            ("(do (let id (lambda x x)) (let a (id 10)) (let b (id (= 1 1))) b)", "Bool"),
+            ("(do (let xs (vector (vector 1))) (let x (get xs 0)) (let y (get x 0)) y)", "Int"),
+            ("(do (let xs (vector (vector 1))) (let x (get (get xs 0) 0)) x)", "Int"),
             ("(lambda x (+ x 1))", "Int -> Int"),
             ("(lambda x (and x (or x x)))", "Bool -> Bool"),
-            (
-                "(do (let fn (lambda a b (and a b))) (fn (= 1 1) (= 1 2)))",
-                "Bool",
-            ),
-            (
-                "(do (let process (lambda xs (get xs 0))) (process (vector 1 2 3 )))",
-                "Int",
-            ),
+            ("(do (let fn (lambda a b (and a b))) (fn (= 1 1) (= 1 2)))", "Bool"),
+            ("(do (let process (lambda xs (get xs 0))) (process (vector 1 2 3 )))", "Int"),
             (
                 "(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (vector (= 1 1))))",
                 "Bool",
             ),
             ("(vector 1 2 3)", "[Int]"),
             ("(vector (vector (vector 1)))", "[[[Int]]]"),
-            (
-                "(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))",
-                "Int",
-            ),
+            ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
             (
                 "(do (let fn (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn)",
                 "Int -> Int -> Bool -> [Int -> Bool] -> Bool",
@@ -69,22 +48,14 @@ xs)"#,
             if let Some(expr) = exprs.first() {
                 let result = crate::infer::infer_with_builtins(
                     expr,
-                    crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
                 );
                 // Assert that the result is Ok
-                assert!(
-                    result.is_ok(),
-                    "Type inference should succeed for expression: {}",
-                    inp
-                );
+                assert!(result.is_ok(), "Type inference should succeed for expression: {}", inp);
                 // Optionally, check that the type is Int
                 if let Ok(typ) = result {
                     // println!("{:?}", inp);
-                    assert_eq!(
-                        typ.to_string(),
-                        *out,
-                        "Type of expression should match expected",
-                    );
+                    assert_eq!(typ.to_string(), *out, "Type of expression should match expected");
                 }
             } else {
                 panic!("No expressions found in parsed result for: {}", inp);
@@ -96,16 +67,10 @@ xs)"#,
     fn test_type_inference_failure() {
         // Test cases that should result in type inference errors
         let test_cases = [
-            (
-                "(+ 1 (= 1 1))",
-                r#"Error! Cannot unify Int with Bool
-Error! (+ 1 (= 1 1))"#,
-            ),
+            ("(+ 1 (= 1 1))", r#"Error! Cannot unify Int with Bool
+Error! (+ 1 (= 1 1))"#),
             ("(1 2)", "Error! Cannot apply non-function type: Int\n(1 2)"),
-            (
-                "(do (let t 10) (t))",
-                "Error! Cannot apply non-function type: Int\n(t)",
-            ),
+            ("(do (let t 10) (t))", "Error! Cannot apply non-function type: Int\n(t)"),
             (
                 "(let x (vector 1 2 (= 1 2)))",
                 "Error! Cannot unify Int with Bool\nError! (vector 1 2 (= 1 2))",
@@ -114,14 +79,8 @@ Error! (+ 1 (= 1 1))"#,
                 "(vector 1 2 (> 1 2))",
                 "Error! Cannot unify Int with Bool\nError! (vector 1 2 (> 1 2))",
             ),
-            (
-                "(lambda x (and x 42))",
-                "Error! Cannot unify Bool with Int\nError! (and x 42)",
-            ),
-            (
-                "(summation (range 1 10))",
-                "Error! Undefined variable: summation",
-            ),
+            ("(lambda x (and x 42))", "Error! Cannot unify Bool with Int\nError! (and x 42)"),
+            ("(summation (range 1 10))", "Error! Undefined variable: summation"),
             (
                 "(if 1 10 20)",
                 r#"Error! Cannot unify Int with Bool
@@ -134,18 +93,12 @@ Error! Condition must be Bool
 Error! Concequent and alternative must match types
 (if (= 1 2) 10 (= 0 1))"#,
             ),
-            (
-                "(do (let x 10) (let x 2))",
-                "Error! Variable 'x' already defined in this scope",
-            ),
+            ("(do (let x 10) (let x 2))", "Error! Variable 'x' already defined in this scope"),
             (
                 "(vector (tuple 0 true) (tuple true 0))",
                 "Error! Cannot unify Int with Bool\nError! (vector (tuple 0 true) (tuple true 0))",
             ),
-            (
-                "(+ 1.23 2)",
-                "Error! Cannot unify Int with Float\nError! (+ 1.23 2)",
-            ),
+            ("(+ 1.23 2)", "Error! Cannot unify Int with Float\nError! (+ 1.23 2)"),
             (
                 r#"(do (let xs (vector (vector (vector))))
 (set! xs (length xs) (vector (vector true)))
@@ -168,23 +121,15 @@ Error! Concequent and alternative must match types
                 // Check that type inference returns an Err
                 let result = crate::infer::infer_with_builtins(
                     expr,
-                    crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
                 );
                 // Assert that the result is an Err
 
-                assert!(
-                    result.is_err(),
-                    "Expected type inference error for expression: {}",
-                    inp
-                );
+                assert!(result.is_err(), "Expected type inference error for expression: {}", inp);
 
                 // Optionally, you can check the error message
                 if let Err(error_msg) = result {
-                    assert_eq!(
-                        error_msg.to_string(),
-                        *out,
-                        "Type error should match expected",
-                    );
+                    assert_eq!(error_msg.to_string(), *out, "Type error should match expected");
                 }
             } else {
                 panic!("No expressions found in parsed result");
@@ -197,10 +142,7 @@ Error! Concequent and alternative must match types
         let test_cases = [
             ("(+ 1 2)", "3"),
             ("(std/vector/int/sum [ 1 2 ])", "3"),
-            (
-                "\"Hello world\"",
-                "[72 101 108 108 111 32 119 111 114 108 100]",
-            ),
+            ("\"Hello world\"", "[72 101 108 108 111 32 119 111 114 108 100]"),
             (
                 r#"(let A [false (and (= 1 2) (> 3 3))]) ; => [false false] Correct
 (let B [false (or (= 1 2) (> 3 3))]) ; => [true false] Wrong
@@ -1560,10 +1502,7 @@ L82")
 (solution (parse INPUT))"#,
                 "[[2 1] [4 0]]",
             ),
-            (
-                r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#,
-                "[1.0 15.0 -1.0]",
-            ),
+            (r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#, "[1.0 15.0 -1.0]"),
             (
                 r#"(let INPUT "162,817,812
 57,618,57
@@ -2326,11 +2265,8 @@ bbrgwb")
 { z  { (fn { 10 23 }) { a1 (c1 b1)} } }"#,
                 "[false [[1 2 10 23] [true 15]]]",
             ),
-            (
-                r#"(let [ a b rest ] [ 1 2 3 4 5 6 ])
-{ a rest }"#,
-                "[1 [3 4 5 6]]",
-            ),
+            (r#"(let [ a b rest ] [ 1 2 3 4 5 6 ])
+{ a rest }"#, "[1 [3 4 5 6]]"),
             (
                 r#"(let rev (lambda xs (do 
   (let~ rec/rev (lambda xs out 
@@ -2347,9 +2283,10 @@ bbrgwb")
  (rev xs)
 ]"#,
                 "[[4 3 2 1] [4 3 2 1] [4 3 2 1] [4 3 2 1]]",
-            ), 
-            
-            (r#"(let INPUT "2333133121414131402")
+            ),
+
+            (
+                r#"(let INPUT "2333133121414131402")
 (let parse (comp (map Char->Digit)))
 (let part1 (lambda input (do 
   (integer file-id -1)
@@ -2369,10 +2306,12 @@ bbrgwb")
       ) false)))))
   (fragment 0 true)
   (|> disk (reduce/i (lambda a b i (+ a (* b i))) 0)))))
-(part1 (parse INPUT))"#, "1928"),
+(part1 (parse INPUT))"#,
+                "1928",
+            ),
 
-
-(r#"(let parse (comp (String->Vector nl) (map String->Integer)))
+            (
+                r#"(let parse (comp (String->Vector nl) (map String->Integer)))
 (let part1 (comp
   (map (lambda secret (do
     (integer SECRET secret)
@@ -2418,8 +2357,11 @@ bbrgwb")
 (part1 (parse "1
 10
 100
-2024"))"#, "1234258"),
-(r#"(let INPUT
+2024"))"#,
+                "1234258",
+            ),
+            (
+                r#"(let INPUT
 "Button A: X+94, Y+34
 Button B: X+22, Y+67
 Prize: X=8400, Y=5400
@@ -2460,8 +2402,11 @@ Prize: X=18641, Y=10279")
                         `a + ca * 3 + cb`
                         a)))
                     0)))
-          (part1 (parse INPUT))"#, "480"),
-          (r#"; solve :: [[Char]] -> Int
+          (part1 (parse INPUT))"#,
+                "480",
+            ),
+            (
+                r#"; solve :: [[Char]] -> Int
 (let solve (comp 
     (map (Vector/get! 1)) 
     (map (lambda x (if (=# x '-') -1 1))) 
@@ -2469,8 +2414,11 @@ Prize: X=18641, Y=10279")
 
 (map solve [["--X" "X++" "X++"] ["++X" "++X" "X++"] ["X++" "++X" "--X" "X--"]])
 ; [ 1 3 0 ]
-"#, "[1 3 0]"),
-(r#"(let sum-sub-slow (lambda xs (do
+"#,
+                "[1 3 0]",
+            ),
+            (
+                r#"(let sum-sub-slow (lambda xs (do
   (let out [])
   (loop 0 (length xs) (lambda i 
     (loop i (length xs) (lambda j (push! out (slice i (+ j 1) xs))))))
@@ -2495,8 +2443,11 @@ Prize: X=18641, Y=10279")
   (sum-sub-imperative xs)
   (sum-sub-functional xs)
   (sum-sub-math xs)
-]"#, "[116 116 116 116]"),
-(r#"(let group-anagrams (comp 
+]"#,
+                "[116 116 116 116]",
+            ),
+            (
+                r#"(let group-anagrams (comp 
     (map (lambda w { w (sort ># w)}))
     (sort (lambda { . a } { . b } (String/gt? a b)))
     (reduce/i (lambda a b i (do 
@@ -2508,68 +2459,74 @@ Prize: X=18641, Y=10279")
       a)) [[]])
       (map (cond (map fst)))))
 
-(group-anagrams ["eat" "tea" "tan" "ate" "nat" "bat"])"#, "[[[110 97 116] [116 97 110]] [[101 97 116] [116 101 97] [97 116 101]] [[98 97 116]]]")
+(group-anagrams ["eat" "tea" "tan" "ate" "nat" "bat"])"#,
+                "[[[110 97 116] [116 97 110]] [[101 97 116] [116 101 97] [97 116 101]] [[98 97 116]]]",
+            ),
             // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
-               // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
-               // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
-               // (r#"(let input [
-               //     [ 1 2 3 ]
-               //     [ 5 5 5 ]
-               //     [ 3 1 4 ]
-               // ])
+            // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
+            // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
+            // (r#"(let input [
+            //     [ 1 2 3 ]
+            //     [ 5 5 5 ]
+            //     [ 3 1 4 ]
+            // ])
 
-               // ; long version - not prefered
-               // (let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
+            // ; long version - not prefered
+            // (let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
 
-               // ; Both of these are prefered
+            // ; Both of these are prefered
 
-               // ; Pipe composition - easy to follow
-               // (let maximumWealthPipe (lambda xs (<| xs (map sum) (maximum))))
+            // ; Pipe composition - easy to follow
+            // (let maximumWealthPipe (lambda xs (<| xs (map sum) (maximum))))
 
-               // ; Point free version - most conscise
-               // (let maximumWealthFree (\ maximum (\map sum)))
+            // ; Point free version - most conscise
+            // (let maximumWealthFree (\ maximum (\map sum)))
 
-               // (<| ; all of these functions are [[Int]] -> Int so they can exist in the same vector
-               //     [maximumWealthLong maximumWealthPipe maximumWealthFree]
-               //     (map (lambda fn (fn input))))"#, "[15 15 15]"),
-               //     (r#"(let \filterOdd (\filter odd?))
-               // (let maximumWealthFree (\ maximum (\map sum)))
-               // [(<|
-               //     [ 1 2 3 4 5 ]
-               //     (\filterOdd)
-               //     (\map square)
-               //     (sum))
-               //  (<| [
-               //     [ 1 2 3 ]
-               //     [ 5 5 5 ]
-               //     [ 3 1 4 ]
-               // ] (maximumWealthFree))]"#, "[35 15]"),
+            // (<| ; all of these functions are [[Int]] -> Int so they can exist in the same vector
+            //     [maximumWealthLong maximumWealthPipe maximumWealthFree]
+            //     (map (lambda fn (fn input))))"#, "[15 15 15]"),
+            //     (r#"(let \filterOdd (\filter odd?))
+            // (let maximumWealthFree (\ maximum (\map sum)))
+            // [(<|
+            //     [ 1 2 3 4 5 ]
+            //     (\filterOdd)
+            //     (\map square)
+            //     (sum))
+            //  (<| [
+            //     [ 1 2 3 ]
+            //     [ 5 5 5 ]
+            //     [ 3 1 4 ]
+            // ] (maximumWealthFree))]"#, "[35 15]"),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
             if let crate::parser::Expression::Apply(items) = &std_ast {
                 match crate::parser::merge_std_and_program(&inp, items[1..].to_vec()) {
                     Ok(exprs) => {
-                        match crate::infer::infer_with_builtins(
-                            &exprs,
-                            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-                        ) {
+                        match
+                            crate::infer::infer_with_builtins(
+                                &exprs,
+                                crate::types::create_builtin_environment(
+                                    crate::types::TypeEnv::new()
+                                )
+                            )
+                        {
                             Ok(_) => {
                                 match crate::vm::run(&exprs, crate::vm::VM::new()) {
                                     Ok(result) => {
                                         // println!("{:?}", inp);
-                                        assert_eq!(format!("{:?}", result), *out, "Solution")
+                                        assert_eq!(format!("{:?}", result), *out, "Solution");
                                     }
                                     Err(e) => {
                                         // to figure out which test failed due to run time Error!
                                         // println!("{:?}", inp);
-                                        panic!("Failed tests because {}", e)
+                                        panic!("Failed tests because {}", e);
                                     }
                                 }
                             }
                             Err(e) => {
                                 // println!("{:?}", inp);
-                                panic!("Failed tests because {}", e)
+                                panic!("Failed tests because {}", e);
                             }
                         }
                     }

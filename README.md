@@ -43,8 +43,8 @@ Build (needed for shell scripts)
 build wasm bundle
 
 ```bash
-wasm-pack build --target nodejs --out-dir pkg/node --release
-wasm-pack build --target web --out-dir pkg/web --release
+wasm-pack build --target nodejs --out-dir pkg/node --release --no-default-features --features parser,js-compiler,type-checker,vm
+wasm-pack build --target web --out-dir pkg/web --release --no-default-features --features parser,js-compiler,type-checker,vm
 ```
 
 build "baked" libraries
