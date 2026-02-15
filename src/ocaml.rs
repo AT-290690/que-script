@@ -152,6 +152,13 @@ fn compile_call(children: &[TypedExpression]) -> String {
         return "()".to_string();
     }
     let mut out = compile_expr(&children[0]);
+    if children.len() == 1 {
+        if let Some(Type::Function(param, _ret)) = children[0].typ.as_ref() {
+            if matches!(**param, Type::Unit) {
+                return format!("({} ())", out);
+            }
+        }
+    }
     for arg in &children[1..] {
         let arg_src = compile_expr(arg);
         let needs_wrap = {
@@ -219,6 +226,8 @@ pub fn compile_expr(node: &TypedExpression) -> String {
             match w.as_str() {
                 "true" => "true".to_string(),
                 "false" => "false".to_string(),
+                "fst" => "fst".to_string(),
+                "snd" => "snd".to_string(),
                 _ => ident(w),
             }
         }
@@ -230,22 +239,44 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                 Expression::Word(op) => {
                     match op.as_str() {
                         "do" => compile_do(items, &node.children),
-                        "vector" | "string" => {
+                        "vector" => {
+                            let elems = &node.children[1..];
+                            let all_same = elems
+                                .first()
+                                .and_then(|f| f.typ.as_ref())
+                                .map(|t0| elems.iter().all(|e| e.typ.as_ref() == Some(t0)))
+                                .unwrap_or(true);
+
+                            if !all_same && elems.len() == 2 {
+                                // Preserve type-safety for heterogeneous 2-element
+                                // "vectors" (commonly used as pair records in std code).
+                                let a = compile_expr(&elems[0]);
+                                let b = compile_expr(&elems[1]);
+                                format!("({}, {})", a, b)
+                            } else {
+                                let args = elems
+                                    .iter()
+                                    .map(compile_expr)
+                                    .collect::<Vec<_>>()
+                                    .join("; ");
+                                format!("(ref [|{}|])", args)
+                            }
+                        }
+                        "string" => {
                             let args = node.children[1..]
                                 .iter()
-                                .map(|n| format!("Obj.repr ({})", compile_expr(n)))
+                                .map(compile_expr)
                                 .collect::<Vec<_>>()
                                 .join("; ");
                             format!("(ref [|{}|])", args)
                         }
                         "tuple" => {
-                            // Runtime tuples are represented as vectors in this language.
                             let args = node.children[1..]
                                 .iter()
-                                .map(|n| format!("Obj.repr ({})", compile_expr(n)))
+                                .map(compile_expr)
                                 .collect::<Vec<_>>()
-                                .join("; ");
-                            format!("(ref [|{}|])", args)
+                                .join(", ");
+                            format!("({})", args)
                         }
                         "length" => {
                             let a = node.children
@@ -263,6 +294,28 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 .get(2)
                                 .map(compile_expr)
                                 .unwrap_or_else(|| "0".to_string());
+                            if let Some(Type::Tuple(items)) =
+                                node.children.get(1).and_then(|n| n.typ.as_ref())
+                            {
+                                if let Some(TypedExpression {
+                                    expr: Expression::Int(idx),
+                                    ..
+                                }) = node.children.get(2)
+                                {
+                                    let idx = *idx as usize;
+                                    if idx < items.len() {
+                                        let names = (0..items.len())
+                                            .map(|n| format!("__t{}", n))
+                                            .collect::<Vec<_>>();
+                                        return format!(
+                                            "(let ({}) = {} in {})",
+                                            names.join(", "),
+                                            a,
+                                            names[idx]
+                                        );
+                                    }
+                                }
+                            }
                             format!("(vec_get {} {})", a, i)
                         }
                         "car" => {
@@ -276,15 +329,15 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "(ref [||])".to_string());
-                            format!("(vec_get {} 0)", a)
+                                .unwrap_or_else(|| "()".to_string());
+                            format!("(fst {})", a)
                         }
                         "snd" => {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "(ref [||])".to_string());
-                            format!("(vec_get {} 1)", a)
+                                .unwrap_or_else(|| "()".to_string());
+                            format!("(snd {})", a)
                         }
                         "cdr" => {
                             let a = node.children
@@ -324,14 +377,30 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 .get(1)
                                 .map(compile_expr)
                                 .unwrap_or_else(|| "false".to_string());
-                            let t = node.children
+                            let mut t = node.children
                                 .get(2)
                                 .map(compile_expr)
                                 .unwrap_or_else(|| "()".to_string());
-                            let e = node.children
+                            let mut e = node.children
                                 .get(3)
                                 .map(compile_expr)
                                 .unwrap_or_else(|| "()".to_string());
+
+                            let t_ty = node.children.get(2).and_then(|n| n.typ.as_ref());
+                            let e_ty = node.children.get(3).and_then(|n| n.typ.as_ref());
+
+                            if let (Some(Type::Function(t_arg, t_ret)), Some(e_t)) = (t_ty, e_ty) {
+                                if matches!(**t_arg, Type::Unit) && **t_ret == *e_t {
+                                    t = format!("({} ())", t);
+                                }
+                            }
+
+                            if let (Some(t_t), Some(Type::Function(e_arg, e_ret))) = (t_ty, e_ty) {
+                                if matches!(**e_arg, Type::Unit) && **e_ret == *t_t {
+                                    e = format!("({} ())", e);
+                                }
+                            }
+
                             format!("(if {} then {} else {})", c, t, e)
                         }
                         "loop" => {
@@ -483,39 +552,47 @@ pub fn compile_expr(node: &TypedExpression) -> String {
 const OCAML_PRELUDE: &str =
     r#"[@@@warning "-26-27"]
 
-type vec = Obj.t array ref
+type 'a vec = 'a array ref
 
-let vec_length (v: vec) : int = Array.length !v
+let vec_length (v: 'a vec) : int = Array.length !v
 
-let vec_get (v: vec) (i: int) : 'a = Obj.obj ((!v).(i))
+let vec_get (v: 'a vec) (i: int) : 'a = (!v).(i)
 
-let vec_rest (v: vec) (i: int) : vec =
+let vec_rest (v: 'a vec) (i: int) : 'a vec =
   let a = !v in
   let n = Array.length a in
   if i <= 0 then ref a
   else if i >= n then ref [||]
   else ref (Array.sub a i (n - i))
 
-let vec_set (v: vec) (i: int) (x: 'a) : unit =
+let vec_set (v: 'a vec) (i: int) (x: 'a) : unit =
   let a = !v in
   let n = Array.length a in
-  if i = n then v := Array.append a [|Obj.repr x|]
-  else if i >= 0 && i < n then a.(i) <- Obj.repr x
+  if i = n then v := Array.append a [|x|]
+  else if i >= 0 && i < n then a.(i) <- x
   else failwith "set!: index out of bounds"
 
-let vec_pop (v: vec) : unit =
+let vec_pop (v: 'a vec) : unit =
   let a = !v in
   let n = Array.length a in
   if n > 0 then v := Array.sub a 0 (n - 1)
 
-let rec auto_int (x : 'a) : int =
-  let ox = Obj.repr x in
-  if Obj.is_int ox then (Obj.obj ox : int)
-  else if Obj.is_block ox then
-    let n = Obj.size ox in
-    if n = 1 then auto_int (Obj.obj (Obj.field ox 0)) else
-    failwith "expected int or boxed single int"
-  else failwith "expected int or boxed single int"
+let auto_int (x : int) : int = x
+
+let v__gt_ a b = a > b
+let v__lt_ a b = a < b
+let v__eq_ a b = a = b
+let v__gt__eq_ a b = a >= b
+let v__lt__eq_ a b = a <= b
+let v__gt__ a b = v__gt_ a b
+let v__lt__ a b = v__lt_ a b
+let v__eq__ a b = v__eq_ a b
+let v__plus_ a b = a + b
+let v__dash_ a b = a - b
+let v__star_ a b = a * b
+let v__slash_ a b = a / b
+let v_mod a b = a mod b
+let v__ a = lnot a
 
 (* -------------------------------------------------
    Generic printer - works for any concrete value
@@ -548,10 +625,49 @@ let log_last_with show expr =
   expr
 "#;
 
-fn show_fn_for_type(t: Option<&Type>) -> &'static str {
+fn show_expr_for_type(ty: &Type, var: &str) -> String {
+    match ty {
+        Type::Int => format!("(string_of_int {})", var),
+        Type::Float => format!("(string_of_float {})", var),
+        Type::Bool => format!("(if {} then \"true\" else \"false\")", var),
+        Type::Char => format!("(string_of_int {})", var),
+        Type::Unit => "\"()\"".to_string(),
+        Type::Function(_, _) => "\"<function>\"".to_string(),
+        Type::Var(_) => format!("(show_any (Obj.repr {}))", var),
+        Type::List(inner) => {
+            let inner_var = "__x";
+            let inner_show = show_expr_for_type(inner, inner_var);
+            format!(
+                "(\"[ \" ^ String.concat \" \" (List.map (fun {} -> {}) (Array.to_list !{})) ^ \" ]\")",
+                inner_var, inner_show, var
+            )
+        }
+        Type::Tuple(items) => {
+            let names = (0..items.len())
+                .map(|i| format!("__t{}", i))
+                .collect::<Vec<_>>();
+            let rendered = items
+                .iter()
+                .enumerate()
+                .map(|(i, t)| show_expr_for_type(t, &names[i]))
+                .collect::<Vec<_>>();
+            format!(
+                "(let ({}) = {} in \"( \" ^ String.concat \" \" [{}] ^ \" )\")",
+                names.join(", "),
+                var,
+                rendered.join("; ")
+            )
+        }
+    }
+}
+
+fn show_fn_for_type(t: Option<&Type>) -> String {
     match t {
-        Some(Type::Bool) => "(fun v -> if v then \"true\" else \"false\")",
-        _ => "(fun v -> show_any (Obj.repr v))",
+        Some(typ) => {
+            let body = show_expr_for_type(typ, "v");
+            format!("(fun v -> {})", body)
+        }
+        None => "(fun v -> show_any (Obj.repr v))".to_string(),
     }
 }
 
