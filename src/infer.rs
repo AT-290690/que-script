@@ -17,6 +17,39 @@ pub struct TypeError {
     pub expr: Vec<crate::parser::Expression>,
 }
 
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct TypedExpression {
+    pub expr: Expression,
+    pub typ: Option<Type>,
+    pub children: Vec<TypedExpression>,
+}
+
+fn expression_id(expr: &Expression) -> usize {
+    expr as *const Expression as usize
+}
+
+#[allow(dead_code)]
+fn build_typed_expression(
+    expr: &Expression,
+    solved_expr_types: &HashMap<usize, Type>
+) -> TypedExpression {
+    let children = match expr {
+        Expression::Apply(items) =>
+            items
+                .iter()
+                .map(|item| build_typed_expression(item, solved_expr_types))
+                .collect(),
+        _ => Vec::new(),
+    };
+
+    TypedExpression {
+        expr: expr.clone(),
+        typ: solved_expr_types.get(&expression_id(expr)).cloned(),
+        children,
+    }
+}
+
 fn src_to_pretty(src: &TypeError) -> String {
     let joined = src.expr
         .iter()
@@ -37,6 +70,8 @@ pub struct InferenceContext {
     pub env: TypeEnv,
     pub constraints: Vec<(Type, Type, TypeError)>,
     pub fresh_var_counter: u64,
+    pub expr_types: HashMap<usize, Type>,
+    pub collect_expr_types: bool,
 }
 
 impl InferenceContext {
@@ -61,7 +96,7 @@ impl InferenceContext {
 }
 
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
-    match expr {
+    let inferred = match expr {
         Expression::Int(_) => Ok(Type::Int),
         Expression::Float(_) => Ok(Type::Float),
 
@@ -92,7 +127,15 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                 infer_function_call(exprs, ctx)
             }
         }
+    };
+
+    if ctx.collect_expr_types {
+        if let Ok(typ) = &inferred {
+        ctx.expr_types.insert(expression_id(expr), typ.clone());
+        }
     }
+
+    inferred
 }
 
 fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
@@ -924,6 +967,8 @@ pub fn infer_with_builtins(
         env,
         constraints: Vec::new(),
         fresh_var_counter: init_id,
+        expr_types: HashMap::new(),
+        collect_expr_types: false,
     };
 
     // Infer type — accumulate constraints
@@ -952,6 +997,8 @@ pub fn infer_with_builtins_env(
         env,
         constraints: Vec::new(),
         fresh_var_counter: init_id,
+        expr_types: HashMap::new(),
+        collect_expr_types: false,
     };
 
     // Infer type — accumulate constraints
@@ -970,4 +1017,37 @@ pub fn infer_with_builtins_env(
     ctx.env.apply_substitution_map(&subst_map);
 
     Ok(ctx.env)
+}
+
+#[allow(dead_code)]
+pub fn infer_with_builtins_typed(
+    expr: &Expression,
+    (env, init_id): (TypeEnv, u64)
+) -> Result<(Type, TypedExpression), String> {
+    let mut ctx = InferenceContext {
+        env,
+        constraints: Vec::new(),
+        fresh_var_counter: init_id,
+        expr_types: HashMap::new(),
+        collect_expr_types: true,
+    };
+
+    let inferred = infer_expr(expr, &mut ctx)?;
+
+    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
+        .iter()
+        .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
+        .collect();
+
+    let subst_map = solve_constraints_list(&constraints_vec).map_err(|e| e.to_string())?;
+    let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
+    ctx.env.apply_substitution_map(&subst_map);
+
+    let solved_expr_types: HashMap<usize, Type> = ctx.expr_types
+        .iter()
+        .map(|(id, typ)| (*id, apply_subst_map_to_type(&subst_map, typ)))
+        .collect();
+
+    let typed_expr = build_typed_expression(expr, &solved_expr_types);
+    Ok((solved_type, typed_expr))
 }

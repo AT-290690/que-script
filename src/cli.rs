@@ -96,6 +96,74 @@ pub fn run_code_report(program: String) -> String {
     })
 }
 
+#[cfg(feature = "ocaml-compiler")]
+fn format_typed_ast_node(node: &crate::infer::TypedExpression, indent: usize, out: &mut String) {
+    let pad = "  ".repeat(indent);
+    let typ = node.typ
+        .as_ref()
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "_".to_string());
+    out.push_str(&format!("{}{} :: {}\n", pad, node.expr.to_lisp(), typ));
+    for child in &node.children {
+        format_typed_ast_node(child, indent + 1, out);
+    }
+}
+
+#[cfg(feature = "ocaml-compiler")]
+pub fn run_code_typed_ast(program: String) -> String {
+    STD.with(|std| {
+        let std_ast = std.borrow();
+        if let crate::parser::Expression::Apply(items) = &*std_ast {
+            let wrapped_ast = match
+                crate::parser::merge_std_and_program(&program, items[1..].to_vec())
+            {
+                Ok(ast) => ast,
+                Err(err) => {
+                    return err;
+                }
+            };
+
+            let (typ, typed_ast) = match
+                crate::infer::infer_with_builtins_typed(
+                    &wrapped_ast,
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                )
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    return err;
+                }
+            };
+
+            let mut output = String::new();
+            output.push_str(&format!("program_type: {}\n", typ));
+            output.push_str("typed_ast:\n");
+            format_typed_ast_node(&typed_ast, 0, &mut output);
+            return output;
+        }
+        "No expressions...".to_string()
+    })
+}
+
+#[cfg(feature = "ocaml-compiler")]
+fn typed_ast_for_expression(expr: &crate::parser::Expression) -> String {
+    match
+        crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        )
+    {
+        Ok((typ, typed_ast)) => {
+            let mut output = String::new();
+            output.push_str(&format!("program_type: {}\n", typ));
+            output.push_str("typed_ast:\n");
+            format_typed_ast_node(&typed_ast, 0, &mut output);
+            output
+        }
+        Err(err) => err,
+    }
+}
+
 fn compress(data: &str) -> Vec<u8> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(data.as_bytes()).expect("Failed to compress data");
@@ -211,21 +279,57 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             }
         });
     } else if cmd == "--js" {
-        let program = fs::read_to_string(path)?;
-        let std_ast = crate::baked::load_ast();
-        STD.with(|std| {
-            let std_ast = std.borrow();
-            if let crate::parser::Expression::Apply(items) = &*std_ast {
-                match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                    Ok(wrapped_ast) => {
-                        let mut code: Vec<crate::vm::Instruction> = Vec::new();
-                        let js = crate::js::compile_program_to_js(&wrapped_ast);
-                        dump_wrapped_js(js, &format!("{}/main.js", dist));
+        #[cfg(feature = "js-compiler")]
+        {
+            let program = fs::read_to_string(path)?;
+            let std_ast = crate::baked::load_ast();
+            STD.with(|std| {
+                let std_ast = std.borrow();
+                if let crate::parser::Expression::Apply(items) = &*std_ast {
+                    match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                        Ok(wrapped_ast) => {
+                            let mut code: Vec<crate::vm::Instruction> = Vec::new();
+                            let js = crate::js::compile_program_to_js(&wrapped_ast);
+                            dump_wrapped_js(js, &format!("{}/main.js", dist));
+                        }
+                        Err(e) => println!("{}", e),
                     }
-                    Err(e) => println!("{}", e),
                 }
-            }
-        });
+            });
+        }
+        #[cfg(not(feature = "js-compiler"))]
+        {
+            println!("Error! JS compiler is disabled. Rebuild with --features js-compiler");
+        }
+    } else if cmd == "--ml" {
+        #[cfg(feature = "ocaml-compiler")]
+        {
+            let program = fs::read_to_string(path)?;
+            STD.with(|std| {
+                let std_ast = std.borrow();
+                if let crate::parser::Expression::Apply(items) = &*std_ast {
+                    match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                        Ok(wrapped_ast) => {
+                            let out = match crate::ocaml::compile_program_to_ocaml(&wrapped_ast) {
+                                Ok(src) => src,
+                                Err(err) => err,
+                            };
+                            let target = format!("{}/main.ml", dist);
+                            std::fs
+                                ::create_dir_all(std::path::Path::new(&target).parent().unwrap())
+                                .unwrap();
+                            let mut out_file = fs::File::create(target).unwrap();
+                            writeln!(out_file, "{}", out).unwrap();
+                        }
+                        Err(e) => println!("{}", e),
+                    }
+                }
+            });
+        }
+        #[cfg(not(feature = "ocaml-compiler"))]
+        {
+            println!("Error! OCaml compiler is disabled. Rebuild with --features ocaml-compiler");
+        }
     } else if cmd == "--comp" {
         let path = &args[1];
         let program = fs::read_to_string(path)?;
@@ -329,10 +433,17 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 }
             }
         }
-        let path = "./lib.json";
+        let path = "./example/dist/lib.json";
         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
         let mut file = fs::File::create(path)?;
         write!(file, "{:?}", names)?;
+
+        // let std_typed_ast_path = "./example/dist/std-typed-ast.txt";
+        // std::fs
+        //     ::create_dir_all(std::path::Path::new(std_typed_ast_path).parent().unwrap())
+        //     .unwrap();
+        // let mut typed_ast_file = fs::File::create(std_typed_ast_path)?;
+        // writeln!(typed_ast_file, "{}", typed_ast_for_expression(&std_ast))?;
     } else if cmd == "--sig" {
         let program = fs::read_to_string(path)?;
         let mut names = Vec::new();
@@ -389,6 +500,21 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(std::path::Path::new(report).parent().unwrap()).unwrap();
         let mut fileOut = fs::File::create(report)?;
         writeln!(fileOut, "{}", run_code_report(file))?;
+    } else if cmd == "--typed-ast" || cmd == "--type-ast" {
+        #[cfg(feature = "ocaml-compiler")]
+        {
+            let file = fs::read_to_string(path)?;
+            let typed_ast = "./example/dist/typed-ast.txt";
+            std::fs::create_dir_all(std::path::Path::new(typed_ast).parent().unwrap()).unwrap();
+            let mut fileOut = fs::File::create(typed_ast)?;
+            writeln!(fileOut, "{}", run_code_typed_ast(file))?;
+        }
+        #[cfg(not(feature = "ocaml-compiler"))]
+        {
+            println!(
+                "Error! typed-ast is disabled. Rebuild with --features ocaml-compiler"
+            );
+        }
     } else {
         let file = fs::read_to_string(path)?;
         println!("{}", run_code(file));
