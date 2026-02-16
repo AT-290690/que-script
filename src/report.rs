@@ -131,6 +131,12 @@ pub enum Instruction {
 
 const MAXIMUM_CALL_STACK_DEPTH_LIMIT: usize = 200;
 const MAX_FUNCTION_REPORT_ENTRIES: usize = 100;
+const MAX_INPUT_PREVIEW_LEN: usize = 160;
+const INPUT_PREVIEW_EDGE_LEN: usize = 25;
+const MAX_RESULT_REPR_LEN: usize = 160;
+const RESULT_REPR_EDGE_LEN: usize = 25;
+const MAX_INNER_VALUE_PREVIEW_LEN: usize = 80;
+const INNER_VALUE_PREVIEW_EDGE_LEN: usize = 20;
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
@@ -154,10 +160,12 @@ pub struct RuntimeReport {
     pub set_array_overwrite_count: usize,
     pub rest_array_empty_result_count: usize,
     pub get_array_count: usize,
+    pub scalar_box_get_count: usize,
     pub min_get_index: Option<i32>,
     pub max_get_index: Option<i32>,
     pub min_set_index: Option<i32>,
     pub max_set_index: Option<i32>,
+    pub scalar_box_set_count: usize,
     pub out_of_bounds_count: usize,
     pub call_depth_limit_exceeded_count: usize,
     pub int_overflow_risk_count: usize,
@@ -204,11 +212,15 @@ pub struct FunctionAnomalySignals {
     pub branch_signal: usize,
     pub vector_mutation_signal: usize,
     pub vector_read_signal: usize,
+    pub scalar_update_signal: usize,
+    pub scalar_read_signal: usize,
     pub literal_build_signal: usize,
     pub input_array_avg_len: f32,
     pub output_array_avg_len: f32,
     pub writes_per_input_elem: f32,
     pub reads_per_input_elem: f32,
+    pub update_coverage_ratio: f32,
+    pub coverage_interpretation: String,
     pub get_index_range: Option<(i32, i32)>,
     pub set_index_range: Option<(i32, i32)>,
     pub out_of_bounds_count: usize,
@@ -219,6 +231,8 @@ pub struct FunctionAnomalySignals {
     pub algorithm_style: String,
     pub mutation_ratio: f32,
     pub literal_ratio: f32,
+    pub potential_complexity: String,
+    pub complexity_confidence: f32,
     pub suspicious_flags: Vec<String>,
 }
 
@@ -228,6 +242,9 @@ pub struct LlmAnomalyReport {
     pub final_result_type_tag: Option<String>,
     pub final_result_repr: Option<String>,
     pub total_instructions: usize,
+    pub dominant_potential_complexity: String,
+    pub dominant_complexity_function_id: Option<String>,
+    pub dominant_complexity_confidence: f32,
     pub function_groups: Vec<FunctionAnomalySignals>,
 }
 
@@ -253,10 +270,12 @@ pub struct RuntimeReportDelta {
     pub set_array_overwrite_count: usize,
     pub rest_array_empty_result_count: usize,
     pub get_array_count: usize,
+    pub scalar_box_get_count: usize,
     pub min_get_index: Option<i32>,
     pub max_get_index: Option<i32>,
     pub min_set_index: Option<i32>,
     pub max_set_index: Option<i32>,
+    pub scalar_box_set_count: usize,
     pub out_of_bounds_count: usize,
     pub call_depth_limit_exceeded_count: usize,
     pub int_overflow_risk_count: usize,
@@ -296,10 +315,12 @@ impl RuntimeReportDelta {
             set_array_overwrite_count: self.set_array_overwrite_count,
             rest_array_empty_result_count: self.rest_array_empty_result_count,
             get_array_count: self.get_array_count,
+            scalar_box_get_count: self.scalar_box_get_count,
             min_get_index: self.min_get_index,
             max_get_index: self.max_get_index,
             min_set_index: self.min_set_index,
             max_set_index: self.max_set_index,
+            scalar_box_set_count: self.scalar_box_set_count,
             out_of_bounds_count: self.out_of_bounds_count,
             call_depth_limit_exceeded_count: self.call_depth_limit_exceeded_count,
             int_overflow_risk_count: self.int_overflow_risk_count,
@@ -364,10 +385,16 @@ impl RuntimeReport {
                 baseline.rest_array_empty_result_count
             ),
             get_array_count: self.get_array_count.saturating_sub(baseline.get_array_count),
+            scalar_box_get_count: self.scalar_box_get_count.saturating_sub(
+                baseline.scalar_box_get_count
+            ),
             min_get_index: pick_min_delta_index(self.min_get_index, baseline.min_get_index),
             max_get_index: pick_max_delta_index(self.max_get_index, baseline.max_get_index),
             min_set_index: pick_min_delta_index(self.min_set_index, baseline.min_set_index),
             max_set_index: pick_max_delta_index(self.max_set_index, baseline.max_set_index),
+            scalar_box_set_count: self.scalar_box_set_count.saturating_sub(
+                baseline.scalar_box_set_count
+            ),
             out_of_bounds_count: self.out_of_bounds_count.saturating_sub(
                 baseline.out_of_bounds_count
             ),
@@ -452,6 +479,11 @@ impl RuntimeReport {
     pub fn llm_anomaly_report(&self) -> LlmAnomalyReport {
         let grouped = self.grouped_function_patterns();
         let mut function_groups = Vec::with_capacity(grouped.len());
+        let mut dominant_rank: usize = 0;
+        let mut dominant_instr: usize = 0;
+        let mut dominant_complexity = "O(1)".to_string();
+        let mut dominant_confidence = 0.0_f32;
+        let mut dominant_function_id: Option<String> = None;
 
         for group in grouped {
             let total_instructions = group.totals.total_instructions;
@@ -470,6 +502,14 @@ impl RuntimeReport {
                 group.totals.set_array_overwrite_count +
                 group.totals.instruction_counts.get("PopArray").copied().unwrap_or(0);
             let vector_read_signal = group.totals.get_array_count;
+            let scalar_update_signal = group.totals.scalar_box_set_count;
+            let scalar_read_signal = group.totals.scalar_box_get_count;
+            let effective_vector_mutation_signal = vector_mutation_signal.saturating_sub(
+                scalar_update_signal
+            );
+            let effective_vector_read_signal = vector_read_signal.saturating_sub(
+                scalar_read_signal
+            );
             let literal_build_signal =
                 group.totals.instruction_counts.get("PushInt").copied().unwrap_or(0) +
                 group.totals.instruction_counts.get("PushFloat").copied().unwrap_or(0) +
@@ -494,13 +534,28 @@ impl RuntimeReport {
             let writes_per_input_elem = if group.totals.input_array_total_len == 0 {
                 0.0
             } else {
-                (vector_mutation_signal as f32) / (group.totals.input_array_total_len as f32)
+                (effective_vector_mutation_signal as f32) /
+                    (group.totals.input_array_total_len as f32)
             };
             let reads_per_input_elem = if group.totals.input_array_total_len == 0 {
                 0.0
             } else {
-                (vector_read_signal as f32) / (group.totals.input_array_total_len as f32)
+                (effective_vector_read_signal as f32) /
+                    (group.totals.input_array_total_len as f32)
             };
+            let update_coverage_ratio = if input_array_avg_len <= 0.0 {
+                0.0
+            } else {
+                (output_array_avg_len / input_array_avg_len).max(0.0)
+            };
+            let returns_array = group.final_result_type_tag.as_deref() == Some("Array");
+            let coverage_interpretation = classify_coverage_interpretation(
+                returns_array,
+                reads_per_input_elem,
+                writes_per_input_elem,
+                input_array_avg_len,
+                output_array_avg_len
+            );
             let get_index_range = match (group.totals.min_get_index, group.totals.max_get_index) {
                 (Some(a), Some(b)) => Some((a, b)),
                 _ => None,
@@ -510,15 +565,23 @@ impl RuntimeReport {
                 _ => None,
             };
             let (algorithm_style, mutation_ratio, literal_ratio) = classify_algorithm_style(
-                vector_mutation_signal,
+                effective_vector_mutation_signal,
                 vector_construction_signal,
                 iterative_signal,
                 branch_signal,
-                vector_read_signal
+                effective_vector_read_signal
             );
+            let (potential_complexity, complexity_confidence, complexity_rank) =
+                infer_potential_complexity(
+                    input_array_avg_len,
+                    iterative_signal,
+                    group.totals.call_count,
+                    reads_per_input_elem,
+                    writes_per_input_elem,
+                    branch_signal
+                );
 
             let mut suspicious_flags = Vec::new();
-            let returns_array = group.final_result_type_tag.as_deref() == Some("Array");
             if
                 returns_array &&
                 iterative_signal == 0 &&
@@ -543,9 +606,23 @@ impl RuntimeReport {
                     algorithm_style == "mutable_style" ||
                     algorithm_style == "hybrid_mutation_dominant"
                 {
-                    suspicious_flags.push("incomplete_update_coverage".to_string());
+                    if coverage_interpretation != "filter_like_expected_partial_write" {
+                        suspicious_flags.push("incomplete_update_coverage".to_string());
+                    } else {
+                        suspicious_flags.push(
+                            "incomplete_update_coverage_filter_like_expected".to_string()
+                        );
+                    }
                 } else if algorithm_style == "hybrid_balanced" {
-                    suspicious_flags.push("incomplete_update_coverage_low_confidence".to_string());
+                    if coverage_interpretation != "filter_like_expected_partial_write" {
+                        suspicious_flags.push(
+                            "incomplete_update_coverage_low_confidence".to_string()
+                        );
+                    } else {
+                        suspicious_flags.push(
+                            "incomplete_update_coverage_filter_like_expected".to_string()
+                        );
+                    }
                 }
             }
             if returns_array && input_array_avg_len > 0.0 && reads_per_input_elem < 0.8 {
@@ -592,6 +669,20 @@ impl RuntimeReport {
             if group.totals.float_non_finite_count > 0 {
                 suspicious_flags.push("float_non_finite_detected".to_string());
             }
+            if complexity_rank >= 2 {
+                suspicious_flags.push("potential_superlinear_growth".to_string());
+            }
+
+            if
+                complexity_rank > dominant_rank ||
+                (complexity_rank == dominant_rank && total_instructions > dominant_instr)
+            {
+                dominant_rank = complexity_rank;
+                dominant_instr = total_instructions;
+                dominant_complexity = potential_complexity.to_string();
+                dominant_confidence = complexity_confidence;
+                dominant_function_id = Some(group.function_id.clone());
+            }
 
             function_groups.push(FunctionAnomalySignals {
                 function_id: group.function_id,
@@ -605,11 +696,15 @@ impl RuntimeReport {
                 branch_signal,
                 vector_mutation_signal,
                 vector_read_signal,
+                scalar_update_signal,
+                scalar_read_signal,
                 literal_build_signal,
                 input_array_avg_len,
                 output_array_avg_len,
                 writes_per_input_elem,
                 reads_per_input_elem,
+                update_coverage_ratio,
+                coverage_interpretation: coverage_interpretation.to_string(),
                 get_index_range,
                 set_index_range,
                 out_of_bounds_count: group.totals.out_of_bounds_count,
@@ -620,6 +715,8 @@ impl RuntimeReport {
                 algorithm_style: algorithm_style.to_string(),
                 mutation_ratio,
                 literal_ratio,
+                potential_complexity: potential_complexity.to_string(),
+                complexity_confidence,
                 suspicious_flags,
             });
         }
@@ -628,6 +725,9 @@ impl RuntimeReport {
             final_result_type_tag: self.final_result_type_tag.clone(),
             final_result_repr: self.final_result_repr.clone(),
             total_instructions: self.total_instructions,
+            dominant_potential_complexity: dominant_complexity,
+            dominant_complexity_function_id: dominant_function_id,
+            dominant_complexity_confidence: dominant_confidence,
             function_groups,
         }
     }
@@ -641,7 +741,12 @@ pub fn format_anomaly_report_text(
 ) -> String {
     let mut out = String::new();
     // out.push_str(&format!("status={}\n", if runtime_error.is_some() { "error" } else { "ok" }));
-    out.push_str(&format!("final_result={}\n", final_result.unwrap_or("-")));
+    let final_result = truncate_middle(
+        final_result.unwrap_or("-"),
+        MAX_RESULT_REPR_LEN,
+        RESULT_REPR_EDGE_LEN
+    );
+    out.push_str(&format!("final_result={}\n", final_result));
     out.push_str(&format!("runtime_error={}\n", runtime_error.unwrap_or("-")));
     out.push_str(
         &format!("final_result_type={}\n", report.final_result_type_tag.as_deref().unwrap_or("-"))
@@ -650,6 +755,24 @@ pub fn format_anomaly_report_text(
         &format!("final_result_repr={}\n", report.final_result_repr.as_deref().unwrap_or("-"))
     );
     out.push_str(&format!("total_instructions={}\n", report.total_instructions));
+    out.push_str(
+        &format!(
+            "dominant_potential_complexity={}\n",
+            report.dominant_potential_complexity
+        )
+    );
+    out.push_str(
+        &format!(
+            "dominant_complexity_function_id={}\n",
+            report.dominant_complexity_function_id.as_deref().unwrap_or("-")
+        )
+    );
+    out.push_str(
+        &format!(
+            "dominant_complexity_confidence={:.3}\n",
+            report.dominant_complexity_confidence
+        )
+    );
     out.push_str("functions:\n");
 
     for g in &report.function_groups {
@@ -681,7 +804,12 @@ pub fn format_anomaly_report_text(
                 inputs,
                 g.count,
                 g.total_instructions,
-                g.algorithm_style,
+                format!(
+                    "{} complexity={} conf={:.3}",
+                    g.algorithm_style,
+                    g.potential_complexity,
+                    g.complexity_confidence
+                ),
                 g.iterative_signal,
                 g.branch_signal,
                 g.vector_read_signal,
@@ -690,6 +818,9 @@ pub fn format_anomaly_report_text(
                 g.output_array_avg_len,
                 g.reads_per_input_elem,
                 g.writes_per_input_elem,
+                // coverage details in compact form
+                // ucr = update coverage ratio, cint = coverage interpretation
+                // appended below for readability
                 get_idx,
                 set_idx,
                 g.out_of_bounds_count,
@@ -700,9 +831,109 @@ pub fn format_anomaly_report_text(
                 flags
             )
         );
+        out.push_str(
+            &format!(
+                "    scalar: read={} update={}\n",
+                g.scalar_read_signal,
+                g.scalar_update_signal
+            )
+        );
+        out.push_str(
+            &format!(
+                "    coverage: update_ratio={:.3} interpretation={}\n",
+                g.update_coverage_ratio,
+                g.coverage_interpretation
+            )
+        );
     }
 
     out
+}
+
+fn classify_coverage_interpretation(
+    returns_array: bool,
+    reads_per_input_elem: f32,
+    writes_per_input_elem: f32,
+    input_array_avg_len: f32,
+    output_array_avg_len: f32
+) -> &'static str {
+    if input_array_avg_len <= 0.0 {
+        return "no_array_input";
+    }
+    let output_ratio = if input_array_avg_len <= 0.0 {
+        0.0
+    } else {
+        output_array_avg_len / input_array_avg_len
+    };
+    if reads_per_input_elem >= 0.9 && writes_per_input_elem >= 0.9 {
+        return "full_traversal_full_update";
+    }
+    if
+        returns_array &&
+        reads_per_input_elem >= 0.9 &&
+        writes_per_input_elem < 0.9 &&
+        output_ratio < 0.95
+    {
+        return "filter_like_expected_partial_write";
+    }
+    if !returns_array && reads_per_input_elem >= 0.9 && writes_per_input_elem < 0.9 {
+        return "reducer_like_full_read_low_write";
+    }
+    if reads_per_input_elem < 0.9 && writes_per_input_elem < 0.9 {
+        return "partial_traversal_possible_issue";
+    }
+    if reads_per_input_elem >= 0.9 && writes_per_input_elem < 0.9 {
+        return "full_read_partial_write_mixed";
+    }
+    "mixed_coverage_pattern"
+}
+
+fn infer_potential_complexity(
+    input_array_avg_len: f32,
+    iterative_signal: usize,
+    call_count: usize,
+    reads_per_input_elem: f32,
+    writes_per_input_elem: f32,
+    branch_signal: usize
+) -> (&'static str, f32, usize) {
+    let n = input_array_avg_len.max(1.0);
+    let iter_per_elem = (iterative_signal as f32) / n;
+    let rw_per_elem = reads_per_input_elem + writes_per_input_elem;
+    let call_per_elem = (call_count as f32) / n;
+    let superlinear_density = if n > 0.0 { rw_per_elem / n } else { 0.0 };
+    let iter_density = if n > 0.0 { iter_per_elem / n } else { 0.0 };
+
+    // Not enough size signal (scalar boxes / tiny arrays): avoid false superlinear labels.
+    if input_array_avg_len <= 1.5 {
+        if iterative_signal == 0 && call_count <= 1 {
+            return ("O(1)", 0.8, 0);
+        }
+        return ("O(1)~O(n) low-signal", 0.25, 0);
+    }
+
+    if iterative_signal == 0 && call_count <= 1 && rw_per_elem <= 0.2 {
+        return ("O(1)", 0.9, 0);
+    }
+    // Strong quadratic cue:
+    // for O(n^2), work per input element grows ~O(n), so normalized density vs n stays high.
+    if input_array_avg_len >= 6.0 && (superlinear_density >= 0.30 || iter_density >= 0.30) {
+        return ("O(n^2+)?", 0.72, 3);
+    }
+    // Typical single/triple pass array processing stays linear even with VM overhead.
+    if iter_per_elem <= 12.0 && rw_per_elem <= 4.5 && call_per_elem <= 8.0 {
+        return ("O(n)", 0.8, 1);
+    }
+    if iter_per_elem <= 3.0 && rw_per_elem <= 3.5 && call_per_elem <= 2.5 {
+        return ("O(n)", 0.75, 1);
+    }
+    if input_array_avg_len >= 4.0 && iter_per_elem <= 20.0 && rw_per_elem <= 10.0 && branch_signal > 0 {
+        return ("O(n log n)?", 0.45, 2);
+    }
+    // Only call this potentially quadratic when size signal is meaningful.
+    if input_array_avg_len >= 6.0 && (iter_per_elem > 20.0 || rw_per_elem > 10.0) {
+        return ("O(n^2+)?", 0.55, 3);
+    }
+    ("O(n log n)?", 0.35, 2)
 }
 
 fn classify_algorithm_style(
@@ -758,10 +989,12 @@ fn accumulate_report_delta(total: &mut RuntimeReportDelta, delta: &RuntimeReport
     total.set_array_overwrite_count += delta.set_array_overwrite_count;
     total.rest_array_empty_result_count += delta.rest_array_empty_result_count;
     total.get_array_count += delta.get_array_count;
+    total.scalar_box_get_count += delta.scalar_box_get_count;
     total.min_get_index = min_opt_i32(total.min_get_index, delta.min_get_index);
     total.max_get_index = max_opt_i32(total.max_get_index, delta.max_get_index);
     total.min_set_index = min_opt_i32(total.min_set_index, delta.min_set_index);
     total.max_set_index = max_opt_i32(total.max_set_index, delta.max_set_index);
+    total.scalar_box_set_count += delta.scalar_box_set_count;
     total.out_of_bounds_count += delta.out_of_bounds_count;
     total.call_depth_limit_exceeded_count += delta.call_depth_limit_exceeded_count;
     total.int_overflow_risk_count += delta.int_overflow_risk_count;
@@ -803,10 +1036,12 @@ fn merge_runtime_report_into(total: &mut RuntimeReport, src: &RuntimeReport) {
     total.set_array_overwrite_count += src.set_array_overwrite_count;
     total.rest_array_empty_result_count += src.rest_array_empty_result_count;
     total.get_array_count += src.get_array_count;
+    total.scalar_box_get_count += src.scalar_box_get_count;
     total.min_get_index = min_opt_i32(total.min_get_index, src.min_get_index);
     total.max_get_index = max_opt_i32(total.max_get_index, src.max_get_index);
     total.min_set_index = min_opt_i32(total.min_set_index, src.min_set_index);
     total.max_set_index = max_opt_i32(total.max_set_index, src.max_set_index);
+    total.scalar_box_set_count += src.scalar_box_set_count;
     total.out_of_bounds_count += src.out_of_bounds_count;
     total.call_depth_limit_exceeded_count += src.call_depth_limit_exceeded_count;
     total.int_overflow_risk_count += src.int_overflow_risk_count;
@@ -848,6 +1083,12 @@ fn function_report_has_anomaly(r: &RuntimeReportDelta) -> bool {
         r.set_array_overwrite_count +
         r.instruction_counts.get("PopArray").copied().unwrap_or(0);
     let vector_read_signal = r.get_array_count;
+    let scalar_update_signal = r.scalar_box_set_count;
+    let scalar_read_signal = r.scalar_box_get_count;
+    let effective_vector_mutation_signal = vector_mutation_signal.saturating_sub(
+        scalar_update_signal
+    );
+    let effective_vector_read_signal = vector_read_signal.saturating_sub(scalar_read_signal);
     let literal_build_signal =
         r.instruction_counts.get("PushInt").copied().unwrap_or(0) +
         r.instruction_counts.get("PushFloat").copied().unwrap_or(0) +
@@ -867,19 +1108,19 @@ fn function_report_has_anomaly(r: &RuntimeReportDelta) -> bool {
     let writes_per_input_elem = if r.input_array_total_len == 0 {
         0.0
     } else {
-        (vector_mutation_signal as f32) / (r.input_array_total_len as f32)
+        (effective_vector_mutation_signal as f32) / (r.input_array_total_len as f32)
     };
     let reads_per_input_elem = if r.input_array_total_len == 0 {
         0.0
     } else {
-        (vector_read_signal as f32) / (r.input_array_total_len as f32)
+        (effective_vector_read_signal as f32) / (r.input_array_total_len as f32)
     };
     let (style, _, _) = classify_algorithm_style(
-        vector_mutation_signal,
+        effective_vector_mutation_signal,
         vector_construction_signal,
         iterative_signal,
         branch_signal,
-        vector_read_signal
+        effective_vector_read_signal
     );
     let returns_array = r.final_result_type_tag.as_deref() == Some("Array");
 
@@ -934,16 +1175,54 @@ fn function_report_has_anomaly(r: &RuntimeReportDelta) -> bool {
 }
 
 fn format_input_preview(args: &[BiteCodeEvaluated]) -> String {
-    let mut s = args
+    let s = args
         .iter()
-        .map(|x| format!("{:?}", x))
+        .map(|x|
+            truncate_middle(
+                &format_value_preview(x),
+                MAX_INPUT_PREVIEW_LEN,
+                INPUT_PREVIEW_EDGE_LEN
+            )
+        )
         .collect::<Vec<_>>()
         .join(", ");
-    if s.len() > 160 {
-        s.truncate(160);
-        s.push_str("...");
-    }
+    let s = truncate_middle(&s, MAX_INPUT_PREVIEW_LEN, INPUT_PREVIEW_EDGE_LEN);
     format!("[{}]", s)
+}
+
+fn format_value_preview(value: &BiteCodeEvaluated) -> String {
+    match value {
+        BiteCodeEvaluated::Bool(v) => format!("{}", v),
+        BiteCodeEvaluated::Int(v) => format!("{}", v),
+        BiteCodeEvaluated::Float(v) => format!("{:?}", v),
+        BiteCodeEvaluated::Function(_, _, _, _) => "Function".to_string(),
+        BiteCodeEvaluated::Array(arr) => {
+            let elems = arr
+                .borrow()
+                .iter()
+                .map(|x|
+                    truncate_middle(
+                        &format_value_preview(x),
+                        MAX_INNER_VALUE_PREVIEW_LEN,
+                        INNER_VALUE_PREVIEW_EDGE_LEN
+                    )
+                )
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("[{}]", elems)
+        }
+    }
+}
+
+fn truncate_middle(s: &str, max_len: usize, edge_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        return s.to_string();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let edge = edge_len.min(chars.len() / 2);
+    let prefix: String = chars[..edge].iter().collect();
+    let suffix: String = chars[chars.len() - edge..].iter().collect();
+    format!("{}...{}", prefix, suffix)
 }
 
 fn min_opt_i32(a: Option<i32>, b: Option<i32>) -> Option<i32> {
@@ -1151,6 +1430,9 @@ impl VM {
                                             Some(i)
                                         );
                                         let r = arr.borrow();
+                                        if r.len() == 1 && i == 0 {
+                                            self.report.scalar_box_get_count += 1;
+                                        }
                                         if i < 0 || (i as usize) >= r.len() {
                                             self.report.out_of_bounds_count += 1;
                                             self.stack.push(BiteCodeEvaluated::Int(0));
@@ -1250,6 +1532,9 @@ impl VM {
                                             arr.borrow_mut().push(value);
                                         } else {
                                             self.report.set_array_overwrite_count += 1;
+                                            if len == 1 && idx == 0 {
+                                                self.report.scalar_box_set_count += 1;
+                                            }
                                             arr.borrow_mut()[idx as usize] = value;
                                         }
                                     } else {
@@ -1897,7 +2182,11 @@ impl VM {
                                                         value_type_tag(value).to_string()
                                                     );
                                                     function_report.final_result_repr = Some(
-                                                        format!("{:?}", value)
+                                                        truncate_middle(
+                                                            &format_value_preview(value),
+                                                            MAX_RESULT_REPR_LEN,
+                                                            RESULT_REPR_EDGE_LEN
+                                                        )
                                                     );
                                                     if let BiteCodeEvaluated::Array(arr) = value {
                                                         function_report.output_array_total_len = arr
@@ -3213,7 +3502,13 @@ pub fn run_with_report(
 
     if let Ok(value) = &result {
         vm.report.final_result_type_tag = Some(value_type_tag(value).to_string());
-        vm.report.final_result_repr = Some(format!("{:?}", value));
+        vm.report.final_result_repr = Some(
+            truncate_middle(
+                &format_value_preview(value),
+                MAX_RESULT_REPR_LEN,
+                RESULT_REPR_EDGE_LEN
+            )
+        );
     }
 
     (result, vm.report)

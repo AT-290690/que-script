@@ -127,7 +127,8 @@ fn op_call(name: &str) -> Option<&'static str> {
         "*." => Some("*."),
         "/" | "/#" => Some("/"),
         "/." => Some("/."),
-        "mod" | "mod." => Some("mod"),
+        "mod" => Some("mod"),
+        "mod." => Some("mod_float"),
         "=" | "=?" | "=#" | "=." => Some("="),
         "<" | "<#" | "<." => Some("<"),
         ">" | ">#" | ">." => Some(">"),
@@ -144,7 +145,7 @@ fn op_call(name: &str) -> Option<&'static str> {
 }
 
 fn is_int_arith_op(name: &str) -> bool {
-    matches!(name, "+" | "+#" | "-" | "-#" | "*" | "*#" | "/" | "/#" | "mod" | "mod.")
+    matches!(name, "+" | "+#" | "-" | "-#" | "*" | "*#" | "/" | "/#" | "mod")
 }
 
 fn compile_call(children: &[TypedExpression]) -> String {
@@ -221,7 +222,8 @@ fn compile_do(items: &[Expression], children: &[TypedExpression]) -> String {
 pub fn compile_expr(node: &TypedExpression) -> String {
     match &node.expr {
         Expression::Int(n) => format!("{}", n),
-        Expression::Float(n) => format!("{}", n),
+        // Keep explicit float shape (e.g. 4.0) so OCaml uses float operators correctly.
+        Expression::Float(n) => format!("{:?}", n),
         Expression::Word(w) => {
             match w.as_str() {
                 "true" => "true".to_string(),
@@ -294,13 +296,14 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 .get(2)
                                 .map(compile_expr)
                                 .unwrap_or_else(|| "0".to_string());
-                            if let Some(Type::Tuple(items)) =
-                                node.children.get(1).and_then(|n| n.typ.as_ref())
+                            if
+                                let Some(Type::Tuple(items)) = node.children
+                                    .get(1)
+                                    .and_then(|n| n.typ.as_ref())
                             {
-                                if let Some(TypedExpression {
-                                    expr: Expression::Int(idx),
-                                    ..
-                                }) = node.children.get(2)
+                                if
+                                    let Some(TypedExpression { expr: Expression::Int(idx), .. }) =
+                                        node.children.get(2)
                                 {
                                     let idx = *idx as usize;
                                     if idx < items.len() {
@@ -529,6 +532,9 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                         .get(2)
                                         .map(compile_expr)
                                         .unwrap_or_else(|| "0".to_string());
+                                    if opf == "mod_float" {
+                                        format!("({} {} {})", opf, a, b)
+                                    } else
                                     if is_int_arith_op(op) {
                                         format!("((auto_int ({})) {} (auto_int ({})))", a, opf, b)
                                     } else {
@@ -639,13 +645,13 @@ fn show_expr_for_type(ty: &Type, var: &str) -> String {
             let inner_show = show_expr_for_type(inner, inner_var);
             format!(
                 "(\"[ \" ^ String.concat \" \" (List.map (fun {} -> {}) (Array.to_list !{})) ^ \" ]\")",
-                inner_var, inner_show, var
+                inner_var,
+                inner_show,
+                var
             )
         }
         Type::Tuple(items) => {
-            let names = (0..items.len())
-                .map(|i| format!("__t{}", i))
-                .collect::<Vec<_>>();
+            let names = (0..items.len()).map(|i| format!("__t{}", i)).collect::<Vec<_>>();
             let rendered = items
                 .iter()
                 .enumerate()
@@ -682,15 +688,30 @@ pub fn compile_program_to_ocaml_typed(typed_ast: &TypedExpression) -> String {
     );
     for (from, to) in [
         ("( + )", "+"),
+        ("( +# )", "+"),
         ("( - )", "-"),
+        ("( -# )", "-"),
         ("( * )", "*"),
+        ("( *# )", "*"),
         ("( / )", "/"),
+        ("( /# )", "/"),
         ("( mod )", "mod"),
+        ("( mod. )", "mod_float"),
         ("( = )", "="),
+        ("( =# )", "="),
+        ("( =? )", "="),
         ("( < )", "<"),
+        ("( <# )", "<"),
+        ("( <. )", "<"),
         ("( > )", ">"),
+        ("( ># )", ">"),
+        ("( >. )", ">"),
         ("( <= )", "<="),
+        ("( <=# )", "<="),
+        ("( <=. )", "<="),
         ("( >= )", ">="),
+        ("( >=# )", ">="),
+        ("( >=. )", ">="),
         ("( +. )", "+."),
         ("( -. )", "-."),
         ("( *. )", "*."),
