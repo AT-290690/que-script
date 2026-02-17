@@ -451,9 +451,11 @@ impl VM {
                     match arr {
                         BiteCodeEvaluated::Array(elements) => {
                             let len = elements.borrow().len();
-                            let len_i32 = i32::try_from(len).map_err(|_| {
-                                "Error! length overflow: vector too large".to_string()
-                            })?;
+                            let len_i32 = i32
+                                ::try_from(len)
+                                .map_err(|_| {
+                                    "Error! length overflow: vector too large".to_string()
+                                })?;
                             self.stack.push(BiteCodeEvaluated::Int(len_i32));
                         }
                         _ => {
@@ -524,9 +526,11 @@ impl VM {
                     let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
-                            let result = a.checked_add(b).ok_or_else(|| {
-                                format!("Error! integer overflow at (+): {} + {}", a, b)
-                            })?;
+                            let result = a
+                                .checked_add(b)
+                                .ok_or_else(|| {
+                                    format!("Error! integer overflow at (+): {} + {}", a, b)
+                                })?;
                             self.stack.push(BiteCodeEvaluated::Int(result));
                         }
                         _ => {
@@ -559,9 +563,11 @@ impl VM {
                     let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
-                            let result = a.checked_mul(b).ok_or_else(|| {
-                                format!("Error! integer overflow at (*): {} * {}", a, b)
-                            })?;
+                            let result = a
+                                .checked_mul(b)
+                                .ok_or_else(|| {
+                                    format!("Error! integer overflow at (*): {} * {}", a, b)
+                                })?;
                             self.stack.push(BiteCodeEvaluated::Int(result));
                         }
                         _ => {
@@ -597,9 +603,11 @@ impl VM {
                             if b == 0 {
                                 return Err("Error! division by zero at (/)".to_string());
                             }
-                            let result = a.checked_div(b).ok_or_else(|| {
-                                format!("Error! integer overflow at (/): {} / {}", a, b)
-                            })?;
+                            let result = a
+                                .checked_div(b)
+                                .ok_or_else(|| {
+                                    format!("Error! integer overflow at (/): {} / {}", a, b)
+                                })?;
                             self.stack.push(BiteCodeEvaluated::Int(result));
                         }
                         _ => {
@@ -635,9 +643,11 @@ impl VM {
                     let a = self.stack.pop().ok_or("stack underflow")?;
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
-                            let result = a.checked_sub(b).ok_or_else(|| {
-                                format!("Error! integer overflow at (-): {} - {}", a, b)
-                            })?;
+                            let result = a
+                                .checked_sub(b)
+                                .ok_or_else(|| {
+                                    format!("Error! integer overflow at (-): {} - {}", a, b)
+                                })?;
                             self.stack.push(BiteCodeEvaluated::Int(result));
                         }
                         _ => {
@@ -673,9 +683,11 @@ impl VM {
                             if b == 0 {
                                 return Err("Error! modulo by zero at (mod)".to_string());
                             }
-                            let result = a.checked_rem(b).ok_or_else(|| {
-                                format!("Error! integer overflow at (mod): {} % {}", a, b)
-                            })?;
+                            let result = a
+                                .checked_rem(b)
+                                .ok_or_else(|| {
+                                    format!("Error! integer overflow at (mod): {} % {}", a, b)
+                                })?;
                             self.stack.push(BiteCodeEvaluated::Int(result));
                         }
                         _ => {
@@ -694,7 +706,11 @@ impl VM {
                             let result = a % b;
                             if !result.is_finite() {
                                 return Err(
-                                    format!("Error! float non-finite result at (mod.): {} % {}", a, b)
+                                    format!(
+                                        "Error! float non-finite result at (mod.): {} % {}",
+                                        a,
+                                        b
+                                    )
                                 );
                             }
                             self.stack.push(BiteCodeEvaluated::Float(result));
@@ -725,12 +741,16 @@ impl VM {
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             if b < 0 {
-                                return Err("Error! shift amount cannot be negative at (>>)".to_string());
+                                return Err(
+                                    "Error! shift amount cannot be negative at (>>)".to_string()
+                                );
                             }
                             let shift = b as u32;
-                            let result = a.checked_shr(shift).ok_or_else(|| {
-                                format!("Error! shift amount out of range at (>>): {}", b)
-                            })?;
+                            let result = a
+                                .checked_shr(shift)
+                                .ok_or_else(|| {
+                                    format!("Error! shift amount out of range at (>>): {}", b)
+                                })?;
                             self.stack.push(BiteCodeEvaluated::Int(result));
                         }
                         _ => {
@@ -744,12 +764,16 @@ impl VM {
                     match (a, b) {
                         (BiteCodeEvaluated::Int(a), BiteCodeEvaluated::Int(b)) => {
                             if b < 0 {
-                                return Err("Error! shift amount cannot be negative at (<<)".to_string());
+                                return Err(
+                                    "Error! shift amount cannot be negative at (<<)".to_string()
+                                );
                             }
                             let shift = b as u32;
-                            let result = a.checked_shl(shift).ok_or_else(|| {
-                                format!("Error! shift amount out of range at (<<): {}", b)
-                            })?;
+                            let result = a
+                                .checked_shl(shift)
+                                .ok_or_else(|| {
+                                    format!("Error! shift amount out of range at (<<): {}", b)
+                                })?;
                             self.stack.push(BiteCodeEvaluated::Int(result));
                         }
                         _ => {
@@ -814,10 +838,7 @@ impl VM {
                             }
                             if a < (i32::MIN as f32) || a > (i32::MAX as f32) {
                                 return Err(
-                                    format!(
-                                        "Error! integer overflow at (Float->Int): {} out of i32 range",
-                                        a
-                                    )
+                                    format!("Error! integer overflow at (Float->Int): {} out of i32 range", a)
                                 );
                             }
                             self.stack.push(BiteCodeEvaluated::Int(a as i32));

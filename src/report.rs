@@ -80,7 +80,7 @@ pub enum Instruction {
     MakeLambdaUid(usize, Vec<String>, Vec<Instruction>),
     Call(usize),
     MakeVector(usize),
-    If(Vec<Instruction>, Vec<Instruction>),
+    If(usize, Vec<Instruction>, Vec<Instruction>),
 
     Loop(
         Vec<Instruction>,
@@ -129,6 +129,12 @@ pub enum Instruction {
     FloatToInt,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct BranchSiteCoverage {
+    pub true_hits: usize,
+    pub false_hits: usize,
+}
+
 const MAXIMUM_CALL_STACK_DEPTH_LIMIT: usize = 200;
 const MAX_FUNCTION_REPORT_ENTRIES: usize = 100;
 const MAX_INPUT_PREVIEW_LEN: usize = 160;
@@ -150,6 +156,7 @@ pub struct RuntimeReport {
     pub partial_application_count: usize,
     pub branch_true_count: usize,
     pub branch_false_count: usize,
+    pub branch_site_outcomes: HashMap<usize, BranchSiteCoverage>,
     pub loop_iterations: usize,
     pub loop_finish_iterations: usize,
     pub max_loop_iterations: usize,
@@ -210,6 +217,10 @@ pub struct FunctionAnomalySignals {
     pub avg_instructions_per_call: f32,
     pub iterative_signal: usize,
     pub branch_signal: usize,
+    pub branch_sites_total: usize,
+    pub branch_sites_full: usize,
+    pub branch_site_coverage_pct: f32,
+    pub branch_outcome_coverage_pct: f32,
     pub vector_mutation_signal: usize,
     pub vector_read_signal: usize,
     pub scalar_update_signal: usize,
@@ -242,6 +253,13 @@ pub struct LlmAnomalyReport {
     pub final_result_type_tag: Option<String>,
     pub final_result_repr: Option<String>,
     pub total_instructions: usize,
+    pub int_overflow_risk_count: usize,
+    pub int_div_by_zero_count: usize,
+    pub float_non_finite_count: usize,
+    pub branch_sites_total: usize,
+    pub branch_sites_full: usize,
+    pub branch_site_coverage_pct: f32,
+    pub branch_outcome_coverage_pct: f32,
     pub dominant_potential_complexity: String,
     pub dominant_complexity_function_id: Option<String>,
     pub dominant_complexity_confidence: f32,
@@ -260,6 +278,7 @@ pub struct RuntimeReportDelta {
     pub partial_application_count: usize,
     pub branch_true_count: usize,
     pub branch_false_count: usize,
+    pub branch_site_outcomes: HashMap<usize, BranchSiteCoverage>,
     pub loop_iterations: usize,
     pub loop_finish_iterations: usize,
     pub max_loop_iterations: usize,
@@ -305,6 +324,7 @@ impl RuntimeReportDelta {
             partial_application_count: self.partial_application_count,
             branch_true_count: self.branch_true_count,
             branch_false_count: self.branch_false_count,
+            branch_site_outcomes: self.branch_site_outcomes.clone(),
             loop_iterations: self.loop_iterations,
             loop_finish_iterations: self.loop_finish_iterations,
             max_loop_iterations: self.max_loop_iterations,
@@ -363,6 +383,10 @@ impl RuntimeReport {
             ),
             branch_true_count: self.branch_true_count.saturating_sub(baseline.branch_true_count),
             branch_false_count: self.branch_false_count.saturating_sub(baseline.branch_false_count),
+            branch_site_outcomes: subtract_branch_site_outcomes(
+                &self.branch_site_outcomes,
+                &baseline.branch_site_outcomes
+            ),
             loop_iterations: self.loop_iterations.saturating_sub(baseline.loop_iterations),
             loop_finish_iterations: self.loop_finish_iterations.saturating_sub(
                 baseline.loop_finish_iterations
@@ -456,9 +480,7 @@ impl RuntimeReport {
                 final_result_type_tag: call.report.final_result_type_tag.clone(),
                 final_result_repr: call.report.final_result_repr.clone(),
                 count: 1,
-                input_examples: call
-                    .report
-                    .input_preview
+                input_examples: call.report.input_preview
                     .clone()
                     .map(|s| vec![s])
                     .unwrap_or_default(),
@@ -497,6 +519,12 @@ impl RuntimeReport {
                 group.totals.loop_finish_iterations +
                 group.totals.call_count;
             let branch_signal = group.totals.branch_true_count + group.totals.branch_false_count;
+            let (
+                branch_sites_total,
+                branch_sites_full,
+                branch_site_coverage_pct,
+                branch_outcome_coverage_pct,
+            ) = branch_coverage_stats(&group.totals.branch_site_outcomes);
             let vector_mutation_signal =
                 group.totals.set_array_append_count +
                 group.totals.set_array_overwrite_count +
@@ -504,12 +532,10 @@ impl RuntimeReport {
             let vector_read_signal = group.totals.get_array_count;
             let scalar_update_signal = group.totals.scalar_box_set_count;
             let scalar_read_signal = group.totals.scalar_box_get_count;
-            let effective_vector_mutation_signal = vector_mutation_signal.saturating_sub(
-                scalar_update_signal
-            );
-            let effective_vector_read_signal = vector_read_signal.saturating_sub(
-                scalar_read_signal
-            );
+            let effective_vector_mutation_signal =
+                vector_mutation_signal.saturating_sub(scalar_update_signal);
+            let effective_vector_read_signal =
+                vector_read_signal.saturating_sub(scalar_read_signal);
             let literal_build_signal =
                 group.totals.instruction_counts.get("PushInt").copied().unwrap_or(0) +
                 group.totals.instruction_counts.get("PushFloat").copied().unwrap_or(0) +
@@ -540,8 +566,7 @@ impl RuntimeReport {
             let reads_per_input_elem = if group.totals.input_array_total_len == 0 {
                 0.0
             } else {
-                (effective_vector_read_signal as f32) /
-                    (group.totals.input_array_total_len as f32)
+                (effective_vector_read_signal as f32) / (group.totals.input_array_total_len as f32)
             };
             let update_coverage_ratio = if input_array_avg_len <= 0.0 {
                 0.0
@@ -694,6 +719,10 @@ impl RuntimeReport {
                 avg_instructions_per_call,
                 iterative_signal,
                 branch_signal,
+                branch_sites_total,
+                branch_sites_full,
+                branch_site_coverage_pct,
+                branch_outcome_coverage_pct,
                 vector_mutation_signal,
                 vector_read_signal,
                 scalar_update_signal,
@@ -721,10 +750,24 @@ impl RuntimeReport {
             });
         }
 
+        let (
+            root_branch_sites_total,
+            root_branch_sites_full,
+            root_branch_site_coverage_pct,
+            root_branch_outcome_coverage_pct,
+        ) = branch_coverage_stats(&self.branch_site_outcomes);
+
         LlmAnomalyReport {
             final_result_type_tag: self.final_result_type_tag.clone(),
             final_result_repr: self.final_result_repr.clone(),
             total_instructions: self.total_instructions,
+            int_overflow_risk_count: self.int_overflow_risk_count,
+            int_div_by_zero_count: self.int_div_by_zero_count,
+            float_non_finite_count: self.float_non_finite_count,
+            branch_sites_total: root_branch_sites_total,
+            branch_sites_full: root_branch_sites_full,
+            branch_site_coverage_pct: root_branch_site_coverage_pct,
+            branch_outcome_coverage_pct: root_branch_outcome_coverage_pct,
             dominant_potential_complexity: dominant_complexity,
             dominant_complexity_function_id: dominant_function_id,
             dominant_complexity_confidence: dominant_confidence,
@@ -755,11 +798,20 @@ pub fn format_anomaly_report_text(
         &format!("final_result_repr={}\n", report.final_result_repr.as_deref().unwrap_or("-"))
     );
     out.push_str(&format!("total_instructions={}\n", report.total_instructions));
+    out.push_str(&format!("int_overflow_risk_count={}\n", report.int_overflow_risk_count));
+    out.push_str(&format!("int_div_by_zero_count={}\n", report.int_div_by_zero_count));
+    out.push_str(&format!("float_non_finite_count={}\n", report.float_non_finite_count));
     out.push_str(
         &format!(
-            "dominant_potential_complexity={}\n",
-            report.dominant_potential_complexity
+            "branch_coverage_sites={}/{} ({:.3})\n",
+            report.branch_sites_full,
+            report.branch_sites_total,
+            report.branch_site_coverage_pct
         )
+    );
+    out.push_str(&format!("branch_coverage_outcomes={:.3}\n", report.branch_outcome_coverage_pct));
+    out.push_str(
+        &format!("dominant_potential_complexity={}\n", report.dominant_potential_complexity)
     );
     out.push_str(
         &format!(
@@ -768,10 +820,7 @@ pub fn format_anomaly_report_text(
         )
     );
     out.push_str(
-        &format!(
-            "dominant_complexity_confidence={:.3}\n",
-            report.dominant_complexity_confidence
-        )
+        &format!("dominant_complexity_confidence={:.3}\n", report.dominant_complexity_confidence)
     );
     out.push_str("functions:\n");
 
@@ -797,7 +846,7 @@ pub fn format_anomaly_report_text(
 
         out.push_str(
             &format!(
-                "  fn id={} type={} result={} inputs={} count={} instr={} style={} iter={} branch={} read={} write={} in_avg={:.3} out_avg={:.3} rpi={:.3} wpi={:.3} idx_get={} idx_set={} oob={} depth_limit={} int_ovf={} int_div0={} float_nf={} flags={}\n",
+                "  fn id={} type={} result={} inputs={} count={} instr={} style={} iter={} branch={} branch_sites={}/{} branch_site_cov={:.3} branch_outcome_cov={:.3} read={} write={} in_avg={:.3} out_avg={:.3} rpi={:.3} wpi={:.3} idx_get={} idx_set={} oob={} depth_limit={} int_ovf={} int_div0={} float_nf={} flags={}\n",
                 g.function_id,
                 g.final_result_type_tag.as_deref().unwrap_or("-"),
                 g.final_result_repr.as_deref().unwrap_or("-"),
@@ -812,6 +861,10 @@ pub fn format_anomaly_report_text(
                 ),
                 g.iterative_signal,
                 g.branch_signal,
+                g.branch_sites_full,
+                g.branch_sites_total,
+                g.branch_site_coverage_pct,
+                g.branch_outcome_coverage_pct,
                 g.vector_read_signal,
                 g.vector_mutation_signal,
                 g.input_array_avg_len,
@@ -888,6 +941,47 @@ fn classify_coverage_interpretation(
     "mixed_coverage_pattern"
 }
 
+fn branch_coverage_stats(
+    outcomes: &HashMap<usize, BranchSiteCoverage>
+) -> (usize, usize, f32, f32) {
+    let total = outcomes.len();
+    if total == 0 {
+        return (0, 0, 1.0, 1.0);
+    }
+    let mut full = 0usize;
+    let mut seen_outcomes = 0usize;
+    for v in outcomes.values() {
+        let t = v.true_hits > 0;
+        let f = v.false_hits > 0;
+        if t && f {
+            full += 1;
+        }
+        if t {
+            seen_outcomes += 1;
+        }
+        if f {
+            seen_outcomes += 1;
+        }
+    }
+    (total, full, (full as f32) / (total as f32), (seen_outcomes as f32) / ((2 * total) as f32))
+}
+
+fn subtract_branch_site_outcomes(
+    current: &HashMap<usize, BranchSiteCoverage>,
+    baseline: &HashMap<usize, BranchSiteCoverage>
+) -> HashMap<usize, BranchSiteCoverage> {
+    let mut out = HashMap::new();
+    for (id, cur) in current {
+        let base = baseline.get(id).cloned().unwrap_or_default();
+        let true_hits = cur.true_hits.saturating_sub(base.true_hits);
+        let false_hits = cur.false_hits.saturating_sub(base.false_hits);
+        if true_hits > 0 || false_hits > 0 {
+            out.insert(*id, BranchSiteCoverage { true_hits, false_hits });
+        }
+    }
+    out
+}
+
 fn infer_potential_complexity(
     input_array_avg_len: f32,
     iterative_signal: usize,
@@ -916,7 +1010,7 @@ fn infer_potential_complexity(
     }
     // Strong quadratic cue:
     // for O(n^2), work per input element grows ~O(n), so normalized density vs n stays high.
-    if input_array_avg_len >= 6.0 && (superlinear_density >= 0.30 || iter_density >= 0.30) {
+    if input_array_avg_len >= 6.0 && (superlinear_density >= 0.3 || iter_density >= 0.3) {
         return ("O(n^2+)?", 0.72, 3);
     }
     // Typical single/triple pass array processing stays linear even with VM overhead.
@@ -926,7 +1020,12 @@ fn infer_potential_complexity(
     if iter_per_elem <= 3.0 && rw_per_elem <= 3.5 && call_per_elem <= 2.5 {
         return ("O(n)", 0.75, 1);
     }
-    if input_array_avg_len >= 4.0 && iter_per_elem <= 20.0 && rw_per_elem <= 10.0 && branch_signal > 0 {
+    if
+        input_array_avg_len >= 4.0 &&
+        iter_per_elem <= 20.0 &&
+        rw_per_elem <= 10.0 &&
+        branch_signal > 0
+    {
         return ("O(n log n)?", 0.45, 2);
     }
     // Only call this potentially quadratic when size signal is meaningful.
@@ -979,6 +1078,11 @@ fn accumulate_report_delta(total: &mut RuntimeReportDelta, delta: &RuntimeReport
     total.partial_application_count += delta.partial_application_count;
     total.branch_true_count += delta.branch_true_count;
     total.branch_false_count += delta.branch_false_count;
+    for (id, c) in &delta.branch_site_outcomes {
+        let e = total.branch_site_outcomes.entry(*id).or_default();
+        e.true_hits += c.true_hits;
+        e.false_hits += c.false_hits;
+    }
     total.loop_iterations += delta.loop_iterations;
     total.loop_finish_iterations += delta.loop_finish_iterations;
     total.max_loop_iterations += delta.max_loop_iterations;
@@ -1024,6 +1128,11 @@ fn merge_runtime_report_into(total: &mut RuntimeReport, src: &RuntimeReport) {
     total.partial_application_count += src.partial_application_count;
     total.branch_true_count += src.branch_true_count;
     total.branch_false_count += src.branch_false_count;
+    for (id, c) in &src.branch_site_outcomes {
+        let e = total.branch_site_outcomes.entry(*id).or_default();
+        e.true_hits += c.true_hits;
+        e.false_hits += c.false_hits;
+    }
     total.loop_iterations += src.loop_iterations;
     total.loop_finish_iterations += src.loop_finish_iterations;
     total.max_loop_iterations = total.max_loop_iterations.max(src.max_loop_iterations);
@@ -1085,9 +1194,8 @@ fn function_report_has_anomaly(r: &RuntimeReportDelta) -> bool {
     let vector_read_signal = r.get_array_count;
     let scalar_update_signal = r.scalar_box_set_count;
     let scalar_read_signal = r.scalar_box_get_count;
-    let effective_vector_mutation_signal = vector_mutation_signal.saturating_sub(
-        scalar_update_signal
-    );
+    let effective_vector_mutation_signal =
+        vector_mutation_signal.saturating_sub(scalar_update_signal);
     let effective_vector_read_signal = vector_read_signal.saturating_sub(scalar_read_signal);
     let literal_build_signal =
         r.instruction_counts.get("PushInt").copied().unwrap_or(0) +
@@ -1178,11 +1286,7 @@ fn format_input_preview(args: &[BiteCodeEvaluated]) -> String {
     let s = args
         .iter()
         .map(|x|
-            truncate_middle(
-                &format_value_preview(x),
-                MAX_INPUT_PREVIEW_LEN,
-                INPUT_PREVIEW_EDGE_LEN
-            )
+            truncate_middle(&format_value_preview(x), MAX_INPUT_PREVIEW_LEN, INPUT_PREVIEW_EDGE_LEN)
         )
         .collect::<Vec<_>>()
         .join(", ");
@@ -1270,7 +1374,7 @@ fn instruction_name(instr: &Instruction) -> &'static str {
         Instruction::MakeLambdaUid(_, _, _) => "MakeLambda",
         Instruction::Call(_) => "Call",
         Instruction::MakeVector(_) => "MakeVector",
-        Instruction::If(_, _) => "If",
+        Instruction::If(_, _, _) => "If",
         Instruction::Loop(_, _, _) => "Loop",
         Instruction::LoopFinish(_, _) => "LoopFinish",
         Instruction::Length => "Length",
@@ -1339,8 +1443,9 @@ fn assign_lambda_uids(code: Vec<Instruction>, next_uid: &mut usize) -> Vec<Instr
                 Instruction::MakeLambdaUid(uid, params, body) => {
                     Instruction::MakeLambdaUid(uid, params, assign_lambda_uids(body, next_uid))
                 }
-                Instruction::If(then_branch, else_branch) => {
+                Instruction::If(branch_id, then_branch, else_branch) => {
                     Instruction::If(
+                        branch_id,
                         assign_lambda_uids(then_branch, next_uid),
                         assign_lambda_uids(else_branch, next_uid)
                     )
@@ -1356,6 +1461,48 @@ fn assign_lambda_uids(code: Vec<Instruction>, next_uid: &mut usize) -> Vec<Instr
                     Instruction::LoopFinish(
                         assign_lambda_uids(cond, next_uid),
                         assign_lambda_uids(func, next_uid)
+                    )
+                }
+                other => other,
+            }
+        })
+        .collect()
+}
+
+fn assign_branch_uids(code: Vec<Instruction>, next_branch_id: &mut usize) -> Vec<Instruction> {
+    code.into_iter()
+        .map(|instr| {
+            match instr {
+                Instruction::If(_, then_branch, else_branch) => {
+                    let id = *next_branch_id;
+                    *next_branch_id += 1;
+                    Instruction::If(
+                        id,
+                        assign_branch_uids(then_branch, next_branch_id),
+                        assign_branch_uids(else_branch, next_branch_id)
+                    )
+                }
+                Instruction::MakeLambda(params, body) => {
+                    Instruction::MakeLambda(params, assign_branch_uids(body, next_branch_id))
+                }
+                Instruction::MakeLambdaUid(uid, params, body) => {
+                    Instruction::MakeLambdaUid(
+                        uid,
+                        params,
+                        assign_branch_uids(body, next_branch_id)
+                    )
+                }
+                Instruction::Loop(start, end, func) => {
+                    Instruction::Loop(
+                        assign_branch_uids(start, next_branch_id),
+                        assign_branch_uids(end, next_branch_id),
+                        assign_branch_uids(func, next_branch_id)
+                    )
+                }
+                Instruction::LoopFinish(cond, func) => {
+                    Instruction::LoopFinish(
+                        assign_branch_uids(cond, next_branch_id),
+                        assign_branch_uids(func, next_branch_id)
                     )
                 }
                 other => other,
@@ -1550,7 +1697,7 @@ impl VM {
                                     );
                                 }
                             }
-                            Instruction::If(then_branch, else_branch) => {
+                            Instruction::If(branch_id, then_branch, else_branch) => {
                                 let cond = self.stack.pop().ok_or("stack underflow")?;
                                 let cond_val = match cond {
                                     BiteCodeEvaluated::Bool(n) => n,
@@ -1562,9 +1709,15 @@ impl VM {
                                 };
                                 if cond_val {
                                     self.report.branch_true_count += 1;
+                                    self.report.branch_site_outcomes
+                                        .entry(*branch_id)
+                                        .or_default().true_hits += 1;
                                     self.run(&then_branch)?;
                                 } else {
                                     self.report.branch_false_count += 1;
+                                    self.report.branch_site_outcomes
+                                        .entry(*branch_id)
+                                        .or_default().false_hits += 1;
                                     self.run(&else_branch)?;
                                 }
                             }
@@ -3128,7 +3281,9 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         compile(&exprs[2], &mut then_code)?;
                         // First argument is the condition
                         compile(&exprs[1], code)?;
-                        code.push(Instruction::If(then_code, vec![Instruction::PushBool(false)]));
+                        code.push(
+                            Instruction::If(0, then_code, vec![Instruction::PushBool(false)])
+                        );
                         Ok(())
                     }
                     "or" => {
@@ -3145,6 +3300,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         // If a is true, return true immediately; otherwise, evaluate b
                         code.push(
                             Instruction::If(
+                                0,
                                 vec![Instruction::PushBool(true)], // then branch
                                 else_code // else branch
                             )
@@ -3357,7 +3513,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         let mut else_code = Vec::new();
                         compile(&exprs[3], &mut else_code)?;
 
-                        code.push(Instruction::If(then_code, else_code));
+                        code.push(Instruction::If(0, then_code, else_code));
                         Ok(())
                     }
                     "loop-finish" => {
@@ -3494,6 +3650,8 @@ pub fn run_with_report(
     }
     let mut next_lambda_uid = 0usize;
     code = assign_lambda_uids(code, &mut next_lambda_uid);
+    let mut next_branch_id = 0usize;
+    code = assign_branch_uids(code, &mut next_branch_id);
 
     let result = match vm.run(&code) {
         Ok(_) => Ok(vm.result().unwrap_or(&BiteCodeEvaluated::Int(0)).clone()),
@@ -3503,11 +3661,7 @@ pub fn run_with_report(
     if let Ok(value) = &result {
         vm.report.final_result_type_tag = Some(value_type_tag(value).to_string());
         vm.report.final_result_repr = Some(
-            truncate_middle(
-                &format_value_preview(value),
-                MAX_RESULT_REPR_LEN,
-                RESULT_REPR_EDGE_LEN
-            )
+            truncate_middle(&format_value_preview(value), MAX_RESULT_REPR_LEN, RESULT_REPR_EDGE_LEN)
         );
     }
 
