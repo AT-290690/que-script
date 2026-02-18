@@ -13,6 +13,9 @@ _Only 470KB WASM module including the library which is 85KB itself_
 - **[Syntactic sugar](https://en.wikipedia.org/wiki/Syntactic_sugar)** layer
 - **[Strongly typed](https://en.wikipedia.org/wiki/Strong_and_weak_typing)** using the **[Hindley-Milner](https://en.wikipedia.org/wiki/Hindley–Milner_type_system)** type system
 - **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [JavaScript](https://en.wikipedia.org/wiki/JavaScript)
+- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [Python](<https://en.wikipedia.org/wiki/Python_(programming_language)>)
+- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [Rust](<https://en.wikipedia.org/wiki/Rust_(programming_language)>)
+- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [OCaml](https://en.wikipedia.org/wiki/OCaml)
 - **[WASM](https://en.wikipedia.org/wiki/WebAssembly)** build for [online editor](https://at-290690.github.io/rust-lisp/playground)
 - It supports some cool features from **functional programming**
 
@@ -296,6 +299,20 @@ or you can aways execute it using in rust using the shell script
 
 ```bash
 ./scripts/exec.sh out.txt
+```
+
+### Testing transpilers
+
+To see if all transpilers produce the same result
+
+```bash
+ ./scripts/js-ex.sh && ./scripts/py-ex.sh && ./scripts/ocaml-ex.sh && ./scripts/rust-ex.sh
+```
+
+To run specific file with opt rust transpiler
+
+```bash
+./scripts/rust-ex.sh ./lisp/main.lisp ./example/dist/main.rs
 ```
 
 ### WASM usage

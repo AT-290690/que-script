@@ -240,11 +240,49 @@ pub fn cons(a: String, b: String) -> String {
     );
 }
 pub fn cli(dir: &str) -> std::io::Result<()> {
-    let path = format!("{}/{}", dir, "main.lisp");
-    let dist = format!("{}/dist", dir);
+    let default_source = format!("{}/{}", dir, "main.lisp");
+    let default_dist = format!("{}/dist", dir);
 
     let args: Vec<String> = env::args().collect();
-    let cmd = args.iter().last().unwrap();
+    let get_opt = |name: &str| -> Option<String> {
+        args
+            .windows(2)
+            .find(|w| w[0] == name)
+            .map(|w| w[1].clone())
+    };
+    let source_path = get_opt("--s").unwrap_or(default_source);
+    let dist = get_opt("--d").unwrap_or(default_dist);
+    let known_cmds = [
+        "--std",
+        "--check",
+        "--js",
+        "--ml",
+        "--py",
+        "--rs",
+        "--comp",
+        "--exec",
+        "--str",
+        "--bit",
+        "--doc",
+        "--sig",
+        "--fmt",
+        "--repl",
+        "--report",
+        "--type-ast",
+    ];
+    let cmd = args
+        .iter()
+        .find(|a| known_cmds.contains(&a.as_str()))
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    let resolve_output_path = |dest: &str, default_file: &str| -> String {
+        let p = std::path::Path::new(dest);
+        if p.extension().is_some() {
+            dest.to_string()
+        } else {
+            format!("{}/{}", dest, default_file)
+        }
+    };
     if cmd == "--std" {
         let combined = format!(
             "{}\n{}\n{}\n{}",
@@ -257,7 +295,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         // writeln!(file, "{}", combined)?;
         dump_wrapped_libs(&build(&combined).unwrap().to_lisp(), "./src/baked.rs");
     } else if cmd == "--check" {
-        let program = fs::read_to_string(path)?;
+        let program = fs::read_to_string(&source_path)?;
         STD.with(|std| {
             let std_ast = std.borrow();
             if let crate::parser::Expression::Apply(items) = &*std_ast {
@@ -281,7 +319,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--js" {
         #[cfg(feature = "js-compiler")]
         {
-            let program = fs::read_to_string(path)?;
+            let program = fs::read_to_string(&source_path)?;
             let std_ast = crate::baked::load_ast();
             STD.with(|std| {
                 let std_ast = std.borrow();
@@ -290,7 +328,8 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                         Ok(wrapped_ast) => {
                             let mut code: Vec<crate::vm::Instruction> = Vec::new();
                             let js = crate::js::compile_program_to_js(&wrapped_ast);
-                            dump_wrapped_js(js, &format!("{}/main.js", dist));
+                            let target = resolve_output_path(&dist, "main.js");
+                            dump_wrapped_js(js, &target);
                         }
                         Err(e) => println!("{}", e),
                     }
@@ -304,7 +343,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--ml" {
         #[cfg(feature = "ocaml-compiler")]
         {
-            let program = fs::read_to_string(path)?;
+            let program = fs::read_to_string(&source_path)?;
             STD.with(|std| {
                 let std_ast = std.borrow();
                 if let crate::parser::Expression::Apply(items) = &*std_ast {
@@ -314,7 +353,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                                 Ok(src) => src,
                                 Err(err) => err,
                             };
-                            let target = format!("{}/main.ml", dist);
+                            let target = resolve_output_path(&dist, "main.ml");
                             std::fs
                                 ::create_dir_all(std::path::Path::new(&target).parent().unwrap())
                                 .unwrap();
@@ -333,14 +372,14 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--py" {
         #[cfg(feature = "python-compiler")]
         {
-            let program = fs::read_to_string(path)?;
+            let program = fs::read_to_string(&source_path)?;
             STD.with(|std| {
                 let std_ast = std.borrow();
                 if let crate::parser::Expression::Apply(items) = &*std_ast {
                     match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
                         Ok(wrapped_ast) => {
                             let out = crate::py::compile_program_to_python(&wrapped_ast);
-                            let target = format!("{}/main.py", dist);
+                            let target = resolve_output_path(&dist, "main.py");
                             std::fs
                                 ::create_dir_all(std::path::Path::new(&target).parent().unwrap())
                                 .unwrap();
@@ -359,7 +398,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--rs" {
         #[cfg(feature = "rust-compiler")]
         {
-            let program = fs::read_to_string(path)?;
+            let program = fs::read_to_string(&source_path)?;
             STD.with(|std| {
                 let std_ast = std.borrow();
                 if let crate::parser::Expression::Apply(items) = &*std_ast {
@@ -369,7 +408,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                                 Ok(src) => src,
                                 Err(err) => err,
                             };
-                            let target = format!("{}/main.rs", dist);
+                            let target = resolve_output_path(&dist, "main.rs");
                             std::fs
                                 ::create_dir_all(std::path::Path::new(&target).parent().unwrap())
                                 .unwrap();
@@ -386,8 +425,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             println!("Error! Rust compiler is disabled. Rebuild with --features rust-compiler");
         }
     } else if cmd == "--comp" {
-        let path = &args[1];
-        let program = fs::read_to_string(path)?;
+        let program = fs::read_to_string(&source_path)?;
         STD.with(|std| {
             let std_ast = std.borrow();
             if let crate::parser::Expression::Apply(items) = &*std_ast {
@@ -395,22 +433,26 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                     Ok(wrapped_ast) => {
                         let mut code: Vec<crate::vm::Instruction> = Vec::new();
                         crate::vm::compile(&wrapped_ast, &mut code);
-                        let path = &args[2];
-                        dump_raw_bytecode(code, &format!("{}", path));
+                        let target = resolve_output_path(&dist, "main.txt");
+                        dump_raw_bytecode(code, &target);
                     }
                     Err(e) => println!("{}", e),
                 }
             }
         });
     } else if cmd == "--exec" {
-        let path = &args[1];
+        let path = args
+            .get(1)
+            .filter(|x| !x.starts_with("--"))
+            .cloned()
+            .unwrap_or_else(|| format!("{}/main.txt", dist));
         let program = fs::read_to_string(path)?;
         match crate::vm::exe(parse_bitecode(&program).unwrap(), crate::vm::VM::new()) {
             Ok(e) => println!("{:?}", e),
             Err(e) => println!("{:?}", e),
         }
     } else if cmd == "--str" {
-        let program = fs::read_to_string(path)?;
+        let program = fs::read_to_string(&source_path)?;
         STD.with(|std| {
             let std_ast = std.borrow();
             if let crate::parser::Expression::Apply(items) = &*std_ast {
@@ -500,7 +542,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         // let mut typed_ast_file = fs::File::create(std_typed_ast_path)?;
         // writeln!(typed_ast_file, "{}", typed_ast_for_expression(&std_ast))?;
     } else if cmd == "--sig" {
-        let program = fs::read_to_string(path)?;
+        let program = fs::read_to_string(&source_path)?;
         let mut names = Vec::new();
         match crate::baked::load_ast() {
             crate::parser::Expression::Apply(items) => {
@@ -539,7 +581,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             _ => {}
         }
     } else if cmd == "--fmt" {
-        println!("{}", crate::format::format_source(&fs::read_to_string(path)?));
+        println!("{}", crate::format::format_source(&fs::read_to_string(&source_path)?));
     } else if cmd == "--repl" {
         if args.len() == 6 {
             let path = &args[4];
@@ -550,7 +592,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             repl(String::new());
         }
     } else if cmd == "--report" {
-        let file = fs::read_to_string(path)?;
+        let file = fs::read_to_string(&source_path)?;
         let report = "./example/dist/report.txt";
         std::fs::create_dir_all(std::path::Path::new(report).parent().unwrap()).unwrap();
         let mut fileOut = fs::File::create(report)?;
@@ -558,7 +600,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     } else if cmd == "--type-ast" {
         #[cfg(feature = "type-ast")]
         {
-            let file = fs::read_to_string(path)?;
+            let file = fs::read_to_string(&source_path)?;
             let typed_ast = "./example/dist/typed-ast.txt";
             std::fs::create_dir_all(std::path::Path::new(typed_ast).parent().unwrap()).unwrap();
             let mut fileOut = fs::File::create(typed_ast)?;
@@ -569,7 +611,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
             println!("Error! typed-ast is disabled. Rebuild with --features type-ast");
         }
     } else {
-        let file = fs::read_to_string(path)?;
+        let file = fs::read_to_string(&source_path)?;
         println!("{}", run_code(file));
     }
 
