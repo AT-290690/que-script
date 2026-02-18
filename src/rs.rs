@@ -78,7 +78,20 @@ fn ident(name: &str) -> String {
                     'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => {
                         s.push(c);
                     }
-                    ':' | '-' | '*' | '/' | '?' | '!' | '.' | '+' | '<' | '>' | '=' | '|' | '&' | '^' => push_encoded(&mut s, c),
+                    | ':'
+                    | '-'
+                    | '*'
+                    | '/'
+                    | '?'
+                    | '!'
+                    | '.'
+                    | '+'
+                    | '<'
+                    | '>'
+                    | '='
+                    | '|'
+                    | '&'
+                    | '^' => push_encoded(&mut s, c),
                     _ => push_encoded(&mut s, c),
                 }
             }
@@ -631,9 +644,9 @@ fn compile_do(items: &[Expression], node: &TypedExpression, lift_named_fns: bool
                             if
                                 lift_named_fns &&
                                 matches!(&let_items[2], Expression::Word(_)) &&
-                                value_node.and_then(|n| n.typ.as_ref()).is_some_and(|t|
-                                    matches!(t, Type::Function(_, _))
-                                )
+                                value_node
+                                    .and_then(|n| n.typ.as_ref())
+                                    .is_some_and(|t| matches!(t, Type::Function(_, _)))
                             {
                                 if let Expression::Word(target_word) = &let_items[2] {
                                     let target_id = ident(target_word);
@@ -642,17 +655,17 @@ fn compile_do(items: &[Expression], node: &TypedExpression, lift_named_fns: bool
                                     if !prior_function_names.contains(&target_id) {
                                         // fall through to regular let alias emission
                                     } else {
-                                    lines.push(
-                                        compile_function_alias(
-                                            name,
-                                            target_word,
-                                            value_node.and_then(|n| n.typ.as_ref()).unwrap()
-                                        )
-                                    );
-                                    let name_id = ident(name);
-                                    prior_function_names.insert(name_id.clone());
-                                    prior_top_level_names.insert(name_id);
-                                    continue;
+                                        lines.push(
+                                            compile_function_alias(
+                                                name,
+                                                target_word,
+                                                value_node.and_then(|n| n.typ.as_ref()).unwrap()
+                                            )
+                                        );
+                                        let name_id = ident(name);
+                                        prior_function_names.insert(name_id.clone());
+                                        prior_top_level_names.insert(name_id);
+                                        continue;
                                     }
                                 }
                             }
@@ -804,7 +817,7 @@ fn compile_call_parts(children: &[TypedExpression]) -> String {
             Some(Type::List(_)) | Some(Type::Tuple(_)) => true,
             Some(Type::Var(_)) => true,
             Some(Type::Function(_, _)) => false,
-            Some(Type::Int)
+            | Some(Type::Int)
             | Some(Type::Float)
             | Some(Type::Bool)
             | Some(Type::Char)
@@ -860,7 +873,9 @@ fn compile_call_parts(children: &[TypedExpression]) -> String {
                 } else {
                     let name = format!("__p{}", p_idx);
                     p_idx += 1;
-                    rem_params.push(format!("{}: {}", name, rust_type_with_infer_vars(&param_types[i])));
+                    rem_params.push(
+                        format!("{}: {}", name, rust_type_with_infer_vars(&param_types[i]))
+                    );
                     all_args.push(name);
                 }
             }
@@ -986,13 +1001,7 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                                 .map(compile_expr)
                                 .collect::<Vec<_>>();
                             match node.typ.as_ref() {
-                                Some(Type::Tuple(_)) => {
-                                    match args.len() {
-                                        0 => "()".to_string(),
-                                        1 => format!("({},)", args[0]),
-                                        _ => format!("({})", args.join(", ")),
-                                    }
-                                }
+                                Some(Type::Tuple(_)) => format!("({}, {})", args[0], args[1]),
                                 Some(Type::List(_)) =>
                                     format!(
                                         "std::rc::Rc::new(std::cell::RefCell::new(vec![{}]))",
@@ -1175,19 +1184,20 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                                 None => v,
                             }
                         }
-                        "char" | "Int->Float" => {
-                            if op == "char" {
+                        "char" => {
+                            node.children
+                                .get(1)
+                                .map(compile_expr)
+                                .unwrap_or_else(|| "0i32".to_string())
+                        }
+                        "Int->Float" => {
+                            format!(
+                                "({}) as f32",
                                 node.children
                                     .get(1)
                                     .map(compile_expr)
-                                    .unwrap_or_else(|| "0i32".to_string())
-                            } else {
-                                let a = node.children
-                                    .get(1)
-                                    .map(compile_expr)
-                                    .unwrap_or_else(|| "0".to_string());
-                                format!("({}) as f32", a)
-                            }
+                                    .unwrap_or_else(|| "0".to_string())
+                            )
                         }
                         "Float->Int" => {
                             let a = node.children
@@ -1434,13 +1444,16 @@ pub fn compile_program_to_rust_typed(typed_ast: &TypedExpression) -> String {
 
     let mut arities = HashMap::new();
     collect_decl_arity(typed_ast, &mut arities);
-    DECL_ARITY.with(|m| *m.borrow_mut() = arities);
+    DECL_ARITY.with(|m| {
+        *m.borrow_mut() = arities;
+    });
 
     // Lift only non-capturing lambdas to Rust `fn` items; capturing lambdas stay closures.
     let body = compile_expr_with_mode(typed_ast, true);
     let int_to_float_name = ident("Int->Float");
     let float_to_int_name = ident("Float->Int");
-    let helpers = r#"
+    let helpers =
+        r#"
 fn v_plus(a: i32, b: i32) -> i32 { a + b }
 fn v_plus_char(a: i32, b: i32) -> i32 { a + b }
 fn v_plus_float(a: f32, b: f32) -> f32 { a + b }

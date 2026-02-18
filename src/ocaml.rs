@@ -243,26 +243,12 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                         "do" => compile_do(items, &node.children),
                         "vector" => {
                             let elems = &node.children[1..];
-                            let all_same = elems
-                                .first()
-                                .and_then(|f| f.typ.as_ref())
-                                .map(|t0| elems.iter().all(|e| e.typ.as_ref() == Some(t0)))
-                                .unwrap_or(true);
-
-                            if !all_same && elems.len() == 2 {
-                                // Preserve type-safety for heterogeneous 2-element
-                                // "vectors" (commonly used as pair records in std code).
-                                let a = compile_expr(&elems[0]);
-                                let b = compile_expr(&elems[1]);
-                                format!("({}, {})", a, b)
-                            } else {
-                                let args = elems
-                                    .iter()
-                                    .map(compile_expr)
-                                    .collect::<Vec<_>>()
-                                    .join("; ");
-                                format!("(ref [|{}|])", args)
-                            }
+                            let args = elems
+                                .iter()
+                                .map(compile_expr)
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            format!("(ref [|{}|])", args)
                         }
                         "string" => {
                             let args = node.children[1..]
