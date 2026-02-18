@@ -472,11 +472,18 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 "0".to_string()
                             }
                         }
-                        "as" | "char" | "Int->Float" => {
+                        "as" | "char" => {
                             node.children
                                 .get(1)
                                 .map(compile_expr)
                                 .unwrap_or_else(|| "()".to_string())
+                        }
+                        "Int->Float" => {
+                            let a = node.children
+                                .get(1)
+                                .map(compile_expr)
+                                .unwrap_or_else(|| "0".to_string());
+                            format!("(float_of_int {})", a)
                         }
                         "Float->Int" => {
                             let a = node.children
@@ -534,8 +541,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                         .unwrap_or_else(|| "0".to_string());
                                     if opf == "mod_float" {
                                         format!("({} {} {})", opf, a, b)
-                                    } else
-                                    if is_int_arith_op(op) {
+                                    } else if is_int_arith_op(op) {
                                         format!("((auto_int ({})) {} (auto_int ({})))", a, opf, b)
                                     } else {
                                         format!("({} {} {})", a, opf, b)
@@ -599,6 +605,8 @@ let v__star_ a b = a * b
 let v__slash_ a b = a / b
 let v_mod a b = a mod b
 let v__ a = lnot a
+let v_u_float_to_int a = int_of_float a
+let v_u_int_to_float a = float_of_int a
 
 (* -------------------------------------------------
    Generic printer - works for any concrete value
