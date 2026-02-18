@@ -651,7 +651,7 @@ fn show_expr_for_type(ty: &Type, var: &str) -> String {
             let inner_var = "__x";
             let inner_show = show_expr_for_type(inner, inner_var);
             format!(
-                "(\"[ \" ^ String.concat \" \" (List.map (fun {} -> {}) (Array.to_list !{})) ^ \" ]\")",
+                "(\"[\" ^ String.concat \" \" (List.map (fun {} -> {}) (Array.to_list !{})) ^ \"]\")",
                 inner_var,
                 inner_show,
                 var
@@ -665,7 +665,7 @@ fn show_expr_for_type(ty: &Type, var: &str) -> String {
                 .map(|(i, t)| show_expr_for_type(t, &names[i]))
                 .collect::<Vec<_>>();
             format!(
-                "(let ({}) = {} in \"( \" ^ String.concat \" \" [{}] ^ \" )\")",
+                "(let ({}) = {} in \"(\" ^ String.concat \" \" [{}] ^ \")\")",
                 names.join(", "),
                 var,
                 rendered.join("; ")

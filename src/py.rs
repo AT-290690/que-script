@@ -447,8 +447,9 @@ pub fn compile_program_to_python(top: &Expression) -> String {
 def _pop(xs):\n    if len(xs) > 0:\n        xs.pop()\n    return 0\n\n\
 def _loop(start, end, fn_):\n    for i in range(int(start), int(end)):\n        fn_(i)\n    return 0\n\n\
 def _loop_finish(cond, fn_):\n    while cond():\n        fn_()\n    return 0\n\n\
+def _pretty_result(v):\n    if isinstance(v, bool):\n        return 'true' if v else 'false'\n    if v is None:\n        return '()'\n    if isinstance(v, list):\n        return '[' + ' '.join(_pretty_result(x) for x in v) + ']'\n    if isinstance(v, tuple):\n        return '[' + ' '.join(_pretty_result(x) for x in v) + ']'\n    return str(v)\n\n\
 def _main():\n{}\n\n\
-if __name__ == '__main__':\n    print(_main())\n",
+if __name__ == '__main__':\n    print(_pretty_result(_main()))\n",
         stmts
     )
 }

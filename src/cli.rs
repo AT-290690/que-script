@@ -223,9 +223,13 @@ pub fn dump_raw_bytecode(code: Vec<crate::vm::Instruction>, path: &str) -> std::
 pub fn dump_wrapped_js(src: String, path: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
     let mut file = fs::File::create(path)?;
+    writeln!(
+        file,
+        "const _prettyResult = (v) => {{ if (typeof v === 'boolean') return v ? 'true' : 'false'; if (v === null || v === undefined) return '()'; if (Array.isArray(v)) return `[${{v.map(_prettyResult).join(' ')}}]`; return String(v); }};"
+    )?;
     writeln!(file, "const _ =(")?;
     writeln!(file, "{}", src)?;
-    writeln!(file, ");console.log(_)")?;
+    writeln!(file, ");console.log(_prettyResult(_))")?;
 
     Ok(())
 }
