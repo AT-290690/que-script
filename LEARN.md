@@ -960,49 +960,6 @@ This makes higher-order code significantly more readable by removing large inlin
 
 _Control the flow of execution in your programs with conditionals and loops._
 
-```lisp
-(type T::Int/Predicate? (Lambda (: Int x) Bool))
-
-(let odd-n? (: T::Int/Predicate? (lambda n (= (mod n 2) 1))))
-(let even-n? (: T::Int/Predicate? (lambda n (= (mod n 2) 0))))
-(let zero-n? (: T::Int/Predicate? (lambda n (= n 0))))
-(let one-n? (: T::Int/Predicate? (lambda n (= n 1))))
-(let inverted-n? (: T::Int/Predicate? (lambda n (= n -1))))
-
-; Can only contain T::Int/Predicate?
-(let predicates (: [T::Int/Predicate?] [odd-n? even-n? zero-n? one-n? inverted-n?]))
-```
-
-Using type signatures for functions ::
-
-Syntactic shorthand for type definition and type assertion.
-
-By using the same name as a function in the current scope, we can reduce the type declaration to only one line of code.
-
-```lisp
-(type String [Char])
-(:: common-strings (Lambda (: [String] a) (: [String] b) Int))
-(let common-strings (lambda xs ys (|>
-(Set/intersection (Vector->Set xs) (Vector->Set ys))
-Set/size)))
-```
-
-What This Enables
-
-Clear and reusable higher-order function signatures.
-
-Consistent typing across APIs without repeating complex type expressions.
-
-Safer refactoring, since mismatched implementations are caught immediately.
-
-Notes
-
-Named function types do not change runtime behavior — they are compile-time checks only.
-
-They do not force types; they verify that inferred types match expectations.
-
-They compose naturally with Hindley–Milner inference and generalisation.
-
 ## Conditional Expressions
 
 Use 'if' expressions to make decisions based on conditions. All branches must return values.

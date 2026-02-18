@@ -53,6 +53,18 @@ build "baked" libraries
 cargo run -- --std
 ```
 
+transpile program to OCaml (`./example/dist/main.ml`)
+
+```bash
+cargo run --no-default-features --features parser,type-checker,type-ast,ocaml-compiler -- --ml
+```
+
+transpile program to Rust (`./example/dist/main.rs`)
+
+```bash
+cargo run --no-default-features --features parser,type-checker,type-ast,rust-compiler -- --rs
+```
+
 type check libraries and generate lib.json
 
 ```bash

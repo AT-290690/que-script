@@ -330,6 +330,35 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         {
             println!("Error! OCaml compiler is disabled. Rebuild with --features ocaml-compiler");
         }
+    } else if cmd == "--rs" {
+        #[cfg(feature = "rust-compiler")]
+        {
+            let program = fs::read_to_string(path)?;
+            STD.with(|std| {
+                let std_ast = std.borrow();
+                if let crate::parser::Expression::Apply(items) = &*std_ast {
+                    match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                        Ok(wrapped_ast) => {
+                            let out = match crate::rs::compile_program_to_rust(&wrapped_ast) {
+                                Ok(src) => src,
+                                Err(err) => err,
+                            };
+                            let target = format!("{}/main.rs", dist);
+                            std::fs
+                                ::create_dir_all(std::path::Path::new(&target).parent().unwrap())
+                                .unwrap();
+                            let mut out_file = fs::File::create(target).unwrap();
+                            writeln!(out_file, "{}", out).unwrap();
+                        }
+                        Err(e) => println!("{}", e),
+                    }
+                }
+            });
+        }
+        #[cfg(not(feature = "rust-compiler"))]
+        {
+            println!("Error! Rust compiler is disabled. Rebuild with --features rust-compiler");
+        }
     } else if cmd == "--comp" {
         let path = &args[1];
         let program = fs::read_to_string(path)?;
