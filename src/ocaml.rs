@@ -248,7 +248,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 .map(compile_expr)
                                 .collect::<Vec<_>>()
                                 .join("; ");
-                            format!("(ref [|{}|])", args)
+                            format!("(vec_of_array [|{}|])", args)
                         }
                         "string" => {
                             let args = node.children[1..]
@@ -256,7 +256,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 .map(compile_expr)
                                 .collect::<Vec<_>>()
                                 .join("; ");
-                            format!("(ref [|{}|])", args)
+                            format!("(vec_of_array [|{}|])", args)
                         }
                         "tuple" => {
                             let args = node.children[1..]
@@ -270,14 +270,14 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "(ref [||])".to_string());
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                             format!("(vec_length {})", a)
                         }
                         "get" => {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "(ref [||])".to_string());
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                             let i = node.children
                                 .get(2)
                                 .map(compile_expr)
@@ -311,7 +311,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "(ref [||])".to_string());
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                             format!("(vec_get {} 0)", a)
                         }
                         "fst" => {
@@ -332,7 +332,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "(ref [||])".to_string());
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                             let i = node.children
                                 .get(2)
                                 .map(compile_expr)
@@ -343,7 +343,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "(ref [||])".to_string());
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                             let i = node.children
                                 .get(2)
                                 .map(compile_expr)
@@ -358,7 +358,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "(ref [||])".to_string());
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                             format!("(vec_pop {}; 0)", a)
                         }
                         "if" => {
@@ -549,30 +549,32 @@ pub fn compile_expr(node: &TypedExpression) -> String {
 const OCAML_PRELUDE: &str =
     r#"[@@@warning "-26-27"]
 
-type 'a vec = 'a array ref
+type 'a vec = { mutable data: 'a array }
 
-let vec_length (v: 'a vec) : int = Array.length !v
+let vec_of_array (a: 'a array) : 'a vec = { data = a }
 
-let vec_get (v: 'a vec) (i: int) : 'a = (!v).(i)
+let vec_length (v: 'a vec) : int = Array.length v.data
+
+let vec_get (v: 'a vec) (i: int) : 'a = v.data.(i)
 
 let vec_rest (v: 'a vec) (i: int) : 'a vec =
-  let a = !v in
+  let a = v.data in
   let n = Array.length a in
-  if i <= 0 then ref a
-  else if i >= n then ref [||]
-  else ref (Array.sub a i (n - i))
+  if i <= 0 then vec_of_array a
+  else if i >= n then vec_of_array [||]
+  else vec_of_array (Array.sub a i (n - i))
 
 let vec_set (v: 'a vec) (i: int) (x: 'a) : unit =
-  let a = !v in
+  let a = v.data in
   let n = Array.length a in
-  if i = n then v := Array.append a [|x|]
+  if i = n then v.data <- Array.append a [|x|]
   else if i >= 0 && i < n then a.(i) <- x
   else failwith "set!: index out of bounds"
 
 let vec_pop (v: 'a vec) : unit =
-  let a = !v in
+  let a = v.data in
   let n = Array.length a in
-  if n > 0 then v := Array.sub a 0 (n - 1)
+  if n > 0 then v.data <- Array.sub a 0 (n - 1)
 
 let auto_int (x : int) : int = x
 
@@ -604,7 +606,6 @@ let rec show_any (x : Obj.t) : string =
   | tag when tag = Obj.closure_tag -> "<function>"
   | _ when Obj.is_block x ->
       let n = Obj.size x in
-      (* vec runtime representation is: Obj.repr (ref [| ... |]) *)
       if n = 1 && Obj.is_block (Obj.field x 0) then
         let arr = Obj.field x 0 in
         let m = Obj.size arr in
@@ -637,7 +638,7 @@ fn show_expr_for_type(ty: &Type, var: &str) -> String {
             let inner_var = "__x";
             let inner_show = show_expr_for_type(inner, inner_var);
             format!(
-                "(\"[\" ^ String.concat \" \" (List.map (fun {} -> {}) (Array.to_list !{})) ^ \"]\")",
+                "(\"[\" ^ String.concat \" \" (List.map (fun {} -> {}) (Array.to_list {}.data)) ^ \"]\")",
                 inner_var,
                 inner_show,
                 var
