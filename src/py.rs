@@ -1,6 +1,11 @@
 use crate::parser::Expression;
 
 fn ident(name: &str, idx: usize) -> String {
+    let originally_upper = name
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_uppercase())
+        .unwrap_or(false);
     match name {
         "+" | "+#" | "+." => "(lambda a: (lambda b: a + b))".to_string(),
         "-" | "-#" | "-." => "(lambda a: (lambda b: a - b))".to_string(),
@@ -32,19 +37,37 @@ fn ident(name: &str, idx: usize) -> String {
         "false" => "False".to_string(),
         "null" => "None".to_string(),
         _ => {
+            fn push_encoded(s: &mut String, c: char) {
+                match c {
+                    ':' => s.push_str("_colon_"),
+                    '-' => s.push_str("_dash_"),
+                    '*' => s.push_str("_star_"),
+                    '/' => s.push_str("_slash_"),
+                    '?' => s.push_str("_q_"),
+                    '!' => s.push_str("_bang_"),
+                    '.' => s.push_str("_dot_"),
+                    '+' => s.push_str("_plus_"),
+                    '<' => s.push_str("_lt_"),
+                    '>' => s.push_str("_gt_"),
+                    '=' => s.push_str("_eq_"),
+                    '|' => s.push_str("_pipe_"),
+                    '&' => s.push_str("_amp_"),
+                    '^' => s.push_str("_xor_"),
+                    _ => s.push('_'),
+                }
+            }
+
             let mut s = String::new();
             for c in name.chars() {
                 match c {
-                    '.' => {
-                        s.push('_');
-                        for c in idx.to_string().chars() {
-                            s.push(c);
-                        }
+                    // Preserve unique placeholder names for lambda arg "." usage.
+                    '.' if name == "." => {
+                        s.push_str("_hole_");
+                        s.push_str(&idx.to_string());
                     }
                     'a'..='z' | 'A'..='Z' | '0'..='9' => s.push(c.to_ascii_lowercase()),
-                    ':' | '-' | '*' | '/' => s.push('_'),
-                    '?' | '!' | '<' | '>' | '=' | '+' | '^' | '|' | '&' => s.push('_'),
-                    _ => s.push('_'),
+                    ':' | '-' | '*' | '/' | '?' | '!' | '.' | '+' | '<' | '>' | '=' | '|' | '&' | '^' => push_encoded(&mut s, c),
+                    _ => push_encoded(&mut s, c),
                 }
             }
             if
@@ -101,7 +124,11 @@ fn ident(name: &str, idx: usize) -> String {
             if keywords.contains(&s.as_str()) {
                 s.push('_');
             }
-            format!("v_{}", s)
+            if originally_upper {
+                format!("u_{}", s)
+            } else {
+                format!("v_{}", s)
+            }
         }
     }
 }

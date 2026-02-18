@@ -46,22 +46,34 @@ fn ident(name: &str) -> String {
         "<<" => "v_shl".to_string(),
         ">>" => "v_shr".to_string(),
         _ => {
+            fn push_encoded(s: &mut String, c: char) {
+                match c {
+                    ':' => s.push_str("_colon_"),
+                    '-' => s.push_str("_dash_"),
+                    '*' => s.push_str("_star_"),
+                    '/' => s.push_str("_slash_"),
+                    '?' => s.push_str("_q_"),
+                    '!' => s.push_str("_bang_"),
+                    '.' => s.push_str("_dot_"),
+                    '+' => s.push_str("_plus_"),
+                    '<' => s.push_str("_lt_"),
+                    '>' => s.push_str("_gt_"),
+                    '=' => s.push_str("_eq_"),
+                    '|' => s.push_str("_pipe_"),
+                    '&' => s.push_str("_amp_"),
+                    '^' => s.push_str("_xor_"),
+                    _ => s.push('_'),
+                }
+            }
+
             let mut s = String::new();
-            let mut prev_us = false;
             for c in name.chars() {
-                let mapped = match c {
-                    'a'..='z' | 'A'..='Z' | '0'..='9' => c,
-                    ':' | '-' | '*' | '/' | '?' | '!' | '.' | '>' | '<' | '=' => '_',
-                    _ => '_',
-                };
-                if mapped == '_' {
-                    if !prev_us {
-                        s.push('_');
+                match c {
+                    'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => {
+                        s.push(c);
                     }
-                    prev_us = true;
-                } else {
-                    s.push(mapped);
-                    prev_us = false;
+                    ':' | '-' | '*' | '/' | '?' | '!' | '.' | '+' | '<' | '>' | '=' | '|' | '&' | '^' => push_encoded(&mut s, c),
+                    _ => push_encoded(&mut s, c),
                 }
             }
             let mut out = if s.is_empty() {
@@ -814,7 +826,15 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
         Expression::Int(n) => format!("{}", n),
         Expression::Float(n) => format!("{}f32", n),
         Expression::Word(w) => {
-            if w == "nil" { "0i32".to_string() } else { ident(w) }
+            if w == "nil" {
+                "0i32".to_string()
+            } else {
+                let id = ident(w);
+                match node.typ.as_ref() {
+                    Some(Type::List(_)) | Some(Type::Tuple(_)) => format!("({}).clone()", id),
+                    _ => id,
+                }
+            }
         }
         Expression::Apply(items) => {
             if items.is_empty() {
@@ -925,7 +945,7 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                                 .map(compile_expr)
                                 .unwrap_or_else(|| "1".to_string());
                             format!(
-                                "{{ let __r = ({}).borrow(); std::rc::Rc::new(std::cell::RefCell::new(__r[({}) as usize..].to_vec())) }}",
+                                "{{ let __arr = {}; let __r = __arr.borrow(); std::rc::Rc::new(std::cell::RefCell::new(__r[({}) as usize..].to_vec())) }}",
                                 a,
                                 i
                             )
@@ -1300,7 +1320,7 @@ fn v_shl(a: i32, b: i32) -> i32 { a << b }
 fn v_shr(a: i32, b: i32) -> i32 { a >> b }
 "#;
     format!(
-        "#![allow(warnings)]\n\nfn normalize_ws(s: &str) -> String {{\n    let mut out = String::new();\n    let mut prev_space = false;\n    for ch in s.chars() {{\n        if ch.is_whitespace() {{\n            if !prev_space {{\n                out.push(' ');\n                prev_space = true;\n            }}\n        }} else {{\n            out.push(ch);\n            prev_space = false;\n        }}\n    }}\n    out.trim().to_string()\n}}\n\nfn pretty_result<T: std::fmt::Debug>(value: &T) -> String {{\n    let mut s = format!(\"{{:?}}\", value);\n    s = s.replace(\"RefCell {{ value: \", \"\");\n    s = s.replace(\"}}\", \"\");\n    s = s.replace(',', \"\");\n    normalize_ws(&s)\n}}\n{}\n#[allow(non_snake_case)]\nfn {}(x: i32) -> f32 {{ x as f32 }}\n\n#[allow(non_snake_case)]\nfn {}(x: f32) -> i32 {{ x as i32 }}\n\nfn main() {{\n    let result = {};\n    println!(\"{{}}\", pretty_result(&result));\n}}\n",
+        "#![allow(warnings)]\n\nfn normalize_ws(s: &str) -> String {{\n    let mut out = String::new();\n    let mut prev_space = false;\n    for ch in s.chars() {{\n        if ch.is_whitespace() {{\n            if !prev_space {{\n                out.push(' ');\n                prev_space = true;\n            }}\n        }} else {{\n            out.push(ch);\n            prev_space = false;\n        }}\n    }}\n    out.trim().to_string()\n}}\n\nfn pretty_result<T: std::fmt::Debug>(value: &T) -> String {{\n    let mut s = format!(\"{{:?}}\", value);\n    s = s.replace(\"RefCell {{ value: \", \"\");\n    s = s.replace(\"}}\", \"\");\n    s = s.replace(',', \"\");\n    s = s.replace('(', \"[\");\n    s = s.replace(')', \"]\");\n    normalize_ws(&s)\n}}\n{}\n#[allow(non_snake_case)]\nfn {}(x: i32) -> f32 {{ x as f32 }}\n\n#[allow(non_snake_case)]\nfn {}(x: f32) -> i32 {{ x as i32 }}\n\nfn main() {{\n    let result = {};\n    println!(\"{{}}\", pretty_result(&result));\n}}\n",
         helpers,
         int_to_float_name,
         float_to_int_name,

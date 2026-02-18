@@ -665,7 +665,7 @@ fn show_expr_for_type(ty: &Type, var: &str) -> String {
                 .map(|(i, t)| show_expr_for_type(t, &names[i]))
                 .collect::<Vec<_>>();
             format!(
-                "(let ({}) = {} in \"(\" ^ String.concat \" \" [{}] ^ \")\")",
+                "(let ({}) = {} in \"[\" ^ String.concat \" \" [{}] ^ \"]\")",
                 names.join(", "),
                 var,
                 rendered.join("; ")
