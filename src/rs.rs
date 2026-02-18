@@ -1,50 +1,56 @@
 use crate::infer::TypedExpression;
 use crate::parser::Expression;
 use crate::types::Type;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    static DECL_ARITY: RefCell<HashMap<String, usize>> = RefCell::new(HashMap::new());
+}
 
 fn ident(name: &str) -> String {
     match name {
         "true" => "true".to_string(),
         "false" => "false".to_string(),
-        "+" => "v_plus".to_string(),
-        "+#" => "v_plus_char".to_string(),
-        "+." => "v_plus_float".to_string(),
-        "-" => "v_minus".to_string(),
-        "-#" => "v_minus_char".to_string(),
-        "-." => "v_minus_float".to_string(),
-        "*" => "v_mul".to_string(),
-        "*#" => "v_mul_char".to_string(),
-        "*." => "v_mul_float".to_string(),
-        "/" => "v_div".to_string(),
-        "/#" => "v_div_char".to_string(),
-        "/." => "v_div_float".to_string(),
-        "mod" => "v_mod".to_string(),
-        "mod." => "v_mod_float".to_string(),
-        "=" => "v_eq".to_string(),
-        "=?" => "v_eq_bool".to_string(),
-        "=#" => "v_eq_char".to_string(),
-        "=." => "v_eq_float".to_string(),
-        "<" => "v_lt".to_string(),
-        "<#" => "v_lt_char".to_string(),
-        "<." => "v_lt_float".to_string(),
-        ">" => "v_gt".to_string(),
-        ">#" => "v_gt_char".to_string(),
-        ">." => "v_gt_float".to_string(),
-        "<=" => "v_lte".to_string(),
-        "<=#" => "v_lte_char".to_string(),
-        "<=." => "v_lte_float".to_string(),
-        ">=" => "v_gte".to_string(),
-        ">=#" => "v_gte_char".to_string(),
-        ">=." => "v_gte_float".to_string(),
-        "not" => "v_not".to_string(),
-        "and" => "v_and".to_string(),
-        "or" => "v_or".to_string(),
-        "^" => "v_xor".to_string(),
-        "|" => "v_bor".to_string(),
-        "&" => "v_band".to_string(),
-        "~" => "v_bnot".to_string(),
-        "<<" => "v_shl".to_string(),
-        ">>" => "v_shr".to_string(),
+        "+" => "(|a, b| a + b)".to_string(),
+        "+#" => "(|a, b| a + b)".to_string(),
+        "+." => "(|a, b| a + b)".to_string(),
+        "-" => "(|a, b| a - b)".to_string(),
+        "-#" => "(|a, b| a - b)".to_string(),
+        "-." => "(|a, b| a - b)".to_string(),
+        "*" => "(|a, b| a * b)".to_string(),
+        "*#" => "(|a, b| a * b)".to_string(),
+        "*." => "(|a, b| a * b)".to_string(),
+        "/" => "(|a, b| a / b)".to_string(),
+        "/#" => "(|a, b| a / b)".to_string(),
+        "/." => "(|a, b| a / b)".to_string(),
+        "mod" => "(|a, b| a % b)".to_string(),
+        "mod." => "(|a, b| a % b)".to_string(),
+        "=" => "(|a, b| a == b)".to_string(),
+        "=?" => "(|a, b| a == b)".to_string(),
+        "=#" => "(|a, b| a == b)".to_string(),
+        "=." => "(|a, b| a == b)".to_string(),
+        "<" => "(|a, b| a < b)".to_string(),
+        "<#" => "(|a, b| a < b)".to_string(),
+        "<." => "(|a, b| a < b)".to_string(),
+        ">" => "(|a, b| a > b)".to_string(),
+        ">#" => "(|a, b| a > b)".to_string(),
+        ">." => "(|a, b| a > b)".to_string(),
+        "<=" => "(|a, b| a <= b)".to_string(),
+        "<=#" => "(|a, b| a <= b)".to_string(),
+        "<=." => "(|a, b| a <= b)".to_string(),
+        ">=" => "(|a, b| a >= b)".to_string(),
+        ">=#" => "(|a, b| a >= b)".to_string(),
+        ">=." => "(|a, b| a >= b)".to_string(),
+        "not" => "(|a| !a)".to_string(),
+        "and" => "(|a, b| a && b)".to_string(),
+        "or" => "(|a, b| a || b)".to_string(),
+        "^" => "(|a, b| a ^ b)".to_string(),
+        "|" => "(|a, b| a | b)".to_string(),
+        "&" => "(|a, b| a & b)".to_string(),
+        "~" => "(|a| !a)".to_string(),
+        "<<" => "(|a, b| a << b)".to_string(),
+        ">>" => "(|a, b| a >> b)".to_string(),
         _ => {
             fn push_encoded(s: &mut String, c: char) {
                 match c {
@@ -470,6 +476,46 @@ fn type_contains_var(t: &Type) -> bool {
     }
 }
 
+fn compile_function_alias(alias: &str, target: &str, fn_type: &Type) -> String {
+    let (param_types, ret_type) = function_parts(fn_type);
+    let mut tvs = std::collections::BTreeSet::new();
+    collect_type_vars(fn_type, &mut tvs);
+    let mut type_var_map: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
+    for (i, id) in tvs.iter().enumerate() {
+        type_var_map.insert(*id, format!("T{}", i));
+    }
+    let mut generic_bounds = tvs
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("T{}: Clone", i))
+        .collect::<Vec<_>>();
+    generic_bounds.sort();
+    generic_bounds.dedup();
+    let generics = if generic_bounds.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", generic_bounds.join(", "))
+    };
+
+    let mut params_decl = Vec::new();
+    let mut call_args = Vec::new();
+    for (i, p) in param_types.iter().enumerate() {
+        let name = format!("__p{}", i);
+        params_decl.push(format!("{}: {}", name, rust_type_with_vars(p, &type_var_map)));
+        call_args.push(format!("std_clone(&({}))", name));
+    }
+    let ret = rust_type_with_vars(&ret_type, &type_var_map);
+    format!(
+        "fn {}{}({}) -> {} {{ {}({}) }}",
+        ident(alias),
+        generics,
+        params_decl.join(", "),
+        ret,
+        ident(target),
+        call_args.join(", ")
+    )
+}
+
 fn lambda_captures_from_set(
     lambda_items: &[Expression],
     captured_names: &std::collections::HashSet<String>
@@ -582,6 +628,27 @@ fn compile_do(items: &[Expression], node: &TypedExpression, lift_named_fns: bool
                                 .and_then(|n| n.children.get(2))
                                 .map(|n| compile_expr_with_mode(n, false))
                                 .unwrap_or_else(|| "()".to_string());
+                            if
+                                lift_named_fns &&
+                                matches!(&let_items[2], Expression::Word(_)) &&
+                                value_node.and_then(|n| n.typ.as_ref()).is_some_and(|t|
+                                    matches!(t, Type::Function(_, _)) && type_contains_var(t)
+                                )
+                            {
+                                if let Expression::Word(target_word) = &let_items[2] {
+                                    lines.push(
+                                        compile_function_alias(
+                                            name,
+                                            target_word,
+                                            value_node.and_then(|n| n.typ.as_ref()).unwrap()
+                                        )
+                                    );
+                                    let name_id = ident(name);
+                                    prior_function_names.insert(name_id.clone());
+                                    prior_top_level_names.insert(name_id);
+                                    continue;
+                                }
+                            }
                             if let Some(val_node) = value_node {
                                 if let Expression::Apply(lambda_items) = &let_items[2] {
                                     if !lambda_items.is_empty() {
@@ -663,7 +730,12 @@ fn compile_lambda(items: &[Expression], node: &TypedExpression) -> String {
                         } else {
                             rust_type_with_vars(param_ty, &empty_vars)
                         };
-                        params.push(format!("{}: {}", ident(name), ty));
+                        if ty == "_" {
+                            // Avoid `|x: _|` in closures.
+                            params.push(ident(name));
+                        } else {
+                            params.push(format!("{}: {}", ident(name), ty));
+                        }
                     }
                 }
             } else {
@@ -695,13 +767,21 @@ fn compile_loop(node: &TypedExpression) -> String {
     )
 }
 
-fn compile_call(node: &TypedExpression) -> String {
-    let f = node.children
+fn compile_call_parts(children: &[TypedExpression]) -> String {
+    fn declared_arity_for_head(head: &TypedExpression) -> Option<usize> {
+        if let Expression::Word(w) = &head.expr {
+            let key = ident(w);
+            return DECL_ARITY.with(|m| m.borrow().get(&key).copied());
+        }
+        None
+    }
+
+    let f = children
         .first()
         .map(compile_expr)
         .unwrap_or_else(|| "()".to_string());
     let mut arg_exprs: Vec<Option<String>> = Vec::new();
-    for arg in &node.children[1..] {
+    for arg in &children[1..] {
         if let Expression::Word(w) = &arg.expr {
             if w == "_" || w == "__ignored" {
                 arg_exprs.push(None);
@@ -714,7 +794,8 @@ fn compile_call(node: &TypedExpression) -> String {
             continue;
         }
         let clone_by_type = match arg.typ.as_ref() {
-            Some(Type::List(_)) | Some(Type::Tuple(_)) | Some(Type::Var(_)) => true,
+            Some(Type::List(_)) | Some(Type::Tuple(_)) => true,
+            Some(Type::Var(_)) => true,
             Some(Type::Function(_, _)) => false,
             Some(Type::Int)
             | Some(Type::Float)
@@ -725,9 +806,10 @@ fn compile_call(node: &TypedExpression) -> String {
         };
         let clone_by_word_fallback =
             matches!(arg.expr, Expression::Word(_)) &&
-            !matches!(arg.typ.as_ref(), Some(Type::Function(_, _)));
+            matches!(arg.typ.as_ref(), Some(_)) &&
+            !matches!(arg.typ.as_ref(), Some(Type::Function(_, _)) | Some(Type::Var(_)));
         if clone_by_type || clone_by_word_fallback {
-            arg_exprs.push(Some(format!("({}).clone()", expr)));
+            arg_exprs.push(Some(format!("std_clone(&({}))", expr)));
         } else {
             arg_exprs.push(Some(expr));
         }
@@ -737,12 +819,16 @@ fn compile_call(node: &TypedExpression) -> String {
         return format!("{}()", f);
     }
 
-    // Partial application: if fewer args are supplied than function arity,
-    // return a closure that captures supplied args and takes the remaining ones.
-    if let Some(f_ty) = node.children.first().and_then(|n| n.typ.as_ref()) {
+    // Partial application: explicit holes or fewer supplied args than inferred arity.
+    if let Some(f_ty) = children.first().and_then(|n| n.typ.as_ref()) {
         let (param_types, _ret_ty) = function_parts(f_ty);
+        let direct_arity_opt = children
+            .first()
+            .and_then(declared_arity_for_head)
+            .or_else(|| if param_types.is_empty() { None } else { Some(param_types.len()) });
+        let direct_arity = direct_arity_opt.unwrap_or(0);
         let has_holes = arg_exprs.iter().any(|a| a.is_none());
-        if arg_exprs.len() < param_types.len() || has_holes {
+        if direct_arity > 0 && (has_holes || arg_exprs.len() < direct_arity) {
             let mut binds = Vec::new();
             binds.push(format!("let __fun = {};", f));
 
@@ -751,7 +837,7 @@ fn compile_call(node: &TypedExpression) -> String {
             let mut p_idx = 0usize;
             let mut a_idx = 0usize;
 
-            for (i, ty) in param_types.iter().enumerate() {
+            for (i, ty) in param_types.iter().take(direct_arity).enumerate() {
                 if a_idx < arg_exprs.len() {
                     if let Some(expr) = &arg_exprs[a_idx] {
                         let name = format!("__arg{}", a_idx);
@@ -778,6 +864,38 @@ fn compile_call(node: &TypedExpression) -> String {
                 all_args.join(", ")
             );
         }
+
+        // Over-application: apply first `arity` args normally, then apply the
+        // remaining arguments one-by-one to the returned function value.
+        if direct_arity > 0 && arg_exprs.len() > direct_arity {
+            let head_n = direct_arity;
+            let mut binds = Vec::new();
+            binds.push(format!("let __fun = {};", f));
+
+            let mut head_names = Vec::new();
+            for (i, arg_expr_opt) in arg_exprs.iter().take(head_n).enumerate() {
+                let arg_expr = arg_expr_opt
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| "0i32".to_string());
+                let name = format!("__arg{}", i);
+                binds.push(format!("let {} = {};", name, arg_expr));
+                head_names.push(name);
+            }
+            binds.push(format!("let mut __ap = __fun({});", head_names.join(", ")));
+
+            for (j, arg_expr_opt) in arg_exprs.iter().skip(head_n).enumerate() {
+                let arg_expr = arg_expr_opt
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| "0i32".to_string());
+                let name = format!("__arg_over{}", j);
+                binds.push(format!("let {} = {};", name, arg_expr));
+                binds.push(format!("__ap = __ap({});", name));
+            }
+
+            return format!("{{ {} __ap }}", binds.join(" "));
+        }
     }
 
     let mut binds = Vec::new();
@@ -794,6 +912,10 @@ fn compile_call(node: &TypedExpression) -> String {
     }
 
     format!("{{ {} {}({}) }}", binds.join(" "), f, names.join(", "))
+}
+
+fn compile_call(node: &TypedExpression) -> String {
+    compile_call_parts(&node.children)
 }
 
 fn tuple_index_projection(tuple_src: String, idx: usize, arity: usize) -> String {
@@ -843,6 +965,13 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
             match &items[0] {
                 Expression::Word(op) =>
                     match op.as_str() {
+                        _ if op.starts_with("std/fn/apply/first/") => {
+                            if node.children.len() >= 2 {
+                                compile_call_parts(&node.children[1..])
+                            } else {
+                                "0i32".to_string()
+                            }
+                        }
                         "do" => compile_do(items, node, lift_named_fns),
                         "vector" | "string" | "tuple" => {
                             let args = node.children[1..]
@@ -1274,6 +1403,32 @@ pub fn compile_expr(node: &TypedExpression) -> String {
 }
 
 pub fn compile_program_to_rust_typed(typed_ast: &TypedExpression) -> String {
+    fn collect_decl_arity(node: &TypedExpression, out: &mut HashMap<String, usize>) {
+        if let Expression::Apply(items) = &node.expr {
+            if let Some(Expression::Word(op)) = items.first() {
+                if (op == "let" || op == "let*" || op == "let~") && items.len() == 3 {
+                    if let Expression::Word(name) = &items[1] {
+                        if let Expression::Apply(lambda_items) = &items[2] {
+                            if let Some(Expression::Word(h)) = lambda_items.first() {
+                                if h == "lambda" {
+                                    let arity = lambda_items.len().saturating_sub(2);
+                                    out.insert(ident(name), arity);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for c in &node.children {
+            collect_decl_arity(c, out);
+        }
+    }
+
+    let mut arities = HashMap::new();
+    collect_decl_arity(typed_ast, &mut arities);
+    DECL_ARITY.with(|m| *m.borrow_mut() = arities);
+
     // Lift only non-capturing lambdas to Rust `fn` items; capturing lambdas stay closures.
     let body = compile_expr_with_mode(typed_ast, true);
     let int_to_float_name = ident("Int->Float");
@@ -1320,7 +1475,7 @@ fn v_shl(a: i32, b: i32) -> i32 { a << b }
 fn v_shr(a: i32, b: i32) -> i32 { a >> b }
 "#;
     format!(
-        "#![allow(warnings)]\n\nfn normalize_ws(s: &str) -> String {{\n    let mut out = String::new();\n    let mut prev_space = false;\n    for ch in s.chars() {{\n        if ch.is_whitespace() {{\n            if !prev_space {{\n                out.push(' ');\n                prev_space = true;\n            }}\n        }} else {{\n            out.push(ch);\n            prev_space = false;\n        }}\n    }}\n    out.trim().to_string()\n}}\n\nfn pretty_result<T: std::fmt::Debug>(value: &T) -> String {{\n    let mut s = format!(\"{{:?}}\", value);\n    s = s.replace(\"RefCell {{ value: \", \"\");\n    s = s.replace(\"}}\", \"\");\n    s = s.replace(',', \"\");\n    s = s.replace('(', \"[\");\n    s = s.replace(')', \"]\");\n    normalize_ws(&s)\n}}\n{}\n#[allow(non_snake_case)]\nfn {}(x: i32) -> f32 {{ x as f32 }}\n\n#[allow(non_snake_case)]\nfn {}(x: f32) -> i32 {{ x as i32 }}\n\nfn main() {{\n    let result = {};\n    println!(\"{{}}\", pretty_result(&result));\n}}\n",
+        "#![allow(warnings)]\n\nfn std_clone<T: Clone>(x: &T) -> T {{ x.clone() }}\n\nfn normalize_ws(s: &str) -> String {{\n    let mut out = String::new();\n    let mut prev_space = false;\n    for ch in s.chars() {{\n        if ch.is_whitespace() {{\n            if !prev_space {{\n                out.push(' ');\n                prev_space = true;\n            }}\n        }} else {{\n            out.push(ch);\n            prev_space = false;\n        }}\n    }}\n    out.trim().to_string()\n}}\n\nfn pretty_result<T: std::fmt::Debug>(value: &T) -> String {{\n    let mut s = format!(\"{{:?}}\", value);\n    s = s.replace(\"RefCell {{ value: \", \"\");\n    s = s.replace(\"}}\", \"\");\n    s = s.replace(',', \"\");\n    s = s.replace('(', \"[\");\n    s = s.replace(')', \"]\");\n    s = normalize_ws(&s);\n    s = s.replace(\"[ \", \"[\");\n    s = s.replace(\" ]\", \"]\");\n    s\n}}\n{}\n#[allow(non_snake_case)]\nfn {}(x: i32) -> f32 {{ x as f32 }}\n\n#[allow(non_snake_case)]\nfn {}(x: f32) -> i32 {{ x as i32 }}\n\nfn main() {{\n    let result = {};\n    println!(\"{{}}\", pretty_result(&result));\n}}\n",
         helpers,
         int_to_float_name,
         float_to_int_name,
