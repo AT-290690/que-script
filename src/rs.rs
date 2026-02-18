@@ -632,10 +632,16 @@ fn compile_do(items: &[Expression], node: &TypedExpression, lift_named_fns: bool
                                 lift_named_fns &&
                                 matches!(&let_items[2], Expression::Word(_)) &&
                                 value_node.and_then(|n| n.typ.as_ref()).is_some_and(|t|
-                                    matches!(t, Type::Function(_, _)) && type_contains_var(t)
+                                    matches!(t, Type::Function(_, _))
                                 )
                             {
                                 if let Expression::Word(target_word) = &let_items[2] {
+                                    let target_id = ident(target_word);
+                                    // Only emit fn-wrapper aliases when aliasing a lifted fn item.
+                                    // If target is a closure value, keep `let` alias to allow captures.
+                                    if !prior_function_names.contains(&target_id) {
+                                        // fall through to regular let alias emission
+                                    } else {
                                     lines.push(
                                         compile_function_alias(
                                             name,
@@ -647,6 +653,7 @@ fn compile_do(items: &[Expression], node: &TypedExpression, lift_named_fns: bool
                                     prior_function_names.insert(name_id.clone());
                                     prior_top_level_names.insert(name_id);
                                     continue;
+                                    }
                                 }
                             }
                             if let Some(val_node) = value_node {
@@ -682,7 +689,7 @@ fn compile_do(items: &[Expression], node: &TypedExpression, lift_named_fns: bool
                                     }
                                 }
                             }
-                            lines.push(format!("let mut {} = {};", ident(name), val_expr));
+                            lines.push(format!("let {} = {};", ident(name), val_expr));
                             prior_function_names.remove(&ident(name));
                             prior_top_level_names.insert(ident(name));
                             continue;
@@ -1149,7 +1156,7 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                                     .get(2)
                                     .map(compile_expr)
                                     .unwrap_or_else(|| "0i32".to_string());
-                                format!("{{ let mut {} = {}; 0i32 }}", name, v)
+                                format!("{{ let {} = {}; 0i32 }}", name, v)
                             } else {
                                 "0i32".to_string()
                             }
