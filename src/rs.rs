@@ -978,7 +978,6 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                                 .unwrap_or_else(|| "0f32".to_string());
                             format!("({}) as i32", a)
                         }
-                        "type" | "::" | ":" => "0i32".to_string(),
                         "not" => {
                             let a = node.children
                                 .get(1)

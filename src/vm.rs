@@ -2118,28 +2118,6 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
 
                         Ok(())
                     }
-                    ":" => {
-                        // Just ensure syntax correctness — (as expr type)
-                        if exprs.len() != 3 {
-                            return Err(
-                                "Error! as expects two arguments: (as expr Type)".to_string()
-                            );
-                        }
-
-                        // Compile the last argument normally
-                        compile(&exprs[2], code)?;
-
-                        // We intentionally do NOT emit anything for the type annotation.
-                        // The type info is only used by the type checker / inference layer.
-
-                        Ok(())
-                    }
-                    "type" | "::" => {
-                        // Trying to skip type all together but for now will just skip it
-                        // push sentinel Unit (here just Int 0) so do sees something
-                        code.push(Instruction::PushInt(0));
-                        Ok(())
-                    }
                     "char" => {
                         for arg in &exprs[1..] {
                             compile(arg, code)?;

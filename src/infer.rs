@@ -118,7 +118,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "as" => infer_as(exprs, ctx),
                     "lambda" => infer_lambda(exprs, ctx),
                     "if" => infer_if(&exprs, ctx),
-                    "let" | "type" | "::" => infer_let(&exprs, ctx),
+                    "let" => infer_let(&exprs, ctx),
                     "let*" => infer_rec(&exprs, ctx),
                     "do" => infer_do(&exprs, ctx),
                     _ => infer_function_call(exprs, ctx),
@@ -131,7 +131,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 
     if ctx.collect_expr_types {
         if let Ok(typ) = &inferred {
-        ctx.expr_types.insert(expression_id(expr), typ.clone());
+            ctx.expr_types.insert(expression_id(expr), typ.clone());
         }
     }
 

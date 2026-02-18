@@ -545,8 +545,7 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
                     "comp" => Ok(combinator_transform_rev(exprs)?),
-                    "do" => Ok(transform_types_in_do(exprs)?),
-                    "Lambda" => Ok(type_transform(exprs)?),
+                    "do" => Ok(transform_do(exprs)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
@@ -555,145 +554,6 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
         }
         other => Ok(other),
     }
-}
-
-fn defined_value_name(expr: &Expression) -> Option<String> {
-    match expr {
-        Expression::Apply(xs) if xs.len() >= 3 =>
-            match &xs[0] {
-                Expression::Word(w) if w == "let" || w == "let*" || w == "let~" => {
-                    if let Expression::Word(name) = &xs[1] { Some(name.clone()) } else { None }
-                }
-                _ => None,
-            }
-        _ => None,
-    }
-}
-
-fn is_type(expr: &Expression) -> bool {
-    matches!(expr, Expression::Apply(xs) if
-        matches!(xs.first(), Some(Expression::Word(w)) if w == "type")
-    )
-}
-fn is_type_decl(expr: &Expression) -> Option<String> {
-    match expr {
-        Expression::Apply(xs) if xs.len() >= 3 => {
-            if matches!(&xs[0], Expression::Word(w) if w == "::") {
-                if let Expression::Word(name) = &xs[1] {
-                    return Some(name.clone());
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-fn rewrite_type_name_conflicts(exprs: Vec<Expression>) -> Vec<Expression> {
-    let mut out = Vec::new();
-    let mut pending_assertions = Vec::new();
-
-    for expr in exprs {
-        // Rewrite type declaration
-        if let Some(type_name) = is_type_decl(&expr) {
-            let new_name = format!("T::Fn::{}", type_name);
-
-            let rewritten = match expr {
-                Expression::Apply(mut xs) => {
-                    xs[1] = Expression::Word(new_name.clone());
-                    Expression::Apply(xs)
-                }
-                _ => unreachable!(),
-            };
-
-            pending_assertions.push((type_name, new_name));
-            out.push(rewritten);
-            continue;
-        }
-
-        // Rewrite value definition
-        if let Some(value_name) = defined_value_name(&expr) {
-            out.push(expr.clone());
-
-            if let Some((_, tname)) = pending_assertions.iter().find(|(n, _)| *n == value_name) {
-                out.push(
-                    Expression::Apply(
-                        vec![
-                            Expression::Word(":".to_string()),
-                            Expression::Word(tname.clone()),
-                            Expression::Word(value_name.clone())
-                        ]
-                    )
-                );
-            }
-            continue;
-        }
-
-        out.push(expr);
-    }
-
-    out
-}
-
-fn type_transform(exprs: Vec<Expression>) -> Result<Expression, String> {
-    if exprs.len() < 2 {
-        return Err("Error! type requires at least one clause".into());
-    }
-
-    let mut params = vec![Expression::Word("lambda".into())];
-    let mut body_forms = Vec::new();
-
-    for expr in &exprs[1..] {
-        match expr {
-            // (: name TYPE)
-            Expression::Apply(xs) if
-                xs.len() == 3 &&
-                matches!(&xs[0], Expression::Word(w) if w == ":")
-            => {
-                let ty = xs[1].clone();
-                let name = xs[2].clone();
-
-                params.push(name.clone());
-
-                // If RHS is another (type ...), recursively rewrite it
-                let rewritten_ty = if is_type(&ty) {
-                    type_transform(match ty {
-                        Expression::Apply(inner) => inner.clone(),
-                        _ => unreachable!(),
-                    })?
-                } else {
-                    ty
-                };
-
-                body_forms.push(
-                    Expression::Apply(vec![Expression::Word(":".into()), rewritten_ty, name])
-                );
-            }
-
-            // Final return type expression
-            _ => {
-                body_forms.push(expr.clone());
-            }
-        }
-    }
-
-    Ok(
-        Expression::Apply(
-            vec![
-                params.into_iter().collect::<Vec<_>>(),
-                vec![
-                    Expression::Apply(
-                        std::iter
-                            ::once(Expression::Word("do".into()))
-                            .chain(body_forms.into_iter())
-                            .collect()
-                    )
-                ]
-            ]
-                .into_iter()
-                .flatten()
-                .collect()
-        )
-    )
 }
 
 fn destructure_pattern(
@@ -1628,12 +1488,9 @@ fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expre
     Ok(new_exprs)
 }
 
-fn transform_types_in_do(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+fn transform_do(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
-    let exprs_with_rewritten_types = rewrite_type_name_conflicts(exprs);
-    let exprs_with_destructured_lets = transform_let_destructuring_in_do(
-        exprs_with_rewritten_types
-    )?;
+    let exprs_with_destructured_lets = transform_let_destructuring_in_do(exprs)?;
     Ok(
         Expression::Apply(
             vec![Expression::Word("do".to_string())]
@@ -2036,7 +1893,7 @@ pub fn build(program: &str) -> Result<Expression, String> {
         Ok(preprocessed) => {
             let mut desugared = Vec::new();
 
-            for expr in rewrite_type_name_conflicts(parse(&preprocessed).unwrap()) {
+            for expr in parse(&preprocessed).unwrap() {
                 match desugar(expr) {
                     Ok(expr) => desugared.push(desugar_tail_recursion(expr)),
                     Err(e) => {
@@ -2062,7 +1919,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
             match parse(&preprocessed) {
                 Ok(exprs) => {
                     let mut desugared = Vec::new();
-                    for expr in rewrite_type_name_conflicts(exprs) {
+                    for expr in exprs {
                         match desugar(expr) {
                             Ok(expr) => desugared.push(desugar_tail_recursion(expr)),
                             Err(e) => {

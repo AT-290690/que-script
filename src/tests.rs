@@ -692,8 +692,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[1 3 7 8 4 6 5 2 8 8 2 0]",
             ),
             (
-                r#"(:: fibonacci (Lambda (: Int n) Int))
-(let* fibonacci (lambda n 
+                r#"(let* fibonacci (lambda n 
     (if (< n 2) n 
         (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
 
@@ -2215,8 +2214,6 @@ bbrgwb")
             ),
             (
                 r#"; SRM 727: Problem 1 - MakeTwoConsecutive
-(type String [Char])
-(:: solve (Lambda (: String s) Bool))
 (let solve (lambda s (and (> (length s) 2) (do
   (let n (length s))
   (integer c 0)

@@ -492,7 +492,6 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 .unwrap_or_else(|| "0.0".to_string());
                             format!("(int_of_float {})", a)
                         }
-                        "type" | "::" | ":" => "()".to_string(),
                         "~" => {
                             let a = node.children
                                 .get(1)
