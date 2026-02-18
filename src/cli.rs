@@ -330,6 +330,32 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         {
             println!("Error! OCaml compiler is disabled. Rebuild with --features ocaml-compiler");
         }
+    } else if cmd == "--py" {
+        #[cfg(feature = "python-compiler")]
+        {
+            let program = fs::read_to_string(path)?;
+            STD.with(|std| {
+                let std_ast = std.borrow();
+                if let crate::parser::Expression::Apply(items) = &*std_ast {
+                    match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                        Ok(wrapped_ast) => {
+                            let out = crate::py::compile_program_to_python(&wrapped_ast);
+                            let target = format!("{}/main.py", dist);
+                            std::fs
+                                ::create_dir_all(std::path::Path::new(&target).parent().unwrap())
+                                .unwrap();
+                            let mut out_file = fs::File::create(target).unwrap();
+                            writeln!(out_file, "{}", out).unwrap();
+                        }
+                        Err(e) => println!("{}", e),
+                    }
+                }
+            });
+        }
+        #[cfg(not(feature = "python-compiler"))]
+        {
+            println!("Error! Python compiler is disabled. Rebuild with --features python-compiler");
+        }
     } else if cmd == "--rs" {
         #[cfg(feature = "rust-compiler")]
         {

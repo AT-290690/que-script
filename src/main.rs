@@ -9,6 +9,8 @@ mod ir;
 mod js;
 #[cfg(feature = "ocaml-compiler")]
 mod ocaml;
+#[cfg(feature = "python-compiler")]
+mod py;
 #[cfg(feature = "rust-compiler")]
 mod rs;
 mod parser;
