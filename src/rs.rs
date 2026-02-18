@@ -6,6 +6,45 @@ fn ident(name: &str) -> String {
     match name {
         "true" => "true".to_string(),
         "false" => "false".to_string(),
+        "+" => "v_plus".to_string(),
+        "+#" => "v_plus_char".to_string(),
+        "+." => "v_plus_float".to_string(),
+        "-" => "v_minus".to_string(),
+        "-#" => "v_minus_char".to_string(),
+        "-." => "v_minus_float".to_string(),
+        "*" => "v_mul".to_string(),
+        "*#" => "v_mul_char".to_string(),
+        "*." => "v_mul_float".to_string(),
+        "/" => "v_div".to_string(),
+        "/#" => "v_div_char".to_string(),
+        "/." => "v_div_float".to_string(),
+        "mod" => "v_mod".to_string(),
+        "mod." => "v_mod_float".to_string(),
+        "=" => "v_eq".to_string(),
+        "=?" => "v_eq_bool".to_string(),
+        "=#" => "v_eq_char".to_string(),
+        "=." => "v_eq_float".to_string(),
+        "<" => "v_lt".to_string(),
+        "<#" => "v_lt_char".to_string(),
+        "<." => "v_lt_float".to_string(),
+        ">" => "v_gt".to_string(),
+        ">#" => "v_gt_char".to_string(),
+        ">." => "v_gt_float".to_string(),
+        "<=" => "v_lte".to_string(),
+        "<=#" => "v_lte_char".to_string(),
+        "<=." => "v_lte_float".to_string(),
+        ">=" => "v_gte".to_string(),
+        ">=#" => "v_gte_char".to_string(),
+        ">=." => "v_gte_float".to_string(),
+        "not" => "v_not".to_string(),
+        "and" => "v_and".to_string(),
+        "or" => "v_or".to_string(),
+        "^" => "v_xor".to_string(),
+        "|" => "v_bor".to_string(),
+        "&" => "v_band".to_string(),
+        "~" => "v_bnot".to_string(),
+        "<<" => "v_shl".to_string(),
+        ">>" => "v_shr".to_string(),
         _ => {
             let mut s = String::new();
             let mut prev_us = false;
@@ -26,7 +65,7 @@ fn ident(name: &str) -> String {
                 }
             }
             let mut out = if s.is_empty() {
-                "_".to_string()
+                "__ignored".to_string()
             } else if
                 s
                     .chars()
@@ -92,7 +131,9 @@ fn ident(name: &str) -> String {
                 "yield",
                 "try",
             ];
-            if RUST_KEYWORDS.contains(&out.as_str()) {
+            if out == "_" {
+                out = "__ignored".to_string();
+            } else if RUST_KEYWORDS.contains(&out.as_str()) {
                 out.push('_');
             }
             out
@@ -647,32 +688,40 @@ fn compile_call(node: &TypedExpression) -> String {
         .first()
         .map(compile_expr)
         .unwrap_or_else(|| "()".to_string());
-    let args = node.children[1..]
-        .iter()
-        .map(|arg| {
-            let expr = compile_expr(arg);
-            let clone_by_type = match arg.typ.as_ref() {
-                Some(Type::List(_)) | Some(Type::Tuple(_)) | Some(Type::Var(_)) => { true }
-                Some(Type::Function(_, _)) => false,
-                | Some(Type::Int)
-                | Some(Type::Float)
-                | Some(Type::Bool)
-                | Some(Type::Char)
-                | Some(Type::Unit) => false,
-                None => false,
-            };
-            let clone_by_word_fallback =
-                matches!(arg.expr, Expression::Word(_)) &&
-                !matches!(arg.typ.as_ref(), Some(Type::Function(_, _)));
-            if clone_by_type || clone_by_word_fallback {
-                format!("({}).clone()", expr)
-            } else {
-                expr
+    let mut arg_exprs: Vec<Option<String>> = Vec::new();
+    for arg in &node.children[1..] {
+        if let Expression::Word(w) = &arg.expr {
+            if w == "_" || w == "__ignored" {
+                arg_exprs.push(None);
+                continue;
             }
-        })
-        .collect::<Vec<_>>();
+        }
+        let expr = compile_expr(arg);
+        if expr == "__ignored" {
+            arg_exprs.push(None);
+            continue;
+        }
+        let clone_by_type = match arg.typ.as_ref() {
+            Some(Type::List(_)) | Some(Type::Tuple(_)) | Some(Type::Var(_)) => true,
+            Some(Type::Function(_, _)) => false,
+            Some(Type::Int)
+            | Some(Type::Float)
+            | Some(Type::Bool)
+            | Some(Type::Char)
+            | Some(Type::Unit) => false,
+            None => false,
+        };
+        let clone_by_word_fallback =
+            matches!(arg.expr, Expression::Word(_)) &&
+            !matches!(arg.typ.as_ref(), Some(Type::Function(_, _)));
+        if clone_by_type || clone_by_word_fallback {
+            arg_exprs.push(Some(format!("({}).clone()", expr)));
+        } else {
+            arg_exprs.push(Some(expr));
+        }
+    }
 
-    if args.is_empty() {
+    if arg_exprs.is_empty() {
         return format!("{}()", f);
     }
 
@@ -680,27 +729,36 @@ fn compile_call(node: &TypedExpression) -> String {
     // return a closure that captures supplied args and takes the remaining ones.
     if let Some(f_ty) = node.children.first().and_then(|n| n.typ.as_ref()) {
         let (param_types, _ret_ty) = function_parts(f_ty);
-        if args.len() < param_types.len() {
+        let has_holes = arg_exprs.iter().any(|a| a.is_none());
+        if arg_exprs.len() < param_types.len() || has_holes {
             let mut binds = Vec::new();
             binds.push(format!("let __fun = {};", f));
 
-            let mut supplied_names = Vec::new();
-            for (i, arg_expr) in args.iter().enumerate() {
-                let name = format!("__arg{}", i);
-                binds.push(format!("let {} = {};", name, arg_expr));
-                supplied_names.push(name);
-            }
-
             let mut rem_params = Vec::new();
-            let mut rem_names = Vec::new();
-            for (i, ty) in param_types[args.len()..].iter().enumerate() {
-                let name = format!("__p{}", i);
-                rem_names.push(name.clone());
-                rem_params.push(format!("{}: {}", name, rust_type_with_infer_vars(ty)));
-            }
+            let mut all_args = Vec::new();
+            let mut p_idx = 0usize;
+            let mut a_idx = 0usize;
 
-            let mut all_args = supplied_names;
-            all_args.extend(rem_names);
+            for (i, ty) in param_types.iter().enumerate() {
+                if a_idx < arg_exprs.len() {
+                    if let Some(expr) = &arg_exprs[a_idx] {
+                        let name = format!("__arg{}", a_idx);
+                        binds.push(format!("let {} = {};", name, expr));
+                        all_args.push(name);
+                    } else {
+                        let name = format!("__p{}", p_idx);
+                        p_idx += 1;
+                        rem_params.push(format!("{}: {}", name, rust_type_with_infer_vars(ty)));
+                        all_args.push(name);
+                    }
+                    a_idx += 1;
+                } else {
+                    let name = format!("__p{}", p_idx);
+                    p_idx += 1;
+                    rem_params.push(format!("{}: {}", name, rust_type_with_infer_vars(&param_types[i])));
+                    all_args.push(name);
+                }
+            }
             return format!(
                 "{{ {} move |{}| {{ __fun({}) }} }}",
                 binds.join(" "),
@@ -713,7 +771,11 @@ fn compile_call(node: &TypedExpression) -> String {
     let mut binds = Vec::new();
     let mut names = Vec::new();
 
-    for (i, arg_expr) in args.iter().enumerate() {
+    for (i, arg_expr_opt) in arg_exprs.iter().enumerate() {
+        let arg_expr = arg_expr_opt
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| "0i32".to_string());
         let name = format!("__arg{}", i);
         binds.push(format!("let {} = {};", name, arg_expr));
         names.push(name);
@@ -1196,8 +1258,50 @@ pub fn compile_program_to_rust_typed(typed_ast: &TypedExpression) -> String {
     let body = compile_expr_with_mode(typed_ast, true);
     let int_to_float_name = ident("Int->Float");
     let float_to_int_name = ident("Float->Int");
+    let helpers = r#"
+fn v_plus(a: i32, b: i32) -> i32 { a + b }
+fn v_plus_char(a: i32, b: i32) -> i32 { a + b }
+fn v_plus_float(a: f32, b: f32) -> f32 { a + b }
+fn v_minus(a: i32, b: i32) -> i32 { a - b }
+fn v_minus_char(a: i32, b: i32) -> i32 { a - b }
+fn v_minus_float(a: f32, b: f32) -> f32 { a - b }
+fn v_mul(a: i32, b: i32) -> i32 { a * b }
+fn v_mul_char(a: i32, b: i32) -> i32 { a * b }
+fn v_mul_float(a: f32, b: f32) -> f32 { a * b }
+fn v_div(a: i32, b: i32) -> i32 { a / b }
+fn v_div_char(a: i32, b: i32) -> i32 { a / b }
+fn v_div_float(a: f32, b: f32) -> f32 { a / b }
+fn v_mod(a: i32, b: i32) -> i32 { a % b }
+fn v_mod_float(a: f32, b: f32) -> f32 { a % b }
+fn v_eq(a: i32, b: i32) -> bool { a == b }
+fn v_eq_bool(a: bool, b: bool) -> bool { a == b }
+fn v_eq_char(a: i32, b: i32) -> bool { a == b }
+fn v_eq_float(a: f32, b: f32) -> bool { a == b }
+fn v_lt(a: i32, b: i32) -> bool { a < b }
+fn v_lt_char(a: i32, b: i32) -> bool { a < b }
+fn v_lt_float(a: f32, b: f32) -> bool { a < b }
+fn v_gt(a: i32, b: i32) -> bool { a > b }
+fn v_gt_char(a: i32, b: i32) -> bool { a > b }
+fn v_gt_float(a: f32, b: f32) -> bool { a > b }
+fn v_lte(a: i32, b: i32) -> bool { a <= b }
+fn v_lte_char(a: i32, b: i32) -> bool { a <= b }
+fn v_lte_float(a: f32, b: f32) -> bool { a <= b }
+fn v_gte(a: i32, b: i32) -> bool { a >= b }
+fn v_gte_char(a: i32, b: i32) -> bool { a >= b }
+fn v_gte_float(a: f32, b: f32) -> bool { a >= b }
+fn v_not(a: bool) -> bool { !a }
+fn v_and(a: bool, b: bool) -> bool { a && b }
+fn v_or(a: bool, b: bool) -> bool { a || b }
+fn v_xor(a: i32, b: i32) -> i32 { a ^ b }
+fn v_bor(a: i32, b: i32) -> i32 { a | b }
+fn v_band(a: i32, b: i32) -> i32 { a & b }
+fn v_bnot(a: i32) -> i32 { !a }
+fn v_shl(a: i32, b: i32) -> i32 { a << b }
+fn v_shr(a: i32, b: i32) -> i32 { a >> b }
+"#;
     format!(
-        "#![allow(warnings)]\n\nfn normalize_ws(s: &str) -> String {{\n    let mut out = String::new();\n    let mut prev_space = false;\n    for ch in s.chars() {{\n        if ch.is_whitespace() {{\n            if !prev_space {{\n                out.push(' ');\n                prev_space = true;\n            }}\n        }} else {{\n            out.push(ch);\n            prev_space = false;\n        }}\n    }}\n    out.trim().to_string()\n}}\n\nfn pretty_result<T: std::fmt::Debug>(value: &T) -> String {{\n    let mut s = format!(\"{{:?}}\", value);\n    s = s.replace(\"RefCell {{ value: \", \"\");\n    s = s.replace(\"}}\", \"\");\n    s = s.replace(',', \"\");\n    s = normalize_ws(&s);\n    s = s.replace(\"[\", \"[ \");\n    s = s.replace(\"]\", \" ]\");\n    normalize_ws(&s)\n}}\n\n#[allow(non_snake_case)]\nfn {}(x: i32) -> f32 {{ x as f32 }}\n\n#[allow(non_snake_case)]\nfn {}(x: f32) -> i32 {{ x as i32 }}\n\nfn main() {{\n    let result = {};\n    println!(\"{{}}\", pretty_result(&result));\n}}\n",
+        "#![allow(warnings)]\n\nfn normalize_ws(s: &str) -> String {{\n    let mut out = String::new();\n    let mut prev_space = false;\n    for ch in s.chars() {{\n        if ch.is_whitespace() {{\n            if !prev_space {{\n                out.push(' ');\n                prev_space = true;\n            }}\n        }} else {{\n            out.push(ch);\n            prev_space = false;\n        }}\n    }}\n    out.trim().to_string()\n}}\n\nfn pretty_result<T: std::fmt::Debug>(value: &T) -> String {{\n    let mut s = format!(\"{{:?}}\", value);\n    s = s.replace(\"RefCell {{ value: \", \"\");\n    s = s.replace(\"}}\", \"\");\n    s = s.replace(',', \"\");\n    s = normalize_ws(&s);\n    s = s.replace(\"[\", \"[ \");\n    s = s.replace(\"]\", \" ]\");\n    normalize_ws(&s)\n}}\n{}\n#[allow(non_snake_case)]\nfn {}(x: i32) -> f32 {{ x as f32 }}\n\n#[allow(non_snake_case)]\nfn {}(x: f32) -> i32 {{ x as i32 }}\n\nfn main() {{\n    let result = {};\n    println!(\"{{}}\", pretty_result(&result));\n}}\n",
+        helpers,
         int_to_float_name,
         float_to_int_name,
         body

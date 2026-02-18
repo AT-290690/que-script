@@ -3,28 +3,28 @@ fn ident(name: &str, idx: usize) -> String {
     // make a JS-safe identifier from Lisp name:
     // simple rules: replace ":" "*" "?" "!" "-" "." with underscores, remove other unsafe chars
     match name {
-        "+" | "+#" | "+." => "(a,b)=>a+b".to_string(),
-        "-" | "-#" | "-." => "(a,b)=>a-b".to_string(),
-        "/" | "/#" => "(a,b)=>(a/b)|0".to_string(),
+        "+" | "+#" | "+." => "(a)=>(b)=>a+b".to_string(),
+        "-" | "-#" | "-." => "(a)=>(b)=>a-b".to_string(),
+        "/" | "/#" => "(a)=>(b)=>(a/b)|0".to_string(),
         // float division
-        "/." => "(a,b)=>a/b".to_string(),
-        "*" | "*#" | "*." => "(a,b)=>a*b".to_string(),
-        "mod" | "mod." => "(a,b)=>a%b".to_string(),
-        "=" | "=?" | "=#" | "=." => "(a,b)=>a==b".to_string(),
-        "<" | "<#" | "<." => "(a,b)=>a<b".to_string(),
-        ">" | ">#" | ">." => "(a,b)=>a>b".to_string(),
-        "<=" | "<=#" | "<=." => "(a,b)=>a<=b".to_string(),
-        ">=" | ">=#" | ">=." => "(a,b)=>a>=b".to_string(),
+        "/." => "(a)=>(b)=>a/b".to_string(),
+        "*" | "*#" | "*." => "(a)=>(b)=>a*b".to_string(),
+        "mod" | "mod." => "(a)=>(b)=>a%b".to_string(),
+        "=" | "=?" | "=#" | "=." => "(a)=>(b)=>a==b".to_string(),
+        "<" | "<#" | "<." => "(a)=>(b)=>a<b".to_string(),
+        ">" | ">#" | ">." => "(a)=>(b)=>a>b".to_string(),
+        "<=" | "<=#" | "<=." => "(a)=>(b)=>a<=b".to_string(),
+        ">=" | ">=#" | ">=." => "(a)=>(b)=>a>=b".to_string(),
 
         "not" => "(a)=>!a".to_string(),
-        "and" => "(a,b)=>a&&b".to_string(),
-        "or" => "(a,b)=>a||b".to_string(),
+        "and" => "(a)=>(b)=>a&&b".to_string(),
+        "or" => "(a)=>(b)=>a||b".to_string(),
 
-        "^" => "(a,b)=>a^b".to_string(),
-        ">>" => "(a,b)=>a>>b".to_string(),
-        "<<" => "(a,b)=>a<<b".to_string(),
-        "|" => "(a,b)=>a|b".to_string(),
-        "&" => "(a,b)=>a&b".to_string(),
+        "^" => "(a)=>(b)=>a^b".to_string(),
+        ">>" => "(a)=>(b)=>a>>b".to_string(),
+        "<<" => "(a)=>(b)=>a<<b".to_string(),
+        "|" => "(a)=>(b)=>a|b".to_string(),
+        "&" => "(a)=>(b)=>a&b".to_string(),
         "~" => "(a)=>~a".to_string(),
 
         "fst" => "(a)=>a[0]".to_string(),
@@ -100,6 +100,15 @@ fn ident(name: &str, idx: usize) -> String {
 }
 pub fn compile_expr_to_js(expr: &Expression) -> String {
     compile_expr_to_js_inner(expr, false)
+}
+
+fn compile_curried_call(func_js: String, args_js: &[String]) -> String {
+    if args_js.is_empty() {
+        return format!("({})()", func_js);
+    }
+    args_js
+        .iter()
+        .fold(func_js, |acc, arg| format!("({})({})", acc, arg))
 }
 
 /// Compile a single Expression into a JavaScript expression / snippet.
@@ -347,12 +356,13 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             let body_expr = &items[items.len() - 1];
                             let body_js = compile_expr_to_js_inner(body_expr, true);
 
-                            if params.len() == 0 {
+                            if params.is_empty() {
                                 format!("() => {}", body_js)
-                            } else if params.len() == 1 {
-                                format!("({}) => {}", params[0], body_js)
                             } else {
-                                format!("_curry(({}) => {})", params.join(", "), body_js)
+                                params
+                                    .iter()
+                                    .rev()
+                                    .fold(body_js, |acc, p| format!("({}) => {}", p, acc))
                             }
                         }
                         "as" | "char" | "Int->Float" =>
@@ -366,7 +376,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                                 .iter()
                                 .map(|e| compile_expr_to_js(e))
                                 .collect();
-                            format!("{}({})", func_js, args_js.join(", "))
+                            compile_curried_call(func_js, &args_js)
                         }
                     }
 
@@ -377,7 +387,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         .iter()
                         .map(|e| compile_expr_to_js(e))
                         .collect();
-                    format!("({})({})", func_js, args_js.join(", "))
+                    compile_curried_call(format!("({})", func_js), &args_js)
                 }
             }
         }
@@ -427,7 +437,7 @@ pub fn compile_program_to_js(top: &Expression) -> String {
     let body = stmts.join("\n");
     format!(
         "(()=>{{\n{}\n{}\n}})()",
-        "let _mconsole_log_m = console.log; function _curry(func) {return function curried(...args) {if (args.length === func.length){return func(...args);}else{return function (...next) {return curried(...args, ...next);};}};}",
+        "let _mconsole_log_m = console.log;",
         body
     )
 }
