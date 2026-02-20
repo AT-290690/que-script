@@ -249,8 +249,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
 
     let args: Vec<String> = env::args().collect();
     let get_opt = |name: &str| -> Option<String> {
-        args
-            .windows(2)
+        args.windows(2)
             .find(|w| w[0] == name)
             .map(|w| w[1].clone())
     };
@@ -262,6 +261,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         "--js",
         "--ml",
         "--py",
+        "--kt",
         "--rs",
         "--comp",
         "--exec",
@@ -398,6 +398,35 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         #[cfg(not(feature = "python-compiler"))]
         {
             println!("Error! Python compiler is disabled. Rebuild with --features python-compiler");
+        }
+    } else if cmd == "--kt" {
+        #[cfg(feature = "kotlin-compiler")]
+        {
+            let program = fs::read_to_string(&source_path)?;
+            STD.with(|std| {
+                let std_ast = std.borrow();
+                if let crate::parser::Expression::Apply(items) = &*std_ast {
+                    match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                        Ok(wrapped_ast) => {
+                            let out = match crate::kotlin::compile_program_to_kotlin(&wrapped_ast) {
+                                Ok(src) => src,
+                                Err(err) => err,
+                            };
+                            let target = resolve_output_path(&dist, "main.kt");
+                            std::fs
+                                ::create_dir_all(std::path::Path::new(&target).parent().unwrap())
+                                .unwrap();
+                            let mut out_file = fs::File::create(target).unwrap();
+                            writeln!(out_file, "{}", out).unwrap();
+                        }
+                        Err(e) => println!("{}", e),
+                    }
+                }
+            });
+        }
+        #[cfg(not(feature = "kotlin-compiler"))]
+        {
+            println!("Error! Kotlin compiler is disabled. Rebuild with --features kotlin-compiler");
         }
     } else if cmd == "--rs" {
         #[cfg(feature = "rust-compiler")]

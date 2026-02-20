@@ -16,6 +16,7 @@ _Only 470KB WASM module including the library which is 85KB itself_
 - **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [Python](<https://en.wikipedia.org/wiki/Python_(programming_language)>)
 - **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [Rust](<https://en.wikipedia.org/wiki/Rust_(programming_language)>)
 - **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [OCaml](https://en.wikipedia.org/wiki/OCaml)
+- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [Kotlin](<https://en.wikipedia.org/wiki/Kotlin_(programming_language)>)
 - **[WASM](https://en.wikipedia.org/wiki/WebAssembly)** build for [online editor](https://at-290690.github.io/rust-lisp/playground)
 - It supports some cool features from **functional programming**
 
@@ -56,6 +57,12 @@ build "baked" libraries
 cargo run -- --std
 ```
 
+transpile program to JavaScrpt (`./example/dist/main.js`)
+
+```bash
+cargo run --no-default-features --features parser,type-checker,type-ast,js-compiler -- --js
+```
+
 transpile program to OCaml (`./example/dist/main.ml`)
 
 ```bash
@@ -66,6 +73,12 @@ transpile program to Rust (`./example/dist/main.rs`)
 
 ```bash
 cargo run --no-default-features --features parser,type-checker,type-ast,rust-compiler -- --rs
+```
+
+transpile program to Kotlin (`./example/dist/main.kt`)
+
+```bash
+cargo run --no-default-features --features parser,type-checker,type-ast,kotlin-compiler -- --kt
 ```
 
 type check libraries and generate lib.json

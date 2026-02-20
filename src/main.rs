@@ -11,6 +11,8 @@ mod js;
 mod ocaml;
 #[cfg(feature = "python-compiler")]
 mod py;
+#[cfg(feature = "kotlin-compiler")]
+mod kotlin;
 #[cfg(feature = "rust-compiler")]
 mod rs;
 mod parser;
