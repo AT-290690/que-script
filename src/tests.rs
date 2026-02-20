@@ -2459,6 +2459,30 @@ Prize: X=18641, Y=10279")
 (group-anagrams ["eat" "tea" "tan" "ate" "nat" "bat"])"#,
                 "[[[110 97 116] [116 97 110]] [[101 97 116] [116 101 97] [97 116 101]] [[98 97 116]]]",
             ),
+
+            (
+                r#"(let binary-search (lambda arr target
+  (do
+    (let L (box 0))
+    (let R (box (- (length arr) 1)))
+    (let result (box -1)) ; Store index here, -1 if not found
+
+    (loop (and (<= (get L 0) (get R 0)) (= (get result 0) -1))
+      (lambda
+        (do
+          (let mid (/ (+ (get L 0) (get R 0)) 2))
+          (let val (get arr mid))
+          (cond
+            (= val target) (set! result 0 mid)
+            (< val target) (set! L 0 (+ mid 1))
+            (set! R 0 (- mid 1))))))
+    (get result 0))))
+
+; Usage with your sorted result
+(let sorted-vec [1 2 5 5 6 9])
+(binary-search sorted-vec 6)"#,
+                "4",
+            ),
             // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
             // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
             // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
