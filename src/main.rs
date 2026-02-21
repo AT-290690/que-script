@@ -22,9 +22,6 @@ mod rs;
 #[cfg(feature = "wasm-compiler")]
 #[path = "compilers/wat.rs"]
 mod wat;
-#[cfg(feature = "wati-compiler")]
-#[path = "compilers/wati.rs"]
-mod wati;
 mod parser;
 mod repl;
 mod report;
