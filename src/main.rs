@@ -4,7 +4,6 @@ mod baked;
 mod cli;
 mod format;
 mod infer;
-mod ir;
 #[cfg(feature = "js-compiler")]
 #[path = "compilers/js.rs"]
 mod js;

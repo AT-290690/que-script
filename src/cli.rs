@@ -3,7 +3,6 @@
 
 use crate::baked::load_ast;
 use crate::infer::infer_with_builtins_env;
-use crate::ir::load_bytecode;
 use crate::parser::build;
 use crate::vm::parse_bitecode;
 use crate::format::format;
