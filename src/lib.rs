@@ -11,6 +11,9 @@ mod js;
 #[cfg(feature = "wasm-compiler")]
 #[path = "compilers/wat.rs"]
 mod wat;
+#[cfg(feature = "wati-compiler")]
+#[path = "compilers/wati.rs"]
+mod wati;
 #[cfg(feature = "parser")]
 mod parser;
 #[cfg(feature = "type-checker")]
@@ -130,6 +133,27 @@ pub fn wat(program: String) -> *const u8 {
             match parser::merge_std_and_program(&program, items[1..].to_vec()) {
                 Ok(wrapped_ast) =>
                     match wat::compile_program_to_wat(&wrapped_ast) {
+                        Ok(wat_src) => wat_src,
+                        Err(err) => format!("3\n{}", err),
+                    }
+                Err(err) => format!("2\n{}", err),
+            }
+        } else {
+            "1\nNo expressions...".to_string()
+        }
+    });
+    write_to_output(&result)
+}
+
+#[wasm_bindgen]
+#[cfg(all(feature = "parser", feature = "wati-compiler"))]
+pub fn wati(program: String) -> *const u8 {
+    let result = STD.with(|std| {
+        let std_ast = std.borrow();
+        if let parser::Expression::Apply(items) = &*std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) =>
+                    match wati::compile_program_to_wat(&wrapped_ast) {
                         Ok(wat_src) => wat_src,
                         Err(err) => format!("3\n{}", err),
                     }

@@ -25,7 +25,6 @@ struct Ctx<'a> {
     lambda_ids: &'a HashMap<String, i32>,
     lambda_bindings: &'a HashMap<String, TypedExpression>,
     locals: HashMap<String, usize>,
-    local_types: HashMap<String, Type>,
     tmp_i32: usize,
 }
 const EXTRA_I32_LOCALS: usize = 16;
@@ -33,7 +32,6 @@ const EXTRA_I32_LOCALS: usize = 16;
 #[derive(Clone, Copy)]
 enum VecElemKind {
     I32,
-    F32,
 }
 
 fn builtin_fn_tag(name: &str) -> Option<i32> {
@@ -63,16 +61,6 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "pop!" => Some(22),
         "fst" => Some(23),
         "snd" => Some(24),
-        "+." => Some(31),
-        "-." => Some(32),
-        "*." => Some(33),
-        "/." => Some(34),
-        "mod." => Some(35),
-        "=." => Some(36),
-        "<." => Some(37),
-        ">." => Some(38),
-        "<=." => Some(39),
-        ">=." => Some(40),
         _ => None,
     }
 }
@@ -91,85 +79,14 @@ fn is_i32ish_type(t: &Type) -> bool {
     )
 }
 
-fn is_f32_type(t: &Type) -> bool {
-    matches!(t, Type::Float)
-}
-
 fn is_ref_type(t: &Type) -> bool {
     matches!(t, Type::List(_))
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ScalarKind {
-    I32,
-    F32,
-}
-
-fn scalar_kind_from_type(t: &Type) -> ScalarKind {
-    if matches!(t, Type::Float) {
-        ScalarKind::F32
-    } else {
-        ScalarKind::I32
-    }
-}
-
-fn resolve_type(node: &TypedExpression, ctx: &Ctx<'_>) -> Option<Type> {
-    match &node.expr {
-        Expression::Word(w) => ctx.local_types.get(w).cloned().or_else(|| node.typ.clone()),
-        Expression::Apply(items) => {
-            if let Some(Expression::Word(op)) = items.first() {
-                if (op == "vector" || op == "string") && !node.children[1..].is_empty() {
-                    if let Some(elem_t) = node.children[1..]
-                        .iter()
-                        .find_map(|c| resolve_type(c, ctx))
-                    {
-                        return Some(Type::List(Box::new(elem_t)));
-                    }
-                }
-                if op == "get" {
-                    if let Some(xs) = node.children.get(1) {
-                        if let Some(Type::List(inner)) = resolve_type(xs, ctx) {
-                            return Some(*inner);
-                        }
-                    }
-                }
-                if matches!(op.as_str(), "+." | "-." | "*." | "/." | "mod.") {
-                    return Some(Type::Float);
-                }
-                if matches!(op.as_str(), "=." | "<." | ">." | "<=." | ">=.") {
-                    return Some(Type::Bool);
-                }
-                if node.children.len() == 3 {
-                    let a = node.children.get(1).and_then(|n| resolve_type(n, ctx));
-                    let b = node.children.get(2).and_then(|n| resolve_type(n, ctx));
-                    if a.as_ref().is_some_and(is_f32_type) && b.as_ref().is_some_and(is_f32_type) {
-                        return Some(Type::Float);
-                    }
-                }
-                if node.children.len() == 2 {
-                    let a = node.children.get(1).and_then(|n| resolve_type(n, ctx));
-                    if a.as_ref().is_some_and(is_f32_type) {
-                        return Some(Type::Float);
-                    }
-                }
-            }
-            match node.typ.as_ref() {
-                Some(t) if !matches!(t, Type::Var(_)) => Some(t.clone()),
-                _ => node.typ.clone(),
-            }
-        }
-        _ => match node.typ.as_ref() {
-            Some(t) if !matches!(t, Type::Var(_)) => Some(t.clone()),
-            _ => node.typ.clone(),
-        },
-    }
 }
 
 impl VecElemKind {
     fn suffix(self) -> &'static str {
         match self {
             VecElemKind::I32 => "i32",
-            VecElemKind::F32 => "f32",
         }
     }
 }
@@ -219,7 +136,7 @@ fn ident(name: &str) -> String {
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
         Type::Int | Type::Bool | Type::Char | Type::Unit => Ok("i32"),
-        Type::Float => Ok("f32"),
+        Type::Float => Err("Float is currently unsupported in wasm backend".to_string()),
         Type::List(_) | Type::Tuple(_) => Ok("i32"),
         Type::Var(_) => Ok("i32"),
         Type::Function(_, _) => Ok("i32"),
@@ -228,7 +145,7 @@ fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
 
 fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
     match typ {
-        Type::Float => Ok(VecElemKind::F32),
+        Type::Float => Err("Float vectors are currently unsupported in wasm backend".to_string()),
         Type::Int | Type::Bool | Type::Char | Type::Unit | Type::List(_) | Type::Tuple(_) => {
             Ok(VecElemKind::I32)
         }
@@ -856,7 +773,7 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
-  (func $tuple_new_i32_i32 (param $a i32) (param $b i32) (result i32)
+  (func $tuple_new (param $a i32) (param $b i32) (result i32)
     (local $ptr i32)
     i32.const 8
     call $alloc
@@ -872,76 +789,16 @@ fn emit_vector_runtime(
     local.get $ptr
   )
 
-  (func $tuple_new_f32_i32 (param $a f32) (param $b i32) (result i32)
-    (local $ptr i32)
-    i32.const 8
-    call $alloc
-    local.set $ptr
-    local.get $ptr
-    local.get $a
-    f32.store
-    local.get $ptr
-    i32.const 4
-    i32.add
-    local.get $b
-    i32.store
-    local.get $ptr
-  )
-
-  (func $tuple_new_i32_f32 (param $a i32) (param $b f32) (result i32)
-    (local $ptr i32)
-    i32.const 8
-    call $alloc
-    local.set $ptr
-    local.get $ptr
-    local.get $a
-    i32.store
-    local.get $ptr
-    i32.const 4
-    i32.add
-    local.get $b
-    f32.store
-    local.get $ptr
-  )
-
-  (func $tuple_new_f32_f32 (param $a f32) (param $b f32) (result i32)
-    (local $ptr i32)
-    i32.const 8
-    call $alloc
-    local.set $ptr
-    local.get $ptr
-    local.get $a
-    f32.store
-    local.get $ptr
-    i32.const 4
-    i32.add
-    local.get $b
-    f32.store
-    local.get $ptr
-  )
-
-  (func $tuple_fst_i32 (param $ptr i32) (result i32)
+  (func $tuple_fst (param $ptr i32) (result i32)
     local.get $ptr
     i32.load
   )
 
-  (func $tuple_fst_f32 (param $ptr i32) (result f32)
-    local.get $ptr
-    f32.load
-  )
-
-  (func $tuple_snd_i32 (param $ptr i32) (result i32)
+  (func $tuple_snd (param $ptr i32) (result i32)
     local.get $ptr
     i32.const 4
     i32.add
     i32.load
-  )
-
-  (func $tuple_snd_f32 (param $ptr i32) (result f32)
-    local.get $ptr
-    i32.const 4
-    i32.add
-    f32.load
   )
 
   (func $vec_new_i32 (param $len i32) (param $elem_ref i32) (result i32)
@@ -984,46 +841,6 @@ fn emit_vector_runtime(
     local.get $ptr
   )
 
-  (func $vec_new_f32 (param $len i32) (result i32)
-    (local $cap i32)
-    (local $ptr i32)
-    local.get $len
-    i32.const 64
-    i32.lt_s
-    if (result i32)
-      i32.const 64
-    else
-      local.get $len
-    end
-    local.set $cap
-    i32.const 16
-    local.get $cap
-    i32.const 4
-    i32.mul
-    i32.add
-    call $alloc
-    local.set $ptr
-    local.get $ptr
-    local.get $len
-    i32.store
-    local.get $ptr
-    i32.const 4
-    i32.add
-    local.get $cap
-    i32.store
-    local.get $ptr
-    i32.const 8
-    i32.add
-    i32.const 1
-    i32.store
-    local.get $ptr
-    i32.const 12
-    i32.add
-    i32.const 0
-    i32.store
-    local.get $ptr
-  )
-
   (func $vec_get_i32 (param $ptr i32) (param $idx i32) (result i32)
     local.get $ptr
     i32.const 16
@@ -1033,17 +850,6 @@ fn emit_vector_runtime(
     i32.mul
     i32.add
     i32.load
-  )
-
-  (func $vec_get_f32 (param $ptr i32) (param $idx i32) (result f32)
-    local.get $ptr
-    i32.const 16
-    i32.add
-    local.get $idx
-    i32.const 4
-    i32.mul
-    i32.add
-    f32.load
   )
 
   (func $vec_push_i32 (param $ptr i32) (param $v i32) (result i32)
@@ -1087,44 +893,6 @@ fn emit_vector_runtime(
       local.get $addr
       local.get $v
       i32.store
-      local.get $ptr
-      local.get $len
-      i32.const 1
-      i32.add
-      i32.store
-      i32.const 0
-      return
-    end
-    unreachable
-  )
-
-  (func $vec_push_f32 (param $ptr i32) (param $v f32) (result i32)
-    (local $len i32)
-    (local $cap i32)
-    (local $addr i32)
-    local.get $ptr
-    i32.load
-    local.set $len
-    local.get $ptr
-    i32.const 4
-    i32.add
-    i32.load
-    local.set $cap
-    local.get $len
-    local.get $cap
-    i32.lt_s
-    if
-      local.get $ptr
-      i32.const 16
-      i32.add
-      local.get $len
-      i32.const 4
-      i32.mul
-      i32.add
-      local.set $addr
-      local.get $addr
-      local.get $v
-      f32.store
       local.get $ptr
       local.get $len
       i32.const 1
@@ -1281,75 +1049,6 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
-  (func $vec_set_f32 (param $ptr i32) (param $idx i32) (param $v f32) (result i32)
-    (local $len i32)
-    (local $cap i32)
-    (local $addr i32)
-    local.get $ptr
-    i32.load
-    local.set $len
-    local.get $ptr
-    i32.const 4
-    i32.add
-    i32.load
-    local.set $cap
-
-    local.get $idx
-    local.get $len
-    i32.eq
-    if
-      local.get $len
-      local.get $cap
-      i32.lt_s
-      if
-        local.get $ptr
-        i32.const 16
-        i32.add
-        local.get $len
-        i32.const 4
-        i32.mul
-        i32.add
-        local.set $addr
-        local.get $addr
-        local.get $v
-        f32.store
-        local.get $ptr
-        local.get $len
-        i32.const 1
-        i32.add
-        i32.store
-        i32.const 0
-        return
-      end
-      unreachable
-    end
-
-    local.get $idx
-    i32.const 0
-    i32.ge_s
-    local.get $idx
-    local.get $len
-    i32.lt_s
-    i32.and
-    if
-      local.get $ptr
-      i32.const 16
-      i32.add
-      local.get $idx
-      i32.const 4
-      i32.mul
-      i32.add
-      local.set $addr
-      local.get $addr
-      local.get $v
-      f32.store
-      i32.const 0
-      return
-    end
-
-    unreachable
-  )
-
   (func $vec_slice_i32 (param $ptr i32) (param $start i32) (result i32)
     (local $len i32)
     (local $new_len i32)
@@ -1416,64 +1115,6 @@ fn emit_vector_runtime(
     end
   )
 
-  (func $vec_slice_f32 (param $ptr i32) (param $start i32) (result i32)
-    (local $len i32)
-    (local $new_len i32)
-    (local $i i32)
-    (local $out i32)
-    local.get $ptr
-    i32.load
-    local.set $len
-
-    local.get $start
-    i32.const 0
-    i32.le_s
-    if (result i32)
-      local.get $ptr
-    else
-      local.get $start
-      local.get $len
-      i32.ge_s
-      if (result i32)
-        i32.const 0
-        call $vec_new_f32
-      else
-        local.get $len
-        local.get $start
-        i32.sub
-        local.set $new_len
-        local.get $new_len
-        call $vec_new_f32
-        local.set $out
-        i32.const 0
-        local.set $i
-        block $done
-          loop $copy
-            local.get $i
-            local.get $new_len
-            i32.ge_s
-            br_if $done
-            local.get $out
-            local.get $i
-            local.get $ptr
-            local.get $start
-            local.get $i
-            i32.add
-            call $vec_get_f32
-            call $vec_set_f32
-            drop
-            local.get $i
-            i32.const 1
-            i32.add
-            local.set $i
-            br $copy
-          end
-        end
-        local.get $out
-      end
-    end
-  )
-
   (func $apply1_i32 (param $f i32) (param $a i32) (result i32)
 "#
     );
@@ -1513,14 +1154,14 @@ fn emit_vector_runtime(
     i32.eq
     if (result i32)
       local.get $a
-      call $tuple_fst_i32
+      call $tuple_fst
     else
     local.get $f
     i32.const 24
     i32.eq
     if (result i32)
       local.get $a
-      call $tuple_snd_i32
+      call $tuple_snd
     else
     local.get $f
     i32.const 18
@@ -1552,66 +1193,6 @@ fn emit_vector_runtime(
     out.push_str(
         r#"
   )
-
-  (func $apply1_f32 (param $f i32) (param $a f32) (result f32)
-"#
-    );
-    let mut apply1f_open_ends = 0usize;
-    for (name, tag) in fn_ids {
-        if let Some((ps, ret)) = fn_sigs.get(name) {
-            if ps.len() == 1 && is_f32_type(&ps[0]) && is_f32_type(ret) {
-                apply1f_open_ends += 1;
-                out.push_str(
-                    &format!(
-                        "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result f32)\n      local.get $a\n      call ${}\n    else\n",
-                        tag,
-                        ident(name)
-                    )
-                );
-            }
-        }
-    }
-    out.push_str(
-        r#"
-    unreachable
-"#
-    );
-    for _ in 0..apply1f_open_ends {
-        out.push_str("    end\n");
-    }
-    out.push_str("  )\n");
-    out.push_str(
-        r#"
-
-  (func $apply1_i32_f32 (param $f i32) (param $a i32) (result f32)
-"#
-    );
-    let mut apply1_i32_f32_open_ends = 0usize;
-    for (name, tag) in fn_ids {
-        if let Some((ps, ret)) = fn_sigs.get(name) {
-            if ps.len() == 1 && is_i32ish_type(&ps[0]) && is_f32_type(ret) {
-                apply1_i32_f32_open_ends += 1;
-                out.push_str(
-                    &format!(
-                        "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result f32)\n      local.get $a\n      call ${}\n    else\n",
-                        tag,
-                        ident(name)
-                    )
-                );
-            }
-        }
-    }
-    out.push_str(
-        r#"
-    unreachable
-"#
-    );
-    for _ in 0..apply1_i32_f32_open_ends {
-        out.push_str("    end\n");
-    }
-    out.push_str("  )\n");
-    out.push_str(
-        r#"
 
   (func $apply2_i32 (param $f i32) (param $a i32) (param $b i32) (result i32)
 "#
@@ -1783,10 +1364,10 @@ fn emit_vector_runtime(
     }
     out.push_str(
         r#"
-    end
-    end
-    end
-        end
+                                  end
+                                end
+                              end
+                            end
                           end
                         end
                       end
@@ -1794,138 +1375,6 @@ fn emit_vector_runtime(
                   end
                 end
               end
-            end
-          end
-        end
-      end
-    end
-  )
-"#
-    );
-    out.push_str(
-        r#"
-  (func $apply2_f32 (param $f i32) (param $a f32) (param $b f32) (result f32)
-"#
-    );
-    let mut apply2f_open_ends = 0usize;
-    for (name, tag) in fn_ids {
-        if let Some((ps, ret)) = fn_sigs.get(name) {
-            if ps.len() == 2 && is_f32_type(&ps[0]) && is_f32_type(&ps[1]) && is_f32_type(ret) {
-                apply2f_open_ends += 1;
-                out.push_str(
-                    &format!(
-                        "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result f32)\n      local.get $a\n      local.get $b\n      call ${}\n    else\n",
-                        tag,
-                        ident(name)
-                    )
-                );
-            }
-        }
-    }
-    out.push_str(
-        r#"
-    local.get $f
-    i32.const 31
-    i32.eq
-    if (result f32)
-      local.get $a
-      local.get $b
-      f32.add
-    else
-      local.get $f
-      i32.const 32
-      i32.eq
-      if (result f32)
-        local.get $a
-        local.get $b
-        f32.sub
-      else
-        local.get $f
-        i32.const 33
-        i32.eq
-        if (result f32)
-          local.get $a
-          local.get $b
-          f32.mul
-        else
-          local.get $f
-          i32.const 34
-          i32.eq
-          if (result f32)
-            local.get $a
-            local.get $b
-            f32.div
-          else
-            local.get $f
-            i32.const 35
-            i32.eq
-            if (result f32)
-              local.get $a
-              local.get $a
-              local.get $b
-              f32.div
-              f32.trunc
-              local.get $b
-              f32.mul
-              f32.sub
-            else
-              unreachable
-            end
-          end
-        end
-      end
-    end
-    "#
-    );
-    for _ in 0..apply2f_open_ends {
-        out.push_str("    end\n");
-    }
-    out.push_str("  )\n");
-    out.push_str(
-        r#"
-
-  (func $apply2_f32_i32 (param $f i32) (param $a f32) (param $b f32) (result i32)
-    local.get $f
-    i32.const 36
-    i32.eq
-    if (result i32)
-      local.get $a
-      local.get $b
-      f32.eq
-    else
-      local.get $f
-      i32.const 37
-      i32.eq
-      if (result i32)
-        local.get $a
-        local.get $b
-        f32.lt
-      else
-        local.get $f
-        i32.const 38
-        i32.eq
-        if (result i32)
-          local.get $a
-          local.get $b
-          f32.gt
-        else
-          local.get $f
-          i32.const 39
-          i32.eq
-          if (result i32)
-            local.get $a
-            local.get $b
-            f32.le
-          else
-            local.get $f
-            i32.const 40
-            i32.eq
-            if (result i32)
-              local.get $a
-              local.get $b
-              f32.ge
-            else
-              unreachable
             end
           end
         end
@@ -1989,40 +1438,31 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         .ok_or_else(|| format!("Missing rhs for {}", op))
         .and_then(|n| compile_expr(n, ctx))?;
     let code = match op {
-        "+" | "+#" => format!("{a}\n{b}\ni32.add"),
-        "-" | "-#" => format!("{a}\n{b}\ni32.sub"),
-        "*" | "*#" => format!("{a}\n{b}\ni32.mul"),
-        "/" | "/#" => format!("{a}\n{b}\ni32.div_s"),
-        "mod" => format!("{a}\n{b}\ni32.rem_s"),
-        "=" | "=?" | "=#" => format!("{a}\n{b}\ni32.eq"),
-        "<" | "<#" => format!("{a}\n{b}\ni32.lt_s"),
-        ">" | ">#" => format!("{a}\n{b}\ni32.gt_s"),
-        "<=" | "<=#" => format!("{a}\n{b}\ni32.le_s"),
-        ">=" | ">=#" => format!("{a}\n{b}\ni32.ge_s"),
-        "and" => format!("{a}\n{b}\ni32.and"),
-        "or" => format!("{a}\n{b}\ni32.or"),
-        "^" => format!("{a}\n{b}\ni32.xor"),
-        "|" => format!("{a}\n{b}\ni32.or"),
-        "&" => format!("{a}\n{b}\ni32.and"),
-        "<<" => format!("{a}\n{b}\ni32.shl"),
-        ">>" => format!("{a}\n{b}\ni32.shr_s"),
-        "+." => format!("{a}\n{b}\nf32.add"),
-        "-." => format!("{a}\n{b}\nf32.sub"),
-        "*." => format!("{a}\n{b}\nf32.mul"),
-        "/." => format!("{a}\n{b}\nf32.div"),
-        "mod." => format!(
-            "{a}\n{b}\n{a}\n{b}\nf32.div\nf32.trunc\n{b}\nf32.mul\nf32.sub"
-        ),
-        "=." => format!("{a}\n{b}\nf32.eq"),
-        "<." => format!("{a}\n{b}\nf32.lt"),
-        ">." => format!("{a}\n{b}\nf32.gt"),
-        "<=." => format!("{a}\n{b}\nf32.le"),
-        ">=." => format!("{a}\n{b}\nf32.ge"),
+        "+" | "+#" => "i32.add",
+        "-" | "-#" => "i32.sub",
+        "*" | "*#" => "i32.mul",
+        "/" | "/#" => "i32.div_s",
+        "mod" => "i32.rem_s",
+        "=" | "=?" | "=#" => "i32.eq",
+        "<" | "<#" => "i32.lt_s",
+        ">" | ">#" => "i32.gt_s",
+        "<=" | "<=#" => "i32.le_s",
+        ">=" | ">=#" => "i32.ge_s",
+        "and" => "i32.and",
+        "or" => "i32.or",
+        "^" => "i32.xor",
+        "|" => "i32.or",
+        "&" => "i32.and",
+        "<<" => "i32.shl",
+        ">>" => "i32.shr_s",
+        "+." | "-." | "*." | "/." | "mod." | "=." | "<." | ">." | "<=." | ">=." => {
+            return Err("Float is currently unsupported in wasm backend".to_string());
+        }
         _ => {
             return Err(format!("Unsupported builtin {}", op));
         }
     };
-    Ok(code)
+    Ok(format!("{a}\n{b}\n{code}"))
 }
 
 fn compile_if(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -2053,7 +1493,6 @@ fn compile_do(
     };
     let mut parts = Vec::new();
     let mut scoped_lambda_bindings = ctx.lambda_bindings.clone();
-    let mut scoped_local_types = ctx.local_types.clone();
     for i in 1..items.len() - 1 {
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
@@ -2075,7 +1514,6 @@ fn compile_do(
                                 lambda_ids: ctx.lambda_ids,
                                 lambda_bindings: &scoped_lambda_bindings,
                                 locals: ctx.locals.clone(),
-                                local_types: scoped_local_types.clone(),
                                 tmp_i32: ctx.tmp_i32,
                             };
                             if
@@ -2093,17 +1531,6 @@ fn compile_do(
                         })?;
                     if let Some(local_idx) = ctx.locals.get(name) {
                         parts.push(format!("{value}\nlocal.set {}", local_idx));
-                        if let Some(val_t) = val_node.and_then(|n| resolve_type(n, &Ctx {
-                            fn_sigs: ctx.fn_sigs,
-                            fn_ids: ctx.fn_ids,
-                            lambda_ids: ctx.lambda_ids,
-                            lambda_bindings: &scoped_lambda_bindings,
-                            locals: ctx.locals.clone(),
-                            local_types: scoped_local_types.clone(),
-                            tmp_i32: ctx.tmp_i32,
-                        })) {
-                            scoped_local_types.insert(name.clone(), val_t);
-                        }
                     } else {
                         return Err(format!("Unknown local '{}'", name));
                     }
@@ -2118,7 +1545,6 @@ fn compile_do(
                 lambda_ids: ctx.lambda_ids,
                 lambda_bindings: &scoped_lambda_bindings,
                 locals: ctx.locals.clone(),
-                local_types: scoped_local_types.clone(),
                 tmp_i32: ctx.tmp_i32,
             };
             let c = compile_expr(n, &scoped_ctx)?;
@@ -2134,7 +1560,6 @@ fn compile_do(
                 lambda_ids: ctx.lambda_ids,
                 lambda_bindings: &scoped_lambda_bindings,
                 locals: ctx.locals.clone(),
-                local_types: scoped_local_types,
                 tmp_i32: ctx.tmp_i32,
             };
             compile_expr(n, &scoped_ctx)
@@ -2144,7 +1569,7 @@ fn compile_do(
 }
 
 fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let elem_kind = match resolve_type(node, ctx).as_ref() {
+    let elem_kind = match node.typ.as_ref() {
         Some(Type::List(inner)) => vec_elem_kind_from_type(inner)?,
         Some(other) => {
             return Err(format!("vector literal expected list type, got {}", other));
@@ -2154,26 +1579,20 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         }
     };
     let args = &node.children[1..];
-    let elem_ref_flag = match resolve_type(node, ctx).as_ref() {
+    let elem_ref_flag = match node.typ.as_ref() {
         Some(Type::List(inner)) if is_ref_type(inner) => 1,
         _ => 0,
     };
     let mut out = Vec::new();
-    match elem_kind {
-        VecElemKind::I32 => {
-            out.push(
-                format!(
-                    "i32.const {}\ni32.const {}\ncall $vec_new_i32\nlocal.set {}",
-                    0,
-                    elem_ref_flag,
-                    ctx.tmp_i32
-                )
-            );
-        }
-        VecElemKind::F32 => {
-            out.push(format!("i32.const 0\ncall $vec_new_f32\nlocal.set {}", ctx.tmp_i32));
-        }
-    }
+    out.push(
+        format!(
+            "i32.const {}\ni32.const {}\ncall $vec_new_{}\nlocal.set {}",
+            0,
+            elem_ref_flag,
+            elem_kind.suffix(),
+            ctx.tmp_i32
+        )
+    );
     for a in args {
         let nested_ctx = Ctx {
             fn_sigs: ctx.fn_sigs,
@@ -2181,7 +1600,6 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             lambda_ids: ctx.lambda_ids,
             lambda_bindings: ctx.lambda_bindings,
             locals: ctx.locals.clone(),
-            local_types: ctx.local_types.clone(),
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
@@ -2194,27 +1612,15 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
 }
 
 fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let a_node = node.children.get(1).ok_or_else(|| "tuple missing first element".to_string())?;
-    let b_node = node.children.get(2).ok_or_else(|| "tuple missing second element".to_string())?;
-    let a = compile_expr(a_node, ctx)?;
-    let b = compile_expr(b_node, ctx)?;
-    let ak = resolve_type(a_node, ctx)
-        .as_ref()
-        .or(a_node.typ.as_ref())
-        .map(scalar_kind_from_type)
-        .unwrap_or(ScalarKind::I32);
-    let bk = resolve_type(b_node, ctx)
-        .as_ref()
-        .or(b_node.typ.as_ref())
-        .map(scalar_kind_from_type)
-        .unwrap_or(ScalarKind::I32);
-    let ctor = match (ak, bk) {
-        (ScalarKind::I32, ScalarKind::I32) => "$tuple_new_i32_i32",
-        (ScalarKind::F32, ScalarKind::I32) => "$tuple_new_f32_i32",
-        (ScalarKind::I32, ScalarKind::F32) => "$tuple_new_i32_f32",
-        (ScalarKind::F32, ScalarKind::F32) => "$tuple_new_f32_f32",
-    };
-    Ok(format!("{a}\n{b}\ncall {ctor}"))
+    let a = compile_expr(
+        node.children.get(1).ok_or_else(|| "tuple missing first element".to_string())?,
+        ctx
+    )?;
+    let b = compile_expr(
+        node.children.get(2).ok_or_else(|| "tuple missing second element".to_string())?,
+        ctx
+    )?;
+    Ok(format!("{a}\n{b}\ncall $tuple_new"))
 }
 
 fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -2222,13 +1628,7 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         node.children.get(1).ok_or_else(|| "fst missing tuple arg".to_string())?,
         ctx
     )?;
-    let rk = resolve_type(node, ctx)
-        .as_ref()
-        .or(node.typ.as_ref())
-        .map(scalar_kind_from_type)
-        .unwrap_or(ScalarKind::I32);
-    let getter = if rk == ScalarKind::F32 { "$tuple_fst_f32" } else { "$tuple_fst_i32" };
-    Ok(format!("{p}\ncall {getter}"))
+    Ok(format!("{p}\ncall $tuple_fst"))
 }
 
 fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -2236,13 +1636,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         node.children.get(1).ok_or_else(|| "snd missing tuple arg".to_string())?,
         ctx
     )?;
-    let rk = resolve_type(node, ctx)
-        .as_ref()
-        .or(node.typ.as_ref())
-        .map(scalar_kind_from_type)
-        .unwrap_or(ScalarKind::I32);
-    let getter = if rk == ScalarKind::F32 { "$tuple_snd_f32" } else { "$tuple_snd_i32" };
-    Ok(format!("{p}\ncall {getter}"))
+    Ok(format!("{p}\ncall $tuple_snd"))
 }
 
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -2254,7 +1648,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         node.children.get(2).ok_or_else(|| "get missing index".to_string())?,
         ctx
     )?;
-    let elem = match resolve_type(node, ctx).as_ref() {
+    let elem = match node.typ.as_ref() {
         Some(t) => vec_elem_kind_from_type(t)?,
         None => {
             return Err("get missing return type".to_string());
@@ -2274,12 +1668,10 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     )?;
     let val_node = node.children.get(3).ok_or_else(|| "set! missing value".to_string())?;
     let v = compile_expr(val_node, ctx)?;
-    let elem = resolve_type(val_node, ctx)
+    let elem = val_node.typ
         .as_ref()
-        .or(val_node.typ.as_ref())
-        .cloned()
         .ok_or_else(|| "set! value missing type".to_string())
-        .and_then(|t| vec_elem_kind_from_type(&t))?;
+        .and_then(vec_elem_kind_from_type)?;
     Ok(format!("{xs}\n{idx}\n{v}\ncall $vec_set_{}", elem.suffix()))
 }
 
@@ -2299,7 +1691,7 @@ fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     } else {
         "i32.const 1".to_string()
     };
-    let elem = match resolve_type(xs_node, ctx).as_ref() {
+    let elem = match xs_node.typ.as_ref() {
         Some(Type::List(inner)) => vec_elem_kind_from_type(inner)?,
         Some(other) => {
             return Err(format!("cdr expected list, got {}", other));
@@ -2350,7 +1742,6 @@ fn compile_loop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                 lambda_ids: ctx.lambda_ids,
                 lambda_bindings: ctx.lambda_bindings,
                 locals,
-                local_types: ctx.local_types.clone(),
                 tmp_i32: ctx.tmp_i32,
             };
             let body = compile_expr(body_node, &body_ctx)?;
@@ -2385,7 +1776,6 @@ fn compile_loop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                     lambda_ids: ctx.lambda_ids,
                     lambda_bindings: ctx.lambda_bindings,
                     locals,
-                    local_types: ctx.local_types.clone(),
                     tmp_i32: ctx.tmp_i32,
                 };
                 let body = compile_expr(body_node, &body_ctx)?;
@@ -2482,20 +1872,6 @@ fn compile_loop_finish(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, 
 }
 
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
-    let core = op.rsplit('/').next().unwrap_or(op);
-    let args = &node.children[1..];
-    if core == "set!" && args.len() == 3 {
-        let xs = compile_expr(&args[0], ctx)?;
-        let idx = compile_expr(&args[1], ctx)?;
-        let v = compile_expr(&args[2], ctx)?;
-        let elem = resolve_type(&args[2], ctx)
-            .as_ref()
-            .or(args[2].typ.as_ref())
-            .cloned()
-            .ok_or_else(|| "set! value missing type".to_string())
-            .and_then(|t| vec_elem_kind_from_type(&t))?;
-        return Ok(format!("{xs}\n{idx}\n{v}\ncall $vec_set_{}", elem.suffix()));
-    }
     let (params, _ret) = if let Some(sig) = ctx.fn_sigs.get(op) {
         sig.clone()
     } else if builtin_fn_tag(op).is_some() {
@@ -2504,32 +1880,18 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
     } else {
         return Err(format!("Unknown function '{}'", op));
     };
+    let args = &node.children[1..];
     if params.is_empty() && !args.is_empty() {
         let mut out = vec![format!("call ${}", ident(op))];
         match args.len() {
             1 => {
                 out.push(compile_expr(&args[0], ctx)?);
-                let arg_is_f32 = resolve_type(&args[0], ctx).as_ref().is_some_and(is_f32_type);
-                let ret_is_f32 = resolve_type(node, ctx).as_ref().is_some_and(is_f32_type);
-                if arg_is_f32 {
-                    out.push("call $apply1_f32".to_string());
-                } else if ret_is_f32 {
-                    out.push("call $apply1_i32_f32".to_string());
-                } else {
-                    out.push("call $apply1_i32".to_string());
-                }
+                out.push("call $apply1_i32".to_string());
             }
             2 => {
                 out.push(compile_expr(&args[0], ctx)?);
                 out.push(compile_expr(&args[1], ctx)?);
-                let args_float = args
-                    .iter()
-                    .all(|n| resolve_type(n, ctx).as_ref().is_some_and(is_f32_type));
-                if resolve_type(node, ctx).as_ref().is_some_and(is_f32_type) || args_float {
-                    out.push("call $apply2_f32".to_string());
-                } else {
-                    out.push("call $apply2_i32".to_string());
-                }
+                out.push("call $apply2_i32".to_string());
             }
             3 => {
                 out.push(compile_expr(&args[0], ctx)?);
@@ -2575,27 +1937,12 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
     match args.len() {
         1 => {
             let a = compile_expr(&args[0], ctx)?;
-            let arg_is_f32 = resolve_type(&args[0], ctx).as_ref().is_some_and(is_f32_type);
-            let ret_is_f32 = resolve_type(node, ctx).as_ref().is_some_and(is_f32_type);
-            if arg_is_f32 {
-                Ok(format!("{f}\n{a}\ncall $apply1_f32"))
-            } else if ret_is_f32 {
-                Ok(format!("{f}\n{a}\ncall $apply1_i32_f32"))
-            } else {
-                Ok(format!("{f}\n{a}\ncall $apply1_i32"))
-            }
+            Ok(format!("{f}\n{a}\ncall $apply1_i32"))
         }
         2 => {
             let a = compile_expr(&args[0], ctx)?;
             let b = compile_expr(&args[1], ctx)?;
-            let args_float = args
-                .iter()
-                .all(|n| resolve_type(n, ctx).as_ref().is_some_and(is_f32_type));
-            if resolve_type(node, ctx).as_ref().is_some_and(is_f32_type) || args_float {
-                Ok(format!("{f}\n{a}\n{b}\ncall $apply2_f32"))
-            } else {
-                Ok(format!("{f}\n{a}\n{b}\ncall $apply2_i32"))
-            }
+            Ok(format!("{f}\n{a}\n{b}\ncall $apply2_i32"))
         }
         3 => {
             let a = compile_expr(&args[0], ctx)?;
@@ -2619,8 +1966,8 @@ fn compile_local_lambda_call(
         .get(name)
         .ok_or_else(|| format!("Unknown local lambda '{}'", name))?;
     let items = match &lambda_node.expr {
-        Expression::Apply(xs)
-            if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda") => xs,
+        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda") =>
+            xs,
         _ => {
             return Err(format!("Local '{}' is not a lambda", name));
         }
@@ -2653,7 +2000,6 @@ fn compile_local_lambda_call(
             lambda_ids: ctx.lambda_ids,
             lambda_bindings: ctx.lambda_bindings,
             locals: ctx.locals.clone(),
-            local_types: ctx.local_types.clone(),
             tmp_i32: arg_tmp_base,
         };
         let arg_code = compile_expr(arg, &arg_ctx)?;
@@ -2680,7 +2026,6 @@ fn compile_local_lambda_call(
         lambda_ids: ctx.lambda_ids,
         lambda_bindings: ctx.lambda_bindings,
         locals,
-        local_types: ctx.local_types.clone(),
         tmp_i32: arg_tmp_base,
     };
     out.push(compile_expr(body_node, &body_ctx)?);
@@ -2699,7 +2044,9 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
 fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     match &node.expr {
         Expression::Int(n) => Ok(format!("i32.const {}", n)),
-        Expression::Float(n) => Ok(format!("f32.const {}", n)),
+        Expression::Float(_n) => {
+            Err("Float is currently unsupported in wasm backend".to_string())
+        }
         Expression::Word(w) =>
             match w.as_str() {
                 "true" => Ok("i32.const 1".to_string()),
@@ -2782,19 +2129,8 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(format!("{a}\ni32.eqz"))
                         }
-                        "Int->Float" => {
-                            let a = compile_expr(
-                                node.children.get(1).ok_or_else(|| "Int->Float missing arg".to_string())?,
-                                ctx
-                            )?;
-                            Ok(format!("{a}\nf32.convert_i32_s"))
-                        }
-                        "Float->Int" => {
-                            let a = compile_expr(
-                                node.children.get(1).ok_or_else(|| "Float->Int missing arg".to_string())?,
-                                ctx
-                            )?;
-                            Ok(format!("{a}\ni32.trunc_f32_s"))
+                        "Int->Float" | "Float->Int" => {
+                            Err("Float is currently unsupported in wasm backend".to_string())
                         }
                         "as" | "char" =>
                             node.children
@@ -2917,14 +2253,11 @@ fn compile_lambda_func(
     local_defs.retain(|(n, _)| !params.iter().any(|(p, _)| p == n));
 
     let mut locals = HashMap::new();
-    let mut local_types = HashMap::new();
     for (i, (p, _)) in params.iter().enumerate() {
         locals.insert(p.clone(), i);
-        local_types.insert(p.clone(), params[i].1.clone());
     }
     for (i, (n, _)) in local_defs.iter().enumerate() {
         locals.insert(n.clone(), params.len() + i);
-        local_types.insert(n.clone(), local_defs[i].1.clone());
     }
 
     let tmp_i32 = params.len() + local_defs.len();
@@ -2941,7 +2274,6 @@ fn compile_lambda_func(
         lambda_ids,
         lambda_bindings: &scoped_lambda_bindings,
         locals,
-        local_types,
         tmp_i32,
     };
     let body_code = compile_expr(body_node, &ctx)?;
@@ -3006,10 +2338,8 @@ fn compile_value_func(
     let mut local_defs = Vec::new();
     collect_let_locals(value_node, &mut local_defs);
     let mut locals = HashMap::new();
-    let mut local_types = HashMap::new();
     for (i, (n, _)) in local_defs.iter().enumerate() {
         locals.insert(n.clone(), i);
-        local_types.insert(n.clone(), local_defs[i].1.clone());
     }
     let tmp_i32 = local_defs.len();
     let mut scoped_lambda_bindings = lambda_bindings.clone();
@@ -3025,7 +2355,6 @@ fn compile_value_func(
         lambda_ids,
         lambda_bindings: &scoped_lambda_bindings,
         locals,
-        local_types,
         tmp_i32,
     };
     let body_code = compile_expr(value_node, &ctx)?;
@@ -3082,10 +2411,8 @@ fn compile_partial_helper_func(
     lambda_bindings: &HashMap<String, TypedExpression>
 ) -> Result<String, String> {
     let mut locals = HashMap::new();
-    let mut local_types = HashMap::new();
     for i in 0..h.remaining_params.len() {
         locals.insert(format!("__p{}", i), i);
-        local_types.insert(format!("__p{}", i), h.remaining_params[i].clone());
     }
     let ctx = Ctx {
         fn_sigs,
@@ -3093,7 +2420,6 @@ fn compile_partial_helper_func(
         lambda_ids,
         lambda_bindings,
         locals,
-        local_types,
         tmp_i32: h.remaining_params.len(),
     };
 
@@ -3437,10 +2763,8 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     let mut main_local_defs = Vec::new();
     collect_let_locals(&main_node, &mut main_local_defs);
     let mut main_locals = HashMap::new();
-    let mut main_local_types = HashMap::new();
     for (i, (n, _)) in main_local_defs.iter().enumerate() {
         main_locals.insert(n.clone(), i);
-        main_local_types.insert(n.clone(), main_local_defs[i].1.clone());
     }
 
     let mut scoped_lambda_bindings = lambda_bindings.clone();
@@ -3456,7 +2780,6 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         lambda_ids: &lambda_ids,
         lambda_bindings: &scoped_lambda_bindings,
         locals: main_locals,
-        local_types: main_local_types,
         tmp_i32: main_local_defs.len(),
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;
