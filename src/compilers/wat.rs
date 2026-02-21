@@ -752,6 +752,7 @@ fn emit_vector_runtime(
     (local $len i32)
     (local $i i32)
     (local $elem_ref i32)
+    (local $data i32)
     (local $v i32)
     local.get $ptr
     i32.eqz
@@ -783,10 +784,18 @@ fn emit_vector_runtime(
     i32.add
     i32.load
     local.set $elem_ref
+    local.get $ptr
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
     local.get $elem_ref
     i32.const 0
     i32.eq
     if
+      local.get $data
+      call $free
+      drop
       local.get $ptr
       call $free
       drop
@@ -804,9 +813,7 @@ fn emit_vector_runtime(
         local.get $len
         i32.ge_s
         br_if $done
-        local.get $ptr
-        i32.const 16
-        i32.add
+        local.get $data
         local.get $i
         i32.const 4
         i32.mul
@@ -823,6 +830,9 @@ fn emit_vector_runtime(
         br $loop
       end
     end
+    local.get $data
+    call $free
+    drop
     local.get $ptr
     call $free
     drop
@@ -1236,22 +1246,24 @@ fn emit_vector_runtime(
   (func $vec_new_i32 (param $len i32) (param $elem_ref i32) (result i32)
     (local $cap i32)
     (local $ptr i32)
+    (local $data i32)
     local.get $len
-    i32.const 64
+    i32.const 2
     i32.lt_s
     if (result i32)
-      i32.const 64
+      i32.const 2
     else
       local.get $len
     end
     local.set $cap
-    i32.const 16
+    i32.const 20
+    call $alloc
+    local.set $ptr
     local.get $cap
     i32.const 4
     i32.mul
-    i32.add
     call $alloc
-    local.set $ptr
+    local.set $data
     local.get $ptr
     local.get $len
     i32.store
@@ -1271,17 +1283,105 @@ fn emit_vector_runtime(
     local.get $elem_ref
     i32.store
     local.get $ptr
+    i32.const 16
+    i32.add
+    local.get $data
+    i32.store
+    local.get $ptr
   )
 
   (func $vec_get_i32 (param $ptr i32) (param $idx i32) (result i32)
     local.get $ptr
     i32.const 16
     i32.add
+    i32.load
     local.get $idx
     i32.const 4
     i32.mul
     i32.add
     i32.load
+  )
+
+  (func $vec_grow_i32 (param $ptr i32) (result i32)
+    (local $cap i32)
+    (local $new_cap i32)
+    (local $len i32)
+    (local $old_data i32)
+    (local $new_data i32)
+    (local $i i32)
+    (local $v i32)
+    local.get $ptr
+    i32.const 4
+    i32.add
+    i32.load
+    local.set $cap
+    local.get $cap
+    i32.const 2
+    i32.mul
+    local.set $new_cap
+    local.get $new_cap
+    i32.const 1
+    i32.lt_s
+    if
+      i32.const 1
+      local.set $new_cap
+    end
+    local.get $ptr
+    i32.load
+    local.set $len
+    local.get $ptr
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $old_data
+    local.get $new_cap
+    i32.const 4
+    i32.mul
+    call $alloc
+    local.set $new_data
+    i32.const 0
+    local.set $i
+    block $done
+      loop $copy
+        local.get $i
+        local.get $len
+        i32.ge_s
+        br_if $done
+        local.get $old_data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.load
+        local.set $v
+        local.get $new_data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        local.get $v
+        i32.store
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $copy
+      end
+    end
+    local.get $old_data
+    call $free
+    drop
+    local.get $ptr
+    i32.const 4
+    i32.add
+    local.get $new_cap
+    i32.store
+    local.get $ptr
+    i32.const 16
+    i32.add
+    local.get $new_data
+    i32.store
+    i32.const 0
   )
 
   (func $vec_push_i32 (param $ptr i32) (param $v i32) (result i32)
@@ -1305,35 +1405,38 @@ fn emit_vector_runtime(
     local.get $len
     local.get $cap
     i32.lt_s
+    i32.eqz
     if
-      local.get $elem_ref
-      i32.const 0
-      i32.ne
-      if
-        local.get $v
-        call $rc_retain
-        drop
-      end
       local.get $ptr
-      i32.const 16
-      i32.add
-      local.get $len
-      i32.const 4
-      i32.mul
-      i32.add
-      local.set $addr
-      local.get $addr
-      local.get $v
-      i32.store
-      local.get $ptr
-      local.get $len
-      i32.const 1
-      i32.add
-      i32.store
-      i32.const 0
-      return
+      call $vec_grow_i32
+      drop
     end
-    unreachable
+    local.get $elem_ref
+    i32.const 0
+    i32.ne
+    if
+      local.get $v
+      call $rc_retain
+      drop
+    end
+    local.get $ptr
+    i32.const 16
+    i32.add
+    i32.load
+    local.get $len
+    i32.const 4
+    i32.mul
+    i32.add
+    local.set $addr
+    local.get $addr
+    local.get $v
+    i32.store
+    local.get $ptr
+    local.get $len
+    i32.const 1
+    i32.add
+    i32.store
+    i32.const 0
   )
 
   (func $vec_set_i32 (param $ptr i32) (param $idx i32) (param $v i32) (result i32)
@@ -1363,35 +1466,39 @@ fn emit_vector_runtime(
       local.get $len
       local.get $cap
       i32.lt_s
+      i32.eqz
       if
-        local.get $elem_ref
-        i32.const 0
-        i32.ne
-        if
-          local.get $v
-          call $rc_retain
-          drop
-        end
         local.get $ptr
-        i32.const 16
-        i32.add
-        local.get $len
-        i32.const 4
-        i32.mul
-        i32.add
-        local.set $addr
-        local.get $addr
-        local.get $v
-        i32.store
-        local.get $ptr
-        local.get $len
-        i32.const 1
-        i32.add
-        i32.store
-        i32.const 0
-        return
+        call $vec_grow_i32
+        drop
       end
-      unreachable
+      local.get $elem_ref
+      i32.const 0
+      i32.ne
+      if
+        local.get $v
+        call $rc_retain
+        drop
+      end
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      local.get $len
+      i32.const 4
+      i32.mul
+      i32.add
+      local.set $addr
+      local.get $addr
+      local.get $v
+      i32.store
+      local.get $ptr
+      local.get $len
+      i32.const 1
+      i32.add
+      i32.store
+      i32.const 0
+      return
     end
 
     local.get $idx
@@ -1405,6 +1512,7 @@ fn emit_vector_runtime(
       local.get $ptr
       i32.const 16
       i32.add
+      i32.load
       local.get $idx
       i32.const 4
       i32.mul
@@ -1458,6 +1566,7 @@ fn emit_vector_runtime(
         local.get $ptr
         i32.const 16
         i32.add
+        i32.load
         local.get $len
         i32.const 1
         i32.sub
