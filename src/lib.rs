@@ -6,8 +6,10 @@ mod baked;
 #[cfg(feature = "type-checker")]
 mod infer;
 #[cfg(feature = "js-compiler")]
+#[path = "compilers/js.rs"]
 mod js;
 #[cfg(feature = "wasm-compiler")]
+#[path = "compilers/wat.rs"]
 mod wat;
 #[cfg(feature = "parser")]
 mod parser;
