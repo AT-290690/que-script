@@ -2063,6 +2063,18 @@ fn compile_do(
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
                 if kw == "let" || kw == "let~" || kw == "let*" {
                     let val_node = child_at(i).and_then(|n| n.children.get(2));
+                    let self_capture_idx = val_node.and_then(|n| {
+                        if
+                            matches!(&n.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
+                        {
+                            let key = n.expr.to_lisp();
+                            ctx.closure_defs.get(&key).and_then(|d| {
+                                d.captures.iter().position(|c| c == name)
+                            })
+                        } else {
+                            None
+                        }
+                    });
                     if let Some(n) = val_node {
                         if
                             matches!(&n.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
@@ -2107,6 +2119,18 @@ fn compile_do(
                             );
                         } else {
                             parts.push(format!("{value}\nlocal.set {}", local_idx));
+                        }
+                        if let Some(cap_idx) = self_capture_idx {
+                            // Recursive local lambda: fill self-capture after binding is assigned.
+                            // Use non-ref capture to avoid RC self-cycles.
+                            parts.push(
+                                format!(
+                                    "local.get {}\ni32.const {}\nlocal.get {}\ncall $closure_set\ndrop",
+                                    local_idx,
+                                    cap_idx,
+                                    local_idx
+                                )
+                            );
                         }
                     } else {
                         return Err(format!("Unknown local '{}'", name));
@@ -2741,11 +2765,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                 Expression::Word(op) =>
                     match op.as_str() {
                         _ if ctx.locals.contains_key(op) => {
-                            if ctx.lambda_bindings.contains_key(op) {
-                                compile_local_lambda_call(node, op, ctx)
-                            } else {
-                                compile_dynamic_call(node, ctx)
-                            }
+                            compile_dynamic_call(node, ctx)
                         }
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
@@ -3662,6 +3682,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;
 
+    wat.push_str(&format!("  ;; return type: {}\n", main_ret_ty));
     wat.push_str(&format!("  (func (export \"main\") (result {main_wasm_ty})\n"));
     for (_n, t) in &main_local_defs {
         wat.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
