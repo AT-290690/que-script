@@ -263,6 +263,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         "--py",
         "--kt",
         "--rs",
+        "--wat",
         "--comp",
         "--exec",
         "--str",
@@ -456,6 +457,38 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         #[cfg(not(feature = "rust-compiler"))]
         {
             println!("Error! Rust compiler is disabled. Rebuild with --features rust-compiler");
+        }
+    } else if cmd == "--wat" {
+        #[cfg(feature = "wasm-compiler")]
+        {
+            let program = fs::read_to_string(&source_path)?;
+            STD.with(|std| {
+                let std_ast = std.borrow();
+                if let crate::parser::Expression::Apply(items) = &*std_ast {
+                    match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                        Ok(wrapped_ast) => {
+                            match crate::wat::compile_program_to_wat(&wrapped_ast) {
+                                Ok(out) => {
+                                    let target = resolve_output_path(&dist, "main.wat");
+                                    std::fs
+                                        ::create_dir_all(
+                                            std::path::Path::new(&target).parent().unwrap()
+                                        )
+                                        .unwrap();
+                                    let mut out_file = fs::File::create(target).unwrap();
+                                    writeln!(out_file, "{}", out).unwrap();
+                                }
+                                Err(err) => println!("{}", err),
+                            }
+                        }
+                        Err(e) => println!("{}", e),
+                    }
+                }
+            });
+        }
+        #[cfg(not(feature = "wasm-compiler"))]
+        {
+            println!("Error! Wasm compiler is disabled. Rebuild with --features wasm-compiler");
         }
     } else if cmd == "--comp" {
         let program = fs::read_to_string(&source_path)?;

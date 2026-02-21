@@ -15,6 +15,8 @@ mod py;
 mod kotlin;
 #[cfg(feature = "rust-compiler")]
 mod rs;
+#[cfg(feature = "wasm-compiler")]
+mod wat;
 mod parser;
 mod repl;
 mod report;
