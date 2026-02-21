@@ -254,7 +254,7 @@
 
 (let std/fn/rec (lambda init-frame handler (do 
   (let stack [init-frame])
-  (let result [])
+  (let result [[]])
   (loop (not (empty? stack)) (lambda (do 
     (let frame (pull! stack))
     (let action (handler frame))
@@ -972,6 +972,31 @@ nil)))
            (if (< start end) (helper)))))
      (loop (> (length stack) 0) process)
      arr)))
+
+(let std/vector/safe-sort! (lambda v fn
+  (do
+    (let init-frame {{0 (- (length v) 1)} v})
+    (let handler (lambda frame
+      (do
+        (let range (fst frame))
+        (let vec (snd frame))
+        (let low (fst range))
+        (let high (snd range))
+        (if (>= low high) {std/fn/none []} 
+            (do
+              (let pivot (get vec high))
+              (let i (box low))
+              (let j (box low))
+              (loop (< (get j 0) high) (lambda (do
+                  (if (fn (get vec (get j 0)) pivot)
+                      (do (std/vector/swap! vec (get i 0) (get j 0)) (++ i))
+                      nil)
+                  (++ j))))
+              (std/vector/swap! vec (get i 0) high)
+              (let p (get i 0))
+              {std/fn/push [{{low (- p 1)} vec} {{(+ p 1) high} vec}]})))))
+    (std/fn/rec init-frame handler)
+    v)))
 
 (let std/int/hash
  (lambda table key (do
