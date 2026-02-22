@@ -19,6 +19,12 @@ struct PartialHelper {
     ret: Type,
 }
 
+#[derive(Clone)]
+struct DynamicPartialHelper {
+    name: String,
+    total_arity: usize,
+}
+
 #[derive(Clone, Debug)]
 struct ClosureDef {
     key: String,
@@ -3146,7 +3152,7 @@ fn compile_loop_finish(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, 
 }
 
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
-    let (params, _ret) = if let Some(sig) = ctx.fn_sigs.get(op) {
+    let (params, ret_ty) = if let Some(sig) = ctx.fn_sigs.get(op) {
         sig.clone()
     } else if builtin_fn_tag(op).is_some() {
         // Builtin used via namespaced value (e.g. std/vector/set!) without explicit top def.
@@ -3156,12 +3162,101 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
     };
     let args = &node.children[1..];
     if params.is_empty() && !args.is_empty() {
-        let arity = args.len();
+        let (ret_params, _ret_final) = function_parts(&ret_ty);
+        if !ret_params.is_empty() && args.len() < ret_params.len() {
+            let total = ret_params.len();
+            let provided = args.len();
+            let helper_name = format!("__partial_dyn_{}_{}", total, provided);
+            let helper_id = *ctx.fn_ids
+                .get(&helper_name)
+                .ok_or_else(|| format!("Missing dynamic partial helper '{}'", helper_name))?;
+            let clo_local = ctx.tmp_i32;
+            let tmp_local = ctx.tmp_i32 + 1;
+            let mut out = Vec::new();
+            out.push(
+                format!(
+                    "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
+                    helper_id,
+                    1 + provided,
+                    clo_local
+                )
+            );
+            out.push(
+                format!(
+                    "local.get {}\ni32.const 0\ncall ${}\ncall $closure_set_ref\ndrop",
+                    clo_local,
+                    ident(op)
+                )
+            );
+            for (i, arg) in args.iter().enumerate() {
+                let nested_ctx = Ctx {
+                    fn_sigs: ctx.fn_sigs,
+                    fn_ids: ctx.fn_ids,
+                    lambda_ids: ctx.lambda_ids,
+                    closure_defs: ctx.closure_defs,
+                    lambda_bindings: ctx.lambda_bindings,
+                    locals: ctx.locals.clone(),
+                    local_types: ctx.local_types.clone(),
+                    tmp_i32: ctx.tmp_i32 + 2,
+                };
+                let av = compile_expr(arg, &nested_ctx)?;
+                let idx = i + 1;
+                let is_ref = is_ref_type(&ret_params[i]);
+                let is_lambda_literal =
+                    matches!(
+                    &arg.expr,
+                    Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+                );
+                if is_ref {
+                    if is_lambda_literal {
+                        out.push(
+                            format!(
+                                "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall $closure_set_ref\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                                clo_local,
+                                idx,
+                                av,
+                                tmp_local,
+                                tmp_local
+                            )
+                        );
+                    } else {
+                        out.push(
+                            format!(
+                                "local.get {}\ni32.const {}\n{}\ncall $closure_set_ref\ndrop",
+                                clo_local,
+                                idx,
+                                av
+                            )
+                        );
+                    }
+                } else {
+                    out.push(
+                        format!(
+                            "local.get {}\ni32.const {}\n{}\ncall $closure_set\ndrop",
+                            clo_local,
+                            idx,
+                            av
+                        )
+                    );
+                }
+            }
+            out.push(format!("local.get {}", clo_local));
+            return Ok(out.join("\n"));
+        }
+        if !ret_params.is_empty() && args.len() > ret_params.len() {
+            return Err(
+                format!(
+                    "Dynamic function application with extra args is not supported in wasm backend: expected {}, got {}",
+                    ret_params.len(),
+                    args.len()
+                )
+            );
+        }
         let mut out = vec![format!("call ${}", ident(op))];
         for arg in args {
             out.push(compile_expr(arg, ctx)?);
         }
-        out.push(format!("call $apply{}_i32", arity));
+        out.push(format!("call $apply{}_i32", args.len()));
         return Ok(out.join("\n"));
     }
     let unit_arity_elided = params.len() == 1 && matches!(params[0], Type::Unit) && args.is_empty();
@@ -3186,14 +3281,99 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
 }
 
 fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let f = compile_expr(
-        node.children.first().ok_or_else(|| "call missing function".to_string())?,
-        ctx
-    )?;
+    let f_node = node.children.first().ok_or_else(|| "call missing function".to_string())?;
+    let f = compile_expr(f_node, ctx)?;
     let args = &node.children[1..];
     if args.is_empty() {
         return Err(
             "Dynamic function application with 0 args is not supported in wasm backend".to_string()
+        );
+    }
+    let head_ty = f_node.typ.as_ref().ok_or_else(|| "dynamic call head missing type".to_string())?;
+    let (head_params, _head_ret) = function_parts(head_ty);
+    if !head_params.is_empty() && args.len() < head_params.len() {
+        let total = head_params.len();
+        let provided = args.len();
+        let helper_name = format!("__partial_dyn_{}_{}", total, provided);
+        let helper_id = *ctx.fn_ids
+            .get(&helper_name)
+            .ok_or_else(|| format!("Missing dynamic partial helper '{}'", helper_name))?;
+        let clo_local = ctx.tmp_i32;
+        let tmp_local = ctx.tmp_i32 + 1;
+        let mut out = Vec::new();
+        out.push(
+            format!(
+                "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
+                helper_id,
+                1 + provided,
+                clo_local
+            )
+        );
+        out.push(
+            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set_ref\ndrop", clo_local, f)
+        );
+        for (i, arg) in args.iter().enumerate() {
+            let nested_ctx = Ctx {
+                fn_sigs: ctx.fn_sigs,
+                fn_ids: ctx.fn_ids,
+                lambda_ids: ctx.lambda_ids,
+                closure_defs: ctx.closure_defs,
+                lambda_bindings: ctx.lambda_bindings,
+                locals: ctx.locals.clone(),
+                local_types: ctx.local_types.clone(),
+                tmp_i32: ctx.tmp_i32 + 2,
+            };
+            let av = compile_expr(arg, &nested_ctx)?;
+            let idx = i + 1;
+            let is_ref = is_ref_type(&head_params[i]);
+            let is_lambda_literal =
+                matches!(
+                &arg.expr,
+                Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+            );
+            if is_ref {
+                if is_lambda_literal {
+                    out.push(
+                        format!(
+                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall $closure_set_ref\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                            clo_local,
+                            idx,
+                            av,
+                            tmp_local,
+                            tmp_local
+                        )
+                    );
+                } else {
+                    out.push(
+                        format!(
+                            "local.get {}\ni32.const {}\n{}\ncall $closure_set_ref\ndrop",
+                            clo_local,
+                            idx,
+                            av
+                        )
+                    );
+                }
+            } else {
+                out.push(
+                    format!(
+                        "local.get {}\ni32.const {}\n{}\ncall $closure_set\ndrop",
+                        clo_local,
+                        idx,
+                        av
+                    )
+                );
+            }
+        }
+        out.push(format!("local.get {}", clo_local));
+        return Ok(out.join("\n"));
+    }
+    if !head_params.is_empty() && args.len() > head_params.len() {
+        return Err(
+            format!(
+                "Dynamic function application with extra args is not supported in wasm backend: expected {}, got {}",
+                head_params.len(),
+                args.len()
+            )
         );
     }
     let mut out = vec![f];
@@ -3407,6 +3587,33 @@ fn collect_call_specializations(
     }
     for ch in &node.children {
         collect_call_specializations(ch, top_def_names, out);
+    }
+}
+
+fn collect_dynamic_partial_specs(
+    node: &TypedExpression,
+    top_def_names: &HashSet<String>,
+    out: &mut HashSet<(usize, usize)>
+) {
+    if let Expression::Apply(items) = &node.expr {
+        if !items.is_empty() && node.children.len() >= 2 {
+            let dynamic_word_head = match &items[0] {
+                Expression::Word(w) => !is_special_word(w),
+                _ => false,
+            };
+            if dynamic_word_head {
+                if let Some(head_ty) = node.children.first().and_then(|n| n.typ.as_ref()) {
+                    let (head_params, _head_ret) = function_parts(head_ty);
+                    let provided = node.children.len().saturating_sub(1);
+                    if provided > 0 && provided < head_params.len() {
+                        out.insert((head_params.len(), provided));
+                    }
+                }
+            }
+        }
+    }
+    for ch in &node.children {
+        collect_dynamic_partial_specs(ch, top_def_names, out);
     }
 }
 
@@ -3826,6 +4033,25 @@ fn compile_partial_helper_func(
     Ok(out)
 }
 
+fn compile_dynamic_partial_helper_func(h: &DynamicPartialHelper) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("  (func ${}", ident(&h.name)));
+    for _ in 0..1 + h.total_arity {
+        out.push_str(" (param i32)");
+    }
+    out.push_str(" (result i32)\n");
+    for _ in 0..EXTRA_I32_LOCALS {
+        out.push_str("    (local i32)\n");
+    }
+    out.push_str("    local.get 0\n");
+    for i in 1..=h.total_arity {
+        out.push_str(&format!("    local.get {}\n", i));
+    }
+    out.push_str(&format!("    call $apply{}_i32\n", h.total_arity));
+    out.push_str("  )\n");
+    out
+}
+
 pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<String, String> {
     let (top_defs, main_expr, main_node) = match &typed_ast.expr {
         Expression::Apply(items) if
@@ -3942,6 +4168,8 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     let mut fn_sigs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
     let mut top_level_lambda_key_to_name: HashMap<String, String> = HashMap::new();
     let top_def_names: HashSet<String> = top_defs.keys().cloned().collect();
+    let mut dynamic_partial_specs: HashSet<(usize, usize)> = HashSet::new();
+    collect_dynamic_partial_specs(typed_ast, &top_def_names, &mut dynamic_partial_specs);
     let mut call_specs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
     collect_call_specializations(typed_ast, &top_def_names, &mut call_specs);
     for (name, def) in &top_defs {
@@ -3985,6 +4213,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     collect_let_lambda_bindings(typed_ast, &mut lambda_bindings);
     let mut lambda_names: HashMap<String, String> = HashMap::new();
     let mut closure_defs: HashMap<String, ClosureDef> = HashMap::new();
+    let mut dynamic_partial_helpers: Vec<DynamicPartialHelper> = Vec::new();
     let mut lambda_ids: HashMap<String, i32> = HashMap::new();
     let mut next_lambda_idx = 0i32;
     let mut next_closure_idx = 0i32;
@@ -4033,6 +4262,29 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
                 });
             }
         }
+    }
+
+    let mut dynamic_partial_specs_sorted = dynamic_partial_specs.into_iter().collect::<Vec<_>>();
+    dynamic_partial_specs_sorted.sort_unstable();
+    for (total, provided) in dynamic_partial_specs_sorted {
+        let name = format!("__partial_dyn_{}_{}", total, provided);
+        if fn_sigs.contains_key(&name) {
+            continue;
+        }
+        fn_sigs.insert(name.clone(), (vec![Type::Int; 1 + total], Type::Int));
+        let cap_count = 1 + provided;
+        let captures = (0..cap_count).map(|i| format!("__cap{}", i)).collect::<Vec<_>>();
+        let key = format!("__partial_dyn_key_{}_{}", total, provided);
+        closure_defs.insert(key.clone(), ClosureDef {
+            key,
+            name: name.clone(),
+            captures,
+            user_arity: total - provided,
+        });
+        dynamic_partial_helpers.push(DynamicPartialHelper {
+            name,
+            total_arity: total,
+        });
     }
 
     // Compile-time partial application lowering for top-level value bindings:
@@ -4159,6 +4411,9 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
                 &lambda_bindings
             )?
         );
+    }
+    for h in &dynamic_partial_helpers {
+        emitted_funcs.push(compile_dynamic_partial_helper_func(h));
     }
     for h in &partial_helpers {
         let helper_id = fn_ids
