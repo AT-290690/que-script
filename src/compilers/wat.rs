@@ -4992,9 +4992,13 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
             .ok_or_else(|| format!("Missing function id for helper '{}'", h.helper_name))?;
         emitted_funcs.push(compile_value_func_fn_ptr(&h.binding_name, helper_id));
     }
+    let mut emitted_hoisted_lambda_names: HashSet<String> = HashSet::new();
     for node in &lambda_nodes {
         let key = node.expr.to_lisp();
         if let Some(name) = lambda_names.get(&key) {
+            if !emitted_hoisted_lambda_names.insert(name.clone()) {
+                continue;
+            }
             emitted_funcs.push(
                 compile_lambda_func(
                     name,
