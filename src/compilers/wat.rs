@@ -1186,30 +1186,33 @@ fn emit_vector_runtime(
 
   (func $tuple_new (param $a i32) (param $b i32) (result i32)
     (local $ptr i32)
-    i32.const 8
-    call $alloc
+    ;; Tuples are represented as 2-element reference vectors.
+    ;; This gives tuple fields correct retain/release semantics.
+    i32.const 0
+    i32.const 1
+    call $vec_new_i32
     local.set $ptr
     local.get $ptr
     local.get $a
-    i32.store
+    call $vec_push_i32
+    drop
     local.get $ptr
-    i32.const 4
-    i32.add
     local.get $b
-    i32.store
+    call $vec_push_i32
+    drop
     local.get $ptr
   )
 
   (func $tuple_fst (param $ptr i32) (result i32)
     local.get $ptr
-    i32.load
+    i32.const 0
+    call $vec_get_i32
   )
 
   (func $tuple_snd (param $ptr i32) (result i32)
     local.get $ptr
-    i32.const 4
-    i32.add
-    i32.load
+    i32.const 1
+    call $vec_get_i32
   )
 
   (func $closure_new (param $fn i32) (param $n i32) (result i32)
