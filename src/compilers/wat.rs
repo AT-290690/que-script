@@ -1500,6 +1500,114 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
+  (func $is_vec_ptr (param $ptr i32) (result i32)
+    (local $mem_end i32)
+    (local $len i32)
+    (local $cap i32)
+    (local $elem_ref i32)
+    (local $data i32)
+    (local $avail i32)
+    local.get $ptr
+    i32.const 65536
+    i32.lt_u
+    if
+      i32.const 0
+      return
+    end
+    memory.size
+    i32.const 16
+    i32.shl
+    local.set $mem_end
+    local.get $ptr
+    i32.const 20
+    i32.add
+    local.get $mem_end
+    i32.gt_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    i32.load
+    local.set $len
+    local.get $ptr
+    i32.const 4
+    i32.add
+    i32.load
+    local.set $cap
+    local.get $ptr
+    i32.const 12
+    i32.add
+    i32.load
+    local.set $elem_ref
+    local.get $ptr
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    local.get $len
+    i32.const 0
+    i32.lt_s
+    if
+      i32.const 0
+      return
+    end
+    local.get $cap
+    i32.const 0
+    i32.lt_s
+    if
+      i32.const 0
+      return
+    end
+    local.get $len
+    local.get $cap
+    i32.gt_s
+    if
+      i32.const 0
+      return
+    end
+    local.get $elem_ref
+    i32.const 0
+    i32.ne
+    if
+      local.get $elem_ref
+      i32.const 1
+      i32.ne
+      if
+        i32.const 0
+        return
+      end
+    end
+    local.get $data
+    i32.const 65536
+    i32.lt_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $data
+    local.get $mem_end
+    i32.ge_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $mem_end
+    local.get $data
+    i32.sub
+    local.set $avail
+    local.get $cap
+    local.get $avail
+    i32.const 2
+    i32.shr_u
+    i32.gt_u
+    if
+      i32.const 0
+      return
+    end
+    i32.const 1
+  )
+
   (func $rc_retain (param $ptr i32) (result i32)
     local.get $ptr
     i32.eqz
@@ -1520,6 +1628,13 @@ fn emit_vector_runtime(
     local.get $ptr
     i32.const 65536
     i32.lt_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    call $is_vec_ptr
+    i32.eqz
     if
       i32.const 0
       return
@@ -1548,6 +1663,13 @@ fn emit_vector_runtime(
     local.get $ptr
     i32.const 65536
     i32.lt_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    call $is_vec_ptr
+    i32.eqz
     if
       i32.const 0
       return
@@ -3861,6 +3983,125 @@ fn collect_dynamic_partial_specs(
     }
 }
 
+fn collect_type_subst(pattern: &Type, concrete: &Type, out: &mut HashMap<u64, Type>) {
+    match pattern {
+        Type::Var(v) => {
+            out.entry(v.id).or_insert_with(|| concrete.clone());
+        }
+        Type::List(a) => {
+            if let Type::List(b) = concrete {
+                collect_type_subst(a, b, out);
+            }
+        }
+        Type::Tuple(as_) => {
+            if let Type::Tuple(bs) = concrete {
+                if as_.len() == bs.len() {
+                    for (a, b) in as_.iter().zip(bs.iter()) {
+                        collect_type_subst(a, b, out);
+                    }
+                }
+            }
+        }
+        Type::Function(a1, a2) => {
+            if let Type::Function(b1, b2) = concrete {
+                collect_type_subst(a1, b1, out);
+                collect_type_subst(a2, b2, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn apply_type_subst(t: &Type, subst: &HashMap<u64, Type>) -> Type {
+    match t {
+        Type::Var(v) => subst.get(&v.id).cloned().unwrap_or_else(|| Type::Var(v.clone())),
+        Type::List(a) => Type::List(Box::new(apply_type_subst(a, subst))),
+        Type::Tuple(xs) => Type::Tuple(xs.iter().map(|x| apply_type_subst(x, subst)).collect()),
+        Type::Function(a, b) =>
+            Type::Function(
+                Box::new(apply_type_subst(a, subst)),
+                Box::new(apply_type_subst(b, subst))
+            ),
+        _ => t.clone(),
+    }
+}
+
+fn specialize_typed_expr(node: &TypedExpression, subst: &HashMap<u64, Type>) -> TypedExpression {
+    TypedExpression {
+        expr: node.expr.clone(),
+        typ: node.typ.as_ref().map(|t| apply_type_subst(t, subst)),
+        children: node.children.iter().map(|c| specialize_typed_expr(c, subst)).collect(),
+    }
+}
+
+fn indent_block(code: &str, spaces: usize) -> String {
+    let pad = " ".repeat(spaces);
+    code.lines()
+        .map(|l| format!("{pad}{l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn compile_tail_expr(
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    self_name: &str,
+    arity: usize
+) -> Result<Option<String>, String> {
+    match &node.expr {
+        Expression::Apply(items) if !items.is_empty() => match &items[0] {
+            Expression::Word(op) if op == self_name => {
+                let args = &node.children[1..];
+                if args.len() != arity {
+                    return Ok(None);
+                }
+                let mut out = Vec::new();
+                for a in args {
+                    out.push(compile_expr(a, ctx)?);
+                }
+                out.push(format!("return_call ${}", ident(self_name)));
+                Ok(Some(out.join("\n")))
+            }
+            Expression::Word(op) if op == "if" => {
+                let cond_node = node
+                    .children
+                    .get(1)
+                    .ok_or_else(|| "if missing condition".to_string())?;
+                let then_node = node.children.get(2).ok_or_else(|| "if missing then".to_string())?;
+                let else_node = node.children.get(3).ok_or_else(|| "if missing else".to_string())?;
+                let cond = compile_expr(cond_node, ctx)?;
+                let result_ty = node.typ
+                    .as_ref()
+                    .ok_or_else(|| "if missing type".to_string())
+                    .and_then(wasm_val_type)?;
+                let then_code = if let Some(tc) = compile_tail_expr(then_node, ctx, self_name, arity)?
+                {
+                    tc
+                } else {
+                    compile_expr(then_node, ctx)?
+                };
+                let else_code = if let Some(tc) = compile_tail_expr(else_node, ctx, self_name, arity)?
+                {
+                    tc
+                } else {
+                    compile_expr(else_node, ctx)?
+                };
+                Ok(
+                    Some(
+                        format!(
+                            "{cond}\n(if (result {result_ty})\n  (then\n{}\n  )\n  (else\n{}\n  )\n)\nreturn",
+                            indent_block(&then_code, 2),
+                            indent_block(&else_code, 2)
+                        )
+                    )
+                )
+            }
+            _ => Ok(None),
+        },
+        _ => Ok(None),
+    }
+}
+
 fn compile_lambda_func(
     name: &str,
     lambda_expr: &Expression,
@@ -3881,7 +4122,7 @@ fn compile_lambda_func(
         return Err(format!("lambda '{}' missing body", name));
     }
     let body_idx = items.len() - 1;
-    let body_node = lambda_node.children
+    let body_node_raw = lambda_node.children
         .get(body_idx)
         .ok_or_else(|| format!("Missing typed body for '{}'", name))?;
     let sig = fn_sigs.get(name).cloned();
@@ -3916,6 +4157,16 @@ fn compile_lambda_func(
             .map(|(_, ret)| ret)
             .ok_or_else(|| format!("Missing lambda return type for '{}'", name))?
     };
+    let mut subst = HashMap::new();
+    if let Some(decl_fn_ty) = lambda_node.typ.as_ref() {
+        let (decl_ps, decl_ret) = function_parts(decl_fn_ty);
+        for ((_, spec_t), decl_t) in params.iter().zip(decl_ps.iter()) {
+            collect_type_subst(decl_t, spec_t, &mut subst);
+        }
+        collect_type_subst(&decl_ret, &ret_ty, &mut subst);
+    }
+    let body_node_owned = specialize_typed_expr(body_node_raw, &subst);
+    let body_node = &body_node_owned;
 
     let mut local_defs = Vec::new();
     collect_let_locals(body_node, &mut local_defs);
@@ -3964,7 +4215,13 @@ fn compile_lambda_func(
             ref_slots.push(params.len() + i);
         }
     }
-
+    let tco_safe = !is_managed_local_type(&ret_ty) &&
+        local_defs.iter().all(|(_, t)| !is_managed_local_type(t));
+    let tail_body_code = if tco_safe {
+        compile_tail_expr(body_node, &ctx, name, params.len())?
+    } else {
+        None
+    };
     let mut out = String::new();
     out.push_str(&format!("  (func ${}", ident(name)));
     for (_pname, pty) in &params {
@@ -3976,6 +4233,12 @@ fn compile_lambda_func(
     }
     for _ in 0..EXTRA_I32_LOCALS {
         out.push_str("    (local i32)\n");
+    }
+    if let Some(tail_code) = tail_body_code {
+        out.push_str(&format!("    {}\n", tail_code.replace('\n', "\n    ")));
+        out.push_str("    unreachable\n");
+        out.push_str("  )\n");
+        return Ok(out);
     }
     out.push_str(&format!("    (local {})\n", wasm_val_type(&ret_ty)?));
     let ret_slot = params.len() + local_defs.len() + EXTRA_I32_LOCALS;

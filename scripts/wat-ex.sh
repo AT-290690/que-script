@@ -17,25 +17,25 @@ fi
 
 if ! command -v wasmtime >/dev/null 2>&1; then
   echo "wasmtime not found. Install wasmtime to execute WASM (compilation already succeeded)."
-  wat2wasm "$DST" -o "$BASE.wasm"
+  wat2wasm --enable-tail-call "$DST" -o "$BASE.wasm"
   exit 0
 fi
 
-wat2wasm "$DST" -o "$BASE.wasm" || exit 1
+wat2wasm --enable-tail-call "$DST" -o "$BASE.wasm" || exit 1
 
 OUT=""
 STATUS=0
 
-OUT="$(wasmtime --invoke=main "$BASE.wasm" 2>&1)"
+OUT="$(wasmtime -W tail-call=y --invoke=main "$BASE.wasm" 2>&1)"
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then
-  OUT="$(wasmtime --invoke main "$BASE.wasm" 2>&1)"
+  OUT="$(wasmtime -W tail-call=y --invoke main "$BASE.wasm" 2>&1)"
   STATUS=$?
 fi
 
 if [ $STATUS -ne 0 ]; then
-  OUT="$(wasmtime run --invoke main "$BASE.wasm" 2>&1)"
+  OUT="$(wasmtime run -W tail-call=y --invoke main "$BASE.wasm" 2>&1)"
   STATUS=$?
 fi
 
