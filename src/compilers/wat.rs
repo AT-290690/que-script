@@ -2692,9 +2692,34 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
-        out.push(
-            format!("local.get {}\n{}\ncall $vec_push_{}\ndrop", ctx.tmp_i32, v, elem_kind.suffix())
-        );
+        let is_lambda_literal =
+            matches!(
+                &a.expr,
+                Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+            );
+        let arg_is_managed = a.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
+        if is_lambda_literal && arg_is_managed {
+            // Fresh lambda values are retained by vector push; release the temporary owner.
+            out.push(
+                format!(
+                    "local.get {}\n{}\nlocal.tee {}\ncall $vec_push_{}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                    ctx.tmp_i32,
+                    v,
+                    ctx.tmp_i32 + 1,
+                    elem_kind.suffix(),
+                    ctx.tmp_i32 + 1
+                )
+            );
+        } else {
+            out.push(
+                format!(
+                    "local.get {}\n{}\ncall $vec_push_{}\ndrop",
+                    ctx.tmp_i32,
+                    v,
+                    elem_kind.suffix()
+                )
+            );
+        }
     }
     out.push(format!("local.get {}", ctx.tmp_i32));
     Ok(out.join("\n"))
@@ -2761,7 +2786,25 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .as_ref()
         .ok_or_else(|| "set! value missing type".to_string())
         .and_then(vec_elem_kind_from_type)?;
-    Ok(format!("{xs}\n{idx}\n{v}\ncall $vec_set_{}", elem.suffix()))
+    let is_lambda_literal =
+        matches!(
+            &val_node.expr,
+            Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+        );
+    let value_is_managed = val_node.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
+    if is_lambda_literal && value_is_managed {
+        // Fresh lambda value is retained by vec_set; release temporary owner to avoid leaks/churn.
+        Ok(
+            format!(
+                "{xs}\n{idx}\n{v}\nlocal.tee {}\ncall $vec_set_{}\nlocal.get {}\ncall $rc_release\ndrop",
+                ctx.tmp_i32 + 1,
+                elem.suffix(),
+                ctx.tmp_i32 + 1
+            )
+        )
+    } else {
+        Ok(format!("{xs}\n{idx}\n{v}\ncall $vec_set_{}", elem.suffix()))
+    }
 }
 
 fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
