@@ -103,7 +103,7 @@ fn is_i32ish_type(t: &Type) -> bool {
 }
 
 fn is_ref_type(t: &Type) -> bool {
-    matches!(t, Type::List(_))
+    matches!(t, Type::List(_) | Type::Function(_, _))
 }
 
 fn is_managed_local_type(t: &Type) -> bool {
@@ -171,12 +171,17 @@ fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
 
 fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
     match typ {
-        Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit | Type::List(_) | Type::Tuple(_) => {
+        | Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::Char
+        | Type::Unit
+        | Type::List(_)
+        | Type::Tuple(_) => {
             Ok(VecElemKind::I32)
         }
         Type::Var(_) => Ok(VecElemKind::I32),
-        Type::Function(_, _) =>
-            Err("Function values inside vectors are not supported in wasm backend".to_string()),
+        Type::Function(_, _) => Ok(VecElemKind::I32),
     }
 }
 
@@ -394,28 +399,14 @@ fn lambda_capture_names(node: &TypedExpression, top_defs: &HashMap<String, TopDe
 
 fn lambda_syntax_arity(expr: &Expression) -> usize {
     match expr {
-        Expression::Apply(items)
-            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") && items.len() >= 2 =>
-        {
+        Expression::Apply(items) if
+            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") &&
+            items.len() >= 2
+        => {
             items.len().saturating_sub(2)
         }
         _ => 0,
     }
-}
-
-fn lambda_decl_param_types(node: &TypedExpression) -> Vec<Type> {
-    let out = Vec::new();
-    let Some(t) = node.typ.as_ref() else {
-        return out;
-    };
-    let (mut ps, _ret) = function_parts(t);
-    let syn_arity = lambda_syntax_arity(&node.expr);
-    if syn_arity == 0 && ps.len() == 1 && matches!(ps[0], Type::Unit) {
-        ps.clear();
-    } else if ps.len() >= syn_arity {
-        ps.truncate(syn_arity);
-    }
-    ps
 }
 
 fn emit_vector_runtime(
@@ -1690,10 +1681,7 @@ fn emit_vector_runtime(
         );
         for (fid, name, cap_len) in &apply1_closures {
             out.push_str(
-                &format!(
-                    "      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n",
-                    fid
-                )
+                &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
             );
             for i in 0..*cap_len {
                 out.push_str(
@@ -1829,10 +1817,7 @@ fn emit_vector_runtime(
         );
         for (fid, name, cap_len) in &apply2_closures {
             out.push_str(
-                &format!(
-                    "      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n",
-                    fid
-                )
+                &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
             );
             for i in 0..*cap_len {
                 out.push_str(
@@ -1840,7 +1825,10 @@ fn emit_vector_runtime(
                 );
             }
             out.push_str(
-                &format!("        local.get $a\n        local.get $b\n        call ${}\n", ident(name))
+                &format!(
+                    "        local.get $a\n        local.get $b\n        call ${}\n",
+                    ident(name)
+                )
             );
             out.push_str("      else\n");
         }
@@ -2185,10 +2173,7 @@ fn emit_vector_runtime(
         );
         for (fid, name, cap_len) in &apply3_closures {
             out.push_str(
-                &format!(
-                    "      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n",
-                    fid
-                )
+                &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
             );
             for i in 0..*cap_len {
                 out.push_str(
@@ -2280,46 +2265,56 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         "&" => "i32.and",
         "<<" => "i32.shl",
         ">>" => "i32.shr_s",
-        "+." =>
+        "+." => {
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.add\ni32.reinterpret_f32"
                 )
-            ),
-        "-." =>
+            );
+        }
+        "-." => {
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.sub\ni32.reinterpret_f32"
                 )
-            ),
-        "*." =>
+            );
+        }
+        "*." => {
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32"
                 )
-            ),
-        "/." =>
+            );
+        }
+        "/." => {
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.div\ni32.reinterpret_f32"
                 )
-            ),
-        "mod." =>
+            );
+        }
+        "mod." => {
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.div\nf32.trunc\n{b}\nf32.reinterpret_i32\nf32.mul\nf32.sub\ni32.reinterpret_f32"
                 )
-            ),
-        "=." =>
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.eq")),
-        "<." =>
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.lt")),
-        ">." =>
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.gt")),
-        "<=." =>
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.le")),
-        ">=." =>
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge")),
+            );
+        }
+        "=." => {
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.eq"));
+        }
+        "<." => {
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.lt"));
+        }
+        ">." => {
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.gt"));
+        }
+        "<=." => {
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.le"));
+        }
+        ">=." => {
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge"));
+        }
         _ => {
             return Err(format!("Unsupported builtin {}", op));
         }
@@ -2365,9 +2360,9 @@ fn compile_do(
                             matches!(&n.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
                         {
                             let key = n.expr.to_lisp();
-                            ctx.closure_defs.get(&key).and_then(|d| {
-                                d.captures.iter().position(|c| c == name)
-                            })
+                            ctx.closure_defs
+                                .get(&key)
+                                .and_then(|d| { d.captures.iter().position(|c| c == name) })
                         } else {
                             None
                         }
@@ -2401,8 +2396,7 @@ fn compile_do(
                             }
                         })?;
                     if let Some(local_idx) = ctx.locals.get(name) {
-                        let managed_local = ctx
-                            .local_types
+                        let managed_local = ctx.local_types
                             .get(name)
                             .map(is_managed_local_type)
                             .unwrap_or(false);
@@ -2833,7 +2827,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
     if args.len() != params.len() && !unit_arity_elided {
         return Err(
             format!(
-                "Partial application/extra args not yet supported in wasm backend: '{}' expected {} args, got {}",
+                "Unassigned function with partial application/extra args not yet supported in wasm backend: '{}' expected {} args, got {}",
                 op,
                 params.len(),
                 args.len()
@@ -2879,96 +2873,6 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
     }
 }
 
-fn compile_local_lambda_call(
-    node: &TypedExpression,
-    name: &str,
-    ctx: &Ctx<'_>
-) -> Result<String, String> {
-    let lambda_node = ctx.lambda_bindings
-        .get(name)
-        .ok_or_else(|| format!("Unknown local lambda '{}'", name))?;
-    let items = match &lambda_node.expr {
-        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda") =>
-            xs,
-        _ => {
-            return Err(format!("Local '{}' is not a lambda", name));
-        }
-    };
-    if items.len() < 2 {
-        return Err(format!("Local lambda '{}' missing body", name));
-    }
-    let body_idx = items.len() - 1;
-    let args = &node.children[1..];
-    let param_exprs = &items[1..body_idx];
-    if args.len() != param_exprs.len() {
-        return Err(
-            format!(
-                "Partial application/extra args not yet supported in wasm backend: '{}' expected {} args, got {}",
-                name,
-                param_exprs.len(),
-                args.len()
-            )
-        );
-    }
-
-    let param_local_base = ctx.tmp_i32;
-    let arg_tmp_base = ctx.tmp_i32 + args.len() + 1;
-
-    let mut out = Vec::new();
-    for (i, arg) in args.iter().enumerate() {
-        let arg_ctx = Ctx {
-            fn_sigs: ctx.fn_sigs,
-            fn_ids: ctx.fn_ids,
-            lambda_ids: ctx.lambda_ids,
-            closure_defs: ctx.closure_defs,
-            lambda_bindings: ctx.lambda_bindings,
-            locals: ctx.locals.clone(),
-            local_types: ctx.local_types.clone(),
-            tmp_i32: arg_tmp_base,
-        };
-        let arg_code = compile_expr(arg, &arg_ctx)?;
-        out.push(format!("{arg_code}\nlocal.set {}", param_local_base + i));
-    }
-
-    let mut locals = ctx.locals.clone();
-    for (i, p) in param_exprs.iter().enumerate() {
-        let pname = match p {
-            Expression::Word(w) => w.clone(),
-            _ => {
-                return Err(format!("Local lambda '{}' has non-word parameter", name));
-            }
-        };
-        locals.insert(pname, param_local_base + i);
-    }
-
-    let body_node = lambda_node.children
-        .get(body_idx)
-        .ok_or_else(|| format!("Local lambda '{}' missing typed body", name))?;
-    let body_ctx = Ctx {
-        fn_sigs: ctx.fn_sigs,
-        fn_ids: ctx.fn_ids,
-        lambda_ids: ctx.lambda_ids,
-        closure_defs: ctx.closure_defs,
-        lambda_bindings: ctx.lambda_bindings,
-        locals,
-        local_types: {
-            let mut tys = ctx.local_types.clone();
-            let decl_types = lambda_decl_param_types(lambda_node);
-            for (i, p) in param_exprs.iter().enumerate() {
-                if let Expression::Word(w) = p {
-                    if let Some(t) = decl_types.get(i) {
-                        tys.insert(w.clone(), t.clone());
-                    }
-                }
-            }
-            tys
-        },
-        tmp_i32: arg_tmp_base,
-    };
-    out.push(compile_expr(body_node, &body_ctx)?);
-    Ok(out.join("\n"))
-}
-
 fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let key = node.expr.to_lisp();
     if let Some(id) = ctx.lambda_ids.get(&key) {
@@ -2992,14 +2896,10 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                 format!("local.get {}", local_idx)
             } else {
                 return Err(
-                    format!(
-                        "Unsupported closure capture '{}' in wasm backend (not a local)",
-                        cap
-                    )
+                    format!("Unsupported closure capture '{}' in wasm backend (not a local)", cap)
                 );
             };
-            let is_ref_capture = ctx
-                .local_types
+            let is_ref_capture = ctx.local_types
                 .get(cap)
                 .map(is_managed_local_type)
                 .unwrap_or(false);
@@ -3017,10 +2917,7 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         out.push(format!("local.get {}", clo_local));
         Ok(out.join("\n"))
     } else {
-        Err(format!(
-            "Unsupported lambda literal in wasm backend (missing lowering id): {}",
-            key
-        ))
+        Err(format!("Unsupported lambda literal in wasm backend (missing lowering id): {}", key))
     }
 }
 
@@ -3059,9 +2956,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
             match &items[0] {
                 Expression::Word(op) =>
                     match op.as_str() {
-                        _ if ctx.locals.contains_key(op) => {
-                            compile_dynamic_call(node, ctx)
-                        }
+                        _ if ctx.locals.contains_key(op) => { compile_dynamic_call(node, ctx) }
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
@@ -3278,8 +3173,9 @@ fn compile_lambda_func(
         local_types,
         tmp_i32,
     };
-    let body_code = compile_expr(body_node, &ctx)
-        .map_err(|e| format!("in lambda '{}': {}", name, e))?;
+    let body_code = compile_expr(body_node, &ctx).map_err(|e|
+        format!("in lambda '{}': {}", name, e)
+    )?;
     let ret_is_ref = is_managed_local_type(&ret_ty);
     let mut ref_slots: Vec<usize> = Vec::new();
     for (i, (_n, t)) in local_defs.iter().enumerate() {
@@ -3343,7 +3239,7 @@ fn compile_closure_func(
         }
     };
     if items.len() < 2 {
-        return Err(format!("closure '{}' missing body", name));
+        return Err(format!("Closure '{}' missing body", name));
     }
     let body_idx = items.len() - 1;
     let body_node = lambda_node.children
@@ -3410,8 +3306,9 @@ fn compile_closure_func(
         local_types,
         tmp_i32,
     };
-    let body_code = compile_expr(body_node, &ctx)
-        .map_err(|e| format!("in closure '{}': {}", name, e))?;
+    let body_code = compile_expr(body_node, &ctx).map_err(|e|
+        format!("in closure '{}': {}", name, e)
+    )?;
     let ret_is_ref = is_managed_local_type(&ret_ty);
     let mut ref_slots: Vec<usize> = Vec::new();
     for (i, (_n, t)) in local_defs.iter().enumerate() {
@@ -3499,8 +3396,9 @@ fn compile_value_func(
         local_types,
         tmp_i32,
     };
-    let body_code = compile_expr(value_node, &ctx)
-        .map_err(|e| format!("in value '{}': {}", name, e))?;
+    let body_code = compile_expr(value_node, &ctx).map_err(|e|
+        format!("in value '{}': {}", name, e)
+    )?;
     let ret_is_ref = is_managed_local_type(ret_ty);
     let ref_slots: Vec<usize> = local_defs
         .iter()
@@ -3865,6 +3763,10 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
     }
     let mut wat = String::new();
+    let main_ret_ty = main_node.typ
+        .as_ref()
+        .ok_or_else(|| "Missing main expression type".to_string())?;
+    wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
     wat.push_str("(module\n");
     wat.push_str(&emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs));
 
@@ -3957,9 +3859,6 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
     }
 
-    let main_ret_ty = main_node.typ
-        .as_ref()
-        .ok_or_else(|| "Missing main expression type".to_string())?;
     let main_wasm_ty = wasm_val_type(main_ret_ty)?;
 
     let mut main_local_defs = Vec::new();
@@ -3992,7 +3891,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;
 
-    wat.push_str(&format!("  ;; return type: {}\n", main_ret_ty));
+    wat.push_str(&format!("  ;; Type: {}\n", main_ret_ty));
     wat.push_str(&format!("  (func (export \"main\") (result {main_wasm_ty})\n"));
     for (_n, t) in &main_local_defs {
         wat.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
