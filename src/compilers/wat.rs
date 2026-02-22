@@ -177,9 +177,7 @@ fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
         | Type::Char
         | Type::Unit
         | Type::List(_)
-        | Type::Tuple(_) => {
-            Ok(VecElemKind::I32)
-        }
+        | Type::Tuple(_) => Ok(VecElemKind::I32),
         Type::Var(_) => Ok(VecElemKind::I32),
         Type::Function(_, _) => Ok(VecElemKind::I32),
     }
@@ -409,10 +407,117 @@ fn lambda_syntax_arity(expr: &Expression) -> usize {
     }
 }
 
-fn emit_vector_runtime(
+fn collect_apply_arities_from_code(code: &str, out: &mut HashSet<usize>) {
+    let needle = "call $apply";
+    let mut rest = code;
+    while let Some(pos) = rest.find(needle) {
+        let after = &rest[pos + needle.len()..];
+        let digit_count = after
+            .bytes()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        if digit_count > 0 {
+            let digits = &after[..digit_count];
+            if after[digit_count..].starts_with("_i32") {
+                if let Ok(n) = digits.parse::<usize>() {
+                    out.insert(n);
+                }
+            }
+        }
+        rest = &after[digit_count..];
+    }
+}
+
+fn emit_high_arity_apply_i32(
+    arity: usize,
     fn_ids: &HashMap<String, i32>,
     fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
     closure_defs: &HashMap<String, ClosureDef>
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("  (func $apply{}_i32 (param $f i32)", arity));
+    for i in 0..arity {
+        out.push_str(&format!(" (param $a{} i32)", i));
+    }
+    out.push_str(" (result i32)\n");
+
+    let closure_cases = closure_defs
+        .values()
+        .filter_map(|def| {
+            let fid = *fn_ids.get(&def.name)?;
+            let (ps, ret) = fn_sigs.get(&def.name)?;
+            if
+                def.user_arity != arity ||
+                !is_i32ish_type(ret) ||
+                ps.len() != def.captures.len() + arity
+            {
+                return None;
+            }
+            if !ps.iter().all(is_i32ish_type) {
+                return None;
+            }
+            Some((fid, def.name.clone(), def.captures.len()))
+        })
+        .collect::<Vec<_>>();
+
+    if !closure_cases.is_empty() {
+        out.push_str(
+            "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
+        );
+        for (fid, name, cap_len) in &closure_cases {
+            out.push_str(
+                &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
+            );
+            for i in 0..*cap_len {
+                out.push_str(
+                    &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
+                );
+            }
+            for i in 0..arity {
+                out.push_str(&format!("        local.get $a{}\n", i));
+            }
+            out.push_str(&format!("        call ${}\n", ident(name)));
+            out.push_str("      else\n");
+        }
+        out.push_str("        unreachable\n");
+        for _ in 0..closure_cases.len() {
+            out.push_str("      end\n");
+        }
+        out.push_str("    else\n");
+    }
+
+    let mut direct_cases = 0usize;
+    for (name, tag) in fn_ids {
+        if let Some((ps, ret)) = fn_sigs.get(name) {
+            if ps.len() == arity && ps.iter().all(is_i32ish_type) && is_i32ish_type(ret) {
+                direct_cases += 1;
+                out.push_str(
+                    &format!("    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n", tag)
+                );
+                for i in 0..arity {
+                    out.push_str(&format!("      local.get $a{}\n", i));
+                }
+                out.push_str(&format!("      call ${}\n    else\n", ident(name)));
+            }
+        }
+    }
+
+    out.push_str("      unreachable\n");
+    for _ in 0..direct_cases {
+        out.push_str("    end\n");
+    }
+    if !closure_cases.is_empty() {
+        out.push_str("    end\n");
+    }
+    out.push_str("  )\n");
+    out
+}
+
+fn emit_vector_runtime(
+    fn_ids: &HashMap<String, i32>,
+    fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
+    closure_defs: &HashMap<String, ClosureDef>,
+    apply_arities: &HashSet<usize>
 ) -> String {
     let mut out = String::new();
     out.push_str(
@@ -1843,63 +1948,67 @@ fn emit_vector_runtime(
       end
     end
   )
-
-  (func $apply1_i32 (param $f i32) (param $a i32) (result i32)
 "#
     );
-    let apply1_closures = closure_defs
-        .values()
-        .filter_map(|def| {
-            let fid = *fn_ids.get(&def.name)?;
-            let (ps, ret) = fn_sigs.get(&def.name)?;
-            if def.user_arity != 1 || !is_i32ish_type(ret) || ps.len() != def.captures.len() + 1 {
-                return None;
-            }
-            if !ps.iter().all(is_i32ish_type) {
-                return None;
-            }
-            Some((fid, def.name.clone(), def.captures.len()))
-        })
-        .collect::<Vec<_>>();
-    if !apply1_closures.is_empty() {
-        out.push_str(
-            "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
-        );
-        for (fid, name, cap_len) in &apply1_closures {
+    if apply_arities.contains(&1) {
+        out.push_str("  (func $apply1_i32 (param $f i32) (param $a i32) (result i32)\n");
+        let apply1_closures = closure_defs
+            .values()
+            .filter_map(|def| {
+                let fid = *fn_ids.get(&def.name)?;
+                let (ps, ret) = fn_sigs.get(&def.name)?;
+                if
+                    def.user_arity != 1 ||
+                    !is_i32ish_type(ret) ||
+                    ps.len() != def.captures.len() + 1
+                {
+                    return None;
+                }
+                if !ps.iter().all(is_i32ish_type) {
+                    return None;
+                }
+                Some((fid, def.name.clone(), def.captures.len()))
+            })
+            .collect::<Vec<_>>();
+        if !apply1_closures.is_empty() {
             out.push_str(
-                &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
+                "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
             );
-            for i in 0..*cap_len {
+            for (fid, name, cap_len) in &apply1_closures {
                 out.push_str(
-                    &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
+                    &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
                 );
+                for i in 0..*cap_len {
+                    out.push_str(
+                        &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
+                    );
+                }
+                out.push_str(&format!("        local.get $a\n        call ${}\n", ident(name)));
+                out.push_str("      else\n");
             }
-            out.push_str(&format!("        local.get $a\n        call ${}\n", ident(name)));
-            out.push_str("      else\n");
+            out.push_str("        unreachable\n");
+            for _ in 0..apply1_closures.len() {
+                out.push_str("      end\n");
+            }
+            out.push_str("    else\n");
         }
-        out.push_str("        unreachable\n");
-        for _ in 0..apply1_closures.len() {
-            out.push_str("      end\n");
-        }
-        out.push_str("    else\n");
-    }
-    let mut apply1_open_ends = 0usize;
-    for (name, tag) in fn_ids {
-        if let Some((ps, ret)) = fn_sigs.get(name) {
-            if ps.len() == 1 && is_i32ish_type(&ps[0]) && is_i32ish_type(ret) {
-                apply1_open_ends += 1;
-                out.push_str(
-                    &format!(
-                        "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      local.get $a\n      call ${}\n    else\n",
-                        tag,
-                        ident(name)
-                    )
-                );
+        let mut apply1_open_ends = 0usize;
+        for (name, tag) in fn_ids {
+            if let Some((ps, ret)) = fn_sigs.get(name) {
+                if ps.len() == 1 && is_i32ish_type(&ps[0]) && is_i32ish_type(ret) {
+                    apply1_open_ends += 1;
+                    out.push_str(
+                        &format!(
+                            "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      local.get $a\n      call ${}\n    else\n",
+                            tag,
+                            ident(name)
+                        )
+                    );
+                }
             }
         }
-    }
-    out.push_str(
-        r#"
+        out.push_str(
+            r#"
     local.get $f
     i32.const 20
     i32.eq
@@ -1969,83 +2078,86 @@ fn emit_vector_runtime(
     end
     end
     "#
-    );
-    for _ in 0..apply1_open_ends {
-        out.push_str("    end\n");
-    }
-    if !apply1_closures.is_empty() {
-        out.push_str("    end\n");
-    }
-    out.push_str(
-        r#"
-  )
-
-  (func $apply2_i32 (param $f i32) (param $a i32) (param $b i32) (result i32)
-"#
-    );
-    let apply2_closures = closure_defs
-        .values()
-        .filter_map(|def| {
-            let fid = *fn_ids.get(&def.name)?;
-            let (ps, ret) = fn_sigs.get(&def.name)?;
-            if def.user_arity != 2 || !is_i32ish_type(ret) || ps.len() != def.captures.len() + 2 {
-                return None;
-            }
-            if !ps.iter().all(is_i32ish_type) {
-                return None;
-            }
-            Some((fid, def.name.clone(), def.captures.len()))
-        })
-        .collect::<Vec<_>>();
-    if !apply2_closures.is_empty() {
-        out.push_str(
-            "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
         );
-        for (fid, name, cap_len) in &apply2_closures {
-            out.push_str(
-                &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
-            );
-            for i in 0..*cap_len {
-                out.push_str(
-                    &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
-                );
-            }
-            out.push_str(
-                &format!(
-                    "        local.get $a\n        local.get $b\n        call ${}\n",
-                    ident(name)
-                )
-            );
-            out.push_str("      else\n");
+        for _ in 0..apply1_open_ends {
+            out.push_str("    end\n");
         }
-        out.push_str("        unreachable\n");
-        for _ in 0..apply2_closures.len() {
-            out.push_str("      end\n");
+        if !apply1_closures.is_empty() {
+            out.push_str("    end\n");
         }
-        out.push_str("    else\n");
+        out.push_str("  )\n");
     }
-    let mut apply2_open_ends = 0usize;
-    for (name, tag) in fn_ids {
-        if let Some((ps, ret)) = fn_sigs.get(name) {
-            if
-                ps.len() == 2 &&
-                is_i32ish_type(&ps[0]) &&
-                is_i32ish_type(&ps[1]) &&
-                is_i32ish_type(ret)
-            {
-                apply2_open_ends += 1;
+    if apply_arities.contains(&2) {
+        out.push_str(
+            "  (func $apply2_i32 (param $f i32) (param $a i32) (param $b i32) (result i32)\n"
+        );
+        let apply2_closures = closure_defs
+            .values()
+            .filter_map(|def| {
+                let fid = *fn_ids.get(&def.name)?;
+                let (ps, ret) = fn_sigs.get(&def.name)?;
+                if
+                    def.user_arity != 2 ||
+                    !is_i32ish_type(ret) ||
+                    ps.len() != def.captures.len() + 2
+                {
+                    return None;
+                }
+                if !ps.iter().all(is_i32ish_type) {
+                    return None;
+                }
+                Some((fid, def.name.clone(), def.captures.len()))
+            })
+            .collect::<Vec<_>>();
+        if !apply2_closures.is_empty() {
+            out.push_str(
+                "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
+            );
+            for (fid, name, cap_len) in &apply2_closures {
+                out.push_str(
+                    &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
+                );
+                for i in 0..*cap_len {
+                    out.push_str(
+                        &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
+                    );
+                }
                 out.push_str(
                     &format!(
-                        "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      local.get $a\n      local.get $b\n      call ${}\n    else\n",
-                        tag,
+                        "        local.get $a\n        local.get $b\n        call ${}\n",
                         ident(name)
                     )
                 );
+                out.push_str("      else\n");
+            }
+            out.push_str("        unreachable\n");
+            for _ in 0..apply2_closures.len() {
+                out.push_str("      end\n");
+            }
+            out.push_str("    else\n");
+        }
+        let mut apply2_open_ends = 0usize;
+        for (name, tag) in fn_ids {
+            if let Some((ps, ret)) = fn_sigs.get(name) {
+                if
+                    ps.len() == 2 &&
+                    is_i32ish_type(&ps[0]) &&
+                    is_i32ish_type(&ps[1]) &&
+                    is_i32ish_type(ret)
+                {
+                    apply2_open_ends += 1;
+                    out.push_str(
+                        &format!(
+                            "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      local.get $a\n      local.get $b\n      call ${}\n    else\n",
+                            tag,
+                            ident(name)
+                        )
+                    );
+                }
             }
         }
-    }
-    out.push_str(
-        r#"
+        out.push_str(
+            r#"
     local.get $f
     i32.const 1
     i32.eq
@@ -2307,15 +2419,15 @@ fn emit_vector_runtime(
                                       end
                                     end
     "#
-    );
-    for _ in 0..apply2_open_ends {
-        out.push_str("                                    end\n");
-    }
-    if !apply2_closures.is_empty() {
-        out.push_str("    end\n");
-    }
-    out.push_str(
-        r#"
+        );
+        for _ in 0..apply2_open_ends {
+            out.push_str("                                    end\n");
+        }
+        if !apply2_closures.is_empty() {
+            out.push_str("    end\n");
+        }
+        out.push_str(
+            r#"
                                   end
                                 end
                               end
@@ -2332,95 +2444,112 @@ fn emit_vector_runtime(
         end
       end
     end
-  )
-"#
-    );
-
-    out.push_str(
-        "  (func $apply3_i32 (param $f i32) (param $a i32) (param $b i32) (param $c i32) (result i32)\n"
-    );
-    let apply3_closures = closure_defs
-        .values()
-        .filter_map(|def| {
-            let fid = *fn_ids.get(&def.name)?;
-            let (ps, ret) = fn_sigs.get(&def.name)?;
-            if def.user_arity != 3 || !is_i32ish_type(ret) || ps.len() != def.captures.len() + 3 {
-                return None;
-            }
-            if !ps.iter().all(is_i32ish_type) {
-                return None;
-            }
-            Some((fid, def.name.clone(), def.captures.len()))
-        })
-        .collect::<Vec<_>>();
-    if !apply3_closures.is_empty() {
-        out.push_str(
-            "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
+  "#
         );
-        for (fid, name, cap_len) in &apply3_closures {
-            out.push_str(
-                &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
-            );
-            for i in 0..*cap_len {
-                out.push_str(
-                    &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
-                );
-            }
-            out.push_str(
-                &format!(
-                    "        local.get $a\n        local.get $b\n        local.get $c\n        call ${}\n",
-                    ident(name)
-                )
-            );
-            out.push_str("      else\n");
-        }
-        out.push_str("        unreachable\n");
-        for _ in 0..apply3_closures.len() {
-            out.push_str("      end\n");
-        }
-        out.push_str("    else\n");
+        out.push_str("  )\n");
     }
-    out.push_str(
-        "    local.get $f\n    i32.const 21\n    i32.eq\n    if (result i32)\n      local.get $a\n      local.get $b\n      local.get $c\n      call $vec_set_i32\n    else\n"
-    );
-    for (name, tag) in fn_ids {
-        if let Some((ps, ret)) = fn_sigs.get(name) {
-            if
-                ps.len() == 3 &&
-                is_i32ish_type(&ps[0]) &&
-                is_i32ish_type(&ps[1]) &&
-                is_i32ish_type(&ps[2]) &&
-                is_i32ish_type(ret)
-            {
+
+    if apply_arities.contains(&3) {
+        out.push_str(
+            "  (func $apply3_i32 (param $f i32) (param $a i32) (param $b i32) (param $c i32) (result i32)\n"
+        );
+        let apply3_closures = closure_defs
+            .values()
+            .filter_map(|def| {
+                let fid = *fn_ids.get(&def.name)?;
+                let (ps, ret) = fn_sigs.get(&def.name)?;
+                if
+                    def.user_arity != 3 ||
+                    !is_i32ish_type(ret) ||
+                    ps.len() != def.captures.len() + 3
+                {
+                    return None;
+                }
+                if !ps.iter().all(is_i32ish_type) {
+                    return None;
+                }
+                Some((fid, def.name.clone(), def.captures.len()))
+            })
+            .collect::<Vec<_>>();
+        if !apply3_closures.is_empty() {
+            out.push_str(
+                "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
+            );
+            for (fid, name, cap_len) in &apply3_closures {
+                out.push_str(
+                    &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
+                );
+                for i in 0..*cap_len {
+                    out.push_str(
+                        &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
+                    );
+                }
                 out.push_str(
                     &format!(
-                        "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      local.get $a\n      local.get $b\n      local.get $c\n      call ${}\n    else\n",
-                        tag,
+                        "        local.get $a\n        local.get $b\n        local.get $c\n        call ${}\n",
                         ident(name)
                     )
                 );
+                out.push_str("      else\n");
+            }
+            out.push_str("        unreachable\n");
+            for _ in 0..apply3_closures.len() {
+                out.push_str("      end\n");
+            }
+            out.push_str("    else\n");
+        }
+        out.push_str(
+            "    local.get $f\n    i32.const 21\n    i32.eq\n    if (result i32)\n      local.get $a\n      local.get $b\n      local.get $c\n      call $vec_set_i32\n    else\n"
+        );
+        for (name, tag) in fn_ids {
+            if let Some((ps, ret)) = fn_sigs.get(name) {
+                if
+                    ps.len() == 3 &&
+                    is_i32ish_type(&ps[0]) &&
+                    is_i32ish_type(&ps[1]) &&
+                    is_i32ish_type(&ps[2]) &&
+                    is_i32ish_type(ret)
+                {
+                    out.push_str(
+                        &format!(
+                            "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      local.get $a\n      local.get $b\n      local.get $c\n      call ${}\n    else\n",
+                            tag,
+                            ident(name)
+                        )
+                    );
+                }
             }
         }
-    }
-    out.push_str("      unreachable\n");
-    for (name, _tag) in fn_ids {
-        if let Some((ps, ret)) = fn_sigs.get(name) {
-            if
-                ps.len() == 3 &&
-                is_i32ish_type(&ps[0]) &&
-                is_i32ish_type(&ps[1]) &&
-                is_i32ish_type(&ps[2]) &&
-                is_i32ish_type(ret)
-            {
-                out.push_str("    end\n");
+        out.push_str("      unreachable\n");
+        for (name, _tag) in fn_ids {
+            if let Some((ps, ret)) = fn_sigs.get(name) {
+                if
+                    ps.len() == 3 &&
+                    is_i32ish_type(&ps[0]) &&
+                    is_i32ish_type(&ps[1]) &&
+                    is_i32ish_type(&ps[2]) &&
+                    is_i32ish_type(ret)
+                {
+                    out.push_str("    end\n");
+                }
             }
         }
-    }
-    out.push_str("    end\n");
-    if !apply3_closures.is_empty() {
         out.push_str("    end\n");
+        if !apply3_closures.is_empty() {
+            out.push_str("    end\n");
+        }
+        out.push_str("  )\n");
     }
-    out.push_str("  )\n");
+
+    let mut extra_apply_arities = apply_arities
+        .iter()
+        .copied()
+        .filter(|n| *n > 3)
+        .collect::<Vec<_>>();
+    extra_apply_arities.sort_unstable();
+    for arity in extra_apply_arities {
+        out.push_str(&emit_high_arity_apply_i32(arity, fn_ids, fn_sigs, closure_defs));
+    }
     out
 }
 
@@ -2694,9 +2823,9 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         let v = compile_expr(a, &nested_ctx)?;
         let is_lambda_literal =
             matches!(
-                &a.expr,
-                Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-            );
+            &a.expr,
+            Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+        );
         let arg_is_managed = a.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
         if is_lambda_literal && arg_is_managed {
             // Fresh lambda values are retained by vector push; release the temporary owner.
@@ -2788,9 +2917,9 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .and_then(vec_elem_kind_from_type)?;
     let is_lambda_literal =
         matches!(
-            &val_node.expr,
-            Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-        );
+        &val_node.expr,
+        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+    );
     let value_is_managed = val_node.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
     if is_lambda_literal && value_is_managed {
         // Fresh lambda value is retained by vec_set; release temporary owner to avoid leaks/churn.
@@ -2987,9 +3116,9 @@ fn compile_loop_finish(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, 
                 }
                 let body_node = lambda_node.children
                     .last()
-                    .ok_or_else(||
+                    .ok_or_else(|| {
                         format!("loop-finish local lambda '{}' missing typed body", name)
-                    )?;
+                    })?;
                 let body = compile_expr(body_node, ctx)?;
                 format!("{body}\ndrop")
             } else if let Some((params, _ret)) = ctx.fn_sigs.get(name) {
@@ -3027,29 +3156,12 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
     };
     let args = &node.children[1..];
     if params.is_empty() && !args.is_empty() {
+        let arity = args.len();
         let mut out = vec![format!("call ${}", ident(op))];
-        match args.len() {
-            1 => {
-                out.push(compile_expr(&args[0], ctx)?);
-                out.push("call $apply1_i32".to_string());
-            }
-            2 => {
-                out.push(compile_expr(&args[0], ctx)?);
-                out.push(compile_expr(&args[1], ctx)?);
-                out.push("call $apply2_i32".to_string());
-            }
-            3 => {
-                out.push(compile_expr(&args[0], ctx)?);
-                out.push(compile_expr(&args[1], ctx)?);
-                out.push(compile_expr(&args[2], ctx)?);
-                out.push("call $apply3_i32".to_string());
-            }
-            n => {
-                return Err(
-                    format!("Dynamic function application with {} args is not supported in wasm backend", n)
-                );
-            }
+        for arg in args {
+            out.push(compile_expr(arg, ctx)?);
         }
+        out.push(format!("call $apply{}_i32", arity));
         return Ok(out.join("\n"));
     }
     let unit_arity_elided = params.len() == 1 && matches!(params[0], Type::Unit) && args.is_empty();
@@ -3079,27 +3191,17 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
         ctx
     )?;
     let args = &node.children[1..];
-    match args.len() {
-        1 => {
-            let a = compile_expr(&args[0], ctx)?;
-            Ok(format!("{f}\n{a}\ncall $apply1_i32"))
-        }
-        2 => {
-            let a = compile_expr(&args[0], ctx)?;
-            let b = compile_expr(&args[1], ctx)?;
-            Ok(format!("{f}\n{a}\n{b}\ncall $apply2_i32"))
-        }
-        3 => {
-            let a = compile_expr(&args[0], ctx)?;
-            let b = compile_expr(&args[1], ctx)?;
-            let c = compile_expr(&args[2], ctx)?;
-            Ok(format!("{f}\n{a}\n{b}\n{c}\ncall $apply3_i32"))
-        }
-        n =>
-            Err(
-                format!("Dynamic function application with {} args is not supported in wasm backend", n)
-            ),
+    if args.is_empty() {
+        return Err(
+            "Dynamic function application with 0 args is not supported in wasm backend".to_string()
+        );
     }
+    let mut out = vec![f];
+    for arg in args {
+        out.push(compile_expr(arg, ctx)?);
+    }
+    out.push(format!("call $apply{}_i32", args.len()));
+    Ok(out.join("\n"))
 }
 
 fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -3185,7 +3287,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
             match &items[0] {
                 Expression::Word(op) =>
                     match op.as_str() {
-                        _ if ctx.locals.contains_key(op) => { compile_dynamic_call(node, ctx) }
+                        _ if ctx.locals.contains_key(op) => compile_dynamic_call(node, ctx),
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
@@ -3256,10 +3358,9 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         op if is_special_word(op) => emit_builtin(op, node, ctx),
                         _ => compile_call(node, op, ctx),
                     }
-                _ =>
-                    Err(
-                        "Higher-order call heads are not yet supported in wasm backend".to_string()
-                    ),
+                _ => {
+                    Err("Higher-order call heads are not yet supported in wasm backend".to_string())
+                }
             }
         }
     }
@@ -3340,9 +3441,9 @@ fn compile_lambda_func(
                 ps
                     .get(i)
                     .cloned()
-                    .ok_or_else(||
+                    .ok_or_else(|| {
                         format!("Missing specialized param type for '{}' arg {}", name, i)
-                    )?
+                    })?
             } else {
                 lambda_node.typ
                     .as_ref()
@@ -3632,7 +3733,9 @@ fn compile_value_func(
     let ref_slots: Vec<usize> = local_defs
         .iter()
         .enumerate()
-        .filter_map(|(i, (_n, t))| if is_managed_local_type(t) { Some(i) } else { None })
+        .filter_map(|(i, (_n, t))| {
+            if is_managed_local_type(t) { Some(i) } else { None }
+        })
         .collect();
 
     let mut out = String::new();
@@ -3843,10 +3946,10 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     for (name, def) in &top_defs {
         let is_lambda_def =
             matches!(
-                &def.expr,
-                Expression::Apply(items)
-                    if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
-            );
+            &def.expr,
+            Expression::Apply(items)
+                if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
+        );
         let (ps, ret) = if is_lambda_def {
             let t = def.node.typ
                 .as_ref()
@@ -3991,13 +4094,10 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
             lambda_ids.insert(key.clone(), *id);
         }
     }
-    let mut wat = String::new();
     let main_ret_ty = main_node.typ
         .as_ref()
         .ok_or_else(|| "Missing main expression type".to_string())?;
-    wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
-    wat.push_str("(module\n");
-    wat.push_str(&emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs));
+    let mut emitted_funcs: Vec<String> = Vec::new();
 
     for (name, def) in &top_defs {
         if partial_helpers.iter().any(|h| h.binding_name == *name) {
@@ -4007,8 +4107,8 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
             Expression::Apply(items) if
                 matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
             => {
-                wat.push_str(
-                    &compile_lambda_func(
+                emitted_funcs.push(
+                    compile_lambda_func(
                         name,
                         &def.expr,
                         &def.node,
@@ -4021,8 +4121,8 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
                 );
             }
             _ => {
-                wat.push_str(
-                    &compile_value_func(
+                emitted_funcs.push(
+                    compile_value_func(
                         name,
                         &def.node,
                         &fn_sigs,
@@ -4036,8 +4136,8 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
     }
     for h in &partial_helpers {
-        wat.push_str(
-            &compile_partial_helper_func(
+        emitted_funcs.push(
+            compile_partial_helper_func(
                 h,
                 &fn_sigs,
                 &fn_ids,
@@ -4052,13 +4152,13 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
             .get(&h.helper_name)
             .copied()
             .ok_or_else(|| format!("Missing function id for helper '{}'", h.helper_name))?;
-        wat.push_str(&compile_value_func_fn_ptr(&h.binding_name, helper_id));
+        emitted_funcs.push(compile_value_func_fn_ptr(&h.binding_name, helper_id));
     }
     for node in &lambda_nodes {
         let key = node.expr.to_lisp();
         if let Some(name) = lambda_names.get(&key) {
-            wat.push_str(
-                &compile_lambda_func(
+            emitted_funcs.push(
+                compile_lambda_func(
                     name,
                     &node.expr,
                     node,
@@ -4073,8 +4173,8 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     }
     for def in closure_defs.values() {
         if let Some(node) = lambda_nodes.iter().find(|n| n.expr.to_lisp() == def.key) {
-            wat.push_str(
-                &compile_closure_func(
+            emitted_funcs.push(
+                compile_closure_func(
                     &def.name,
                     node,
                     &def.captures,
@@ -4119,18 +4219,34 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         tmp_i32: main_local_defs.len(),
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;
+    let mut apply_arities: HashSet<usize> = HashSet::new();
+    for func in &emitted_funcs {
+        collect_apply_arities_from_code(func, &mut apply_arities);
+    }
+    collect_apply_arities_from_code(&main_code, &mut apply_arities);
 
-    wat.push_str(&format!("  ;; Type: {}\n", main_ret_ty));
-    wat.push_str(&format!("  (func (export \"main\") (result {main_wasm_ty})\n"));
+    let mut main_func = String::new();
+    main_func.push_str(&format!("  ;; Type: {}\n", main_ret_ty));
+    main_func.push_str(&format!("  (func (export \"main\") (result {main_wasm_ty})\n"));
     for (_n, t) in &main_local_defs {
-        wat.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
+        main_func.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
     for _ in 0..EXTRA_I32_LOCALS {
-        wat.push_str("    (local i32)\n");
+        main_func.push_str("    (local i32)\n");
     }
-    wat.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
-    wat.push_str("  )\n");
+    main_func.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
+    main_func.push_str("  )\n");
+
+    let mut wat = String::new();
+    wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
+    wat.push_str("(module\n");
+    wat.push_str(&emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs, &apply_arities));
+    for func in emitted_funcs {
+        wat.push_str(&func);
+    }
+    wat.push_str(&main_func);
     wat.push_str(")\n");
+
     Ok(wat)
 }
 
