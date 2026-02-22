@@ -976,7 +976,10 @@ fn subtract_branch_site_outcomes(
         let true_hits = cur.true_hits.saturating_sub(base.true_hits);
         let false_hits = cur.false_hits.saturating_sub(base.false_hits);
         if true_hits > 0 || false_hits > 0 {
-            out.insert(*id, BranchSiteCoverage { true_hits, false_hits });
+            out.insert(*id, BranchSiteCoverage {
+                true_hits,
+                false_hits,
+            });
         }
     }
     out
@@ -1285,9 +1288,9 @@ fn function_report_has_anomaly(r: &RuntimeReportDelta) -> bool {
 fn format_input_preview(args: &[BiteCodeEvaluated]) -> String {
     let s = args
         .iter()
-        .map(|x|
+        .map(|x| {
             truncate_middle(&format_value_preview(x), MAX_INPUT_PREVIEW_LEN, INPUT_PREVIEW_EDGE_LEN)
-        )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let s = truncate_middle(&s, MAX_INPUT_PREVIEW_LEN, INPUT_PREVIEW_EDGE_LEN);
@@ -1304,13 +1307,13 @@ fn format_value_preview(value: &BiteCodeEvaluated) -> String {
             let elems = arr
                 .borrow()
                 .iter()
-                .map(|x|
+                .map(|x| {
                     truncate_middle(
                         &format_value_preview(x),
                         MAX_INNER_VALUE_PREVIEW_LEN,
                         INNER_VALUE_PREVIEW_EDGE_LEN
                     )
-                )
+                })
                 .collect::<Vec<_>>()
                 .join(" ");
             format!("[{}]", elems)
@@ -1349,7 +1352,9 @@ fn max_opt_i32(a: Option<i32>, b: Option<i32>) -> Option<i32> {
 
 fn pick_min_delta_index(current: Option<i32>, baseline: Option<i32>) -> Option<i32> {
     match (current, baseline) {
-        (Some(c), Some(b)) => if c < b { Some(c) } else { None }
+        (Some(c), Some(b)) => {
+            if c < b { Some(c) } else { None }
+        }
         (Some(c), None) => Some(c),
         _ => None,
     }
@@ -1357,7 +1362,9 @@ fn pick_min_delta_index(current: Option<i32>, baseline: Option<i32>) -> Option<i
 
 fn pick_max_delta_index(current: Option<i32>, baseline: Option<i32>) -> Option<i32> {
     match (current, baseline) {
-        (Some(c), Some(b)) => if c > b { Some(c) } else { None }
+        (Some(c), Some(b)) => {
+            if c > b { Some(c) } else { None }
+        }
         (Some(c), None) => Some(c),
         _ => None,
     }
@@ -1443,26 +1450,23 @@ fn assign_lambda_uids(code: Vec<Instruction>, next_uid: &mut usize) -> Vec<Instr
                 Instruction::MakeLambdaUid(uid, params, body) => {
                     Instruction::MakeLambdaUid(uid, params, assign_lambda_uids(body, next_uid))
                 }
-                Instruction::If(branch_id, then_branch, else_branch) => {
+                Instruction::If(branch_id, then_branch, else_branch) =>
                     Instruction::If(
                         branch_id,
                         assign_lambda_uids(then_branch, next_uid),
                         assign_lambda_uids(else_branch, next_uid)
-                    )
-                }
-                Instruction::Loop(start, end, func) => {
+                    ),
+                Instruction::Loop(start, end, func) =>
                     Instruction::Loop(
                         assign_lambda_uids(start, next_uid),
                         assign_lambda_uids(end, next_uid),
                         assign_lambda_uids(func, next_uid)
-                    )
-                }
-                Instruction::LoopFinish(cond, func) => {
+                    ),
+                Instruction::LoopFinish(cond, func) =>
                     Instruction::LoopFinish(
                         assign_lambda_uids(cond, next_uid),
                         assign_lambda_uids(func, next_uid)
-                    )
-                }
+                    ),
                 other => other,
             }
         })
@@ -1492,19 +1496,17 @@ fn assign_branch_uids(code: Vec<Instruction>, next_branch_id: &mut usize) -> Vec
                         assign_branch_uids(body, next_branch_id)
                     )
                 }
-                Instruction::Loop(start, end, func) => {
+                Instruction::Loop(start, end, func) =>
                     Instruction::Loop(
                         assign_branch_uids(start, next_branch_id),
                         assign_branch_uids(end, next_branch_id),
                         assign_branch_uids(func, next_branch_id)
-                    )
-                }
-                Instruction::LoopFinish(cond, func) => {
+                    ),
+                Instruction::LoopFinish(cond, func) =>
                     Instruction::LoopFinish(
                         assign_branch_uids(cond, next_branch_id),
                         assign_branch_uids(func, next_branch_id)
-                    )
-                }
+                    ),
                 other => other,
             }
         })

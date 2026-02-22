@@ -845,7 +845,9 @@ fn compile_call_parts(children: &[TypedExpression]) -> String {
         let direct_arity_opt = children
             .first()
             .and_then(declared_arity_for_head)
-            .or_else(|| if param_types.is_empty() { None } else { Some(param_types.len()) });
+            .or_else(|| {
+                if param_types.is_empty() { None } else { Some(param_types.len()) }
+            });
         let direct_arity = direct_arity_opt.unwrap_or(0);
         let has_holes = arg_exprs.iter().any(|a| a.is_none());
         if direct_arity > 0 && (has_holes || arg_exprs.len() < direct_arity) {
@@ -1014,18 +1016,18 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(||
+                                .unwrap_or_else(|| {
                                     "std::rc::Rc::new(std::cell::RefCell::new(Vec::<i32>::new()))".to_string()
-                                );
+                                });
                             format!("{{ let __arr = ({}).clone(); let __r = __arr.borrow(); let __n = __r.len() as i32; __n }}", a)
                         }
                         "get" | "car" => {
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(||
+                                .unwrap_or_else(|| {
                                     "std::rc::Rc::new(std::cell::RefCell::new(Vec::<i32>::new()))".to_string()
-                                );
+                                });
                             let i = if op == "car" {
                                 "0".to_string()
                             } else {
@@ -1082,9 +1084,9 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(||
+                                .unwrap_or_else(|| {
                                     "std::rc::Rc::new(std::cell::RefCell::new(Vec::<i32>::new()))".to_string()
-                                );
+                                });
                             let i = node.children
                                 .get(2)
                                 .map(compile_expr)
@@ -1099,9 +1101,9 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(||
+                                .unwrap_or_else(|| {
                                     "std::rc::Rc::new(std::cell::RefCell::new(Vec::<i32>::new()))".to_string()
-                                );
+                                });
                             let i = node.children
                                 .get(2)
                                 .map(compile_expr)
@@ -1121,9 +1123,9 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                             let a = node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(||
+                                .unwrap_or_else(|| {
                                     "std::rc::Rc::new(std::cell::RefCell::new(Vec::<i32>::new()))".to_string()
-                                );
+                                });
                             format!("{{ ({}).borrow_mut().pop(); 0i32 }}", a)
                         }
                         "if" => {
@@ -1184,12 +1186,11 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                                 None => v,
                             }
                         }
-                        "char" => {
+                        "char" =>
                             node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "0i32".to_string())
-                        }
+                                .unwrap_or_else(|| "0i32".to_string()),
                         "Int->Float" => {
                             format!(
                                 "({}) as f32",

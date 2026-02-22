@@ -8,17 +8,17 @@ mod infer;
 #[cfg(feature = "js-compiler")]
 #[path = "compilers/js.rs"]
 mod js;
-#[cfg(feature = "wasm-compiler")]
-#[path = "compilers/wat.rs"]
-mod wat;
 #[cfg(feature = "parser")]
 mod parser;
+#[cfg(feature = "report")]
+mod report;
 #[cfg(feature = "type-checker")]
 mod types;
 #[cfg(feature = "vm")]
 mod vm;
-#[cfg(feature = "report")]
-mod report;
+#[cfg(feature = "wasm-compiler")]
+#[path = "compilers/wat.rs"]
+mod wat;
 #[cfg(feature = "vm")]
 use crate::vm::parse_bitecode;
 use std::cell::RefCell;

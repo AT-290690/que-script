@@ -224,7 +224,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
         Expression::Int(n) => format!("{}", n),
         // Keep explicit float shape (e.g. 4.0) so OCaml uses float operators correctly.
         Expression::Float(n) => format!("{:?}", n),
-        Expression::Word(w) => {
+        Expression::Word(w) =>
             match w.as_str() {
                 "true" => "true".to_string(),
                 "false" => "false".to_string(),
@@ -232,13 +232,12 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                 "snd" => "snd".to_string(),
                 _ => ident(w),
             }
-        }
         Expression::Apply(items) => {
             if items.is_empty() {
                 return "()".to_string();
             }
             match &items[0] {
-                Expression::Word(op) => {
+                Expression::Word(op) =>
                     match op.as_str() {
                         "do" => compile_do(items, &node.children),
                         "vector" => {
@@ -458,12 +457,11 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 "0".to_string()
                             }
                         }
-                        "as" | "char" => {
+                        "as" | "char" =>
                             node.children
                                 .get(1)
                                 .map(compile_expr)
-                                .unwrap_or_else(|| "()".to_string())
-                        }
+                                .unwrap_or_else(|| "()".to_string()),
                         "Int->Float" => {
                             let a = node.children
                                 .get(1)
@@ -539,7 +537,6 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                             }
                         }
                     }
-                }
                 _ => compile_call(&node.children),
             }
         }

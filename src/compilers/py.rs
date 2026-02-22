@@ -66,7 +66,20 @@ fn ident(name: &str, idx: usize) -> String {
                         s.push_str(&idx.to_string());
                     }
                     'a'..='z' | 'A'..='Z' | '0'..='9' => s.push(c.to_ascii_lowercase()),
-                    ':' | '-' | '*' | '/' | '?' | '!' | '.' | '+' | '<' | '>' | '=' | '|' | '&' | '^' => push_encoded(&mut s, c),
+                    | ':'
+                    | '-'
+                    | '*'
+                    | '/'
+                    | '?'
+                    | '!'
+                    | '.'
+                    | '+'
+                    | '<'
+                    | '>'
+                    | '='
+                    | '|'
+                    | '&'
+                    | '^' => push_encoded(&mut s, c),
                     _ => push_encoded(&mut s, c),
                 }
             }
@@ -137,9 +150,7 @@ fn compile_curried_call(func_py: String, args_py: &[String]) -> String {
     if args_py.is_empty() {
         return format!("({})()", func_py);
     }
-    args_py
-        .iter()
-        .fold(func_py, |acc, arg| format!("({})({})", acc, arg))
+    args_py.iter().fold(func_py, |acc, arg| format!("({})({})", acc, arg))
 }
 
 fn compile_do_expr(items: &[Expression]) -> String {
@@ -396,10 +407,7 @@ fn compile_expr_to_py_inner(expr: &Expression) -> String {
                     }
                 other_head => {
                     let f = compile_expr_to_py(other_head);
-                    let args: Vec<String> = items[1..]
-                        .iter()
-                        .map(compile_expr_to_py)
-                        .collect();
+                    let args: Vec<String> = items[1..].iter().map(compile_expr_to_py).collect();
                     compile_curried_call(format!("({})", f), &args)
                 }
             }
@@ -469,14 +477,11 @@ pub fn compile_program_to_python(top: &Expression) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    format!(
-        "def _set(xs, i, v):\n    i = int(i)\n    if i == len(xs):\n        xs.append(v)\n    else:\n        xs[i] = v\n    return 0\n\n\
+    format!("def _set(xs, i, v):\n    i = int(i)\n    if i == len(xs):\n        xs.append(v)\n    else:\n        xs[i] = v\n    return 0\n\n\
 def _pop(xs):\n    if len(xs) > 0:\n        xs.pop()\n    return 0\n\n\
 def _loop(start, end, fn_):\n    for i in range(int(start), int(end)):\n        fn_(i)\n    return 0\n\n\
 def _loop_finish(cond, fn_):\n    while cond():\n        fn_()\n    return 0\n\n\
 def _pretty_result(v):\n    if isinstance(v, bool):\n        return 'true' if v else 'false'\n    if v is None:\n        return '()'\n    if isinstance(v, list):\n        return '[' + ' '.join(_pretty_result(x) for x in v) + ']'\n    if isinstance(v, tuple):\n        return '[' + ' '.join(_pretty_result(x) for x in v) + ']'\n    return str(v)\n\n\
 def _main():\n{}\n\n\
-if __name__ == '__main__':\n    print(_pretty_result(_main()))\n",
-        stmts
-    )
+if __name__ == '__main__':\n    print(_pretty_result(_main()))\n", stmts)
 }

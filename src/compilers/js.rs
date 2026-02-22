@@ -106,9 +106,7 @@ fn compile_curried_call(func_js: String, args_js: &[String]) -> String {
     if args_js.is_empty() {
         return format!("({})()", func_js);
     }
-    args_js
-        .iter()
-        .fold(func_js, |acc, arg| format!("({})({})", acc, arg))
+    args_js.iter().fold(func_js, |acc, arg| format!("({})({})", acc, arg))
 }
 
 /// Compile a single Expression into a JavaScript expression / snippet.
@@ -435,9 +433,5 @@ pub fn compile_program_to_js(top: &Expression) -> String {
     }
     let stmts = top_level_to_statements(top);
     let body = stmts.join("\n");
-    format!(
-        "(()=>{{\n{}\n{}\n}})()",
-        "let _mconsole_log_m = console.log;",
-        body
-    )
+    format!("(()=>{{\n{}\n{}\n}})()", "let _mconsole_log_m = console.log;", body)
 }

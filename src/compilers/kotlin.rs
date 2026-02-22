@@ -442,12 +442,13 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                             }
                             let value_node = node.children.get(2);
                             let name = match &items[1] {
-                                Expression::Word(n) =>
+                                Expression::Word(n) => {
                                     ident_typed(
                                         n,
                                         0,
                                         value_node.and_then(|n| n.typ.as_ref())
-                                    ),
+                                    )
+                                }
                                 _ => "_tmp".to_string(),
                             };
                             let name = match items.get(2) {
@@ -758,10 +759,12 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 .get(1)
                                 .map(compile_expr)
                                 .unwrap_or_else(|| "0".to_string()),
-                        "Int->Float" =>
-                            format!("(({}) as Int).toDouble()", compile_expr(&node.children[1])),
-                        "Float->Int" =>
-                            format!("(({}) as Double).toInt()", compile_expr(&node.children[1])),
+                        "Int->Float" => {
+                            format!("(({}) as Int).toDouble()", compile_expr(&node.children[1]))
+                        }
+                        "Float->Int" => {
+                            format!("(({}) as Double).toInt()", compile_expr(&node.children[1]))
+                        }
                         _ =>
                             cast_result_to_node_type(
                                 compile_call(&node.children),

@@ -2,20 +2,20 @@
 #![allow(warnings)]
 
 use crate::baked::load_ast;
+use crate::format::format;
 use crate::infer::infer_with_builtins_env;
 use crate::parser::build;
+#[cfg(feature = "repl")]
+use crate::repl::repl;
 use crate::vm::parse_bitecode;
-use crate::format::format;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use std::cell::RefCell;
 use std::env;
 use std::fs;
 use std::io::Read;
-use std::num::Wrapping;
-use std::cell::RefCell;
-use flate2::write::GzEncoder;
-use flate2::Compression;
 use std::io::{ self, Write };
-#[cfg(feature = "repl")]
-use crate::repl::repl;
+use std::num::Wrapping;
 thread_local! {
     static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
 }
@@ -465,7 +465,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 let std_ast = std.borrow();
                 if let crate::parser::Expression::Apply(items) = &*std_ast {
                     match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                        Ok(wrapped_ast) => {
+                        Ok(wrapped_ast) =>
                             match crate::wat::compile_program_to_wat(&wrapped_ast) {
                                 Ok(out) => {
                                     let target = resolve_output_path(&dist, "main.wat");
@@ -479,7 +479,6 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                                 }
                                 Err(err) => println!("{}", err),
                             }
-                        }
                         Err(e) => println!("{}", e),
                     }
                 }
