@@ -3839,17 +3839,38 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             )
         );
         for (i, cap) in def.captures.iter().enumerate() {
-            let cap_v = if let Some(local_idx) = ctx.locals.get(cap) {
-                format!("local.get {}", local_idx)
+            let (cap_v, is_ref_capture) = if let Some(local_idx) = ctx.locals.get(cap) {
+                (
+                    format!("local.get {}", local_idx),
+                    ctx.local_types
+                        .get(cap)
+                        .map(is_managed_local_type)
+                        .unwrap_or(false),
+                )
+            } else if let Some((ps, ret)) = ctx.fn_sigs.get(cap) {
+                if ps.is_empty() {
+                    (format!("call ${}", ident(cap)), is_managed_local_type(ret))
+                } else if let Some(id) = ctx.fn_ids.get(cap) {
+                    // Function-valued global capture: store function pointer id.
+                    (format!("i32.const {}", id), true)
+                } else if let Some(tag) = builtin_fn_tag(cap) {
+                    // Builtin function captured as value.
+                    (format!("i32.const {}", tag), true)
+                } else {
+                    return Err(
+                        format!(
+                            "Unsupported closure capture '{}' in wasm backend (no function id/tag)",
+                            cap
+                        )
+                    );
+                }
+            } else if let Some(tag) = builtin_fn_tag(cap) {
+                (format!("i32.const {}", tag), true)
             } else {
                 return Err(
-                    format!("Unsupported closure capture '{}' in wasm backend (not a local)", cap)
+                    format!("Unsupported closure capture '{}' in wasm backend", cap)
                 );
             };
-            let is_ref_capture = ctx.local_types
-                .get(cap)
-                .map(is_managed_local_type)
-                .unwrap_or(false);
             let set_fn = if is_ref_capture { "$closure_set_ref" } else { "$closure_set" };
             out.push(
                 format!(
