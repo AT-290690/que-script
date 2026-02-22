@@ -93,6 +93,20 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
     }
 }
 
+fn builtin_tag_arity(tag: i32) -> Option<usize> {
+    match tag {
+        1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 25 | 26 |
+        27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 => Some(2),
+        21 => Some(3),
+        18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 => Some(1),
+        _ => None,
+    }
+}
+
+fn builtin_tag_first_param_is_ref(tag: i32) -> bool {
+    matches!(tag, 21)
+}
+
 fn is_i32ish_type(t: &Type) -> bool {
     matches!(
         t,
@@ -109,11 +123,11 @@ fn is_i32ish_type(t: &Type) -> bool {
 }
 
 fn is_ref_type(t: &Type) -> bool {
-    matches!(t, Type::List(_) | Type::Function(_, _))
+    matches!(t, Type::List(_) | Type::Function(_, _) | Type::Var(_))
 }
 
 fn is_managed_local_type(t: &Type) -> bool {
-    matches!(t, Type::List(_) | Type::Function(_, _))
+    matches!(t, Type::List(_) | Type::Function(_, _) | Type::Var(_))
 }
 
 impl VecElemKind {
@@ -1957,7 +1971,9 @@ fn emit_vector_runtime(
 "#
     );
     if apply_arities.contains(&1) {
-        out.push_str("  (func $apply1_i32 (param $f i32) (param $a i32) (result i32)\n");
+        out.push_str(
+            "  (func $apply1_i32 (param $f i32) (param $a i32) (result i32)\n    (local $clo i32)\n"
+        );
         let apply1_closures = closure_defs
             .values()
             .filter_map(|def| {
@@ -1976,7 +1992,30 @@ fn emit_vector_runtime(
                 Some((fid, def.name.clone(), def.captures.len()))
             })
             .collect::<Vec<_>>();
-        if !apply1_closures.is_empty() {
+        let apply1_partial_closures = closure_defs
+            .values()
+            .filter_map(|def| {
+                let fid = *fn_ids.get(&def.name)?;
+                let (ps, ret) = fn_sigs.get(&def.name)?;
+                if def.user_arity <= 1 || !is_i32ish_type(ret) {
+                    return None;
+                }
+                if ps.len() != def.captures.len() + def.user_arity {
+                    return None;
+                }
+                if !ps.iter().all(is_i32ish_type) {
+                    return None;
+                }
+                let helper_name = format!("__partial_dyn_{}_1", def.user_arity);
+                let helper_id = *fn_ids.get(&helper_name)?;
+                let first_param_is_ref = ps
+                    .get(def.captures.len())
+                    .map(is_ref_type)
+                    .unwrap_or(false);
+                Some((fid, helper_id, first_param_is_ref))
+            })
+            .collect::<Vec<_>>();
+        if !apply1_closures.is_empty() || !apply1_partial_closures.is_empty() {
             out.push_str(
                 "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
             );
@@ -1992,8 +2031,34 @@ fn emit_vector_runtime(
                 out.push_str(&format!("        local.get $a\n        call ${}\n", ident(name)));
                 out.push_str("      else\n");
             }
+            for (fid, helper_id, first_param_is_ref) in &apply1_partial_closures {
+                out.push_str(
+                    &format!(
+                        "      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n",
+                        fid
+                    )
+                );
+                out.push_str(
+                    &format!(
+                        "        i32.const {}\n        i32.const 2\n        call $closure_new\n        local.set $clo\n",
+                        helper_id
+                    )
+                );
+                out.push_str(
+                    "        local.get $clo\n        i32.const 0\n        local.get $f\n        call $closure_set_ref\n        drop\n"
+                );
+                out.push_str("        local.get $clo\n        i32.const 1\n        local.get $a\n");
+                if *first_param_is_ref {
+                    out.push_str("        call $closure_set_ref\n");
+                } else {
+                    out.push_str("        call $closure_set\n");
+                }
+                out.push_str("        drop\n");
+                out.push_str("        local.get $clo\n");
+                out.push_str("      else\n");
+            }
             out.push_str("        unreachable\n");
-            for _ in 0..apply1_closures.len() {
+            for _ in 0..(apply1_closures.len() + apply1_partial_closures.len()) {
                 out.push_str("      end\n");
             }
             out.push_str("    else\n");
@@ -2010,6 +2075,50 @@ fn emit_vector_runtime(
                             ident(name)
                         )
                     );
+                }
+            }
+        }
+        for (name, tag) in fn_ids {
+            if let Some((ps, ret)) = fn_sigs.get(name) {
+                if ps.len() > 1 && ps.iter().all(is_i32ish_type) && is_i32ish_type(ret) {
+                    let helper_name = format!("__partial_dyn_{}_1", ps.len());
+                    if let Some(helper_id) = fn_ids.get(&helper_name) {
+                        let first_param_is_ref = ps.first().map(is_ref_type).unwrap_or(false);
+                        apply1_open_ends += 1;
+                        out.push_str(
+                            &format!(
+                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set_ref\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
+                                tag,
+                                helper_id,
+                                tag,
+                                if first_param_is_ref { "closure_set_ref" } else { "closure_set" }
+                            )
+                        );
+                    }
+                }
+            }
+        }
+        let builtin_apply1_partial_tags = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29,
+            30, 31, 32, 33, 34,
+        ];
+        for tag in builtin_apply1_partial_tags {
+            if let Some(arity) = builtin_tag_arity(tag) {
+                if arity > 1 {
+                    let helper_name = format!("__partial_dyn_{}_1", arity);
+                    if let Some(helper_id) = fn_ids.get(&helper_name) {
+                        let first_param_is_ref = builtin_tag_first_param_is_ref(tag);
+                        apply1_open_ends += 1;
+                        out.push_str(
+                            &format!(
+                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set_ref\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
+                                tag,
+                                helper_id,
+                                tag,
+                                if first_param_is_ref { "closure_set_ref" } else { "closure_set" }
+                            )
+                        );
+                    }
                 }
             }
         }
@@ -2088,7 +2197,7 @@ fn emit_vector_runtime(
         for _ in 0..apply1_open_ends {
             out.push_str("    end\n");
         }
-        if !apply1_closures.is_empty() {
+        if !apply1_closures.is_empty() || !apply1_partial_closures.is_empty() {
             out.push_str("    end\n");
         }
         out.push_str("  )\n");
@@ -2579,8 +2688,20 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         ">" | ">#" => "i32.gt_s",
         "<=" | "<=#" => "i32.le_s",
         ">=" | ">=#" => "i32.ge_s",
-        "and" => "i32.and",
-        "or" => "i32.or",
+        "and" => {
+            return Ok(
+                format!(
+                    "{a}\n(if (result i32)\n  (then\n    {b}\n  )\n  (else\n    i32.const 0\n  )\n)"
+                )
+            );
+        }
+        "or" => {
+            return Ok(
+                format!(
+                    "{a}\n(if (result i32)\n  (then\n    i32.const 1\n  )\n  (else\n    {b}\n  )\n)"
+                )
+            );
+        }
         "^" => "i32.xor",
         "|" => "i32.or",
         "&" => "i32.and",
@@ -2837,6 +2958,10 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     let args = &node.children[1..];
     let elem_ref_flag = match node.typ.as_ref() {
         Some(Type::List(inner)) if is_ref_type(inner) => 1,
+        // Polymorphic vectors may carry reference elements at runtime
+        // (e.g. hash-table buckets of key/value vectors). Default to
+        // reference semantics for unknown element types.
+        Some(Type::List(inner)) if matches!(inner.as_ref(), Type::Var(_)) => 1,
         _ => 0,
     };
     let mut out = Vec::new();
@@ -4383,6 +4508,24 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
     }
 
+    // Runtime apply1 fallback can synthesize partial closures for callable arities > 1.
+    // Ensure those dynamic helper functions are always available.
+    for (_name, (ps, ret)) in &fn_sigs {
+        if ps.len() > 1 && ps.iter().all(is_i32ish_type) && is_i32ish_type(ret) {
+            dynamic_partial_specs.insert((ps.len(), 1));
+        }
+    }
+    for tag in [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30,
+        31, 32, 33, 34,
+    ] {
+        if let Some(arity) = builtin_tag_arity(tag) {
+            if arity > 1 {
+                dynamic_partial_specs.insert((arity, 1));
+            }
+        }
+    }
+
     let mut dynamic_partial_specs_sorted = dynamic_partial_specs.into_iter().collect::<Vec<_>>();
     dynamic_partial_specs_sorted.sort_unstable();
     for (total, provided) in dynamic_partial_specs_sorted {
@@ -4390,7 +4533,14 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         if fn_sigs.contains_key(&name) {
             continue;
         }
-        fn_sigs.insert(name.clone(), (vec![Type::Int; 1 + total], Type::Int));
+        // __partial_dyn_N_K signature is:
+        //   (fn_ptr, arg0, arg1, ..., argN-1) -> i32
+        // The first param is always a function value and must be treated as
+        // a managed reference so closure captures retain/release correctly.
+        let mut helper_params = Vec::with_capacity(1 + total);
+        helper_params.push(Type::Function(Box::new(Type::Int), Box::new(Type::Int)));
+        helper_params.extend(std::iter::repeat(Type::Int).take(total));
+        fn_sigs.insert(name.clone(), (helper_params, Type::Int));
         let cap_count = 1 + provided;
         let captures = (0..cap_count).map(|i| format!("__cap{}", i)).collect::<Vec<_>>();
         let key = format!("__partial_dyn_key_{}_{}", total, provided);
