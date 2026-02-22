@@ -2132,6 +2132,9 @@ fn emit_vector_runtime(
   )
 "#
     );
+    if apply_arities.contains(&0) {
+        out.push_str(&emit_high_arity_apply_i32(0, fn_ids, fn_sigs, closure_defs));
+    }
     if apply_arities.contains(&1) {
         out.push_str(
             "  (func $apply1_i32 (param $f i32) (param $a i32) (result i32)\n    (local $clo i32)\n"
@@ -3686,13 +3689,12 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
     let f_node = node.children.first().ok_or_else(|| "call missing function".to_string())?;
     let f = compile_expr(f_node, ctx)?;
     let args = &node.children[1..];
-    if args.is_empty() {
-        return Err(
-            "Dynamic function application with 0 args is not supported in wasm backend".to_string()
-        );
-    }
     let head_ty = f_node.typ.as_ref().ok_or_else(|| "dynamic call head missing type".to_string())?;
     let (head_params, _head_ret) = function_parts(head_ty);
+    if args.is_empty() {
+        // Zero-arg invocation of a function value (e.g. local thunk).
+        return Ok(format!("{f}\ncall $apply0_i32"));
+    }
     if !head_params.is_empty() && args.len() < head_params.len() {
         let total = head_params.len();
         let provided = args.len();
