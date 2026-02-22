@@ -3940,6 +3940,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     }
 
     let mut fn_sigs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
+    let mut top_level_lambda_key_to_name: HashMap<String, String> = HashMap::new();
     let top_def_names: HashSet<String> = top_defs.keys().cloned().collect();
     let mut call_specs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
     collect_call_specializations(typed_ast, &top_def_names, &mut call_specs);
@@ -3973,6 +3974,10 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
         wasm_val_type(&ret)?;
         fn_sigs.insert(name.clone(), (ps, ret));
+        if is_lambda_def {
+            top_level_lambda_key_to_name.insert(def.expr.to_lisp(), name.clone());
+            top_level_lambda_key_to_name.insert(def.node.expr.to_lisp(), name.clone());
+        }
     }
     let mut lambda_nodes = Vec::new();
     collect_lambda_nodes(typed_ast, &mut lambda_nodes);
@@ -3985,6 +3990,9 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     let mut next_closure_idx = 0i32;
     for node in &lambda_nodes {
         let key = node.expr.to_lisp();
+        if top_level_lambda_key_to_name.contains_key(&key) {
+            continue;
+        }
         if lambda_names.contains_key(&key) || closure_defs.contains_key(&key) {
             continue;
         }
@@ -4087,6 +4095,11 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
                 fn_ids.insert(name.clone(), next_fn_id);
                 next_fn_id += 1;
             }
+        }
+    }
+    for (key, name) in &top_level_lambda_key_to_name {
+        if let Some(id) = fn_ids.get(name) {
+            lambda_ids.insert(key.clone(), *id);
         }
     }
     for (key, name) in &lambda_names {
