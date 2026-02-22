@@ -71,6 +71,18 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "pop!" => Some(22),
         "fst" => Some(23),
         "snd" => Some(24),
+        "+." => Some(25),
+        "-." => Some(26),
+        "*." => Some(27),
+        "/." => Some(28),
+        "mod." => Some(29),
+        "=." => Some(30),
+        "<." => Some(31),
+        ">." => Some(32),
+        "<=." => Some(33),
+        ">=." => Some(34),
+        "Int->Float" => Some(35),
+        "Float->Int" => Some(36),
         _ => None,
     }
 }
@@ -79,6 +91,7 @@ fn is_i32ish_type(t: &Type) -> bool {
     matches!(
         t,
         Type::Int |
+            Type::Float |
             Type::Bool |
             Type::Char |
             Type::Unit |
@@ -149,8 +162,7 @@ fn ident(name: &str) -> String {
 
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
-        Type::Int | Type::Bool | Type::Char | Type::Unit => Ok("i32"),
-        Type::Float => Err("Float is currently unsupported in wasm backend".to_string()),
+        Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => Ok("i32"),
         Type::List(_) | Type::Tuple(_) => Ok("i32"),
         Type::Var(_) => Ok("i32"),
         Type::Function(_, _) => Ok("i32"),
@@ -159,8 +171,7 @@ fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
 
 fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
     match typ {
-        Type::Float => Err("Float vectors are currently unsupported in wasm backend".to_string()),
-        Type::Int | Type::Bool | Type::Char | Type::Unit | Type::List(_) | Type::Tuple(_) => {
+        Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit | Type::List(_) | Type::Tuple(_) => {
             Ok(VecElemKind::I32)
         }
         Type::Var(_) => Ok(VecElemKind::I32),
@@ -1758,7 +1769,25 @@ fn emit_vector_runtime(
         i32.const -1
         i32.xor
     else
+        local.get $f
+        i32.const 35
+        i32.eq
+        if (result i32)
+          local.get $a
+          f32.convert_i32_s
+          i32.reinterpret_f32
+        else
+          local.get $f
+          i32.const 36
+          i32.eq
+          if (result i32)
+            local.get $a
+            f32.reinterpret_i32
+            i32.trunc_f32_s
+          else
         unreachable
+          end
+        end
       end
     end
     end
@@ -1979,7 +2008,129 @@ fn emit_vector_runtime(
                                       local.get $b
                                       i32.shr_s
                                     else
-                                      unreachable
+                                      local.get $f
+                                      i32.const 25
+                                      i32.eq
+                                      if (result i32)
+                                        local.get $a
+                                        f32.reinterpret_i32
+                                        local.get $b
+                                        f32.reinterpret_i32
+                                        f32.add
+                                        i32.reinterpret_f32
+                                      else
+                                        local.get $f
+                                        i32.const 26
+                                        i32.eq
+                                        if (result i32)
+                                          local.get $a
+                                          f32.reinterpret_i32
+                                          local.get $b
+                                          f32.reinterpret_i32
+                                          f32.sub
+                                          i32.reinterpret_f32
+                                        else
+                                          local.get $f
+                                          i32.const 27
+                                          i32.eq
+                                          if (result i32)
+                                            local.get $a
+                                            f32.reinterpret_i32
+                                            local.get $b
+                                            f32.reinterpret_i32
+                                            f32.mul
+                                            i32.reinterpret_f32
+                                          else
+                                            local.get $f
+                                            i32.const 28
+                                            i32.eq
+                                            if (result i32)
+                                              local.get $a
+                                              f32.reinterpret_i32
+                                              local.get $b
+                                              f32.reinterpret_i32
+                                              f32.div
+                                              i32.reinterpret_f32
+                                            else
+                                              local.get $f
+                                              i32.const 29
+                                              i32.eq
+                                              if (result i32)
+                                                local.get $a
+                                                f32.reinterpret_i32
+                                                local.get $a
+                                                f32.reinterpret_i32
+                                                local.get $b
+                                                f32.reinterpret_i32
+                                                f32.div
+                                                f32.trunc
+                                                local.get $b
+                                                f32.reinterpret_i32
+                                                f32.mul
+                                                f32.sub
+                                                i32.reinterpret_f32
+                                              else
+                                                local.get $f
+                                                i32.const 30
+                                                i32.eq
+                                                if (result i32)
+                                                  local.get $a
+                                                  f32.reinterpret_i32
+                                                  local.get $b
+                                                  f32.reinterpret_i32
+                                                  f32.eq
+                                                else
+                                                  local.get $f
+                                                  i32.const 31
+                                                  i32.eq
+                                                  if (result i32)
+                                                    local.get $a
+                                                    f32.reinterpret_i32
+                                                    local.get $b
+                                                    f32.reinterpret_i32
+                                                    f32.lt
+                                                  else
+                                                    local.get $f
+                                                    i32.const 32
+                                                    i32.eq
+                                                    if (result i32)
+                                                      local.get $a
+                                                      f32.reinterpret_i32
+                                                      local.get $b
+                                                      f32.reinterpret_i32
+                                                      f32.gt
+                                                    else
+                                                      local.get $f
+                                                      i32.const 33
+                                                      i32.eq
+                                                      if (result i32)
+                                                        local.get $a
+                                                        f32.reinterpret_i32
+                                                        local.get $b
+                                                        f32.reinterpret_i32
+                                                        f32.le
+                                                      else
+                                                        local.get $f
+                                                        i32.const 34
+                                                        i32.eq
+                                                        if (result i32)
+                                                          local.get $a
+                                                          f32.reinterpret_i32
+                                                          local.get $b
+                                                          f32.reinterpret_i32
+                                                          f32.ge
+                                                        else
+                                                          unreachable
+                                                        end
+                                                      end
+                                                    end
+                                                  end
+                                                end
+                                              end
+                                            end
+                                          end
+                                        end
+                                      end
                                     end
     "#
     );
@@ -2129,9 +2280,46 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         "&" => "i32.and",
         "<<" => "i32.shl",
         ">>" => "i32.shr_s",
-        "+." | "-." | "*." | "/." | "mod." | "=." | "<." | ">." | "<=." | ">=." => {
-            return Err("Float is currently unsupported in wasm backend".to_string());
-        }
+        "+." =>
+            return Ok(
+                format!(
+                    "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.add\ni32.reinterpret_f32"
+                )
+            ),
+        "-." =>
+            return Ok(
+                format!(
+                    "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.sub\ni32.reinterpret_f32"
+                )
+            ),
+        "*." =>
+            return Ok(
+                format!(
+                    "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32"
+                )
+            ),
+        "/." =>
+            return Ok(
+                format!(
+                    "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.div\ni32.reinterpret_f32"
+                )
+            ),
+        "mod." =>
+            return Ok(
+                format!(
+                    "{a}\nf32.reinterpret_i32\n{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.div\nf32.trunc\n{b}\nf32.reinterpret_i32\nf32.mul\nf32.sub\ni32.reinterpret_f32"
+                )
+            ),
+        "=." =>
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.eq")),
+        "<." =>
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.lt")),
+        ">." =>
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.gt")),
+        "<=." =>
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.le")),
+        ">=." =>
+            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge")),
         _ => {
             return Err(format!("Unsupported builtin {}", op));
         }
@@ -2839,9 +3027,7 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
 fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     match &node.expr {
         Expression::Int(n) => Ok(format!("i32.const {}", n)),
-        Expression::Float(_n) => {
-            Err("Float is currently unsupported in wasm backend".to_string())
-        }
+        Expression::Float(n) => Ok(format!("f32.const {:?}\ni32.reinterpret_f32", n)),
         Expression::Word(w) =>
             match w.as_str() {
                 "true" => Ok("i32.const 1".to_string()),
@@ -2920,8 +3106,23 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(format!("{a}\ni32.eqz"))
                         }
-                        "Int->Float" | "Float->Int" => {
-                            Err("Float is currently unsupported in wasm backend".to_string())
+                        "Int->Float" => {
+                            let a = compile_expr(
+                                node.children
+                                    .get(1)
+                                    .ok_or_else(|| "Int->Float missing arg".to_string())?,
+                                ctx
+                            )?;
+                            Ok(format!("{a}\nf32.convert_i32_s\ni32.reinterpret_f32"))
+                        }
+                        "Float->Int" => {
+                            let a = compile_expr(
+                                node.children
+                                    .get(1)
+                                    .ok_or_else(|| "Float->Int missing arg".to_string())?,
+                                ctx
+                            )?;
+                            Ok(format!("{a}\nf32.reinterpret_i32\ni32.trunc_f32_s"))
                         }
                         "as" | "char" =>
                             node.children
