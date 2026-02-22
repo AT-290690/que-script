@@ -1622,6 +1622,26 @@ fn emit_vector_runtime(
     i32.eq
     if
       local.get $ptr
+      i32.const 2147483647
+      i32.and
+      i32.const 65536
+      i32.lt_u
+      if
+        i32.const 0
+        return
+      end
+      local.get $ptr
+      i32.const 2147483647
+      i32.and
+      memory.size
+      i32.const 16
+      i32.shl
+      i32.ge_u
+      if
+        i32.const 0
+        return
+      end
+      local.get $ptr
       call $closure_retain
       return
     end
@@ -1656,6 +1676,26 @@ fn emit_vector_runtime(
     i32.const -2147483648
     i32.eq
     if
+      local.get $ptr
+      i32.const 2147483647
+      i32.and
+      i32.const 65536
+      i32.lt_u
+      if
+        i32.const 0
+        return
+      end
+      local.get $ptr
+      i32.const 2147483647
+      i32.and
+      memory.size
+      i32.const 16
+      i32.shl
+      i32.ge_u
+      if
+        i32.const 0
+        return
+      end
       local.get $ptr
       call $closure_release
       return
@@ -2912,14 +2952,10 @@ fn compile_do(
     let child_at = |item_idx: usize| -> Option<&TypedExpression> {
         if item_idx < child_offset { None } else { node.children.get(item_idx - child_offset) }
     };
-    let mut managed_local_slots: Vec<usize> = ctx.local_types
-        .iter()
-        .filter_map(|(name, t)| {
-            if is_managed_local_type(t) { ctx.locals.get(name).copied() } else { None }
-        })
-        .collect();
-    managed_local_slots.sort_unstable();
-    managed_local_slots.dedup();
+    // Name-based local maps lose shadowed bindings, which can make alias checks
+    // miss live refs and incorrectly release them. Be conservative: compare a
+    // managed temporary against every non-temp slot in this function.
+    let managed_local_slots: Vec<usize> = (0..ctx.tmp_i32).collect();
     let mut parts = Vec::new();
     let mut scoped_lambda_bindings = ctx.lambda_bindings.clone();
     for i in 1..items.len() - 1 {
