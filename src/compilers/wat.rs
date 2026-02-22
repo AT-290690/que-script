@@ -287,6 +287,24 @@ fn is_special_word(w: &str) -> bool {
     )
 }
 
+fn collect_pattern_words(expr: &Expression, out: &mut HashSet<String>) {
+    match expr {
+        Expression::Word(w) => {
+            out.insert(w.clone());
+        }
+        Expression::Apply(items) => {
+            for it in items {
+                collect_pattern_words(it, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_callable_top_def(def: &TopDef) -> bool {
+    matches!(def.node.typ.as_ref(), Some(Type::Function(_, _)))
+}
+
 fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSet<String>) {
     match expr {
         Expression::Word(w) => {
@@ -302,16 +320,34 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                 if op == "lambda" {
                     let mut scoped = bound.clone();
                     for p in &items[1..items.len().saturating_sub(1)] {
-                        if let Expression::Word(name) = p {
-                            scoped.insert(name.clone());
-                        }
+                        collect_pattern_words(p, &mut scoped);
                     }
                     if let Some(body) = items.last() {
                         collect_refs(body, &mut scoped, out);
                     }
                     return;
                 }
+                if op == "do" {
+                    for it in &items[1..] {
+                        if let Expression::Apply(let_items) = it {
+                            if let [Expression::Word(kw), Expression::Word(name), rhs] = &let_items[..] {
+                                if kw == "let" || kw == "let~" || kw == "let*" {
+                                    collect_refs(rhs, bound, out);
+                                    bound.insert(name.clone());
+                                    continue;
+                                }
+                            }
+                        }
+                        collect_refs(it, bound, out);
+                    }
+                    return;
+                }
                 if op == "let" || op == "let~" || op == "let*" {
+                    if let [_, Expression::Word(name), rhs] = &items[..] {
+                        collect_refs(rhs, bound, out);
+                        bound.insert(name.clone());
+                        return;
+                    }
                     if let Some(rhs) = items.get(2) {
                         collect_refs(rhs, bound, out);
                     }
@@ -376,15 +412,13 @@ fn lambda_is_hoistable(node: &TypedExpression, top_defs: &HashMap<String, TopDef
     }
     let mut bound = HashSet::new();
     for p in &items[1..items.len() - 1] {
-        if let Expression::Word(n) = p {
-            bound.insert(n.clone());
-        }
+        collect_pattern_words(p, &mut bound);
     }
     let mut refs = HashSet::new();
     if let Some(body) = items.last() {
         collect_refs(body, &mut bound, &mut refs);
     }
-    refs.into_iter().all(|r| top_defs.contains_key(&r))
+    refs.into_iter().all(|r| top_defs.get(&r).map(is_callable_top_def).unwrap_or(false))
 }
 
 fn lambda_capture_names(node: &TypedExpression, top_defs: &HashMap<String, TopDef>) -> Vec<String> {
@@ -399,9 +433,7 @@ fn lambda_capture_names(node: &TypedExpression, top_defs: &HashMap<String, TopDe
     }
     let mut bound = HashSet::new();
     for p in &items[1..items.len() - 1] {
-        if let Expression::Word(n) = p {
-            bound.insert(n.clone());
-        }
+        collect_pattern_words(p, &mut bound);
     }
     let mut refs = HashSet::new();
     if let Some(body) = items.last() {
@@ -409,7 +441,7 @@ fn lambda_capture_names(node: &TypedExpression, top_defs: &HashMap<String, TopDe
     }
     let mut caps = refs
         .into_iter()
-        .filter(|r| !top_defs.contains_key(r))
+        .filter(|r| !top_defs.get(r).map(is_callable_top_def).unwrap_or(false))
         .collect::<Vec<_>>();
     caps.sort();
     caps
