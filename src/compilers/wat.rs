@@ -420,6 +420,10 @@ fn emit_vector_runtime(
   (memory (export "memory") 1)
   (global $heap (mut i32) (i32.const 65536))
   (global $free_head (mut i32) (i32.const 0))
+  (global $free_small_16 (mut i32) (i32.const 0))
+  (global $free_small_32 (mut i32) (i32.const 0))
+  (global $free_small_64 (mut i32) (i32.const 0))
+  (global $free_small_128 (mut i32) (i32.const 0))
 
   (func $alloc (param $n i32) (result i32)
     (local $prev i32)
@@ -434,6 +438,131 @@ fn emit_vector_runtime(
     (local $delta i32)
     (local $grow_pages i32)
     (local $grow_res i32)
+    ;; Small-block fast path (segregated free lists).
+    ;; Rounds small requests to class size and pops in O(1) when available.
+    local.get $n
+    i32.const 16
+    i32.le_s
+    if
+      i32.const 16
+      local.set $n
+      global.get $free_small_16
+      local.tee $cur
+      i32.eqz
+      if
+      else
+        local.get $cur
+        i32.const 4
+        i32.add
+        i32.load
+        global.set $free_small_16
+        local.get $cur
+        local.get $n
+        i32.store
+        local.get $cur
+        i32.const 4
+        i32.add
+        i32.const 0
+        i32.store
+        local.get $cur
+        i32.const 8
+        i32.add
+        return
+      end
+    else
+      local.get $n
+      i32.const 32
+      i32.le_s
+      if
+        i32.const 32
+        local.set $n
+        global.get $free_small_32
+        local.tee $cur
+        i32.eqz
+        if
+        else
+          local.get $cur
+          i32.const 4
+          i32.add
+          i32.load
+          global.set $free_small_32
+          local.get $cur
+          local.get $n
+          i32.store
+          local.get $cur
+          i32.const 4
+          i32.add
+          i32.const 0
+          i32.store
+          local.get $cur
+          i32.const 8
+          i32.add
+          return
+        end
+      else
+        local.get $n
+        i32.const 64
+        i32.le_s
+        if
+          i32.const 64
+          local.set $n
+          global.get $free_small_64
+          local.tee $cur
+          i32.eqz
+          if
+          else
+            local.get $cur
+            i32.const 4
+            i32.add
+            i32.load
+            global.set $free_small_64
+            local.get $cur
+            local.get $n
+            i32.store
+            local.get $cur
+            i32.const 4
+            i32.add
+            i32.const 0
+            i32.store
+            local.get $cur
+            i32.const 8
+            i32.add
+            return
+          end
+        else
+          local.get $n
+          i32.const 128
+          i32.le_s
+          if
+            i32.const 128
+            local.set $n
+            global.get $free_small_128
+            local.tee $cur
+            i32.eqz
+            if
+            else
+              local.get $cur
+              i32.const 4
+              i32.add
+              i32.load
+              global.set $free_small_128
+              local.get $cur
+              local.get $n
+              i32.store
+              local.get $cur
+              i32.const 4
+              i32.add
+              i32.const 0
+              i32.store
+              local.get $cur
+              i32.const 8
+              i32.add
+              return
+            end
+          end
+        end
+      end
+    end
     global.get $free_head
     local.set $cur
     i32.const 0
@@ -606,6 +735,63 @@ fn emit_vector_runtime(
     local.get $base
     i32.load
     local.set $size
+    ;; Small-block fast path: keep tiny blocks in size bins for O(1) reuse.
+    local.get $size
+    i32.const 16
+    i32.eq
+    if
+      local.get $base
+      i32.const 4
+      i32.add
+      global.get $free_small_16
+      i32.store
+      local.get $base
+      global.set $free_small_16
+      i32.const 0
+      return
+    end
+    local.get $size
+    i32.const 32
+    i32.eq
+    if
+      local.get $base
+      i32.const 4
+      i32.add
+      global.get $free_small_32
+      i32.store
+      local.get $base
+      global.set $free_small_32
+      i32.const 0
+      return
+    end
+    local.get $size
+    i32.const 64
+    i32.eq
+    if
+      local.get $base
+      i32.const 4
+      i32.add
+      global.get $free_small_64
+      i32.store
+      local.get $base
+      global.set $free_small_64
+      i32.const 0
+      return
+    end
+    local.get $size
+    i32.const 128
+    i32.eq
+    if
+      local.get $base
+      i32.const 4
+      i32.add
+      global.get $free_small_128
+      i32.store
+      local.get $base
+      global.set $free_small_128
+      i32.const 0
+      return
+    end
     i32.const 0
     local.set $prev
     global.get $free_head
