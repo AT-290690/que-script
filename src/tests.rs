@@ -2483,6 +2483,78 @@ Prize: X=18641, Y=10279")
 (binary-search sorted-vec 6)"#,
                 "4",
             ),
+
+            (
+                r#"(let correct (Vector->Set ["spelling" "bat" "cat"]))
+
+(let generate-abc (lambda (do 
+  (let offset (Char->Int 'a'))
+  (let out [])
+  (loop 0 26 (lambda i (push! out (Int->Char (+ i offset)))))
+  out)))
+
+(let abc (generate-abc))
+
+(let autocorrect (lambda word (if (Set/has? word correct) word (do
+
+    (let temp (copy word))
+    (boolean loop? true)
+    (integer i 0)
+    (variable out word)
+
+    (loop (and (true? loop?) (< (get i) (length word))) (lambda (do
+
+        (let filtered (filter/i (lambda . j (<> j (get i))) word))
+        (if (Set/has? filtered correct) (do 
+            (set out filtered)
+            (set loop? false)))
+
+        (if (> (get i) 0) (do 
+          (let prev (get temp (- (get i) 1)))
+          (let next (get temp (get i)))
+          (set! temp (- (get i) 1) next)
+          (set! temp (get i) prev)
+
+          (if (Set/has? temp correct) (do 
+            (set out temp)
+            (set loop? false))
+            (do 
+              (set! temp (- (get i) 1) prev)
+              (set! temp (get i) next)))))
+
+        (integer k 0)
+        (loop (and (true? loop?) (< (get k) (length abc))) (lambda (do
+          (let a (get abc (get k)))
+          (let t (get temp (get i)))
+          (set! temp (get i) a)
+          (if (Set/has? temp correct) (do
+              (set out temp)
+              (set loop? false))
+              (set! temp (get i) t))
+          (++ k))))
+
+        (integer j 0)
+        (loop (and (true? loop?) (< (get j) (length abc))) (lambda (do
+          (let a (get abc (get j)))
+          (let added (cons (slice 0 (get i) word) [a] (slice (get i) (length word) word)))
+          (if (Set/has? added correct) (do
+              (set out added) 
+              (set loop? false)))
+          (++ j))))
+
+        (++ i))))
+    (get out)))))
+(every? (lambda x (Set/has? x correct)) [
+
+  (autocorrect "spellling")
+  (autocorrect "speling")
+  (autocorrect "spelljng")
+  (autocorrect "seplling")
+
+            ])"#,
+                "true",
+            ),
+
             // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
             // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
             // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),

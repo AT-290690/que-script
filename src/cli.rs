@@ -18,7 +18,7 @@ use std::io::{ self, Write };
 use std::num::Wrapping;
 
 #[cfg(feature = "deref-wasm")]
-use wasmtime::{Engine, Instance, Memory, Module as WasmModule, Store};
+use wasmtime::{ Engine, Instance, Memory, Module as WasmModule, Store };
 #[cfg(feature = "deref-wasm")]
 use wat as wat_crate;
 
@@ -257,31 +257,40 @@ fn extract_type_from_wat(src: &str) -> Option<String> {
         .and_then(|line| line.strip_prefix(";; Type:"))
         .map(|rest| rest.trim().to_string())
 }
-
 #[cfg(feature = "deref-wasm")]
 fn i32_at(mem: &Memory, store: &mut Store<()>, addr: i32) -> i32 {
     let data = mem.data(store);
     let i = addr as usize;
-    let bytes = &data[i..i + 4];
-    i32::from_le_bytes(bytes.try_into().unwrap())
+
+    if i + 4 > data.len() {
+        panic!("out of bounds memory read at {}", addr);
+    }
+
+    let bytes: [u8; 4] = data[i..i + 4].try_into().unwrap();
+    i32::from_le_bytes(bytes)
+}
+
+#[cfg(feature = "deref-wasm")]
+fn i32_to_f32(bits: i32) -> f32 {
+    f32::from_bits(bits as u32)
 }
 
 #[cfg(feature = "deref-wasm")]
 struct VecHeader {
     len: i32,
-    _cap: i32,
-    _rc: i32,
-    _elem_ref: i32,
+    cap: i32,
+    rc: i32,
+    elem_ref: i32,
     data_ptr: i32,
 }
 
 #[cfg(feature = "deref-wasm")]
-fn read_vec_header(mem: &Memory, store: &mut Store<()>, ptr: i32) -> VecHeader {
+fn read_vec(mem: &Memory, store: &mut Store<()>, ptr: i32) -> VecHeader {
     VecHeader {
         len: i32_at(mem, store, ptr + 0),
-        _cap: i32_at(mem, store, ptr + 4),
-        _rc: i32_at(mem, store, ptr + 8),
-        _elem_ref: i32_at(mem, store, ptr + 12),
+        cap: i32_at(mem, store, ptr + 4),
+        rc: i32_at(mem, store, ptr + 8),
+        elem_ref: i32_at(mem, store, ptr + 12),
         data_ptr: i32_at(mem, store, ptr + 16),
     }
 }
@@ -289,53 +298,126 @@ fn read_vec_header(mem: &Memory, store: &mut Store<()>, ptr: i32) -> VecHeader {
 #[cfg(feature = "deref-wasm")]
 fn read_vec_items(mem: &Memory, store: &mut Store<()>, hdr: &VecHeader) -> Vec<i32> {
     let mut out = Vec::with_capacity(hdr.len as usize);
+
     for i in 0..hdr.len {
         out.push(i32_at(mem, store, hdr.data_ptr + i * 4));
     }
+
     out
 }
 
 #[cfg(feature = "deref-wasm")]
-fn read_tuple2(mem: &Memory, store: &mut Store<()>, ptr: i32) -> (i32, i32) {
-    let hdr = read_vec_header(mem, store, ptr);
+fn read_tuple(mem: &Memory, store: &mut Store<()>, ptr: i32) -> Vec<i32> {
+    let hdr = read_vec(mem, store, ptr);
     let items = read_vec_items(mem, store, &hdr);
-    assert_eq!(items.len(), 2, "tuple len != 2");
-    (items[0], items[1])
+
+    if hdr.len < 2 {
+        panic!("tuple len != 2 ({})", hdr.len);
+    }
+
+    items
 }
 
-/// Very small subset of JS getValue: Int, [Int], { [Int] * [Int] }
+#[cfg(feature = "deref-wasm")]
+fn split_tuple_types(s: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for c in s.chars() {
+        match c {
+            '[' | '{' => {
+                depth += 1;
+                current.push(c);
+            }
+            ']' | '}' => {
+                depth -= 1;
+                current.push(c);
+            }
+            '*' if depth == 0 => {
+                parts.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(c),
+        }
+    }
+
+    if !current.is_empty() {
+        parts.push(current.trim().to_string());
+    }
+
+    parts
+}
+
 #[cfg(feature = "deref-wasm")]
 fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<()>) -> String {
     let t = typ.trim();
-    if t == "Int" {
-        return format!("{}", ptr);
+
+    // Bool
+    if t == "Bool" {
+        return (ptr == 1).to_string();
     }
+
+    // Float (reinterpret bits)
+    if t == "Float" {
+        return i32_to_f32(ptr).to_string();
+    }
+
+    // Char
+    if t == "Char" {
+        let ch = char::from_u32(ptr as u32).unwrap_or('?');
+        return ch.to_string();
+    }
+
+    // [Char] -> String
+    if t == "[Char]" {
+        let hdr = read_vec(mem, store, ptr);
+        let items = read_vec_items(mem, store, &hdr);
+        let s: String = items
+            .into_iter()
+            .map(|x| char::from_u32(x as u32).unwrap_or('?'))
+            .collect();
+        return s;
+    }
+
+    // Vector: [T]
     if t.starts_with('[') && t.ends_with(']') {
         let inner = t[1..t.len() - 1].trim();
-        if inner == "Int" {
-            let hdr = read_vec_header(mem, store, ptr);
-            let items = read_vec_items(mem, store, &hdr);
-            return format!(
-                "[{}]",
-                items
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-        }
+
+        let hdr = read_vec(mem, store, ptr);
+        let items = read_vec_items(mem, store, &hdr);
+
+        let decoded: Vec<String> = items
+            .into_iter()
+            .map(|item_ptr| decode_value(item_ptr, inner, mem, store))
+            .collect();
+
+        return format!("[{}]", decoded.join(", "));
     }
+
+    // Tuple: { A * B }
     if t.starts_with('{') && t.ends_with('}') {
-        let content = &t[1..t.len() - 1];
-        let parts: Vec<_> = content.split('*').map(|s| s.trim()).collect();
-        if parts.len() == 2 && parts[0] == "[Int]" && parts[1] == "[Int]" {
-            let (a_ptr, b_ptr) = read_tuple2(mem, store, ptr);
-            let a = decode_value(a_ptr, "[Int]", mem, store);
-            let b = decode_value(b_ptr, "[Int]", mem, store);
-            return format!("{{ {} {} }}", a, b);
-        }
+        let content = t[1..t.len() - 1].trim();
+        let parts = split_tuple_types(content);
+        let raw_items = read_tuple(mem, store, ptr);
+
+        let decoded: Vec<String> = raw_items
+            .into_iter()
+            .enumerate()
+            .map(|(i, item_ptr)| {
+                let typ = parts
+                    .get(i)
+                    .map(|s| s.as_str())
+                    .unwrap_or("Int");
+                decode_value(item_ptr, typ, mem, store)
+            })
+            .collect();
+
+        return format!("{{ {} }}", decoded.join(", "));
     }
-    format!("ptr({})", ptr)
+
+    // Base case (Int or unknown)
+    ptr.to_string()
 }
 
 #[cfg(feature = "deref-wasm")]
@@ -343,11 +425,11 @@ fn deref_wat_text(wat_src: &str) -> Result<String, String> {
     let typ = extract_type_from_wat(wat_src).unwrap_or_else(|| "Int".to_string());
     let wasm_bytes = wat_crate::parse_str(wat_src).map_err(|e| e.to_string())?;
     let engine = Engine::default();
-    let module =
-        WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
+    let module = WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
     let mut store = Store::new(&engine, ());
-    let instance =
-        Instance::new(&mut store, &module, &[]).map_err(|e| format!("inst error: {}", e))?;
+    let instance = Instance::new(&mut store, &module, &[]).map_err(|e|
+        format!("inst error: {}", e)
+    )?;
 
     let memory = instance
         .get_memory(&mut store, "memory")
@@ -615,13 +697,15 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
                 let std_ast = std.borrow();
                 if let crate::parser::Expression::Apply(items) = &*std_ast {
                     match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                        Ok(wrapped_ast) => match crate::wat::compile_program_to_wat(&wrapped_ast) {
-                            Ok(wat_src) => match deref_wat_text(&wat_src) {
-                                Ok(value) => println!("{}", value),
+                        Ok(wrapped_ast) =>
+                            match crate::wat::compile_program_to_wat(&wrapped_ast) {
+                                Ok(wat_src) =>
+                                    match deref_wat_text(&wat_src) {
+                                        Ok(value) => println!("{}", value),
+                                        Err(err) => println!("{}", err),
+                                    }
                                 Err(err) => println!("{}", err),
-                            },
-                            Err(err) => println!("{}", err),
-                        },
+                            }
                         Err(e) => println!("{}", e),
                     }
                 }
