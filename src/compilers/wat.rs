@@ -4968,11 +4968,12 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
     }
     for (_k, name) in &lambda_names {
-        if let Some((ps, _ret)) = fn_sigs.get(name) {
-            if !ps.is_empty() {
-                fn_ids.insert(name.clone(), next_fn_id);
-                next_fn_id += 1;
-            }
+        if fn_ids.contains_key(name) {
+            continue;
+        }
+        if fn_sigs.contains_key(name) {
+            fn_ids.insert(name.clone(), next_fn_id);
+            next_fn_id += 1;
         }
     }
     for (key, name) in &top_level_lambda_key_to_name {
