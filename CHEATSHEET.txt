@@ -14,6 +14,71 @@ Types
 Notes:
 • Unit represents the absence of a value (effects only)
 • [T] is a homogeneous vector — all elements share the same type
+• {T * K} is a tuple (but runtime a vector). It can be of only 2 different types (even another tuple)
+
+---------------------------------------------------------------------------------------------------------------------------
+
+Built-in functions
+
+false Bool
+true Bool
+or Bool -> Bool -> Bool
+and Bool -> Bool -> Bool
+not Bool -> Bool
+=? Bool -> Bool -> Bool
+
+= Int -> Int -> Bool
+> Int -> Int -> Bool
+< Int -> Int -> Bool
+<= Int -> Int -> Bool
+>= Int -> Int -> Bool
++ Int -> Int -> Int
+* Int -> Int -> Int
+- Int -> Int -> Int
+/ Int -> Int -> Int
+mod Int -> Int -> Int
+
+~ Int -> Int
+& Int -> Int -> Int
+| Int -> Int -> Int
+>> Int -> Int -> Int
+<< Int -> Int -> Int
+^ Int -> Int -> Int
+
+=. Float -> Float -> Bool
+<. Float -> Float -> Bool
+>. Float -> Float -> Bool
+>=. Float -> Float -> Bool
+<=. Float -> Float -> Bool
++. Float -> Float -> Float
+*. Float -> Float -> Float
+-. Float -> Float -> Float
+/. Float -> Float -> Float
+mod. Float -> Float -> Float
+
+=# Char -> Char -> Bool
+<# Char -> Char -> Bool
+># Char -> Char -> Bool
+<=# Char -> Char -> Bool
+>=# Char -> Char -> Bool
++# Char -> Char -> Char
+*# Char -> Char -> Char
+-# Char -> Char -> Char
+/# Char -> Char -> Char
+
+Int->Float Int -> Float
+Float->Int Float -> Int
+
+car [T] -> T
+cdr [T] -> Int -> [T]
+length [T] -> Int
+set! [T] -> Int -> T -> ()
+pop! [T] -> ()
+get [T] -> Int -> T
+fst {T * K} -> T
+snd {T * K} -> K
+loop Int -> Int -> (Int -> T) -> ()
+loop-finish Bool -> T -> ()
 
 ---------------------------------------------------------------------------------------------------------------------------
 

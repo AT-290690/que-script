@@ -16,6 +16,12 @@ use std::fs;
 use std::io::Read;
 use std::io::{ self, Write };
 use std::num::Wrapping;
+
+#[cfg(feature = "deref-wasm")]
+use wasmtime::{Engine, Instance, Memory, Module as WasmModule, Store};
+#[cfg(feature = "deref-wasm")]
+use wat as wat_crate;
+
 thread_local! {
     static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
 }
@@ -242,6 +248,118 @@ pub fn cons(a: String, b: String) -> String {
             .collect::<Vec<_>>()
     );
 }
+
+#[cfg(feature = "deref-wasm")]
+fn extract_type_from_wat(src: &str) -> Option<String> {
+    // Convention: first line is `;; Type: <typ>`
+    src.lines()
+        .next()
+        .and_then(|line| line.strip_prefix(";; Type:"))
+        .map(|rest| rest.trim().to_string())
+}
+
+#[cfg(feature = "deref-wasm")]
+fn i32_at(mem: &Memory, store: &mut Store<()>, addr: i32) -> i32 {
+    let data = mem.data(store);
+    let i = addr as usize;
+    let bytes = &data[i..i + 4];
+    i32::from_le_bytes(bytes.try_into().unwrap())
+}
+
+#[cfg(feature = "deref-wasm")]
+struct VecHeader {
+    len: i32,
+    _cap: i32,
+    _rc: i32,
+    _elem_ref: i32,
+    data_ptr: i32,
+}
+
+#[cfg(feature = "deref-wasm")]
+fn read_vec_header(mem: &Memory, store: &mut Store<()>, ptr: i32) -> VecHeader {
+    VecHeader {
+        len: i32_at(mem, store, ptr + 0),
+        _cap: i32_at(mem, store, ptr + 4),
+        _rc: i32_at(mem, store, ptr + 8),
+        _elem_ref: i32_at(mem, store, ptr + 12),
+        data_ptr: i32_at(mem, store, ptr + 16),
+    }
+}
+
+#[cfg(feature = "deref-wasm")]
+fn read_vec_items(mem: &Memory, store: &mut Store<()>, hdr: &VecHeader) -> Vec<i32> {
+    let mut out = Vec::with_capacity(hdr.len as usize);
+    for i in 0..hdr.len {
+        out.push(i32_at(mem, store, hdr.data_ptr + i * 4));
+    }
+    out
+}
+
+#[cfg(feature = "deref-wasm")]
+fn read_tuple2(mem: &Memory, store: &mut Store<()>, ptr: i32) -> (i32, i32) {
+    let hdr = read_vec_header(mem, store, ptr);
+    let items = read_vec_items(mem, store, &hdr);
+    assert_eq!(items.len(), 2, "tuple len != 2");
+    (items[0], items[1])
+}
+
+/// Very small subset of JS getValue: Int, [Int], { [Int] * [Int] }
+#[cfg(feature = "deref-wasm")]
+fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<()>) -> String {
+    let t = typ.trim();
+    if t == "Int" {
+        return format!("{}", ptr);
+    }
+    if t.starts_with('[') && t.ends_with(']') {
+        let inner = t[1..t.len() - 1].trim();
+        if inner == "Int" {
+            let hdr = read_vec_header(mem, store, ptr);
+            let items = read_vec_items(mem, store, &hdr);
+            return format!(
+                "[{}]",
+                items
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+    }
+    if t.starts_with('{') && t.ends_with('}') {
+        let content = &t[1..t.len() - 1];
+        let parts: Vec<_> = content.split('*').map(|s| s.trim()).collect();
+        if parts.len() == 2 && parts[0] == "[Int]" && parts[1] == "[Int]" {
+            let (a_ptr, b_ptr) = read_tuple2(mem, store, ptr);
+            let a = decode_value(a_ptr, "[Int]", mem, store);
+            let b = decode_value(b_ptr, "[Int]", mem, store);
+            return format!("{{ {} {} }}", a, b);
+        }
+    }
+    format!("ptr({})", ptr)
+}
+
+#[cfg(feature = "deref-wasm")]
+fn deref_wat_text(wat_src: &str) -> Result<String, String> {
+    let typ = extract_type_from_wat(wat_src).unwrap_or_else(|| "Int".to_string());
+    let wasm_bytes = wat_crate::parse_str(wat_src).map_err(|e| e.to_string())?;
+    let engine = Engine::default();
+    let module =
+        WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
+    let mut store = Store::new(&engine, ());
+    let instance =
+        Instance::new(&mut store, &module, &[]).map_err(|e| format!("inst error: {}", e))?;
+
+    let memory = instance
+        .get_memory(&mut store, "memory")
+        .ok_or_else(|| "no exported memory".to_string())?;
+
+    let main = instance
+        .get_typed_func::<(), i32>(&mut store, "main")
+        .map_err(|e| format!("main func error: {}", e))?;
+
+    let ptr = main.call(&mut store, ()).map_err(|e| format!("call error: {}", e))?;
+    Ok(decode_value(ptr, &typ, &memory, &mut store))
+}
 pub fn cli(dir: &str) -> std::io::Result<()> {
     let default_source = format!("{}/{}", dir, "main.lisp");
     let default_dist = format!("{}/dist", dir);
@@ -264,6 +382,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         "--rs",
         "--wat",
         "--comp",
+        "--deref-wasm",
         "--exec",
         "--str",
         "--bit",
@@ -487,6 +606,30 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         #[cfg(not(feature = "wasm-compiler"))]
         {
             println!("Error! Wasm compiler is disabled. Rebuild with --features wasm-compiler");
+        }
+    } else if cmd == "--deref-wasm" {
+        #[cfg(feature = "deref-wasm")]
+        {
+            let program = fs::read_to_string(&source_path)?;
+            STD.with(|std| {
+                let std_ast = std.borrow();
+                if let crate::parser::Expression::Apply(items) = &*std_ast {
+                    match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                        Ok(wrapped_ast) => match crate::wat::compile_program_to_wat(&wrapped_ast) {
+                            Ok(wat_src) => match deref_wat_text(&wat_src) {
+                                Ok(value) => println!("{}", value),
+                                Err(err) => println!("{}", err),
+                            },
+                            Err(err) => println!("{}", err),
+                        },
+                        Err(e) => println!("{}", e),
+                    }
+                }
+            });
+        }
+        #[cfg(not(feature = "deref-wasm"))]
+        {
+            println!("Error! deref-wasm is disabled. Rebuild with --features deref-wasm");
         }
     } else if cmd == "--comp" {
         let program = fs::read_to_string(&source_path)?;

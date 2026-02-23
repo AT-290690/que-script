@@ -39,11 +39,17 @@ Que Script is a **functional, expression-only, Lisp-style language** using **S-e
 
 ---
 
+### When to use do
+
+Top level already has a do block so it's not needed there but functions with more than one expression need it.
+
 ### Recursion
 
 - `let~` — **tail recursion**, TCO enabled
 - `let*` — explicit recursion, no TCO
 - VM forbids returning closures capturing outer scope
+
+_Note: WASM enables tco so let star is just fine to use all the time_
 
 ---
 
@@ -76,9 +82,8 @@ Que Script is a **functional, expression-only, Lisp-style language** using **S-e
 
 - Primitives: `Int Float Bool Char`
 - Composite:
-
   - `[T]` — Vector
-  - `{A B}` — Tuple
+  - `{A * B}` — Tuple
   - `A -> B` — Function
 
 - String = `[Char]`
@@ -128,6 +133,8 @@ Vectors: `push! set! pull!`
 ---
 
 ### Useful Functions
+
+Libraries are tree shaked - just use what you need and they get imported
 
 ```
 map      (T -> T) -> [T] -> [T]
