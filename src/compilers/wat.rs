@@ -4688,11 +4688,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
                                     Expression::Apply(xs)
                                         if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
                                 );
-                                let is_function_value = matches!(
-                                    defs.get(name).and_then(|d| d.node.typ.as_ref()),
-                                    Some(Type::Function(_, _))
-                                );
-                                if is_lambda_rhs || is_function_value {
+                                if is_lambda_rhs {
                                     continue;
                                 }
                             }
