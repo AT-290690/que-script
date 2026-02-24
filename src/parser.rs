@@ -591,7 +591,7 @@ fn destructure_pattern(
             if let [Expression::Word(ref vector_kw), ref elements @ ..] = &tuple_exprs[..] {
                 if vector_kw == "vector" {
                     // Recursively calling so value_expr should be the vector element
-                    let temp_var = format!("_temp_{}_{}", arg_index, binding_counter);
+                    let temp_var = format!("_temp_vec_{}_{}", arg_index, binding_counter);
                     *binding_counter += 1;
 
                     let mut bindings = vec![];
@@ -626,7 +626,7 @@ fn destructure_pattern(
                     }
 
                     let mut bindings = vec![];
-                    let temp_var = format!("_temp_{}_{}", arg_index, binding_counter);
+                    let temp_var = format!("_temp_tuple_{}_{}", arg_index, binding_counter);
                     *binding_counter += 1;
 
                     bindings.push(
@@ -674,7 +674,7 @@ fn destructure_pattern(
                                 if inner_kw == "tuple" {
                                     let mut bindings = vec![];
                                     let temp_var = format!(
-                                        "_temp_{}_{}",
+                                        "_temp_tuple_{}_{}",
                                         arg_index,
                                         binding_counter
                                     );
@@ -692,7 +692,7 @@ fn destructure_pattern(
 
                                     // Get the inner tuple from snd
                                     let inner_tuple_var = format!(
-                                        "_temp_{}_{}",
+                                        "_temp_tuple_{}_{}",
                                         arg_index,
                                         binding_counter
                                     );
@@ -749,7 +749,7 @@ fn destructure_pattern(
                             }
                         } else if elements.len() == 2 {
                             let mut bindings = vec![];
-                            let temp_var = format!("_temp_{}_{}", arg_index, binding_counter);
+                            let temp_var = format!("_temp_tuple_{}_{}", arg_index, binding_counter);
                             *binding_counter += 1;
 
                             bindings.push(
@@ -1421,6 +1421,21 @@ fn normalize_apply(expr: Expression) -> Expression {
         other => other,
     }
 }
+enum DestructuringKind {
+    Tuple,
+    Vector,
+}
+fn destructuring_kind(pattern: &Expression) -> Option<DestructuringKind> {
+    match pattern {
+        Expression::Apply(exprs) =>
+            match exprs.as_slice() {
+                [Expression::Word(kw), ..] if kw == "tuple" => { Some(DestructuringKind::Tuple) }
+                [Expression::Word(kw), ..] if kw == "vector" => { Some(DestructuringKind::Vector) }
+                _ => None,
+            }
+        _ => None,
+    }
+}
 fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expression>, String> {
     let mut new_exprs = Vec::new();
     let mut binding_counter = 0;
@@ -1433,22 +1448,14 @@ fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expre
                         let pattern = &let_items[1];
                         let value_expr = &let_items[2];
 
-                        let is_destructuring = match pattern {
-                            Expression::Word(_) => false, // Simple variable name skip
-                            Expression::Apply(pattern_exprs) => {
-                                if pattern_exprs.is_empty() {
-                                    false
-                                } else if let [Expression::Word(ref kw), ..] = &pattern_exprs[..] {
-                                    kw == "tuple" || kw == "vector"
-                                } else {
-                                    false
-                                }
-                            }
-                            _ => false,
-                        };
+                        if let Some(kind) = destructuring_kind(pattern) {
+                            let prefix = match kind {
+                                DestructuringKind::Tuple => "tuple",
+                                DestructuringKind::Vector => "vec",
+                            };
 
-                        if is_destructuring {
-                            let temp_var = format!("_let_temp_{}", binding_counter);
+                            let temp_var = format!("_let_temp_{}_{}", prefix, binding_counter);
+
                             binding_counter += 1;
 
                             let temp_binding = Expression::Apply(
@@ -1475,6 +1482,7 @@ fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expre
                             // Not a destructuring pattern, keep as is
                             new_exprs.push(expr);
                         }
+
                         continue;
                     }
                 }
