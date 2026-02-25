@@ -57,6 +57,8 @@ build wasm bundle using wasm compiler
 wasm-pack build --target web --out-dir pkg/web --release --no-default-features --features wasm-compiler
 ```
 
+WASM host integration guide (JS + Rust, including `ARGV`): [`WASM.md`](./WASM.md)
+
 build "baked" libraries
 
 ```bash

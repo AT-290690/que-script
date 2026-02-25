@@ -609,6 +609,8 @@ fn emit_vector_runtime(
   (global $free_small_32 (mut i32) (i32.const 0))
   (global $free_small_64 (mut i32) (i32.const 0))
   (global $free_small_128 (mut i32) (i32.const 0))
+  ;; Runtime ARGV storage (vector pointer). Lazily initialized to [].
+  (global $argv_ptr (mut i32) (i32.const 0))
 
   (func $alloc (param $n i32) (result i32)
     (local $prev i32)
@@ -1241,6 +1243,82 @@ fn emit_vector_runtime(
     local.get $ptr
     i32.const 1
     call $vec_get_i32
+  )
+
+  (func $__argv_get (result i32)
+    global.get $argv_ptr
+    i32.eqz
+    if
+      i32.const 0
+      i32.const 1
+      call $vec_new_i32
+      global.set $argv_ptr
+    end
+    global.get $argv_ptr
+  )
+
+  (func (export "get_argv") (result i32)
+    call $__argv_get
+  )
+
+  (func (export "set_argv") (param $ptr i32) (result i32)
+    local.get $ptr
+    call $rc_retain
+    drop
+    global.get $argv_ptr
+    call $rc_release
+    drop
+    local.get $ptr
+    global.set $argv_ptr
+    i32.const 0
+  )
+
+  (func (export "argv_clear") (result i32)
+    (local $v i32)
+    i32.const 0
+    i32.const 1
+    call $vec_new_i32
+    local.set $v
+    global.get $argv_ptr
+    call $rc_release
+    drop
+    local.get $v
+    global.set $argv_ptr
+    i32.const 0
+  )
+
+  (func (export "argv_push") (param $v i32) (result i32)
+    call $__argv_get
+    local.get $v
+    call $vec_push_i32
+  )
+
+  (func (export "make_vec") (param $elem_ref i32) (result i32)
+    i32.const 0
+    local.get $elem_ref
+    call $vec_new_i32
+  )
+
+  (func (export "vec_push") (param $ptr i32) (param $v i32) (result i32)
+    local.get $ptr
+    local.get $v
+    call $vec_push_i32
+  )
+
+  (func (export "make_tuple") (param $a i32) (param $b i32) (result i32)
+    local.get $a
+    local.get $b
+    call $tuple_new
+  )
+
+  (func (export "retain") (param $ptr i32) (result i32)
+    local.get $ptr
+    call $rc_retain
+  )
+
+  (func (export "release") (param $ptr i32) (result i32)
+    local.get $ptr
+    call $rc_release
   )
 
   (func $closure_new (param $fn i32) (param $n i32) (result i32)
@@ -3905,6 +3983,8 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                     format!("local.get {}", local_idx),
                     ctx.local_types.get(cap).map(is_managed_local_type).unwrap_or(false),
                 )
+            } else if cap == "ARGV" {
+                ("call $__argv_get".to_string(), true)
             } else if let Some((ps, ret)) = ctx.fn_sigs.get(cap) {
                 if ps.is_empty() {
                     (format!("call ${}", ident(cap)), is_managed_local_type(ret))
@@ -3953,6 +4033,8 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                 _ => {
                     if let Some(local_idx) = ctx.locals.get(w) {
                         Ok(format!("local.get {}", local_idx))
+                    } else if w == "ARGV" {
+                        Ok("call $__argv_get".to_string())
                     } else if let Some((params, _ret)) = ctx.fn_sigs.get(w) {
                         if params.is_empty() {
                             Ok(format!("call ${}", ident(w)))
