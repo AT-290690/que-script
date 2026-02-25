@@ -2590,6 +2590,68 @@ SECRET = SANTA")
 (map solve ["BCAB" "BB" "A" "AABB" "BAB" "KEEP"])"#,
                 "[false false false true true true]",
             ),
+
+            (
+                r#"(let modulus 33554393)
+(let multiplier 252533)
+(let seed 20151125)
+
+(let mod-add (lambda a b m (do
+    (let s (+ a b))
+    (if (>= s m) (- s m) s))))
+
+(let* mul-mod/loop (lambda a b m acc
+    (if (= b 0)
+        acc
+        (mul-mod/loop
+            (mod-add a a m)
+            (/ b 2)
+            m
+            (if (= (mod b 2) 1)
+                (mod-add acc a m)
+                acc)))))
+
+(let mul-mod (lambda a b m (mul-mod/loop a b m 0)))
+
+(let* pow-mod/loop (lambda base exp m acc
+    (if (= exp 0)
+        acc
+        (pow-mod/loop
+            (mul-mod base base m)
+            (/ exp 2)
+            m
+            (if (= (mod exp 2) 1)
+                (mul-mod acc base m)
+                acc)))))
+
+(let pow-mod (lambda base exp m (pow-mod/loop base exp m 1)))
+
+(let code-index (lambda row col (do
+    (let k (+ row col -2))
+    (+ (/ (* k (+ k 1)) 2) col))))
+
+(let code-at (lambda row col (do
+    (let idx (code-index row col))
+    (let factor (pow-mod multiplier (- idx 1) modulus))
+    (mul-mod seed factor modulus))))
+
+[(code-at 6 6) (code-at 2981 3075)]
+"#,
+                "[27995004 9132360]",
+            ),
+
+            (
+                r#"(let h (lambda payload (do
+(let [a b c .] payload)
+(let* step (lambda i [i i i]))
+(let final-state (step 1))
+(do
+(let [x y z .] final-state)
+(+ a b x)
+))))
+(h [1 2 3 4])"#,
+                "4",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
@@ -2612,14 +2674,14 @@ SECRET = SANTA")
                                             Ok(res) =>
                                                 assert_eq!(format!("{}", res), *out, "Solution"),
                                             Err(e) => {
-                                                println!("{:?}", inp);
+                                                // println!("{:?}", inp);
                                                 panic!("Failed tests because {}", e);
                                             }
                                         }
                                     }
                                     Err(e) => {
                                         // to figure out which test failed due to run time Error!
-                                        println!("{:?}", inp);
+                                        // println!("{:?}", inp);
                                         panic!("Failed tests because {}", e);
                                     }
                                 }

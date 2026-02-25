@@ -559,12 +559,18 @@ fn preprocess(source: &str) -> Result<String, String> {
 
     Ok(out)
 }
-fn desugar(expr: Expression) -> Result<Expression, String> {
+fn next_destructure_temp(prefix: &str, arg_index: usize, binding_counter: &mut usize) -> String {
+    let id = *binding_counter;
+    *binding_counter += 1;
+    format!("_{}_{}_{}", prefix, arg_index, id)
+}
+
+fn desugar_with_counter(expr: Expression, binding_counter: &mut usize) -> Result<Expression, String> {
     match expr {
         Expression::Apply(exprs) if !exprs.is_empty() => {
             let mut desugared_exprs = Vec::new();
             for expr in exprs {
-                match desugar(expr) {
+                match desugar_with_counter(expr, binding_counter) {
                     Ok(expr) => desugared_exprs.push(expr),
                     Err(e) => {
                         return Err(e);
@@ -600,11 +606,11 @@ fn desugar(expr: Expression) -> Result<Expression, String> {
                     "floating" => Ok(float_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
                     "loop" => Ok(loop_transform(exprs)?),
-                    "lambda" => lambda_destructure_transform(exprs),
+                    "lambda" => lambda_destructure_transform(exprs, binding_counter),
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
                     "comp" => Ok(combinator_transform_rev(exprs)?),
-                    "do" => Ok(transform_do(exprs)?),
+                    "do" => Ok(transform_do(exprs, binding_counter)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
@@ -650,8 +656,7 @@ fn destructure_pattern(
             if let [Expression::Word(ref vector_kw), ref elements @ ..] = &tuple_exprs[..] {
                 if vector_kw == "vector" {
                     // Recursively calling so value_expr should be the vector element
-                    let temp_var = format!("_temp_vec_{}_{}", arg_index, binding_counter);
-                    *binding_counter += 1;
+                    let temp_var = next_destructure_temp("temp_vec", arg_index, binding_counter);
 
                     let mut bindings = vec![];
                     bindings.push(
@@ -685,8 +690,7 @@ fn destructure_pattern(
                     }
 
                     let mut bindings = vec![];
-                    let temp_var = format!("_temp_tuple_{}_{}", arg_index, binding_counter);
-                    *binding_counter += 1;
+                    let temp_var = next_destructure_temp("temp_tuple", arg_index, binding_counter);
 
                     bindings.push(
                         Expression::Apply(
@@ -732,12 +736,8 @@ fn destructure_pattern(
                             if let [Expression::Word(ref inner_kw), ..] = &inner_exprs[..] {
                                 if inner_kw == "tuple" {
                                     let mut bindings = vec![];
-                                    let temp_var = format!(
-                                        "_temp_tuple_{}_{}",
-                                        arg_index,
-                                        binding_counter
-                                    );
-                                    *binding_counter += 1;
+                                    let temp_var =
+                                        next_destructure_temp("temp_tuple", arg_index, binding_counter);
 
                                     bindings.push(
                                         Expression::Apply(
@@ -750,12 +750,8 @@ fn destructure_pattern(
                                     );
 
                                     // Get the inner tuple from snd
-                                    let inner_tuple_var = format!(
-                                        "_temp_tuple_{}_{}",
-                                        arg_index,
-                                        binding_counter
-                                    );
-                                    *binding_counter += 1;
+                                    let inner_tuple_var =
+                                        next_destructure_temp("temp_tuple", arg_index, binding_counter);
                                     bindings.push(
                                         Expression::Apply(
                                             vec![
@@ -808,8 +804,8 @@ fn destructure_pattern(
                             }
                         } else if elements.len() == 2 {
                             let mut bindings = vec![];
-                            let temp_var = format!("_temp_tuple_{}_{}", arg_index, binding_counter);
-                            *binding_counter += 1;
+                            let temp_var =
+                                next_destructure_temp("temp_tuple", arg_index, binding_counter);
 
                             bindings.push(
                                 Expression::Apply(
@@ -980,7 +976,10 @@ fn destructure_vector_pattern(
     }
 }
 
-fn lambda_destructure_transform(exprs: Vec<Expression>) -> Result<Expression, String> {
+fn lambda_destructure_transform(
+    exprs: Vec<Expression>,
+    binding_counter: &mut usize
+) -> Result<Expression, String> {
     // Check if valid body
     if exprs.len() < 2 {
         return Err("Error! lambda expects at least a body".to_string());
@@ -991,8 +990,6 @@ fn lambda_destructure_transform(exprs: Vec<Expression>) -> Result<Expression, St
     // look for destructuring patterns in args
     let mut new_bindings = vec![];
     let mut new_args = Vec::new();
-    let mut binding_counter = 0;
-
     for (j, arg) in args.iter().enumerate() {
         match arg {
             Expression::Apply(array_exprs) => {
@@ -1000,12 +997,13 @@ fn lambda_destructure_transform(exprs: Vec<Expression>) -> Result<Expression, St
                     match array_kw.as_str() {
                         "vector" => {
                             // Vector destructuring pattern
-                            let temp_arg_name = format!("_args{}", j);
+                            let temp_arg_name =
+                                format!("_args{}_{}", j, next_destructure_temp("arg", j, binding_counter));
                             let bindings = destructure_vector_pattern(
                                 arg,
                                 temp_arg_name.clone(),
                                 j,
-                                &mut binding_counter
+                                binding_counter
                             )?;
                             new_bindings.extend(bindings);
                             new_args.push(Expression::Word(temp_arg_name));
@@ -1013,12 +1011,13 @@ fn lambda_destructure_transform(exprs: Vec<Expression>) -> Result<Expression, St
                         }
                         "tuple" => {
                             // Tuple destructuring pattern - use recursive destructuring
-                            let temp_arg_name = format!("_args{}", j);
+                            let temp_arg_name =
+                                format!("_args{}_{}", j, next_destructure_temp("arg", j, binding_counter));
                             let (bindings, _) = destructure_pattern(
                                 arg,
                                 Expression::Word(temp_arg_name.clone()),
                                 j,
-                                &mut binding_counter
+                                binding_counter
                             )?;
                             new_bindings.extend(bindings);
                             new_args.push(Expression::Word(temp_arg_name));
@@ -1495,9 +1494,11 @@ fn destructuring_kind(pattern: &Expression) -> Option<DestructuringKind> {
         _ => None,
     }
 }
-fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expression>, String> {
+fn transform_let_destructuring_in_do(
+    exprs: Vec<Expression>,
+    binding_counter: &mut usize
+) -> Result<Vec<Expression>, String> {
     let mut new_exprs = Vec::new();
-    let mut binding_counter = 0;
 
     for expr in exprs {
         if let Expression::Apply(let_items) = &expr {
@@ -1513,9 +1514,11 @@ fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expre
                                 DestructuringKind::Vector => "vec",
                             };
 
-                            let temp_var = format!("_let_temp_{}_{}", prefix, binding_counter);
-
-                            binding_counter += 1;
+                            let temp_var = next_destructure_temp(
+                                &format!("let_temp_{}", prefix),
+                                10000,
+                                binding_counter
+                            );
 
                             let temp_binding = Expression::Apply(
                                 vec![
@@ -1531,7 +1534,7 @@ fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expre
                                 pattern,
                                 Expression::Word(temp_var),
                                 10000, // Use high index to avoid conflicts with lambda's small indices
-                                &mut binding_counter
+                                binding_counter
                             )?;
 
                             // Add temp binding first, then destructured bindings
@@ -1555,9 +1558,12 @@ fn transform_let_destructuring_in_do(exprs: Vec<Expression>) -> Result<Vec<Expre
     Ok(new_exprs)
 }
 
-fn transform_do(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+fn transform_do(
+    mut exprs: Vec<Expression>,
+    binding_counter: &mut usize
+) -> Result<Expression, String> {
     exprs.remove(0);
-    let exprs_with_destructured_lets = transform_let_destructuring_in_do(exprs)?;
+    let exprs_with_destructured_lets = transform_let_destructuring_in_do(exprs, binding_counter)?;
     Ok(
         Expression::Apply(
             vec![Expression::Word("do".to_string())]
@@ -1959,16 +1965,17 @@ pub fn build(program: &str) -> Result<Expression, String> {
     match preprocess(&program) {
         Ok(preprocessed) => {
             let mut desugared = Vec::new();
+            let mut binding_counter = 0usize;
 
             for expr in parse(&preprocessed).unwrap() {
-                match desugar(expr) {
+                match desugar_with_counter(expr, &mut binding_counter) {
                     Ok(expr) => desugared.push(expr),
                     Err(e) => {
                         return Err(e);
                     }
                 }
             }
-            let top_level = transform_let_destructuring_in_do(desugared.to_vec())?;
+            let top_level = transform_let_destructuring_in_do(desugared.to_vec(), &mut binding_counter)?;
             let wrapped = Expression::Apply(
                 std::iter::once(Expression::Word("do".to_string())).chain(top_level).collect()
             );
@@ -1986,8 +1993,9 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
             match parse(&preprocessed) {
                 Ok(exprs) => {
                     let mut desugared = Vec::new();
+                    let mut binding_counter = 0usize;
                     for expr in exprs {
-                        match desugar(expr) {
+                        match desugar_with_counter(expr, &mut binding_counter) {
                             Ok(expr) => desugared.push(expr),
                             Err(e) => {
                                 return Err(e);
@@ -2014,7 +2022,10 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                     }
 
                     let shaken_std = tree_shake(std, &used, &mut definitions);
-                    let top_level = transform_let_destructuring_in_do(desugared.to_vec())?;
+                    let top_level = transform_let_destructuring_in_do(
+                        desugared.to_vec(),
+                        &mut binding_counter
+                    )?;
                     let wrapped = Expression::Apply(
                         std::iter
                             ::once(Expression::Word("do".to_string()))
