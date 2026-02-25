@@ -45,8 +45,7 @@ Top level already has a do block so it's not needed there but functions with mor
 
 ### Recursion
 
-- `let~` — **tail recursion**, TCO enabled
-- `let*` — explicit recursion, no TCO
+- `let*` — explicit recursion, TCO possible in wasm
 - VM forbids returning closures capturing outer scope
 
 _Note: WASM enables tco so let star is just fine to use all the time_
@@ -82,6 +81,7 @@ _Note: WASM enables tco so let star is just fine to use all the time_
 
 - Primitives: `Int Float Bool Char`
 - Composite:
+
   - `[T]` — Vector
   - `{A * B}` — Tuple
   - `A -> B` — Function

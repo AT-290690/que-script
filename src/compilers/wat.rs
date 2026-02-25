@@ -95,8 +95,33 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
 
 fn builtin_tag_arity(tag: i32) -> Option<usize> {
     match tag {
-        1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 25 | 26 |
-        27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 => Some(2),
+        | 1
+        | 2
+        | 3
+        | 4
+        | 5
+        | 6
+        | 7
+        | 8
+        | 9
+        | 10
+        | 11
+        | 12
+        | 13
+        | 14
+        | 15
+        | 16
+        | 17
+        | 25
+        | 26
+        | 27
+        | 28
+        | 29
+        | 30
+        | 31
+        | 32
+        | 33
+        | 34 => Some(2),
         21 => Some(3),
         18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 => Some(1),
         _ => None,
@@ -224,7 +249,6 @@ fn is_special_word(w: &str) -> bool {
         w,
         "do" |
             "let" |
-            "let~" |
             "let*" |
             "lambda" |
             "if" |
@@ -326,8 +350,11 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                 if op == "do" {
                     for it in &items[1..] {
                         if let Expression::Apply(let_items) = it {
-                            if let [Expression::Word(kw), Expression::Word(name), rhs] = &let_items[..] {
-                                if kw == "let" || kw == "let~" || kw == "let*" {
+                            if
+                                let [Expression::Word(kw), Expression::Word(name), rhs] =
+                                    &let_items[..]
+                            {
+                                if kw == "let" || kw == "let*" {
                                     collect_refs(rhs, bound, out);
                                     bound.insert(name.clone());
                                     continue;
@@ -338,7 +365,7 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     }
                     return;
                 }
-                if op == "let" || op == "let~" || op == "let*" {
+                if op == "let" || op == "let*" {
                     if let [_, Expression::Word(name), rhs] = &items[..] {
                         collect_refs(rhs, bound, out);
                         bound.insert(name.clone());
@@ -380,7 +407,7 @@ fn collect_lambda_nodes(node: &TypedExpression, out: &mut Vec<TypedExpression>) 
 fn collect_let_lambda_bindings(node: &TypedExpression, out: &mut HashMap<String, TypedExpression>) {
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
-            if kw == "let" || kw == "let~" || kw == "let*" {
+            if kw == "let" || kw == "let*" {
                 if let Some(rhs) = node.children.get(2) {
                     if
                         matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
@@ -417,7 +444,10 @@ fn lambda_is_hoistable(node: &TypedExpression, _top_defs: &HashMap<String, TopDe
     refs.is_empty()
 }
 
-fn lambda_capture_names(node: &TypedExpression, _top_defs: &HashMap<String, TopDef>) -> Vec<String> {
+fn lambda_capture_names(
+    node: &TypedExpression,
+    _top_defs: &HashMap<String, TopDef>
+) -> Vec<String> {
     let items = match &node.expr {
         Expression::Apply(xs) => xs,
         _ => {
@@ -2226,16 +2256,10 @@ fn emit_vector_runtime(
             }
             for (fid, helper_id, first_param_is_ref) in &apply1_partial_closures {
                 out.push_str(
-                    &format!(
-                        "      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n",
-                        fid
-                    )
+                    &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
                 );
                 out.push_str(
-                    &format!(
-                        "        i32.const {}\n        i32.const 2\n        call $closure_new\n        local.set $clo\n",
-                        helper_id
-                    )
+                    &format!("        i32.const {}\n        i32.const 2\n        call $closure_new\n        local.set $clo\n", helper_id)
                 );
                 out.push_str(
                     "        local.get $clo\n        i32.const 0\n        local.get $f\n        call $closure_set_ref\n        drop\n"
@@ -2251,7 +2275,7 @@ fn emit_vector_runtime(
                 out.push_str("      else\n");
             }
             out.push_str("        unreachable\n");
-            for _ in 0..(apply1_closures.len() + apply1_partial_closures.len()) {
+            for _ in 0..apply1_closures.len() + apply1_partial_closures.len() {
                 out.push_str("      end\n");
             }
             out.push_str("    else\n");
@@ -2284,7 +2308,11 @@ fn emit_vector_runtime(
                                 tag,
                                 helper_id,
                                 tag,
-                                if first_param_is_ref { "closure_set_ref" } else { "closure_set" }
+                                if first_param_is_ref {
+                                    "closure_set_ref"
+                                } else {
+                                    "closure_set"
+                                }
                             )
                         );
                     }
@@ -2292,8 +2320,8 @@ fn emit_vector_runtime(
             }
         }
         let builtin_apply1_partial_tags = [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29,
-            30, 31, 32, 33, 34,
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30,
+            31, 32, 33, 34,
         ];
         for tag in builtin_apply1_partial_tags {
             if let Some(arity) = builtin_tag_arity(tag) {
@@ -2308,7 +2336,11 @@ fn emit_vector_runtime(
                                 tag,
                                 helper_id,
                                 tag,
-                                if first_param_is_ref { "closure_set_ref" } else { "closure_set" }
+                                if first_param_is_ref {
+                                    "closure_set_ref"
+                                } else {
+                                    "closure_set"
+                                }
                             )
                         );
                     }
@@ -3003,7 +3035,7 @@ fn compile_do(
     for i in 1..items.len() - 1 {
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
-                if kw == "let" || kw == "let~" || kw == "let*" {
+                if kw == "let" || kw == "let*" {
                     let val_node = child_at(i).and_then(|n| n.children.get(2));
                     let self_capture_idx = val_node.and_then(|n| {
                         if
@@ -3050,9 +3082,8 @@ fn compile_do(
                             .get(name)
                             .map(is_managed_local_type)
                             .unwrap_or(false);
-                        let borrowed_rhs = val_node
-                            .map(is_borrowing_accessor_expr)
-                            .unwrap_or(false) ||
+                        let borrowed_rhs =
+                            val_node.map(is_borrowing_accessor_expr).unwrap_or(false) ||
                             value.contains("call $vec_get_i32") ||
                             value.contains("call $tuple_fst") ||
                             value.contains("call $tuple_snd");
@@ -3865,10 +3896,7 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             let (cap_v, is_ref_capture) = if let Some(local_idx) = ctx.locals.get(cap) {
                 (
                     format!("local.get {}", local_idx),
-                    ctx.local_types
-                        .get(cap)
-                        .map(is_managed_local_type)
-                        .unwrap_or(false),
+                    ctx.local_types.get(cap).map(is_managed_local_type).unwrap_or(false),
                 )
             } else if let Some((ps, ret)) = ctx.fn_sigs.get(cap) {
                 if ps.is_empty() {
@@ -3881,18 +3909,13 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                     (format!("i32.const {}", tag), true)
                 } else {
                     return Err(
-                        format!(
-                            "Unsupported closure capture '{}' in wasm backend (no function id/tag)",
-                            cap
-                        )
+                        format!("Unsupported closure capture '{}' in wasm backend (no function id/tag)", cap)
                     );
                 }
             } else if let Some(tag) = builtin_fn_tag(cap) {
                 (format!("i32.const {}", tag), true)
             } else {
-                return Err(
-                    format!("Unsupported closure capture '{}' in wasm backend", cap)
-                );
+                return Err(format!("Unsupported closure capture '{}' in wasm backend", cap));
             };
             let set_fn = if is_ref_capture { "$closure_set_ref" } else { "$closure_set" };
             out.push(
@@ -4029,7 +4052,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
 fn collect_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
-            if kw == "let" || kw == "let~" || kw == "let*" {
+            if kw == "let" || kw == "let*" {
                 if let Some(t) = node.children.get(2).and_then(|n| n.typ.as_ref()) {
                     if !out.iter().any(|(n, _)| n == name) {
                         out.push((name.clone(), t.clone()));
@@ -4128,9 +4151,19 @@ fn collect_type_subst(pattern: &Type, concrete: &Type, out: &mut HashMap<u64, Ty
 
 fn apply_type_subst(t: &Type, subst: &HashMap<u64, Type>) -> Type {
     match t {
-        Type::Var(v) => subst.get(&v.id).cloned().unwrap_or_else(|| Type::Var(v.clone())),
+        Type::Var(v) =>
+            subst
+                .get(&v.id)
+                .cloned()
+                .unwrap_or_else(|| Type::Var(v.clone())),
         Type::List(a) => Type::List(Box::new(apply_type_subst(a, subst))),
-        Type::Tuple(xs) => Type::Tuple(xs.iter().map(|x| apply_type_subst(x, subst)).collect()),
+        Type::Tuple(xs) =>
+            Type::Tuple(
+                xs
+                    .iter()
+                    .map(|x| apply_type_subst(x, subst))
+                    .collect()
+            ),
         Type::Function(a, b) =>
             Type::Function(
                 Box::new(apply_type_subst(a, subst)),
@@ -4144,7 +4177,10 @@ fn specialize_typed_expr(node: &TypedExpression, subst: &HashMap<u64, Type>) -> 
     TypedExpression {
         expr: node.expr.clone(),
         typ: node.typ.as_ref().map(|t| apply_type_subst(t, subst)),
-        children: node.children.iter().map(|c| specialize_typed_expr(c, subst)).collect(),
+        children: node.children
+            .iter()
+            .map(|c| specialize_typed_expr(c, subst))
+            .collect(),
     }
 }
 
@@ -4163,55 +4199,61 @@ fn compile_tail_expr(
     arity: usize
 ) -> Result<Option<String>, String> {
     match &node.expr {
-        Expression::Apply(items) if !items.is_empty() => match &items[0] {
-            Expression::Word(op) if op == self_name => {
-                let args = &node.children[1..];
-                if args.len() != arity {
-                    return Ok(None);
+        Expression::Apply(items) if !items.is_empty() =>
+            match &items[0] {
+                Expression::Word(op) if op == self_name => {
+                    let args = &node.children[1..];
+                    if args.len() != arity {
+                        return Ok(None);
+                    }
+                    let mut out = Vec::new();
+                    for a in args {
+                        out.push(compile_expr(a, ctx)?);
+                    }
+                    out.push(format!("return_call ${}", ident(self_name)));
+                    Ok(Some(out.join("\n")))
                 }
-                let mut out = Vec::new();
-                for a in args {
-                    out.push(compile_expr(a, ctx)?);
-                }
-                out.push(format!("return_call ${}", ident(self_name)));
-                Ok(Some(out.join("\n")))
-            }
-            Expression::Word(op) if op == "if" => {
-                let cond_node = node
-                    .children
-                    .get(1)
-                    .ok_or_else(|| "if missing condition".to_string())?;
-                let then_node = node.children.get(2).ok_or_else(|| "if missing then".to_string())?;
-                let else_node = node.children.get(3).ok_or_else(|| "if missing else".to_string())?;
-                let cond = compile_expr(cond_node, ctx)?;
-                let result_ty = node.typ
-                    .as_ref()
-                    .ok_or_else(|| "if missing type".to_string())
-                    .and_then(wasm_val_type)?;
-                let then_code = if let Some(tc) = compile_tail_expr(then_node, ctx, self_name, arity)?
-                {
-                    tc
-                } else {
-                    compile_expr(then_node, ctx)?
-                };
-                let else_code = if let Some(tc) = compile_tail_expr(else_node, ctx, self_name, arity)?
-                {
-                    tc
-                } else {
-                    compile_expr(else_node, ctx)?
-                };
-                Ok(
-                    Some(
-                        format!(
-                            "{cond}\n(if (result {result_ty})\n  (then\n{}\n  )\n  (else\n{}\n  )\n)\nreturn",
-                            indent_block(&then_code, 2),
-                            indent_block(&else_code, 2)
+                Expression::Word(op) if op == "if" => {
+                    let cond_node = node.children
+                        .get(1)
+                        .ok_or_else(|| "if missing condition".to_string())?;
+                    let then_node = node.children
+                        .get(2)
+                        .ok_or_else(|| "if missing then".to_string())?;
+                    let else_node = node.children
+                        .get(3)
+                        .ok_or_else(|| "if missing else".to_string())?;
+                    let cond = compile_expr(cond_node, ctx)?;
+                    let result_ty = node.typ
+                        .as_ref()
+                        .ok_or_else(|| "if missing type".to_string())
+                        .and_then(wasm_val_type)?;
+                    let then_code = if
+                        let Some(tc) = compile_tail_expr(then_node, ctx, self_name, arity)?
+                    {
+                        tc
+                    } else {
+                        compile_expr(then_node, ctx)?
+                    };
+                    let else_code = if
+                        let Some(tc) = compile_tail_expr(else_node, ctx, self_name, arity)?
+                    {
+                        tc
+                    } else {
+                        compile_expr(else_node, ctx)?
+                    };
+                    Ok(
+                        Some(
+                            format!(
+                                "{cond}\n(if (result {result_ty})\n  (then\n{}\n  )\n  (else\n{}\n  )\n)\nreturn",
+                                indent_block(&then_code, 2),
+                                indent_block(&else_code, 2)
+                            )
                         )
                     )
-                )
+                }
+                _ => Ok(None),
             }
-            _ => Ok(None),
-        },
         _ => Ok(None),
     }
 }
@@ -4329,7 +4371,8 @@ fn compile_lambda_func(
             ref_slots.push(params.len() + i);
         }
     }
-    let tco_safe = !is_managed_local_type(&ret_ty) &&
+    let tco_safe =
+        !is_managed_local_type(&ret_ty) &&
         local_defs.iter().all(|(_, t)| !is_managed_local_type(t));
     let tail_body_code = if tco_safe {
         compile_tail_expr(body_node, &ctx, name, params.len())?
@@ -4688,7 +4731,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
             for i in 1..items.len() {
                 if let Expression::Apply(let_items) = &items[i] {
                     if let [Expression::Word(kw), Expression::Word(name), rhs] = &let_items[..] {
-                        if kw == "let" || kw == "let~" || kw == "let*" {
+                        if kw == "let" || kw == "let*" {
                             if
                                 let Some(node) = child_at(i)
                                     .and_then(|n| n.children.get(2))
@@ -4885,8 +4928,8 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
     }
     for tag in [
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30,
-        31, 32, 33, 34,
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30, 31, 32,
+        33, 34,
     ] {
         if let Some(arity) = builtin_tag_arity(tag) {
             if arity > 1 {

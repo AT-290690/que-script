@@ -51,10 +51,22 @@ wasm-pack build --target nodejs --out-dir pkg/node --release --no-default-featur
 wasm-pack build --target web --out-dir pkg/web --release --no-default-features --features parser,js-compiler,type-checker,vm
 ```
 
+build wasm bundle using wasm compiler
+
+```bash
+wasm-pack build --target web --out-dir pkg/web --release --no-default-features --features wasm-compiler
+```
+
 build "baked" libraries
 
 ```bash
 cargo run -- --std
+```
+
+run tests with wasm
+
+```bash
+cargo test --features deref-wasm
 ```
 
 transpile program to JavaScrpt (`./example/dist/main.js`)
@@ -129,7 +141,7 @@ A call is said to be in tail position if it is the last instruction executed bef
 This is especially useful for recursive functions. For instance, take this function that sums the elements of a vector:
 
 ```lisp
-(let~ sum (lambda xs acc
+(let* sum (lambda xs acc
     (if (= (length xs) 0) acc
         (sum (drop/first 1 xs) (+ acc (get xs 0))))))
 
@@ -158,11 +170,11 @@ This optimization is particularly important for functional languages. They rely 
 
 ```lisp
 ; TCO recursion
-(let~ k-mod (lambda n k (if (< k n) k (k-mod n (- k n)))))
+(let* k-mod (lambda n k (if (< k n) k (k-mod n (- k n)))))
 ; taking advantage of partial apply
 (let mod2 (k-mod 2))
 ; TCO recursion
-(let~ collatz (lambda n steps
+(let* collatz (lambda n steps
                (if (= n 1)
                     steps
                     (collatz (if (= (mod2 n) 0)
@@ -188,7 +200,7 @@ Users are encouraged to design tail-recursive functions so that the accumulator 
 Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner:
 
 ```lisp
-(let~ factorial (lambda n total
+(let* factorial (lambda n total
    (if (= n 0)
        total
        (factorial (- n 1) (* total n)))))
@@ -211,7 +223,7 @@ Unfortunately, we can't fit that number in 32 big integers.
 Instead we have to use **Big** integers (or numbers as a vectors with arbitrary precision):
 
 ```lisp
-(let~ factorial (lambda n total
+(let* factorial (lambda n total
         (if (= (get n 0) 0)
             total
             (factorial (BigInt/sub n [ 1 ]) (BigInt/mul total n)))))

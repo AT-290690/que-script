@@ -314,7 +314,7 @@ fn compile_do(items: &[Expression], node: &TypedExpression) -> String {
     for i in 1..items.len() - 1 {
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
-                if kw == "let" || kw == "let~" || kw == "let*" {
+                if kw == "let" || kw == "let*" {
                     let val_node = child_at(i).and_then(|n| n.children.get(2));
                     let value = val_node.map(compile_expr).unwrap_or_else(|| "0".to_string());
                     let binding = if kw == "let*" { "var" } else { "val" };
@@ -436,7 +436,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                 Expression::Word(op) =>
                     match op.as_str() {
                         "do" => compile_do(items, node),
-                        "let" | "let~" | "let*" => {
+                        "let" | "let*" => {
                             if items.len() != 3 {
                                 return "0".to_string();
                             }

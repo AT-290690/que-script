@@ -184,7 +184,7 @@ fn compile_do(items: &[Expression], children: &[TypedExpression]) -> String {
     for i in 1..items.len() - 1 {
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
-                if kw == "let" || kw == "let~" || kw == "let*" {
+                if kw == "let" || kw == "let*" {
                     let val = children
                         .get(i)
                         .and_then(|n| n.children.get(2))
@@ -440,7 +440,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
                                 format!("(fun {} -> {})", params.join(" "), body)
                             }
                         }
-                        "let" | "let~" | "let*" => {
+                        "let" | "let*" => {
                             if items.len() == 3 {
                                 let name = if let Expression::Word(n) = &items[1] {
                                     ident(n)

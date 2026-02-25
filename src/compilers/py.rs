@@ -162,7 +162,7 @@ fn compile_do_expr(items: &[Expression]) -> String {
         match expr {
             Expression::Apply(parts) if parts.len() == 3 => {
                 if let Expression::Word(op) = &parts[0] {
-                    if op == "let" || op == "let*" || op == "let~" {
+                    if op == "let" || op == "let*" {
                         if let Expression::Word(name) = &parts[1] {
                             let v = compile_expr_to_py(&parts[2]);
                             exprs.push(format!("({} := ({}))", ident(name, 0), v));
@@ -191,7 +191,7 @@ fn compile_expr_to_py_inner(expr: &Expression) -> String {
                 Expression::Word(op) =>
                     match op.as_str() {
                         "do" => compile_do_expr(items),
-                        "let" | "let*" | "let~" => {
+                        "let" | "let*" => {
                             if items.len() != 3 {
                                 return "None".to_string();
                             }
@@ -431,7 +431,7 @@ pub fn compile_program_to_python(top: &Expression) -> String {
                             match e {
                                 Expression::Apply(let_items) if let_items.len() == 3 => {
                                     if let Expression::Word(kw) = &let_items[0] {
-                                        if kw == "let" || kw == "let*" || kw == "let~" {
+                                        if kw == "let" || kw == "let*" {
                                             if let Expression::Word(name) = &let_items[1] {
                                                 let v = compile_expr_to_py(&let_items[2]);
                                                 out.push(format!("{} = ({})", ident(name, 0), v));

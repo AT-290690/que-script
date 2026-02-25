@@ -326,7 +326,7 @@ You can use anonymous lambdas inline with the pipe operator (|>), especially for
 Functions in Que Script can call themselves and thanks to Tail Call Optimization, recursion is efficient and safe.
 
 ```lisp
-(let~ factorial (lambda n total
+(let* factorial (lambda n total
     (if (= n 0)
         total
         (factorial (- n 1) (* total n)))))
@@ -360,13 +360,13 @@ Without memoization, recursive functions like Fibonacci recompute the same value
 
 Memoization is especially effective in Que because purity ensures that cached results never become invalid. It is not a replacement for algorithms, but it turns expressive—but slow—recursive definitions into practical ones. The key idea: pure functions plus memoization enable efficient computation without sacrificing clarity.
 
-## Explicit recursion (let\* & let~)
+## Explicit recursion (let\*)
 
-If a function is a tail call, Que rewrites it internally as a loop for efficiency but only if explicitly defined as let~.
+If a function is a tail call, Que rewrites it internally as a loop for efficiency but only if explicitly defined as let\*.
 
 ```lisp
 ; Explicit tail call can be optimized
-(let~ tail-call/sum (lambda xs acc
+(let* tail-call/sum (lambda xs acc
     (if (= (length xs) 0) acc
         (tail-call/sum (drop/first 1 xs) (+ acc (get xs 0))))))
 
@@ -381,7 +381,7 @@ If a function is a tail call, Que rewrites it internally as a loop for efficienc
 ] ; both produce 15
 ```
 
-You need to explicitly mark a function as recursive using `let*`. This is especially useful for functions that are deeply or mutually recursive, such as the Ackermann function. Using `let*` tells the compiler that recursion is intentional and not tail-call optimizable — preventing TCO and ensuring the recursive structure remains untouched.
+You need to explicitly mark a function as recursive using `let*`. This is especially useful for functions that are deeply or mutually recursive, such as the Ackermann function. Using `let*` tells the compiler that recursion is intentional and might do tail-call optimization.
 
 ```lisp
 (let* ackermann (lambda m n
@@ -394,8 +394,6 @@ You need to explicitly mark a function as recursive using `let*`. This is especi
 
 (ackermann 2 3)
 ```
-
-However, note that `let*` disables Tail Call Optimization — which means you should only use it when you are absolutely sure. For tail-recursive functions, prefer `let~` so the compiler can optimize them into loops.
 
 ## Partial Application
 
@@ -1464,11 +1462,11 @@ The Collatz conjecture is an unsolved mathematical problem that asks whether a s
 
 ```lisp
 ; TCO recursion
-(let~ k-mod (lambda n k (if (< k n) k (k-mod n (- k n)))))
+(let* k-mod (lambda n k (if (< k n) k (k-mod n (- k n)))))
 ; taking advantage of partial apply
 (let mod2 (k-mod 2))
 ; TCO recursion
-(let~ collatz (lambda n steps
+(let* collatz (lambda n steps
                (if (= n 1)
                     steps
                     (collatz (if (= (mod2 n) 0)
@@ -1505,7 +1503,7 @@ https://adventofcode.com/2019/day/1
 (let part2 (lambda input (do
 
 (let retry (lambda x (do
-    (let~ tail-call:retry! (lambda x out (do
+    (let* tail-call:retry! (lambda x out (do
         (let result (- (/ x 3) 2))
         (if (<= result 0) out
             (tail-call:retry! result (do (push! out result) out))))))

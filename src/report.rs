@@ -3408,7 +3408,7 @@ pub fn compile(expr: &Expression, code: &mut Vec<Instruction>) -> Result<(), Str
                         code.push(Instruction::Length);
                         Ok(())
                     }
-                    "let" | "let*" | "let~" => {
+                    "let" | "let*" => {
                         if exprs.len() != 3 {
                             return Err(
                                 "let requires exactly 2 arguments: name and value".to_string()

@@ -576,7 +576,7 @@ fn lambda_captures_from_set(
                             return walk(&items[items.len() - 1], &mut nested_scope, captured_names);
                         }
                     }
-                    if (head == "let" || head == "let*" || head == "let~") && items.len() == 3 {
+                    if (head == "let" || head == "let*") && items.len() == 3 {
                         if walk(&items[2], scope, captured_names) {
                             return true;
                         }
@@ -615,7 +615,7 @@ fn compile_do(items: &[Expression], node: &TypedExpression, lift_named_fns: bool
         if let Expression::Apply(let_items) = &items[i] {
             if !let_items.is_empty() {
                 if let Expression::Word(kw) = &let_items[0] {
-                    if (kw == "let" || kw == "let*" || kw == "let~") && let_items.len() == 3 {
+                    if (kw == "let" || kw == "let*") && let_items.len() == 3 {
                         if let Expression::Word(name) = &let_items[1] {
                             let value_node = sub_node.and_then(|n| n.children.get(2)).or(sub_node);
                             if kw == "let*" {
@@ -1156,7 +1156,7 @@ fn compile_expr_with_mode(node: &TypedExpression, lift_named_fns: bool) -> Strin
                             format!("{{ let __f = {}; while {} {{ __f(); }} 0i32 }}", fun, cond)
                         }
                         "lambda" => compile_lambda(items, node),
-                        "let" | "let*" | "let~" => {
+                        "let" | "let*" => {
                             if items.len() == 3 {
                                 let name = if let Expression::Word(n) = &items[1] {
                                     ident(n)
@@ -1424,7 +1424,7 @@ pub fn compile_program_to_rust_typed(typed_ast: &TypedExpression) -> String {
     fn collect_decl_arity(node: &TypedExpression, out: &mut HashMap<String, usize>) {
         if let Expression::Apply(items) = &node.expr {
             if let Some(Expression::Word(op)) = items.first() {
-                if (op == "let" || op == "let*" || op == "let~") && items.len() == 3 {
+                if (op == "let" || op == "let*") && items.len() == 3 {
                     if let Expression::Word(name) = &items[1] {
                         if let Expression::Apply(lambda_items) = &items[2] {
                             if let Some(Expression::Word(h)) = lambda_items.first() {
