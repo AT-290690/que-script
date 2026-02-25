@@ -2555,6 +2555,41 @@ Prize: X=18641, Y=10279")
             ])"#,
                 "true",
             ),
+
+            (
+                r#"(let .env "PORT = 8080
+DB   = postgres
+SECRET = SANTA")
+
+(let parse/env (comp
+                (String->Vector nl)
+                (exclude empty?)
+                (map (comp (String->Vector sp)
+                (map (comp (exclude (apply =# '='))))
+                (exclude empty?)))))
+
+(let ENV (reduce
+  (lambda a [ k v .] (do (Table/set! k v a) a))
+  (buckets 32)
+  (parse/env .env)))
+
+(let option (Table/get* "PORT" ENV))
+(if (fst option) (get (snd option)) "")"#,
+                "8080",
+            ),
+
+            (
+                r#"(let solve (lambda s 
+  (and (> (length s) 2) (do
+    (let n (length s))
+    (integer c 0)
+    (loop 0 (- n 1) (lambda i (if (=# (get s i) (get s (+ i 1))) (++ c))))
+    (loop 0 (- n 2) (lambda i (if (=# (get s i) (get s (+ i 2))) (++ c))))
+    (> (get c) 0)))))
+
+(map solve ["BCAB" "BB" "A" "AABB" "BAB" "KEEP"])"#,
+                "[false false false true true true]",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

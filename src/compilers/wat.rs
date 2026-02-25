@@ -594,6 +594,11 @@ fn emit_vector_runtime(
     closure_defs: &HashMap<String, ClosureDef>,
     apply_arities: &HashSet<usize>
 ) -> String {
+    let mut apply_arities = apply_arities.clone();
+    // apply3 fallback chains through apply1, so ensure apply1 runtime exists.
+    if apply_arities.contains(&3) {
+        apply_arities.insert(1);
+    }
     let mut out = String::new();
     out.push_str(
         r#"
@@ -2860,7 +2865,9 @@ fn emit_vector_runtime(
                 }
             }
         }
-        out.push_str("      unreachable\n");
+        out.push_str(
+            "      local.get $f\n      local.get $a\n      call $apply1_i32\n      local.get $b\n      call $apply1_i32\n      local.get $c\n      call $apply1_i32\n"
+        );
         for (name, _tag) in fn_ids {
             if let Some((ps, ret)) = fn_sigs.get(name) {
                 if
