@@ -1752,14 +1752,14 @@ q)))
   out))))
 
 (let std/vector/int/sequence (lambda xs (std/vector/int/range 0 (- (length xs) 1))))
-(let std/int/shoelace (lambda points (do
-    (let len (length points))
-    (/ (<| (std/vector/int/sequence points)
+(let std/int/shoelace (lambda px (do
+    (let len (length px))
+    (/ (<| (std/vector/int/sequence px)
         (std/vector/reduce (lambda ab i (do
             (let a (get ab 0))
             (let b (get ab 1))
-            (let left (get points i))
-            (let right (get points (mod (+ i 1) len)))
+            (let left (get px i))
+            (let right (get px (mod (+ i 1) len)))
             (let y1 (get left 0))
             (let x1 (get left 1))
             (let y2 (get right 0))
@@ -1768,7 +1768,7 @@ q)))
         [0 0])
         (std/vector/int/pair/sub)
         (std/int/abs)) 2))))
-(let std/int/collinear? (lambda points (= (std/int/shoelace points) 0)))
+(let std/int/collinear? (lambda px (= (std/int/shoelace px) 0)))
 
 
 (let std/vector/int/big/range (lambda start end (do

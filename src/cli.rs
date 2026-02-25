@@ -392,7 +392,7 @@ fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<()>) -> Str
             .map(|item_ptr| decode_value(item_ptr, inner, mem, store))
             .collect();
 
-        return format!("[{}]", decoded.join(", "));
+        return format!("[{}]", decoded.join(" "));
     }
 
     // Tuple: { A * B }
@@ -413,7 +413,7 @@ fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<()>) -> Str
             })
             .collect();
 
-        return format!("{{ {} }}", decoded.join(", "));
+        return format!("{{ {} }}", decoded.join(" "));
     }
 
     // Base case (Int or unknown)
@@ -421,7 +421,7 @@ fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<()>) -> Str
 }
 
 #[cfg(feature = "deref-wasm")]
-fn deref_wat_text(wat_src: &str) -> Result<String, String> {
+pub fn deref_wat_text(wat_src: &str) -> Result<String, String> {
     let typ = extract_type_from_wat(wat_src).unwrap_or_else(|| "Int".to_string());
     let wasm_bytes = wat_crate::parse_str(wat_src).map_err(|e| e.to_string())?;
     let engine = Engine::default();

@@ -137,12 +137,13 @@ Error! Concequent and alternative must match types
         }
     }
 
+    #[cfg(feature = "deref-wasm")]
     #[test]
     fn test_correctness() {
         let test_cases = [
             ("(+ 1 2)", "3"),
             ("(std/vector/int/sum [ 1 2 ])", "3"),
-            ("\"Hello world\"", "[72 101 108 108 111 32 119 111 114 108 100]"),
+            ("\"Hello world\"", "Hello world"),
             (
                 r#"(let A [false (and (= 1 2) (> 3 3))]) ; => [false false] Correct
 (let B [false (or (= 1 2) (> 3 3))]) ; => [true false] Wrong
@@ -169,7 +170,7 @@ Error! Concequent and alternative must match types
                 r#"(let last-stone-weight (lambda stones (do
   (let max-cmp (lambda a b (> a b)))
   (let heap (std/convert/vector->heap stones max-cmp))
-  (let~ tail-call/smash (lambda t
+  (let* tail-call/smash (lambda t
     (if (> (length heap) 1)
       (do
         (let y (std/heap/peek heap))
@@ -449,16 +450,16 @@ Error! Concequent and alternative must match types
                 r#"
 (let parse (lambda input (<| input (std/vector/char/lines) (std/vector/map std/convert/chars->integer))))
 (let part1 (lambda input (do 
-    (let min (std/vector/int/minimum input))
+    (let m (std/vector/int/minimum input))
     (<| input
-        (std/vector/map (lambda x (- x min)))
+        (std/vector/map (lambda x (- x m)))
         (std/vector/int/sum)))))
 
  (let part2 (lambda input (do 
     (std/vector/sort/desc! input)
-    (let median (std/vector/int/median input))
+    (let m (std/vector/int/median input))
     (<| input
-        (std/vector/map (lambda x (cond (> x median) (- x median) (< x median) (- median x) 0)))
+        (std/vector/map (lambda x (cond (> x m) (- x m) (< x m) (- m x) 0)))
         (std/vector/int/sum)))))
 
 [(<| 
@@ -484,14 +485,14 @@ Error! Concequent and alternative must match types
                 r#"(let xs [1 2 0 4 3 0 5 0])
 
 (let solve! (lambda xs (do 
-    (integer count 0)
+    (integer c 0)
     (let len (length xs))
     (std/vector/for xs (lambda x (if (<> x 0) (do 
-        (set! xs (get count) x)
-        (++ count)))))
-    (loop (< (get count) len) (lambda (do 
-        (set! xs (get count) 0)
-        (++ count))))
+        (set! xs (get c) x)
+        (++ c)))))
+    (loop (< (get c) len) (lambda (do 
+        (set! xs (get c) 0)
+        (++ c))))
     xs)))
 
 (solve! xs)"#,
@@ -592,7 +593,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (std/vector/sort! (lambda a b (> (get a 1) (get b 1))))
     (std/vector/map (lambda [i .] (get letters i)))))))
 (<| input (parse) (part1))"#,
-                "[66 68 67 65]",
+                "BDCA",
             ),
             (
                 r#"(let palindrome? (lambda str (do 
@@ -631,10 +632,10 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[true false]",
             ),
             (
-                r#"(let~ rev (lambda xs rev 
+                r#"(let* rev (lambda xs ys 
     (if (std/vector/empty? xs) 
-         rev 
-        (rev (std/vector/drop/last xs 1) (std/vector/append! rev (std/vector/at xs -1))))))
+         ys 
+        (rev (std/vector/drop/last xs 1) (std/vector/append! ys (std/vector/at xs -1))))))
 ;
 (rev [ 1 2 3 4 5 ] [])"#,
                 "[5 4 3 2 1]",
@@ -673,7 +674,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             ),
             (
                 r#"
-(let~ factorial (lambda n total
+(let* factorial (lambda n total
     (if (= (get n 0) 0)
         total
         (factorial (std/int/big/sub n [ 1 ]) (std/int/big/mul total n)))))
@@ -858,7 +859,7 @@ D:=,=,=,+,=,=,=,+,=,=")
  (interleave [ "a" "b" "c" ] (ints [ 1 2 3 ])) ; [ "a" 1 "b" 2 "c" 3 ]
  (interleave (ints [ 1 2 ]) [ "x" "y" "z" ])  ; [ 1 "x" 2 "y" "z" ]
 ]"#,
-                "[[[97] [49] [98] [50] [99] [51]] [[49] [120] [50] [121]]]",
+                "[[a 1 b 2 c 3] [1 x 2 y]]",
             ),
             (
                 r#"(let fn (lambda [ a b . ] [ x y . ] (std/int/manhattan-distance a b x y)))
@@ -1018,7 +1019,7 @@ out
   (|> ["R2, L3"  "R2, R2, R2" "R5, L5, R5, R3"] (map parse) (map part1))
   (part2 (parse "R8, R4, R4, R8"))
 }"#,
-                "[[5 2 12] 4]",
+                "{ [5 2 12] 4 }",
             ),
             (
                 r#"(let INPUT
@@ -1074,7 +1075,7 @@ out
 (let part2 (lambda input (do
 
 (let retry (lambda x (do
-    (let~ tail-call:retry! (lambda x out (do 
+    (let* tail-call:retry! (lambda x out (do 
         (let result (- (/ x 3) 2))
         (if (<= result 0) out 
             (tail-call:retry! result (std/vector/append! out result))))))
@@ -1099,18 +1100,18 @@ b
             ),
             (
                 r#"(std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })"#,
-                "[[1 true] [2 false] [3 true]]",
+                "[{ 1 true } { 2 false } { 3 true }]",
             ),
             (
                 r#"(std/vector/tuple/unzip 
     (std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })
 )"#,
-                "[[1 2 3] [true false true]]",
+                "{ [1 2 3] [true false true] }",
             ),
             (
-                r#"(let~ rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
+                r#"(let* rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
 (rec { 1 1 } { true 10 })"#,
-                "[false 12]",
+                "{ false 12 }",
             ),
             (
                 r#"(let factorial (lambda N (snd (pull! (Rec { N 1 } (lambda { n acc } 
@@ -1187,7 +1188,7 @@ sword)))
           { (take/first half xs) (drop/first half xs)})))
 
 (halve (range 0 11))"#,
-                "[[0 1 2 3 4 5] [6 7 8 9 10 11]]",
+                "{ [0 1 2 3 4 5] [6 7 8 9 10 11] }",
             ),
             (
                 r#"(let max-depth (lambda s (|> s 
@@ -1291,7 +1292,7 @@ L82")
 
 
 { (part1 (parse INPUT)) (part2 (parse INPUT)) }"#,
-                "[357 [3 1 2 1 9 1 0 7 7 8 6 1 9]]",
+                "{ 357 [3 1 2 1 9 1 0 7 7 8 6 1 9] }",
             ),
             (
                 r#"(let INPUT 
@@ -1317,7 +1318,7 @@ L82")
   (get TOTAL))))
 
   (let part2 (lambda input (do
-    (let~ rec (lambda total (do
+    (let* rec (lambda total (do
         (let rem [])
         (loop 0 (length input) (lambda y (do 
         (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
@@ -1501,7 +1502,7 @@ L82")
 (solution (parse INPUT))"#,
                 "[[2 1] [4 0]]",
             ),
-            (r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#, "[1.0 15.0 -1.0]"),
+            (r#"[ (floor 1.23) (ceil 14.235) (ceil -1.2) ]"#, "[1 15 -1]"),
             (
                 r#"(let INPUT "162,817,812
 57,618,57
@@ -1533,7 +1534,7 @@ L82")
       (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) })))))))
   (let edges (map fst (sort! (lambda { . d1 } { . d2 } (< d1 d2)) dist)))
   (let parent (range 0 (- (length input) 1)))
-  (let~ root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
+  (let* root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
   (let merge (lambda a b (set! parent (root a) (root b))))
   (for (lambda [ a b .] (merge a b)) (take/first 10 edges))
   (|> 
@@ -1617,11 +1618,11 @@ L82")
             ),
             (
                 "{  (std/vector/float/mean (range/float 1 10)) (Float->Int (std/vector/float/mean (range/float 1 10))) }",
-                "[5.5 5]",
+                "{ 5.5 5 }",
             ),
             (
                 "{ (map Float->Int (range/float 1 10)) (map Int->Float (range/int 1 10)) }",
-                "[[1 2 3 4 5 6 7 8 9 10] [1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0]]",
+                "{ [1 2 3 4 5 6 7 8 9 10] [1 2 3 4 5 6 7 8 9 10] }",
             ),
             (
                 "(=? 
@@ -1686,7 +1687,7 @@ UUUUD")
                  (set! start 1 (clamp-range 0 len x))))
               (get pad (get start 0) (get start 1)))) '0'))))))))
 [(part1 (parse INPUT)) (part2 (parse INPUT))]"#,
-                "[[49 57 56 53] [53 68 66 51]]",
+                "[1985 5DB3]",
             ),
             (
                 r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter digit? x))) (filter not-empty?) (map String->Integer)))))))
@@ -1733,7 +1734,7 @@ UUUUD")
  (sort! (lambda { . a } { . b } (> a b)))
  (car)
  (fst))"#,
-                "[101]",
+                "e",
             ),
             (
                 r#"(let flood-fill (lambda image sr sc color (do 
@@ -1828,7 +1829,7 @@ UUUUD")
   (lambda rows prefer-most? (do
     (let width (length (get rows 0)))
 
-    (let~ step
+    (let* step
       (lambda idx remaining
         (if (or (= (length remaining) 1) (= idx width))
             remaining
@@ -1907,7 +1908,7 @@ bbrgwb")
 
 [(res 234 25) (res -1 25) (res 234 0)]
 "#,
-                "[[true 4704] [false -1] [false -1]]",
+                "[{ true 4704 } { false -1 } { false -1 }]",
             ),
             (
                 r#"
@@ -1954,7 +1955,7 @@ bbrgwb")
 (let first-winning-board
   (lambda numbers boards (do
     (let drawn (buckets 32))
-    (let~ step
+    (let* step
       (lambda i result
         (if (or
               (not (= (fst result) -1))
@@ -2087,7 +2088,7 @@ bbrgwb")
 (let unnest (lambda [[a b c .] [. d .]] [ a b c d ]))
 (let both (lambda { [ y x z . ] { a b } } (if (or a b) (* (+ y x) z) z)))
 { (unnest [[ 1 2 3 ] [ 4 5 6 ]]) { (unpack { 1 { 2 { 3 { 4 5 }}}}) (both { [ 2 3 -1 ] { false true } }) } }"#,
-                "[[1 2 3 5] [9 -5]]",
+                "{ [1 2 3 5] { 9 -5 } }",
             ),
             (
                 r#"; [Char]
@@ -2102,7 +2103,7 @@ bbrgwb")
 (let step (lambda [ c0 c1 c2 c3 c4 c5 c6 c7 c8 . ] [ c1 c2 c3 c4 c5 c6 (+ c7 c0) c8 c0 ]))
 ; Int -> [Int] -> [Int]
 (let simulate (lambda days state (do 
-    (let~ rec (lambda i acc
+    (let* rec (lambda i acc
         (if (= i days)
             acc
             (rec (+ i 1) (step acc)))))
@@ -2233,7 +2234,7 @@ bbrgwb")
             ),
             (
                 r#"(let max-water (lambda input (do 
-  (let~ max-water-rec (lambda l r out 
+  (let* max-water-rec (lambda l r out 
     (if (< l r) 
       (do 
         (let width (- r l))
@@ -2260,13 +2261,13 @@ bbrgwb")
 (let def { true { [ 1 2 3 4 5 ] (lambda [ a b ] (+ (sum b) a)) } })
 (let { a1 { b1 c1 } } def)
 { z  { (fn { 10 23 }) { a1 (c1 b1)} } }"#,
-                "[false [[1 2 10 23] [true 15]]]",
+                "{ false { [1 2 10 23] { true 15 } } }",
             ),
             (r#"(let [ a b rest ] [ 1 2 3 4 5 6 ])
-{ a rest }"#, "[1 [3 4 5 6]]"),
+{ a rest }"#, "{ 1 [3 4 5 6] }"),
             (
                 r#"(let rev (lambda xs (do 
-  (let~ rec/rev (lambda xs out 
+  (let* rec/rev (lambda xs out 
                   (if (empty? xs) out 
                       (rec/rev (cdr xs) (cons [(car xs)] out)))))
   (rec/rev xs []))))
@@ -2294,7 +2295,7 @@ bbrgwb")
     (Vector/new (lambda . id) ch))
     (Vector/new (lambda . -1) ch))])) [])))
   (let blanks (reduce/i (lambda a x i (do (if (= x -1) (push! a i)) a)) [] disk))
-  (let~ fragment (lambda ind out (do 
+  (let* fragment (lambda ind out (do 
     (let i (get blanks ind))
     (if (= (last disk) -1) (do (pop! disk) (fragment ind out))
       (if (not (<= (length disk) i)) (do 
@@ -2457,7 +2458,7 @@ Prize: X=18641, Y=10279")
       (map (cond (map fst)))))
 
 (group-anagrams ["eat" "tea" "tan" "ate" "nat" "bat"])"#,
-                "[[[110 97 116] [116 97 110]] [[101 97 116] [116 101 97] [97 116 101]] [[98 97 116]]]",
+                "[[nat tan] [eat tea ate] [bat]]",
             ),
 
             (
@@ -2554,42 +2555,6 @@ Prize: X=18641, Y=10279")
             ])"#,
                 "true",
             ),
-
-            // (r#"(let solve (lambda xs (<| xs (sort! <) (map/adjacent delta) (map/adjacent -) (every? zero?))))
-            // (let arithmetic-progression? (lambda inp (<| (sort inp >) (Vector->Tuple (\drop/last 1) (\drop/first 1)) (zip) (map Tuple/int/sub) (map/adjacent -) (every? zero?))))
-            // [ (solve [ 3 1 7 9 5 ]) (arithmetic-progression? [ 3 1 7 9 5 ]) ]"#, "[true true]"),
-            // (r#"(let input [
-            //     [ 1 2 3 ]
-            //     [ 5 5 5 ]
-            //     [ 3 1 4 ]
-            // ])
-
-            // ; long version - not prefered
-            // (let maximumWealthLong (lambda xs (reduce (map xs (lambda ys (reduce ys + 0))) (lambda a b (max a b)) -infinity)))
-
-            // ; Both of these are prefered
-
-            // ; Pipe composition - easy to follow
-            // (let maximumWealthPipe (lambda xs (<| xs (map sum) (maximum))))
-
-            // ; Point free version - most conscise
-            // (let maximumWealthFree (\ maximum (\map sum)))
-
-            // (<| ; all of these functions are [[Int]] -> Int so they can exist in the same vector
-            //     [maximumWealthLong maximumWealthPipe maximumWealthFree]
-            //     (map (lambda fn (fn input))))"#, "[15 15 15]"),
-            //     (r#"(let \filterOdd (\filter odd?))
-            // (let maximumWealthFree (\ maximum (\map sum)))
-            // [(<|
-            //     [ 1 2 3 4 5 ]
-            //     (\filterOdd)
-            //     (\map square)
-            //     (sum))
-            //  (<| [
-            //     [ 1 2 3 ]
-            //     [ 5 5 5 ]
-            //     [ 3 1 4 ]
-            // ] (maximumWealthFree))]"#, "[35 15]"),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
@@ -2605,14 +2570,21 @@ Prize: X=18641, Y=10279")
                             )
                         {
                             Ok(_) => {
-                                match crate::vm::run(&exprs, crate::vm::VM::new()) {
+                                // match crate::vm::run(&exprs, crate::vm::VM::new()) {
+                                match crate::wat::compile_program_to_wat(&exprs) {
                                     Ok(result) => {
-                                        // println!("{:?}", inp);
-                                        assert_eq!(format!("{:?}", result), *out, "Solution");
+                                        match crate::cli::deref_wat_text(&result) {
+                                            Ok(res) =>
+                                                assert_eq!(format!("{}", res), *out, "Solution"),
+                                            Err(e) => {
+                                                println!("{:?}", inp);
+                                                panic!("Failed tests because {}", e);
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         // to figure out which test failed due to run time Error!
-                                        // println!("{:?}", inp);
+                                        println!("{:?}", inp);
                                         panic!("Failed tests because {}", e);
                                     }
                                 }

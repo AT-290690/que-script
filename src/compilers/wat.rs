@@ -301,10 +301,6 @@ fn collect_pattern_words(expr: &Expression, out: &mut HashSet<String>) {
     }
 }
 
-fn is_callable_top_def(def: &TopDef) -> bool {
-    matches!(def.node.typ.as_ref(), Some(Type::Function(_, _)))
-}
-
 fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSet<String>) {
     match expr {
         Expression::Word(w) => {
@@ -400,7 +396,7 @@ fn collect_let_lambda_bindings(node: &TypedExpression, out: &mut HashMap<String,
     }
 }
 
-fn lambda_is_hoistable(node: &TypedExpression, top_defs: &HashMap<String, TopDef>) -> bool {
+fn lambda_is_hoistable(node: &TypedExpression, _top_defs: &HashMap<String, TopDef>) -> bool {
     let items = match &node.expr {
         Expression::Apply(xs) => xs,
         _ => {
@@ -418,10 +414,10 @@ fn lambda_is_hoistable(node: &TypedExpression, top_defs: &HashMap<String, TopDef
     if let Some(body) = items.last() {
         collect_refs(body, &mut bound, &mut refs);
     }
-    refs.into_iter().all(|r| top_defs.get(&r).map(is_callable_top_def).unwrap_or(false))
+    refs.is_empty()
 }
 
-fn lambda_capture_names(node: &TypedExpression, top_defs: &HashMap<String, TopDef>) -> Vec<String> {
+fn lambda_capture_names(node: &TypedExpression, _top_defs: &HashMap<String, TopDef>) -> Vec<String> {
     let items = match &node.expr {
         Expression::Apply(xs) => xs,
         _ => {
@@ -439,10 +435,7 @@ fn lambda_capture_names(node: &TypedExpression, top_defs: &HashMap<String, TopDe
     if let Some(body) = items.last() {
         collect_refs(body, &mut bound, &mut refs);
     }
-    let mut caps = refs
-        .into_iter()
-        .filter(|r| !top_defs.get(r).map(is_callable_top_def).unwrap_or(false))
-        .collect::<Vec<_>>();
+    let mut caps = refs.into_iter().collect::<Vec<_>>();
     caps.sort();
     caps
 }
@@ -2978,6 +2971,17 @@ fn compile_if(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     Ok(format!("{cond}\n(if (result {result_ty})\n  (then\n    {t}\n  )\n  (else\n    {e}\n  )\n)"))
 }
 
+fn is_borrowing_accessor_expr(node: &TypedExpression) -> bool {
+    match &node.expr {
+        Expression::Apply(items) if !items.is_empty() =>
+            matches!(
+                &items[0],
+                Expression::Word(op) if op == "get" || op == "fst" || op == "snd" || op == "car"
+            ),
+        _ => false,
+    }
+}
+
 fn compile_do(
     items: &[Expression],
     node: &TypedExpression,
@@ -3046,6 +3050,22 @@ fn compile_do(
                             .get(name)
                             .map(is_managed_local_type)
                             .unwrap_or(false);
+                        let borrowed_rhs = val_node
+                            .map(is_borrowing_accessor_expr)
+                            .unwrap_or(false) ||
+                            value.contains("call $vec_get_i32") ||
+                            value.contains("call $tuple_fst") ||
+                            value.contains("call $tuple_snd");
+                        let value = if managed_local && borrowed_rhs {
+                            let tmp_owned = ctx.tmp_i32 + 2;
+                            format!(
+                                "{value}\nlocal.tee {}\ncall $rc_retain\ndrop\nlocal.get {}",
+                                tmp_owned,
+                                tmp_owned
+                            )
+                        } else {
+                            value
+                        };
                         if managed_local {
                             parts.push(
                                 format!(
@@ -4338,23 +4358,8 @@ fn compile_lambda_func(
     let ret_slot = params.len() + local_defs.len() + EXTRA_I32_LOCALS;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
-    for slot in ref_slots {
-        if ret_is_ref {
-            out.push_str(&format!("    local.get {}\n", slot));
-            out.push_str(&format!("    local.get {}\n", ret_slot));
-            out.push_str("    i32.eq\n");
-            out.push_str("    if\n");
-            out.push_str("    else\n");
-            out.push_str(&format!("      local.get {}\n", slot));
-            out.push_str("      call $rc_release\n");
-            out.push_str("      drop\n");
-            out.push_str("    end\n");
-        } else {
-            out.push_str(&format!("    local.get {}\n", slot));
-            out.push_str("    call $rc_release\n");
-            out.push_str("    drop\n");
-        }
-    }
+    let scratch_slot = params.len() + local_defs.len();
+    out.push_str(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot));
     out.push_str(&format!("    local.get {}\n", ret_slot));
     out.push_str("  )\n");
     Ok(out)
@@ -4471,26 +4476,52 @@ fn compile_closure_func(
     let ret_slot = params.len() + local_defs.len() + EXTRA_I32_LOCALS;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
-    for slot in ref_slots {
+    let scratch_slot = params.len() + local_defs.len();
+    out.push_str(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot));
+    out.push_str(&format!("    local.get {}\n", ret_slot));
+    out.push_str("  )\n");
+    Ok(out)
+}
+
+fn emit_release_unique_refs(
+    ref_slots: &[usize],
+    ret_slot: usize,
+    ret_is_ref: bool,
+    scratch_slot: usize
+) -> String {
+    let mut out = String::new();
+    for (i, slot) in ref_slots.iter().enumerate() {
+        out.push_str("    i32.const 1\n");
+        out.push_str(&format!("    local.set {}\n", scratch_slot));
         if ret_is_ref {
             out.push_str(&format!("    local.get {}\n", slot));
             out.push_str(&format!("    local.get {}\n", ret_slot));
             out.push_str("    i32.eq\n");
             out.push_str("    if\n");
-            out.push_str("    else\n");
-            out.push_str(&format!("      local.get {}\n", slot));
-            out.push_str("      call $rc_release\n");
-            out.push_str("      drop\n");
+            out.push_str("      i32.const 0\n");
+            out.push_str(&format!("      local.set {}\n", scratch_slot));
             out.push_str("    end\n");
-        } else {
-            out.push_str(&format!("    local.get {}\n", slot));
-            out.push_str("    call $rc_release\n");
-            out.push_str("    drop\n");
         }
+        for prev in ref_slots.iter().take(i) {
+            out.push_str(&format!("    local.get {}\n", scratch_slot));
+            out.push_str("    if\n");
+            out.push_str(&format!("      local.get {}\n", slot));
+            out.push_str(&format!("      local.get {}\n", prev));
+            out.push_str("      i32.eq\n");
+            out.push_str("      if\n");
+            out.push_str("        i32.const 0\n");
+            out.push_str(&format!("        local.set {}\n", scratch_slot));
+            out.push_str("      end\n");
+            out.push_str("    end\n");
+        }
+        out.push_str(&format!("    local.get {}\n", scratch_slot));
+        out.push_str("    if\n");
+        out.push_str(&format!("      local.get {}\n", slot));
+        out.push_str("      call $rc_release\n");
+        out.push_str("      drop\n");
+        out.push_str("    end\n");
     }
-    out.push_str(&format!("    local.get {}\n", ret_slot));
-    out.push_str("  )\n");
-    Ok(out)
+    out
 }
 
 fn compile_value_func(
@@ -4558,23 +4589,8 @@ fn compile_value_func(
     let ret_slot = local_defs.len() + EXTRA_I32_LOCALS;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
-    for slot in ref_slots {
-        if ret_is_ref {
-            out.push_str(&format!("    local.get {}\n", slot));
-            out.push_str(&format!("    local.get {}\n", ret_slot));
-            out.push_str("    i32.eq\n");
-            out.push_str("    if\n");
-            out.push_str("    else\n");
-            out.push_str(&format!("      local.get {}\n", slot));
-            out.push_str("      call $rc_release\n");
-            out.push_str("      drop\n");
-            out.push_str("    end\n");
-        } else {
-            out.push_str(&format!("    local.get {}\n", slot));
-            out.push_str("    call $rc_release\n");
-            out.push_str("    drop\n");
-        }
-    }
+    let scratch_slot = local_defs.len();
+    out.push_str(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot));
     out.push_str(&format!("    local.get {}\n", ret_slot));
     out.push_str("  )\n");
     Ok(out)

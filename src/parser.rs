@@ -1,13 +1,68 @@
 use std::collections::{ HashMap, HashSet };
 
-fn collect_idents(expr: &Expression, acc: &mut HashSet<String>) {
+fn collect_pattern_words(expr: &Expression, acc: &mut HashSet<String>) {
     match expr {
         Expression::Word(w) => {
-            acc.insert(w.clone());
+            if w != "." {
+                acc.insert(w.clone());
+            }
         }
         Expression::Apply(exprs) => {
             for e in exprs {
-                collect_idents(e, acc);
+                collect_pattern_words(e, acc);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut HashSet<String>) {
+    match expr {
+        Expression::Word(w) => {
+            if !bound.contains(w) {
+                acc.insert(w.clone());
+            }
+        }
+        Expression::Apply(exprs) => {
+            if exprs.is_empty() {
+                return;
+            }
+            if let Expression::Word(op) = &exprs[0] {
+                if op == "lambda" {
+                    let mut scoped = bound.clone();
+                    for p in &exprs[1..exprs.len().saturating_sub(1)] {
+                        collect_pattern_words(p, &mut scoped);
+                    }
+                    if let Some(body) = exprs.last() {
+                        collect_free_idents(body, &mut scoped, acc);
+                    }
+                    return;
+                }
+                if op == "do" {
+                    for it in &exprs[1..] {
+                        if let Expression::Apply(let_items) = it {
+                            if let [Expression::Word(kw), Expression::Word(name), rhs] = &let_items[..] {
+                                if kw == "let" || kw == "let~" || kw == "let*" {
+                                    collect_free_idents(rhs, bound, acc);
+                                    bound.insert(name.clone());
+                                    continue;
+                                }
+                            }
+                        }
+                        collect_free_idents(it, bound, acc);
+                    }
+                    return;
+                }
+                if op == "let" || op == "let~" || op == "let*" {
+                    if let [_, Expression::Word(name), rhs] = &exprs[..] {
+                        collect_free_idents(rhs, bound, acc);
+                        bound.insert(name.clone());
+                        return;
+                    }
+                }
+            }
+            for e in exprs {
+                collect_free_idents(e, bound, acc);
             }
         }
         _ => {}
@@ -47,7 +102,8 @@ fn tree_shake(
             if let Expression::Apply(list) = def {
                 if list.len() >= 3 {
                     let mut deps = HashSet::new();
-                    collect_idents(&list[2], &mut deps);
+                    let mut scoped = HashSet::new();
+                    collect_free_idents(&list[2], &mut scoped, &mut deps);
                     for dep in deps {
                         visit(&dep, index, kept, visited);
                     }
@@ -1937,7 +1993,8 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                     }
                     let mut used: HashSet<String> = HashSet::new();
                     for e in &desugared {
-                        collect_idents(e, &mut used);
+                        let mut scoped = HashSet::new();
+                        collect_free_idents(e, &mut scoped, &mut used);
                     }
                     let mut definitions: HashSet<String> = HashSet::new();
                     for expr in &desugared {
@@ -1951,11 +2008,6 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                 }
                             }
                         }
-                    }
-
-                    let mut used = HashSet::new();
-                    for e in &desugared {
-                        collect_idents(e, &mut used);
                     }
 
                     let shaken_std = tree_shake(std, &used, &mut definitions);

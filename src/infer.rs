@@ -562,6 +562,8 @@ pub fn solve_constraints_list(
         let right_ap = unifier.apply(&right);
 
         match (left_ap.clone(), right_ap.clone()) {
+            (a2, b2) if a2 == b2 => {} // ok
+
             (Type::Var(v), ty) | (ty, Type::Var(v)) => {
                 if let Err(e) = unifier.bind_var(v.id, ty) {
                     // attach source info and return
@@ -590,7 +592,6 @@ pub fn solve_constraints_list(
                     work.push_back((ai, bi, src.clone()));
                 }
             }
-            (a2, b2) if a2 == b2 => {} // ok
             (a2, b2) => {
                 // can't unify, attach source and return
                 return Err(
