@@ -4104,6 +4104,14 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(format!("{a}\ni32.eqz"))
                         }
+                        "~" => {
+                            let a = compile_expr(
+                                node.children.get(1).ok_or_else(|| "~ missing arg".to_string())?,
+                                ctx
+                            )?;
+                            // Bitwise NOT for i32.
+                            Ok(format!("{a}\ni32.const -1\ni32.xor"))
+                        }
                         "Int->Float" => {
                             let a = compile_expr(
                                 node.children
