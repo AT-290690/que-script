@@ -12,6 +12,9 @@ mod js;
 mod parser;
 #[cfg(feature = "report")]
 mod report;
+#[cfg(feature = "qir")]
+#[path = "compilers/qir.rs"]
+mod qir;
 #[cfg(feature = "type-checker")]
 mod types;
 #[cfg(feature = "vm")]
@@ -133,6 +136,33 @@ pub fn wat(program: String) -> *const u8 {
                         Ok(wat_src) => wat_src,
                         Err(err) => format!("3\n{}", err),
                     }
+                Err(err) => format!("2\n{}", err),
+            }
+        } else {
+            "1\nNo expressions...".to_string()
+        }
+    });
+    write_to_output(&result)
+}
+
+#[wasm_bindgen]
+#[cfg(all(feature = "parser", feature = "qir"))]
+pub fn qir(program: String) -> *const u8 {
+    let result = STD.with(|std| {
+        let std_ast = std.borrow();
+        if let parser::Expression::Apply(items) = &*std_ast {
+            match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(wrapped_ast) => {
+                    match
+                        infer::infer_with_builtins_typed(
+                            &wrapped_ast,
+                            types::create_builtin_environment(types::TypeEnv::new())
+                        )
+                    {
+                        Ok((typ, typed_ast)) => qir::compile_program_to_qir_typed(&typ, &typed_ast),
+                        Err(err) => format!("3\n{}", err),
+                    }
+                }
                 Err(err) => format!("2\n{}", err),
             }
         } else {

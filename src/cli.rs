@@ -150,6 +150,37 @@ pub fn run_code_typed_ast(program: String) -> String {
     })
 }
 
+#[cfg(feature = "qir")]
+pub fn run_code_qir(program: String) -> String {
+    STD.with(|std| {
+        let std_ast = std.borrow();
+        if let crate::parser::Expression::Apply(items) = &*std_ast {
+            let wrapped_ast = match
+                crate::parser::merge_std_and_program(&program, items[1..].to_vec())
+            {
+                Ok(ast) => ast,
+                Err(err) => {
+                    return err;
+                }
+            };
+
+            let (typ, typed_ast) = match
+                crate::infer::infer_with_builtins_typed(
+                    &wrapped_ast,
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                )
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    return err;
+                }
+            };
+            return crate::qir::compile_program_to_qir_typed(&typ, &typed_ast);
+        }
+        "No expressions...".to_string()
+    })
+}
+
 #[cfg(feature = "type-ast")]
 fn typed_ast_for_expression(expr: &crate::parser::Expression) -> String {
     match
@@ -474,6 +505,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         "--repl",
         "--report",
         "--type-ast",
+        "--qir",
     ];
     let cmd = args
         .iter()
@@ -900,6 +932,19 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         #[cfg(not(feature = "type-ast"))]
         {
             println!("Error! typed-ast is disabled. Rebuild with --features type-ast");
+        }
+    } else if cmd == "--qir" {
+        #[cfg(feature = "qir")]
+        {
+            let file = fs::read_to_string(&source_path)?;
+            let target = resolve_output_path(&dist, "main.qir");
+            std::fs::create_dir_all(std::path::Path::new(&target).parent().unwrap()).unwrap();
+            let mut file_out = fs::File::create(target)?;
+            writeln!(file_out, "{}", run_code_qir(file))?;
+        }
+        #[cfg(not(feature = "qir"))]
+        {
+            println!("Error! qir is disabled. Rebuild with --features qir");
         }
     } else {
         let file = fs::read_to_string(&source_path)?;

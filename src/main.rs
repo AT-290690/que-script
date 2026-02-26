@@ -17,6 +17,9 @@ mod parser;
 #[cfg(feature = "python-compiler")]
 #[path = "compilers/py.rs"]
 mod py;
+#[cfg(feature = "qir")]
+#[path = "compilers/qir.rs"]
+mod qir;
 mod repl;
 mod report;
 #[cfg(feature = "rust-compiler")]

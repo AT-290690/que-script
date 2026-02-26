@@ -95,6 +95,12 @@ transpile program to Kotlin (`./example/dist/main.kt`)
 cargo run --no-default-features --features parser,type-checker,type-ast,kotlin-compiler -- --kt
 ```
 
+emit typed semantic core IR (`./example/dist/main.qir`)
+
+```bash
+cargo run --no-default-features --features parser,type-checker,qir -- --qir
+```
+
 type check libraries and generate lib.json
 
 ```bash
