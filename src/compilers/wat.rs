@@ -205,6 +205,14 @@ fn ident(name: &str) -> String {
     format!("v_{}", s)
 }
 
+fn cache_init_global(name: &str) -> String {
+    format!("g_init_{}", ident(name))
+}
+
+fn cache_value_global(name: &str) -> String {
+    format!("g_val_{}", ident(name))
+}
+
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => Ok("i32"),
@@ -4727,10 +4735,35 @@ fn compile_value_func(
     }
     out.push_str(&format!("    (local {})\n", wasm_val_type(ret_ty)?));
     let ret_slot = local_defs.len() + EXTRA_I32_LOCALS;
-    out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
-    out.push_str(&format!("    local.set {}\n", ret_slot));
     let scratch_slot = local_defs.len();
-    out.push_str(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot));
+    let g_init = cache_init_global(name);
+    let g_val = cache_value_global(name);
+
+    out.push_str(&format!("    global.get ${}\n", g_init));
+    out.push_str("    if\n");
+    out.push_str(&format!("      global.get ${}\n", g_val));
+    out.push_str(&format!("      local.set {}\n", ret_slot));
+    if ret_is_ref {
+        out.push_str(&format!("      local.get {}\n", ret_slot));
+        out.push_str("      call $rc_retain\n");
+        out.push_str("      drop\n");
+    }
+    out.push_str("    else\n");
+    out.push_str(&format!("      {}\n", body_code.replace('\n', "\n      ")));
+    out.push_str(&format!("      local.set {}\n", ret_slot));
+    out.push_str(&indent_block(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot), 6));
+    out.push('\n');
+    if ret_is_ref {
+        // Keep one root reference in the global cache while returning one to caller.
+        out.push_str(&format!("      local.get {}\n", ret_slot));
+        out.push_str("      call $rc_retain\n");
+        out.push_str("      drop\n");
+    }
+    out.push_str(&format!("      local.get {}\n", ret_slot));
+    out.push_str(&format!("      global.set ${}\n", g_val));
+    out.push_str("      i32.const 1\n");
+    out.push_str(&format!("      global.set ${}\n", g_init));
+    out.push_str("    end\n");
     out.push_str(&format!("    local.get {}\n", ret_slot));
     out.push_str("  )\n");
     Ok(out)
@@ -4838,15 +4871,9 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
                                     expr: rhs.clone(),
                                     node,
                                 });
-                                let is_lambda_rhs =
-                                    matches!(
-                                    rhs,
-                                    Expression::Apply(xs)
-                                        if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-                                );
-                                if is_lambda_rhs {
-                                    continue;
-                                }
+                                // Top-level bindings are canonicalized as defs and referenced by name.
+                                // Do not also keep duplicate let expressions in main.
+                                continue;
                             }
                         }
                     }
@@ -5142,6 +5169,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         .as_ref()
         .ok_or_else(|| "Missing main expression type".to_string())?;
     let mut emitted_funcs: Vec<String> = Vec::new();
+    let mut cached_value_defs: Vec<String> = Vec::new();
 
     for (name, def) in &top_defs {
         if partial_helpers.iter().any(|h| h.binding_name == *name) {
@@ -5165,6 +5193,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
                 );
             }
             _ => {
+                cached_value_defs.push(name.clone());
                 emitted_funcs.push(
                     compile_value_func(
                         name,
@@ -5291,6 +5320,10 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     let mut wat = String::new();
     wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
     wat.push_str("(module\n");
+    for name in &cached_value_defs {
+        wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_init_global(name)));
+        wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_value_global(name)));
+    }
     wat.push_str(&emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs, &apply_arities));
     for func in emitted_funcs {
         wat.push_str(&func);

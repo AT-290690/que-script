@@ -2652,6 +2652,173 @@ SECRET = SANTA")
 (h [1 2 3 4])"#,
                 "4",
             ),
+
+            (
+                r#"(let secret "iwrupvqb")
+(let secret-bytes [105 119 114 117 112 118 113 98])
+
+(let K [
+-680876936 -389564586 606105819 -1044525330
+-176418897 1200080426 -1473231341 -45705983
+1770035416 -1958414417 -42063 -1990404162
+1804603682 -40341101 -1502002290 1236535329
+-165796510 -1069501632 643717713 -373897302
+-701558691 38016083 -660478335 -405537848
+568446438 -1019803690 -187363961 1163531501
+-1444681467 -51403784 1735328473 -1926607734
+-378558 -2022574463 1839030562 -35309556
+-1530992060 1272893353 -155497632 -1094730640
+681279174 -358537222 -722521979 76029189
+-640364487 -421815835 530742520 -995338651
+-198630844 1126891415 -1416354905 -57434055
+1700485571 -1894986606 -1051523 -2054922799
+1873313359 -30611744 -1560198380 1309151649
+-145523070 -1120210379 718787259 -343485551
+])
+
+(let left-rotate (lambda x c
+(| (<< x c) (& (>> x (- 32 c)) (- (<< 1 c) 1)))))
+
+(let add32 (lambda a b (do
+(let s0 (+ (& a 255) (& b 255)))
+(let r0 (& s0 255))
+(let c0 (>> s0 8))
+
+(let s1 (+ (& (>> a 8) 255) (& (>> b 8) 255) c0))
+(let r1 (& s1 255))
+(let c1 (>> s1 8))
+
+(let s2 (+ (& (>> a 16) 255) (& (>> b 16) 255) c1))
+(let r2 (& s2 255))
+(let c2 (>> s2 8))
+
+(let s3 (+ (& (>> a 24) 255) (& (>> b 24) 255) c2))
+(let r3 (& s3 255))
+
+(| r0 (| (<< r1 8) (| (<< r2 16) (<< r3 24)))))))
+
+(let add32-4 (lambda a b c d
+(add32 (add32 a b) (add32 c d))))
+
+(let block [0])
+(loop 1 64 (lambda i (push! block 0)))
+(let words [0])
+(loop 1 16 (lambda i (push! words 0)))
+
+(let shift-by (lambda i
+(do
+(let r (mod i 4))
+(if (< i 16)
+(if (= r 0) 7 (if (= r 1) 12 (if (= r 2) 17 22)))
+(if (< i 32)
+(if (= r 0) 5 (if (= r 1) 9 (if (= r 2) 14 20)))
+(if (< i 48)
+(if (= r 0) 4 (if (= r 1) 11 (if (= r 2) 16 23)))
+(if (= r 0) 6 (if (= r 1) 10 (if (= r 2) 15 21)))))))))
+
+(let md5-a0 (lambda n (do
+(loop 0 8 (lambda i (set! block i (get secret-bytes i))))
+
+(let div-init
+(if (>= n 1000000000) 1000000000
+(if (>= n 100000000) 100000000
+(if (>= n 10000000) 10000000
+(if (>= n 1000000) 1000000
+(if (>= n 100000) 100000
+(if (>= n 10000) 10000
+(if (>= n 1000) 1000
+(if (>= n 100) 100
+(if (>= n 10) 10 1))))))))))
+(integer div div-init)
+
+(integer x n)
+(integer msg-len 8)
+(loop 0 10 (lambda i
+(if (> (get div) 0) (do
+(let digit (/ (get x) (get div)))
+(set! block (get msg-len) (+ 48 digit))
+(set x (mod (get x) (get div)))
+(set div (/ (get div) 10))
+(set msg-len (+ (get msg-len) 1)))
+nil)))
+
+(set! block (get msg-len) 128)
+(loop 0 56 (lambda i
+(if (> i (get msg-len))
+(set! block i 0)
+nil)))
+
+(let bit-len (* (get msg-len) 8))
+(set! block 56 (& bit-len 255))
+(set! block 57 (& (>> bit-len 8) 255))
+(set! block 58 (& (>> bit-len 16) 255))
+(set! block 59 (& (>> bit-len 24) 255))
+(set! block 60 0)
+(set! block 61 0)
+(set! block 62 0)
+(set! block 63 0)
+
+(loop 0 16 (lambda i (do
+(let j (* i 4))
+(set! words i
+(| (get block j)
+   (| (<< (get block (+ j 1)) 8)
+      (| (<< (get block (+ j 2)) 16)
+         (<< (get block (+ j 3)) 24))))))))
+
+(let a0 1732584193)
+(let b0 -271733879)
+(let c0 -1732584194)
+(let d0 271733878)
+
+(integer A a0)
+(integer B b0)
+(integer C c0)
+(integer D d0)
+(integer f 0)
+(integer g 0)
+
+(loop 0 64 (lambda i (do
+(if (< i 16)
+(do
+  (set f (| (& (get B) (get C)) (& (~ (get B)) (get D))))
+  (set g i))
+(if (< i 32)
+(do
+  (set f (| (& (get D) (get B)) (& (~ (get D)) (get C))))
+  (set g (mod (+ (* 5 i) 1) 16)))
+(if (< i 48)
+(do
+  (set f (^ (get B) (^ (get C) (get D))))
+  (set g (mod (+ (* 3 i) 5) 16)))
+(do
+  (set f (^ (get C) (| (get B) (~ (get D)))))
+  (set g (mod (* 7 i) 16))))))
+(let x4 (add32-4 (get A) (get f) (get K i) (get words (get g))))
+(let new-b (add32 (get B) (left-rotate x4 (shift-by i))))
+(let old-d (get D))
+(set D (get C))
+(set C (get B))
+(set B new-b)
+(set A old-d))))
+
+(add32 a0 (get A)))))
+
+(let has-five-leading-zeroes (lambda n (do
+(let a (md5-a0 n))
+(and (= (& a 255) 0)
+ (= (& (>> a 8) 255) 0)
+ (< (& (>> a 16) 255) 16)))))
+
+(integer answer 0)
+(loop 1 500001 (lambda candidate
+(if (and (= (get answer) 0) (has-five-leading-zeroes candidate))
+(set answer candidate)
+nil)))
+(get answer)
+"#,
+                "346386",
+            ),
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
