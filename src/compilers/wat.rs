@@ -3650,7 +3650,324 @@ fn compile_loop_finish(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, 
     )
 }
 
+fn compile_fast_box_ctor(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let value_node = node.children
+        .get(1)
+        .ok_or_else(|| format!("{} requires exactly 1 argument", op))?;
+    if node.children.len() != 2 {
+        return Err(format!("{} requires exactly 1 argument", op));
+    }
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 2,
+    };
+    let value = compile_expr(value_node, &nested_ctx)?;
+    let value_is_managed = value_node.typ
+        .as_ref()
+        .map(is_managed_local_type)
+        .unwrap_or(false);
+    let is_lambda_literal =
+        matches!(
+        &value_node.expr,
+        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+    );
+    // Keep polymorphic `box` as ref-cell like generic lowering; typed scalar ctors stay scalar cells.
+    let elem_ref = if op == "box" { 1 } else { 0 };
+    let normalized_value = if op == "bool" {
+        format!("{value}\ni32.const 0\ni32.ne")
+    } else {
+        value
+    };
+    let vec_local = ctx.tmp_i32;
+    let tmp_val = ctx.tmp_i32 + 1;
+    if is_lambda_literal && value_is_managed {
+        Ok(
+            format!(
+                "i32.const 1\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\ndrop\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {vec_local}"
+            )
+        )
+    } else {
+        Ok(
+            format!(
+                "i32.const 1\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\ncall $vec_set_i32\ndrop\nlocal.get {vec_local}"
+            )
+        )
+    }
+}
+
+fn compile_fast_cell_set(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    normalize_bool: bool
+) -> Result<String, String> {
+    if node.children.len() != 3 {
+        return Err(format!("{} requires exactly 2 arguments", op));
+    }
+    let cell_node = node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?;
+    let value_node = node.children.get(2).ok_or_else(|| format!("{} missing value", op))?;
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 2,
+    };
+    let cell = compile_expr(cell_node, &nested_ctx)?;
+    let value_raw = compile_expr(value_node, &nested_ctx)?;
+    let value = if normalize_bool { format!("{value_raw}\ni32.const 0\ni32.ne") } else { value_raw };
+    let is_lambda_literal =
+        matches!(
+        &value_node.expr,
+        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+    );
+    let value_is_managed = value_node.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
+    if is_lambda_literal && value_is_managed {
+        let tmp_val = ctx.tmp_i32 + 1;
+        Ok(
+            format!(
+                "{cell}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\nlocal.get {tmp_val}\ncall $rc_release\ndrop"
+            )
+        )
+    } else {
+        Ok(format!("{cell}\ni32.const 0\n{value}\ncall $vec_set_i32"))
+    }
+}
+
+fn compile_fast_cell_update_int_binary(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    wasm_op: &str
+) -> Result<String, String> {
+    if node.children.len() != 3 {
+        return Err(format!("{} requires exactly 2 arguments", op));
+    }
+    let cell_node = node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?;
+    let rhs_node = node.children.get(2).ok_or_else(|| format!("{} missing rhs", op))?;
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 3,
+    };
+    let cell = compile_expr(cell_node, &nested_ctx)?;
+    let rhs = compile_expr(rhs_node, &nested_ctx)?;
+    let cell_local = ctx.tmp_i32;
+    let value_local = ctx.tmp_i32 + 1;
+    Ok(
+        format!(
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\n{rhs}\n{wasm_op}\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+        )
+    )
+}
+
+fn compile_fast_cell_update_int_unary(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>
+) -> Result<String, String> {
+    if node.children.len() != 2 {
+        return Err(format!("{} requires exactly 1 argument", op));
+    }
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 3,
+    };
+    let cell = compile_expr(
+        node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?,
+        &nested_ctx
+    )?;
+    let cell_local = ctx.tmp_i32;
+    let old_local = ctx.tmp_i32 + 1;
+    let value_local = ctx.tmp_i32 + 2;
+    let update_expr = match op {
+        "++" => format!("local.get {old_local}\ni32.const 1\ni32.add"),
+        "--" => format!("local.get {old_local}\ni32.const 1\ni32.sub"),
+        "**" => format!("local.get {old_local}\nlocal.get {old_local}\ni32.mul"),
+        _ => return Err(format!("Unsupported int unary fast helper '{}'", op)),
+    };
+    Ok(
+        format!(
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{update_expr}\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+        )
+    )
+}
+
+fn compile_fast_cell_update_float_binary(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    wasm_op: &str
+) -> Result<String, String> {
+    if node.children.len() != 3 {
+        return Err(format!("{} requires exactly 2 arguments", op));
+    }
+    let cell_node = node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?;
+    let rhs_node = node.children.get(2).ok_or_else(|| format!("{} missing rhs", op))?;
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 4,
+    };
+    let cell = compile_expr(cell_node, &nested_ctx)?;
+    let rhs = compile_expr(rhs_node, &nested_ctx)?;
+    let cell_local = ctx.tmp_i32;
+    let old_local = ctx.tmp_i32 + 1;
+    let value_local = ctx.tmp_i32 + 2;
+    Ok(
+        format!(
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\nlocal.get {old_local}\nf32.reinterpret_i32\n{rhs}\nf32.reinterpret_i32\n{wasm_op}\ni32.reinterpret_f32\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+        )
+    )
+}
+
+fn compile_fast_cell_update_float_unary(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>
+) -> Result<String, String> {
+    if node.children.len() != 2 {
+        return Err(format!("{} requires exactly 1 argument", op));
+    }
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 4,
+    };
+    let cell = compile_expr(
+        node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?,
+        &nested_ctx
+    )?;
+    let cell_local = ctx.tmp_i32;
+    let old_local = ctx.tmp_i32 + 1;
+    let value_local = ctx.tmp_i32 + 2;
+    let update_expr = match op {
+        "++." =>
+            format!(
+                "local.get {old_local}\nf32.reinterpret_i32\nf32.const 1\nf32.add\ni32.reinterpret_f32"
+            ),
+        "--." =>
+            format!(
+                "local.get {old_local}\nf32.reinterpret_i32\nf32.const 1\nf32.sub\ni32.reinterpret_f32"
+            ),
+        "**." =>
+            format!(
+                "local.get {old_local}\nf32.reinterpret_i32\nlocal.get {old_local}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32"
+            ),
+        _ => return Err(format!("Unsupported float unary fast helper '{}'", op)),
+    };
+    Ok(
+        format!(
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{update_expr}\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+        )
+    )
+}
+
+fn compile_fast_cell_inc_simple(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if node.children.len() != 2 {
+        return Err(format!("{} requires exactly 1 argument", op));
+    }
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 2,
+    };
+    let cell = compile_expr(
+        node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?,
+        &nested_ctx
+    )?;
+    Ok(
+        format!(
+            "{cell}\ni32.const 0\n{cell}\ni32.const 0\ncall $vec_get_i32\ni32.const 1\ni32.add\ncall $vec_set_i32"
+        )
+    )
+}
+
+fn compile_fast_truthy(op: &str, node: &TypedExpression, ctx: &Ctx<'_>, negate: bool) -> Result<String, String> {
+    if node.children.len() != 2 {
+        return Err(format!("{} requires exactly 1 argument", op));
+    }
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 2,
+    };
+    let cell = compile_expr(
+        node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?,
+        &nested_ctx
+    )?;
+    if negate {
+        Ok(format!("{cell}\ni32.const 0\ncall $vec_get_i32\ni32.eqz"))
+    } else {
+        Ok(format!("{cell}\ni32.const 0\ncall $vec_get_i32\ni32.const 0\ni32.ne"))
+    }
+}
+
+fn compile_fast_cell_helper(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Option<Result<String, String>> {
+    match op {
+        "box" | "int" | "float" | "bool" => Some(compile_fast_box_ctor(op, node, ctx)),
+        "set" | "=!" => Some(compile_fast_cell_set(op, node, ctx, false)),
+        "true?" => Some(compile_fast_truthy(op, node, ctx, false)),
+        "false?" => Some(compile_fast_truthy(op, node, ctx, true)),
+        "+=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.add")),
+        "-=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.sub")),
+        "*=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.mul")),
+        "/=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.div_s")),
+        "++" => Some(compile_fast_cell_inc_simple(op, node, ctx)),
+        "--" | "**" => Some(compile_fast_cell_update_int_unary(op, node, ctx)),
+        "+=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.add")),
+        "-=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.sub")),
+        "*=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.mul")),
+        "/=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.div")),
+        "++." | "--." | "**." => Some(compile_fast_cell_update_float_unary(op, node, ctx)),
+        _ => None,
+    }
+}
+
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
+    if let Some(fast) = compile_fast_cell_helper(op, node, ctx) {
+        return fast;
+    }
     let (params, ret_ty) = if let Some(sig) = ctx.fn_sigs.get(op) {
         sig.clone()
     } else if builtin_fn_tag(op).is_some() {
