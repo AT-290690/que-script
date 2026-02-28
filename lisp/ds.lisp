@@ -135,7 +135,7 @@
 (let Vector/at! (lambda idx xs (std/vector/at xs idx)))
 (let Vector/at* (lambda idx xs (if (< idx (length xs)) { true [(std/vector/at xs idx)] } { false [] })))
 
-(let Vector/set! std/vector/set!)
+(let Vector/set! (lambda i v xs (set! xs i v)))
 (let Vector/length std/vector/length)
 (let Vector/append! (lambda x xs (std/vector/append! xs x)))
 (let Vector/2d/set! std/vector/2d/int/set!)

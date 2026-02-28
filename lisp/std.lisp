@@ -99,11 +99,11 @@
 (let bt std/char/backtick)
 
 (let box (lambda value [ value ]))
-(let set (lambda vrbl x (std/vector/set! vrbl 0 x)))
-(let =! (lambda vrbl x (std/vector/set! vrbl 0 x)))
-(let boole-set (lambda vrbl x (std/vector/set! vrbl 0 (if x true false))))
+(let set (lambda vrbl x (set! vrbl 0 x)))
+(let =! (lambda vrbl x (set! vrbl 0 x)))
+(let boole-set (lambda vrbl x (set! vrbl 0 (if x true false))))
 (let boole-eqv (lambda a b (=? (get a) (get b))))
-(let boolean/set (lambda vrbl x (std/vector/set! vrbl 0 (if x true false))))
+(let boolean/set (lambda vrbl x (set! vrbl 0 (if x true false))))
 (let true? (lambda vrbl (if (get vrbl) true false)))
 (let false? (lambda vrbl (if (get vrbl) false true)))
 (let += (lambda vrbl n (=! vrbl (+ (get vrbl) n))))
@@ -140,21 +140,21 @@
 (let std/vector/length (lambda xs (length xs)))
 (let std/vector/flat/length (lambda matrix (length (std/vector/flat-one matrix))))
 (let std/vector/get (lambda xs i (get xs i)))
-(let std/vector/get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
+(let get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
 (let std/vector/2d/length std/vector/length)
-(let std/vector/2d/get std/vector/get)
-(let std/vector/2d/get/default std/vector/get/default)
+(let std/vector/2d/get get)
+(let std/vector/2d/get/default get/default)
 (let std/vector/pop! (lambda xs (pop! xs)))
 (let std/vector/set! (lambda xs i x (set! xs i x)))
-(let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (std/vector/set! xs i (get xs j)) (std/vector/set! xs j temp))))
-(let std/vector/push! (lambda xs x (do (std/vector/set! xs (length xs) x) xs)))
+(let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp))))
+(let std/vector/push! (lambda xs x (do (set! xs (length xs) x) xs)))
 (let std/vector/pop-and-get! (lambda xs (do 
       (let out (get xs (- (length xs) 1))) 
-      (std/vector/pop! xs)
+      (pop! xs)
       out)))
-(let std/vector/push-and-get! (lambda xs x (do (std/vector/set! xs (length xs) x) x)))
+(let std/vector/push-and-get! (lambda xs x (do (set! xs (length xs) x) x)))
 (let std/vector/update! (lambda xs i value (do (set! xs i value) xs)))
-(let std/vector/tail! (lambda xs (do (std/vector/pop! xs) xs)))
+(let std/vector/tail! (lambda xs (do (pop! xs) xs)))
 (let std/vector/append! (lambda xs x (do (std/vector/push! xs x) xs)))
 (let std/vector/at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
 (let std/vector/first (lambda xs (get xs 0)))
@@ -168,6 +168,7 @@
 
 (let int (lambda value (if (std/int/safe? value) [ value ] [ 0 ])))
 (let float (lambda value (if (std/float/safe? value) [ value ] [ 0.0 ])))
+(let bool (lambda value [(=? value true)]))
 
 (let std/int/safe? (lambda value (and (>= value const/int/min-safe) (<= value const/int/max-safe))))
 (let std/int/get-safe (lambda vrbl (if (std/int/safe? (get vrbl)) (get vrbl) Int)))
@@ -277,7 +278,7 @@
 
 (let std/vector/empty? (lambda xs (= (length xs) 0)))
 (let std/vector/empty! (lambda xs (if (std/vector/empty? xs) xs (do 
-     (loop 0 (length xs) (lambda . (std/vector/pop! xs)))
+     (loop 0 (length xs) (lambda . (pop! xs)))
      xs))))
 (let std/vector/not-empty? (lambda xs (not (= (length xs) 0))))
 (let std/vector/in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
@@ -287,7 +288,7 @@
      (let out [])
      (let process (lambda i (do
       (let x (get xs i))
-      (if (fn? x) (std/vector/set! out (length out) x)))))
+      (if (fn? x) (set! out (length out) x)))))
      (loop 0 (length xs) process)
      out))))
 
@@ -295,31 +296,31 @@
      (let out [])
      (let process (lambda i (do
       (let x (get xs i))
-      (if (fn? x i) (std/vector/set! out (length out) x)))))
+      (if (fn? x i) (set! out (length out) x)))))
      (loop 0 (length xs) process)
      out))))
 
 (let std/vector/reduce (lambda xs fn initial (do
      (let out [ initial ])
-     (let process (lambda i (std/vector/set! out 0 (fn (get out 0) (get xs i)))))
+     (let process (lambda i (set! out 0 (fn (get out 0) (get xs i)))))
      (loop 0 (length xs) process)
      (get out))))
 
 (let std/vector/reduce/i (lambda xs fn initial (do
      (let out [ initial ])
-     (let process (lambda i (std/vector/set! out 0 (fn (get out 0) (get xs i) i))))
+     (let process (lambda i (set! out 0 (fn (get out 0) (get xs i) i))))
      (loop 0 (length xs) process)
      (get out))))
 
 (let std/vector/map (lambda xs fn (if (std/vector/empty? xs) [] (do
      (let out [(fn (get xs 0))])
-     (let process (lambda i (std/vector/set! out (length out) (fn (get xs i)))))
+     (let process (lambda i (set! out (length out) (fn (get xs i)))))
      (loop 1 (length xs) process)
      out))))
 
 (let std/vector/map/i (lambda xs fn (if (std/vector/empty? xs) [] (do
      (let out [(fn (get xs 0) 0)])
-     (let process (lambda i (std/vector/set! out (length out) (fn (get xs i) i))))
+     (let process (lambda i (set! out (length out) (fn (get xs i) i))))
      (loop 1 (length xs) process)
      out))))
 
@@ -382,39 +383,39 @@
 
 (let std/vector/int/range (lambda start end (do
      (let out [ start ])
-     (let process (lambda i (std/vector/set! out (length out) i)))
+     (let process (lambda i (set! out (length out) i)))
      (loop (+ start 1) (+ end 1) process)
      out))) 
 
 
 (let std/vector/float/range (lambda start end (do
      (let out [ (Int->Float start) ])
-     (let process (lambda i (std/vector/set! out (length out) (Int->Float i))))
+     (let process (lambda i (set! out (length out) (Int->Float i))))
      (loop (+ start 1) (+ end 1) process)
      out))) 
     
  (let std/vector/float/ones (lambda n (do
      (let out [ 1.0 ])
-     (let process (lambda i (std/vector/set! out (length out) 1.0)))
+     (let process (lambda i (set! out (length out) 1.0)))
      (loop 1 n process)
      out))) 
 
  (let std/vector/float/zeroes (lambda n (do
      (let out [ 0.0 ])
-     (let process (lambda i (std/vector/set! out (length out) 0.0)))
+     (let process (lambda i (set! out (length out) 0.0)))
      (loop 1 n process)
      out)))
 
 
  (let std/vector/int/ones (lambda n (do
      (let out [ 1 ])
-     (let process (lambda i (std/vector/set! out (length out) 1)))
+     (let process (lambda i (set! out (length out) 1)))
      (loop 1 n process)
      out))) 
 
  (let std/vector/int/zeroes (lambda n (do
      (let out [ 0 ])
-     (let process (lambda i (std/vector/set! out (length out) 0)))
+     (let process (lambda i (set! out (length out) 0)))
      (loop 1 n process)
      out)))
 
@@ -434,7 +435,7 @@
 
 (let std/vector/char/blanks (lambda n (do
     (let out [ std/char/empty ])
-    (let process (lambda i (std/vector/set! out (length out) std/char/empty)))
+    (let process (lambda i (set! out (length out) std/char/empty)))
     (loop 1 n process)
     out))) 
 
@@ -466,12 +467,12 @@
 
 (let std/vector/cons (lambda a b (cond (std/vector/empty? a) b (std/vector/empty? b) a (do 
   (let out []) 
-  (loop 0 (length a) (lambda i (std/vector/set! out (length out) (get a i)))) 
-  (loop 0 (length b) (lambda i (std/vector/set! out (length out) (get b i)))) 
+  (loop 0 (length a) (lambda i (set! out (length out) (get a i)))) 
+  (loop 0 (length b) (lambda i (set! out (length out) (get b i)))) 
   out))))
 
 (let std/vector/cons! (lambda a b (if (and (std/vector/empty? a) (std/vector/empty? b)) a (do 
-  (loop 0 (length b) (lambda i (std/vector/set! a (length a) (get b i)))) 
+  (loop 0 (length b) (lambda i (set! a (length a) (get b i)))) 
   a))))
 
 (let std/vector/concat (lambda xs (std/vector/reduce xs std/vector/cons [])))
@@ -480,25 +481,25 @@
 (let std/vector/every? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop (and (< (get i) len) (predicate? (get xs (get i)))) (lambda (std/vector/set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (predicate? (get xs (get i)))) (lambda (set! i 0 (+ (get i) 1))))
            (not (> len (get i))))))
 
 (let std/vector/some? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (std/vector/set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
 (let std/vector/every/i? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop (and (< (get i) len) (predicate? (get xs (get i)) (get i))) (lambda (std/vector/set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (predicate? (get xs (get i)) (get i))) (lambda (set! i 0 (+ (get i) 1))))
            (not (> len (get i))))))
 
 (let std/vector/some/i? (lambda xs predicate? (do
            (let i [ 0 ])
            (let len (length xs))
-           (loop (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (std/vector/set! i 0 (+ (get i) 1))))
+           (loop (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (set! i 0 (+ (get i) 1))))
            (or (= len 0) (> len (get i))))))
 
 (let std/vector/cartesian-product (lambda a b (std/vector/reduce a (lambda p x (std/vector/cons p (std/vector/map b (lambda y { x y })))) [])))
@@ -809,7 +810,7 @@ nil)))
 
 (let std/vector/zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
-      (let process (lambda i (std/vector/set! out (length out) [(get a i) (get b i)])))
+      (let process (lambda i (set! out (length out) [(get a i) (get b i)])))
       (loop 1 (length a) process)
       out)))
 
@@ -819,7 +820,7 @@ nil)))
 
 (let std/vector/tuple/zipper (lambda a b (do
       (let out [{ (get a 0) (get b 0) }])
-      (let process (lambda i (std/vector/set! out (length out) { (get a i) (get b i) })))
+      (let process (lambda i (set! out (length out) { (get a i) (get b i) })))
       (loop 1 (length a) process)
       out)))
 
@@ -835,14 +836,14 @@ nil)))
      (let end (length xs))
      (let bounds (- end start))
      (let out [])
-     (let process (lambda i (std/vector/set! out (length out) (get xs (+ start i)))))
+     (let process (lambda i (set! out (length out) (get xs (+ start i)))))
      (loop 0 bounds process)
      out))))
      
 (let std/vector/slice (lambda xs start end (if (std/vector/empty? xs) xs (do
      (let bounds (- end start))
      (let out [])
-     (let process (lambda i (std/vector/set! out (length out) (get xs (+ start i)))))
+     (let process (lambda i (set! out (length out) (get xs (+ start i)))))
      (loop 0 bounds process)
      out))))
 
@@ -850,33 +851,33 @@ nil)))
      (let end (length xs))
      (let bounds (- end start))
      (let out [])
-     (let process (lambda i (std/vector/set! out (length out) (get xs (+ start i)))))
+     (let process (lambda i (set! out (length out) (get xs (+ start i)))))
      (loop 0 bounds process)
      out))))
 
 (let std/vector/drop/last (lambda xs end (if (std/vector/empty? xs) xs (do
      (let bounds (- (length xs) end))
      (let out [])
-     (let process (lambda i (std/vector/set! out (length out) (get xs i))))
+     (let process (lambda i (set! out (length out) (get xs i))))
      (loop 0 bounds process)
      out))))
 
 (let std/vector/take (lambda xs end (if (std/vector/empty? xs) xs (do
      (let out [])
-     (let process (lambda i (std/vector/set! out (length out) (get xs i))))
+     (let process (lambda i (set! out (length out) (get xs i))))
      (loop 0 end process)
      out))))
 
 (let std/vector/take/last (lambda xs start (if (std/vector/empty? xs) xs (do
      (let out [])
-     (let process (lambda i (std/vector/set! out (length out) (get xs i))))
+     (let process (lambda i (set! out (length out) (get xs i))))
      (loop (- (length xs) start) (length xs) process)
      out))))
 
 (let std/vector/reverse (lambda xs (if (std/vector/empty? xs) xs (do
      (let out [])
      (let len (length xs))
-     (let process (lambda i (std/vector/set! out (length out) (get xs (- len i 1)))))
+     (let process (lambda i (set! out (length out) (get xs (- len i 1)))))
      (loop 0 len process)
      out))))
 
@@ -888,14 +889,14 @@ nil)))
      (let len (length xs))
      (let process (lambda
            (if (fn? (get xs (get i)))
-              (std/vector/set! index 0 (get i))
-              (std/vector/set! i 0 (+ (get i) 1)))))
+              (set! index 0 (get i))
+              (set! i 0 (+ (get i) 1)))))
      (loop (and (< (get i) len) (= (get index 0) -1)) process)
      (get index 0))))
 
 (let std/vector/buckets (lambda size (do
      (let out [[]])
-     (loop 1 size (lambda . (std/vector/set! out (length out) [])))
+     (loop 1 size (lambda . (set! out (length out) [])))
      out)))
 
 (let std/vector/char/equal? (lambda a b (and (= (length a) (length b)) (<|
@@ -931,8 +932,8 @@ nil)))
 (let std/vector/partition (lambda xs n (if (= n (length xs)) [xs] (do 
     (let a [])
     (loop 0 (length xs) (lambda i (if (= (mod i n) 0)
-        (std/vector/set! a (length a) [(get xs i)])
-        (std/vector/set! (std/vector/at a -1) (length (std/vector/at a -1)) (get xs i)))))
+        (set! a (length a) [(get xs i)])
+        (set! (std/vector/at a -1) (length (std/vector/at a -1)) (get xs i)))))
      a))))
 
 (let std/vector/sort-partition! (lambda arr start end fn (do
@@ -941,13 +942,13 @@ nil)))
      (let j [ start ])
 
      (let helper (lambda i j (do
-          (std/vector/set! i 0 (+ (get i) 1))
+          (set! i 0 (+ (get i) 1))
           (std/vector/swap! arr (get i) (get j))
           nil)))
 
      (let process (lambda (do
            (if (fn (get arr (get j)) pivot) (helper i j))
-           (std/vector/set! j 0 (+ (get j) 1)))))
+           (set! j 0 (+ (get j) 1)))))
      (loop (< (get j) end) process)
 
      (std/vector/swap! arr (+ (get i) 1) end)
@@ -959,9 +960,9 @@ nil)))
      (std/vector/push! stack (- (length arr) 1))
      (let process (lambda (do
            (let end (get stack (- (length stack) 1)))
-           (std/vector/pop! stack)
+           (pop! stack)
            (let start (get stack (- (length stack) 1)))
-           (std/vector/pop! stack)
+           (pop! stack)
            (let helper (lambda (do
                  (let pivot-index (std/vector/sort-partition! arr start end fn))
                  (std/vector/push! stack start)
@@ -1007,8 +1008,8 @@ nil)))
 
      (let process (lambda (do
            (let letter (get key (get i)))
-           (std/vector/set! total 0 (std/int/euclidean-mod (+ (* (get total 0 ) prime-num) (as letter Int)) (length table)))
-           (std/vector/set! i 0 (+ (get i) 1)))))
+           (set! total 0 (std/int/euclidean-mod (+ (* (get total 0 ) prime-num) (as letter Int)) (length table)))
+           (set! i 0 (+ (get i) 1)))))
 
      (loop (< (get i) bounds) process)
      (get total 0))))
@@ -1033,51 +1034,51 @@ nil)))
      (lambda table key
        (do
          (let idx (std/int/hash table key))
-         (if (not (std/vector/in-bounds? table idx)) (std/vector/set! table idx (as [] [[Char]])) nil)
+         (if (not (std/vector/in-bounds? table idx)) (set! table idx (as [] [[Char]])) nil)
          (let item (get table idx))
          (let current (as item [[Char]]))
          (let len (length current))
          (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? x key))) -1))
          (let entry key)
          (if (= index -1)
-           (std/vector/set! current (length current) entry)
-           (std/vector/set! current index entry)) table)))
+           (set! current (length current) entry)
+           (set! current index entry)) table)))
 
 (let std/vector/hash/set/remove!
  (lambda table key
    (do
      (let idx (std/int/hash table key))
-     (if (not (std/vector/in-bounds? table idx)) (std/vector/set! table idx (as [] [[Char]])) nil)
+     (if (not (std/vector/in-bounds? table idx)) (set! table idx (as [] [[Char]])) nil)
      (let item (get table idx))
      (let current (as item [[Char]]))
      (let len (length current))
      (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? x key))) -1))
      (let entry key)
-     (if (not (= index -1)) (do (std/vector/set! current index (std/vector/at current -1)) (std/vector/pop! current)) nil)
+     (if (not (= index -1)) (do (set! current index (std/vector/at current -1)) (pop! current)) nil)
      table)))
 
 (let std/vector/hash/table/set! (lambda table key value
        (do
          (let idx (std/int/hash table key))
-         (if (not (std/vector/in-bounds? table idx)) (std/vector/set! table idx (as [] [[[Char]]])) nil)
+         (if (not (std/vector/in-bounds? table idx)) (set! table idx (as [] [[[Char]]])) nil)
          (let item (get table idx))
          (let current (as item [[[Char]]]))
          (let len (length current))
          (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (as (get x 0) [Char]) key))) -1))
          (let entry [ key [(Int->Char value)] ])
          (if (= index -1)
-           (std/vector/set! current (length current) entry)
-           (std/vector/set! current index entry))
+           (set! current (length current) entry)
+           (set! current index entry))
          table)))
         
 (let std/vector/hash/table/delete! (lambda table key
      (do
        (let idx (std/int/hash table key))
-       (if (not (std/vector/in-bounds? table idx)) (std/vector/set! table idx []) nil)
+       (if (not (std/vector/in-bounds? table idx)) (set! table idx []) nil)
        (let current (get table idx))
        (let len (length current))
        (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (get x 0) key))) -1))
-       (if (not (= index -1)) (do (std/vector/set! current index (std/vector/at current -1)) (std/vector/pop! current)) nil)
+       (if (not (= index -1)) (do (set! current index (std/vector/at current -1)) (pop! current)) nil)
        table)))
 
 (let std/vector/hash/clear! (lambda table (do 
@@ -1133,7 +1134,7 @@ nil)))
      (let len (length current))
      (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (fst (get x 0)) key))) -1))
      (let entry key)
-     (if (not (= index -1)) (do (std/vector/set! current index (std/vector/at current -1)) (std/vector/pop! current)) nil)
+     (if (not (= index -1)) (do (set! current index (std/vector/at current -1)) (pop! current)) nil)
      table)))
 
 
@@ -1206,8 +1207,8 @@ nil)))
               (std/vector/reduce(lambda a b (do
               (let prev (std/vector/at a -1))
                 (if (std/vector/char/equal? [b] [char])
-                    (std/vector/set! a (length a) [])
-                    (std/vector/set! prev (length prev) b)) a))
+                    (set! a (length a) [])
+                    (set! prev (length prev) b)) a))
               [[]])
               (std/vector/map (lambda x (std/convert/vector->string [ x ] std/char/empty))))))
 
@@ -1773,7 +1774,7 @@ q)))
 
 (let std/vector/int/big/range (lambda start end (do
      (let out [ (std/int/big/new (std/convert/integer->string start)) ])
-     (let process (lambda i (std/vector/set! out (length out) (std/int/big/new (std/convert/integer->string i)))))
+     (let process (lambda i (set! out (length out) (std/int/big/new (std/convert/integer->string i)))))
      (loop (+ start 1) (+ end 1) process)
    out))) 
 
@@ -1816,7 +1817,7 @@ q)))
   ; Remove trailing zeros (from the most significant end)
   (integer i (- (length result) 1))
   (loop (and (> (get i) 0) (= (get result (get i)) 0)) (lambda (do
-    (std/vector/pop! result)
+    (pop! result)
     (set i (- (get i) 1)))))
   (std/vector/reverse result))))
 
@@ -1846,7 +1847,7 @@ q)))
   ; Remove trailing zeros (from the most significant end), but keep at least one digit
   (integer i (- (length result) 1))
   (loop (and (> (get i) 0) (= (get result (get i)) 0) (> (length result) 1)) (lambda (do
-    (std/vector/pop! result)
+    (pop! result)
     (set i (- (get i) 1)))))
   (std/vector/reverse result))))
 
@@ -2055,8 +2056,8 @@ q)))
 (let std/tuple/swap (lambda { a b } { b a }))
 
 (let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
-(let std/vector/get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
-(let std/vector/2d/get* std/vector/get*)
+(let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
+(let std/vector/2d/get* get*)
 (let std/vector/3d/get* (lambda xs i j some none (if (std/vector/3d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))
 (let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))
 (let std/vector/enumerate (lambda xs (std/vector/tuple/zip { (std/vector/int/range 0 (- (length xs) 1)) xs })))

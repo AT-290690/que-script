@@ -565,7 +565,10 @@ fn next_destructure_temp(prefix: &str, arg_index: usize, binding_counter: &mut u
     format!("_{}_{}_{}", prefix, arg_index, id)
 }
 
-fn desugar_with_counter(expr: Expression, binding_counter: &mut usize) -> Result<Expression, String> {
+fn desugar_with_counter(
+    expr: Expression,
+    binding_counter: &mut usize
+) -> Result<Expression, String> {
     match expr {
         Expression::Apply(exprs) if !exprs.is_empty() => {
             let mut desugared_exprs = Vec::new();
@@ -736,8 +739,11 @@ fn destructure_pattern(
                             if let [Expression::Word(ref inner_kw), ..] = &inner_exprs[..] {
                                 if inner_kw == "tuple" {
                                     let mut bindings = vec![];
-                                    let temp_var =
-                                        next_destructure_temp("temp_tuple", arg_index, binding_counter);
+                                    let temp_var = next_destructure_temp(
+                                        "temp_tuple",
+                                        arg_index,
+                                        binding_counter
+                                    );
 
                                     bindings.push(
                                         Expression::Apply(
@@ -750,8 +756,11 @@ fn destructure_pattern(
                                     );
 
                                     // Get the inner tuple from snd
-                                    let inner_tuple_var =
-                                        next_destructure_temp("temp_tuple", arg_index, binding_counter);
+                                    let inner_tuple_var = next_destructure_temp(
+                                        "temp_tuple",
+                                        arg_index,
+                                        binding_counter
+                                    );
                                     bindings.push(
                                         Expression::Apply(
                                             vec![
@@ -804,8 +813,11 @@ fn destructure_pattern(
                             }
                         } else if elements.len() == 2 {
                             let mut bindings = vec![];
-                            let temp_var =
-                                next_destructure_temp("temp_tuple", arg_index, binding_counter);
+                            let temp_var = next_destructure_temp(
+                                "temp_tuple",
+                                arg_index,
+                                binding_counter
+                            );
 
                             bindings.push(
                                 Expression::Apply(
@@ -997,8 +1009,11 @@ fn lambda_destructure_transform(
                     match array_kw.as_str() {
                         "vector" => {
                             // Vector destructuring pattern
-                            let temp_arg_name =
-                                format!("_args{}_{}", j, next_destructure_temp("arg", j, binding_counter));
+                            let temp_arg_name = format!(
+                                "_args{}_{}",
+                                j,
+                                next_destructure_temp("arg", j, binding_counter)
+                            );
                             let bindings = destructure_vector_pattern(
                                 arg,
                                 temp_arg_name.clone(),
@@ -1011,8 +1026,11 @@ fn lambda_destructure_transform(
                         }
                         "tuple" => {
                             // Tuple destructuring pattern - use recursive destructuring
-                            let temp_arg_name =
-                                format!("_args{}_{}", j, next_destructure_temp("arg", j, binding_counter));
+                            let temp_arg_name = format!(
+                                "_args{}_{}",
+                                j,
+                                next_destructure_temp("arg", j, binding_counter)
+                            );
                             let (bindings, _) = destructure_pattern(
                                 arg,
                                 Expression::Word(temp_arg_name.clone()),
@@ -1334,7 +1352,7 @@ fn boolean_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
             vec![
                 Expression::Word("let".to_string()),
                 exprs[0].clone(),
-                Expression::Apply(vec![Expression::Word("vector".to_string()), exprs[1].clone()])
+                Expression::Apply(vec![Expression::Word("bool".to_string()), exprs[1].clone()])
             ]
         )
     )
@@ -1975,7 +1993,10 @@ pub fn build(program: &str) -> Result<Expression, String> {
                     }
                 }
             }
-            let top_level = transform_let_destructuring_in_do(desugared.to_vec(), &mut binding_counter)?;
+            let top_level = transform_let_destructuring_in_do(
+                desugared.to_vec(),
+                &mut binding_counter
+            )?;
             let wrapped = Expression::Apply(
                 std::iter::once(Expression::Word("do".to_string())).chain(top_level).collect()
             );
