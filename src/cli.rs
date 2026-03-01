@@ -545,11 +545,12 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     };
     if cmd == "--std" {
         let combined = format!(
-            "{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}",
             fs::read_to_string("./lisp/const.lisp")?,
             fs::read_to_string("./lisp/std.lisp")?,
             fs::read_to_string("./lisp/fp.lisp")?,
-            fs::read_to_string("./lisp/ds.lisp")?
+            fs::read_to_string("./lisp/ds.lisp")?,
+            fs::read_to_string("./lisp/shell.lisp")?
         );
         // let mut file = fs::File::create("./combined.lisp")?;
         // writeln!(file, "{}", combined)?;
