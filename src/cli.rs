@@ -30,13 +30,13 @@ type DerefStoreData = ();
 type DerefStoreData = ShellStoreData;
 
 #[cfg(all(feature = "deref-wasm", not(feature = "shell")))]
-fn make_deref_store_data() -> DerefStoreData {
-    ()
+fn make_deref_store_data() -> Result<DerefStoreData, String> {
+    Ok(())
 }
 
 #[cfg(all(feature = "deref-wasm", feature = "shell"))]
-fn make_deref_store_data() -> DerefStoreData {
-    ShellStoreData
+fn make_deref_store_data() -> Result<DerefStoreData, String> {
+    ShellStoreData::new().map_err(|e| format!("wasi setup error: {}", e))
 }
 
 thread_local! {
@@ -479,7 +479,7 @@ pub fn deref_wat_text(wat_src: &str) -> Result<String, String> {
     {
         add_shell_to_linker(&mut linker).map_err(|e| format!("link shell error: {}", e))?;
     }
-    let mut store = Store::new(&engine, make_deref_store_data());
+    let mut store = Store::new(&engine, make_deref_store_data()?);
     let instance = linker
         .instantiate(&mut store, &module)
         .map_err(|e| format!("inst error: {}", e))?;
