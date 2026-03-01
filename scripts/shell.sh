@@ -10,7 +10,7 @@ if [ ! -f "$DST" ]; then
   exit 1
 fi
 
-OUT="$(./target/release/fez-rs --sh --s "$SRC" 2>&1)"
+OUT="$(./target/release/fez-rs "$SRC" "${@:3}" 2>&1)"
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then

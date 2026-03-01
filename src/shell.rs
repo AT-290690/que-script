@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::path::PathBuf;
 use wasmtime::{Caller, Extern, Linker, Memory, TypedFunc};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
@@ -13,10 +14,15 @@ pub struct ShellStoreData {
     pub wasi_ctx: WasiCtx,
     pub resource_table: ResourceTable,
     wasi_p1_ctx: wasmtime_wasi::p1::WasiP1Ctx,
+    pub script_cwd: Option<PathBuf>,
 }
 
 impl ShellStoreData {
     pub fn new() -> wasmtime::Result<Self> {
+        Self::new_with_script_cwd(None)
+    }
+
+    pub fn new_with_script_cwd(script_cwd: Option<PathBuf>) -> wasmtime::Result<Self> {
         let mut p2_builder = WasiCtxBuilder::new();
         p2_builder.inherit_stdio();
         p2_builder.inherit_args();
@@ -31,6 +37,7 @@ impl ShellStoreData {
             wasi_ctx: p2_builder.build(),
             resource_table: ResourceTable::new(),
             wasi_p1_ctx: p1_builder.build_p1(),
+            script_cwd,
         })
     }
 }
@@ -143,9 +150,12 @@ pub fn host_run_shell(
         .map(|n| char::from_u32(n as u32).unwrap_or('\u{FFFD}'))
         .collect();
 
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(&cmd_str)
+    let mut command = Command::new("sh");
+    command.arg("-c").arg(&cmd_str);
+    if let Some(script_cwd) = caller.data().script_cwd.as_ref() {
+        command.current_dir(script_cwd);
+    }
+    let output = command
         .output()
         .map_err(|e| wasmtime::Error::msg(format!("failed to run shell command: {}", e)))?;
 
