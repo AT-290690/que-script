@@ -18,9 +18,26 @@ use std::io::{ self, Write };
 use std::num::Wrapping;
 
 #[cfg(feature = "deref-wasm")]
-use wasmtime::{ Engine, Instance, Memory, Module as WasmModule, Store };
+use wasmtime::{ Engine, Linker, Memory, Module as WasmModule, Store };
 #[cfg(feature = "deref-wasm")]
 use wat as wat_crate;
+#[cfg(all(feature = "deref-wasm", feature = "shell"))]
+use crate::shell::{ add_shell_to_linker, ShellStoreData };
+
+#[cfg(all(feature = "deref-wasm", not(feature = "shell")))]
+type DerefStoreData = ();
+#[cfg(all(feature = "deref-wasm", feature = "shell"))]
+type DerefStoreData = ShellStoreData;
+
+#[cfg(all(feature = "deref-wasm", not(feature = "shell")))]
+fn make_deref_store_data() -> DerefStoreData {
+    ()
+}
+
+#[cfg(all(feature = "deref-wasm", feature = "shell"))]
+fn make_deref_store_data() -> DerefStoreData {
+    ShellStoreData
+}
 
 thread_local! {
     static STD: RefCell<crate::parser::Expression> = RefCell::new(crate::baked::load_ast());
@@ -289,7 +306,7 @@ fn extract_type_from_wat(src: &str) -> Option<String> {
         .map(|rest| rest.trim().to_string())
 }
 #[cfg(feature = "deref-wasm")]
-fn i32_at(mem: &Memory, store: &mut Store<()>, addr: i32) -> i32 {
+fn i32_at(mem: &Memory, store: &mut Store<DerefStoreData>, addr: i32) -> i32 {
     let data = mem.data(store);
     let i = addr as usize;
 
@@ -316,7 +333,7 @@ struct VecHeader {
 }
 
 #[cfg(feature = "deref-wasm")]
-fn read_vec(mem: &Memory, store: &mut Store<()>, ptr: i32) -> VecHeader {
+fn read_vec(mem: &Memory, store: &mut Store<DerefStoreData>, ptr: i32) -> VecHeader {
     VecHeader {
         len: i32_at(mem, store, ptr + 0),
         cap: i32_at(mem, store, ptr + 4),
@@ -327,7 +344,7 @@ fn read_vec(mem: &Memory, store: &mut Store<()>, ptr: i32) -> VecHeader {
 }
 
 #[cfg(feature = "deref-wasm")]
-fn read_vec_items(mem: &Memory, store: &mut Store<()>, hdr: &VecHeader) -> Vec<i32> {
+fn read_vec_items(mem: &Memory, store: &mut Store<DerefStoreData>, hdr: &VecHeader) -> Vec<i32> {
     let mut out = Vec::with_capacity(hdr.len as usize);
 
     for i in 0..hdr.len {
@@ -338,7 +355,7 @@ fn read_vec_items(mem: &Memory, store: &mut Store<()>, hdr: &VecHeader) -> Vec<i
 }
 
 #[cfg(feature = "deref-wasm")]
-fn read_tuple(mem: &Memory, store: &mut Store<()>, ptr: i32) -> Vec<i32> {
+fn read_tuple(mem: &Memory, store: &mut Store<DerefStoreData>, ptr: i32) -> Vec<i32> {
     let hdr = read_vec(mem, store, ptr);
     let items = read_vec_items(mem, store, &hdr);
 
@@ -381,7 +398,7 @@ fn split_tuple_types(s: &str) -> Vec<String> {
 }
 
 #[cfg(feature = "deref-wasm")]
-fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<()>) -> String {
+fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<DerefStoreData>) -> String {
     let t = typ.trim();
 
     // Bool
@@ -457,10 +474,15 @@ pub fn deref_wat_text(wat_src: &str) -> Result<String, String> {
     let wasm_bytes = wat_crate::parse_str(wat_src).map_err(|e| e.to_string())?;
     let engine = Engine::default();
     let module = WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
-    let mut store = Store::new(&engine, ());
-    let instance = Instance::new(&mut store, &module, &[]).map_err(|e|
-        format!("inst error: {}", e)
-    )?;
+    let mut linker = Linker::new(&engine);
+    #[cfg(feature = "shell")]
+    {
+        add_shell_to_linker(&mut linker).map_err(|e| format!("link shell error: {}", e))?;
+    }
+    let mut store = Store::new(&engine, make_deref_store_data());
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .map_err(|e| format!("inst error: {}", e))?;
 
     let memory = instance
         .get_memory(&mut store, "memory")
@@ -495,6 +517,7 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         "--rs",
         "--wat",
         "--comp",
+        "--sh",
         "--deref-wasm",
         "--exec",
         "--str",
@@ -746,6 +769,32 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
         #[cfg(not(feature = "deref-wasm"))]
         {
             println!("Error! deref-wasm is disabled. Rebuild with --features deref-wasm");
+        }
+    } else if cmd == "--sh" {
+        #[cfg(feature = "shell")]
+        {
+            let program = fs::read_to_string(&source_path)?;
+            STD.with(|std| {
+                let std_ast = std.borrow();
+                if let crate::parser::Expression::Apply(items) = &*std_ast {
+                    match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                        Ok(wrapped_ast) =>
+                            match crate::wat::compile_program_to_wat(&wrapped_ast) {
+                                Ok(wat_src) =>
+                                    match deref_wat_text(&wat_src) {
+                                        Ok(value) => println!("{}", value),
+                                        Err(err) => println!("{}", err),
+                                    }
+                                Err(err) => println!("{}", err),
+                            }
+                        Err(e) => println!("{}", e),
+                    }
+                }
+            });
+        }
+        #[cfg(not(feature = "shell"))]
+        {
+            println!("Error! shell is disabled. Rebuild with --features shell");
         }
     } else if cmd == "--comp" {
         let program = fs::read_to_string(&source_path)?;

@@ -1,1 +1,2 @@
-(+ 1 2)
+; (let cmd (shell "cat ./example/main.lisp"))
+(shell "ls -d */")

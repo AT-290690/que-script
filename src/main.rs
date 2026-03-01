@@ -25,6 +25,8 @@ mod report;
 #[cfg(feature = "rust-compiler")]
 #[path = "compilers/rs.rs"]
 mod rs;
+#[cfg(all(feature = "deref-wasm", feature = "shell"))]
+mod shell;
 mod tests;
 mod types;
 mod vm;

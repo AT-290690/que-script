@@ -314,6 +314,7 @@ fn is_special_word(w: &str) -> bool {
             "~" |
             "Int->Float" |
             "Float->Int" |
+            "shell" |
             "true" |
             "false"
     )
@@ -2281,6 +2282,16 @@ fn emit_vector_runtime(
   )
 "#
     );
+    out.push_str(
+        r#"
+  (export "$alloc" (func $alloc))
+  (export "$rc_retain" (func $rc_retain))
+  (export "$rc_release" (func $rc_release))
+  (export "alloc" (func $alloc))
+  (export "rc_retain" (func $rc_retain))
+  (export "rc_release" (func $rc_release))
+"#
+    );
     if apply_arities.contains(&0) {
         out.push_str(&emit_high_arity_apply_i32(0, fn_ids, fn_sigs, closure_defs));
     }
@@ -3964,6 +3975,25 @@ fn compile_fast_cell_helper(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> 
     }
 }
 
+#[cfg(feature = "shell")]
+fn compile_shell_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if node.children.len() != 2 {
+        return Err("shell expects exactly one [Char] argument".to_string());
+    }
+    let arg = compile_expr(
+        node.children
+            .get(1)
+            .ok_or_else(|| "shell missing argument".to_string())?,
+        ctx
+    )?;
+    Ok(format!("{arg}\ncall $host_run_shell"))
+}
+
+#[cfg(not(feature = "shell"))]
+fn compile_shell_call(_node: &TypedExpression, _ctx: &Ctx<'_>) -> Result<String, String> {
+    Err("shell requires enabling the 'shell' feature".to_string())
+}
+
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
     if let Some(fast) = compile_fast_cell_helper(op, node, ctx) {
         return fast;
@@ -4422,6 +4452,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "pop!" => compile_pop(node, ctx),
                         "loop" => compile_loop(node, ctx),
                         "loop-finish" => compile_loop_finish(node, ctx),
+                        "shell" => compile_shell_call(node, ctx),
                         "not" => {
                             let a = compile_expr(
                                 node.children.get(1).ok_or_else(|| "not missing arg".to_string())?,
@@ -4485,6 +4516,15 @@ fn collect_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
     }
     for ch in &node.children {
         collect_let_locals(ch, out);
+    }
+}
+
+fn typed_expr_uses_shell(node: &TypedExpression) -> bool {
+    match &node.expr {
+        Expression::Apply(items) if !items.is_empty() =>
+            matches!(items.first(), Some(Expression::Word(w)) if w == "shell") ||
+            node.children.iter().any(typed_expr_uses_shell),
+        _ => node.children.iter().any(typed_expr_uses_shell),
     }
 }
 
@@ -5222,6 +5262,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
         _ => (HashMap::new(), typed_ast.expr.clone(), typed_ast.clone()),
     };
+    let needs_shell_host = typed_expr_uses_shell(typed_ast);
 
     let mut needed = HashSet::new();
     let mut bound = HashSet::new();
@@ -5637,6 +5678,10 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     let mut wat = String::new();
     wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
     wat.push_str("(module\n");
+    #[cfg(feature = "shell")]
+    if needs_shell_host {
+        wat.push_str("  (import \"host\" \"run_shell\" (func $host_run_shell (param i32) (result i32)))\n");
+    }
     for name in &cached_value_defs {
         wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_init_global(name)));
         wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_value_global(name)));
