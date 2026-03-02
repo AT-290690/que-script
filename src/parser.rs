@@ -162,7 +162,7 @@ fn tokenize(input: &str) -> Vec<String> {
 
 fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
     if *i >= tokens.len() {
-        return Err("Error! Unexpected end of input".into());
+        return Err("Unexpected end of input".into());
     }
     let tok = &tokens[*i];
 
@@ -173,12 +173,12 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
             exprs.push(parse_expr(tokens, i)?);
         }
         if *i >= tokens.len() {
-            return Err("Error! Unclosed '('".into());
+            return Err("Unclosed '('".into());
         }
         *i += 1;
         Ok(Expression::Apply(exprs))
     } else if tok == ")" {
-        Err("Error! Unexpected ')'".into())
+        Err("Unexpected ')'".into())
     } else {
         *i += 1;
         if is_integer(tok) {
@@ -527,7 +527,7 @@ fn preprocess(source: &str) -> Result<String, String> {
                     }
                 }
                 if s.len() != 1 {
-                    return Err(format!("Error! Char should be of length 1"));
+                    return Err(format!("Char should be of length 1"));
                 }
                 out.push_str("(char ");
                 for c in s.chars() {
@@ -994,7 +994,7 @@ fn lambda_destructure_transform(
 ) -> Result<Expression, String> {
     // Check if valid body
     if exprs.len() < 2 {
-        return Err("Error! lambda expects at least a body".to_string());
+        return Err("lambda expects at least a body".to_string());
     }
     let args = &exprs[1..exprs.len() - 1];
     let body = exprs.last().unwrap().clone();
@@ -1080,7 +1080,7 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     if len != 2 && len != 3 {
         return Err(
             format!(
-                "Error! loop expects 2 or 3 arguments, got {}\n{}",
+                "loop expects 2 or 3 arguments, got {}\n{}",
                 len,
                 exprs
                     .into_iter()
@@ -1100,7 +1100,7 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
                 if head != "lambda" {
                     return Err(
                         format!(
-                            "Error! loop last argument must be a lambda \n{}",
+                            "loop last argument must be a lambda \n{}",
                             exprs
                                 .into_iter()
                                 .map(|e| e.to_lisp())
@@ -1119,7 +1119,7 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
                     if param_count != 0 {
                         return Err(
                             format!(
-                                "Error! loop condition form expects lambda with 0 parameters, found {}\n{}",
+                                "loop condition form expects lambda with 0 parameters, found {}\n{}",
                                 param_count,
                                 exprs
                                     .into_iter()
@@ -1144,7 +1144,7 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
                     if param_count != 1 {
                         return Err(
                             format!(
-                                "Error! loop range form expects lambda with 1 parameter, found {}\n{}",
+                                "loop range form expects lambda with 1 parameter, found {}\n{}",
                                 param_count,
                                 exprs
                                     .into_iter()
@@ -1197,7 +1197,7 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
         _ => {
             return Err(
                 format!(
-                    "Error! loop last argument must be a lambda expression\n{}",
+                    "loop last argument must be a lambda expression\n{}",
                     exprs
                         .into_iter()
                         .map(|e| e.to_lisp())
@@ -1210,7 +1210,7 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
 
     Err(
         format!(
-            "Error! loop invalid structure\n{}",
+            "loop invalid structure\n{}",
             exprs
                 .into_iter()
                 .map(|e| e.to_lisp())
@@ -1225,7 +1225,7 @@ fn cdr_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     let len = exprs.len();
     let mut iter = exprs.into_iter();
     if len == 0 {
-        return Err("Error! cdr requires at least 1 argument".to_string());
+        return Err("cdr requires at least 1 argument".to_string());
     }
     let first = iter.next().unwrap();
     if len == 1 {
@@ -1241,7 +1241,7 @@ fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> 
     let len = exprs.len();
     let mut iter = exprs.into_iter();
     if len == 0 {
-        return Err("Error! get requires at least 1 argument".to_string());
+        return Err("get requires at least 1 argument".to_string());
     }
     let first = iter.next().unwrap();
     if len == 1 {
@@ -1265,7 +1265,7 @@ fn setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     let set_idx = exprs.pop().unwrap();
     let mut iter = exprs.into_iter();
     if len < 3 {
-        return Err("Error! set! requires at least 3 arguments".to_string());
+        return Err("set! requires at least 3 arguments".to_string());
     }
     let first = iter.next().unwrap();
     let mut acc = first;
@@ -1458,7 +1458,7 @@ fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
 //     exprs.remove(0);
 
 //     if exprs.is_empty() {
-//         return Err("Error! (\\) requires at least one function".into());
+//         return Err("(\\) requires at least one function".into());
 //     }
 
 //     // First item is the function being partially applied
@@ -1594,7 +1594,7 @@ fn transform_do(
 fn combinator_transform_rev(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
     if exprs.is_empty() {
-        return Err("Error! (comp) requires at least one function".into());
+        return Err("(comp) requires at least one function".into());
     }
     // generate fresh parameter
     let arg = Expression::Word("_x".to_string());
@@ -1609,7 +1609,7 @@ fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
 
     if exprs.is_empty() {
-        return Err("Error! (apply) requires at least one function".into());
+        return Err("(apply) requires at least one function".into());
     }
 
     // First item is the function being partially applied

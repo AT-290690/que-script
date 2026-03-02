@@ -14,7 +14,7 @@ OUT="$(./target/release/fez-rs "$SRC" "${@:3}" 2>&1)"
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then
-  echo "runtime error: $OUT"
+  echo "Exception: $OUT"
   exit $STATUS
 fi
 

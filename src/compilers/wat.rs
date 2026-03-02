@@ -3661,7 +3661,11 @@ fn compile_loop_finish(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, 
     )
 }
 
-fn compile_fast_box_ctor(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+fn compile_fast_box_ctor(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>
+) -> Result<String, String> {
     let value_node = node.children
         .get(1)
         .ok_or_else(|| format!("{} requires exactly 1 argument", op))?;
@@ -3679,10 +3683,7 @@ fn compile_fast_box_ctor(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Res
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let value = compile_expr(value_node, &nested_ctx)?;
-    let value_is_managed = value_node.typ
-        .as_ref()
-        .map(is_managed_local_type)
-        .unwrap_or(false);
+    let value_is_managed = value_node.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
     let is_lambda_literal =
         matches!(
         &value_node.expr,
@@ -3735,7 +3736,11 @@ fn compile_fast_cell_set(
     };
     let cell = compile_expr(cell_node, &nested_ctx)?;
     let value_raw = compile_expr(value_node, &nested_ctx)?;
-    let value = if normalize_bool { format!("{value_raw}\ni32.const 0\ni32.ne") } else { value_raw };
+    let value = if normalize_bool {
+        format!("{value_raw}\ni32.const 0\ni32.ne")
+    } else {
+        value_raw
+    };
     let is_lambda_literal =
         matches!(
         &value_node.expr,
@@ -3815,7 +3820,9 @@ fn compile_fast_cell_update_int_unary(
         "++" => format!("local.get {old_local}\ni32.const 1\ni32.add"),
         "--" => format!("local.get {old_local}\ni32.const 1\ni32.sub"),
         "**" => format!("local.get {old_local}\nlocal.get {old_local}\ni32.mul"),
-        _ => return Err(format!("Unsupported int unary fast helper '{}'", op)),
+        _ => {
+            return Err(format!("Unsupported int unary fast helper '{}'", op));
+        }
     };
     Ok(
         format!(
@@ -3895,7 +3902,9 @@ fn compile_fast_cell_update_float_unary(
             format!(
                 "local.get {old_local}\nf32.reinterpret_i32\nlocal.get {old_local}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32"
             ),
-        _ => return Err(format!("Unsupported float unary fast helper '{}'", op)),
+        _ => {
+            return Err(format!("Unsupported float unary fast helper '{}'", op));
+        }
     };
     Ok(
         format!(
@@ -3904,7 +3913,11 @@ fn compile_fast_cell_update_float_unary(
     )
 }
 
-fn compile_fast_cell_inc_simple(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+fn compile_fast_cell_inc_simple(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>
+) -> Result<String, String> {
     if node.children.len() != 2 {
         return Err(format!("{} requires exactly 1 argument", op));
     }
@@ -3929,7 +3942,12 @@ fn compile_fast_cell_inc_simple(op: &str, node: &TypedExpression, ctx: &Ctx<'_>)
     )
 }
 
-fn compile_fast_truthy(op: &str, node: &TypedExpression, ctx: &Ctx<'_>, negate: bool) -> Result<String, String> {
+fn compile_fast_truthy(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    negate: bool
+) -> Result<String, String> {
     if node.children.len() != 2 {
         return Err(format!("{} requires exactly 1 argument", op));
     }
@@ -3954,7 +3972,11 @@ fn compile_fast_truthy(op: &str, node: &TypedExpression, ctx: &Ctx<'_>, negate: 
     }
 }
 
-fn compile_fast_cell_helper(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Option<Result<String, String>> {
+fn compile_fast_cell_helper(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>
+) -> Option<Result<String, String>> {
     match op {
         "box" | "int" | "float" | "bool" => Some(compile_fast_box_ctor(op, node, ctx)),
         "set" | "=!" => Some(compile_fast_cell_set(op, node, ctx, false)),
@@ -3981,9 +4003,7 @@ fn compile_shell_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
         return Err("shell expects exactly one [Char] argument".to_string());
     }
     let arg = compile_expr(
-        node.children
-            .get(1)
-            .ok_or_else(|| "shell missing argument".to_string())?,
+        node.children.get(1).ok_or_else(|| "shell missing argument".to_string())?,
         ctx
     )?;
     Ok(format!("{arg}\ncall $host_run_shell"))
@@ -4523,7 +4543,7 @@ fn typed_expr_uses_shell(node: &TypedExpression) -> bool {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() =>
             matches!(items.first(), Some(Expression::Word(w)) if w == "shell") ||
-            node.children.iter().any(typed_expr_uses_shell),
+                node.children.iter().any(typed_expr_uses_shell),
         _ => node.children.iter().any(typed_expr_uses_shell),
     }
 }
@@ -5108,7 +5128,9 @@ fn compile_value_func(
     out.push_str("    else\n");
     out.push_str(&format!("      {}\n", body_code.replace('\n', "\n      ")));
     out.push_str(&format!("      local.set {}\n", ret_slot));
-    out.push_str(&indent_block(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot), 6));
+    out.push_str(
+        &indent_block(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot), 6)
+    );
     out.push('\n');
     if ret_is_ref {
         // Keep one root reference in the global cache while returning one to caller.
@@ -5262,7 +5284,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
         _ => (HashMap::new(), typed_ast.expr.clone(), typed_ast.clone()),
     };
-    let needs_shell_host = typed_expr_uses_shell(typed_ast);
+    let _needs_shell_host = typed_expr_uses_shell(typed_ast);
 
     let mut needed = HashSet::new();
     let mut bound = HashSet::new();
@@ -5679,12 +5701,16 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
     wat.push_str("(module\n");
     #[cfg(feature = "shell")]
-    if needs_shell_host {
-        wat.push_str("  (import \"host\" \"run_shell\" (func $host_run_shell (param i32) (result i32)))\n");
+    if _needs_shell_host {
+        wat.push_str(
+            "  (import \"host\" \"run_shell\" (func $host_run_shell (param i32) (result i32)))\n"
+        );
     }
     for name in &cached_value_defs {
         wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_init_global(name)));
-        wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_value_global(name)));
+        wat.push_str(
+            &format!("  (global ${} (mut i32) (i32.const 0))\n", cache_value_global(name))
+        );
     }
     wat.push_str(&emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs, &apply_arities));
     for func in emitted_funcs {

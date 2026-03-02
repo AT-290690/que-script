@@ -67,50 +67,41 @@ xs)"#,
     fn test_type_inference_failure() {
         // Test cases that should result in type inference errors
         let test_cases = [
-            ("(+ 1 (= 1 1))", r#"Error! Cannot unify Int with Bool
-Error! (+ 1 (= 1 1))"#),
-            ("(1 2)", "Error! Cannot apply non-function type: Int\n(1 2)"),
-            ("(do (let t 10) (t))", "Error! Cannot apply non-function type: Int\n(t)"),
-            (
-                "(let x (vector 1 2 (= 1 2)))",
-                "Error! Cannot unify Int with Bool\nError! (vector 1 2 (= 1 2))",
-            ),
-            (
-                "(vector 1 2 (> 1 2))",
-                "Error! Cannot unify Int with Bool\nError! (vector 1 2 (> 1 2))",
-            ),
-            ("(lambda x (and x 42))", "Error! Cannot unify Bool with Int\nError! (and x 42)"),
-            ("(summation (range 1 10))", "Error! Undefined variable: summation"),
-            (
-                "(if 1 10 20)",
-                r#"Error! Cannot unify Int with Bool
-Error! Condition must be Bool
-(if 1 10 20)"#,
-            ),
+            ("(+ 1 (= 1 1))", r#"Cannot unify Int with Bool
+(+ 1 (= 1 1))"#),
+            ("(1 2)", "Cannot apply non-function type: Int\n(1 2)"),
+            ("(do (let t 10) (t))", "Cannot apply non-function type: Int\n(t)"),
+            ("(let x (vector 1 2 (= 1 2)))", "Cannot unify Int with Bool\n(vector 1 2 (= 1 2))"),
+            ("(vector 1 2 (> 1 2))", "Cannot unify Int with Bool\n(vector 1 2 (> 1 2))"),
+            ("(lambda x (and x 42))", "Cannot unify Bool with Int\n(and x 42)"),
+            ("(summation (range 1 10))", "Undefined variable: summation"),
+            ("(if 1 10 20)", r#"Cannot unify Int with Bool
+Condition must be Bool
+(if 1 10 20)"#),
             (
                 "(if (= 1 2) 10 (= 0 1))",
-                r#"Error! Cannot unify Int with Bool
-Error! Concequent and alternative must match types
+                r#"Cannot unify Int with Bool
+Concequent and alternative must match types
 (if (= 1 2) 10 (= 0 1))"#,
             ),
-            ("(do (let x 10) (let x 2))", "Error! Variable 'x' already defined in this scope"),
+            ("(do (let x 10) (let x 2))", "Variable 'x' already defined in this scope"),
             (
                 "(vector (tuple 0 true) (tuple true 0))",
-                "Error! Cannot unify Int with Bool\nError! (vector (tuple 0 true) (tuple true 0))",
+                "Cannot unify Int with Bool\n(vector (tuple 0 true) (tuple true 0))",
             ),
-            ("(+ 1.23 2)", "Error! Cannot unify Int with Float\nError! (+ 1.23 2)"),
+            ("(+ 1.23 2)", "Cannot unify Int with Float\n(+ 1.23 2)"),
             (
                 r#"(do (let xs (vector (vector (vector))))
 (set! xs (length xs) (vector (vector true)))
 (set! xs (length xs) (vector (vector 1))))"#,
-                "Error! Cannot unify Int with Bool\nError! (set! xs (length xs) (vector (vector 1)))",
+                "Cannot unify Int with Bool\n(set! xs (length xs) (vector (vector 1)))",
             ),
             (
                 r#"(do 
 (let xs (vector))
 (set! xs (length xs) false)
 (set! xs (length xs) 1))"#,
-                "Error! Cannot unify Int with Bool\nError! (set! xs (length xs) 1)",
+                "Cannot unify Int with Bool\n(set! xs (length xs) 1)",
             ),
         ];
 

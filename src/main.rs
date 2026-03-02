@@ -293,7 +293,7 @@ fn run_native_shell() -> Result<(), String> {
 #[cfg(feature = "shell")]
 fn main() {
     if let Err(err) = run_native_shell() {
-        eprintln!("Exception: {}", err);
+        eprintln!("\x1b[31mException: {}\x1b[0m", err);
         std::process::exit(1);
     }
 }

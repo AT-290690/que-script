@@ -57,11 +57,11 @@ fn src_to_pretty(src: &TypeError) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     match src.variant {
-        TypeErrorVariant::Vector => format!("Error! (vector {})", joined),
-        TypeErrorVariant::Call => format!("Error! ({})", joined),
-        TypeErrorVariant::IfCond => format!("Error! Condition must be Bool\n(if {})", joined),
+        TypeErrorVariant::Vector => format!("(vector {})", joined),
+        TypeErrorVariant::Call => format!("({})", joined),
+        TypeErrorVariant::IfCond => format!("Condition must be Bool\n(if {})", joined),
         TypeErrorVariant::IfBody => {
-            format!("Error! Concequent and alternative must match types\n(if {})", joined)
+            format!("Concequent and alternative must match types\n(if {})", joined)
         }
         TypeErrorVariant::Source => joined,
     }
@@ -104,7 +104,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
             if let Some(scheme) = ctx.env.get(name) {
                 Ok(ctx.instantiate(&scheme))
             } else {
-                Err(format!("Error! Undefined variable: {}", name))
+                Err(format!("Undefined variable: {}", name))
             }
         }
 
@@ -161,10 +161,7 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                 } else if t == "tuple" {
                     if items.len() < 2 {
                         return Err(
-                            format!(
-                                "Error! Tuple type must have at least one element: {}",
-                                expr.to_lisp()
-                            )
+                            format!("Tuple type must have at least one element: {}", expr.to_lisp())
                         );
                     }
                     let mut elems = Vec::new();
@@ -174,10 +171,10 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     return Ok(Type::Tuple(elems));
                 }
             }
-            Err(format!("Error! Invalid type hint syntax: {}", expr.to_lisp()))
+            Err(format!("Invalid type hint syntax: {}", expr.to_lisp()))
         }
 
-        _ => Err(format!("Error! Invalid type hint: {}", expr.to_lisp())),
+        _ => Err(format!("Invalid type hint: {}", expr.to_lisp())),
     }
 }
 // arity depth (number of list nestings)
@@ -204,7 +201,7 @@ fn deepest_type(t: &Type) -> &Type {
 pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err("Error! as expects exactly two arguments: (as expr Type)".to_string());
+        return Err("as expects exactly two arguments: (as expr Type)".to_string());
     }
 
     // Infer both sides
@@ -217,7 +214,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
             if expr_elems.len() != hint_elems.len() {
                 return Err(
                     format!(
-                        "Error! Tuple length mismatch in as: {} vs {}\n(as {})",
+                        "Tuple length mismatch in as: {} vs {}\n(as {})",
                         expr_elems.len(),
                         hint_elems.len(),
                         args
@@ -242,7 +239,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         (Type::Tuple(_), _) | (_, Type::Tuple(_)) => {
             return Err(
                 format!(
-                    "Error! Cannot cast between tuple and non-tuple types\n(as {})",
+                    "Cannot cast between tuple and non-tuple types\n(as {})",
                     args
                         .iter()
                         .map(|e| e.to_lisp())
@@ -264,7 +261,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     if is_expr_var && expr_arity > hint_arity {
         return Err(
             format!(
-                "Error! Type variable in as cannot represent deeper nesting: {} vs {}",
+                "Type variable in as cannot represent deeper nesting: {} vs {}",
                 expr_type,
                 type_hint
             )
@@ -275,7 +272,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     if !is_expr_var && expr_arity != hint_arity {
         return Err(
             format!(
-                "Error! Type arity mismatch in as: left has arity {}, right has arity {} ({} vs {})\n(as {})",
+                "Type arity mismatch in as: left has arity {}, right has arity {} ({} vs {})\n(as {})",
                 expr_arity,
                 hint_arity,
                 expr_type,
@@ -310,7 +307,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
             _ => {
                 return Err(
                     format!(
-                        "Error! Invalid array cast in as: cannot cast {} to {}\n(as {})",
+                        "Invalid array cast in as: cannot cast {} to {}\n(as {})",
                         expr_type,
                         type_hint,
                         args
@@ -331,7 +328,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
 fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.is_empty() {
-        return Err("Error! Lambda requires a body".to_string());
+        return Err("Lambda requires a body".to_string());
     }
 
     let param_count = args.len() - 1;
@@ -345,7 +342,7 @@ fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         } else {
             return Err(
                 format!(
-                    "Error! Lambda parameters must be variable names\n({})",
+                    "Lambda parameters must be variable names\n({})",
                     exprs
                         .iter()
                         .map(|e| e.to_lisp())
@@ -369,7 +366,7 @@ fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     for (name, typ) in param_names.iter().zip(param_types.iter()) {
         ctx.env
             .insert(name.clone(), TypeScheme::monotype(typ.clone()))
-            .map_err(|e| format!("Error! in lambda: {}", e))?;
+            .map_err(|e| format!("in lambda: {}", e))?;
     }
 
     // Infer body type
@@ -397,7 +394,7 @@ fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
 fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args: &[Expression] = &exprs[1..];
     if args.len() != 3 {
-        return Err("Error! If requires exactly 3 arguments: condition, then, else".to_string());
+        return Err("If requires exactly 3 arguments: condition, then, else".to_string());
     }
 
     let condition = &args[0];
@@ -581,7 +578,7 @@ pub fn solve_constraints_list(
                 if a_items.len() != b_items.len() {
                     return Err(
                         format!(
-                            "Error! Cannot unify tuples of different lengths ({} vs {})\n{}",
+                            "Cannot unify tuples of different lengths ({} vs {})\n{}",
                             a_items.len(),
                             b_items.len(),
                             src_to_pretty(&src)
@@ -594,9 +591,7 @@ pub fn solve_constraints_list(
             }
             (a2, b2) => {
                 // can't unify, attach source and return
-                return Err(
-                    format!("Error! Cannot unify {} with {}\n{}", a2, b2, src_to_pretty(&src))
-                );
+                return Err(format!("Cannot unify {} with {}\n{}", a2, b2, src_to_pretty(&src)));
             }
         }
     }
@@ -632,7 +627,7 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     if args.len() != 2 {
         return Err(
             format!(
-                "Error! Let requires exactly 2 arguments: variable and value\n({})",
+                "Let requires exactly 2 arguments: variable and value\n({})",
                 exprs
                     .iter()
                     .map(|e| e.to_lisp())
@@ -665,12 +660,12 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         if is_nonexpansive(value_expr) {
             generalize(&ctx.env, solved_type);
         } else {
-            return Err("Error! Only recursive functions allowed for let* optimization".to_string());
+            return Err("Only recursive functions allowed for let* optimization".to_string());
         }
 
         Ok(Type::Unit)
     } else {
-        Err("Error! Let variable must be a variable name".to_string())
+        Err("Let variable must be a variable name".to_string())
     }
 }
 
@@ -679,7 +674,7 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     if args.len() != 2 {
         return Err(
             format!(
-                "Error! Let requires exactly 2 arguments: variable and value\n({})",
+                "Let requires exactly 2 arguments: variable and value\n({})",
                 exprs
                     .iter()
                     .map(|e| e.to_lisp())
@@ -715,7 +710,7 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         ctx.env.insert(var_name.clone(), scheme)?;
         Ok(Type::Unit)
     } else {
-        Err("Error! Let variable must be a variable name".to_string())
+        Err("Let variable must be a variable name".to_string())
     }
 }
 
@@ -723,7 +718,7 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 fn infer_do(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.is_empty() {
-        return Err("Error! do requires at least one expression".to_string());
+        return Err("do requires at least one expression".to_string());
     }
 
     let mut last_type = Type::Unit; // Default type
@@ -738,7 +733,7 @@ fn infer_do(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 // Type inference for function calls
 fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     if exprs.is_empty() {
-        return Err("Error! Function call requires at least a function".to_string());
+        return Err("Function call requires at least a function".to_string());
     }
 
     // Special handling for vector before anything else
@@ -832,7 +827,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             if args.len() != 2 {
                 return Err(
                     format!(
-                        "Error! Tuples can only store 2 values but got {{{}}}",
+                        "Tuples can only store 2 values but got {{{}}}",
                         exprs
                             .iter()
                             .map(|e| e.to_lisp())
@@ -879,7 +874,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             _ => {
                 return Err(
                     format!(
-                        "Error! Cannot apply non-function type: {}\n{}",
+                        "Cannot apply non-function type: {}\n{}",
                         func_type,
                         format!(
                             "({})",
@@ -933,7 +928,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             _ => {
                 return Err(
                     format!(
-                        "Error! Cannot apply non-function type: {}\n{}",
+                        "Cannot apply non-function type: {}\n{}",
                         func_type,
                         format!(
                             "({})",
