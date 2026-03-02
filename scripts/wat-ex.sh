@@ -16,7 +16,7 @@ OUT="$(./target/release/fez-rs --deref-wasm --s "$SRC" 2>&1)"
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then
-  echo "runtime error: $OUT"
+  echo "Exception: $OUT"
   exit $STATUS
 fi
 

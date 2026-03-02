@@ -40,7 +40,7 @@ use std::env;
 #[cfg(feature = "shell")]
 use std::fs;
 #[cfg(feature = "shell")]
-use std::path::{Path, PathBuf};
+use std::path::{ Path, PathBuf };
 #[cfg(feature = "shell")]
 use wasmtime::{ Engine, Linker, Memory, Module as WasmModule, Store };
 
@@ -190,7 +190,10 @@ fn decode_value(
         let raw_items = read_tuple(memory, store, ptr)?;
         let mut decoded = Vec::with_capacity(raw_items.len());
         for (i, item_ptr) in raw_items.into_iter().enumerate() {
-            let typ = parts.get(i).map(|s| s.as_str()).unwrap_or("Int");
+            let typ = parts
+                .get(i)
+                .map(|s| s.as_str())
+                .unwrap_or("Int");
             decoded.push(decode_value(item_ptr, typ, memory, store)?);
         }
         return Ok(format!("{{ {} }}", decoded.join(" ")));
@@ -238,7 +241,8 @@ fn run_native_shell() -> Result<(), String> {
     let program = fs
         ::read_to_string(&file_path)
         .map_err(|e| format!("failed to read '{}': {}", file_path, e))?;
-    let script_cwd = fs::canonicalize(file_path)
+    let script_cwd = fs
+        ::canonicalize(file_path)
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf))
         .or_else(|| Path::new(file_path).parent().map(Path::to_path_buf))
@@ -266,7 +270,8 @@ fn run_native_shell() -> Result<(), String> {
     crate::shell::add_shell_to_linker(&mut linker).map_err(|e| e.to_string())?;
     let mut store = Store::new(
         &engine,
-        crate::shell::ShellStoreData::new_with_script_cwd(Some(script_cwd))
+        crate::shell::ShellStoreData
+            ::new_with_script_cwd(Some(script_cwd))
             .map_err(|e| e.to_string())?
     );
     let instance = linker.instantiate(&mut store, &module).map_err(|e| e.to_string())?;
@@ -288,7 +293,7 @@ fn run_native_shell() -> Result<(), String> {
 #[cfg(feature = "shell")]
 fn main() {
     if let Err(err) = run_native_shell() {
-        eprintln!("error: {}", err);
+        eprintln!("Exception: {}", err);
         std::process::exit(1);
     }
 }
