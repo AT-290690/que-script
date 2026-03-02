@@ -11,7 +11,7 @@ echo "Installing $APP_NAME..."
 if curl -fsSL "$BINARY_URL" -o "/tmp/$APP_NAME"; then
     chmod +x "/tmp/$APP_NAME"
     sudo mv "/tmp/$APP_NAME" "$INSTALL_PATH"
-    echo "✅ Success! You can now run: $APP_NAME your_file.que"
+    echo "✅ Success! You can now run: $APP_NAME yourfile.que"
 else
     echo "❌ Error: Could not download binary."
     echo "Check that you have a RELEASE and an ASSET named 'que' at:"
