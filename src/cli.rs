@@ -22,7 +22,7 @@ use wasmtime::{ Engine, Linker, Memory, Module as WasmModule, Store };
 #[cfg(feature = "deref-wasm")]
 use wat as wat_crate;
 #[cfg(all(feature = "deref-wasm", feature = "shell"))]
-use crate::shell::{ add_shell_to_linker, ShellStoreData };
+use crate::shell::{ add_shell_to_linker, shell_policy_from_process_args, ShellStoreData };
 
 #[cfg(all(feature = "deref-wasm", not(feature = "shell")))]
 type DerefStoreData = ();
@@ -36,7 +36,11 @@ fn make_deref_store_data() -> Result<DerefStoreData, String> {
 
 #[cfg(all(feature = "deref-wasm", feature = "shell"))]
 fn make_deref_store_data() -> Result<DerefStoreData, String> {
-    ShellStoreData::new().map_err(|e| format!("wasi setup error: {}", e))
+    let policy = shell_policy_from_process_args()
+        .map_err(|e| format!("shell policy error: {}", e))?;
+    ShellStoreData
+        ::new_with_security(None, policy)
+        .map_err(|e| format!("wasi setup error: {}", e))
 }
 
 thread_local! {
@@ -516,7 +520,7 @@ pub fn deref_wat_text(wat_src: &str) -> Result<String, String> {
     let mut store = Store::new(&engine, make_deref_store_data()?);
     let instance = linker
         .instantiate(&mut store, &module)
-        .map_err(|e| format!("inst error: {}", e))?;
+        .map_err(|e| format!("inst error: {:#}", e))?;
 
     let memory = instance
         .get_memory(&mut store, "memory")
@@ -524,9 +528,9 @@ pub fn deref_wat_text(wat_src: &str) -> Result<String, String> {
 
     let main = instance
         .get_typed_func::<(), i32>(&mut store, "main")
-        .map_err(|e| format!("main func error: {}", e))?;
+        .map_err(|e| format!("main func error: {:#}", e))?;
 
-    let ptr = main.call(&mut store, ()).map_err(|e| format!("call error: {}", e))?;
+    let ptr = main.call(&mut store, ()).map_err(|e| format!("call error: {:#}", e))?;
     Ok(decode_value(ptr, &typ, &memory, &mut store))
 }
 pub fn cli(dir: &str) -> std::io::Result<()> {

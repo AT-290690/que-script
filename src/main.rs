@@ -274,7 +274,10 @@ fn run_native_shell() -> Result<(), String> {
     let Some(file_path) = args.get(1) else {
         return Err("missing file_path. Usage: fez-rs <script.fez> [arg ...]".to_string());
     };
-    let argv: Vec<String> = args.iter().skip(2).cloned().collect();
+    let mut argv: Vec<String> = args.iter().skip(2).cloned().collect();
+    let shell_policy = crate::shell
+        ::take_shell_policy_from_argv(&mut argv)
+        .map_err(|e| format!("invalid shell policy: {}", e))?;
 
     let program = fs
         ::read_to_string(&file_path)
@@ -309,15 +312,21 @@ fn run_native_shell() -> Result<(), String> {
     let mut store = Store::new(
         &engine,
         crate::shell::ShellStoreData
-            ::new_with_script_cwd(Some(script_cwd))
+            ::new_with_security(Some(script_cwd), shell_policy)
             .map_err(|e| e.to_string())?
     );
-    let instance = linker.instantiate(&mut store, &module).map_err(|e| e.to_string())?;
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .map_err(|e| format!("{:#}", e))?;
 
     set_argv_strings(&mut store, &instance, &argv).map_err(|e| e.to_string())?;
 
-    let main = instance.get_typed_func::<(), i32>(&mut store, "main").map_err(|e| e.to_string())?;
-    let result = main.call(&mut store, ()).map_err(|e| e.to_string())?;
+    let main = instance
+        .get_typed_func::<(), i32>(&mut store, "main")
+        .map_err(|e| format!("{:#}", e))?;
+    let result = main
+        .call(&mut store, ())
+        .map_err(|e| format!("{:#}", e))?;
 
     let memory = instance
         .get_memory(&mut store, "memory")

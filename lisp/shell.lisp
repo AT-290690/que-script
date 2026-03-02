@@ -24,7 +24,9 @@
 (let cmd/console-log (lambda "cat")) 
 ; Logic Helpers
 (let cmd/if-exists (lambda file cmd (cons "test -f " file " && " cmd)))
+; Evaluate que file
 (let cmd/eval (lambda file (cons "que" " " file)))
+; Create args string from vector of args
 (let cmd/args (lambda args (Vector->String ' ' (map String/dquote args))))
 ; --- Lazy Command Builders ---
 ; Builds: curl -X POST -d 'data' url
