@@ -15,8 +15,7 @@
     },
     "strings": {
       "patterns": [
-        { "name": "string.quoted.double.que", "begin": "\"", "end": "\"" },
-        { "name": "string.quoted.single.que", "begin": "'", "end": "'" }
+        { "name": "string.quoted.double.que", "begin": "\"", "end": "\"" }
       ]
     },
     "types": {
@@ -31,7 +30,7 @@
       "patterns": [
         {
           "name": "keyword.control.que",
-          "match": "\\b(do|let|let~|let\\*|loop|if|unless|cond|lambda|mod|length|as|get|at|set|pop|push|pull|swap|emod|not|and|or|identity|boole-set|boole-eqv|eq|integer|floating|boolean|variable|que|string|chars|digits|vector|bigint|tuple|table|fst|snd|car|cdr|has|in-bounds|apply|eq|comp|matrix|shell|Vector|String|Matrix|BigInt|Tuple|Table|Set|Que|Integer|Float|Boolean)\\b"
+          "match": "\\b(do|let|let~|let\\*|loop|if|unless|cond|lambda|mod|length|as|get|at|set!|pop!|push!|pull!|swap!|emod|not|and|or|identity|boole-set|boole-eqv|eq|true\\?|false\\?|integer|floating|boolean|variable|que|string|chars|digits|set|vector|bigint|tuple|table|fst|snd|car|cdr|has\\?|in-bounds\\?|apply|eq\\?|comp|matrix|shell|Vector|String|Matrix|BigInt|Tuple|Table|Set|Que)\\b"
         }
       ]
     },
@@ -43,7 +42,7 @@
         },
         {
           "name": "support.function.que",
-          "match": "\\b(enumerate|sum|nl|sp|ep|dq|sq|bt|map|filter|reduce|every|some|empty|copy|reverse|slice|cons|sort|range|square|sqrt|expt|floor|ceil|max|min|abs|first|last|count|points|zip|unzip|permutation|window|flat|pair|product|find|lcm|gcd|call|odd|even|upper|lower|match|digit|fill|take|drop|clamp|one|zero|ones|zeroes|positive|negative|invert|divisible|maximum|minimum|for|subset|scan|extreme|neighborhood|unique|transpose|interleave|intersperse|cycle|replicate|avg|mean|median|each|const|select|exclude|group|append|tail|head|split)\\b"
+          "match": "\\b(enumerate|sum|nl|sp|ep|dq|sq|bt|map|filter|reduce|every\\?|some\\?|empty\\?|empty!|copy|reverse|slice|cons|sort!|sort|range|square|sqrt|expt|floor|ceil|max|min|abs|first|last|count|points|zip|unzip|permutation|window|flat|pair|product|find|lcm|gcd|call|odd\\?|even\\?|upper|lower|match\\?|digit\\?|fill|take|drop|clamp|one\\?|zero\\?|ones|zeroes|positive\\?|negative\\?|invert|divisible\\?|maximum|minimum|for|subset|scan|extreme|neighborhood|unique|transpose|interleave|intersperse|cycle|replicate|avg|mean|median|each|const|select|exclude|group|append!|tail|head|split)\\b"
         }
       ]
     },
