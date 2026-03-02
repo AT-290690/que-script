@@ -73,28 +73,6 @@ cargo test --features deref-wasm
 
 transpile program to JavaScrpt (`./example/dist/main.js`)
 
-```bash
-cargo run --no-default-features --features parser,type-checker,type-ast,js-compiler -- --js
-```
-
-transpile program to OCaml (`./example/dist/main.ml`)
-
-```bash
-cargo run --no-default-features --features parser,type-checker,type-ast,ocaml-compiler -- --ml
-```
-
-transpile program to Rust (`./example/dist/main.rs`)
-
-```bash
-cargo run --no-default-features --features parser,type-checker,type-ast,rust-compiler -- --rs
-```
-
-transpile program to Kotlin (`./example/dist/main.kt`)
-
-```bash
-cargo run --no-default-features --features parser,type-checker,type-ast,kotlin-compiler -- --kt
-```
-
 emit typed semantic core IR (`./example/dist/main.qir`)
 
 ```bash

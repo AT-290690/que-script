@@ -398,6 +398,40 @@ fn split_tuple_types(s: &str) -> Vec<String> {
 }
 
 #[cfg(feature = "deref-wasm")]
+fn strip_outer_type(t: &str, open: char, close: char) -> Option<String> {
+    let s = t.trim();
+    if !s.starts_with(open) || !s.ends_with(close) {
+        return None;
+    }
+
+    let mut depth = 0i32;
+    let mut saw_outer_close_at_end = false;
+    for (idx, ch) in s.char_indices() {
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            depth -= 1;
+            if depth == 0 {
+                saw_outer_close_at_end = idx + ch.len_utf8() == s.len();
+                if !saw_outer_close_at_end {
+                    return None;
+                }
+            } else if depth < 0 {
+                return None;
+            }
+        }
+    }
+
+    if depth != 0 || !saw_outer_close_at_end {
+        return None;
+    }
+
+    let inner_start = open.len_utf8();
+    let inner_end = s.len() - close.len_utf8();
+    Some(s[inner_start..inner_end].trim().to_string())
+}
+
+#[cfg(feature = "deref-wasm")]
 fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<DerefStoreData>) -> String {
     let t = typ.trim();
 
@@ -429,8 +463,8 @@ fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<DerefStoreD
     }
 
     // Vector: [T]
-    if t.starts_with('[') && t.ends_with(']') {
-        let inner = t[1..t.len() - 1].trim();
+    if let Some(inner) = strip_outer_type(t, '[', ']') {
+        let inner = inner.trim();
 
         let hdr = read_vec(mem, store, ptr);
         let items = read_vec_items(mem, store, &hdr);
@@ -444,8 +478,8 @@ fn decode_value(ptr: i32, typ: &str, mem: &Memory, store: &mut Store<DerefStoreD
     }
 
     // Tuple: { A * B }
-    if t.starts_with('{') && t.ends_with('}') {
-        let content = t[1..t.len() - 1].trim();
+    if let Some(content) = strip_outer_type(t, '{', '}') {
+        let content = content.trim();
         let parts = split_tuple_types(content);
         let raw_items = read_tuple(mem, store, ptr);
 

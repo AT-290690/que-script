@@ -1,10 +1,16 @@
 {
   "name": "que-lang",
   "displayName": "Que Script",
+  "publisher": "anthony",
+  "description": "Script highlighting and IntelliSense for Que Script.",
   "version": "0.0.1",
   "main": "./extension.js",
+  "icon": "logo.svg",
   "activationEvents": [
     "onLanguage:que"
+  ],
+  "categories": [
+    "Programming Languages"
   ],
   "engines": {
     "vscode": "^1.75.0"

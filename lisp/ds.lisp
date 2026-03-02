@@ -186,7 +186,8 @@
 (let String/gte? std/vector/char/greater-or-equal?)
 (let String/lt? std/vector/char/lesser?)
 (let String/gt? std/vector/char/greater?)
-
+(let String/quote (lambda str (cons "'" str "'")))
+(let String/dquote (lambda str (cons [dq] str [dq])))
 (let Char/eq? (lambda a b (=# a b)))
 (let Int/eq? (lambda a b (= a b)))
 (let Bool/eq? (lambda a b (=? a b)))
