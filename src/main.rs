@@ -203,23 +203,33 @@ fn decode_value(
 }
 
 #[cfg(feature = "shell")]
-fn set_argv_i32(
+fn set_argv_strings(
     store: &mut Store<shell::ShellStoreData>,
     instance: &wasmtime::Instance,
-    argv: &[i32]
+    argv: &[String]
 ) -> wasmtime::Result<()> {
     let make_vec = instance.get_typed_func::<i32, i32>(&mut *store, "make_vec")?;
     let vec_push = instance.get_typed_func::<(i32, i32), i32>(&mut *store, "vec_push")?;
     let set_argv = instance.get_typed_func::<i32, i32>(&mut *store, "set_argv")?;
+    let release = instance.get_typed_func::<i32, i32>(&mut *store, "release").ok();
 
-    let vec_ptr = make_vec.call(&mut *store, 0)?;
-    for &value in argv {
-        let _ = vec_push.call(&mut *store, (vec_ptr, value))?;
+    // ARGV = [[Char]] (outer vec of references to char-code vectors).
+    let vec_ptr = make_vec.call(&mut *store, 1)?;
+    for raw in argv {
+        let arg_ptr = make_vec.call(&mut *store, 0)?;
+        for ch in raw.chars() {
+            let code = i32::try_from(u32::from(ch)).unwrap_or(0);
+            let _ = vec_push.call(&mut *store, (arg_ptr, code))?;
+        }
+        let _ = vec_push.call(&mut *store, (vec_ptr, arg_ptr))?;
+        if let Some(release_fn) = &release {
+            let _ = release_fn.call(&mut *store, arg_ptr)?;
+        }
     }
     let _ = set_argv.call(&mut *store, vec_ptr)?;
 
-    if let Ok(release) = instance.get_typed_func::<i32, i32>(&mut *store, "release") {
-        let _ = release.call(&mut *store, vec_ptr)?;
+    if let Some(release_fn) = &release {
+        let _ = release_fn.call(&mut *store, vec_ptr)?;
     }
     Ok(())
 }
@@ -228,15 +238,9 @@ fn set_argv_i32(
 fn run_native_shell() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     let Some(file_path) = args.get(1) else {
-        return Err("missing file_path. Usage: fez-rs <script.fez> [i32 ...]".to_string());
+        return Err("missing file_path. Usage: fez-rs <script.fez> [arg ...]".to_string());
     };
-    let mut argv = Vec::new();
-    for raw in args.iter().skip(2) {
-        let parsed = raw
-            .parse::<i32>()
-            .map_err(|_| format!("invalid ARGV item '{}': expected i32", raw))?;
-        argv.push(parsed);
-    }
+    let argv: Vec<String> = args.iter().skip(2).cloned().collect();
 
     let program = fs
         ::read_to_string(&file_path)
@@ -276,7 +280,7 @@ fn run_native_shell() -> Result<(), String> {
     );
     let instance = linker.instantiate(&mut store, &module).map_err(|e| e.to_string())?;
 
-    set_argv_i32(&mut store, &instance, &argv).map_err(|e| e.to_string())?;
+    set_argv_strings(&mut store, &instance, &argv).map_err(|e| e.to_string())?;
 
     let main = instance.get_typed_func::<(), i32>(&mut store, "main").map_err(|e| e.to_string())?;
     let result = main.call(&mut store, ()).map_err(|e| e.to_string())?;
@@ -285,7 +289,7 @@ fn run_native_shell() -> Result<(), String> {
         .get_memory(&mut store, "memory")
         .ok_or_else(|| "no exported memory".to_string())?;
     let decoded = decode_value(result, &ret_type, &memory, &store)?;
-    println!("{}", decoded);
+    println!("\x1b[32m{}\x1b[0m", decoded);
 
     Ok(())
 }

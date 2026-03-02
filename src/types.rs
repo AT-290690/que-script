@@ -579,10 +579,9 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     let _ = env.insert("true".to_string(), TypeScheme::monotype(Type::Bool));
     let _ = env.insert("false".to_string(), TypeScheme::monotype(Type::Bool));
     {
-        let a: Type = fresh_var();
         let _ = env.insert(
             "ARGV".to_string(),
-            TypeScheme::new(vec![a.var_id().unwrap()], Type::List(Box::new(a)))
+            TypeScheme::monotype(Type::List(Box::new(Type::List(Box::new(Type::Char)))))
         );
     }
 
