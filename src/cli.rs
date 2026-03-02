@@ -36,11 +36,10 @@ fn make_deref_store_data() -> Result<DerefStoreData, String> {
 
 #[cfg(all(feature = "deref-wasm", feature = "shell"))]
 fn make_deref_store_data() -> Result<DerefStoreData, String> {
-    let policy = shell_policy_from_process_args()
-        .map_err(|e| format!("shell policy error: {}", e))?;
-    ShellStoreData
-        ::new_with_security(None, policy)
-        .map_err(|e| format!("wasi setup error: {}", e))
+    let policy = shell_policy_from_process_args().map_err(|e|
+        format!("shell policy error: {}", e)
+    )?;
+    ShellStoreData::new_with_security(None, policy).map_err(|e| format!("wasi setup error: {}", e))
 }
 
 thread_local! {
@@ -583,12 +582,11 @@ pub fn cli(dir: &str) -> std::io::Result<()> {
     };
     if cmd == "--std" {
         let combined = format!(
-            "{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}",
             fs::read_to_string("./lisp/const.lisp")?,
             fs::read_to_string("./lisp/std.lisp")?,
             fs::read_to_string("./lisp/fp.lisp")?,
-            fs::read_to_string("./lisp/ds.lisp")?,
-            fs::read_to_string("./lisp/shell.lisp")?
+            fs::read_to_string("./lisp/ds.lisp")?
         );
         // let mut file = fs::File::create("./combined.lisp")?;
         // writeln!(file, "{}", combined)?;

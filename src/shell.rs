@@ -1,8 +1,9 @@
-use std::process::Command;
 use std::collections::HashSet;
-use std::path::PathBuf;
-use wasmtime::{Caller, Extern, Linker, Memory, TypedFunc};
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use std::fs;
+use std::path::{ Path, PathBuf };
+use std::process::Command;
+use wasmtime::{ Caller, Extern, Linker, Memory, TypedFunc };
+use wasmtime_wasi::{ ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView };
 
 const VEC_LEN_OFFSET: i32 = 0;
 const VEC_CAP_OFFSET: i32 = 4;
@@ -55,284 +56,35 @@ impl ShellPolicy {
         self.permissions.contains(&permission)
     }
 
-    pub fn validate_command(&self, command: &str) -> Result<(), String> {
+    pub fn require(
+        &self,
+        permission: ShellPermission,
+        operation: &str,
+        target: &str
+    ) -> Result<(), String> {
         if !self.shell_enabled {
-            return Err(format!(
-                "shell is disabled. pass --allow <read|write|delete|network> [...]. denied command: {}",
-                command
-            ));
-        }
-
-        if command.trim().is_empty() {
-            return Err(format!("shell command is empty. denied command: {}", command));
-        }
-
-        if command.contains("$(") || command.contains('`') || command.contains("<(") || command.contains(">(") {
-            return Err(format!(
-                "shell command substitutions are blocked by policy. denied command: {}",
-                command
-            ));
-        }
-
-        let entries = parse_command_entries(command).map_err(|reason| {
-            format!("unable to parse shell command ({}). denied command: {}", reason, command)
-        })?;
-
-        if entries.is_empty() {
-            return Err(format!("no executable command found. denied command: {}", command));
-        }
-
-        for entry in entries {
-            if entry.has_output_redirection && !self.allows(ShellPermission::Write) {
-                return Err(format!(
-                    "shell permission 'write' is required for output redirection in '{}'. denied command: {}",
-                    entry.program, command
-                ));
-            }
-
-            let needed = classify_program(&entry.program).ok_or_else(|| {
+            return Err(
                 format!(
-                    "command '{}' is not in the shell allowlist. denied command: {}",
-                    entry.program, command
+                    "host io is disabled. pass --allow <read|write|delete|network> [...]. denied operation '{}' for '{}'",
+                    operation,
+                    target
                 )
-            })?;
+            );
+        }
 
-            if !self.allows(needed) {
-                return Err(format!(
-                    "shell permission '{}' is required for '{}'. denied command: {}",
-                    needed.as_str(),
-                    entry.program,
-                    command
-                ));
-            }
+        if !self.allows(permission) {
+            return Err(
+                format!(
+                    "permission '{}' is required for operation '{}'. denied target: {}",
+                    permission.as_str(),
+                    operation,
+                    target
+                )
+            );
         }
 
         Ok(())
     }
-}
-
-#[derive(Debug)]
-struct CommandEntry {
-    program: String,
-    has_output_redirection: bool,
-}
-
-const READ_COMMANDS: &[&str] = &[
-    "[",
-    "awk",
-    "basename",
-    "cat",
-    "cut",
-    "date",
-    "df",
-    "dirname",
-    "du",
-    "echo",
-    "env",
-    "fez-rs",
-    "file",
-    "find",
-    "free",
-    "grep",
-    "head",
-    "hostname",
-    "id",
-    "less",
-    "ls",
-    "lsof",
-    "more",
-    "nproc",
-    "pgrep",
-    "printenv",
-    "ps",
-    "pwd",
-    "que",
-    "readlink",
-    "realpath",
-    "sed",
-    "sleep",
-    "sort",
-    "stat",
-    "tail",
-    "test",
-    "top",
-    "tr",
-    "uname",
-    "uniq",
-    "wc",
-    "which",
-    "whoami",
-];
-
-const WRITE_COMMANDS: &[&str] = &[
-    "chmod",
-    "chgrp",
-    "chown",
-    "cp",
-    "dd",
-    "install",
-    "ln",
-    "mkdir",
-    "mv",
-    "tee",
-    "touch",
-    "truncate",
-];
-
-const DELETE_COMMANDS: &[&str] = &["rm", "rmdir", "shred", "unlink"];
-
-const NETWORK_COMMANDS: &[&str] = &[
-    "curl",
-    "dig",
-    "ftp",
-    "host",
-    "nc",
-    "ncat",
-    "netcat",
-    "nslookup",
-    "ping",
-    "scp",
-    "sftp",
-    "ssh",
-    "telnet",
-    "wget",
-];
-
-fn classify_program(program: &str) -> Option<ShellPermission> {
-    if READ_COMMANDS.contains(&program) {
-        return Some(ShellPermission::Read);
-    }
-    if WRITE_COMMANDS.contains(&program) {
-        return Some(ShellPermission::Write);
-    }
-    if DELETE_COMMANDS.contains(&program) {
-        return Some(ShellPermission::Delete);
-    }
-    if NETWORK_COMMANDS.contains(&program) {
-        return Some(ShellPermission::Network);
-    }
-    None
-}
-
-fn is_env_assignment(token: &str) -> bool {
-    let Some(eq_idx) = token.find('=') else {
-        return false;
-    };
-    if eq_idx == 0 {
-        return false;
-    }
-    let key = &token[..eq_idx];
-    let mut chars = key.chars();
-    match chars.next() {
-        Some(c) if c == '_' || c.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
-}
-
-fn normalize_program(raw: &str) -> String {
-    raw.rsplit('/').next().unwrap_or(raw).to_ascii_lowercase()
-}
-
-fn extract_program(tokens: &[String]) -> Option<String> {
-    let mut idx = 0usize;
-    while idx < tokens.len() && is_env_assignment(&tokens[idx]) {
-        idx += 1;
-    }
-
-    while idx < tokens.len() && tokens[idx] == "!" {
-        idx += 1;
-    }
-
-    tokens.get(idx).map(|t| normalize_program(t))
-}
-
-fn parse_command_entries(command: &str) -> Result<Vec<CommandEntry>, String> {
-    let mut entries = Vec::new();
-    let mut tokens = Vec::<String>::new();
-    let mut token = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut escaped = false;
-    let mut has_output_redirection = false;
-
-    let push_token = |token: &mut String, tokens: &mut Vec<String>| {
-        if !token.is_empty() {
-            tokens.push(std::mem::take(token));
-        }
-    };
-
-    let flush_entry = |tokens: &mut Vec<String>,
-                       has_output_redirection: &mut bool,
-                       entries: &mut Vec<CommandEntry>| {
-        if let Some(program) = extract_program(tokens) {
-            entries.push(CommandEntry {
-                program,
-                has_output_redirection: *has_output_redirection,
-            });
-        }
-        tokens.clear();
-        *has_output_redirection = false;
-    };
-
-    for ch in command.chars() {
-        if escaped {
-            token.push(ch);
-            escaped = false;
-            continue;
-        }
-
-        if in_single {
-            if ch == '\'' {
-                in_single = false;
-            } else {
-                token.push(ch);
-            }
-            continue;
-        }
-
-        if in_double {
-            if ch == '"' {
-                in_double = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else {
-                token.push(ch);
-            }
-            continue;
-        }
-
-        match ch {
-            '\\' => escaped = true,
-            '\'' => in_single = true,
-            '"' => in_double = true,
-            '>' => {
-                has_output_redirection = true;
-                push_token(&mut token, &mut tokens);
-            }
-            ';' | '\n' | '|' | '&' => {
-                push_token(&mut token, &mut tokens);
-                flush_entry(&mut tokens, &mut has_output_redirection, &mut entries);
-            }
-            c if c.is_whitespace() => {
-                push_token(&mut token, &mut tokens);
-            }
-            _ => token.push(ch),
-        }
-    }
-
-    if in_single || in_double {
-        return Err("unterminated string quote".to_string());
-    }
-
-    if escaped {
-        token.push('\\');
-    }
-
-    push_token(&mut token, &mut tokens);
-    flush_entry(&mut tokens, &mut has_output_redirection, &mut entries);
-
-    Ok(entries)
 }
 
 fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, String> {
@@ -341,11 +93,7 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
 
     for part in parts {
         for fragment in part.split(',') {
-            let token = fragment
-                .trim()
-                .trim_matches('"')
-                .trim_matches('\'')
-                .to_ascii_lowercase();
+            let token = fragment.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
             if token.is_empty() {
                 continue;
             }
@@ -362,12 +110,13 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
                 "network" => {
                     permissions.insert(ShellPermission::Network);
                 }
-                "all" | "*" => grant_all = true,
+                "all" | "*" => {
+                    grant_all = true;
+                }
                 _ => {
-                    return Err(format!(
-                        "unknown shell permission '{}'. expected one of: read, write, delete, network",
-                        token
-                    ));
+                    return Err(
+                        format!("unknown shell permission '{}'. expected one of: read, write, delete, network", token)
+                    );
                 }
             }
         }
@@ -409,7 +158,7 @@ pub struct ShellStoreData {
 impl ShellStoreData {
     pub fn new_with_security(
         script_cwd: Option<PathBuf>,
-        shell_policy: ShellPolicy,
+        shell_policy: ShellPolicy
     ) -> wasmtime::Result<Self> {
         let mut p2_builder = WasiCtxBuilder::new();
         p2_builder.inherit_stdio();
@@ -450,9 +199,10 @@ fn memory_export(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<Me
 fn read_i32(
     memory: &Memory,
     caller: &Caller<'_, ShellStoreData>,
-    addr: i32,
+    addr: i32
 ) -> wasmtime::Result<i32> {
-    let offset = usize::try_from(addr)
+    let offset = usize
+        ::try_from(addr)
         .map_err(|_| wasmtime::Error::msg(format!("invalid read address: {}", addr)))?;
     let mut bytes = [0u8; 4];
     memory
@@ -465,9 +215,10 @@ fn write_i32(
     memory: &Memory,
     caller: &mut Caller<'_, ShellStoreData>,
     addr: i32,
-    value: i32,
+    value: i32
 ) -> wasmtime::Result<()> {
-    let offset = usize::try_from(addr)
+    let offset = usize
+        ::try_from(addr)
         .map_err(|_| wasmtime::Error::msg(format!("invalid write address: {}", addr)))?;
     memory
         .write(caller, offset, &value.to_le_bytes())
@@ -487,7 +238,7 @@ fn guest_alloc(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<Type
 
 pub fn read_lisp_vector(
     caller: &mut Caller<'_, ShellStoreData>,
-    vec_ptr: i32,
+    vec_ptr: i32
 ) -> wasmtime::Result<Vec<i32>> {
     let memory = memory_export(caller)?;
     let len = read_i32(&memory, &*caller, vec_ptr + VEC_LEN_OFFSET)?;
@@ -505,19 +256,19 @@ pub fn read_lisp_vector(
 
 pub fn write_lisp_vector(
     caller: &mut Caller<'_, ShellStoreData>,
-    values: &[i32],
+    values: &[i32]
 ) -> wasmtime::Result<i32> {
     let alloc = guest_alloc(caller)?;
-    let vec_len = i32::try_from(values.len())
+    let vec_len = i32
+        ::try_from(values.len())
         .map_err(|_| wasmtime::Error::msg("output too large for i32 vector length"))?;
     let header_ptr = alloc.call(&mut *caller, VEC_HEADER_SIZE)?;
     let data_ptr = alloc.call(&mut *caller, vec_len * 4)?;
     let memory = memory_export(caller)?;
 
     for (i, value) in values.iter().copied().enumerate() {
-        let offset = i32::try_from(i)
-            .map_err(|_| wasmtime::Error::msg("output index overflow"))?
-            * 4;
+        let offset =
+            i32::try_from(i).map_err(|_| wasmtime::Error::msg("output index overflow"))? * 4;
         write_i32(&memory, caller, data_ptr + offset, value)?;
     }
 
@@ -529,45 +280,336 @@ pub fn write_lisp_vector(
     Ok(header_ptr)
 }
 
-pub fn host_run_shell(
-    mut caller: Caller<'_, ShellStoreData>,
-    cmd_vec_ptr: i32,
+fn read_lisp_string(
+    caller: &mut Caller<'_, ShellStoreData>,
+    vec_ptr: i32
+) -> wasmtime::Result<String> {
+    let codes = read_lisp_vector(caller, vec_ptr)?;
+    Ok(
+        codes
+            .into_iter()
+            .map(|n| char::from_u32(n as u32).unwrap_or('\u{FFFD}'))
+            .collect::<String>()
+    )
+}
+
+fn write_lisp_string(
+    caller: &mut Caller<'_, ShellStoreData>,
+    value: &str
 ) -> wasmtime::Result<i32> {
-    let cmd_codes = read_lisp_vector(&mut caller, cmd_vec_ptr)?;
-    let cmd_str: String = cmd_codes
-        .into_iter()
-        .map(|n| char::from_u32(n as u32).unwrap_or('\u{FFFD}'))
-        .collect();
+    let codes = value
+        .chars()
+        .map(|c| i32::try_from(u32::from(c)).unwrap_or(0))
+        .collect::<Vec<_>>();
+    write_lisp_vector(caller, &codes)
+}
+
+fn resolve_target_path(caller: &Caller<'_, ShellStoreData>, raw: &str) -> PathBuf {
+    let candidate = Path::new(raw);
+    if candidate.is_absolute() {
+        return candidate.to_path_buf();
+    }
+
+    if let Some(script_cwd) = caller.data().script_cwd.as_ref() {
+        return script_cwd.join(candidate);
+    }
+
+    candidate.to_path_buf()
+}
+
+fn split_shell_like_args(input: &str) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+    let mut token = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    let push_token = |token: &mut String, args: &mut Vec<String>| {
+        if !token.is_empty() {
+            args.push(std::mem::take(token));
+        }
+    };
+
+    for ch in input.chars() {
+        if escaped {
+            token.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if in_single {
+            if ch == '\'' {
+                in_single = false;
+            } else {
+                token.push(ch);
+            }
+            continue;
+        }
+
+        if in_double {
+            if ch == '"' {
+                in_double = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else {
+                token.push(ch);
+            }
+            continue;
+        }
+
+        match ch {
+            '\\' => {
+                escaped = true;
+            }
+            '\'' => {
+                in_single = true;
+            }
+            '"' => {
+                in_double = true;
+            }
+            c if c.is_whitespace() => push_token(&mut token, &mut args),
+            _ => token.push(ch),
+        }
+    }
+
+    if in_single || in_double {
+        return Err("unterminated quoted string in curl args".to_string());
+    }
+
+    if escaped {
+        token.push('\\');
+    }
+
+    push_token(&mut token, &mut args);
+    Ok(args)
+}
+
+fn list_dir_text(path: &Path) -> Result<String, String> {
+    let entries = fs
+        ::read_dir(path)
+        .map_err(|e| format!("failed to read directory '{}': {}", path.display(), e))?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("failed to read dir entry: {}", e))?;
+        names.push(entry.file_name().to_string_lossy().into_owned());
+    }
+    names.sort();
+    if names.is_empty() {
+        Ok(String::new())
+    } else {
+        Ok(format!("{}\n", names.join("\n")))
+    }
+}
+
+pub fn host_list_dir(
+    mut caller: Caller<'_, ShellStoreData>,
+    path_vec_ptr: i32
+) -> wasmtime::Result<i32> {
+    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
     caller
         .data()
-        .shell_policy
-        .validate_command(&cmd_str)
+        .shell_policy.require(ShellPermission::Read, "list-dir!", &path)
         .map_err(wasmtime::Error::msg)?;
 
-    let mut command = Command::new("sh");
-    command.arg("-c").arg(&cmd_str);
+    let target = resolve_target_path(&caller, &path);
+    let output = list_dir_text(&target).map_err(wasmtime::Error::msg)?;
+    write_lisp_string(&mut caller, &output)
+}
+
+pub fn host_read_file(
+    mut caller: Caller<'_, ShellStoreData>,
+    path_vec_ptr: i32
+) -> wasmtime::Result<i32> {
+    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Read, "read!", &path)
+        .map_err(wasmtime::Error::msg)?;
+
+    let target = resolve_target_path(&caller, &path);
+    let output = fs
+        ::read_to_string(&target)
+        .map_err(|e|
+            wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
+        )?;
+    write_lisp_string(&mut caller, &output)
+}
+
+pub fn host_write_file(
+    mut caller: Caller<'_, ShellStoreData>,
+    path_vec_ptr: i32,
+    data_vec_ptr: i32
+) -> wasmtime::Result<i32> {
+    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
+    let data = read_lisp_string(&mut caller, data_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Write, "write!", &path)
+        .map_err(wasmtime::Error::msg)?;
+
+    let target = resolve_target_path(&caller, &path);
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs
+                ::create_dir_all(parent)
+                .map_err(|e| {
+                    wasmtime::Error::msg(
+                        format!("failed to create parent dirs '{}': {}", parent.display(), e)
+                    )
+                })?;
+        }
+    }
+    fs
+        ::write(&target, data.as_bytes())
+        .map_err(|e| {
+            wasmtime::Error::msg(format!("failed to write '{}': {}", target.display(), e))
+        })?;
+
+    Ok(0)
+}
+
+pub fn host_mkdir_p(
+    mut caller: Caller<'_, ShellStoreData>,
+    path_vec_ptr: i32
+) -> wasmtime::Result<i32> {
+    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Write, "mkdir!", &path)
+        .map_err(wasmtime::Error::msg)?;
+
+    let target = resolve_target_path(&caller, &path);
+    fs
+        ::create_dir_all(&target)
+        .map_err(|e|
+            wasmtime::Error::msg(format!("failed to mkdir '{}': {}", target.display(), e))
+        )?;
+    Ok(0)
+}
+
+pub fn host_delete(
+    mut caller: Caller<'_, ShellStoreData>,
+    path_vec_ptr: i32
+) -> wasmtime::Result<i32> {
+    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Delete, "delete!", &path)
+        .map_err(wasmtime::Error::msg)?;
+
+    let target = resolve_target_path(&caller, &path);
+    let meta = fs
+        ::symlink_metadata(&target)
+        .map_err(|e|
+            wasmtime::Error::msg(
+                format!("failed to inspect path '{}' for delete: {}", target.display(), e)
+            )
+        )?;
+    if meta.is_dir() {
+        fs
+            ::remove_dir_all(&target)
+            .map_err(|e|
+                wasmtime::Error::msg(
+                    format!("failed to delete directory '{}': {}", target.display(), e)
+                )
+            )?;
+    } else {
+        fs
+            ::remove_file(&target)
+            .map_err(|e|
+                wasmtime::Error::msg(
+                    format!("failed to delete file '{}': {}", target.display(), e)
+                )
+            )?;
+    }
+    Ok(0)
+}
+
+pub fn host_move(
+    mut caller: Caller<'_, ShellStoreData>,
+    src_vec_ptr: i32,
+    dst_vec_ptr: i32
+) -> wasmtime::Result<i32> {
+    let src = read_lisp_string(&mut caller, src_vec_ptr)?;
+    let dst = read_lisp_string(&mut caller, dst_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Write, "move!", &format!("{} -> {}", src, dst))
+        .map_err(wasmtime::Error::msg)?;
+
+    let src_path = resolve_target_path(&caller, &src);
+    let dst_path = resolve_target_path(&caller, &dst);
+    if let Some(parent) = dst_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs
+                ::create_dir_all(parent)
+                .map_err(|e|
+                    wasmtime::Error::msg(
+                        format!("failed to create destination dirs '{}': {}", parent.display(), e)
+                    )
+                )?;
+        }
+    }
+    fs
+        ::rename(&src_path, &dst_path)
+        .map_err(|e|
+            wasmtime::Error::msg(
+                format!(
+                    "failed to move '{}' to '{}': {}",
+                    src_path.display(),
+                    dst_path.display(),
+                    e
+                )
+            )
+        )?;
+
+    Ok(0)
+}
+
+pub fn host_curl(
+    mut caller: Caller<'_, ShellStoreData>,
+    args_vec_ptr: i32
+) -> wasmtime::Result<i32> {
+    let args_text = read_lisp_string(&mut caller, args_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Network, "curl!", &args_text)
+        .map_err(wasmtime::Error::msg)?;
+
+    let mut args = split_shell_like_args(&args_text).map_err(wasmtime::Error::msg)?;
+    if args.first().map(|x| x.to_ascii_lowercase()) == Some("curl".to_string()) {
+        args.remove(0);
+    }
+
+    let mut command = Command::new("curl");
+    command.args(&args);
     if let Some(script_cwd) = caller.data().script_cwd.as_ref() {
         command.current_dir(script_cwd);
     }
     let output = command
         .output()
-        .map_err(|e| wasmtime::Error::msg(format!("failed to run shell command: {}", e)))?;
+        .map_err(|e| wasmtime::Error::msg(format!("failed to run curl: {}", e)))?;
 
     let mut combined = String::new();
     combined.push_str(&String::from_utf8_lossy(&output.stdout));
     combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    if combined.is_empty() && !output.status.success() {
+        combined = format!("curl failed with status {}", output.status);
+    }
 
-    let output_codes = combined
-        .chars()
-        .map(|c| i32::try_from(u32::from(c)).unwrap_or(0))
-        .collect::<Vec<_>>();
-    write_lisp_vector(&mut caller, &output_codes)
+    write_lisp_string(&mut caller, &combined)
 }
 
 pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Result<()> {
     // Core wasm modules (like this backend) use WASIp1 imports.
     wasmtime_wasi::p1::add_to_linker_sync(linker, |state| &mut state.wasi_p1_ctx)?;
-    linker.func_wrap("host", "run_shell", host_run_shell)?;
+    linker.func_wrap("host", "list_dir", host_list_dir)?;
+    linker.func_wrap("host", "read_file", host_read_file)?;
+    linker.func_wrap("host", "write_file", host_write_file)?;
+    linker.func_wrap("host", "mkdir_p", host_mkdir_p)?;
+    linker.func_wrap("host", "delete", host_delete)?;
+    linker.func_wrap("host", "move", host_move)?;
+    linker.func_wrap("host", "curl", host_curl)?;
     Ok(())
 }
 
@@ -581,7 +623,7 @@ mod tests {
         let mut args = vec!["alpha".to_string(), "--allow".to_string()];
         let policy = take_shell_policy_from_argv(&mut args).unwrap();
         assert_eq!(args, vec!["alpha".to_string()]);
-        assert!(policy.validate_command("ls").is_err());
+        assert!(policy.require(ShellPermission::Read, "read", "./x").is_err());
     }
 
     #[test]
@@ -590,31 +632,27 @@ mod tests {
             "main.fez".to_string(),
             "--allow".to_string(),
             "read".to_string(),
-            "write".to_string(),
+            "write".to_string()
         ];
         let policy = take_shell_policy_from_argv(&mut args).unwrap();
         assert_eq!(args, vec!["main.fez".to_string()]);
-        assert!(policy.validate_command("ls").is_ok());
-        assert!(policy.validate_command("mkdir demo").is_ok());
-        assert!(policy.validate_command("rm demo").is_err());
+        assert!(policy.require(ShellPermission::Read, "read", "./x").is_ok());
+        assert!(policy.require(ShellPermission::Write, "mkdir", "./x").is_ok());
+        assert!(policy.require(ShellPermission::Delete, "delete", "./x").is_err());
     }
 
     #[test]
     fn parse_policy_rejects_unknown_permission() {
-        let mut args = vec![
-            "main.fez".to_string(),
-            "--allow".to_string(),
-            "foo".to_string(),
-        ];
+        let mut args = vec!["main.fez".to_string(), "--allow".to_string(), "foo".to_string()];
         let err = take_shell_policy_from_argv(&mut args).unwrap_err();
         assert!(err.contains("unknown shell permission 'foo'"));
     }
 
     #[test]
-    fn disabled_policy_blocks_shell() {
+    fn disabled_policy_blocks_operations() {
         let policy = ShellPolicy::disabled();
-        let err = policy.validate_command("ls").unwrap_err();
-        assert!(err.contains("denied command: ls"));
+        let err = policy.require(ShellPermission::Read, "read", "./x").unwrap_err();
+        assert!(err.contains("host io is disabled"));
     }
 
     #[test]
@@ -622,16 +660,8 @@ mod tests {
         let mut perms = HashSet::new();
         perms.insert(ShellPermission::Read);
         let policy = ShellPolicy::enabled(perms);
-        assert!(policy.validate_command("ls -la").is_ok());
-        assert!(policy.validate_command("mkdir a").is_err());
-        assert!(policy.validate_command("curl https://example.com").is_err());
-    }
-
-    #[test]
-    fn write_redirection_needs_write_permission() {
-        let mut perms = HashSet::new();
-        perms.insert(ShellPermission::Read);
-        let policy = ShellPolicy::enabled(perms);
-        assert!(policy.validate_command("echo hi > out.txt").is_err());
+        assert!(policy.require(ShellPermission::Read, "list-dir", ".").is_ok());
+        assert!(policy.require(ShellPermission::Write, "mkdir", "./x").is_err());
+        assert!(policy.require(ShellPermission::Network, "curl", "-sL").is_err());
     }
 }

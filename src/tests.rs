@@ -105,7 +105,8 @@ Concequent and alternative must match types
             ),
         ];
 
-        for (inp, out) in &test_cases {
+        for (idx, (inp, out)) in test_cases.iter().enumerate() {
+            eprintln!("test_correctness case {}", idx);
             let exprs = crate::parser::parse(inp).unwrap();
 
             if let Some(expr) = exprs.first() {

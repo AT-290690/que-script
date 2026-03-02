@@ -51,8 +51,7 @@ enum VecElemKind {
 }
 
 fn builtin_fn_tag(name: &str) -> Option<i32> {
-    let core = name.rsplit('/').next().unwrap_or(name);
-    match core {
+    match name {
         "+" | "+#" => Some(1),
         "-" | "-#" => Some(2),
         "*" | "*#" => Some(3),
@@ -273,6 +272,13 @@ fn is_special_word(w: &str) -> bool {
             "pop!" |
             "loop" |
             "loop-finish" |
+            "curl!" |
+            "read!" |
+            "write!" |
+            "delete!" |
+            "move!" |
+            "list-dir!" |
+            "mkdir!" |
             "+" |
             "+#" |
             "+." |
@@ -314,7 +320,6 @@ fn is_special_word(w: &str) -> bool {
             "~" |
             "Int->Float" |
             "Float->Int" |
-            "shell" |
             "true" |
             "false"
     )
@@ -3998,20 +4003,90 @@ fn compile_fast_cell_helper(
 }
 
 #[cfg(feature = "shell")]
-fn compile_shell_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+fn compile_host_unary_string_call(
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    op_name: &str,
+    host_symbol: &str,
+) -> Result<String, String> {
     if node.children.len() != 2 {
-        return Err("shell expects exactly one [Char] argument".to_string());
+        return Err(format!("{op_name} expects exactly one [Char] argument"));
     }
     let arg = compile_expr(
-        node.children.get(1).ok_or_else(|| "shell missing argument".to_string())?,
+        node.children
+            .get(1)
+            .ok_or_else(|| format!("{op_name} missing argument"))?,
         ctx
     )?;
-    Ok(format!("{arg}\ncall $host_run_shell"))
+    Ok(format!("{arg}\ncall ${host_symbol}"))
+}
+
+#[cfg(feature = "shell")]
+fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if node.children.len() != 3 {
+        return Err("write! expects exactly two [Char] arguments".to_string());
+    }
+    let path = compile_expr(
+        node.children.get(1).ok_or_else(|| "write! missing path".to_string())?,
+        ctx
+    )?;
+    let data = compile_expr(
+        node.children
+            .get(2)
+            .ok_or_else(|| "write! missing content".to_string())?,
+        ctx
+    )?;
+    Ok(format!("{path}\n{data}\ncall $host_write_file"))
+}
+
+#[cfg(feature = "shell")]
+fn compile_host_binary_string_call(
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    op_name: &str,
+    host_symbol: &str,
+) -> Result<String, String> {
+    if node.children.len() != 3 {
+        return Err(format!("{op_name} expects exactly two [Char] arguments"));
+    }
+    let left = compile_expr(
+        node.children
+            .get(1)
+            .ok_or_else(|| format!("{op_name} missing first argument"))?,
+        ctx
+    )?;
+    let right = compile_expr(
+        node.children
+            .get(2)
+            .ok_or_else(|| format!("{op_name} missing second argument"))?,
+        ctx
+    )?;
+    Ok(format!("{left}\n{right}\ncall ${host_symbol}"))
 }
 
 #[cfg(not(feature = "shell"))]
-fn compile_shell_call(_node: &TypedExpression, _ctx: &Ctx<'_>) -> Result<String, String> {
-    Err("shell requires enabling the 'shell' feature".to_string())
+fn compile_host_unary_string_call(
+    _node: &TypedExpression,
+    _ctx: &Ctx<'_>,
+    op_name: &str,
+    _host_symbol: &str,
+) -> Result<String, String> {
+    Err(format!("{op_name} requires enabling the 'shell' feature"))
+}
+
+#[cfg(not(feature = "shell"))]
+fn compile_host_write_call(_node: &TypedExpression, _ctx: &Ctx<'_>) -> Result<String, String> {
+    Err("write! requires enabling the 'shell' feature".to_string())
+}
+
+#[cfg(not(feature = "shell"))]
+fn compile_host_binary_string_call(
+    _node: &TypedExpression,
+    _ctx: &Ctx<'_>,
+    op_name: &str,
+    _host_symbol: &str,
+) -> Result<String, String> {
+    Err(format!("{op_name} requires enabling the 'shell' feature"))
 }
 
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -4432,9 +4507,10 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                 return Ok("i32.const 0".to_string());
             }
             match &items[0] {
-                Expression::Word(op) =>
-                    match op.as_str() {
-                        _ if ctx.locals.contains_key(op) => compile_dynamic_call(node, ctx),
+                Expression::Word(op) => {
+                    let op_full = op.as_str();
+                    match op_full {
+                        _ if ctx.locals.contains_key(op_full) => compile_dynamic_call(node, ctx),
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
@@ -4472,7 +4548,38 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "pop!" => compile_pop(node, ctx),
                         "loop" => compile_loop(node, ctx),
                         "loop-finish" => compile_loop_finish(node, ctx),
-                        "shell" => compile_shell_call(node, ctx),
+                        "list-dir!" => compile_host_unary_string_call(
+                            node,
+                            ctx,
+                            "list-dir!",
+                            "host_list_dir"
+                        ),
+                        "read!" => compile_host_unary_string_call(
+                            node,
+                            ctx,
+                            "read!",
+                            "host_read_file"
+                        ),
+                        "mkdir!" => compile_host_unary_string_call(
+                            node,
+                            ctx,
+                            "mkdir!",
+                            "host_mkdir_p"
+                        ),
+                        "delete!" => compile_host_unary_string_call(
+                            node,
+                            ctx,
+                            "delete!",
+                            "host_delete"
+                        ),
+                        "curl!" => compile_host_unary_string_call(node, ctx, "curl!", "host_curl"),
+                        "write!" => compile_host_write_call(node, ctx),
+                        "move!" => compile_host_binary_string_call(
+                            node,
+                            ctx,
+                            "move!",
+                            "host_move"
+                        ),
                         "not" => {
                             let a = compile_expr(
                                 node.children.get(1).ok_or_else(|| "not missing arg".to_string())?,
@@ -4512,8 +4619,9 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 .map(|n| compile_expr(n, ctx))
                                 .unwrap_or_else(|| Ok("i32.const 0".to_string())),
                         op if is_special_word(op) => emit_builtin(op, node, ctx),
-                        _ => compile_call(node, op, ctx),
+                        _ => compile_call(node, op_full, ctx),
                     }
+                }
                 _ => {
                     Err("Higher-order call heads are not yet supported in wasm backend".to_string())
                 }
@@ -4539,12 +4647,23 @@ fn collect_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
     }
 }
 
-fn typed_expr_uses_shell(node: &TypedExpression) -> bool {
+fn typed_expr_uses_host_io(node: &TypedExpression) -> bool {
     match &node.expr {
-        Expression::Apply(items) if !items.is_empty() =>
-            matches!(items.first(), Some(Expression::Word(w)) if w == "shell") ||
-                node.children.iter().any(typed_expr_uses_shell),
-        _ => node.children.iter().any(typed_expr_uses_shell),
+        Expression::Apply(items) if !items.is_empty() => {
+            let uses_here = if let Some(Expression::Word(op)) = items.first() {
+                op == "curl!" ||
+                    op == "read!" ||
+                    op == "write!" ||
+                    op == "list-dir!" ||
+                    op == "mkdir!" ||
+                    op == "delete!" ||
+                    op == "move!"
+            } else {
+                false
+            };
+            uses_here || node.children.iter().any(typed_expr_uses_host_io)
+        }
+        _ => node.children.iter().any(typed_expr_uses_host_io),
     }
 }
 
@@ -5284,7 +5403,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         }
         _ => (HashMap::new(), typed_ast.expr.clone(), typed_ast.clone()),
     };
-    let _needs_shell_host = typed_expr_uses_shell(typed_ast);
+    let _needs_host_io = typed_expr_uses_host_io(typed_ast);
 
     let mut needed = HashSet::new();
     let mut bound = HashSet::new();
@@ -5701,9 +5820,27 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
     wat.push_str("(module\n");
     #[cfg(feature = "shell")]
-    if _needs_shell_host {
+    if _needs_host_io {
         wat.push_str(
-            "  (import \"host\" \"run_shell\" (func $host_run_shell (param i32) (result i32)))\n"
+            "  (import \"host\" \"list_dir\" (func $host_list_dir (param i32) (result i32)))\n"
+        );
+        wat.push_str(
+            "  (import \"host\" \"read_file\" (func $host_read_file (param i32) (result i32)))\n"
+        );
+        wat.push_str(
+            "  (import \"host\" \"write_file\" (func $host_write_file (param i32 i32) (result i32)))\n"
+        );
+        wat.push_str(
+            "  (import \"host\" \"mkdir_p\" (func $host_mkdir_p (param i32) (result i32)))\n"
+        );
+        wat.push_str(
+            "  (import \"host\" \"delete\" (func $host_delete (param i32) (result i32)))\n"
+        );
+        wat.push_str(
+            "  (import \"host\" \"move\" (func $host_move (param i32 i32) (result i32)))\n"
+        );
+        wat.push_str(
+            "  (import \"host\" \"curl\" (func $host_curl (param i32) (result i32)))\n"
         );
     }
     for name in &cached_value_defs {

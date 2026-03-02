@@ -599,18 +599,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fez-rs"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "flate2",
- "wasm-bindgen",
- "wasmtime",
- "wasmtime-wasi",
- "wat",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1298,6 +1286,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "que"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "flate2",
+ "wasm-bindgen",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wat",
 ]
 
 [[package]]
