@@ -229,8 +229,7 @@ impl ServerState {
         let doc = self.documents.get(uri)?;
 
         if let Some((literal_type, literal_range)) = literal_type_at_position(&doc.text, position) {
-            let literal_text = text_for_range(&doc.text, literal_range).unwrap_or_default();
-            let value = format!("```que\n{} : {}\n```", literal_text, literal_type);
+            let value = format_literal_hover(&doc.text, literal_range, &literal_type);
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
@@ -504,19 +503,23 @@ fn analyze_document_text(
     let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();
     let mut user_bound_symbols = HashSet::new();
     let mut form_scoped_symbols = Vec::new();
+    let parsed_exprs = parse_user_exprs_for_symbol_collection(text);
+    if let Some(exprs) = &parsed_exprs {
+        collect_user_bound_symbols_from_exprs(exprs, &mut user_bound_symbols);
+    }
+    let user_form_count = parsed_exprs
+        .as_ref()
+        .map(|exprs| exprs.len())
+        .unwrap_or_else(|| top_level_form_ranges(text).len());
 
-    let mut analysis_source = text.to_string();
-    let parsed_exprs = match que::parser::parse(text) {
-        Ok(exprs) => exprs,
-        Err(parse_err) => {
-            diagnostics.push(parse_error_to_diagnostic(text, &parse_err));
+    let program = match que::parser::merge_std_and_program(text, std_defs.to_vec()) {
+        Ok(expr) => expr,
+        Err(primary_err) => {
             let repaired = repair_source_for_analysis(text);
-            match que::parser::parse(&repaired) {
-                Ok(exprs) => {
-                    analysis_source = repaired;
-                    exprs
-                }
+            match que::parser::merge_std_and_program(&repaired, std_defs.to_vec()) {
+                Ok(expr) => expr,
                 Err(_) => {
+                    diagnostics.push(make_error_diagnostic(text, primary_err));
                     return DocAnalysis {
                         text: text.to_string(),
                         diagnostics,
@@ -529,28 +532,12 @@ fn analyze_document_text(
             }
         }
     };
-    collect_user_bound_symbols_from_exprs(&parsed_exprs, &mut user_bound_symbols);
-
-    let program = match que::parser::merge_std_and_program(&analysis_source, std_defs.to_vec()) {
-        Ok(expr) => expr,
-        Err(err) => {
-            diagnostics.push(make_error_diagnostic(text, err));
-            return DocAnalysis {
-                text: text.to_string(),
-                diagnostics,
-                symbol_types: HashMap::new(),
-                let_binding_types: HashMap::new(),
-                user_bound_symbols,
-                form_scoped_symbols,
-            };
-        }
-    };
 
     match infer_with_builtins_typed(&program, (base_env.clone(), base_next_id)) {
         Ok((_typ, typed)) => {
             collect_symbol_types(&typed, &mut symbol_types_raw);
             collect_let_binding_types(&typed, &mut let_binding_types_raw);
-            form_scoped_symbols = build_form_scoped_analyses(text, parsed_exprs.len(), &typed);
+            form_scoped_symbols = build_form_scoped_analyses(text, user_form_count, &typed);
         }
         Err(err) => diagnostics.push(make_error_diagnostic(text, err)),
     }
@@ -572,6 +559,73 @@ fn analyze_document_text(
         user_bound_symbols,
         form_scoped_symbols,
     }
+}
+
+fn parse_user_exprs_for_symbol_collection(text: &str) -> Option<Vec<Expression>> {
+    let masked = mask_literals_for_structural_parse(text);
+    if let Ok(exprs) = que::parser::parse(&masked) {
+        return Some(exprs);
+    }
+
+    let repaired_masked = repair_source_for_analysis(&masked);
+    que::parser::parse(&repaired_masked).ok()
+}
+
+fn mask_literals_for_structural_parse(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_comment = false;
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut string_id = 0usize;
+    let mut char_id = 0usize;
+
+    for ch in text.chars() {
+        if in_comment {
+            out.push(ch);
+            if ch == '\n' {
+                in_comment = false;
+            }
+            continue;
+        }
+
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if in_char {
+            if ch == '\'' {
+                in_char = false;
+            }
+            continue;
+        }
+
+        match ch {
+            ';' => {
+                in_comment = true;
+                out.push(ch);
+            }
+            '"' => {
+                out.push(' ');
+                out.push_str(&format!("__STR{}__", string_id));
+                out.push(' ');
+                string_id += 1;
+                in_string = true;
+            }
+            '\'' => {
+                out.push(' ');
+                out.push_str(&format!("__CHR{}__", char_id));
+                out.push(' ');
+                char_id += 1;
+                in_char = true;
+            }
+            _ => out.push(ch),
+        }
+    }
+
+    out
 }
 
 fn analyze_document_text_safe(
@@ -932,22 +986,6 @@ fn should_replace_type(existing: &Type, candidate: &Type) -> bool {
             candidate_score > existing_score
         }
     }
-}
-
-fn parse_error_to_diagnostic(text: &str, message: &str) -> Diagnostic {
-    if let Some(token_index) = extract_parse_error_token_index(message) {
-        let spans = tokenize_with_ranges(text);
-        if let Some((start, end)) = spans.get(token_index) {
-            return Diagnostic {
-                range: Range::new(*start, *end),
-                severity: Some(DiagnosticSeverity::ERROR),
-                message: message.to_string(),
-                source: Some("que-parse".to_string()),
-                ..Diagnostic::default()
-            };
-        }
-    }
-    make_error_diagnostic(text, message.to_string())
 }
 
 fn make_error_diagnostic(text: &str, message: String) -> Diagnostic {
@@ -1438,81 +1476,6 @@ fn position_before(a: Position, b: Position) -> bool {
     a.line < b.line || (a.line == b.line && a.character < b.character)
 }
 
-fn extract_parse_error_token_index(message: &str) -> Option<usize> {
-    let prefix = "Error parsing expression at token index ";
-    let rest = message.strip_prefix(prefix)?;
-    let number = rest.split(':').next()?.trim();
-    number.parse::<usize>().ok()
-}
-
-fn tokenize_with_ranges(text: &str) -> Vec<(Position, Position)> {
-    let mut tokens = Vec::new();
-    let mut line = 0_u32;
-    let mut col = 0_u32;
-
-    let mut buf_start: Option<Position> = None;
-    let mut buf_len: u32 = 0;
-
-    let flush_buffer = |tokens: &mut Vec<(Position, Position)>,
-                        buf_start: &mut Option<Position>,
-                        buf_len: &mut u32| {
-        if let Some(start) = *buf_start {
-            let end = Position::new(start.line, start.character + *buf_len);
-            tokens.push((start, end));
-            *buf_start = None;
-            *buf_len = 0;
-        }
-    };
-
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0_usize;
-    while i < chars.len() {
-        let ch = chars[i];
-        match ch {
-            ';' => {
-                flush_buffer(&mut tokens, &mut buf_start, &mut buf_len);
-                while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
-                    col += 1;
-                }
-                continue;
-            }
-            '(' | ')' => {
-                flush_buffer(&mut tokens, &mut buf_start, &mut buf_len);
-                let start = Position::new(line, col);
-                let end = Position::new(line, col + 1);
-                tokens.push((start, end));
-                i += 1;
-                col += 1;
-                continue;
-            }
-            '\n' => {
-                flush_buffer(&mut tokens, &mut buf_start, &mut buf_len);
-                i += 1;
-                line += 1;
-                col = 0;
-                continue;
-            }
-            c if c.is_whitespace() => {
-                flush_buffer(&mut tokens, &mut buf_start, &mut buf_len);
-                i += 1;
-                col += 1;
-                continue;
-            }
-            _ => {
-                if buf_start.is_none() {
-                    buf_start = Some(Position::new(line, col));
-                }
-                buf_len += 1;
-                i += 1;
-                col += 1;
-            }
-        }
-    }
-    flush_buffer(&mut tokens, &mut buf_start, &mut buf_len);
-    tokens
-}
-
 fn kind_for_signature(signature: &str) -> CompletionItemKind {
     if signature.contains("->") {
         CompletionItemKind::FUNCTION
@@ -1741,6 +1704,63 @@ fn literal_type_at_position(text: &str, position: Position) -> Option<(String, R
     }
 
     None
+}
+
+fn format_literal_hover(text: &str, range: Range, literal_type: &str) -> String {
+    if literal_type == "[Char]" {
+        if let Some((preview, len, truncated)) = preview_string_literal(text, range, 100) {
+            let suffix = if truncated { "..." } else { "" };
+            return format!(
+                "```que\n\"{}{}\" : [Char]\nlen: {}\n```",
+                preview,
+                suffix,
+                len
+            );
+        }
+    }
+
+    let literal_text = text_for_range(text, range).unwrap_or_default();
+    format!("```que\n{} : {}\n```", literal_text, literal_type)
+}
+
+fn preview_string_literal(
+    text: &str,
+    range: Range,
+    max_chars: usize,
+) -> Option<(String, usize, bool)> {
+    let start = position_to_byte_offset(text, range.start)?;
+    let end = position_to_byte_offset(text, range.end)?;
+    let raw = text.get(start..end)?;
+    let content = raw
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(raw);
+
+    let mut preview = String::new();
+    let mut len = 0usize;
+    let mut truncated = false;
+
+    for ch in content.chars() {
+        len += 1;
+        if len <= max_chars {
+            append_escaped_preview_char(&mut preview, ch);
+        } else {
+            truncated = true;
+        }
+    }
+
+    Some((preview, len, truncated))
+}
+
+fn append_escaped_preview_char(out: &mut String, ch: char) {
+    match ch {
+        '\n' => out.push_str("\\n"),
+        '\r' => out.push_str("\\r"),
+        '\t' => out.push_str("\\t"),
+        '"' => out.push_str("\\\""),
+        '\\' => out.push_str("\\\\"),
+        _ => out.push(ch),
+    }
 }
 
 fn find_enclosing_string_literal(text: &str, offset: usize) -> Option<(usize, usize)> {
