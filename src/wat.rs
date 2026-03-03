@@ -4002,6 +4002,7 @@ fn compile_fast_cell_helper(
     }
 }
 
+#[cfg(feature = "io")]
 fn compile_host_unary_string_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
@@ -4020,6 +4021,7 @@ fn compile_host_unary_string_call(
     Ok(format!("{arg}\ncall ${host_symbol}"))
 }
 
+#[cfg(feature = "io")]
 fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     if node.children.len() != 3 {
         return Err("write! expects exactly two [Char] arguments".to_string());
@@ -4037,6 +4039,7 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     Ok(format!("{path}\n{data}\ncall $host_write_file"))
 }
 
+#[cfg(feature = "io")]
 fn compile_host_binary_string_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
@@ -4059,6 +4062,31 @@ fn compile_host_binary_string_call(
         ctx
     )?;
     Ok(format!("{left}\n{right}\ncall ${host_symbol}"))
+}
+
+#[cfg(not(feature = "io"))]
+fn compile_host_unary_string_call(
+    _node: &TypedExpression,
+    _ctx: &Ctx<'_>,
+    op_name: &str,
+    _host_symbol: &str,
+) -> Result<String, String> {
+    Err(format!("{op_name} requires enabling the 'io' feature"))
+}
+
+#[cfg(not(feature = "io"))]
+fn compile_host_write_call(_node: &TypedExpression, _ctx: &Ctx<'_>) -> Result<String, String> {
+    Err("write! requires enabling the 'io' feature".to_string())
+}
+
+#[cfg(not(feature = "io"))]
+fn compile_host_binary_string_call(
+    _node: &TypedExpression,
+    _ctx: &Ctx<'_>,
+    op_name: &str,
+    _host_symbol: &str,
+) -> Result<String, String> {
+    Err(format!("{op_name} requires enabling the 'io' feature"))
 }
 
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {

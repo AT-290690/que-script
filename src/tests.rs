@@ -134,6 +134,7 @@ Concequent and alternative must match types
     }
 
     #[test]
+    #[cfg(feature = "runtime")]
     fn test_correctness() {
         let test_cases = [
             ("(+ 1 2)", "3"),
@@ -2835,13 +2836,32 @@ nil)))
                                 match crate::wat::compile_program_to_wat(&exprs) {
                                     Ok(result) => {
                                         let argv: Vec<String> = Vec::new();
-                                        match
-                                            crate::shell::run_wat_text(
-                                                &result,
+                                        #[cfg(feature = "io")]
+                                        let store_data = crate::shell::ShellStoreData
+                                            ::new_with_security(
                                                 None,
-                                                crate::shell::ShellPolicy::disabled(),
-                                                &argv
+                                                crate::shell::ShellPolicy::disabled()
                                             )
+                                            .map_err(|e| e.to_string())
+                                            .unwrap();
+                                        #[cfg(feature = "io")]
+                                        let run_result = crate::runtime::run_wat_text(
+                                                &result,
+                                                store_data,
+                                                &argv,
+                                                |linker|
+                                                    crate::shell
+                                                        ::add_shell_to_linker(linker)
+                                                        .map_err(|e| e.to_string())
+                                            );
+                                        #[cfg(not(feature = "io"))]
+                                        let run_result = crate::runtime::run_wat_text(
+                                            &result,
+                                            (),
+                                            &argv,
+                                            |_linker| Ok(())
+                                        );
+                                        match run_result
                                         {
                                             Ok(res) =>
                                                 assert_eq!(format!("{}", res), *out, "Solution"),
