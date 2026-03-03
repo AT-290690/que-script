@@ -13,14 +13,19 @@ io = ["runtime", "dep:wasmtime-wasi"]
 path = "src/lib.rs"
 
 [[bin]]
-name = "que-io"
-path = "src/bin/que-io.rs"
+name = "queio"
+path = "src/bin/queio.rs"
 required-features = ["io"]
 
 [[bin]]
-name = "que-compiler"
-path = "src/bin/que-compiler.rs"
+name = "quec"
+path = "src/bin/quec.rs"
 required-features = ["compiler"]
+
+[[bin]]
+name = "quer"
+path = "src/bin/quer.rs"
+required-features = ["runtime"]
 
 [dependencies]
 wasm-bindgen = "0.2"
