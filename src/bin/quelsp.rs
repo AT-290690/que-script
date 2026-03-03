@@ -25,6 +25,7 @@ struct DocAnalysis {
     text: String,
     diagnostics: Vec<Diagnostic>,
     symbol_types: HashMap<String, String>,
+    let_binding_types: HashMap<String, String>,
     user_bound_symbols: HashSet<String>,
     form_scoped_symbols: Vec<FormScopedAnalysis>,
 }
@@ -33,6 +34,7 @@ struct DocAnalysis {
 struct FormScopedAnalysis {
     range: Range,
     symbol_types: HashMap<String, String>,
+    let_binding_types: HashMap<String, String>,
 }
 
 struct ServerState {
@@ -224,7 +226,37 @@ impl ServerState {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let doc = self.documents.get(uri)?;
+
+        if let Some((literal_type, literal_range)) = literal_type_at_position(&doc.text, position) {
+            let literal_text = text_for_range(&doc.text, literal_range).unwrap_or_default();
+            let value = format!("```que\n{} : {}\n```", literal_text, literal_type);
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value,
+                }),
+                range: Some(literal_range),
+            });
+        }
+
         let (symbol, symbol_range) = symbol_at_position(&doc.text, position)?;
+        if is_let_binding_name_at_position(&doc.text, symbol_range, &symbol) {
+            let declaration_type = self
+                .form_let_signatures_at(doc, position)
+                .and_then(|m| m.get(&symbol))
+                .or_else(|| doc.let_binding_types.get(&symbol))
+                .or_else(|| self.global_signatures.get(&symbol))?;
+
+            let value = format!("```que\n{} : {}\n```", symbol, declaration_type);
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value,
+                }),
+                range: Some(symbol_range),
+            });
+        }
+
         let type_info = self.resolve_signature_for_doc(doc, &symbol, Some(position))?;
 
         let value = format!("```que\n{} : {}\n```", symbol, type_info);
@@ -319,6 +351,17 @@ impl ServerState {
             .iter()
             .find(|form| range_contains_position(&form.range, position))
             .map(|form| &form.symbol_types)
+    }
+
+    fn form_let_signatures_at<'a>(
+        &'a self,
+        doc: &'a DocAnalysis,
+        position: Position,
+    ) -> Option<&'a HashMap<String, String>> {
+        doc.form_scoped_symbols
+            .iter()
+            .find(|form| range_contains_position(&form.range, position))
+            .map(|form| &form.let_binding_types)
     }
 }
 
@@ -457,6 +500,7 @@ fn analyze_document_text(
 ) -> DocAnalysis {
     let mut diagnostics = Vec::new();
     let mut symbol_types_raw: HashMap<String, Type> = HashMap::new();
+    let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();
     let mut user_bound_symbols = HashSet::new();
     let mut form_scoped_symbols = Vec::new();
 
@@ -476,6 +520,7 @@ fn analyze_document_text(
                         text: text.to_string(),
                         diagnostics,
                         symbol_types: HashMap::new(),
+                        let_binding_types: HashMap::new(),
                         user_bound_symbols,
                         form_scoped_symbols,
                     };
@@ -493,6 +538,7 @@ fn analyze_document_text(
                 text: text.to_string(),
                 diagnostics,
                 symbol_types: HashMap::new(),
+                let_binding_types: HashMap::new(),
                 user_bound_symbols,
                 form_scoped_symbols,
             };
@@ -502,6 +548,7 @@ fn analyze_document_text(
     match infer_with_builtins_typed(&program, (base_env.clone(), base_next_id)) {
         Ok((_typ, typed)) => {
             collect_symbol_types(&typed, &mut symbol_types_raw);
+            collect_let_binding_types(&typed, &mut let_binding_types_raw);
             form_scoped_symbols = build_form_scoped_analyses(text, parsed_exprs.len(), &typed);
         }
         Err(err) => diagnostics.push(make_error_diagnostic(text, err)),
@@ -511,11 +558,16 @@ fn analyze_document_text(
         .into_iter()
         .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
         .collect();
+    let let_binding_types: HashMap<String, String> = let_binding_types_raw
+        .into_iter()
+        .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
+        .collect();
 
     DocAnalysis {
         text: text.to_string(),
         diagnostics,
         symbol_types,
+        let_binding_types,
         user_bound_symbols,
         form_scoped_symbols,
     }
@@ -540,14 +592,21 @@ fn build_form_scoped_analyses(
     let mut out = Vec::with_capacity(count);
     for idx in 0..count {
         let mut raw_symbols: HashMap<String, Type> = HashMap::new();
+        let mut raw_let_bindings: HashMap<String, Type> = HashMap::new();
         collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
+        collect_let_binding_types(typed_user_forms[idx], &mut raw_let_bindings);
         let symbol_types = raw_symbols
+            .into_iter()
+            .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
+            .collect();
+        let let_binding_types = raw_let_bindings
             .into_iter()
             .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
             .collect();
         out.push(FormScopedAnalysis {
             range: form_ranges[idx],
             symbol_types,
+            let_binding_types,
         });
     }
 
@@ -1305,6 +1364,29 @@ fn end_position(text: &str) -> Position {
     Position::new(line, character)
 }
 
+fn position_to_byte_offset(text: &str, position: Position) -> Option<usize> {
+    let mut line = 0u32;
+    let mut col = 0u32;
+
+    for (idx, ch) in text.char_indices() {
+        if line == position.line && col == position.character {
+            return Some(idx);
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+
+    if line == position.line && col == position.character {
+        Some(text.len())
+    } else {
+        None
+    }
+}
+
 fn range_contains_position(range: &Range, position: Position) -> bool {
     position_at_or_after(position, range.start) && position_before(position, range.end)
 }
@@ -1439,4 +1521,355 @@ fn symbol_at_position(text: &str, position: Position) -> Option<(String, Range)>
 
 fn is_symbol_char(ch: char) -> bool {
     !ch.is_whitespace() && !matches!(ch, '(' | ')' | '[' | ']' | '{' | '}' | '"' | ';' | ',')
+}
+
+fn is_let_binding_name_at_position(text: &str, symbol_range: Range, symbol: &str) -> bool {
+    let Some(symbol_start) = position_to_byte_offset(text, symbol_range.start) else {
+        return false;
+    };
+    let Some(symbol_end) = position_to_byte_offset(text, symbol_range.end) else {
+        return false;
+    };
+    let Some(open) = find_enclosing_open_paren_before(text, symbol_start) else {
+        return false;
+    };
+    let Some(close) = find_matching_paren_byte(text, open) else {
+        return false;
+    };
+    if symbol_end > close + 1 {
+        return false;
+    }
+
+    let Some((head, _head_start, _head_end, after_head)) =
+        read_top_level_atom_token_in_list(text, open + 1, close)
+    else {
+        return false;
+    };
+    if head != "let" && head != "let*" {
+        return false;
+    }
+
+    let Some((name, name_start, name_end, _)) =
+        read_top_level_atom_token_in_list(text, after_head, close)
+    else {
+        return false;
+    };
+
+    name == symbol && name_start == symbol_start && name_end == symbol_end
+}
+
+fn find_enclosing_open_paren_before(text: &str, target: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let end = target.min(bytes.len());
+    let mut stack: Vec<(u8, usize)> = Vec::new();
+    let mut i = 0usize;
+    let mut in_string = false;
+    let mut in_comment = false;
+
+    while i < end {
+        let b = bytes[i];
+        if in_comment {
+            if b == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if !in_string && b == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+
+        if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_string = !in_string;
+            i += 1;
+            continue;
+        }
+
+        if in_string {
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'(' | b'[' => stack.push((b, i)),
+            b')' | b']' => {
+                let _ = stack.pop();
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    for (ch, idx) in stack.iter().rev() {
+        if *ch == b'(' {
+            return Some(*idx);
+        }
+    }
+    None
+}
+
+fn read_top_level_atom_token_in_list(
+    text: &str,
+    mut i: usize,
+    list_close: usize,
+) -> Option<(String, usize, usize, usize)> {
+    let bytes = text.as_bytes();
+    i = skip_ws_and_comments(text, i, list_close);
+    if i >= list_close || i >= bytes.len() {
+        return None;
+    }
+
+    if matches!(bytes[i], b'(' | b')' | b'[' | b']' | b'"') {
+        return None;
+    }
+
+    let start = i;
+    while i < list_close && i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_whitespace() || matches!(b, b';' | b'(' | b')' | b'[' | b']' | b'"') {
+            break;
+        }
+        i += 1;
+    }
+    if i <= start {
+        return None;
+    }
+
+    let token = text.get(start..i)?.to_string();
+    let next = skip_ws_and_comments(text, i, list_close);
+    Some((token, start, i, next))
+}
+
+fn skip_ws_and_comments(text: &str, mut i: usize, end: usize) -> usize {
+    let bytes = text.as_bytes();
+    while i < end && i < bytes.len() {
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b';' {
+            while i < end && i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        break;
+    }
+    i
+}
+
+fn literal_type_at_position(text: &str, position: Position) -> Option<(String, Range)> {
+    let offset = position_to_byte_offset(text, position)?;
+
+    if let Some((start, end)) = find_enclosing_string_literal(text, offset) {
+        return Some((
+            "[Char]".to_string(),
+            Range::new(
+                byte_offset_to_position(text, start),
+                byte_offset_to_position(text, end),
+            ),
+        ));
+    }
+
+    if let Some((start, end)) = find_enclosing_char_literal(text, offset) {
+        return Some((
+            "Char".to_string(),
+            Range::new(
+                byte_offset_to_position(text, start),
+                byte_offset_to_position(text, end),
+            ),
+        ));
+    }
+
+    if let Some((token, start, end)) = numeric_token_at_offset(text, offset) {
+        let typ = if is_float_token(&token) {
+            Some("Float")
+        } else if is_int_token(&token) {
+            Some("Int")
+        } else {
+            None
+        }?;
+        return Some((
+            typ.to_string(),
+            Range::new(
+                byte_offset_to_position(text, start),
+                byte_offset_to_position(text, end),
+            ),
+        ));
+    }
+
+    None
+}
+
+fn find_enclosing_string_literal(text: &str, offset: usize) -> Option<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    let mut in_comment = false;
+    let mut in_string = false;
+    let mut start = 0usize;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_comment {
+            if b == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if !in_string && b == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+
+        if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            if !in_string {
+                in_string = true;
+                start = i;
+            } else {
+                let end = i + 1;
+                if offset >= start && offset < end {
+                    return Some((start, end));
+                }
+                in_string = false;
+            }
+        }
+
+        i += 1;
+    }
+
+    if in_string && offset >= start {
+        return Some((start, bytes.len()));
+    }
+    None
+}
+
+fn find_enclosing_char_literal(text: &str, offset: usize) -> Option<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    let mut in_comment = false;
+    let mut in_string = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_comment {
+            if b == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if !in_string && b == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+
+        if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_string = !in_string;
+            i += 1;
+            continue;
+        }
+
+        if !in_string && b == b'\'' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\'' {
+                    let end = i + 1;
+                    if offset >= start && offset < end {
+                        return Some((start, end));
+                    }
+                    i = end;
+                    break;
+                }
+                if bytes[i] == b'\n' {
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        i += 1;
+    }
+    None
+}
+
+fn numeric_token_at_offset(text: &str, offset: usize) -> Option<(String, usize, usize)> {
+    if text.is_empty() {
+        return None;
+    }
+    let bytes = text.as_bytes();
+    let mut idx = offset.min(bytes.len().saturating_sub(1));
+
+    if idx < bytes.len() && !is_numeric_token_byte(bytes[idx]) {
+        if idx > 0 && is_numeric_token_byte(bytes[idx - 1]) {
+            idx -= 1;
+        } else {
+            return None;
+        }
+    }
+
+    let mut start = idx;
+    while start > 0 && is_numeric_token_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = idx + 1;
+    while end < bytes.len() && is_numeric_token_byte(bytes[end]) {
+        end += 1;
+    }
+
+    let token = text.get(start..end)?.to_string();
+    Some((token, start, end))
+}
+
+fn is_numeric_token_byte(b: u8) -> bool {
+    b.is_ascii_digit() || b == b'.' || b == b'-'
+}
+
+fn is_int_token(token: &str) -> bool {
+    let bytes = token.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let start = if bytes[0] == b'-' { 1 } else { 0 };
+    start < bytes.len() && bytes[start..].iter().all(|b| b.is_ascii_digit())
+}
+
+fn is_float_token(token: &str) -> bool {
+    let bytes = token.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let start = if bytes[0] == b'-' { 1 } else { 0 };
+    if start >= bytes.len() {
+        return false;
+    }
+    let slice = &bytes[start..];
+    let dot_count = slice.iter().filter(|&&b| b == b'.').count();
+    if dot_count != 1 {
+        return false;
+    }
+    if !slice.iter().all(|b| b.is_ascii_digit() || *b == b'.') {
+        return false;
+    }
+    let dot_idx = slice.iter().position(|&b| b == b'.').unwrap_or(0);
+    let left = &slice[..dot_idx];
+    let right = &slice[dot_idx + 1..];
+    (!left.is_empty() || !right.is_empty())
+        && left.iter().all(|b| b.is_ascii_digit())
+        && right.iter().all(|b| b.is_ascii_digit())
+}
+
+fn text_for_range(text: &str, range: Range) -> Option<String> {
+    let start = position_to_byte_offset(text, range.start)?;
+    let end = position_to_byte_offset(text, range.end)?;
+    text.get(start..end).map(|s| s.to_string())
 }

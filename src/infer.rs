@@ -825,7 +825,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             if args.len() != 2 {
                 return Err(
                     format!(
-                        "Tuples can only store 2 values but got {{{}}}",
+                        "Tuples can only store 2 values but got ({})",
                         exprs
                             .iter()
                             .map(|e| e.to_lisp())
