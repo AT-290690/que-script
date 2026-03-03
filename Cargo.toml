@@ -9,6 +9,19 @@ compiler = ["dep:wat"]
 runtime = ["compiler", "dep:wasmtime"]
 io = ["runtime", "dep:wasmtime-wasi"]
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "que-io"
+path = "src/bin/que-io.rs"
+required-features = ["io"]
+
+[[bin]]
+name = "que-compiler"
+path = "src/bin/que-compiler.rs"
+required-features = ["compiler"]
+
 [dependencies]
 wasm-bindgen = "0.2"
 flate2 = "1.1.9"

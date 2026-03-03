@@ -1,27 +1,18 @@
 use std::collections::HashSet;
 use std::env;
 use std::fs;
-#[cfg(feature = "io")]
 use std::io;
 use std::path::{ Path, PathBuf };
-#[cfg(feature = "io")]
 use std::process::Command;
-#[cfg(feature = "io")]
 use wasmtime::{ Caller, Extern, Memory, TypedFunc };
 use wasmtime::Linker;
 use wasmtime_wasi::{ ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView };
 
-#[cfg(feature = "io")]
 const VEC_LEN_OFFSET: i32 = 0;
-#[cfg(feature = "io")]
 const VEC_CAP_OFFSET: i32 = 4;
-#[cfg(feature = "io")]
 const VEC_RC_OFFSET: i32 = 8;
-#[cfg(feature = "io")]
 const VEC_ELEM_REF_OFFSET: i32 = 12;
-#[cfg(feature = "io")]
 const VEC_DATA_PTR_OFFSET: i32 = 16;
-#[cfg(feature = "io")]
 const VEC_HEADER_SIZE: i32 = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -196,7 +187,6 @@ impl WasiView for ShellStoreData {
     }
 }
 
-#[cfg(feature = "io")]
 fn memory_export(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<Memory> {
     caller
         .get_export("memory")
@@ -204,7 +194,6 @@ fn memory_export(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<Me
         .ok_or_else(|| wasmtime::Error::msg("guest export 'memory' not found"))
 }
 
-#[cfg(feature = "io")]
 fn read_i32(
     memory: &Memory,
     caller: &Caller<'_, ShellStoreData>,
@@ -220,7 +209,6 @@ fn read_i32(
     Ok(i32::from_le_bytes(bytes))
 }
 
-#[cfg(feature = "io")]
 fn write_i32(
     memory: &Memory,
     caller: &mut Caller<'_, ShellStoreData>,
@@ -235,7 +223,6 @@ fn write_i32(
         .map_err(|_| wasmtime::Error::msg(format!("out of bounds write at {}", addr)))
 }
 
-#[cfg(feature = "io")]
 fn guest_alloc(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<TypedFunc<i32, i32>> {
     for name in ["$alloc", "alloc"] {
         if let Some(func) = caller.get_export(name).and_then(Extern::into_func) {
@@ -247,7 +234,6 @@ fn guest_alloc(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<Type
     Err(wasmtime::Error::msg("guest export '$alloc'/'alloc' not found"))
 }
 
-#[cfg(feature = "io")]
 pub fn read_lisp_vector(
     caller: &mut Caller<'_, ShellStoreData>,
     vec_ptr: i32
@@ -266,7 +252,6 @@ pub fn read_lisp_vector(
     Ok(values)
 }
 
-#[cfg(feature = "io")]
 pub fn write_lisp_vector(
     caller: &mut Caller<'_, ShellStoreData>,
     values: &[i32]
@@ -293,7 +278,6 @@ pub fn write_lisp_vector(
     Ok(header_ptr)
 }
 
-#[cfg(feature = "io")]
 fn read_lisp_string(
     caller: &mut Caller<'_, ShellStoreData>,
     vec_ptr: i32
@@ -307,7 +291,6 @@ fn read_lisp_string(
     )
 }
 
-#[cfg(feature = "io")]
 fn write_lisp_string(
     caller: &mut Caller<'_, ShellStoreData>,
     value: &str
@@ -319,7 +302,6 @@ fn write_lisp_string(
     write_lisp_vector(caller, &codes)
 }
 
-#[cfg(feature = "io")]
 fn resolve_target_path(caller: &Caller<'_, ShellStoreData>, raw: &str) -> PathBuf {
     let candidate = Path::new(raw);
     if candidate.is_absolute() {
@@ -333,7 +315,6 @@ fn resolve_target_path(caller: &Caller<'_, ShellStoreData>, raw: &str) -> PathBu
     candidate.to_path_buf()
 }
 
-#[cfg(feature = "io")]
 fn split_shell_like_args(input: &str) -> Result<Vec<String>, String> {
     let mut args = Vec::new();
     let mut token = String::new();
@@ -401,7 +382,6 @@ fn split_shell_like_args(input: &str) -> Result<Vec<String>, String> {
     Ok(args)
 }
 
-#[cfg(feature = "io")]
 fn list_dir_text(path: &Path) -> Result<String, String> {
     let entries = fs
         ::read_dir(path)
@@ -419,7 +399,6 @@ fn list_dir_text(path: &Path) -> Result<String, String> {
     }
 }
 
-#[cfg(feature = "io")]
 pub fn host_list_dir(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32
@@ -435,7 +414,6 @@ pub fn host_list_dir(
     write_lisp_string(&mut caller, &output)
 }
 
-#[cfg(feature = "io")]
 pub fn host_read_file(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32
@@ -455,7 +433,6 @@ pub fn host_read_file(
     write_lisp_string(&mut caller, &output)
 }
 
-#[cfg(feature = "io")]
 pub fn host_write_file(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32,
@@ -489,7 +466,6 @@ pub fn host_write_file(
     Ok(0)
 }
 
-#[cfg(feature = "io")]
 pub fn host_mkdir_p(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32
@@ -509,7 +485,6 @@ pub fn host_mkdir_p(
     Ok(0)
 }
 
-#[cfg(feature = "io")]
 pub fn host_delete(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32
@@ -546,7 +521,6 @@ pub fn host_delete(
     Ok(0)
 }
 
-#[cfg(feature = "io")]
 pub fn host_move(
     mut caller: Caller<'_, ShellStoreData>,
     src_vec_ptr: i32,
@@ -588,7 +562,6 @@ pub fn host_move(
     Ok(0)
 }
 
-#[cfg(feature = "io")]
 pub fn host_curl(
     mut caller: Caller<'_, ShellStoreData>,
     args_vec_ptr: i32
@@ -626,16 +599,13 @@ pub fn host_curl(
 pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Result<()> {
     // Core wasm modules (like this backend) use WASIp1 imports.
     wasmtime_wasi::p1::add_to_linker_sync(linker, |state| &mut state.wasi_p1_ctx)?;
-    #[cfg(feature = "io")]
-    {
-        linker.func_wrap("host", "list_dir", host_list_dir)?;
-        linker.func_wrap("host", "read_file", host_read_file)?;
-        linker.func_wrap("host", "write_file", host_write_file)?;
-        linker.func_wrap("host", "mkdir_p", host_mkdir_p)?;
-        linker.func_wrap("host", "delete", host_delete)?;
-        linker.func_wrap("host", "move", host_move)?;
-        linker.func_wrap("host", "curl", host_curl)?;
-    }
+    linker.func_wrap("host", "list_dir", host_list_dir)?;
+    linker.func_wrap("host", "read_file", host_read_file)?;
+    linker.func_wrap("host", "write_file", host_write_file)?;
+    linker.func_wrap("host", "mkdir_p", host_mkdir_p)?;
+    linker.func_wrap("host", "delete", host_delete)?;
+    linker.func_wrap("host", "move", host_move)?;
+    linker.func_wrap("host", "curl", host_curl)?;
     Ok(())
 }
 
@@ -698,7 +668,7 @@ pub fn run_native_shell() -> Result<(), String> {
         return Err("missing file_path. Usage: fez-rs <script.fez> [arg ...]".to_string());
     };
     let mut argv: Vec<String> = args.iter().skip(2).cloned().collect();
-    let shell_policy = crate::shell
+    let shell_policy = crate::io
         ::take_shell_policy_from_argv(&mut argv)
         .map_err(|e| format!("invalid shell policy: {}", e))?;
 
