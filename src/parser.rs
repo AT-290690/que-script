@@ -1979,35 +1979,6 @@ impl Expression {
     }
 }
 
-pub fn build(program: &str) -> Result<Expression, String> {
-    match preprocess(&program) {
-        Ok(preprocessed) => {
-            let mut desugared = Vec::new();
-            let mut binding_counter = 0usize;
-
-            for expr in parse(&preprocessed).unwrap() {
-                match desugar_with_counter(expr, &mut binding_counter) {
-                    Ok(expr) => desugared.push(expr),
-                    Err(e) => {
-                        return Err(e);
-                    }
-                }
-            }
-            let top_level = transform_let_destructuring_in_do(
-                desugared.to_vec(),
-                &mut binding_counter
-            )?;
-            let wrapped = Expression::Apply(
-                std::iter::once(Expression::Word("do".to_string())).chain(top_level).collect()
-            );
-            Ok(wrapped)
-        }
-        Err(e) => {
-            return Err(e);
-        }
-    }
-}
-#[allow(dead_code)]
 pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expression, String> {
     match preprocess(&program) {
         Ok(preprocessed) =>

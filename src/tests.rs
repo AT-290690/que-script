@@ -46,10 +46,12 @@ xs)"#,
             let exprs = crate::parser::parse(inp).unwrap();
 
             if let Some(expr) = exprs.first() {
-                let result = crate::infer::infer_with_builtins(
-                    expr,
-                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
-                );
+                let result = crate::infer
+                    ::infer_with_builtins_typed(
+                        expr,
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                    )
+                    .map(|(typ, _)| typ);
                 // Assert that the result is Ok
                 assert!(result.is_ok(), "Type inference should succeed for expression: {}", inp);
                 // Optionally, check that the type is Int
@@ -111,10 +113,12 @@ Concequent and alternative must match types
 
             if let Some(expr) = exprs.first() {
                 // Check that type inference returns an Err
-                let result = crate::infer::infer_with_builtins(
-                    expr,
-                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
-                );
+                let result = crate::infer
+                    ::infer_with_builtins_typed(
+                        expr,
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                    )
+                    .map(|(typ, _)| typ);
                 // Assert that the result is an Err
 
                 assert!(result.is_err(), "Expected type inference error for expression: {}", inp);
@@ -129,7 +133,6 @@ Concequent and alternative must match types
         }
     }
 
-    #[cfg(feature = "deref-wasm")]
     #[test]
     fn test_correctness() {
         let test_cases = [
@@ -2818,18 +2821,28 @@ nil)))
                 match crate::parser::merge_std_and_program(&inp, items[1..].to_vec()) {
                     Ok(exprs) => {
                         match
-                            crate::infer::infer_with_builtins(
-                                &exprs,
-                                crate::types::create_builtin_environment(
-                                    crate::types::TypeEnv::new()
+                            crate::infer
+                                ::infer_with_builtins_typed(
+                                    &exprs,
+                                    crate::types::create_builtin_environment(
+                                        crate::types::TypeEnv::new()
+                                    )
                                 )
-                            )
+                                .map(|(typ, _)| typ)
                         {
                             Ok(_) => {
                                 // match crate::vm::run(&exprs, crate::vm::VM::new()) {
                                 match crate::wat::compile_program_to_wat(&exprs) {
                                     Ok(result) => {
-                                        match crate::cli::deref_wat_text(&result) {
+                                        let argv: Vec<String> = Vec::new();
+                                        match
+                                            crate::shell::run_wat_text(
+                                                &result,
+                                                None,
+                                                crate::shell::ShellPolicy::disabled(),
+                                                &argv
+                                            )
+                                        {
                                             Ok(res) =>
                                                 assert_eq!(format!("{}", res), *out, "Solution"),
                                             Err(e) => {

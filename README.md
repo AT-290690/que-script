@@ -31,58 +31,16 @@ Try it online at [playground](https://at-290690.github.io/rust-lisp/playground)
 
 Check out official website at [website](https://at-290690.github.io/rust-lisp/)
 
-or clone this project and write code in **./example/main.lisp**
-
-```bash
-# type check and eval
-cargo run
-```
-
-Build (needed for shell scripts)
+Build
 
 ```bash
 ./scripts/build.sh
 ```
 
-build wasm bundle
+Test
 
 ```bash
-wasm-pack build --target nodejs --out-dir pkg/node --release --no-default-features --features parser,js-compiler,type-checker,vm
-wasm-pack build --target web --out-dir pkg/web --release --no-default-features --features parser,js-compiler,type-checker,vm
-```
-
-build wasm bundle using wasm compiler
-
-```bash
-wasm-pack build --target web --out-dir pkg/web --release --no-default-features --features wasm-compiler
-```
-
-WASM host integration guide (JS + Rust, including `ARGV`): [`WASM.md`](./WASM.md)
-
-build "baked" libraries
-
-```bash
-cargo run -- --std
-```
-
-run tests with wasm
-
-```bash
-cargo test --features deref-wasm
-```
-
-transpile program to JavaScrpt (`./example/dist/main.js`)
-
-emit typed semantic core IR (`./example/dist/main.qir`)
-
-```bash
-cargo run --no-default-features --features parser,type-checker,qir -- --qir
-```
-
-type check libraries and generate lib.json
-
-```bash
-cargo run -- --doc
+cargo test
 ```
 
 ---
@@ -264,134 +222,6 @@ To what floor do the instructions take Santa?
 (map solve samples)
 ; [Int]
 ; [0 0 3 3 3 -1 -1 -3 -3]
-```
-
-### REPL (Read, Eval, Print, Loop)
-
-_Make sure you ran ./scripts/build.sh first_
-
-```bash
-./scripts/repl.sh # runs repl without context
-./scripts/repl.sh ./example/main.lisp  # run repl with specific file as context
-```
-
-- Write Que expression
-- Pressing Enter will run the current expression and will add a new line
-- Repeat
-- Press Esc to exit REPL
-
-### Exec with Node.js
-
-_Make sure you ran ./scripts/build.sh first_
-
-Write your program in example/main.lisp (for example)
-Compile bytecode by running
-
-```bash
-./scripts/comp.sh "./example/main.lisp" "main.txt"
-```
-
-Unpack ./miscs/node/que.zip
-It's a tiny ~145KB package
-
-```bash
-cd que
-```
-
-Paste bytecode in que/main.txt (or what ever you call it)
-
-Run with the file path as argument
-
-```bash
-npm run que -- "./main.txt"
-```
-
-or you can aways execute it using in rust using the shell script
-
-```bash
-./scripts/exec.sh out.txt
-```
-
-### Testing transpilers
-
-To see if all transpilers produce the same result
-
-```bash
- ./scripts/js-ex.sh && ./scripts/py-ex.sh && ./scripts/ocaml-ex.sh && ./scripts/rust-ex.sh
-```
-
-To run specific file with opt rust transpiler
-
-```bash
-./scripts/rust-ex.sh ./lisp/main.lisp ./example/dist/main.rs
-```
-
-### WASM usage
-
-**Web**
-
-```js
-import init, {
-  exec,
-  comp,
-  cons,
-  run,
-  check,
-  js,
-  evaluate,
-  get_output_len,
-} from "./pkg/web/fez_rs.js";
-(async () => {
-  const wasm = await init();
-  const memory = wasm.memory;
-})();
-```
-
-**Node**
-
-```js
-import {
-  exec,
-  comp,
-  cons,
-  run,
-  check,
-  signatures,
-  js,
-  evaluate,
-  get_output_len,
-  __wasm,
-} from "./pkg/node/fez_rs.js";
-const memory = __wasm.memory;
-```
-
-**Helper functions**
-
-```js
-const readWasmString = (ptr, len) =>
-  new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
-// Use these
-const typeCheck = (program) => readWasmString(check(program), get_output_len());
-const compileJs = (program) => readWasmString(js(program), get_output_len());
-const compileBiteCode = (program) =>
-  readWasmString(comp(program), get_output_len());
-const execBiteCode = (program) =>
-  readWasmString(exec(program), get_output_len());
-const concatenateBiteCode = (a, b) =>
-  readWasmString(cons(a, b), get_output_len());
-const uncheckRun = (program) => readWasmString(run(program), get_output_len());
-const typeCheckAndRun = (program) =>
-  readWasmString(evaluate(program), get_output_len());
-const generateSignatures = (program) =>
-  readWasmString(signatures(program), get_output_len());
-```
-
-**Example**
-
-```js
-const program = "(+ 1 2)";
-console.log(typeCheck(program));
-console.log(execBiteCode(compileBiteCode(program)));
 ```
 
 **Disclaimer!**
