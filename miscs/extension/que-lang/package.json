@@ -1,0 +1,60 @@
+{
+  "name": "que-lang",
+  "displayName": "Que Script",
+  "publisher": "anthony",
+  "description": "Script highlighting and IntelliSense for Que Script.",
+  "version": "0.0.3",
+  "main": "./extension.js",
+  "icon": "logo.png",
+  "activationEvents": [
+    "onLanguage:que",
+    "onCommand:que.restartLanguageServer"
+  ],
+  "categories": [
+    "Programming Languages"
+  ],
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "que",
+        "aliases": [
+          "Que",
+          "que"
+        ],
+        "extensions": [
+          ".que"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "que",
+        "scopeName": "source.que",
+        "path": "./syntaxes/que.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "que.restartLanguageServer",
+        "title": "Que: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Que Language Server",
+      "properties": {
+        "que.languageServer.path": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the quelsp binary. Leave empty to auto-detect or use QUE_LSP_PATH/PATH."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

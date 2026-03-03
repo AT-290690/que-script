@@ -27,9 +27,17 @@ name = "quer"
 path = "src/bin/quer.rs"
 required-features = ["runtime"]
 
+[[bin]]
+name = "quelsp"
+path = "src/bin/quelsp.rs"
+
 [dependencies]
 wasm-bindgen = "0.2"
 flate2 = "1.1.9"
 wasmtime = { version = "42.0.1", optional = true }
 wat = { version = "1", optional = true }
 wasmtime-wasi = { version = "42.0.1", optional = true }
+lsp-server = "0.7"
+lsp-types = "0.97"
+serde_json = "1"
+serde = "1"
