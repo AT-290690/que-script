@@ -583,79 +583,82 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         TypeScheme::monotype(Type::List(Box::new(Type::List(Box::new(Type::Char)))))
     );
 
-    let _ = env.insert(
-        "curl!".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::List(Box::new(Type::Char)))
+    #[cfg(feature = "io")]
+    {
+        let _ = env.insert(
+            "curl!".to_string(),
+            TypeScheme::monotype(
+                Type::Function(
+                    Box::new(Type::List(Box::new(Type::Char))),
+                    Box::new(Type::List(Box::new(Type::Char)))
+                )
             )
-        )
-    );
-    let _ = env.insert(
-        "list-dir!".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::List(Box::new(Type::Char)))
+        );
+        let _ = env.insert(
+            "list-dir!".to_string(),
+            TypeScheme::monotype(
+                Type::Function(
+                    Box::new(Type::List(Box::new(Type::Char))),
+                    Box::new(Type::List(Box::new(Type::Char)))
+                )
             )
-        )
-    );
-    let _ = env.insert(
-        "mkdir!".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::Unit)
+        );
+        let _ = env.insert(
+            "mkdir!".to_string(),
+            TypeScheme::monotype(
+                Type::Function(
+                    Box::new(Type::List(Box::new(Type::Char))),
+                    Box::new(Type::Unit)
+                )
             )
-        )
-    );
-    let _ = env.insert(
-        "read!".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::List(Box::new(Type::Char)))
+        );
+        let _ = env.insert(
+            "read!".to_string(),
+            TypeScheme::monotype(
+                Type::Function(
+                    Box::new(Type::List(Box::new(Type::Char))),
+                    Box::new(Type::List(Box::new(Type::Char)))
+                )
             )
-        )
-    );
-    let _ = env.insert(
-        "delete!".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::Unit)
+        );
+        let _ = env.insert(
+            "delete!".to_string(),
+            TypeScheme::monotype(
+                Type::Function(
+                    Box::new(Type::List(Box::new(Type::Char))),
+                    Box::new(Type::Unit)
+                )
             )
-        )
-    );
-    let _ = env.insert(
-        "write!".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(
-                    Type::Function(
-                        Box::new(Type::List(Box::new(Type::Char))),
-                        Box::new(Type::Unit)
+        );
+        let _ = env.insert(
+            "write!".to_string(),
+            TypeScheme::monotype(
+                Type::Function(
+                    Box::new(Type::List(Box::new(Type::Char))),
+                    Box::new(
+                        Type::Function(
+                            Box::new(Type::List(Box::new(Type::Char))),
+                            Box::new(Type::Unit)
+                        )
                     )
                 )
             )
-        )
-    );
-    let _ = env.insert(
-        "move!".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(
-                    Type::Function(
-                        Box::new(Type::List(Box::new(Type::Char))),
-                        Box::new(Type::Unit)
+        );
+        let _ = env.insert(
+            "move!".to_string(),
+            TypeScheme::monotype(
+                Type::Function(
+                    Box::new(Type::List(Box::new(Type::Char))),
+                    Box::new(
+                        Type::Function(
+                            Box::new(Type::List(Box::new(Type::Char))),
+                            Box::new(Type::Unit)
+                        )
                     )
                 )
             )
-        )
-    );
+        );
+    }
     let _ = env.insert(
         "=?".to_string(),
         TypeScheme::monotype(

@@ -30,6 +30,13 @@ fn main() {
         std::process::exit(1);
     });
 
+    if wat_requires_host_io(&wat_src) {
+        eprintln!(
+            "\x1b[31mException: this program requires host io functions. Use 'queio' (with --allow ...) or build/run 'quer' without the 'io' feature.\x1b[0m"
+        );
+        std::process::exit(1);
+    }
+
     let decoded = que::runtime
         ::run_wat_text(&wat_src, (), &argv, |_linker| Ok(()))
         .unwrap_or_else(|e| {
@@ -38,4 +45,8 @@ fn main() {
         });
 
     println!("\x1b[32m{}\x1b[0m", decoded);
+}
+
+fn wat_requires_host_io(wat_src: &str) -> bool {
+    wat_src.contains("(import \"host\" \"")
 }
