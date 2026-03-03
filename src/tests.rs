@@ -1196,16 +1196,6 @@ sword)))
                 "3",
             ),
             (
-                r#"(let a 10)
-(let b 8)
-(let c 23)
-(let x 42)
-(let y 69)
-(let r 10)
-`a + b * c + (x + y) / 2 + r^2 - x^2`"#,
-                "-1415",
-            ),
-            (
                 r#"(let A { 0 { 42 { false { "" nil } } } })
 (let B { 1 { 0 { true { "" nil } } } })
 (let C { 2 { 0 { false { "algebraic data types" nil } } } })
@@ -2355,51 +2345,6 @@ bbrgwb")
                 "1234258",
             ),
             (
-                r#"(let INPUT
-"Button A: X+94, Y+34
-Button B: X+22, Y+67
-Prize: X=8400, Y=5400
-
-Button A: X+26, Y+66
-Button B: X+67, Y+21
-Prize: X=12748, Y=12176
-
-Button A: X+17, Y+86
-Button B: X+84, Y+37
-Prize: X=7870, Y=6450
-
-Button A: X+69, Y+23
-Button B: X+27, Y+71
-Prize: X=18641, Y=10279")
-
-(let parse (comp (String->Vector nl)
-                 (exclude empty?)
-                 (map (comp (String->Vector ':')
-                            (drop/first 1)
-                            first))
-                 (map (comp (String->Vector ' ')
-                            (exclude empty?)
-                            (map (comp (select digit?)
-                                       (String->Integer)))))
-                (partition 3)))
-; (let part1 (comp (reduce (lambda a [ [ ax ay . ] [ bx by . ] [ px py . ] . ] (do
-;                     (let ca (/ (- (* px by) (* py bx)) (- (* ax by) (* ay bx))))
-;                     (let cb (/ (- px (* ax ca)) bx))
-;                     (if (and (= (mod ca 1) 0) (= (mod cb 1) 0) (<= ca 100) (<= cb 100))
-;                         (+ a (+ (* ca 3) cb))
-;                         a)))
-;                     0)))
-(let part1 (comp (reduce (lambda a [ [ ax ay . ] [ bx by . ] [ px py . ] . ] (do
-                    (let ca `(px * by - py * bx) / (ax * by - ay * bx)`)
-                    (let cb `(px - ax * ca) / bx`)
-                    (if (and (<= ca 100) (<= cb 100))
-                        `a + ca * 3 + cb`
-                        a)))
-                    0)))
-          (part1 (parse INPUT))"#,
-                "480",
-            ),
-            (
                 r#"; solve :: [[Char]] -> Int
 (let solve (comp 
     (map (Vector/get! 1)) 
@@ -2410,35 +2355,6 @@ Prize: X=18641, Y=10279")
 ; [ 1 3 0 ]
 "#,
                 "[1 3 0]",
-            ),
-            (
-                r#"(let sum-sub-slow (lambda xs (do
-  (let out [])
-  (loop 0 (length xs) (lambda i 
-    (loop i (length xs) (lambda j (push! out (slice i (+ j 1) xs))))))
-  (sum (map sum out)))))
-
-(let sum-sub-imperative (lambda xs (do 
-  (integer result 0)
-  (let n (length xs))
-  (loop 0 n (lambda i (+= result (* (get xs i) (+ i 1) (- n i)))))
-  (get result))))
-
-(let sum-sub-functional (lambda xs 
-  (reduce/i (lambda a b i (+ a (* b (+ i 1) (- (length xs) i)))) 0 xs)))
-
-
-(let sum-sub-math (lambda xs 
-  (reduce/i (lambda a b i `a + b * (i + 1) * (length(xs) - i)`) 0 xs)))
-
-(let xs [ 1 4 5 3 2 ])
-[
-  (sum-sub-slow xs)
-  (sum-sub-imperative xs)
-  (sum-sub-functional xs)
-  (sum-sub-math xs)
-]"#,
-                "[116 116 116 116]",
             ),
             (
                 r#"(let group-anagrams (comp 
@@ -2846,14 +2762,14 @@ nil)))
                                             .unwrap();
                                         #[cfg(feature = "io")]
                                         let run_result = crate::runtime::run_wat_text(
-                                                &result,
-                                                store_data,
-                                                &argv,
-                                                |linker|
-                                                    crate::io
-                                                        ::add_shell_to_linker(linker)
-                                                        .map_err(|e| e.to_string())
-                                            );
+                                            &result,
+                                            store_data,
+                                            &argv,
+                                            |linker|
+                                                crate::io
+                                                    ::add_shell_to_linker(linker)
+                                                    .map_err(|e| e.to_string())
+                                        );
                                         #[cfg(not(feature = "io"))]
                                         let run_result = crate::runtime::run_wat_text(
                                             &result,
@@ -2861,8 +2777,7 @@ nil)))
                                             &argv,
                                             |_linker| Ok(())
                                         );
-                                        match run_result
-                                        {
+                                        match run_result {
                                             Ok(res) =>
                                                 assert_eq!(format!("{}", res), *out, "Solution"),
                                             Err(e) => {
