@@ -18,6 +18,7 @@ use que::parser::Expression;
 use que::types::{create_builtin_environment, Type, TypeEnv};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
@@ -157,7 +158,7 @@ impl ServerState {
             DidOpenTextDocument::METHOD => {
                 let params: DidOpenTextDocumentParams = parse_params(notif.params)?;
                 let uri = params.text_document.uri;
-                let analysis = analyze_document_text(
+                let analysis = analyze_document_text_safe(
                     &params.text_document.text,
                     &self.std_defs,
                     &self.base_env,
@@ -174,7 +175,7 @@ impl ServerState {
                 };
 
                 let uri = params.text_document.uri;
-                let analysis = analyze_document_text(
+                let analysis = analyze_document_text_safe(
                     &last_change.text,
                     &self.std_defs,
                     &self.base_env,
@@ -573,6 +574,43 @@ fn analyze_document_text(
     }
 }
 
+fn analyze_document_text_safe(
+    text: &str,
+    std_defs: &[Expression],
+    base_env: &TypeEnv,
+    base_next_id: u64,
+) -> DocAnalysis {
+    match catch_unwind(AssertUnwindSafe(|| {
+        analyze_document_text(text, std_defs, base_env, base_next_id)
+    })) {
+        Ok(analysis) => analysis,
+        Err(payload) => {
+            let message = format!(
+                "Internal parser/inference error: {}",
+                panic_payload_to_string(payload)
+            );
+            DocAnalysis {
+                text: text.to_string(),
+                diagnostics: vec![make_error_diagnostic(text, message)],
+                symbol_types: HashMap::new(),
+                let_binding_types: HashMap::new(),
+                user_bound_symbols: HashSet::new(),
+                form_scoped_symbols: Vec::new(),
+            }
+        }
+    }
+}
+
+fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(msg) = payload.downcast_ref::<&str>() {
+        return (*msg).to_string();
+    }
+    if let Some(msg) = payload.downcast_ref::<String>() {
+        return msg.clone();
+    }
+    "unknown panic".to_string()
+}
+
 fn build_form_scoped_analyses(
     text: &str,
     user_form_count: usize,
@@ -913,12 +951,13 @@ fn parse_error_to_diagnostic(text: &str, message: &str) -> Diagnostic {
 }
 
 fn make_error_diagnostic(text: &str, message: String) -> Diagnostic {
+    let normalized_message = strip_type_var_numbers(&message);
     let inferred_range = infer_error_range(text, &message);
     let range = inferred_range.unwrap_or_else(|| full_range(text));
     let display_message = if inferred_range.is_some() {
-        first_error_line(&message).to_string()
+        first_error_line(&normalized_message).to_string()
     } else {
-        message
+        normalized_message
     };
 
     Diagnostic {
