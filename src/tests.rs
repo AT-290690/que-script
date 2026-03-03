@@ -2837,10 +2837,10 @@ nil)))
                                     Ok(result) => {
                                         let argv: Vec<String> = Vec::new();
                                         #[cfg(feature = "io")]
-                                        let store_data = crate::shell::ShellStoreData
+                                        let store_data = crate::io::ShellStoreData
                                             ::new_with_security(
                                                 None,
-                                                crate::shell::ShellPolicy::disabled()
+                                                crate::io::ShellPolicy::disabled()
                                             )
                                             .map_err(|e| e.to_string())
                                             .unwrap();
@@ -2850,7 +2850,7 @@ nil)))
                                                 store_data,
                                                 &argv,
                                                 |linker|
-                                                    crate::shell
+                                                    crate::io
                                                         ::add_shell_to_linker(linker)
                                                         .map_err(|e| e.to_string())
                                             );
