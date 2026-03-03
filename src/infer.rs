@@ -18,7 +18,6 @@ pub struct TypeError {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct TypedExpression {
     pub expr: Expression,
     pub typ: Option<Type>,
@@ -29,7 +28,6 @@ fn expression_id(expr: &Expression) -> usize {
     expr as *const Expression as usize
 }
 
-#[allow(dead_code)]
 fn build_typed_expression(
     expr: &Expression,
     solved_expr_types: &HashMap<usize, Type>
@@ -955,67 +953,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     Ok(func_type)
 }
 
-pub fn infer_with_builtins(
-    expr: &Expression,
-    (env, init_id): (TypeEnv, u64)
-) -> Result<Type, String> {
-    let mut ctx = InferenceContext {
-        env,
-        constraints: Vec::new(),
-        fresh_var_counter: init_id,
-        expr_types: HashMap::new(),
-        collect_expr_types: false,
-    };
-
-    // Infer type — accumulate constraints
-    let inferred = infer_expr(expr, &mut ctx)?;
-
-    // Solve constraints once, globally
-    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
-        .iter()
-        .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
-        .collect();
-
-    let subst_map = solve_constraints_list(&constraints_vec).map_err(|e| e.to_string())?;
-
-    // Apply solved substitution map to everything
-    let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
-    ctx.env.apply_substitution_map(&subst_map);
-
-    Ok(solved_type)
-}
-
-pub fn infer_with_builtins_env(
-    expr: &Expression,
-    (env, init_id): (TypeEnv, u64)
-) -> Result<TypeEnv, String> {
-    let mut ctx = InferenceContext {
-        env,
-        constraints: Vec::new(),
-        fresh_var_counter: init_id,
-        expr_types: HashMap::new(),
-        collect_expr_types: false,
-    };
-
-    // Infer type — accumulate constraints
-    infer_expr(expr, &mut ctx)?;
-
-    // Solve constraints once, globally
-    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
-        .iter()
-        .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
-        .collect();
-
-    // We only need the types of all functions in top level
-    // not the type of the last expression in top level
-    // therfor it's less type checking than infer_with_builtins
-    let subst_map = solve_constraints_list(&constraints_vec).map_err(|e| e.to_string())?;
-    ctx.env.apply_substitution_map(&subst_map);
-
-    Ok(ctx.env)
-}
-
-#[allow(dead_code)]
 pub fn infer_with_builtins_typed(
     expr: &Expression,
     (env, init_id): (TypeEnv, u64)

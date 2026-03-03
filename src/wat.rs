@@ -4002,7 +4002,6 @@ fn compile_fast_cell_helper(
     }
 }
 
-#[cfg(feature = "shell")]
 fn compile_host_unary_string_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
@@ -4021,7 +4020,6 @@ fn compile_host_unary_string_call(
     Ok(format!("{arg}\ncall ${host_symbol}"))
 }
 
-#[cfg(feature = "shell")]
 fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     if node.children.len() != 3 {
         return Err("write! expects exactly two [Char] arguments".to_string());
@@ -4039,7 +4037,6 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     Ok(format!("{path}\n{data}\ncall $host_write_file"))
 }
 
-#[cfg(feature = "shell")]
 fn compile_host_binary_string_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
@@ -4062,31 +4059,6 @@ fn compile_host_binary_string_call(
         ctx
     )?;
     Ok(format!("{left}\n{right}\ncall ${host_symbol}"))
-}
-
-#[cfg(not(feature = "shell"))]
-fn compile_host_unary_string_call(
-    _node: &TypedExpression,
-    _ctx: &Ctx<'_>,
-    op_name: &str,
-    _host_symbol: &str,
-) -> Result<String, String> {
-    Err(format!("{op_name} requires enabling the 'shell' feature"))
-}
-
-#[cfg(not(feature = "shell"))]
-fn compile_host_write_call(_node: &TypedExpression, _ctx: &Ctx<'_>) -> Result<String, String> {
-    Err("write! requires enabling the 'shell' feature".to_string())
-}
-
-#[cfg(not(feature = "shell"))]
-fn compile_host_binary_string_call(
-    _node: &TypedExpression,
-    _ctx: &Ctx<'_>,
-    op_name: &str,
-    _host_symbol: &str,
-) -> Result<String, String> {
-    Err(format!("{op_name} requires enabling the 'shell' feature"))
 }
 
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -5819,7 +5791,6 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     let mut wat = String::new();
     wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
     wat.push_str("(module\n");
-    #[cfg(feature = "shell")]
     if _needs_host_io {
         wat.push_str(
             "  (import \"host\" \"list_dir\" (func $host_list_dir (param i32) (result i32)))\n"
