@@ -1755,3 +1755,24 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
         }
     }
 }
+
+pub fn build(program: &str) -> Result<Expression, String> {
+    let preprocessed = preprocess(program)?;
+    let exprs = parse(&preprocessed)?;
+
+    let mut desugared = Vec::new();
+    let mut binding_counter = 0usize;
+    for expr in exprs {
+        desugared.push(desugar_with_counter(expr, &mut binding_counter)?);
+    }
+
+    let top_level = transform_let_destructuring_in_do(desugared, &mut binding_counter)?;
+    Ok(
+        Expression::Apply(
+            std::iter
+                ::once(Expression::Word("do".to_string()))
+                .chain(top_level)
+                .collect()
+        ),
+    )
+}

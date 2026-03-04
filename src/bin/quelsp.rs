@@ -373,10 +373,7 @@ fn normalize_signature(signature: &str) -> String {
     let trimmed = signature.trim();
     let without_quantifier = if let Some(dot_idx) = trimmed.find('.') {
         let prefix = trimmed[..dot_idx].trim();
-        let looks_like_quantifier = !prefix.is_empty() &&
-            prefix
-                .split_whitespace()
-                .all(|tok| tok.starts_with('T') && tok[1..].chars().all(|c| c.is_ascii_digit()));
+        let looks_like_quantifier = is_quantifier_prefix(prefix);
         if looks_like_quantifier {
             trimmed[dot_idx + 1..].trim()
         } else {
@@ -388,6 +385,45 @@ fn normalize_signature(signature: &str) -> String {
     strip_type_var_numbers(without_quantifier)
 }
 
+fn is_quantifier_prefix(prefix: &str) -> bool {
+    if prefix.is_empty() {
+        return false;
+    }
+
+    let chars: Vec<char> = prefix.chars().collect();
+    let mut i = 0usize;
+    let mut saw_any = false;
+
+    while i < chars.len() {
+        while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') {
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+
+        if chars[i] != 'T' {
+            return false;
+        }
+        saw_any = true;
+        i += 1;
+
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        let digit_start = i;
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == digit_start {
+            return false;
+        }
+    }
+
+    saw_any
+}
+
 fn strip_type_var_numbers(input: &str) -> String {
     let chars: Vec<char> = input.chars().collect();
     let mut out = String::with_capacity(input.len());
@@ -395,10 +431,14 @@ fn strip_type_var_numbers(input: &str) -> String {
     while i < chars.len() {
         if chars[i] == 'T' {
             let mut j = i + 1;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            let digit_start = j;
             while j < chars.len() && chars[j].is_ascii_digit() {
                 j += 1;
             }
-            if j > i + 1 {
+            if j > digit_start {
                 out.push('T');
                 i = j;
                 continue;
@@ -503,7 +543,8 @@ fn analyze_document_text(
     let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();
     let mut user_bound_symbols = HashSet::new();
     let mut form_scoped_symbols = Vec::new();
-    let parsed_exprs = parse_user_exprs_for_symbol_collection(text);
+    let analysis_source = strip_comment_bodies_preserve_newlines(text);
+    let parsed_exprs = parse_user_exprs_for_symbol_collection(&analysis_source);
     if let Some(exprs) = &parsed_exprs {
         collect_user_bound_symbols_from_exprs(exprs, &mut user_bound_symbols);
     }
@@ -512,10 +553,10 @@ fn analyze_document_text(
         .map(|exprs| exprs.len())
         .unwrap_or_else(|| top_level_form_ranges(text).len());
 
-    let program = match que::parser::merge_std_and_program(text, std_defs.to_vec()) {
+    let program = match que::parser::merge_std_and_program(&analysis_source, std_defs.to_vec()) {
         Ok(expr) => expr,
         Err(primary_err) => {
-            let repaired = repair_source_for_analysis(text);
+            let repaired = repair_source_for_analysis(&analysis_source);
             match que::parser::merge_std_and_program(&repaired, std_defs.to_vec()) {
                 Ok(expr) => expr,
                 Err(_) => {
@@ -571,6 +612,57 @@ fn parse_user_exprs_for_symbol_collection(text: &str) -> Option<Vec<Expression>>
     que::parser::parse(&repaired_masked).ok()
 }
 
+fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_comment = false;
+    let mut in_string = false;
+    let mut in_char = false;
+
+    for ch in text.chars() {
+        if in_comment {
+            if ch == '\n' {
+                in_comment = false;
+                out.push('\n');
+            }
+            continue;
+        }
+
+        if in_string {
+            out.push(ch);
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if in_char {
+            out.push(ch);
+            if ch == '\'' {
+                in_char = false;
+            }
+            continue;
+        }
+
+        match ch {
+            ';' => {
+                in_comment = true;
+                out.push(' ');
+            }
+            '"' => {
+                in_string = true;
+                out.push(ch);
+            }
+            '\'' => {
+                in_char = true;
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+
+    out
+}
+
 fn mask_literals_for_structural_parse(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_comment = false;
@@ -581,9 +673,9 @@ fn mask_literals_for_structural_parse(text: &str) -> String {
 
     for ch in text.chars() {
         if in_comment {
-            out.push(ch);
             if ch == '\n' {
                 in_comment = false;
+                out.push('\n');
             }
             continue;
         }
@@ -605,7 +697,7 @@ fn mask_literals_for_structural_parse(text: &str) -> String {
         match ch {
             ';' => {
                 in_comment = true;
-                out.push(ch);
+                out.push(' ');
             }
             '"' => {
                 out.push(' ');
@@ -1145,31 +1237,99 @@ fn find_invalid_char_literal_range(text: &str) -> Option<Range> {
 }
 
 fn find_snippet_range(text: &str, snippet: &str) -> Option<Range> {
-    let start = text.find(snippet)?;
-    let end = start + snippet.len();
-    Some(Range::new(
-        byte_offset_to_position(text, start),
-        byte_offset_to_position(text, end),
-    ))
-}
-
-fn find_call_prefix_range(text: &str, snippet: &str) -> Option<Range> {
-    let prefix_tokens = extract_call_prefix_tokens(snippet, 3);
-    if prefix_tokens.is_empty() {
+    if snippet.is_empty() {
         return None;
     }
     let bytes = text.as_bytes();
+    let needle = snippet.as_bytes();
+    if needle.len() > bytes.len() {
+        return None;
+    }
+
     let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] == b'(' && match_call_prefix_at(text, i, &prefix_tokens) {
-            if let Some(close) = find_matching_paren_byte(text, i) {
-                return Some(Range::new(
-                    byte_offset_to_position(text, i),
-                    byte_offset_to_position(text, close + 1),
-                ));
+    let mut in_string = false;
+    let mut in_comment = false;
+    while i + needle.len() <= bytes.len() {
+        let b = bytes[i];
+        if in_comment {
+            if b == b'\n' {
+                in_comment = false;
             }
+            i += 1;
+            continue;
+        }
+        if !in_string && b == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+        if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_string = !in_string;
+            i += 1;
+            continue;
+        }
+        if in_string {
+            i += 1;
+            continue;
+        }
+
+        if &bytes[i..i + needle.len()] == needle {
+            let start = i;
+            let end = i + needle.len();
+            return Some(Range::new(
+                byte_offset_to_position(text, start),
+                byte_offset_to_position(text, end),
+            ));
         }
         i += 1;
+    }
+    None
+}
+
+fn find_call_prefix_range(text: &str, snippet: &str) -> Option<Range> {
+    let all_tokens = extract_call_prefix_tokens(snippet, 3);
+    if all_tokens.is_empty() {
+        return None;
+    }
+    for token_count in (1..=all_tokens.len()).rev() {
+        let prefix_tokens = &all_tokens[..token_count];
+        let bytes = text.as_bytes();
+        let mut i = 0usize;
+        let mut in_string = false;
+        let mut in_comment = false;
+        while i < bytes.len() {
+            if in_comment {
+                if bytes[i] == b'\n' {
+                    in_comment = false;
+                }
+                i += 1;
+                continue;
+            }
+            if !in_string && bytes[i] == b';' {
+                in_comment = true;
+                i += 1;
+                continue;
+            }
+            if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = !in_string;
+                i += 1;
+                continue;
+            }
+            if in_string {
+                i += 1;
+                continue;
+            }
+
+            if bytes[i] == b'(' && match_call_prefix_at(text, i, prefix_tokens) {
+                if let Some(close) = find_matching_paren_byte(text, i) {
+                    return Some(Range::new(
+                        byte_offset_to_position(text, i),
+                        byte_offset_to_position(text, close + 1),
+                    ));
+                }
+            }
+            i += 1;
+        }
     }
     None
 }
@@ -1257,8 +1417,32 @@ fn match_call_prefix_at(text: &str, open_idx: usize, tokens: &[String]) -> bool 
 fn find_first_call_range(text: &str) -> Option<Range> {
     let bytes = text.as_bytes();
     let mut i = 0usize;
+    let mut in_string = false;
+    let mut in_comment = false;
 
     while i < bytes.len() {
+        if in_comment {
+            if bytes[i] == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+        if !in_string && bytes[i] == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_string = !in_string;
+            i += 1;
+            continue;
+        }
+        if in_string {
+            i += 1;
+            continue;
+        }
+
         if bytes[i] == b'(' {
             let open = i;
             i += 1;
@@ -1330,7 +1514,32 @@ fn find_symbol_range(text: &str, symbol: &str) -> Option<Range> {
     }
 
     let mut i = 0usize;
+    let mut in_string = false;
+    let mut in_comment = false;
     while i + needle.len() <= bytes.len() {
+        let b = bytes[i];
+        if in_comment {
+            if b == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+        if !in_string && b == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+        if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_string = !in_string;
+            i += 1;
+            continue;
+        }
+        if in_string {
+            i += 1;
+            continue;
+        }
+
         if &bytes[i..i + needle.len()] == needle {
             let left_ok = i == 0 || !is_ident_char(bytes[i - 1]);
             let right_ok = i + needle.len() == bytes.len() || !is_ident_char(bytes[i + needle.len()]);

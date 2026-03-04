@@ -11,6 +11,7 @@ io = ["runtime", "dep:wasmtime-wasi"]
 
 [lib]
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "queio"
@@ -30,6 +31,10 @@ required-features = ["runtime"]
 [[bin]]
 name = "quelsp"
 path = "src/bin/quelsp.rs"
+
+[[bin]]
+name = "quebake"
+path = "src/bin/quebake.rs"
 
 [dependencies]
 wasm-bindgen = "0.2"

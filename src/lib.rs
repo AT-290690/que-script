@@ -10,3 +10,4 @@ mod tests;
 pub mod types;
 #[cfg(feature = "compiler")]
 pub mod wat;
+pub mod wasm_api;
