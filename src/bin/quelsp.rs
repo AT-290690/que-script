@@ -246,6 +246,7 @@ impl ServerState {
                 .and_then(|m| m.get(&symbol))
                 .or_else(|| doc.let_binding_types.get(&symbol))
                 .or_else(|| self.global_signatures.get(&symbol))?;
+            let declaration_type = normalize_signature(declaration_type);
 
             let value = format!("```que\n{} : {}\n```", symbol, declaration_type);
             return Some(Hover {
@@ -258,6 +259,7 @@ impl ServerState {
         }
 
         let type_info = self.resolve_signature_for_doc(doc, &symbol, Some(position))?;
+        let type_info = normalize_signature(type_info);
 
         let value = format!("```que\n{} : {}\n```", symbol, type_info);
         Some(Hover {
@@ -306,7 +308,7 @@ impl ServerState {
         for (name, signature) in merged_signatures {
             items.push(CompletionItem {
                 label: name,
-                detail: Some(signature.clone()),
+                detail: Some(normalize_signature(&signature)),
                 kind: Some(kind_for_signature(&signature)),
                 ..CompletionItem::default()
             });
@@ -318,9 +320,13 @@ impl ServerState {
 
     fn signature_for_symbol(&self, uri: &Uri, symbol: &str, position: Option<Position>) -> Option<String> {
         if let Some(doc) = self.documents.get(uri) {
-            return self.resolve_signature_for_doc(doc, symbol, position).cloned();
+            return self
+                .resolve_signature_for_doc(doc, symbol, position)
+                .map(|s| normalize_signature(s));
         }
-        self.global_signatures.get(symbol).cloned()
+        self.global_signatures
+            .get(symbol)
+            .map(|s| normalize_signature(s))
     }
 
     fn resolve_signature_for_doc<'a>(

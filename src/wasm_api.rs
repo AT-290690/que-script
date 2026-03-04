@@ -235,7 +235,7 @@ pub fn lsp_completions(text: String) -> String {
             let kind = if detail.contains("->") { "function" } else { "constant" };
             items.push(JsonCompletionItem {
                 label,
-                detail: Some(detail),
+                detail: Some(normalize_signature(&detail)),
                 kind: kind.to_string(),
             });
         }
@@ -275,6 +275,7 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
         let Some(type_info) = type_info else {
             return "null".to_string();
         };
+        let type_info = normalize_signature(type_info);
 
         let hover = JsonHover {
             contents: format!("{} : {}", symbol, type_info),
@@ -711,7 +712,9 @@ fn extract_error_snippet(message: &str) -> Option<String> {
             i += 1;
             while i < bytes.len() {
                 match bytes[i] {
-                    b'(' => depth += 1,
+                    b'(' => {
+                        depth += 1;
+                    }
                     b')' => {
                         depth = depth.saturating_sub(1);
                         if depth == 0 {
@@ -1037,8 +1040,9 @@ fn find_first_call_range(text: &str) -> Option<TextRange> {
                 continue;
             }
             let name = std::str::from_utf8(&bytes[name_start..i]).ok()?;
-            if name.starts_with('_')
-                || matches!(name, "do" | "let" | "let*" | "if" | "lambda" | "as")
+            if
+                name.starts_with('_') ||
+                matches!(name, "do" | "let" | "let*" | "if" | "lambda" | "as")
             {
                 continue;
             }
@@ -1069,7 +1073,8 @@ fn extract_symbol_from_error(message: &str) -> Option<String> {
 }
 
 fn is_ident_char(ch: u8) -> bool {
-    ch.is_ascii_alphanumeric() || matches!(ch, b'_' | b'/' | b'-' | b'?' | b'!' | b'*' | b'+' | b'.')
+    ch.is_ascii_alphanumeric() ||
+        matches!(ch, b'_' | b'/' | b'-' | b'?' | b'!' | b'*' | b'+' | b'.')
 }
 
 fn find_symbol_range(text: &str, symbol: &str) -> Option<TextRange> {
@@ -1111,7 +1116,8 @@ fn find_symbol_range(text: &str, symbol: &str) -> Option<TextRange> {
 
         if &bytes[i..i + needle.len()] == needle {
             let left_ok = i == 0 || !is_ident_char(bytes[i - 1]);
-            let right_ok = i + needle.len() == bytes.len() || !is_ident_char(bytes[i + needle.len()]);
+            let right_ok =
+                i + needle.len() == bytes.len() || !is_ident_char(bytes[i + needle.len()]);
             if left_ok && right_ok {
                 return Some(TextRange {
                     start: byte_offset_to_position(text, i),
@@ -1158,7 +1164,9 @@ fn find_matching_paren_byte(text: &str, open_idx: usize) -> Option<usize> {
         }
 
         match b {
-            b'(' => depth += 1,
+            b'(' => {
+                depth += 1;
+            }
             b')' => {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
@@ -1517,7 +1525,7 @@ fn is_float_token(token: &str) -> bool {
     if dot_count != 1 {
         return false;
     }
-    if !slice.iter().all(|b| b.is_ascii_digit() || *b == b'.') {
+    if !slice.iter().all(|b| (b.is_ascii_digit() || *b == b'.')) {
         return false;
     }
     let dot_idx = slice
