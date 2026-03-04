@@ -134,6 +134,102 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
+        let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert_eq!(contents, "map : ([Char] -> [Char]) -> [[Char]] -> [[Char]]");
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_map_alone_is_generic() {
+        let hover_json = crate::wasm_api::lsp_hover(
+            "(let xs (map reverse [\"G\"]))\nmap".to_string(),
+            1,
+            1
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert_eq!(contents, "map : (T -> T) -> [T] -> [T]");
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_let_binding_uses_rhs_type_without_extra_usage() {
+        let hover_json = crate::wasm_api::lsp_hover(
+            r#"(let xs (map reverse ["G"]))"#.to_string(),
+            0,
+            5
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert_eq!(contents, "xs : [[Char]]");
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_reports_if_branch_type_mismatch() {
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics("(if true 8 2.)".to_string());
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+
+        let has_unify_message = diagnostics
+            .as_array()
+            .map(|items| {
+                items.iter().any(|item| {
+                    item.get("message")
+                        .and_then(|v| v.as_str())
+                        .map(|msg| msg.contains("Cannot unify Int with Float"))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        let has_branch_message = diagnostics
+            .as_array()
+            .map(|items| {
+                items.iter().any(|item| {
+                    item.get("message")
+                        .and_then(|v| v.as_str())
+                        .map(|msg| msg.contains("Concequent and alternative must match types"))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        assert!(
+            has_unify_message,
+            "expected diagnostics to include 'Cannot unify Int with Float', got: {}",
+            diagnostics_json
+        );
+        assert!(
+            has_branch_message,
+            "expected diagnostics to include branch mismatch detail, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
     #[cfg(feature = "runtime")]
     fn test_correctness() {
         let test_cases = [
