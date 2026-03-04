@@ -1,0 +1,1 @@
+ cargo build --release --bin quelsp && wasm-bindgen target/wasm32-unknown-unknown/release/quelsp.wasm --out-dir ./dist --target web
