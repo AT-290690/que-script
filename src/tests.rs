@@ -181,6 +181,20 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_do_cleanup_drops_non_last_literals_and_collapses() {
+        let typed = infer_typed("(do 1 2 (+ 3 4))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "7");
+    }
+
+    #[test]
+    fn test_typed_optimization_do_cleanup_keeps_non_literal_middle_expr() {
+        let typed = infer_typed("(lambda x (do 1 x 2))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(lambda x (do x 2))");
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
         let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
         let hover: serde_json::Value = serde_json

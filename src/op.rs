@@ -34,6 +34,7 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
     };
 
     match op.as_str() {
+        "do" => fold_do(node, &items),
         "if" => fold_if(node, &items),
         "and" => fold_and(node, &items),
         "or" => fold_or(node, &items),
@@ -67,6 +68,50 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         "Float->Int" => fold_float_to_int(node, &items),
 
         _ => node,
+    }
+}
+
+fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
+    if items.len() <= 1 {
+        return node;
+    }
+    if node.children.len() != items.len() {
+        return node;
+    }
+
+    let last_idx = items.len() - 1;
+    let mut kept_indices: Vec<usize> = Vec::new();
+    kept_indices.push(0); // keep "do"
+    for i in 1..last_idx {
+        if !is_pure_literal_expr(&items[i]) {
+            kept_indices.push(i);
+        }
+    }
+    kept_indices.push(last_idx);
+
+    if kept_indices.len() == items.len() {
+        return node;
+    }
+
+    // (do x) => x
+    if kept_indices.len() == 2 {
+        let only_expr_idx = kept_indices[1];
+        return node.children.get(only_expr_idx).cloned().unwrap_or(node);
+    }
+
+    let new_expr_items = kept_indices
+        .iter()
+        .filter_map(|idx| items.get(*idx).cloned())
+        .collect::<Vec<_>>();
+    let new_children = kept_indices
+        .iter()
+        .filter_map(|idx| node.children.get(*idx).cloned())
+        .collect::<Vec<_>>();
+
+    TypedExpression {
+        expr: Expression::Apply(new_expr_items),
+        typ: node.typ,
+        children: new_children,
     }
 }
 
@@ -254,5 +299,13 @@ fn bool_literal(expr: &Expression) -> Option<bool> {
         Expression::Word(w) if w == "true" => Some(true),
         Expression::Word(w) if w == "false" => Some(false),
         _ => None,
+    }
+}
+
+fn is_pure_literal_expr(expr: &Expression) -> bool {
+    match expr {
+        Expression::Int(_) | Expression::Float(_) => true,
+        Expression::Word(w) if w == "true" || w == "false" => true,
+        _ => false,
     }
 }
