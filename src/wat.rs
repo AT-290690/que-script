@@ -5312,6 +5312,9 @@ fn compile_dynamic_partial_helper_func(h: &DynamicPartialHelper) -> String {
 }
 
 pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<String, String> {
+    let optimized_typed_ast = crate::op::optimize_typed_ast(typed_ast);
+    let typed_ast = &optimized_typed_ast;
+
     let (top_defs, main_expr, main_node) = match &typed_ast.expr {
         Expression::Apply(items) if
             matches!(items.first(), Some(Expression::Word(w)) if w == "do")
