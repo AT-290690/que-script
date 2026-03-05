@@ -279,6 +279,9 @@ fn is_special_word(w: &str) -> bool {
             "move!" |
             "list-dir!" |
             "mkdir!" |
+            "print!" |
+            "sleep!" |
+            "clear!" |
             "+" |
             "+#" |
             "+." |
@@ -4020,6 +4023,36 @@ fn compile_host_unary_string_call(
 }
 
 #[cfg(feature = "io")]
+fn compile_host_unary_int_call(
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    op_name: &str,
+    host_symbol: &str
+) -> Result<String, String> {
+    if node.children.len() != 2 {
+        return Err(format!("{op_name} expects exactly one Int argument"));
+    }
+    let arg = compile_expr(
+        node.children.get(1).ok_or_else(|| format!("{op_name} missing argument"))?,
+        ctx
+    )?;
+    Ok(format!("{arg}\ncall ${host_symbol}"))
+}
+
+#[cfg(feature = "io")]
+fn compile_host_unit_call(
+    node: &TypedExpression,
+    _ctx: &Ctx<'_>,
+    op_name: &str,
+    host_symbol: &str
+) -> Result<String, String> {
+    if node.children.len() != 1 {
+        return Err(format!("{op_name} expects no arguments"));
+    }
+    Ok(format!("call ${host_symbol}"))
+}
+
+#[cfg(feature = "io")]
 fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     if node.children.len() != 3 {
         return Err("write! expects exactly two [Char] arguments".to_string());
@@ -4058,6 +4091,26 @@ fn compile_host_binary_string_call(
 
 #[cfg(not(feature = "io"))]
 fn compile_host_unary_string_call(
+    _node: &TypedExpression,
+    _ctx: &Ctx<'_>,
+    op_name: &str,
+    _host_symbol: &str
+) -> Result<String, String> {
+    Err(format!("{op_name} requires enabling the 'io' feature"))
+}
+
+#[cfg(not(feature = "io"))]
+fn compile_host_unary_int_call(
+    _node: &TypedExpression,
+    _ctx: &Ctx<'_>,
+    op_name: &str,
+    _host_symbol: &str
+) -> Result<String, String> {
+    Err(format!("{op_name} requires enabling the 'io' feature"))
+}
+
+#[cfg(not(feature = "io"))]
+fn compile_host_unit_call(
     _node: &TypedExpression,
     _ctx: &Ctx<'_>,
     op_name: &str,
@@ -4549,6 +4602,11 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "delete!" =>
                             compile_host_unary_string_call(node, ctx, "delete!", "host_delete"),
                         "curl!" => compile_host_unary_string_call(node, ctx, "curl!", "host_curl"),
+                        "print!" =>
+                            compile_host_unary_string_call(node, ctx, "print!", "host_print"),
+                        "sleep!" =>
+                            compile_host_unary_int_call(node, ctx, "sleep!", "host_sleep"),
+                        "clear!" => compile_host_unit_call(node, ctx, "clear!", "host_clear"),
                         "write!" => compile_host_write_call(node, ctx),
                         "move!" => compile_host_binary_string_call(node, ctx, "move!", "host_move"),
                         "not" => {
@@ -4628,7 +4686,10 @@ fn typed_expr_uses_host_io(node: &TypedExpression) -> bool {
                     op == "list-dir!" ||
                     op == "mkdir!" ||
                     op == "delete!" ||
-                    op == "move!"
+                    op == "move!" ||
+                    op == "print!" ||
+                    op == "sleep!" ||
+                    op == "clear!"
             } else {
                 false
             };
@@ -5813,6 +5874,9 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
             "  (import \"host\" \"move\" (func $host_move (param i32 i32) (result i32)))\n"
         );
         wat.push_str("  (import \"host\" \"curl\" (func $host_curl (param i32) (result i32)))\n");
+        wat.push_str("  (import \"host\" \"print\" (func $host_print (param i32) (result i32)))\n");
+        wat.push_str("  (import \"host\" \"sleep\" (func $host_sleep (param i32) (result i32)))\n");
+        wat.push_str("  (import \"host\" \"clear\" (func $host_clear (result i32)))\n");
     }
     for name in &cached_value_defs {
         wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_init_global(name)));
