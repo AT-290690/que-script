@@ -2,8 +2,11 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io;
+use std::io::Write as _;
 use std::path::{ Path, PathBuf };
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 use wasmtime::{ Caller, Extern, Memory, TypedFunc };
 use wasmtime::Linker;
 use wasmtime_wasi::{ ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView };
@@ -596,6 +599,58 @@ pub fn host_curl(
     write_lisp_string(&mut caller, &combined)
 }
 
+pub fn host_print(
+    mut caller: Caller<'_, ShellStoreData>,
+    text_vec_ptr: i32
+) -> wasmtime::Result<i32> {
+    let text = read_lisp_string(&mut caller, text_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Write, "print!", "<stdout>")
+        .map_err(wasmtime::Error::msg)?;
+
+    let mut out = io::stdout();
+    out
+        .write_all(text.as_bytes())
+        .map_err(|e| wasmtime::Error::msg(format!("failed to write stdout: {}", e)))?;
+    out
+        .flush()
+        .map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
+    Ok(0)
+}
+
+pub fn host_sleep(
+    caller: Caller<'_, ShellStoreData>,
+    millis: i32
+) -> wasmtime::Result<i32> {
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Write, "sleep!", "<clock>")
+        .map_err(wasmtime::Error::msg)?;
+
+    if millis < 0 {
+        return Err(wasmtime::Error::msg(format!("sleep! expects non-negative ms, got {}", millis)));
+    }
+    thread::sleep(Duration::from_millis(millis as u64));
+    Ok(0)
+}
+
+pub fn host_clear(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
+    caller
+        .data()
+        .shell_policy.require(ShellPermission::Write, "clear!", "<stdout>")
+        .map_err(wasmtime::Error::msg)?;
+
+    let mut out = io::stdout();
+    out
+        .write_all(b"\x1b[2J\x1b[H")
+        .map_err(|e| wasmtime::Error::msg(format!("failed to clear stdout: {}", e)))?;
+    out
+        .flush()
+        .map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
+    Ok(0)
+}
+
 pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Result<()> {
     // Core wasm modules (like this backend) use WASIp1 imports.
     wasmtime_wasi::p1::add_to_linker_sync(linker, |state| &mut state.wasi_p1_ctx)?;
@@ -606,6 +661,9 @@ pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Res
     linker.func_wrap("host", "delete", host_delete)?;
     linker.func_wrap("host", "move", host_move)?;
     linker.func_wrap("host", "curl", host_curl)?;
+    linker.func_wrap("host", "print", host_print)?;
+    linker.func_wrap("host", "sleep", host_sleep)?;
+    linker.func_wrap("host", "clear", host_clear)?;
     Ok(())
 }
 

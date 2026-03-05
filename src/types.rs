@@ -586,6 +586,20 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     #[cfg(feature = "io")]
     {
         let _ = env.insert(
+            "print!".to_string(),
+            TypeScheme::monotype(
+                Type::Function(Box::new(Type::List(Box::new(Type::Char))), Box::new(Type::Unit))
+            )
+        );
+        let _ = env.insert(
+            "sleep!".to_string(),
+            TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Unit)))
+        );
+        let _ = env.insert(
+            "clear!".to_string(),
+            TypeScheme::monotype(Type::Function(Box::new(Type::Unit), Box::new(Type::Unit)))
+        );
+        let _ = env.insert(
             "curl!".to_string(),
             TypeScheme::monotype(
                 Type::Function(
@@ -606,10 +620,7 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         let _ = env.insert(
             "mkdir!".to_string(),
             TypeScheme::monotype(
-                Type::Function(
-                    Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(Type::Unit)
-                )
+                Type::Function(Box::new(Type::List(Box::new(Type::Char))), Box::new(Type::Unit))
             )
         );
         let _ = env.insert(
@@ -624,10 +635,7 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         let _ = env.insert(
             "delete!".to_string(),
             TypeScheme::monotype(
-                Type::Function(
-                    Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(Type::Unit)
-                )
+                Type::Function(Box::new(Type::List(Box::new(Type::Char))), Box::new(Type::Unit))
             )
         );
         let _ = env.insert(
