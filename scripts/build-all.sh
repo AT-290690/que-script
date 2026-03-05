@@ -1,0 +1,1 @@
+./scripts/build-c.sh && ./scripts/build-io.sh && ./scripts/build-r.sh && ./scripts/build-wasm-c.sh && ./scripts/build-wat.sh

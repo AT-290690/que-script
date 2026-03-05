@@ -198,6 +198,58 @@ fn set_argv_strings<T>(
     Ok(())
 }
 
+fn read_debug_global_i64<T>(
+    instance: &wasmtime::Instance,
+    store: &mut Store<T>,
+    name: &str
+) -> Option<i64> {
+    let g = instance.get_global(&mut *store, name)?;
+    match g.get(&mut *store) {
+        wasmtime::Val::I64(v) => Some(v),
+        wasmtime::Val::I32(v) => Some(v as i64),
+        _ => None,
+    }
+}
+
+fn debug_rc_snapshot<T>(instance: &wasmtime::Instance, store: &mut Store<T>) -> Option<String> {
+    let alloc = read_debug_global_i64(instance, store, "dbg_alloc_count")?;
+    let free = read_debug_global_i64(instance, store, "dbg_free_count").unwrap_or(0);
+    let retain = read_debug_global_i64(instance, store, "dbg_retain_count").unwrap_or(0);
+    let release = read_debug_global_i64(instance, store, "dbg_release_count").unwrap_or(0);
+    let vec_new = read_debug_global_i64(instance, store, "dbg_vec_new_count").unwrap_or(0);
+    let vec_set = read_debug_global_i64(instance, store, "dbg_vec_set_count").unwrap_or(0);
+    let bad_ptr = read_debug_global_i64(instance, store, "dbg_bad_vec_set_ptr").unwrap_or(0);
+    let bad_val = read_debug_global_i64(instance, store, "dbg_bad_ref_value").unwrap_or(0);
+    let bad_old = read_debug_global_i64(instance, store, "dbg_bad_ref_old").unwrap_or(0);
+    let elem_ref_0 = read_debug_global_i64(instance, store, "dbg_vec_set_elem_ref_0").unwrap_or(0);
+    let elem_ref_1 = read_debug_global_i64(instance, store, "dbg_vec_set_elem_ref_1").unwrap_or(0);
+    let rel_vec_gt0 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_gt0").unwrap_or(0);
+    let rel_vec_free = read_debug_global_i64(instance, store, "dbg_rc_release_vec_free").unwrap_or(0);
+    let set_append = read_debug_global_i64(instance, store, "dbg_vec_set_append_path").unwrap_or(0);
+    let set_replace = read_debug_global_i64(instance, store, "dbg_vec_set_replace_path").unwrap_or(0);
+    let rel_rc_eq1 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_eq_1").unwrap_or(0);
+    let rel_rc_ge2 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_ge_2").unwrap_or(0);
+    let old_rc_eq1 = read_debug_global_i64(instance, store, "dbg_vec_set_old_rc_eq_1").unwrap_or(0);
+    let old_rc_ge2 = read_debug_global_i64(instance, store, "dbg_vec_set_old_rc_ge_2").unwrap_or(0);
+    let old_not_vec = read_debug_global_i64(instance, store, "dbg_vec_set_old_not_vec").unwrap_or(0);
+    let tmp_rel_exec = read_debug_global_i64(instance, store, "dbg_tmp_release_exec").unwrap_or(0);
+    let tmp_rel_skip = read_debug_global_i64(instance, store, "dbg_tmp_release_skip").unwrap_or(0);
+    let v_rc_eq1 = read_debug_global_i64(instance, store, "dbg_vec_set_v_rc_eq_1").unwrap_or(0);
+    let v_rc_ge2 = read_debug_global_i64(instance, store, "dbg_vec_set_v_rc_ge_2").unwrap_or(0);
+    let v_not_vec = read_debug_global_i64(instance, store, "dbg_vec_set_v_not_vec").unwrap_or(0);
+    let tmp_post_eq1 = read_debug_global_i64(instance, store, "dbg_tmp_release_post_rc_eq_1").unwrap_or(0);
+    let tmp_post_other = read_debug_global_i64(instance, store, "dbg_tmp_release_post_rc_other").unwrap_or(0);
+    let tmp_post_not_vec = read_debug_global_i64(instance, store, "dbg_tmp_release_post_not_vec").unwrap_or(0);
+    let rel_reject_not_vec = read_debug_global_i64(instance, store, "dbg_rc_release_reject_not_vec").unwrap_or(0);
+    let rel_take_vec = read_debug_global_i64(instance, store, "dbg_rc_release_take_vec_path").unwrap_or(0);
+
+    Some(
+        format!(
+            "debug-rc: alloc={alloc} free={free} retain={retain} release={release} vec_new={vec_new} vec_set={vec_set} bad_vec_set_ptr={bad_ptr} bad_ref_value={bad_val} bad_ref_old={bad_old} vec_set_elem_ref_0={elem_ref_0} vec_set_elem_ref_1={elem_ref_1} rc_release_vec_gt0={rel_vec_gt0} rc_release_vec_free={rel_vec_free} vec_set_append={set_append} vec_set_replace={set_replace} rc_release_vec_rc_eq1={rel_rc_eq1} rc_release_vec_rc_ge2={rel_rc_ge2} vec_set_old_rc_eq1={old_rc_eq1} vec_set_old_rc_ge2={old_rc_ge2} vec_set_old_not_vec={old_not_vec} tmp_release_exec={tmp_rel_exec} tmp_release_skip={tmp_rel_skip} vec_set_v_rc_eq1={v_rc_eq1} vec_set_v_rc_ge2={v_rc_ge2} vec_set_v_not_vec={v_not_vec} tmp_release_post_eq1={tmp_post_eq1} tmp_release_post_other={tmp_post_other} tmp_release_post_not_vec={tmp_post_not_vec} rc_release_reject_not_vec={rel_reject_not_vec} rc_release_take_vec={rel_take_vec}"
+        )
+    )
+}
+
 pub fn run_wat_text<T: 'static, F>(
     wat_src: &str,
     store_data: T,
@@ -228,6 +280,16 @@ where
         .get_typed_func::<(), i32>(&mut store, "main")
         .map_err(|e| format!("main func error: {:#}", e))?;
 
-    let ptr = main.call(&mut store, ()).map_err(|e| format!("call error: {:#}", e))?;
+    let ptr = match main.call(&mut store, ()) {
+        Ok(v) => v,
+        Err(e) => {
+            let mut msg = format!("call error: {:#}", e);
+            if let Some(debug) = debug_rc_snapshot(&instance, &mut store) {
+                msg.push('\n');
+                msg.push_str(&debug);
+            }
+            return Err(msg);
+        }
+    };
     decode_value(ptr, &typ, &memory, &store)
 }

@@ -426,10 +426,18 @@ fn collect_let_lambda_bindings(node: &TypedExpression, out: &mut HashMap<String,
         if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
             if kw == "let" || kw == "let*" {
                 if let Some(rhs) = node.children.get(2) {
-                    if
-                        matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
-                    {
-                        out.insert(name.clone(), rhs.clone());
+                    match &rhs.expr {
+                        Expression::Apply(xs) if
+                            matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+                        => {
+                            out.insert(name.clone(), rhs.clone());
+                        }
+                        Expression::Word(alias) => {
+                            if let Some(target) = out.get(alias).cloned() {
+                                out.insert(name.clone(), target);
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -628,6 +636,7 @@ fn emit_vector_runtime(
   (global $free_small_128 (mut i32) (i32.const 0))
   ;; Runtime ARGV storage (vector pointer). Lazily initialized to [].
   (global $argv_ptr (mut i32) (i32.const 0))
+  ;; __DBG_RC_GLOBALS__
 
   (func $alloc (param $n i32) (result i32)
     (local $prev i32)
@@ -642,6 +651,7 @@ fn emit_vector_runtime(
     (local $delta i32)
     (local $grow_pages i32)
     (local $grow_res i32)
+    ;; __DBG_RC_ALLOC_INC__
     ;; Small-block fast path (segregated free lists).
     ;; Rounds small requests to class size and pops in O(1) when available.
     local.get $n
@@ -932,6 +942,7 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    ;; __DBG_RC_FREE_INC__
     local.get $ptr
     i32.const 8
     i32.sub
@@ -1156,21 +1167,27 @@ fn emit_vector_runtime(
     i32.const 8
     i32.add
     i32.load
-    local.tee $rc
+    local.set $rc
+    ;; __DBG_RC_RELEASE_VEC_RC_HIST__
+    local.get $rc
     i32.const 1
     i32.sub
-    local.tee $rc
+    local.set $rc
     local.get $ptr
     i32.const 8
     i32.add
+    local.get $rc
     i32.store
+    ;; __DBG_RC_RELEASE_VEC_DEC__
     local.get $rc
     i32.const 0
     i32.gt_s
     if
+      ;; __DBG_RC_RELEASE_VEC_GT0__
       i32.const 0
       return
     end
+    ;; __DBG_RC_RELEASE_VEC_FREE_PATH__
     local.get $ptr
     i32.const 12
     i32.add
@@ -1587,13 +1604,15 @@ fn emit_vector_runtime(
     i32.const 8
     i32.add
     i32.load
-    local.tee $rc
+    local.set $rc
+    local.get $rc
     i32.const 1
     i32.sub
-    local.tee $rc
+    local.set $rc
     local.get $base
     i32.const 8
     i32.add
+    local.get $rc
     i32.store
     local.get $rc
     i32.const 0
@@ -1662,9 +1681,12 @@ fn emit_vector_runtime(
     (local $mem_end i32)
     (local $len i32)
     (local $cap i32)
+    (local $rc i32)
     (local $elem_ref i32)
     (local $data i32)
     (local $avail i32)
+    (local $data_base i32)
+    (local $data_block_size i32)
     local.get $ptr
     i32.const 65536
     i32.lt_u
@@ -1677,7 +1699,7 @@ fn emit_vector_runtime(
     i32.shl
     local.set $mem_end
     local.get $ptr
-    i32.const 20
+    i32.const 24
     i32.add
     local.get $mem_end
     i32.gt_u
@@ -1694,6 +1716,11 @@ fn emit_vector_runtime(
     i32.load
     local.set $cap
     local.get $ptr
+    i32.const 8
+    i32.add
+    i32.load
+    local.set $rc
+    local.get $ptr
     i32.const 12
     i32.add
     i32.load
@@ -1703,6 +1730,23 @@ fn emit_vector_runtime(
     i32.add
     i32.load
     local.set $data
+    local.get $ptr
+    i32.const 20
+    i32.add
+    i32.load
+    i32.const 1447380017
+    i32.ne
+    if
+      i32.const 0
+      return
+    end
+    local.get $rc
+    i32.const 0
+    i32.le_s
+    if
+      i32.const 0
+      return
+    end
     local.get $len
     i32.const 0
     i32.lt_s
@@ -1737,8 +1781,40 @@ fn emit_vector_runtime(
       end
     end
     local.get $data
+    i32.const 8
+    i32.sub
+    local.set $data_base
+    local.get $data_base
     i32.const 65536
     i32.lt_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $data_base
+    i32.const 8
+    i32.add
+    local.get $mem_end
+    i32.gt_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $data_base
+    i32.load
+    local.set $data_block_size
+    local.get $data_block_size
+    i32.const 0
+    i32.lt_s
+    if
+      i32.const 0
+      return
+    end
+    local.get $cap
+    i32.const 4
+    i32.mul
+    local.get $data_block_size
+    i32.gt_u
     if
       i32.const 0
       return
@@ -1766,6 +1842,8 @@ fn emit_vector_runtime(
     i32.const 1
   )
 
+  ;; __DBG_RC_HELPERS__
+
   (func $rc_retain (param $ptr i32) (result i32)
     local.get $ptr
     i32.eqz
@@ -1773,6 +1851,7 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    ;; __DBG_RC_RETAIN_INC__
     local.get $ptr
     i32.const -2147483648
     i32.and
@@ -1828,6 +1907,7 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    ;; __DBG_RC_RELEASE_INC__
     local.get $ptr
     i32.const -2147483648
     i32.and
@@ -1869,9 +1949,11 @@ fn emit_vector_runtime(
     call $is_vec_ptr
     i32.eqz
     if
+      ;; __DBG_RC_RELEASE_REJECT_NOT_VEC__
       i32.const 0
       return
     end
+    ;; __DBG_RC_RELEASE_TAKE_VEC_PATH__
     local.get $ptr
     call $rc_release_vec
   )
@@ -1880,6 +1962,8 @@ fn emit_vector_runtime(
     (local $cap i32)
     (local $ptr i32)
     (local $data i32)
+    (local $i i32)
+    ;; __DBG_RC_VEC_NEW_INC__
     local.get $len
     i32.const 2
     i32.lt_s
@@ -1889,7 +1973,7 @@ fn emit_vector_runtime(
       local.get $len
     end
     local.set $cap
-    i32.const 20
+    i32.const 24
     call $alloc
     local.set $ptr
     local.get $cap
@@ -1920,6 +2004,35 @@ fn emit_vector_runtime(
     i32.add
     local.get $data
     i32.store
+    local.get $ptr
+    i32.const 20
+    i32.add
+    i32.const 1447380017
+    i32.store
+    ;; Initialize backing storage so first write to an existing slot does not
+    ;; read/release uninitialized garbage when elem_ref=1.
+    i32.const 0
+    local.set $i
+    block $done
+      loop $zero
+        local.get $i
+        local.get $cap
+        i32.ge_s
+        br_if $done
+        local.get $data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.const 0
+        i32.store
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $zero
+      end
+    end
     local.get $ptr
   )
 
@@ -2078,6 +2191,8 @@ fn emit_vector_runtime(
     (local $addr i32)
     (local $elem_ref i32)
     (local $old i32)
+    ;; __DBG_RC_VEC_SET_INC__
+    ;; __DBG_RC_VEC_SET_PTR_CHECK__
     local.get $ptr
     i32.load
     local.set $len
@@ -2091,11 +2206,13 @@ fn emit_vector_runtime(
     i32.add
     i32.load
     local.set $elem_ref
+    ;; __DBG_RC_VEC_SET_ELEM_REF__
 
     local.get $idx
     local.get $len
     i32.eq
     if
+      ;; __DBG_RC_VEC_SET_APPEND_PATH__
       local.get $len
       local.get $cap
       i32.lt_s
@@ -2109,6 +2226,8 @@ fn emit_vector_runtime(
       i32.const 0
       i32.ne
       if
+        ;; __DBG_RC_VEC_SET_V_RC_BEFORE_RETAIN__
+        ;; __DBG_RC_SET_VALUE_CHECK__
         local.get $v
         call $rc_retain
         drop
@@ -2142,6 +2261,7 @@ fn emit_vector_runtime(
     i32.lt_s
     i32.and
     if
+      ;; __DBG_RC_VEC_SET_REPLACE_PATH__
       local.get $ptr
       i32.const 16
       i32.add
@@ -2155,15 +2275,23 @@ fn emit_vector_runtime(
       i32.const 0
       i32.ne
       if
+        ;; __DBG_RC_VEC_SET_V_RC_BEFORE_RETAIN__
         local.get $addr
         i32.load
         local.set $old
+        ;; __DBG_RC_SET_OLD_CHECK__
         local.get $old
-        call $rc_release
-        drop
         local.get $v
-        call $rc_retain
-        drop
+        i32.ne
+        if
+          ;; __DBG_RC_VEC_SET_OLD_RC_HIST__
+          local.get $v
+          call $rc_retain
+          drop
+          local.get $old
+          call $rc_release
+          drop
+        end
       end
       local.get $addr
       local.get $v
@@ -2298,6 +2426,7 @@ fn emit_vector_runtime(
   (export "alloc" (func $alloc))
   (export "rc_retain" (func $rc_retain))
   (export "rc_release" (func $rc_release))
+  ;; __DBG_RC_EXPORTS__
 "#
     );
     if apply_arities.contains(&0) {
@@ -3002,6 +3131,429 @@ fn emit_vector_runtime(
     for arity in extra_apply_arities {
         out.push_str(&emit_high_arity_apply_i32(arity, fn_ids, fn_sigs, closure_defs));
     }
+    let debug_rc_enabled = cfg!(feature = "debug-rc");
+    let replacements = [
+        (
+            ";; __DBG_RC_GLOBALS__",
+            if debug_rc_enabled {
+                r#"
+  (global $dbg_alloc_count (mut i64) (i64.const 0))
+  (global $dbg_free_count (mut i64) (i64.const 0))
+  (global $dbg_retain_count (mut i64) (i64.const 0))
+  (global $dbg_release_count (mut i64) (i64.const 0))
+  (global $dbg_vec_new_count (mut i64) (i64.const 0))
+  (global $dbg_vec_set_count (mut i64) (i64.const 0))
+  (global $dbg_bad_vec_set_ptr (mut i64) (i64.const 0))
+  (global $dbg_bad_ref_value (mut i64) (i64.const 0))
+  (global $dbg_bad_ref_old (mut i64) (i64.const 0))
+  (global $dbg_vec_set_elem_ref_0 (mut i64) (i64.const 0))
+  (global $dbg_vec_set_elem_ref_1 (mut i64) (i64.const 0))
+  (global $dbg_rc_release_vec_gt0 (mut i64) (i64.const 0))
+  (global $dbg_rc_release_vec_free (mut i64) (i64.const 0))
+  (global $dbg_vec_set_append_path (mut i64) (i64.const 0))
+  (global $dbg_vec_set_replace_path (mut i64) (i64.const 0))
+  (global $dbg_rc_release_vec_rc_eq_1 (mut i64) (i64.const 0))
+  (global $dbg_rc_release_vec_rc_ge_2 (mut i64) (i64.const 0))
+  (global $dbg_vec_set_old_rc_eq_1 (mut i64) (i64.const 0))
+  (global $dbg_vec_set_old_rc_ge_2 (mut i64) (i64.const 0))
+  (global $dbg_vec_set_old_not_vec (mut i64) (i64.const 0))
+  (global $dbg_tmp_release_exec (mut i64) (i64.const 0))
+  (global $dbg_tmp_release_skip (mut i64) (i64.const 0))
+  (global $dbg_vec_set_v_rc_eq_1 (mut i64) (i64.const 0))
+  (global $dbg_vec_set_v_rc_ge_2 (mut i64) (i64.const 0))
+  (global $dbg_vec_set_v_not_vec (mut i64) (i64.const 0))
+  (global $dbg_tmp_release_post_rc_eq_1 (mut i64) (i64.const 0))
+  (global $dbg_tmp_release_post_rc_other (mut i64) (i64.const 0))
+  (global $dbg_tmp_release_post_not_vec (mut i64) (i64.const 0))
+  (global $dbg_rc_release_reject_not_vec (mut i64) (i64.const 0))
+  (global $dbg_rc_release_take_vec_path (mut i64) (i64.const 0))"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_HELPERS__",
+            if debug_rc_enabled {
+                r#"
+  (func $dbg_is_managed_ptr (param $p i32) (result i32)
+    local.get $p
+    i32.eqz
+    if (result i32)
+      i32.const 1
+    else
+      local.get $p
+      i32.const 65536
+      i32.lt_u
+      if (result i32)
+        i32.const 1
+      else
+      local.get $p
+      i32.const -2147483648
+      i32.and
+      i32.const -2147483648
+      i32.eq
+      if (result i32)
+        local.get $p
+        i32.const 2147483647
+        i32.and
+        i32.const 65536
+        i32.ge_u
+        local.get $p
+        i32.const 2147483647
+        i32.and
+        memory.size
+        i32.const 16
+        i32.shl
+        i32.lt_u
+        i32.and
+      else
+        local.get $p
+        call $is_vec_ptr
+      end
+      end
+    end
+  )"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_ALLOC_INC__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_alloc_count
+    i64.const 1
+    i64.add
+    global.set $dbg_alloc_count"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_FREE_INC__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_free_count
+    i64.const 1
+    i64.add
+    global.set $dbg_free_count"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_RETAIN_INC__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_retain_count
+    i64.const 1
+    i64.add
+    global.set $dbg_retain_count"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_RELEASE_INC__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_release_count
+    i64.const 1
+    i64.add
+    global.set $dbg_release_count"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_VEC_NEW_INC__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_vec_new_count
+    i64.const 1
+    i64.add
+    global.set $dbg_vec_new_count"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_VEC_SET_INC__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_vec_set_count
+    i64.const 1
+    i64.add
+    global.set $dbg_vec_set_count"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_VEC_SET_ELEM_REF__",
+            if debug_rc_enabled {
+                r#"local.get $elem_ref
+    i32.eqz
+    if
+      global.get $dbg_vec_set_elem_ref_0
+      i64.const 1
+      i64.add
+      global.set $dbg_vec_set_elem_ref_0
+    else
+      global.get $dbg_vec_set_elem_ref_1
+      i64.const 1
+      i64.add
+      global.set $dbg_vec_set_elem_ref_1
+    end"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_RELEASE_VEC_DEC__",
+            if debug_rc_enabled {
+                ""
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_RELEASE_VEC_RC_HIST__",
+            if debug_rc_enabled {
+                r#"local.get $rc
+    i32.const 1
+    i32.eq
+    if
+      global.get $dbg_rc_release_vec_rc_eq_1
+      i64.const 1
+      i64.add
+      global.set $dbg_rc_release_vec_rc_eq_1
+    else
+      global.get $dbg_rc_release_vec_rc_ge_2
+      i64.const 1
+      i64.add
+      global.set $dbg_rc_release_vec_rc_ge_2
+    end"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_RELEASE_VEC_GT0__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_rc_release_vec_gt0
+      i64.const 1
+      i64.add
+      global.set $dbg_rc_release_vec_gt0"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_RELEASE_VEC_FREE_PATH__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_rc_release_vec_free
+    i64.const 1
+    i64.add
+    global.set $dbg_rc_release_vec_free"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_VEC_SET_APPEND_PATH__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_vec_set_append_path
+      i64.const 1
+      i64.add
+      global.set $dbg_vec_set_append_path"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_VEC_SET_REPLACE_PATH__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_vec_set_replace_path
+      i64.const 1
+      i64.add
+      global.set $dbg_vec_set_replace_path"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_VEC_SET_OLD_RC_HIST__",
+            if debug_rc_enabled {
+                r#"local.get $old
+          call $is_vec_ptr
+          if
+            local.get $old
+            i32.const 8
+            i32.add
+            i32.load
+            i32.const 1
+            i32.eq
+            if
+              global.get $dbg_vec_set_old_rc_eq_1
+              i64.const 1
+              i64.add
+              global.set $dbg_vec_set_old_rc_eq_1
+            else
+              global.get $dbg_vec_set_old_rc_ge_2
+              i64.const 1
+              i64.add
+              global.set $dbg_vec_set_old_rc_ge_2
+            end
+          else
+            global.get $dbg_vec_set_old_not_vec
+            i64.const 1
+            i64.add
+            global.set $dbg_vec_set_old_not_vec
+          end"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_VEC_SET_V_RC_BEFORE_RETAIN__",
+            if debug_rc_enabled {
+                r#"local.get $v
+        call $is_vec_ptr
+        if
+          local.get $v
+          i32.const 8
+          i32.add
+          i32.load
+          i32.const 1
+          i32.eq
+          if
+            global.get $dbg_vec_set_v_rc_eq_1
+            i64.const 1
+            i64.add
+            global.set $dbg_vec_set_v_rc_eq_1
+          else
+            global.get $dbg_vec_set_v_rc_ge_2
+            i64.const 1
+            i64.add
+            global.set $dbg_vec_set_v_rc_ge_2
+          end
+        else
+          global.get $dbg_vec_set_v_not_vec
+          i64.const 1
+          i64.add
+          global.set $dbg_vec_set_v_not_vec
+        end"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_VEC_SET_PTR_CHECK__",
+            if debug_rc_enabled {
+                r#"local.get $ptr
+    call $is_vec_ptr
+    i32.eqz
+    if
+      global.get $dbg_bad_vec_set_ptr
+      i64.const 1
+      i64.add
+      global.set $dbg_bad_vec_set_ptr
+    end"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_SET_VALUE_CHECK__",
+            if debug_rc_enabled {
+                r#"local.get $v
+        call $dbg_is_managed_ptr
+        i32.eqz
+        if
+          global.get $dbg_bad_ref_value
+          i64.const 1
+          i64.add
+          global.set $dbg_bad_ref_value
+        end"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_SET_OLD_CHECK__",
+            if debug_rc_enabled {
+                r#"local.get $old
+        call $dbg_is_managed_ptr
+        i32.eqz
+        if
+          global.get $dbg_bad_ref_old
+          i64.const 1
+          i64.add
+          global.set $dbg_bad_ref_old
+        end"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_RELEASE_REJECT_NOT_VEC__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_rc_release_reject_not_vec
+      i64.const 1
+      i64.add
+      global.set $dbg_rc_release_reject_not_vec"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_RELEASE_TAKE_VEC_PATH__",
+            if debug_rc_enabled {
+                r#"global.get $dbg_rc_release_take_vec_path
+    i64.const 1
+    i64.add
+    global.set $dbg_rc_release_take_vec_path"#
+            } else {
+                ""
+            },
+        ),
+        (
+            ";; __DBG_RC_EXPORTS__",
+            if debug_rc_enabled {
+                r#"
+  (export "dbg_alloc_count" (global $dbg_alloc_count))
+  (export "dbg_free_count" (global $dbg_free_count))
+  (export "dbg_retain_count" (global $dbg_retain_count))
+  (export "dbg_release_count" (global $dbg_release_count))
+  (export "dbg_vec_new_count" (global $dbg_vec_new_count))
+  (export "dbg_vec_set_count" (global $dbg_vec_set_count))
+  (export "dbg_bad_vec_set_ptr" (global $dbg_bad_vec_set_ptr))
+  (export "dbg_bad_ref_value" (global $dbg_bad_ref_value))
+  (export "dbg_bad_ref_old" (global $dbg_bad_ref_old))
+  (export "dbg_vec_set_elem_ref_0" (global $dbg_vec_set_elem_ref_0))
+  (export "dbg_vec_set_elem_ref_1" (global $dbg_vec_set_elem_ref_1))
+  (export "dbg_rc_release_vec_gt0" (global $dbg_rc_release_vec_gt0))
+  (export "dbg_rc_release_vec_free" (global $dbg_rc_release_vec_free))
+  (export "dbg_vec_set_append_path" (global $dbg_vec_set_append_path))
+  (export "dbg_vec_set_replace_path" (global $dbg_vec_set_replace_path))
+  (export "dbg_rc_release_vec_rc_eq_1" (global $dbg_rc_release_vec_rc_eq_1))
+  (export "dbg_rc_release_vec_rc_ge_2" (global $dbg_rc_release_vec_rc_ge_2))
+  (export "dbg_vec_set_old_rc_eq_1" (global $dbg_vec_set_old_rc_eq_1))
+  (export "dbg_vec_set_old_rc_ge_2" (global $dbg_vec_set_old_rc_ge_2))
+  (export "dbg_vec_set_old_not_vec" (global $dbg_vec_set_old_not_vec))
+  (export "dbg_tmp_release_exec" (global $dbg_tmp_release_exec))
+  (export "dbg_tmp_release_skip" (global $dbg_tmp_release_skip))
+  (export "dbg_vec_set_v_rc_eq_1" (global $dbg_vec_set_v_rc_eq_1))
+  (export "dbg_vec_set_v_rc_ge_2" (global $dbg_vec_set_v_rc_ge_2))
+  (export "dbg_vec_set_v_not_vec" (global $dbg_vec_set_v_not_vec))
+  (export "dbg_tmp_release_post_rc_eq_1" (global $dbg_tmp_release_post_rc_eq_1))
+  (export "dbg_tmp_release_post_rc_other" (global $dbg_tmp_release_post_rc_other))
+  (export "dbg_tmp_release_post_not_vec" (global $dbg_tmp_release_post_not_vec))
+  (export "dbg_rc_release_reject_not_vec" (global $dbg_rc_release_reject_not_vec))
+  (export "dbg_rc_release_take_vec_path" (global $dbg_rc_release_take_vec_path))"#
+            } else {
+                ""
+            },
+        ),
+    ];
+    for (needle, replacement) in replacements {
+        out = out.replace(needle, replacement);
+    }
     out
 }
 
@@ -3120,10 +3672,187 @@ fn is_borrowing_accessor_expr(node: &TypedExpression) -> bool {
         Expression::Apply(items) if !items.is_empty() =>
             matches!(
                 &items[0],
-                Expression::Word(op) if op == "get" || op == "fst" || op == "snd" || op == "car"
+                Expression::Word(op)
+                    if op == "get"
+                        || op == "fst"
+                        || op == "snd"
+                        || op == "car"
             ),
         _ => false,
     }
+}
+
+const MAX_BORROW_ANALYSIS_DEPTH: usize = 64;
+
+fn apply_child_at<'a>(node: &'a TypedExpression, item_idx: usize) -> Option<&'a TypedExpression> {
+    let items = match &node.expr {
+        Expression::Apply(items) => items,
+        _ => return None,
+    };
+    let child_offset = if node.children.len() + 1 == items.len() { 1 } else { 0 };
+    if item_idx < child_offset {
+        None
+    } else {
+        node.children.get(item_idx - child_offset)
+    }
+}
+
+fn lambda_params_and_body<'a>(lambda_node: &'a TypedExpression) -> Option<(Vec<String>, &'a TypedExpression)> {
+    let items = match &lambda_node.expr {
+        Expression::Apply(items) => items,
+        _ => return None,
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") || items.len() < 2 {
+        return None;
+    }
+    let body_idx = items.len() - 1;
+    let mut params = Vec::new();
+    for p in &items[1..body_idx] {
+        if let Expression::Word(name) = p {
+            params.push(name.clone());
+        } else {
+            return None;
+        }
+    }
+    let body = apply_child_at(lambda_node, body_idx).or_else(|| lambda_node.children.last())?;
+    Some((params, body))
+}
+
+fn is_borrowed_managed_rhs_with_env(
+    node: &TypedExpression,
+    env: &HashMap<String, bool>,
+    lambda_bindings: &HashMap<String, TypedExpression>,
+    call_stack: &mut Vec<String>,
+    depth: usize
+) -> bool {
+    if depth > MAX_BORROW_ANALYSIS_DEPTH {
+        // Conservative fallback: keep values alive rather than risk releasing
+        // a borrowed alias when wrapper chains are unexpectedly deep.
+        return true;
+    }
+    match &node.expr {
+        Expression::Word(name) => *env.get(name).unwrap_or(&true),
+        Expression::Apply(items) if !items.is_empty() => {
+            let op = match &items[0] {
+                Expression::Word(w) => w.as_str(),
+                _ => return false,
+            };
+            if op == "as" || op == "char" {
+                return apply_child_at(node, 1).map(|n|
+                    is_borrowed_managed_rhs_with_env(n, env, lambda_bindings, call_stack, depth + 1)
+                ).unwrap_or(false);
+            }
+            if is_borrowing_accessor_expr(node) {
+                return apply_child_at(node, 1).map(|n|
+                    is_borrowed_managed_rhs_with_env(n, env, lambda_bindings, call_stack, depth + 1)
+                ).unwrap_or(false);
+            }
+            if op == "if" {
+                let then_borrowed = apply_child_at(node, 2).map(|n|
+                    is_borrowed_managed_rhs_with_env(n, env, lambda_bindings, call_stack, depth + 1)
+                ).unwrap_or(false);
+                let else_borrowed = apply_child_at(node, 3).map(|n|
+                    is_borrowed_managed_rhs_with_env(n, env, lambda_bindings, call_stack, depth + 1)
+                ).unwrap_or(false);
+                return then_borrowed && else_borrowed;
+            }
+            if op == "do" {
+                let mut scoped_env = env.clone();
+                if items.len() > 1 {
+                    for i in 1..items.len() - 1 {
+                        if let Expression::Apply(let_items) = &items[i] {
+                            if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
+                                if kw == "let" || kw == "let*" {
+                                    let rhs_borrowed = apply_child_at(node, i)
+                                        .and_then(|let_node| let_node.children.get(2))
+                                        .map(|rhs|
+                                            is_borrowed_managed_rhs_with_env(
+                                                rhs,
+                                                &scoped_env,
+                                                lambda_bindings,
+                                                call_stack,
+                                                depth + 1
+                                            )
+                                        )
+                                        .unwrap_or(false);
+                                    scoped_env.insert(name.clone(), rhs_borrowed);
+                                }
+                            }
+                        }
+                    }
+                }
+                return apply_child_at(node, items.len() - 1).map(|last|
+                    is_borrowed_managed_rhs_with_env(last, &scoped_env, lambda_bindings, call_stack, depth + 1)
+                ).unwrap_or(false);
+            }
+            if let Some(lambda_node) = lambda_bindings.get(op) {
+                if call_stack.iter().any(|name| name == op) {
+                    // Recursive/cyclic wrapper chain: stay conservative.
+                    return true;
+                }
+                let (params, body) = match lambda_params_and_body(lambda_node) {
+                    Some(pb) => pb,
+                    None => return false,
+                };
+                let mut lambda_env: HashMap<String, bool> = HashMap::new();
+                for (idx, param_name) in params.iter().enumerate() {
+                    let arg_borrowed = apply_child_at(node, idx + 1).map(|arg|
+                        is_borrowed_managed_rhs_with_env(arg, env, lambda_bindings, call_stack, depth + 1)
+                    ).unwrap_or(false);
+                    lambda_env.insert(param_name.clone(), arg_borrowed);
+                }
+                call_stack.push(op.to_string());
+                let result = is_borrowed_managed_rhs_with_env(
+                    body,
+                    &lambda_env,
+                    lambda_bindings,
+                    call_stack,
+                    depth + 1
+                );
+                call_stack.pop();
+                return result;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn is_borrowed_managed_rhs_expr(
+    node: &TypedExpression,
+    lambda_bindings: &HashMap<String, TypedExpression>
+) -> bool {
+    let env = HashMap::new();
+    let mut call_stack = Vec::new();
+    is_borrowed_managed_rhs_with_env(node, &env, lambda_bindings, &mut call_stack, 0)
+}
+
+fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
+    match &node.expr {
+        Expression::Apply(items) if !items.is_empty() => {
+            if let Expression::Word(op) = &items[0] {
+                if op == "as" || op == "char" {
+                    return node.children
+                        .get(1)
+                        .map(is_fresh_owned_managed_expr)
+                        .unwrap_or(false);
+                }
+                return matches!(
+                    op.as_str(),
+                    "lambda" | "vector" | "tuple" | "box" | "int" | "float" | "bool"
+                );
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn should_release_set_rhs(node: &TypedExpression) -> bool {
+    if !node.typ.as_ref().map(is_managed_local_type).unwrap_or(false) {
+        return false;
+    }
+    is_fresh_owned_managed_expr(node)
 }
 
 fn compile_do(
@@ -3162,10 +3891,18 @@ fn compile_do(
                         }
                     });
                     if let Some(n) = val_node {
-                        if
-                            matches!(&n.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
-                        {
-                            scoped_lambda_bindings.insert(name.clone(), n.clone());
+                        match &n.expr {
+                            Expression::Apply(xs) if
+                                matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+                            => {
+                                scoped_lambda_bindings.insert(name.clone(), n.clone());
+                            }
+                            Expression::Word(alias) => {
+                                if let Some(target) = scoped_lambda_bindings.get(alias).cloned() {
+                                    scoped_lambda_bindings.insert(name.clone(), target);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                     let value = val_node
@@ -3194,11 +3931,9 @@ fn compile_do(
                             .get(name)
                             .map(is_managed_local_type)
                             .unwrap_or(false);
-                        let borrowed_rhs =
-                            val_node.map(is_borrowing_accessor_expr).unwrap_or(false) ||
-                            value.contains("call $vec_get_i32") ||
-                            value.contains("call $tuple_fst") ||
-                            value.contains("call $tuple_snd");
+                        let borrowed_rhs = val_node.map(|n|
+                            is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings)
+                        ).unwrap_or(false);
                         let value = if managed_local && borrowed_rhs {
                             let tmp_owned = ctx.tmp_i32 + 2;
                             format!(
@@ -3425,10 +4160,8 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
 }
 
 fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let xs = compile_expr(
-        node.children.get(1).ok_or_else(|| "set! missing vector".to_string())?,
-        ctx
-    )?;
+    let xs_node = node.children.get(1).ok_or_else(|| "set! missing vector".to_string())?;
+    let xs = compile_expr(xs_node, ctx)?;
     let idx = compile_expr(
         node.children.get(2).ok_or_else(|| "set! missing index".to_string())?,
         ctx
@@ -3439,24 +4172,47 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .as_ref()
         .ok_or_else(|| "set! value missing type".to_string())
         .and_then(vec_elem_kind_from_type)?;
-    let is_lambda_literal =
-        matches!(
-        &val_node.expr,
-        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-    );
-    let value_is_managed = val_node.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
-    if is_lambda_literal && value_is_managed {
-        // Fresh lambda value is retained by vec_set; release temporary owner to avoid leaks/churn.
+    let release_rhs = should_release_set_rhs(val_node);
+    let release_target = false;
+    let managed_slots = managed_local_slots(ctx);
+    let target_tmp = ctx.tmp_i32 + 3;
+    let target_keep = ctx.tmp_i32 + 4;
+    let target_prefix = if release_target {
+        format!("{xs}\nlocal.tee {target_tmp}")
+    } else {
+        xs
+    };
+    let target_release = if release_target {
+        emit_release_managed_temp_if_not_local_alias(target_tmp, target_keep, &managed_slots)
+    } else {
+        String::new()
+    };
+    if release_rhs {
+        let tmp_val = ctx.tmp_i32 + 1;
+        let keep_tmp = ctx.tmp_i32 + 2;
+        let release = emit_release_managed_temp_if_not_local_alias(
+            tmp_val,
+            keep_tmp,
+            &managed_slots
+        );
+        let mut tail = Vec::new();
+        tail.push(release);
+        if !target_release.is_empty() {
+            tail.push(target_release);
+        }
         Ok(
             format!(
-                "{xs}\n{idx}\n{v}\nlocal.tee {}\ncall $vec_set_{}\nlocal.get {}\ncall $rc_release\ndrop",
-                ctx.tmp_i32 + 1,
+                "{target_prefix}\n{idx}\n{v}\nlocal.tee {tmp_val}\ncall $vec_set_{}\n{}",
                 elem.suffix(),
-                ctx.tmp_i32 + 1
+                tail.join("\n")
             )
         )
     } else {
-        Ok(format!("{xs}\n{idx}\n{v}\ncall $vec_set_{}", elem.suffix()))
+        if target_release.is_empty() {
+            Ok(format!("{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}", elem.suffix()))
+        } else {
+            Ok(format!("{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}\n{}", elem.suffix(), target_release))
+        }
     }
 }
 
@@ -3709,13 +4465,13 @@ fn compile_fast_box_ctor(
     if is_lambda_literal && value_is_managed {
         Ok(
             format!(
-                "i32.const 1\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\ndrop\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {vec_local}"
+                "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\ndrop\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {vec_local}"
             )
         )
     } else {
         Ok(
             format!(
-                "i32.const 1\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\ncall $vec_set_i32\ndrop\nlocal.get {vec_local}"
+                "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\ncall $vec_set_i32\ndrop\nlocal.get {vec_local}"
             )
         )
     }
@@ -3749,21 +4505,25 @@ fn compile_fast_cell_set(
     } else {
         value_raw
     };
-    let is_lambda_literal =
-        matches!(
-        &value_node.expr,
-        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-    );
-    let value_is_managed = value_node.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
-    if is_lambda_literal && value_is_managed {
+    let release_rhs = should_release_set_rhs(value_node);
+    let managed_slots = managed_local_slots(ctx);
+    let cell_prefix = cell;
+    if release_rhs {
         let tmp_val = ctx.tmp_i32 + 1;
+        let keep_tmp = ctx.tmp_i32 + 2;
+        let release = emit_release_managed_temp_if_not_local_alias(
+            tmp_val,
+            keep_tmp,
+            &managed_slots
+        );
         Ok(
             format!(
-                "{cell}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\nlocal.get {tmp_val}\ncall $rc_release\ndrop"
+                "{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\n{}",
+                release
             )
         )
     } else {
-        Ok(format!("{cell}\ni32.const 0\n{value}\ncall $vec_set_i32"))
+        Ok(format!("{cell_prefix}\ni32.const 0\n{value}\ncall $vec_set_i32"))
     }
 }
 
@@ -4005,6 +4765,61 @@ fn compile_fast_cell_helper(
     }
 }
 
+fn managed_local_slots(ctx: &Ctx<'_>) -> Vec<usize> {
+    // Name-based local maps drop shadowed bindings, which can make alias checks
+    // miss live refs and incorrectly release them. Be conservative: scan all
+    // non-temp slots in the current function frame.
+    (0..ctx.tmp_i32).collect()
+}
+
+fn emit_release_managed_temp_if_not_local_alias(
+    tmp_val: usize,
+    tmp_keep: usize,
+    managed_local_slots: &[usize]
+) -> String {
+    let debug_rc = cfg!(feature = "debug-rc");
+    if managed_local_slots.is_empty() {
+        if debug_rc {
+            return format!(
+                "global.get $dbg_tmp_release_exec\ni64.const 1\ni64.add\nglobal.set $dbg_tmp_release_exec\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {tmp_val}\ncall $is_vec_ptr\nif\n  local.get {tmp_val}\n  i32.const 8\n  i32.add\n  i32.load\n  i32.const 1\n  i32.eq\n  if\n    global.get $dbg_tmp_release_post_rc_eq_1\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_rc_eq_1\n  else\n    global.get $dbg_tmp_release_post_rc_other\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_rc_other\n  end\nelse\n  global.get $dbg_tmp_release_post_not_vec\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_post_not_vec\nend"
+            );
+        }
+        return format!("local.get {tmp_val}\ncall $rc_release\ndrop");
+    }
+    let mut out = Vec::new();
+    out.push(format!("i32.const 0\nlocal.set {}", tmp_keep));
+    for slot in managed_local_slots {
+        out.push(
+            format!(
+                "local.get {}\nlocal.get {}\ni32.eq\nif\n  i32.const 1\n  local.set {}\nend",
+                tmp_val,
+                slot,
+                tmp_keep
+            )
+        );
+    }
+    if debug_rc {
+        out.push(
+            format!(
+                "local.get {}\ni32.eqz\nif\n  global.get $dbg_tmp_release_exec\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_exec\n  local.get {}\n  call $rc_release\n  drop\n  local.get {}\n  call $is_vec_ptr\n  if\n    local.get {}\n    i32.const 8\n    i32.add\n    i32.load\n    i32.const 1\n    i32.eq\n    if\n      global.get $dbg_tmp_release_post_rc_eq_1\n      i64.const 1\n      i64.add\n      global.set $dbg_tmp_release_post_rc_eq_1\n    else\n      global.get $dbg_tmp_release_post_rc_other\n      i64.const 1\n      i64.add\n      global.set $dbg_tmp_release_post_rc_other\n    end\n  else\n    global.get $dbg_tmp_release_post_not_vec\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_not_vec\n  end\nelse\n  global.get $dbg_tmp_release_skip\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_skip\nend",
+                tmp_keep,
+                tmp_val,
+                tmp_val,
+                tmp_val
+            )
+        );
+    } else {
+        out.push(
+            format!(
+                "local.get {}\ni32.eqz\nif\n  local.get {}\n  call $rc_release\n  drop\nend",
+                tmp_keep,
+                tmp_val
+            )
+        );
+    }
+    out.join("\n")
+}
+
 #[cfg(feature = "io")]
 fn compile_host_unary_string_call(
     node: &TypedExpression,
@@ -4015,11 +4830,30 @@ fn compile_host_unary_string_call(
     if node.children.len() != 2 {
         return Err(format!("{op_name} expects exactly one [Char] argument"));
     }
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 3,
+    };
     let arg = compile_expr(
         node.children.get(1).ok_or_else(|| format!("{op_name} missing argument"))?,
-        ctx
+        &nested_ctx
     )?;
-    Ok(format!("{arg}\ncall ${host_symbol}"))
+    let arg_tmp = ctx.tmp_i32;
+    let keep_tmp = ctx.tmp_i32 + 1;
+    let ret_tmp = ctx.tmp_i32 + 2;
+    let managed_slots = managed_local_slots(ctx);
+    let release = emit_release_managed_temp_if_not_local_alias(arg_tmp, keep_tmp, &managed_slots);
+    Ok(
+        format!(
+            "{arg}\nlocal.tee {arg_tmp}\ncall ${host_symbol}\nlocal.set {ret_tmp}\n{release}\nlocal.get {ret_tmp}"
+        )
+    )
 }
 
 #[cfg(feature = "io")]
@@ -4057,15 +4891,36 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     if node.children.len() != 3 {
         return Err("write! expects exactly two [Char] arguments".to_string());
     }
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 5,
+    };
     let path = compile_expr(
         node.children.get(1).ok_or_else(|| "write! missing path".to_string())?,
-        ctx
+        &nested_ctx
     )?;
     let data = compile_expr(
         node.children.get(2).ok_or_else(|| "write! missing content".to_string())?,
-        ctx
+        &nested_ctx
     )?;
-    Ok(format!("{path}\n{data}\ncall $host_write_file"))
+    let path_tmp = ctx.tmp_i32;
+    let data_tmp = ctx.tmp_i32 + 1;
+    let keep_tmp = ctx.tmp_i32 + 2;
+    let ret_tmp = ctx.tmp_i32 + 3;
+    let managed_slots = managed_local_slots(ctx);
+    let release_path = emit_release_managed_temp_if_not_local_alias(path_tmp, keep_tmp, &managed_slots);
+    let release_data = emit_release_managed_temp_if_not_local_alias(data_tmp, keep_tmp, &managed_slots);
+    Ok(
+        format!(
+            "{path}\nlocal.set {path_tmp}\n{data}\nlocal.set {data_tmp}\nlocal.get {path_tmp}\nlocal.get {data_tmp}\ncall $host_write_file\nlocal.set {ret_tmp}\n{release_path}\n{release_data}\nlocal.get {ret_tmp}"
+        )
+    )
 }
 
 #[cfg(feature = "io")]
@@ -4078,15 +4933,36 @@ fn compile_host_binary_string_call(
     if node.children.len() != 3 {
         return Err(format!("{op_name} expects exactly two [Char] arguments"));
     }
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 5,
+    };
     let left = compile_expr(
         node.children.get(1).ok_or_else(|| format!("{op_name} missing first argument"))?,
-        ctx
+        &nested_ctx
     )?;
     let right = compile_expr(
         node.children.get(2).ok_or_else(|| format!("{op_name} missing second argument"))?,
-        ctx
+        &nested_ctx
     )?;
-    Ok(format!("{left}\n{right}\ncall ${host_symbol}"))
+    let left_tmp = ctx.tmp_i32;
+    let right_tmp = ctx.tmp_i32 + 1;
+    let keep_tmp = ctx.tmp_i32 + 2;
+    let ret_tmp = ctx.tmp_i32 + 3;
+    let managed_slots = managed_local_slots(ctx);
+    let release_left = emit_release_managed_temp_if_not_local_alias(left_tmp, keep_tmp, &managed_slots);
+    let release_right = emit_release_managed_temp_if_not_local_alias(right_tmp, keep_tmp, &managed_slots);
+    Ok(
+        format!(
+            "{left}\nlocal.set {left_tmp}\n{right}\nlocal.set {right_tmp}\nlocal.get {left_tmp}\nlocal.get {right_tmp}\ncall ${host_symbol}\nlocal.set {ret_tmp}\n{release_left}\n{release_right}\nlocal.get {ret_tmp}"
+        )
+    )
 }
 
 #[cfg(not(feature = "io"))]

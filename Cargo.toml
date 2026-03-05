@@ -8,6 +8,7 @@ default = ["io"]
 compiler = ["dep:wat"]
 runtime = ["compiler", "dep:wasmtime"]
 io = ["runtime", "dep:wasmtime-wasi"]
+debug-rc = []
 
 [lib]
 path = "src/lib.rs"
