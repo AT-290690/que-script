@@ -43,7 +43,7 @@
         },
         {
           "name": "support.function.que",
-          "match": "\\b(enumerate|sum|nl|sp|ep|dq|sq|bt|map|filter|reduce|every|some|empty|copy|reverse|slice|cons|sort|range|square|sqrt|expt|floor|ceil|max|min|abs|first|last|count|points|zip|unzip|permutation|window|flat|pair|product|find|lcm|gcd|call|odd|even|upper|lower|match|digit|fill|take|drop|clamp|one|zero|ones|zeroes|positive|negative|invert|divisible|maximum|minimum|for|subset|scan|extreme|neighborhood|unique|transpose|interleave|intersperse|cycle|replicate|avg|mean|median|each|const|select|exclude|group|append|tail|head|split|join|replace|list-dir|delete|mkdir|move|read|write|curl)\\b"
+          "match": "\\b(enumerate|sum|nl|sp|ep|dq|sq|bt|map|filter|reduce|every|some|empty|copy|reverse|slice|cons|sort|range|square|sqrt|expt|floor|ceil|max|min|abs|first|last|count|points|zip|unzip|permutation|window|flat|pair|product|find|lcm|gcd|call|odd|even|upper|lower|match|digit|fill|take|drop|clamp|one|zero|ones|zeroes|positive|negative|invert|divisible|maximum|minimum|for|subset|scan|extreme|neighborhood|unique|transpose|interleave|intersperse|cycle|replicate|avg|mean|median|each|const|select|exclude|group|append|tail|head|split|join|replace|list-dir|delete|mkdir|move|read|write|curl|clear|print|sleep)\\b"
         }
       ]
     },
