@@ -4007,15 +4007,13 @@ fn compile_host_unary_string_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
     op_name: &str,
-    host_symbol: &str,
+    host_symbol: &str
 ) -> Result<String, String> {
     if node.children.len() != 2 {
         return Err(format!("{op_name} expects exactly one [Char] argument"));
     }
     let arg = compile_expr(
-        node.children
-            .get(1)
-            .ok_or_else(|| format!("{op_name} missing argument"))?,
+        node.children.get(1).ok_or_else(|| format!("{op_name} missing argument"))?,
         ctx
     )?;
     Ok(format!("{arg}\ncall ${host_symbol}"))
@@ -4031,9 +4029,7 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
         ctx
     )?;
     let data = compile_expr(
-        node.children
-            .get(2)
-            .ok_or_else(|| "write! missing content".to_string())?,
+        node.children.get(2).ok_or_else(|| "write! missing content".to_string())?,
         ctx
     )?;
     Ok(format!("{path}\n{data}\ncall $host_write_file"))
@@ -4044,21 +4040,17 @@ fn compile_host_binary_string_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
     op_name: &str,
-    host_symbol: &str,
+    host_symbol: &str
 ) -> Result<String, String> {
     if node.children.len() != 3 {
         return Err(format!("{op_name} expects exactly two [Char] arguments"));
     }
     let left = compile_expr(
-        node.children
-            .get(1)
-            .ok_or_else(|| format!("{op_name} missing first argument"))?,
+        node.children.get(1).ok_or_else(|| format!("{op_name} missing first argument"))?,
         ctx
     )?;
     let right = compile_expr(
-        node.children
-            .get(2)
-            .ok_or_else(|| format!("{op_name} missing second argument"))?,
+        node.children.get(2).ok_or_else(|| format!("{op_name} missing second argument"))?,
         ctx
     )?;
     Ok(format!("{left}\n{right}\ncall ${host_symbol}"))
@@ -4069,7 +4061,7 @@ fn compile_host_unary_string_call(
     _node: &TypedExpression,
     _ctx: &Ctx<'_>,
     op_name: &str,
-    _host_symbol: &str,
+    _host_symbol: &str
 ) -> Result<String, String> {
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
@@ -4084,7 +4076,7 @@ fn compile_host_binary_string_call(
     _node: &TypedExpression,
     _ctx: &Ctx<'_>,
     op_name: &str,
-    _host_symbol: &str,
+    _host_symbol: &str
 ) -> Result<String, String> {
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
@@ -4548,38 +4540,17 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "pop!" => compile_pop(node, ctx),
                         "loop" => compile_loop(node, ctx),
                         "loop-finish" => compile_loop_finish(node, ctx),
-                        "list-dir!" => compile_host_unary_string_call(
-                            node,
-                            ctx,
-                            "list-dir!",
-                            "host_list_dir"
-                        ),
-                        "read!" => compile_host_unary_string_call(
-                            node,
-                            ctx,
-                            "read!",
-                            "host_read_file"
-                        ),
-                        "mkdir!" => compile_host_unary_string_call(
-                            node,
-                            ctx,
-                            "mkdir!",
-                            "host_mkdir_p"
-                        ),
-                        "delete!" => compile_host_unary_string_call(
-                            node,
-                            ctx,
-                            "delete!",
-                            "host_delete"
-                        ),
+                        "list-dir!" =>
+                            compile_host_unary_string_call(node, ctx, "list-dir!", "host_list_dir"),
+                        "read!" =>
+                            compile_host_unary_string_call(node, ctx, "read!", "host_read_file"),
+                        "mkdir!" =>
+                            compile_host_unary_string_call(node, ctx, "mkdir!", "host_mkdir_p"),
+                        "delete!" =>
+                            compile_host_unary_string_call(node, ctx, "delete!", "host_delete"),
                         "curl!" => compile_host_unary_string_call(node, ctx, "curl!", "host_curl"),
                         "write!" => compile_host_write_call(node, ctx),
-                        "move!" => compile_host_binary_string_call(
-                            node,
-                            ctx,
-                            "move!",
-                            "host_move"
-                        ),
+                        "move!" => compile_host_binary_string_call(node, ctx, "move!", "host_move"),
                         "not" => {
                             let a = compile_expr(
                                 node.children.get(1).ok_or_else(|| "not missing arg".to_string())?,
@@ -5838,9 +5809,7 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
         wat.push_str(
             "  (import \"host\" \"move\" (func $host_move (param i32 i32) (result i32)))\n"
         );
-        wat.push_str(
-            "  (import \"host\" \"curl\" (func $host_curl (param i32) (result i32)))\n"
-        );
+        wat.push_str("  (import \"host\" \"curl\" (func $host_curl (param i32) (result i32)))\n");
     }
     for name in &cached_value_defs {
         wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_init_global(name)));

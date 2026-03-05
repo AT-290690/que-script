@@ -64,6 +64,15 @@ fn src_to_pretty(src: &TypeError) -> String {
         TypeErrorVariant::Source => joined,
     }
 }
+
+fn with_src(message: String, src: &TypeError) -> String {
+    let snippet = src_to_pretty(src);
+    if snippet.trim().is_empty() {
+        message
+    } else {
+        format!("{}\n{}", message, snippet)
+    }
+}
 pub struct InferenceContext {
     pub env: TypeEnv,
     pub constraints: Vec<(Type, Type, TypeError)>,
@@ -517,7 +526,7 @@ impl Unifier {
             }
         }
         if self.occurs(var_id, &ty) {
-            return Err(format!("Occurs check failed: t{} occurs in {:?}", var_id, ty));
+            return Err(format!("Occurs check failed: t{} occurs in {}", var_id, ty));
         }
         self.binds.insert(var_id, ty);
         Ok(())
@@ -562,7 +571,7 @@ pub fn solve_constraints_list(
             (Type::Var(v), ty) | (ty, Type::Var(v)) => {
                 if let Err(e) = unifier.bind_var(v.id, ty) {
                     // attach source info and return
-                    return Err(format!("{}\n{}", src_to_pretty(&src), e));
+                    return Err(with_src(e, &src));
                 }
             }
             (Type::List(a_inner), Type::List(b_inner)) => {
@@ -575,11 +584,13 @@ pub fn solve_constraints_list(
             (Type::Tuple(a_items), Type::Tuple(b_items)) => {
                 if a_items.len() != b_items.len() {
                     return Err(
-                        format!(
-                            "Cannot unify tuples of different lengths ({} vs {})\n{}",
-                            a_items.len(),
-                            b_items.len(),
-                            src_to_pretty(&src)
+                        with_src(
+                            format!(
+                                "Cannot unify tuples of different lengths ({} vs {})",
+                                a_items.len(),
+                                b_items.len()
+                            ),
+                            &src
                         )
                     );
                 }
@@ -589,7 +600,7 @@ pub fn solve_constraints_list(
             }
             (a2, b2) => {
                 // can't unify, attach source and return
-                return Err(format!("Cannot unify {} with {}\n{}", a2, b2, src_to_pretty(&src)));
+                return Err(with_src(format!("Cannot unify {} with {}", a2, b2), &src));
             }
         }
     }
