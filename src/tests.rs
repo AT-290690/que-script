@@ -195,6 +195,50 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_inline_avoids_duplicate_vector_eval() {
+        let typed = infer_typed("(do (let f (lambda x (+ (get x 0) (get x 0)))) (f (vector 1 2 3)))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            !optimized_lisp.contains("(f "),
+            "expected direct call to be inlined, got: {}",
+            optimized_lisp
+        );
+        assert_eq!(
+            optimized_lisp.matches("(vector 1 2 3)").count(),
+            1,
+            "inlining should evaluate vector argument once, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.matches("get __inline_arg_").count() >= 2,
+            "inlined body should reuse temp arg binding, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_inline_skips_large_lambda_body() {
+        let typed = infer_typed(
+            "(do (let f (lambda x (+ (+ (+ (+ (+ (+ (+ (+ x 1) 2) 3) 4) 5) 6) 7) 8))) (f 1))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            optimized_lisp.contains("(f 1)"),
+            "large lambda body should not inline, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            !optimized_lisp.contains("__inline_arg_"),
+            "no temp vars should be introduced when inlining is skipped, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
         let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
         let hover: serde_json::Value = serde_json
