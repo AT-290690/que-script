@@ -196,7 +196,9 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_inline_avoids_duplicate_vector_eval() {
-        let typed = infer_typed("(do (let f (lambda x (+ (get x 0) (get x 0)))) (f (vector 1 2 3)))");
+        let typed = infer_typed(
+            "(do (let f (lambda x (+ (get x 0) (get x 0)))) (f (vector 1 2 3)))"
+        );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
 
@@ -294,9 +296,7 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_nested_inline_skips_managed_vector_args() {
-        let typed = infer_typed(
-            "(do (let f (lambda xs (length xs))) (+ (f (vector 1 2 3)) 1))"
-        );
+        let typed = infer_typed("(do (let f (lambda xs (length xs))) (+ (f (vector 1 2 3)) 1))");
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
 
@@ -498,6 +498,248 @@ Concequent and alternative must match types
             items.is_empty(),
             "expected no diagnostics for whitespace-only text, got: {}",
             diagnostics_json
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "io")]
+    fn test_wat_host_print_releases_temporary_string_arg() {
+        let expr = crate::parser
+            ::build(r#"(do (print! "hello") 1)"#)
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+
+        let host_pos = wat.find("call $host_print").expect("expected host print call in wat");
+        let release_pos = wat[host_pos..]
+            .find("call $rc_release")
+            .map(|p| host_pos + p)
+            .expect("expected rc_release after host print call");
+
+        assert!(
+            release_pos > host_pos,
+            "expected temporary [Char] arg to be released after print!, got wat:\n{}",
+            wat
+        );
+    }
+    #[test]
+    fn test_big_iterations_ref_leak_crash() {
+        let test_case =
+            r#"
+(let box (lambda value [value]))
+(let int box)
+(let float box)
+(let bool box)
+(let set (lambda vrbl x (set! vrbl 0 x)))
+(let =! (lambda vrbl x (set! vrbl 0 x)))
+(let boole-set (lambda vrbl x (set! vrbl 0 (if x true false))))
+(let boole-eqv (lambda a b (=? (get a) (get b))))
+(let boolean/set (lambda vrbl x (set! vrbl 0 (if x true false))))
+(let true? (lambda vrbl (if (get vrbl) true false)))
+(let false? (lambda vrbl (if (get vrbl) false true)))
+(let += (lambda vrbl n (=! vrbl (+ (get vrbl) n))))
+(let -= (lambda vrbl n (=! vrbl (- (get vrbl) n))))
+(let *= (lambda vrbl n (=! vrbl (* (get vrbl) n))))
+(let /= (lambda vrbl n (=! vrbl (/ (get vrbl) n))))
+(let ++ (lambda vrbl (=! vrbl (+ (get vrbl) 1))))
+(let -- (lambda vrbl (=! vrbl (- (get vrbl) 1))))
+(let ** (lambda vrbl (=! vrbl (* (get vrbl) (get vrbl)))))
+
+
+(let +=. (lambda vrbl n (=! vrbl (+. (get vrbl) n))))
+(let -=. (lambda vrbl n (=! vrbl (-. (get vrbl) n))))
+(let *=. (lambda vrbl n (=! vrbl (*. (get vrbl) n))))
+(let /=. (lambda vrbl n (=! vrbl (/. (get vrbl) n))))
+(let ++. (lambda vrbl (=! vrbl (+. (get vrbl) 1.0))))
+(let --. (lambda vrbl (=! vrbl (-. (get vrbl) 1.0))))
+(let **. (lambda vrbl (=! vrbl (*. (get vrbl) (get vrbl)))))
+
+    (let fn (lambda a b (do (let y [a b]) (set! y (length y) 10) y)))
+    (let outer (lambda z (do (let g (fn 1 2)) (length g))))
+    (loop 0 500000 (lambda i (outer i)))
+    1
+    
+    (let mk1 (lambda n (do
+      (let v [])
+      (loop 0 n (lambda i (set! v (length v) [i (+ i 1)])))
+      v)))
+    (loop 0 200000 (lambda i (do (let t (mk1 4)) (length t))))
+    1
+    
+    (let mk2 (lambda n (do
+      (let v [])
+      (loop 0 n (lambda i (set! v (length v) i)))
+      v)))
+    (loop 0 300000 (lambda i (do
+      (let a (mk2 3))
+      (let b (mk2 40))
+      (+ (length a) (length b)))))
+    1
+    
+    ; closure captures a vector, closure dies each loop iteration
+    (let mk-reader (lambda n (do
+      (let xs [])
+      (loop 0 n (lambda i (set! xs (length xs) i)))
+      (lambda idx (get xs idx)))))
+    
+    (loop 0 500000 (lambda i (do
+      (let f (mk-reader 8))
+      (f 3))))
+    1
+    ; closure captures another closure (which captures a vector)
+    (let mk-pipeline (lambda n (do
+      (let xs [n (+ n 1)])
+      (let add-base (lambda x (+ x (get xs 0))))
+      (lambda y (add-base (+ y (get xs 1)))))))
+    
+    (loop 0 400000 (lambda i (do
+      (let g (mk-pipeline i))
+      (g 1))))
+    1
+    
+    ; closure captures another closure (which captures a vector)
+    (let mk-pipeline2 (lambda n (do
+      (let xs [n (+ n 1)])
+      (let add-base (lambda x (+ x (get xs 0))))
+      (lambda y (add-base (+ y (get xs 1)))))))
+    
+    (loop 0 400000 (lambda i (do
+      (let g (mk-pipeline2 i))
+      (g 1))))
+    1
+    ; closure captures another closure (which captures a vector)
+    (let mk-pipeline3 (lambda n (do
+      (let xs [n (+ n 1)])
+      (let add-base (lambda x (+ x (get xs 0))))
+      (lambda y (add-base (+ y (get xs 1)))))))
+    
+    (loop 0 400000 (lambda i (do
+      (let g (mk-pipeline3 i))
+      (g 1))))
+    1
+    
+    ; closure captures another closure (which captures a vector)
+    (let mk-pipeline4 (lambda n (do
+      (let xs [n (+ n 1)])
+      (let add-base (lambda x (+ x (get xs 0))))
+      (lambda y (add-base (+ y (get xs 1)))))))
+    
+    (loop 0 400000 (lambda i (do
+      (let g (mk-pipeline4 i))
+      (g 1))))
+    1
+    
+    ; closure captures another closure (which captures a vector)
+    (let mk-pipeline5 (lambda n (do
+      (let xs [n (+ n 1)])
+      (let add-base (lambda x (+ x (get xs 0))))
+      (lambda y (add-base (+ y (get xs 1)))))))
+    
+    (loop 0 400000 (lambda i (do
+      (let g (mk-pipeline5 i))
+      (g 1))))
+    1
+    
+    ; closure captures another closure (which captures a vector)
+    (let mk-pipeline6 (lambda n (do
+      (let xs [n (+ n 1)])
+      (let add-base (lambda x (+ x (get xs 0))))
+      (lambda y (add-base (+ y (get xs 1)))))))
+    
+    (loop 0 400000 (lambda i (do
+      (let g (mk-pipeline6 i))
+      (g 1))))
+    1
+    
+    ; closure captures nested vectors
+    (let mk-grid-reader7 (lambda n (do
+      (let rows [])
+      (loop 0 n (lambda i (set! rows (length rows) [i (+ i 1) (+ i 2)])))
+      (lambda j (+ (get (get rows 0) 0) (get (get rows 1) 1) j)))))
+    
+    (loop 0 250000 (lambda i (do
+      (let r (mk-grid-reader7 4))
+      (r 1))))
+    1
+    ; same idea as your outer/fn pattern but closure-returning inner
+    (let make2 (lambda a b (do
+      (let y [a b])
+      (set! y (length y) 10)
+      (lambda k (+ (length y) k)))))
+    
+    (let outer2 (lambda z (do
+      (let g (make2 1 2))
+      (g z))))
+    
+    (loop 0 500000 (lambda i (outer2 i)))
+    1
+    
+    ; vector fn clean up
+    (let build-fns (lambda n (do
+      (let fs [])
+      (loop 0 n (lambda i (set! fs (length fs) (lambda x (+ x i)))))
+      fs)))
+    
+    (let sum-call (lambda fs n (do
+      (integer acc 0)
+      (loop 0 n (lambda i (do
+        (let f (get fs i))
+        (+= acc (f 1)))))
+      (get acc))))
+    
+    (let once (sum-call (build-fns 5) 5))
+    
+    (loop 0 50000 (lambda t (do
+      (let fs (build-fns 16))
+      (sum-call fs 16))))
+    
+    (= once 15)"#;
+
+        let expr = crate::parser::build(test_case).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let argv: Vec<String> = Vec::new();
+        #[cfg(feature = "io")]
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .unwrap();
+        #[cfg(feature = "io")]
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
+        );
+        #[cfg(not(feature = "io"))]
+        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
+        assert_eq!(
+            run_result.expect("program should run without trap"),
+            "true",
+            "expected stress loop to finish without memory trap"
+        );
+    }
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_set_ref_vector_stress_no_leak_crash() {
+        let expr = crate::parser
+            ::build(r#"(do
+(let x [[]])
+(loop 0 300000 (lambda i (set! x 0 [])))
+1)"#)
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let argv: Vec<String> = Vec::new();
+        #[cfg(feature = "io")]
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .unwrap();
+        #[cfg(feature = "io")]
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
+        );
+        #[cfg(not(feature = "io"))]
+        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
+        assert_eq!(
+            run_result.expect("program should run without trap"),
+            "1",
+            "expected stress loop to finish without memory trap"
         );
     }
 
@@ -3167,7 +3409,10 @@ nil)))
                             }
                         }
                     }
-                    Err(e) => panic!("Failed tests because {}", e),
+                    Err(e) => {
+                        // println!("{:?}", inp);
+                        panic!("Failed tests because {}", e);
+                    }
                 }
             }
         }
