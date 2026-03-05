@@ -133,6 +133,53 @@ Concequent and alternative must match types
         }
     }
 
+    fn infer_typed(input: &str) -> crate::infer::TypedExpression {
+        let exprs = crate::parser::parse(input).expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let (_typ, typed) = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("input should infer");
+        typed
+    }
+
+    #[test]
+    fn test_typed_optimization_constant_folds_nested_int_ops() {
+        let typed = infer_typed("(+ 2 (* 3 4))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "14");
+    }
+
+    #[test]
+    fn test_typed_optimization_constant_folds_if_branch() {
+        let typed = infer_typed("(if true (+ 1 2) (+ 100 200))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "3");
+    }
+
+    #[test]
+    fn test_typed_optimization_keeps_div_by_zero_unfolded() {
+        let typed = infer_typed("(/ 4 0)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(/ 4 0)");
+    }
+
+    #[test]
+    fn test_typed_optimization_simplifies_add_zero_identity() {
+        let typed = infer_typed("(lambda x (+ x 0))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(lambda x x)");
+    }
+
+    #[test]
+    fn test_typed_optimization_simplifies_mul_one_identity() {
+        let typed = infer_typed("(lambda x (* 1 x))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(lambda x x)");
+    }
+
     #[test]
     fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
         let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
@@ -312,9 +359,7 @@ Concequent and alternative must match types
             ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
 
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
         assert!(
             items.is_empty(),
             "expected no diagnostics for whitespace-only text, got: {}",

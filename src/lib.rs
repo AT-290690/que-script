@@ -6,6 +6,7 @@ pub mod runtime;
 #[cfg(feature = "io")]
 pub mod io;
 pub mod lsp_native_core;
+pub mod op;
 #[cfg(test)]
 mod tests;
 pub mod types;
