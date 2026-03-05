@@ -1,7 +1,7 @@
-use crate::infer::{infer_with_builtins_typed, TypedExpression};
-use crate::parser::{self, Expression};
-use crate::types::{create_builtin_environment, Type, TypeEnv};
-use std::collections::{HashMap, HashSet};
+use crate::infer::{ infer_with_builtins_typed, TypedExpression };
+use crate::parser::{ self, Expression };
+use crate::types::{ create_builtin_environment, Type, TypeEnv };
+use std::collections::{ HashMap, HashSet };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CorePosition {
@@ -126,7 +126,7 @@ pub fn load_std_definitions() -> Vec<Expression> {
 pub fn infer_std_signatures(
     base_env: &TypeEnv,
     base_next_id: u64,
-    std_defs: &[Expression],
+    std_defs: &[Expression]
 ) -> HashMap<String, String> {
     let mut raw_signatures: HashMap<String, Type> = HashMap::new();
     if std_defs.is_empty() {
@@ -134,12 +134,18 @@ pub fn infer_std_signatures(
     }
 
     let std_program = Expression::Apply(
-        std::iter::once(Expression::Word("do".to_string()))
+        std::iter
+            ::once(Expression::Word("do".to_string()))
             .chain(std_defs.iter().cloned())
-            .collect(),
+            .collect()
     );
 
-    if let Ok((_typ, typed)) = infer_with_builtins_typed(&std_program, (base_env.clone(), base_next_id)) {
+    if
+        let Ok((_typ, typed)) = infer_with_builtins_typed(&std_program, (
+            base_env.clone(),
+            base_next_id,
+        ))
+    {
         collect_let_binding_types(&typed, &mut raw_signatures);
     }
 
@@ -617,12 +623,9 @@ pub fn literal_type_at_position(text: &str, position: CorePosition) -> Option<(S
 
 pub fn format_literal_hover(text: &str, range: CoreRange, literal_type: &str) -> String {
     if literal_type == "[Char]" {
-        if let Some((preview, len, truncated)) = preview_string_literal(text, range, 32) {
+        if let Some((preview, len, truncated)) = preview_string_literal(text, range, 16) {
             let suffix = if truncated { "..." } else { "" };
-            return format!(
-                "```que\n\"{}{}\" : [Char] (length {})\n```",
-                preview, suffix, len
-            );
+            return format!("\"{}{}\" : [Char] length : {}", preview, suffix, len);
         }
     }
 
@@ -630,7 +633,11 @@ pub fn format_literal_hover(text: &str, range: CoreRange, literal_type: &str) ->
     format!("{} : {}", literal_text, literal_type)
 }
 
-fn preview_string_literal(text: &str, range: CoreRange, max_chars: usize) -> Option<(String, usize, bool)> {
+fn preview_string_literal(
+    text: &str,
+    range: CoreRange,
+    max_chars: usize
+) -> Option<(String, usize, bool)> {
     let start = position_to_byte_offset(text, range.start)?;
     let end = position_to_byte_offset(text, range.end)?;
     let raw = text.get(start..end)?;
@@ -911,11 +918,7 @@ fn find_call_prefix_range(text: &str, snippet: &str) -> Option<CoreRange> {
 
 fn extract_call_prefix_tokens(snippet: &str, max_tokens: usize) -> Vec<String> {
     let trimmed = snippet.trim();
-    let inner = if let Some(stripped) = trimmed.strip_prefix('(') {
-        stripped
-    } else {
-        trimmed
-    };
+    let inner = if let Some(stripped) = trimmed.strip_prefix('(') { stripped } else { trimmed };
     let mut tokens = Vec::new();
     let mut cur = String::new();
     let mut depth = 0usize;
@@ -1108,7 +1111,8 @@ fn extract_symbol_from_error(message: &str) -> Option<String> {
 }
 
 fn is_ident_char(ch: char) -> bool {
-    ch.is_alphanumeric() || matches!(ch, '_' | '-' | '/' | '?' | '!' | '*' | '+' | '<' | '>' | '=' | '.')
+    ch.is_alphanumeric() ||
+        matches!(ch, '_' | '-' | '/' | '?' | '!' | '*' | '+' | '<' | '>' | '=' | '.')
 }
 
 pub fn find_matching_paren_byte(text: &str, open_idx: usize) -> Option<usize> {
@@ -1308,19 +1312,26 @@ fn is_float_token(token: &str) -> bool {
         return false;
     }
     let slice = &bytes[start..];
-    let dot_count = slice.iter().filter(|&&b| b == b'.').count();
+    let dot_count = slice
+        .iter()
+        .filter(|&&b| b == b'.')
+        .count();
     if dot_count != 1 {
         return false;
     }
-    if !slice.iter().all(|b| b.is_ascii_digit() || *b == b'.') {
+    #[allow(unused_parens)]
+    if !slice.iter().all(|b| (b.is_ascii_digit() || *b == b'.')) {
         return false;
     }
-    let dot_idx = slice.iter().position(|&b| b == b'.').unwrap_or(0);
+    let dot_idx = slice
+        .iter()
+        .position(|&b| b == b'.')
+        .unwrap_or(0);
     let left = &slice[..dot_idx];
     let right = &slice[dot_idx + 1..];
-    (!left.is_empty() || !right.is_empty())
-        && left.iter().all(|b| b.is_ascii_digit())
-        && right.iter().all(|b| b.is_ascii_digit())
+    (!left.is_empty() || !right.is_empty()) &&
+        left.iter().all(|b| b.is_ascii_digit()) &&
+        right.iter().all(|b| b.is_ascii_digit())
 }
 
 fn is_symbol_char(ch: char) -> bool {

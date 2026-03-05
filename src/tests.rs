@@ -187,6 +187,21 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_hover_string_literal_has_fenced_que_format() {
+        let hover_json = crate::wasm_api::lsp_hover("\"dsadas\"".to_string(), 0, 2);
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert_eq!(contents, "\"dsadas\" : [Char] length : 6");
+    }
+
+    #[test]
     fn test_wasm_lsp_diagnostics_reports_if_branch_type_mismatch() {
         let diagnostics_json = crate::wasm_api::lsp_diagnostics("(if true 8 2.)".to_string());
         let diagnostics: serde_json::Value = serde_json
@@ -234,16 +249,17 @@ Concequent and alternative must match types
         let program = "(let v [])\n(push! v v)";
         let std_ast = crate::baked::load_ast();
         let wrapped = match &std_ast {
-            crate::parser::Expression::Apply(items) => crate::parser
-                ::merge_std_and_program(program, items[1..].to_vec())
-                .expect("program should parse with std"),
+            crate::parser::Expression::Apply(items) =>
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should parse with std"),
             _ => panic!("expected baked std ast to be an application"),
         };
 
         let err = crate::infer
             ::infer_with_builtins_typed(
                 &wrapped,
-                crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
             )
             .map(|_| ())
             .expect_err("expected occurs check inference error");
@@ -263,8 +279,9 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wasm_lsp_diagnostics_occurs_check_summary_drops_snippet() {
-        let diagnostics_json =
-            crate::wasm_api::lsp_diagnostics("(let v [])\n(push! v v)".to_string());
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(
+            "(let v [])\n(push! v v)".to_string()
+        );
         let diagnostics: serde_json::Value = serde_json
             ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");

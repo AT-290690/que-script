@@ -1037,6 +1037,5 @@ fn literal_type_at_position(text: &str, position: Position) -> Option<(String, R
 }
 
 fn format_literal_hover(text: &str, range: Range, literal_type: &str) -> String {
-    let content = native_core::format_literal_hover(text, to_core_range(range), literal_type);
-    format!("```que\n{}\n```", content)
+    native_core::format_literal_hover(text, to_core_range(range), literal_type)
 }
