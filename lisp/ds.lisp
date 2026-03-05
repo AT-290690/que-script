@@ -1,7 +1,5 @@
 
 (let Tuple/swap std/tuple/swap)
-(let Tuple/map/fst std/tuple/map/fst)
-(let Tuple/map/snd std/tuple/map/snd)
 (let Tuple/map std/tuple/map)
 (let Tuple/map/fst std/tuple/map/fst)
 (let Tuple/map/snd std/tuple/map/snd)
@@ -180,7 +178,6 @@
 
 (let Vector/new (lambda fn n (std/vector/2d/fill n fn)))
 (let Matrix/new (lambda fn w h (std/vector/3d/fill w h fn)))
-(let String/equal? std/vector/char/equal?)
 (let String/equal? std/vector/char/equal?)
 (let String/lte? std/vector/char/lesser-or-equal?)
 (let String/gte? std/vector/char/greater-or-equal?)
