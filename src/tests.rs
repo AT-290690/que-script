@@ -293,6 +293,21 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_nested_inline_skips_managed_vector_args() {
+        let typed = infer_typed(
+            "(do (let f (lambda xs (length xs))) (+ (f (vector 1 2 3)) 1))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            optimized_lisp.contains("(f (vector 1 2 3))"),
+            "nested no-temp inline should skip managed vector args, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_eliminates_single_use_literal_let_binding() {
         let typed = infer_typed("(do (let res -74975) res)");
         let optimized = crate::op::optimize_typed_ast(&typed);
