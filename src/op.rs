@@ -4,11 +4,25 @@ use crate::types::Type;
 use std::collections::{ HashMap, HashSet };
 
 const MAX_INLINE_BODY_COST: usize = 16;
+const MAX_INLINE_FIXPOINT_PASSES: usize = 16;
+const MAX_OPT_FIXPOINT_PASSES: usize = 8;
 
 pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
+    let mut cur = optimize_typed_ast_once(node);
+    for _ in 0..MAX_OPT_FIXPOINT_PASSES {
+        let next = optimize_typed_ast_once(&cur);
+        if next.expr.to_lisp() == cur.expr.to_lisp() {
+            return next;
+        }
+        cur = next;
+    }
+    cur
+}
+
+fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
     let optimized_children = node.children
         .iter()
-        .map(optimize_typed_ast)
+        .map(optimize_typed_ast_once)
         .collect::<Vec<_>>();
     let rebuilt_expr = rebuild_expr_from_children(&node.expr, &optimized_children);
     let rebuilt_node = TypedExpression {
@@ -85,6 +99,10 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     // First, inline simple direct lambda calls at do-scope with hygienic temp args.
     let mut inline_state = InlineState::new(&node.expr);
     let (inlined_items, inlined_children) = inline_do_simple_calls(&node, &mut inline_state);
+    let (inlined_items, inlined_children) = eliminate_single_use_inline_temps(
+        inlined_items,
+        inlined_children
+    );
 
     let last_idx = inlined_items.len() - 1;
     let mut kept_indices: Vec<usize> = Vec::new();
@@ -379,9 +397,156 @@ fn inline_do_simple_calls(
         return (items.clone(), node.children.clone());
     }
 
+    let mut cur_items = items.clone();
+    let mut cur_children = node.children.clone();
+
+    for _ in 0..MAX_INLINE_FIXPOINT_PASSES {
+        let cur_node = TypedExpression {
+            expr: Expression::Apply(cur_items.clone()),
+            typ: node.typ.clone(),
+            children: cur_children.clone(),
+        };
+        let (next_items, next_children, changed) = inline_do_simple_calls_once(&cur_node, state);
+        cur_items = next_items;
+        cur_children = next_children;
+        if !changed {
+            break;
+        }
+    }
+
+    (cur_items, cur_children)
+}
+
+fn eliminate_single_use_inline_temps(
+    mut items: Vec<Expression>,
+    mut children: Vec<TypedExpression>
+) -> (Vec<Expression>, Vec<TypedExpression>) {
+    if items.len() != children.len() || items.len() <= 2 {
+        return (items, children);
+    }
+
+    for _ in 0..MAX_INLINE_FIXPOINT_PASSES {
+        let mut changed = false;
+        let mut i = 1usize;
+        while i + 1 < items.len() {
+            let Some(name) = inline_temp_let_name(&items[i]) else {
+                i += 1;
+                continue;
+            };
+            let uses = count_word_uses_in_slice(&items[i + 1..], &name);
+            if uses != 1 {
+                i += 1;
+                continue;
+            }
+            let Some(rhs_typed) = children.get(i).and_then(|n| n.children.get(2)).cloned() else {
+                i += 1;
+                continue;
+            };
+            let rhs_expr = rhs_typed.expr.clone();
+
+            for j in i + 1..items.len() {
+                items[j] = substitute_word_with_expr(&items[j], &name, &rhs_expr);
+                children[j] = substitute_word_with_typed(&children[j], &name, &rhs_typed);
+            }
+            items.remove(i);
+            children.remove(i);
+            changed = true;
+            break;
+        }
+        if !changed {
+            break;
+        }
+    }
+    (items, children)
+}
+
+fn inline_temp_let_name(expr: &Expression) -> Option<String> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), _rhs] = &items[..] else {
+        return None;
+    };
+    if (kw == "let" || kw == "let*") && name.starts_with("__inline_arg_") {
+        Some(name.clone())
+    } else {
+        None
+    }
+}
+
+fn count_word_uses_in_slice(items: &[Expression], name: &str) -> usize {
+    items.iter().map(|e| count_word_uses_expr(e, name)).sum()
+}
+
+fn count_word_uses_expr(expr: &Expression, name: &str) -> usize {
+    match expr {
+        Expression::Word(w) => {
+            if w == name { 1 } else { 0 }
+        }
+        Expression::Apply(items) => items.iter().map(|it| count_word_uses_expr(it, name)).sum(),
+        _ => 0,
+    }
+}
+
+fn substitute_word_with_expr(expr: &Expression, name: &str, replacement: &Expression) -> Expression {
+    match expr {
+        Expression::Word(w) => {
+            if w == name {
+                replacement.clone()
+            } else {
+                Expression::Word(w.clone())
+            }
+        }
+        Expression::Apply(items) => Expression::Apply(
+            items.iter().map(|it| substitute_word_with_expr(it, name, replacement)).collect()
+        ),
+        Expression::Int(n) => Expression::Int(*n),
+        Expression::Float(n) => Expression::Float(*n),
+    }
+}
+
+fn substitute_word_with_typed(
+    node: &TypedExpression,
+    name: &str,
+    replacement: &TypedExpression
+) -> TypedExpression {
+    if matches!(&node.expr, Expression::Word(w) if w == name) {
+        return replacement.clone();
+    }
+
+    let new_children = node.children
+        .iter()
+        .map(|ch| substitute_word_with_typed(ch, name, replacement))
+        .collect::<Vec<_>>();
+
+    let new_expr = match &node.expr {
+        Expression::Apply(items) if items.len() == new_children.len() =>
+            Expression::Apply(new_children.iter().map(|ch| ch.expr.clone()).collect()),
+        _ => substitute_word_with_expr(&node.expr, name, &replacement.expr),
+    };
+
+    TypedExpression {
+        expr: new_expr,
+        typ: node.typ.clone(),
+        children: new_children,
+    }
+}
+
+fn inline_do_simple_calls_once(
+    node: &TypedExpression,
+    state: &mut InlineState
+) -> (Vec<Expression>, Vec<TypedExpression>, bool) {
+    let Expression::Apply(items) = &node.expr else {
+        return (vec![node.expr.clone()], vec![node.clone()], false);
+    };
+    if items.is_empty() || !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return (items.clone(), node.children.clone(), false);
+    }
+
     let mut defs: HashMap<String, InlineLambdaDef> = HashMap::new();
     let mut out_items = vec![items[0].clone()];
     let mut out_children = vec![node.children[0].clone()];
+    let mut changed = false;
 
     for i in 1..items.len() {
         let expr_i = &items[i];
@@ -394,7 +559,19 @@ fn inline_do_simple_calls(
             continue;
         }
 
+        if let Some((prep, rewritten_expr, rewritten_child)) = try_inline_let_rhs(expr_i, child_i, &defs, state) {
+            changed = true;
+            for (e, c) in prep {
+                out_items.push(e);
+                out_children.push(c);
+            }
+            out_items.push(rewritten_expr);
+            out_children.push(rewritten_child);
+            continue;
+        }
+
         if let Some((prep, inlined_expr, inlined_child)) = try_inline_call(expr_i, child_i, &defs, state) {
+            changed = true;
             for (e, c) in prep {
                 out_items.push(e);
                 out_children.push(c);
@@ -408,7 +585,7 @@ fn inline_do_simple_calls(
         out_children.push(child_i.clone());
     }
 
-    (out_items, out_children)
+    (out_items, out_children, changed)
 }
 
 fn extract_inline_lambda_def(
@@ -571,6 +748,37 @@ fn try_inline_call(
     let inlined_expr = substitute_words_expr(&def.body_expr, &subst);
     let inlined_typed = substitute_words_typed(&def.body_typed, &subst);
     Some((prep, inlined_expr, inlined_typed))
+}
+
+fn try_inline_let_rhs(
+    expr: &Expression,
+    node: &TypedExpression,
+    defs: &HashMap<String, InlineLambdaDef>,
+    state: &mut InlineState
+) -> Option<(Vec<(Expression, TypedExpression)>, Expression, TypedExpression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if items.len() != 3 || node.children.len() != 3 {
+        return None;
+    }
+    let kw = match items.first() {
+        Some(Expression::Word(w)) if w == "let" || w == "let*" => w.clone(),
+        _ => return None,
+    };
+    let rhs_expr = items.get(2)?;
+    let rhs_typed = node.children.get(2)?;
+    let (prep, inlined_rhs_expr, inlined_rhs_typed) = try_inline_call(rhs_expr, rhs_typed, defs, state)?;
+
+    let rewritten_expr = Expression::Apply(vec![
+        Expression::Word(kw),
+        items.get(1)?.clone(),
+        inlined_rhs_expr,
+    ]);
+    let mut rewritten_typed = node.clone();
+    rewritten_typed.expr = rewritten_expr.clone();
+    rewritten_typed.children[2] = inlined_rhs_typed;
+    Some((prep, rewritten_expr, rewritten_typed))
 }
 
 fn substitute_words_expr(expr: &Expression, subst: &HashMap<String, String>) -> Expression {

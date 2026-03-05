@@ -239,6 +239,45 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_inline_fixpoint_inlines_let_rhs_calls() {
+        let typed = infer_typed(
+            "(do (let add (lambda a b (+ a b))) (let sub (lambda a b (- a b))) (sub (add 1323 22) (add 4222 122)))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            !optimized_lisp.contains("(sub "),
+            "expected sub call to be inlined, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            !optimized_lisp.contains("(add "),
+            "expected add calls in temp let RHS to be inlined, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            !optimized_lisp.contains("__inline_arg_"),
+            "single-use inline temp lets should be eliminated, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_post_inline_constant_folds_to_single_literal() {
+        let typed = infer_typed(
+            "(do (let add (lambda a b (+ a b))) (let sub (lambda a b (- a b))) (sub (add 1323 22) (add 4222 122)))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.ends_with("-2999)"),
+            "final expression should be folded to literal after inlining, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
         let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
         let hover: serde_json::Value = serde_json
