@@ -850,6 +850,10 @@ fn try_inline_call_no_temps(
     for (idx, param) in def.params.iter().enumerate() {
         let arg_expr = arg_exprs[idx].clone();
         let arg_node = node.children.get(idx + 1)?.clone();
+        let arg_typ = arg_node.typ.as_ref()?;
+        if !is_no_temp_inline_scalar_type(arg_typ) {
+            return None;
+        }
         let uses = count_word_uses_expr(&def.body_expr, param);
         if uses > 1 && !is_atomic_inline_arg_expr(&arg_expr) {
             return None;
@@ -863,6 +867,10 @@ fn try_inline_call_no_temps(
 
 fn is_atomic_inline_arg_expr(expr: &Expression) -> bool {
     matches!(expr, Expression::Word(_) | Expression::Int(_) | Expression::Float(_))
+}
+
+fn is_no_temp_inline_scalar_type(typ: &Type) -> bool {
+    matches!(typ, Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit)
 }
 
 fn substitute_params_expr(expr: &Expression, subst: &HashMap<String, Expression>) -> Expression {
