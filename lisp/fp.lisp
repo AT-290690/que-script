@@ -1,4 +1,3 @@
-
 (let const std/fn/const)
 (let floor std/float/floor)
 (let ceil std/float/ceil)
@@ -17,7 +16,6 @@
 
 (let filter (lambda fn? xs (std/vector/filter xs fn?)))
 (let reduce (lambda fn init xs (std/vector/reduce xs fn init)))
-(let reduce/until (lambda fn fn? init xs (std/vector/reduce/until xs fn fn? init)))
 (let transpose std/vector/3d/rotate)
 (let interleave std/vector/2d/interleave)
 (let intersperse (lambda xs x (std/vector/intersperse x xs)))
@@ -243,3 +241,14 @@
       (if (not (=# (get xs (+ i j)) (get ys j))) (set f? false)))))
     (if (true? f?) (do (set! xs i Char/start) (loop 1 (length ys) (lambda j (set! xs (+ i j) Char/nil)))))))))
   (|> xs (exclude (lambda x (=# Char/nil x))) (String->Vector Char/start)))))
+
+(let join (lambda str xs (do 
+    (let out [])
+    (let lst (pull! xs))
+    (for (lambda current (do 
+        (loop 0 (length current) (lambda i (push! out (get current i))))
+        (loop 0 (length str) (lambda i (push! out (get str i)))))) xs)
+    (loop 0 (length lst) (lambda i (push! out (get lst i))))
+   out)))
+
+(let replace (lambda a b xs (|> xs (split a) (join b))))
