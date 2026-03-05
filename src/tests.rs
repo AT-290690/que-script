@@ -306,6 +306,23 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_diagnostics_whitespace_is_empty() {
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(" \n\t  ".to_string());
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+
+        let items = diagnostics
+            .as_array()
+            .expect("diagnostics response should be an array");
+        assert!(
+            items.is_empty(),
+            "expected no diagnostics for whitespace-only text, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
     #[cfg(feature = "runtime")]
     fn test_correctness() {
         let test_cases = [
