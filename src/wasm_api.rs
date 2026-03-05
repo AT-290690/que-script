@@ -113,6 +113,14 @@ fn build_base_environment(std_defs: &[Expression]) -> (TypeEnv, u64, HashMap<Str
 }
 
 fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
+    if text.trim().is_empty() {
+        return DocAnalysis {
+            diagnostics: Vec::new(),
+            symbol_types: HashMap::new(),
+            user_bound_symbols: HashSet::new(),
+        };
+    }
+
     let mut diagnostics = Vec::new();
     let mut symbol_types_raw: HashMap<String, Type> = HashMap::new();
     let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();

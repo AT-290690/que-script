@@ -42,7 +42,10 @@ use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::{ HashMap, HashSet };
 use std::panic::{ catch_unwind, AssertUnwindSafe };
+use std::time::{ Duration, Instant };
 use serde::{ Deserialize, Serialize };
+
+const ANALYSIS_DELAY_MS: u64 = 500;
 
 #[derive(Clone, Debug)]
 struct DocAnalysis {
@@ -68,10 +71,17 @@ struct LspCore {
     global_signatures: HashMap<String, String>,
 }
 
+struct PendingChange {
+    version: i32,
+    text: String,
+    due_at: Instant,
+}
+
 struct ServerState {
     connection: Connection,
     documents: HashMap<Uri, DocAnalysis>,
     core: RefCell<Option<LspCore>>,
+    pending_changes: HashMap<Uri, PendingChange>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,22 +140,33 @@ fn run() -> Result<(), String> {
         connection,
         documents: HashMap::new(),
         core: RefCell::new(None),
+        pending_changes: HashMap::new(),
     };
 
-    while let Ok(msg) = state.connection.receiver.recv() {
-        match msg {
-            Message::Request(req) => {
-                if
-                    state.connection
-                        .handle_shutdown(&req)
-                        .map_err(|e| format!("shutdown handling failed: {}", e))?
-                {
+    loop {
+        state.flush_due_changes()?;
+
+        if state.has_pending_changes() {
+            if let Ok(msg) = state.connection.receiver.try_recv() {
+                if state.handle_message(msg)? {
                     break;
                 }
-                state.handle_request(req)?;
+                continue;
             }
-            Message::Notification(notif) => state.handle_notification(notif)?,
-            Message::Response(_) => {}
+
+            let sleep_for = state
+                .time_until_next_pending()
+                .unwrap_or_else(|| Duration::from_millis(1))
+                .min(Duration::from_millis(10));
+            std::thread::sleep(sleep_for);
+            continue;
+        }
+
+        let Ok(msg) = state.connection.receiver.recv() else {
+            break;
+        };
+        if state.handle_message(msg)? {
+            break;
         }
     }
 
@@ -165,6 +186,70 @@ fn build_lsp_core() -> LspCore {
 }
 
 impl ServerState {
+    fn handle_message(&mut self, msg: Message) -> Result<bool, String> {
+        match msg {
+            Message::Request(req) => {
+                if
+                    self.connection
+                        .handle_shutdown(&req)
+                        .map_err(|e| format!("shutdown handling failed: {}", e))?
+                {
+                    return Ok(true);
+                }
+                self.handle_request(req)?;
+                Ok(false)
+            }
+            Message::Notification(notif) => {
+                self.handle_notification(notif)?;
+                Ok(false)
+            }
+            Message::Response(_) => Ok(false),
+        }
+    }
+
+    fn has_pending_changes(&self) -> bool {
+        !self.pending_changes.is_empty()
+    }
+
+    fn time_until_next_pending(&self) -> Option<Duration> {
+        let now = Instant::now();
+        self.pending_changes
+            .values()
+            .map(|change| {
+                if change.due_at > now {
+                    change.due_at.duration_since(now)
+                } else {
+                    Duration::from_millis(0)
+                }
+            })
+            .min()
+    }
+
+    fn flush_due_changes(&mut self) -> Result<(), String> {
+        let now = Instant::now();
+        let due_uris: Vec<Uri> = self.pending_changes
+            .iter()
+            .filter_map(|(uri, change)| if change.due_at <= now { Some(uri.clone()) } else { None })
+            .collect();
+
+        for uri in due_uris {
+            let Some(change) = self.pending_changes.remove(&uri) else {
+                continue;
+            };
+            let analysis = self.with_core(|core| {
+                analyze_document_text_safe(
+                    &change.text,
+                    &core.std_defs,
+                    &core.base_env,
+                    core.base_next_id
+                )
+            });
+            self.publish_diagnostics(uri.clone(), Some(change.version), &analysis.diagnostics)?;
+            self.documents.insert(uri, analysis);
+        }
+        Ok(())
+    }
+
     fn with_core<R>(&self, f: impl FnOnce(&LspCore) -> R) -> R {
         if self.core.borrow().is_none() {
             *self.core.borrow_mut() = Some(build_lsp_core());
@@ -203,6 +288,7 @@ impl ServerState {
             DidOpenTextDocument::METHOD => {
                 let params: DidOpenTextDocumentParams = parse_params(notif.params)?;
                 let uri = params.text_document.uri;
+                self.pending_changes.remove(&uri);
                 let analysis = self.with_core(|core| {
                     analyze_document_text_safe(
                         &params.text_document.text,
@@ -226,25 +312,29 @@ impl ServerState {
                 };
 
                 let uri = params.text_document.uri;
-                let analysis = self.with_core(|core| {
-                    analyze_document_text_safe(
-                        &last_change.text,
-                        &core.std_defs,
-                        &core.base_env,
-                        core.base_next_id
-                    )
+                if let Some(doc) = self.documents.get_mut(&uri) {
+                    doc.text = last_change.text.clone();
+                } else {
+                    self.documents.insert(uri.clone(), DocAnalysis {
+                        text: last_change.text.clone(),
+                        diagnostics: Vec::new(),
+                        symbol_types: HashMap::new(),
+                        let_binding_types: HashMap::new(),
+                        user_bound_symbols: HashSet::new(),
+                        form_scoped_symbols: Vec::new(),
+                    });
+                }
+                self.pending_changes.insert(uri, PendingChange {
+                    version: params.text_document.version,
+                    text: last_change.text.clone(),
+                    due_at: Instant::now() + Duration::from_millis(ANALYSIS_DELAY_MS),
                 });
-                self.publish_diagnostics(
-                    uri.clone(),
-                    Some(params.text_document.version),
-                    &analysis.diagnostics
-                )?;
-                self.documents.insert(uri, analysis);
                 Ok(())
             }
             DidCloseTextDocument::METHOD => {
                 let params: DidCloseTextDocumentParams = parse_params(notif.params)?;
                 self.documents.remove(&params.text_document.uri);
+                self.pending_changes.remove(&params.text_document.uri);
                 self.publish_diagnostics(params.text_document.uri, None, &[])?;
                 Ok(())
             }
@@ -501,6 +591,17 @@ fn analyze_document_text(
     base_env: &TypeEnv,
     base_next_id: u64
 ) -> DocAnalysis {
+    if text.trim().is_empty() {
+        return DocAnalysis {
+            text: text.to_string(),
+            diagnostics: Vec::new(),
+            symbol_types: HashMap::new(),
+            let_binding_types: HashMap::new(),
+            user_bound_symbols: HashSet::new(),
+            form_scoped_symbols: Vec::new(),
+        };
+    }
+
     let mut diagnostics = Vec::new();
     let mut symbol_types_raw: HashMap<String, Type> = HashMap::new();
     let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();
@@ -881,7 +982,8 @@ fn kind_for_signature(signature: &str) -> CompletionItemKind {
 }
 
 fn symbol_at_position(text: &str, position: Position) -> Option<(String, Range)> {
-    native_core::symbol_at_position(text, to_core_position(position))
+    native_core
+        ::symbol_at_position(text, to_core_position(position))
         .map(|(symbol, range)| (symbol, from_core_range(range)))
 }
 
@@ -1032,7 +1134,8 @@ fn skip_ws_and_comments(text: &str, mut i: usize, end: usize) -> usize {
 }
 
 fn literal_type_at_position(text: &str, position: Position) -> Option<(String, Range)> {
-    native_core::literal_type_at_position(text, to_core_position(position))
+    native_core
+        ::literal_type_at_position(text, to_core_position(position))
         .map(|(literal_type, range)| (literal_type, from_core_range(range)))
 }
 
