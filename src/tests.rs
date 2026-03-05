@@ -230,6 +230,65 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_type_inference_occurs_check_message_order() {
+        let program = "(let v [])\n(push! v v)";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match &std_ast {
+            crate::parser::Expression::Apply(items) => crate::parser
+                ::merge_std_and_program(program, items[1..].to_vec())
+                .expect("program should parse with std"),
+            _ => panic!("expected baked std ast to be an application"),
+        };
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &wrapped,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            )
+            .map(|_| ())
+            .expect_err("expected occurs check inference error");
+
+        let lines: Vec<&str> = err.lines().collect();
+        assert!(
+            !lines.is_empty() && lines[0].starts_with("Occurs check failed: t"),
+            "expected first line to be occurs-check message, got: {}",
+            err
+        );
+        assert!(
+            lines.last().copied() == Some("(push! v v)"),
+            "expected source snippet to be last line, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_occurs_check_summary_drops_snippet() {
+        let diagnostics_json =
+            crate::wasm_api::lsp_diagnostics("(let v [])\n(push! v v)".to_string());
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+
+        let messages: Vec<&str> = diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .filter_map(|item| item.get("message").and_then(|v| v.as_str()))
+            .collect();
+
+        assert!(
+            messages.iter().any(|msg| msg.starts_with("Occurs check failed: t")),
+            "expected occurs-check diagnostic, got: {}",
+            diagnostics_json
+        );
+        assert!(
+            messages.iter().all(|msg| !msg.contains("(push! v v)")),
+            "expected summary label to drop trailing snippet, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
     #[cfg(feature = "runtime")]
     fn test_correctness() {
         let test_cases = [
