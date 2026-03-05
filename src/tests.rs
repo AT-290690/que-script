@@ -278,6 +278,28 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_nested_calls_fold_after_inline() {
+        let typed = infer_typed(
+            "(do (let add (lambda a b (+ a b))) (let sub (lambda a b (- a b))) (* (sub (add 1323 22) (add 4222 122)) 25))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            optimized_lisp.ends_with("-74975)"),
+            "nested call expression should fold after inline, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_eliminates_single_use_literal_let_binding() {
+        let typed = infer_typed("(do (let res -74975) res)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "-74975");
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
         let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
         let hover: serde_json::Value = serde_json

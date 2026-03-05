@@ -92,17 +92,26 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     if items.len() <= 1 {
         return node;
     }
-    if node.children.len() != items.len() {
+    let Some(normalized_do) = normalize_do_node(&node, items) else {
         return node;
-    }
+    };
 
     // First, inline simple direct lambda calls at do-scope with hygienic temp args.
-    let mut inline_state = InlineState::new(&node.expr);
-    let (inlined_items, inlined_children) = inline_do_simple_calls(&node, &mut inline_state);
-    let (inlined_items, inlined_children) = eliminate_single_use_inline_temps(
+    let mut inline_state = InlineState::new(&normalized_do.expr);
+    let (inlined_items, inlined_children) = inline_do_simple_calls(&normalized_do, &mut inline_state);
+    let (inlined_items, inlined_children) = eliminate_single_use_let_bindings(
         inlined_items,
         inlined_children
     );
+
+    // Always collapse single-item do, even if no cleanup happened.
+    if inlined_items.len() == 2 {
+        return inlined_children
+            .get(1)
+            .cloned()
+            .or_else(|| inlined_children.last().cloned())
+            .unwrap_or(normalized_do);
+    }
 
     let last_idx = inlined_items.len() - 1;
     let mut kept_indices: Vec<usize> = Vec::new();
@@ -117,7 +126,7 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     if kept_indices.len() == inlined_items.len() {
         return TypedExpression {
             expr: Expression::Apply(inlined_items),
-            typ: node.typ,
+            typ: normalized_do.typ,
             children: inlined_children,
         };
     }
@@ -125,7 +134,7 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     // (do x) => x
     if kept_indices.len() == 2 {
         let only_expr_idx = kept_indices[1];
-        return inlined_children.get(only_expr_idx).cloned().unwrap_or(node);
+        return inlined_children.get(only_expr_idx).cloned().unwrap_or(normalized_do);
     }
 
     let new_expr_items = kept_indices
@@ -139,9 +148,33 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
 
     TypedExpression {
         expr: Expression::Apply(new_expr_items),
-        typ: node.typ,
+        typ: normalized_do.typ,
         children: new_children,
     }
+}
+
+fn normalize_do_node(node: &TypedExpression, items: &[Expression]) -> Option<TypedExpression> {
+    if node.children.len() == items.len() {
+        return Some(node.clone());
+    }
+    if
+        node.children.len() + 1 == items.len() &&
+        matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+    {
+        let mut children = Vec::with_capacity(items.len());
+        children.push(TypedExpression {
+            expr: Expression::Word("do".to_string()),
+            typ: None,
+            children: Vec::new(),
+        });
+        children.extend(node.children.clone());
+        return Some(TypedExpression {
+            expr: node.expr.clone(),
+            typ: node.typ.clone(),
+            children,
+        });
+    }
+    None
 }
 
 fn fold_int_add(node: TypedExpression, items: &[Expression]) -> TypedExpression {
@@ -417,7 +450,7 @@ fn inline_do_simple_calls(
     (cur_items, cur_children)
 }
 
-fn eliminate_single_use_inline_temps(
+fn eliminate_single_use_let_bindings(
     mut items: Vec<Expression>,
     mut children: Vec<TypedExpression>
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
@@ -429,12 +462,12 @@ fn eliminate_single_use_inline_temps(
         let mut changed = false;
         let mut i = 1usize;
         while i + 1 < items.len() {
-            let Some(name) = inline_temp_let_name(&items[i]) else {
+            let Some((name, can_duplicate_rhs)) = eliminable_let_name(&items[i]) else {
                 i += 1;
                 continue;
             };
             let uses = count_word_uses_in_slice(&items[i + 1..], &name);
-            if uses != 1 {
+            if uses == 0 || (!can_duplicate_rhs && uses != 1) {
                 i += 1;
                 continue;
             }
@@ -460,15 +493,21 @@ fn eliminate_single_use_inline_temps(
     (items, children)
 }
 
-fn inline_temp_let_name(expr: &Expression) -> Option<String> {
+fn eliminable_let_name(expr: &Expression) -> Option<(String, bool)> {
     let Expression::Apply(items) = expr else {
         return None;
     };
-    let [Expression::Word(kw), Expression::Word(name), _rhs] = &items[..] else {
+    let [Expression::Word(kw), Expression::Word(name), rhs] = &items[..] else {
         return None;
     };
-    if (kw == "let" || kw == "let*") && name.starts_with("__inline_arg_") {
-        Some(name.clone())
+    if kw != "let" && kw != "let*" {
+        None
+    } else if name.starts_with("__inline_arg_") {
+        // Inline temps are compiler-generated and safe to substitute in-place.
+        Some((name.clone(), false))
+    } else if is_pure_literal_expr(rhs) {
+        // Literals are side-effect free and cheap; allow substitution for all uses.
+        Some((name.clone(), true))
     } else {
         None
     }
@@ -578,6 +617,14 @@ fn inline_do_simple_calls_once(
             }
             out_items.push(inlined_expr);
             out_children.push(inlined_child);
+            continue;
+        }
+
+        let (nested_expr, nested_child, nested_changed) = inline_nested_calls(child_i, &defs);
+        if nested_changed {
+            changed = true;
+            out_items.push(nested_expr);
+            out_children.push(nested_child);
             continue;
         }
 
@@ -748,6 +795,111 @@ fn try_inline_call(
     let inlined_expr = substitute_words_expr(&def.body_expr, &subst);
     let inlined_typed = substitute_words_typed(&def.body_typed, &subst);
     Some((prep, inlined_expr, inlined_typed))
+}
+
+fn inline_nested_calls(
+    node: &TypedExpression,
+    defs: &HashMap<String, InlineLambdaDef>
+) -> (Expression, TypedExpression, bool) {
+    let mut changed = false;
+    let mut rewritten_children = Vec::with_capacity(node.children.len());
+    for child in &node.children {
+        let (_expr, rewritten_child, child_changed) = inline_nested_calls(child, defs);
+        if child_changed {
+            changed = true;
+        }
+        rewritten_children.push(rewritten_child);
+    }
+
+    let rewritten_expr = rebuild_expr_from_children(&node.expr, &rewritten_children);
+    let rewritten_node = TypedExpression {
+        expr: rewritten_expr,
+        typ: node.typ.clone(),
+        children: rewritten_children,
+    };
+
+    if let Some(inlined) = try_inline_call_no_temps(&rewritten_node, defs) {
+        return (inlined.expr.clone(), inlined, true);
+    }
+
+    (rewritten_node.expr.clone(), rewritten_node, changed)
+}
+
+fn try_inline_call_no_temps(
+    node: &TypedExpression,
+    defs: &HashMap<String, InlineLambdaDef>
+) -> Option<TypedExpression> {
+    let Expression::Apply(call_items) = &node.expr else {
+        return None;
+    };
+    if call_items.is_empty() {
+        return None;
+    }
+    let callee = match call_items.first() {
+        Some(Expression::Word(w)) => w,
+        _ => return None,
+    };
+    let def = defs.get(callee)?;
+    let arg_exprs = &call_items[1..];
+    if arg_exprs.len() != def.params.len() || node.children.len() != call_items.len() {
+        return None;
+    }
+
+    let mut expr_subst: HashMap<String, Expression> = HashMap::new();
+    let mut typed_subst: HashMap<String, TypedExpression> = HashMap::new();
+    for (idx, param) in def.params.iter().enumerate() {
+        let arg_expr = arg_exprs[idx].clone();
+        let arg_node = node.children.get(idx + 1)?.clone();
+        let uses = count_word_uses_expr(&def.body_expr, param);
+        if uses > 1 && !is_atomic_inline_arg_expr(&arg_expr) {
+            return None;
+        }
+        expr_subst.insert(param.clone(), arg_expr);
+        typed_subst.insert(param.clone(), arg_node);
+    }
+
+    Some(substitute_params_typed(&def.body_typed, &expr_subst, &typed_subst))
+}
+
+fn is_atomic_inline_arg_expr(expr: &Expression) -> bool {
+    matches!(expr, Expression::Word(_) | Expression::Int(_) | Expression::Float(_))
+}
+
+fn substitute_params_expr(expr: &Expression, subst: &HashMap<String, Expression>) -> Expression {
+    match expr {
+        Expression::Word(w) => subst.get(w).cloned().unwrap_or_else(|| Expression::Word(w.clone())),
+        Expression::Apply(items) =>
+            Expression::Apply(items.iter().map(|it| substitute_params_expr(it, subst)).collect()),
+        Expression::Int(n) => Expression::Int(*n),
+        Expression::Float(n) => Expression::Float(*n),
+    }
+}
+
+fn substitute_params_typed(
+    node: &TypedExpression,
+    expr_subst: &HashMap<String, Expression>,
+    typed_subst: &HashMap<String, TypedExpression>
+) -> TypedExpression {
+    if let Expression::Word(w) = &node.expr {
+        if let Some(repl) = typed_subst.get(w) {
+            return repl.clone();
+        }
+    }
+
+    let new_children = node.children
+        .iter()
+        .map(|ch| substitute_params_typed(ch, expr_subst, typed_subst))
+        .collect::<Vec<_>>();
+    let new_expr = match &node.expr {
+        Expression::Apply(items) if items.len() == new_children.len() =>
+            Expression::Apply(new_children.iter().map(|ch| ch.expr.clone()).collect()),
+        _ => substitute_params_expr(&node.expr, expr_subst),
+    };
+    TypedExpression {
+        expr: new_expr,
+        typ: node.typ.clone(),
+        children: new_children,
+    }
 }
 
 fn try_inline_let_rhs(
