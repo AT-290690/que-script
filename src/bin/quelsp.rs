@@ -379,7 +379,10 @@ impl ServerState {
         let doc = self.documents.get(uri)?;
 
         if let Some((literal_type, literal_range)) = literal_type_at_position(&doc.text, position) {
-            let value = format_literal_hover(&doc.text, literal_range, &literal_type);
+            let value = format!(
+                "```que\n{}\n```",
+                format_literal_hover(&doc.text, literal_range, &literal_type)
+            );
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
