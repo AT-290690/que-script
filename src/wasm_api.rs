@@ -1,4 +1,4 @@
-use crate::infer::{ infer_with_builtins_typed, TypedExpression };
+use crate::infer::{ infer_with_builtins_typed, infer_with_builtins_typed_lsp, InferErrorScope, TypedExpression };
 use crate::lsp_native_core as native_core;
 use crate::parser::{ self, Expression };
 use crate::types::{ Type, TypeEnv };
@@ -127,9 +127,14 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
     let mut user_bound_symbols = HashSet::new();
     let analysis_source = strip_comment_bodies_preserve_newlines(text);
 
-    if let Some(exprs) = parse_user_exprs_for_symbol_collection(&analysis_source) {
+    let parsed_exprs = parse_user_exprs_for_symbol_collection(&analysis_source);
+    if let Some(exprs) = &parsed_exprs {
         collect_user_bound_symbols_from_exprs(&exprs, &mut user_bound_symbols);
     }
+    let user_form_count = parsed_exprs
+        .as_ref()
+        .map(|exprs| exprs.len())
+        .unwrap_or_else(|| top_level_form_ranges(text).len());
 
     let program = match parser::merge_std_and_program(&analysis_source, core.std_defs.clone()) {
         Ok(expr) => expr,
@@ -138,7 +143,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             match parser::merge_std_and_program(&repaired, core.std_defs.clone()) {
                 Ok(expr) => expr,
                 Err(_) => {
-                    diagnostics.push(make_error_diagnostic(text, primary_err));
+                    diagnostics.extend(make_error_diagnostic(text, primary_err, None));
                     return DocAnalysis {
                         diagnostics,
                         symbol_types: HashMap::new(),
@@ -149,12 +154,14 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         }
     };
 
-    match infer_with_builtins_typed(&program, (core.base_env.clone(), core.base_next_id)) {
+    match
+        infer_with_builtins_typed_lsp(&program, (core.base_env.clone(), core.base_next_id), user_form_count)
+    {
         Ok((_typ, typed)) => {
             collect_symbol_types(&typed, &mut symbol_types_raw);
             collect_let_binding_types(&typed, &mut let_binding_types_raw);
         }
-        Err(err) => diagnostics.push(make_error_diagnostic(text, err)),
+        Err(err) => diagnostics.extend(make_error_diagnostic(text, err.message, err.scope.as_ref())),
     }
 
     for (name, typ) in let_binding_types_raw {
@@ -332,6 +339,13 @@ fn parse_user_exprs_for_symbol_collection(text: &str) -> Option<Vec<Expression>>
     native_core::parse_user_exprs_for_symbol_collection(text)
 }
 
+fn top_level_form_ranges(text: &str) -> Vec<TextRange> {
+    native_core::top_level_form_ranges(text)
+        .into_iter()
+        .map(from_core_range)
+        .collect()
+}
+
 fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
     native_core::strip_comment_bodies_preserve_newlines(text)
 }
@@ -379,27 +393,48 @@ fn strip_type_var_numbers(input: &str) -> String {
     native_core::strip_type_var_numbers(input)
 }
 
-fn make_error_diagnostic(text: &str, message: String) -> JsonDiagnostic {
+fn make_error_diagnostic(
+    text: &str,
+    message: String,
+    scope: Option<&InferErrorScope>
+) -> Vec<JsonDiagnostic> {
     let normalized_message = strip_type_var_numbers(&message);
-    let inferred_range = infer_error_range(text, &message);
-    let range = inferred_range.unwrap_or_else(|| full_range(text));
-    let display_message = if inferred_range.is_some() {
+    let inferred_ranges = infer_error_ranges(text, &message, scope);
+    let display_message = if !inferred_ranges.is_empty() {
         diagnostic_summary_without_snippet(&normalized_message)
     } else {
         normalized_message
     };
-    JsonDiagnostic {
-        message: display_message,
-        severity: "error".to_string(),
-        range: to_json_range(range),
-    }
+
+    let ranges = if inferred_ranges.is_empty() {
+        vec![full_range(text)]
+    } else {
+        inferred_ranges
+    };
+
+    ranges
+        .into_iter()
+        .map(|range| JsonDiagnostic {
+            message: display_message.clone(),
+            severity: "error".to_string(),
+            range: to_json_range(range),
+        })
+        .collect()
 }
 
 fn diagnostic_summary_without_snippet(message: &str) -> String {
     native_core::diagnostic_summary_without_snippet(message)
 }
-fn infer_error_range(text: &str, message: &str) -> Option<TextRange> {
-    native_core::infer_error_range(text, message).map(from_core_range)
+fn infer_error_ranges(
+    text: &str,
+    message: &str,
+    scope: Option<&InferErrorScope>
+) -> Vec<TextRange> {
+    native_core
+        ::infer_error_ranges(text, message, scope)
+        .into_iter()
+        .map(from_core_range)
+        .collect()
 }
 
 fn full_range(text: &str) -> TextRange {

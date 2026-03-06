@@ -34,7 +34,7 @@ use lsp_types::{
     TextDocumentSyncKind,
     Uri,
 };
-use que::infer::{ infer_with_builtins_typed, TypedExpression };
+use que::infer::{ infer_with_builtins_typed_lsp, InferErrorScope, TypedExpression };
 use que::lsp_native_core as native_core;
 use que::parser::Expression;
 use que::types::{ Type, TypeEnv };
@@ -627,7 +627,7 @@ fn analyze_document_text(
             match que::parser::merge_std_and_program(&repaired, std_defs.to_vec()) {
                 Ok(expr) => expr,
                 Err(_) => {
-                    diagnostics.push(make_error_diagnostic(text, primary_err));
+                    diagnostics.extend(make_error_diagnostic(text, primary_err, None));
                     return DocAnalysis {
                         text: text.to_string(),
                         diagnostics,
@@ -641,13 +641,13 @@ fn analyze_document_text(
         }
     };
 
-    match infer_with_builtins_typed(&program, (base_env.clone(), base_next_id)) {
+    match infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count) {
         Ok((_typ, typed)) => {
             collect_symbol_types(&typed, &mut symbol_types_raw);
             collect_let_binding_types(&typed, &mut let_binding_types_raw);
             form_scoped_symbols = build_form_scoped_analyses(text, user_form_count, &typed);
         }
-        Err(err) => diagnostics.push(make_error_diagnostic(text, err)),
+        Err(err) => diagnostics.extend(make_error_diagnostic(text, err.message, err.scope.as_ref())),
     }
 
     let symbol_types: HashMap<String, String> = symbol_types_raw
@@ -696,7 +696,7 @@ fn analyze_document_text_safe(
             );
             DocAnalysis {
                 text: text.to_string(),
-                diagnostics: vec![make_error_diagnostic(text, message)],
+                diagnostics: make_error_diagnostic(text, message, None),
                 symbol_types: HashMap::new(),
                 let_binding_types: HashMap::new(),
                 user_bound_symbols: HashSet::new(),
@@ -921,31 +921,47 @@ fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String, Ty
     native_core::collect_symbol_types(node, symbols)
 }
 
-fn make_error_diagnostic(text: &str, message: String) -> Diagnostic {
+fn make_error_diagnostic(
+    text: &str,
+    message: String,
+    scope: Option<&InferErrorScope>
+) -> Vec<Diagnostic> {
     let normalized_message = strip_type_var_numbers(&message);
-    let inferred_range = infer_error_range(text, &message);
-    let range = inferred_range.unwrap_or_else(|| full_range(text));
-    let display_message = if inferred_range.is_some() {
+    let inferred_ranges = infer_error_ranges(text, &message, scope);
+    let display_message = if !inferred_ranges.is_empty() {
         diagnostic_summary_without_snippet(&normalized_message)
     } else {
         normalized_message
     };
 
-    Diagnostic {
-        range,
-        severity: Some(DiagnosticSeverity::ERROR),
-        message: display_message,
-        source: Some("que".to_string()),
-        ..Diagnostic::default()
-    }
+    let ranges = if inferred_ranges.is_empty() {
+        vec![full_range(text)]
+    } else {
+        inferred_ranges
+    };
+
+    ranges
+        .into_iter()
+        .map(|range| Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            message: display_message.clone(),
+            source: Some("que".to_string()),
+            ..Diagnostic::default()
+        })
+        .collect()
 }
 
 fn diagnostic_summary_without_snippet(message: &str) -> String {
     native_core::diagnostic_summary_without_snippet(message)
 }
 
-fn infer_error_range(text: &str, message: &str) -> Option<Range> {
-    native_core::infer_error_range(text, message).map(from_core_range)
+fn infer_error_ranges(text: &str, message: &str, scope: Option<&InferErrorScope>) -> Vec<Range> {
+    native_core
+        ::infer_error_ranges(text, message, scope)
+        .into_iter()
+        .map(from_core_range)
+        .collect()
 }
 
 fn find_matching_paren_byte(text: &str, open_idx: usize) -> Option<usize> {
