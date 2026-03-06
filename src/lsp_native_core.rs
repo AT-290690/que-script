@@ -1,4 +1,4 @@
-use crate::infer::{ infer_with_builtins_typed, TypedExpression };
+use crate::infer::{ infer_with_builtins_typed, InferErrorScope, TypedExpression };
 use crate::parser::{ self, Expression };
 use crate::types::{ create_builtin_environment, Type, TypeEnv };
 use std::collections::{ HashMap, HashSet };
@@ -475,29 +475,63 @@ pub fn is_standalone_symbol_expr_at_range(text: &str, range: CoreRange, symbol: 
     before.trim().is_empty() && (after_trimmed.is_empty() || after_trimmed.starts_with(';'))
 }
 
-pub fn infer_error_range(text: &str, message: &str) -> Option<CoreRange> {
+pub fn infer_error_ranges(
+    text: &str,
+    message: &str,
+    scope: Option<&InferErrorScope>
+) -> Vec<CoreRange> {
     if message.contains("Char should be of length 1") {
         if let Some(range) = find_invalid_char_literal_range(text) {
-            return Some(range);
+            return vec![range];
         }
     }
 
     if let Some(snippet) = extract_error_snippet(message) {
-        if let Some(range) = find_snippet_range(text, &snippet) {
-            return Some(range);
+        let mut ranges = find_snippet_ranges(text, &snippet);
+        if ranges.is_empty() {
+            ranges = find_call_prefix_ranges(text, &snippet);
         }
-        if let Some(range) = find_call_prefix_range(text, &snippet) {
-            return Some(range);
+        if !ranges.is_empty() {
+            if let Some(scope_meta) = scope {
+                let scoped = filter_ranges_to_scope(text, &ranges, scope_meta);
+                if !scoped.is_empty() {
+                    return scoped;
+                }
+                if let Some(scope_range) = find_scope_range(text, scope_meta) {
+                    return vec![scope_range];
+                }
+            }
+            return ranges;
         }
     }
 
     if let Some(symbol) = extract_symbol_from_error(message) {
-        if let Some(range) = find_symbol_range(text, &symbol) {
-            return Some(range);
+        let ranges = find_symbol_ranges(text, &symbol);
+        if !ranges.is_empty() {
+            if let Some(scope_meta) = scope {
+                let scoped = filter_ranges_to_scope(text, &ranges, scope_meta);
+                if !scoped.is_empty() {
+                    return scoped;
+                }
+                if let Some(scope_range) = find_scope_range(text, scope_meta) {
+                    return vec![scope_range];
+                }
+            }
+            return ranges;
         }
     }
 
-    find_first_call_range(text)
+    if let Some(scope_meta) = scope {
+        if let Some(scope_range) = find_scope_range(text, scope_meta) {
+            return vec![scope_range];
+        }
+    }
+
+    find_first_call_range(text).into_iter().collect()
+}
+
+pub fn infer_error_range(text: &str, message: &str) -> Option<CoreRange> {
+    infer_error_ranges(text, message, None).into_iter().next()
 }
 
 pub fn extract_error_snippet(message: &str) -> Option<String> {
@@ -744,6 +778,358 @@ fn end_position(text: &str) -> CorePosition {
     CorePosition { line, character }
 }
 
+#[derive(Clone, Debug)]
+struct ScopeRegion {
+    top_form_idx: usize,
+    lambda_path: Vec<usize>,
+    start: usize,
+    end: usize,
+}
+
+#[derive(Clone, Debug)]
+struct ListNode {
+    start: usize,
+    end: usize,
+    head: Option<String>,
+    children: Vec<ListNode>,
+}
+
+pub fn top_level_form_ranges(text: &str) -> Vec<CoreRange> {
+    top_level_form_byte_ranges(text)
+        .into_iter()
+        .map(|(start, end)| CoreRange {
+            start: byte_offset_to_position(text, start),
+            end: byte_offset_to_position(text, end),
+        })
+        .collect()
+}
+
+fn top_level_form_byte_ranges(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut ranges = Vec::new();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        while i < bytes.len() {
+            if bytes[i].is_ascii_whitespace() {
+                i += 1;
+                continue;
+            }
+            if bytes[i] == b';' {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            break;
+        }
+
+        if i >= bytes.len() {
+            break;
+        }
+
+        let start = i;
+        match bytes[i] {
+            b'(' | b'[' => {
+                let end = find_matching_list_end_byte(text, i)
+                    .map(|idx| idx + 1)
+                    .unwrap_or(text.len());
+                ranges.push((start, end));
+                i = end;
+            }
+            b'"' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+                ranges.push((start, i));
+            }
+            _ => {
+                i += 1;
+                while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b';' {
+                    i += 1;
+                }
+                ranges.push((start, i));
+            }
+        }
+    }
+
+    ranges
+}
+
+fn find_matching_list_end_byte(text: &str, open_idx: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let open = *bytes.get(open_idx)?;
+    if open != b'(' && open != b'[' {
+        return None;
+    }
+
+    let mut stack = vec![if open == b'(' { b')' } else { b']' }];
+    let mut in_string = false;
+    let mut in_comment = false;
+    let mut i = open_idx + 1;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if in_comment {
+            if b == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if !in_string && b == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+
+        if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_string = !in_string;
+            i += 1;
+            continue;
+        }
+
+        if in_string {
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'(' => stack.push(b')'),
+            b'[' => stack.push(b']'),
+            b')' | b']' => {
+                let Some(expected) = stack.pop() else {
+                    return None;
+                };
+                if b != expected {
+                    return None;
+                }
+                if stack.is_empty() {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+
+        i += 1;
+    }
+
+    None
+}
+
+fn find_scope_range(text: &str, scope: &InferErrorScope) -> Option<CoreRange> {
+    collect_scope_regions(text)
+        .into_iter()
+        .find(|region| region.top_form_idx == scope.user_top_form && region.lambda_path == scope.lambda_path)
+        .map(|region| CoreRange {
+            start: byte_offset_to_position(text, region.start),
+            end: byte_offset_to_position(text, region.end),
+        })
+}
+
+fn filter_ranges_to_scope(text: &str, ranges: &[CoreRange], scope: &InferErrorScope) -> Vec<CoreRange> {
+    let Some(scope_range) = find_scope_range(text, scope) else {
+        return Vec::new();
+    };
+    let Some(scope_start) = position_to_byte_offset(text, scope_range.start) else {
+        return Vec::new();
+    };
+    let Some(scope_end) = position_to_byte_offset(text, scope_range.end) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for range in ranges {
+        let Some(start) = position_to_byte_offset(text, range.start) else {
+            continue;
+        };
+        let Some(end) = position_to_byte_offset(text, range.end) else {
+            continue;
+        };
+        if start >= scope_start && end <= scope_end && seen.insert((start, end)) {
+            out.push(*range);
+        }
+    }
+    out
+}
+
+fn collect_scope_regions(text: &str) -> Vec<ScopeRegion> {
+    let mut out = Vec::new();
+    for (top_form_idx, (start, end)) in top_level_form_byte_ranges(text).into_iter().enumerate() {
+        out.push(ScopeRegion {
+            top_form_idx,
+            lambda_path: Vec::new(),
+            start,
+            end,
+        });
+
+        let Some(open) = text.as_bytes().get(start) else {
+            continue;
+        };
+        if *open != b'(' && *open != b'[' {
+            continue;
+        }
+        let Some(root) = parse_list_node_at(text, start) else {
+            continue;
+        };
+        collect_lambda_scope_regions(&root, top_form_idx, &[], &mut out);
+    }
+    out
+}
+
+fn collect_lambda_scope_regions(
+    node: &ListNode,
+    top_form_idx: usize,
+    parent_path: &[usize],
+    out: &mut Vec<ScopeRegion>
+) {
+    let mut next_lambda_idx = 0usize;
+    collect_lambda_descendants(node, top_form_idx, parent_path, &mut next_lambda_idx, out);
+}
+
+fn collect_lambda_descendants(
+    node: &ListNode,
+    top_form_idx: usize,
+    parent_path: &[usize],
+    next_lambda_idx: &mut usize,
+    out: &mut Vec<ScopeRegion>
+) {
+    for child in &node.children {
+        if child.head.as_deref() == Some("lambda") {
+            let mut child_path = parent_path.to_vec();
+            child_path.push(*next_lambda_idx);
+            *next_lambda_idx += 1;
+
+            out.push(ScopeRegion {
+                top_form_idx,
+                lambda_path: child_path.clone(),
+                start: child.start,
+                end: child.end,
+            });
+
+            collect_lambda_scope_regions(child, top_form_idx, &child_path, out);
+        } else {
+            collect_lambda_descendants(child, top_form_idx, parent_path, next_lambda_idx, out);
+        }
+    }
+}
+
+fn parse_list_node_at(text: &str, open_idx: usize) -> Option<ListNode> {
+    let close_idx = find_matching_list_end_byte(text, open_idx)?;
+    let mut node = ListNode {
+        start: open_idx,
+        end: close_idx + 1,
+        head: None,
+        children: Vec::new(),
+    };
+    let bytes = text.as_bytes();
+    let mut i = open_idx + 1;
+
+    while i < close_idx {
+        i = skip_ws_and_comments(text, i, close_idx);
+        if i >= close_idx {
+            break;
+        }
+
+        match bytes[i] {
+            b'(' | b'[' => {
+                let child = parse_list_node_at(text, i)?;
+                i = child.end;
+                node.children.push(child);
+            }
+            b'"' => {
+                i = skip_string_literal(text, i, close_idx);
+            }
+            b'\'' => {
+                i = skip_char_literal(text, i, close_idx);
+            }
+            _ => {
+                let token_end = skip_token(text, i, close_idx);
+                if node.head.is_none() {
+                    node.head = text.get(i..token_end).map(|s| s.to_string());
+                }
+                i = token_end;
+            }
+        }
+    }
+
+    Some(node)
+}
+
+fn skip_ws_and_comments(text: &str, mut i: usize, limit: usize) -> usize {
+    let bytes = text.as_bytes();
+    while i < limit {
+        let b = bytes[i];
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if b == b';' {
+            i += 1;
+            while i < limit && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        break;
+    }
+    i
+}
+
+fn skip_string_literal(text: &str, start: usize, limit: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut i = start + 1;
+    while i < limit {
+        if bytes[i] == b'"' && bytes[i - 1] != b'\\' {
+            return i + 1;
+        }
+        i += 1;
+    }
+    limit
+}
+
+fn skip_char_literal(text: &str, start: usize, limit: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut i = start + 1;
+    while i < limit {
+        if bytes[i] == b'\'' {
+            return i + 1;
+        }
+        if bytes[i] == b'\n' {
+            return i;
+        }
+        i += 1;
+    }
+    limit
+}
+
+fn skip_token(text: &str, mut i: usize, limit: usize) -> usize {
+    let bytes = text.as_bytes();
+    while i < limit {
+        let b = bytes[i];
+        if
+            b.is_ascii_whitespace() ||
+            b == b';' ||
+            b == b'(' ||
+            b == b')' ||
+            b == b'[' ||
+            b == b']'
+        {
+            break;
+        }
+        i += 1;
+    }
+    i
+}
+
 fn find_invalid_char_literal_range(text: &str) -> Option<CoreRange> {
     let bytes = text.as_bytes();
     let mut i = 0usize;
@@ -818,16 +1204,17 @@ fn find_invalid_char_literal_range(text: &str) -> Option<CoreRange> {
     None
 }
 
-fn find_snippet_range(text: &str, snippet: &str) -> Option<CoreRange> {
+fn find_snippet_ranges(text: &str, snippet: &str) -> Vec<CoreRange> {
     if snippet.is_empty() {
-        return None;
+        return Vec::new();
     }
     let bytes = text.as_bytes();
     let needle = snippet.as_bytes();
     if needle.len() > bytes.len() {
-        return None;
+        return Vec::new();
     }
 
+    let mut out = Vec::new();
     let mut i = 0usize;
     let mut in_string = false;
     let mut in_comment = false;
@@ -858,21 +1245,24 @@ fn find_snippet_range(text: &str, snippet: &str) -> Option<CoreRange> {
         if &bytes[i..i + needle.len()] == needle {
             let start = i;
             let end = i + needle.len();
-            return Some(CoreRange {
+            out.push(CoreRange {
                 start: byte_offset_to_position(text, start),
                 end: byte_offset_to_position(text, end),
             });
+            i = end;
+            continue;
         }
         i += 1;
     }
-    None
+    out
 }
 
-fn find_call_prefix_range(text: &str, snippet: &str) -> Option<CoreRange> {
+fn find_call_prefix_ranges(text: &str, snippet: &str) -> Vec<CoreRange> {
     let all_tokens = extract_call_prefix_tokens(snippet, 3);
     if all_tokens.is_empty() {
-        return None;
+        return Vec::new();
     }
+    let mut out = Vec::new();
     for token_count in (1..=all_tokens.len()).rev() {
         let prefix_tokens = &all_tokens[..token_count];
         let bytes = text.as_bytes();
@@ -904,16 +1294,21 @@ fn find_call_prefix_range(text: &str, snippet: &str) -> Option<CoreRange> {
 
             if bytes[i] == b'(' && match_call_prefix_at(text, i, prefix_tokens) {
                 if let Some(close) = find_matching_paren_byte(text, i) {
-                    return Some(CoreRange {
+                    out.push(CoreRange {
                         start: byte_offset_to_position(text, i),
                         end: byte_offset_to_position(text, close + 1),
                     });
+                    i = close + 1;
+                    continue;
                 }
             }
             i += 1;
         }
+        if !out.is_empty() {
+            break;
+        }
     }
-    None
+    out
 }
 
 fn extract_call_prefix_tokens(snippet: &str, max_tokens: usize) -> Vec<String> {
@@ -1038,16 +1433,17 @@ fn find_first_call_range(text: &str) -> Option<CoreRange> {
     None
 }
 
-fn find_symbol_range(text: &str, symbol: &str) -> Option<CoreRange> {
+fn find_symbol_ranges(text: &str, symbol: &str) -> Vec<CoreRange> {
     if symbol.is_empty() {
-        return None;
+        return Vec::new();
     }
     let bytes = text.as_bytes();
     let needle = symbol.as_bytes();
     if needle.len() > bytes.len() {
-        return None;
+        return Vec::new();
     }
 
+    let mut out = Vec::new();
     let mut i = 0usize;
     let mut in_string = false;
     let mut in_comment = false;
@@ -1080,16 +1476,18 @@ fn find_symbol_range(text: &str, symbol: &str) -> Option<CoreRange> {
             let right_idx = i + needle.len();
             let right_ok = right_idx >= bytes.len() || !is_ident_char(bytes[right_idx] as char);
             if left_ok && right_ok {
-                return Some(CoreRange {
+                out.push(CoreRange {
                     start: byte_offset_to_position(text, i),
                     end: byte_offset_to_position(text, i + needle.len()),
                 });
+                i += needle.len();
+                continue;
             }
         }
         i += 1;
     }
 
-    None
+    out
 }
 
 fn extract_symbol_from_error(message: &str) -> Option<String> {

@@ -502,6 +502,170 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_diagnostics_scope_fallback_avoids_outer_loop_condition() {
+        let program =
+            "(let fn (lambda x (get x)))\n\n(integer x 1)\n(loop (< (get x) 10) (lambda (do\n    (match? (get x) \"10\")\n(++ x))))";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+        let items = diagnostics
+            .as_array()
+            .expect("diagnostics response should be an array");
+
+        assert!(!items.is_empty(), "expected at least one diagnostic, got: {}", diagnostics_json);
+
+        let loop_condition_pos = (3u64, 9u64);
+        let match_scope_pos = (4u64, 14u64);
+        let mut hits_match_scope = false;
+
+        for item in items {
+            let range = item.get("range").expect("diagnostic should include range");
+            let start = range.get("start").expect("range should include start");
+            let end = range.get("end").expect("range should include end");
+            let sl = start
+                .get("line")
+                .and_then(|v| v.as_u64())
+                .expect("start.line should be u64");
+            let sc = start
+                .get("character")
+                .and_then(|v| v.as_u64())
+                .expect("start.character should be u64");
+            let el = end
+                .get("line")
+                .and_then(|v| v.as_u64())
+                .expect("end.line should be u64");
+            let ec = end
+                .get("character")
+                .and_then(|v| v.as_u64())
+                .expect("end.character should be u64");
+
+            let contains = |line: u64, ch: u64| {
+                let after_start = line > sl || (line == sl && ch >= sc);
+                let before_end = line < el || (line == el && ch < ec);
+                after_start && before_end
+            };
+
+            assert!(
+                !contains(loop_condition_pos.0, loop_condition_pos.1),
+                "diagnostic should not include outer loop condition site, got: {}",
+                diagnostics_json
+            );
+            if contains(match_scope_pos.0, match_scope_pos.1) {
+                hits_match_scope = true;
+            }
+        }
+
+        assert!(
+            hits_match_scope,
+            "expected at least one diagnostic to cover lambda/match? scope, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_scope_path_keeps_get_error_in_fn_only() {
+        let program =
+            "(let fn (lambda x (get x 's')))\n\n(integer x 1)\n(loop (< (get x) 10) (lambda (do\n    (match? (Integer->String (get x)) \"10\")\n(++ x))))";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+        let items = diagnostics
+            .as_array()
+            .expect("diagnostics response should be an array");
+
+        assert!(!items.is_empty(), "expected at least one diagnostic, got: {}", diagnostics_json);
+
+        for item in items {
+            let message = item
+                .get("message")
+                .and_then(|v| v.as_str())
+                .expect("diagnostic should include message");
+            assert!(
+                message.contains("Cannot unify"),
+                "expected type error diagnostic, got: {}",
+                diagnostics_json
+            );
+
+            let start_line = item
+                .get("range")
+                .and_then(|r| r.get("start"))
+                .and_then(|s| s.get("line"))
+                .and_then(|v| v.as_u64())
+                .expect("diagnostic should include range.start.line");
+            let end_line = item
+                .get("range")
+                .and_then(|r| r.get("end"))
+                .and_then(|e| e.get("line"))
+                .and_then(|v| v.as_u64())
+                .expect("diagnostic should include range.end.line");
+
+            assert_eq!(
+                start_line,
+                0,
+                "diagnostic should be scoped to fn form only, got: {}",
+                diagnostics_json
+            );
+            assert_eq!(
+                end_line,
+                0,
+                "diagnostic should be scoped to fn form only, got: {}",
+                diagnostics_json
+            );
+        }
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_empty_application_scoped_to_its_top_form() {
+        let program = "(let fn1 (lambda x x))\n(let fn2 (lambda x x))\n() ; Error!: Empty application";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+        let items = diagnostics
+            .as_array()
+            .expect("diagnostics response should be an array");
+
+        assert_eq!(items.len(), 1, "expected a single scoped diagnostic, got: {}", diagnostics_json);
+        let item = &items[0];
+        let start_line = item
+            .get("range")
+            .and_then(|r| r.get("start"))
+            .and_then(|s| s.get("line"))
+            .and_then(|v| v.as_u64())
+            .expect("diagnostic should include range.start.line");
+        let end_line = item
+            .get("range")
+            .and_then(|r| r.get("end"))
+            .and_then(|e| e.get("line"))
+            .and_then(|v| v.as_u64())
+            .expect("diagnostic should include range.end.line");
+        let message = item
+            .get("message")
+            .and_then(|v| v.as_str())
+            .expect("diagnostic should include message");
+
+        assert_eq!(
+            start_line,
+            2,
+            "expected empty application error on third form, got: {}",
+            diagnostics_json
+        );
+        assert_eq!(
+            end_line,
+            2,
+            "expected empty application error on third form, got: {}",
+            diagnostics_json
+        );
+        assert!(
+            message.contains("Empty application"),
+            "expected empty application diagnostic message, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
     #[cfg(feature = "io")]
     fn test_wat_host_print_releases_temporary_string_arg() {
         let expr = crate::parser
