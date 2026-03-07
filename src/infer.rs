@@ -28,6 +28,7 @@ pub struct InferErrorScope {
 pub struct InferErrorInfo {
     pub message: String,
     pub scope: Option<InferErrorScope>,
+    pub partial_typed_ast: Option<TypedExpression>,
 }
 
 #[derive(Clone, Debug)]
@@ -1105,20 +1106,34 @@ fn infer_with_builtins_typed_internal(
         last_error_scope: None,
     };
 
-    let inferred = infer_expr(expr, &mut ctx).map_err(|message| InferErrorInfo {
-        message,
-        scope: ctx.last_error_scope.clone(),
-    })?;
+    let inferred = match infer_expr(expr, &mut ctx) {
+        Ok(value) => value,
+        Err(message) => {
+            let partial_typed_ast = Some(build_typed_expression(expr, &ctx.expr_types));
+            return Err(InferErrorInfo {
+                message,
+                scope: ctx.last_error_scope.clone(),
+                partial_typed_ast,
+            });
+        }
+    };
 
     let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
         .iter()
         .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
         .collect();
 
-    let subst_map = solve_constraints_list(&constraints_vec).map_err(|e| InferErrorInfo {
-        message: e.message,
-        scope: e.scope,
-    })?;
+    let subst_map = match solve_constraints_list(&constraints_vec) {
+        Ok(subst) => subst,
+        Err(e) => {
+            let partial_typed_ast = Some(build_typed_expression(expr, &ctx.expr_types));
+            return Err(InferErrorInfo {
+                message: e.message,
+                scope: e.scope,
+                partial_typed_ast,
+            });
+        }
+    };
     let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
     ctx.env.apply_substitution_map(&subst_map);
 

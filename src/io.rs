@@ -1,3 +1,10 @@
+use crate::infer::{ InferErrorInfo, InferErrorScope, TypedExpression };
+use crate::lsp_native_core::{
+    diagnostic_summary_without_snippet,
+    extract_error_snippet,
+    infer_error_ranges,
+};
+use crate::parser::Expression;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
@@ -146,6 +153,89 @@ pub fn take_shell_policy_from_argv(argv: &mut Vec<String>) -> Result<ShellPolicy
     }
 
     Ok(ShellPolicy::disabled())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugMode {
+    Off,
+    Basic,
+    Code,
+    Types,
+    All,
+}
+
+fn merge_debug_mode(current: DebugMode, next: DebugMode) -> DebugMode {
+    let enabled = current != DebugMode::Off || next != DebugMode::Off;
+    let code =
+        matches!(current, DebugMode::Code | DebugMode::All) ||
+        matches!(next, DebugMode::Code | DebugMode::All);
+    let types =
+        matches!(current, DebugMode::Types | DebugMode::All) ||
+        matches!(next, DebugMode::Types | DebugMode::All);
+
+    if code && types {
+        DebugMode::All
+    } else if code {
+        DebugMode::Code
+    } else if types {
+        DebugMode::Types
+    } else if enabled {
+        DebugMode::Basic
+    } else {
+        DebugMode::Off
+    }
+}
+
+fn parse_debug_mode_token(token: &str) -> Option<DebugMode> {
+    match token.trim().to_ascii_lowercase().as_str() {
+        "all" => Some(DebugMode::All),
+        "basic" | "loc" | "location" => Some(DebugMode::Basic),
+        "code" => Some(DebugMode::Code),
+        "types" => Some(DebugMode::Types),
+        _ => None,
+    }
+}
+
+impl DebugMode {
+    fn is_enabled(self) -> bool {
+        self != DebugMode::Off
+    }
+
+    fn includes_code(self) -> bool {
+        matches!(self, DebugMode::Code | DebugMode::All)
+    }
+
+    fn includes_types(self) -> bool {
+        matches!(self, DebugMode::Types | DebugMode::All)
+    }
+}
+
+pub fn take_debug_mode_from_argv(argv: &mut Vec<String>) -> DebugMode {
+    let mut mode = DebugMode::Off;
+    let mut i = 0usize;
+    let mut out = Vec::with_capacity(argv.len());
+
+    while i < argv.len() {
+        let token = &argv[i];
+        if token == "--debug" {
+            let mut next_mode = DebugMode::Basic;
+            if let Some(next_token) = argv.get(i + 1) {
+                if let Some(parsed) = parse_debug_mode_token(next_token) {
+                    next_mode = parsed;
+                    i += 1;
+                }
+            }
+            mode = merge_debug_mode(mode, next_mode);
+            i += 1;
+            continue;
+        }
+
+        out.push(token.clone());
+        i += 1;
+    }
+
+    *argv = out;
+    mode
 }
 
 pub struct ShellStoreData {
@@ -613,16 +703,11 @@ pub fn host_print(
     out
         .write_all(text.as_bytes())
         .map_err(|e| wasmtime::Error::msg(format!("failed to write stdout: {}", e)))?;
-    out
-        .flush()
-        .map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
+    out.flush().map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
     Ok(0)
 }
 
-pub fn host_sleep(
-    caller: Caller<'_, ShellStoreData>,
-    millis: i32
-) -> wasmtime::Result<i32> {
+pub fn host_sleep(caller: Caller<'_, ShellStoreData>, millis: i32) -> wasmtime::Result<i32> {
     caller
         .data()
         .shell_policy.require(ShellPermission::Write, "sleep!", "<clock>")
@@ -645,9 +730,7 @@ pub fn host_clear(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
     out
         .write_all(b"\x1b[2J\x1b[H")
         .map_err(|e| wasmtime::Error::msg(format!("failed to clear stdout: {}", e)))?;
-    out
-        .flush()
-        .map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
+    out.flush().map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
     Ok(0)
 }
 
@@ -667,9 +750,245 @@ pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Res
     Ok(())
 }
 
+fn user_form_nodes<'a>(typed: &'a TypedExpression, user_form_count: usize) -> Vec<&'a TypedExpression> {
+    if let Expression::Apply(_) = &typed.expr {
+        if typed.children.len() > 1 {
+            let forms = &typed.children[1..];
+            let start = forms.len().saturating_sub(user_form_count);
+            return forms[start..].iter().collect();
+        }
+    }
+    vec![typed]
+}
+
+fn format_scope_path(scope: Option<&InferErrorScope>) -> String {
+    match scope {
+        Some(meta) => {
+            let lambda_path = if meta.lambda_path.is_empty() {
+                "<root>".to_string()
+            } else {
+                meta.lambda_path
+                    .iter()
+                    .map(|idx| format!("#{}", idx))
+                    .collect::<Vec<String>>()
+                    .join(" -> ")
+            };
+            format!("top_form={} lambda_path={}", meta.user_top_form, lambda_path)
+        }
+        None => "<none>".to_string(),
+    }
+}
+
+fn format_range_line(range_idx: usize, range: crate::lsp_native_core::CoreRange) -> String {
+    format!(
+        "location[{}]: {}:{} -> {}:{}",
+        range_idx,
+        range.start.line + 1,
+        range.start.character + 1,
+        range.end.line + 1,
+        range.end.character + 1
+    )
+}
+
+fn push_location_lines(
+    out: &mut Vec<String>,
+    source_text: &str,
+    message: &str,
+    scope: Option<&InferErrorScope>
+) {
+    let should_locate = scope.is_some() || extract_error_snippet(message).is_some();
+    if !should_locate {
+        out.push("location: <unresolved>".to_string());
+        return;
+    }
+
+    let ranges = infer_error_ranges(source_text, message, scope);
+    if ranges.is_empty() {
+        out.push("location: <unresolved>".to_string());
+        return;
+    }
+
+    for (idx, range) in ranges.iter().copied().take(8).enumerate() {
+        out.push(format_range_line(idx, range));
+        if let Some(line) = source_text.lines().nth(range.start.line as usize) {
+            out.push(format!("location_line[{}]: {}", idx, line.trim_end()));
+        }
+    }
+
+    if ranges.len() > 8 {
+        out.push(format!("location_more: {}", ranges.len() - 8));
+    }
+}
+
+fn typed_node_label(expr: &Expression) -> String {
+    match expr {
+        Expression::Word(name) => name.clone(),
+        Expression::Int(v) => v.to_string(),
+        Expression::Float(v) => format!("{:?}", v),
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return "()".to_string();
+            }
+            match &items[0] {
+                Expression::Word(head) => format!("({} ...)", head),
+                _ => "(apply ...)".to_string(),
+            }
+        }
+    }
+}
+
+fn is_lambda_expr(expr: &Expression) -> bool {
+    if let Expression::Apply(items) = expr {
+        if let Some(Expression::Word(head)) = items.first() {
+            return head == "lambda";
+        }
+    }
+    false
+}
+
+fn lambda_body_child(node: &TypedExpression) -> Option<&TypedExpression> {
+    if !is_lambda_expr(&node.expr) {
+        return None;
+    }
+    node.children.last()
+}
+
+fn find_nth_lambda_in_scope<'a>(root: &'a TypedExpression, nth: usize) -> Option<&'a TypedExpression> {
+    fn walk<'a>(
+        node: &'a TypedExpression,
+        nth: usize,
+        counter: &mut usize
+    ) -> Option<&'a TypedExpression> {
+        if is_lambda_expr(&node.expr) {
+            if *counter == nth {
+                return Some(node);
+            }
+            *counter += 1;
+            // Do not recurse inside lambda body at this depth:
+            // nested lambdas belong to the next scope depth.
+            return None;
+        }
+
+        for child in &node.children {
+            if let Some(found) = walk(child, nth, counter) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    let mut counter = 0usize;
+    walk(root, nth, &mut counter)
+}
+
+fn scope_focus_node<'a>(
+    typed: &'a TypedExpression,
+    user_form_count: usize,
+    scope: Option<&InferErrorScope>
+) -> Option<(usize, &'a TypedExpression)> {
+    let scope = scope?;
+    let forms = user_form_nodes(typed, user_form_count);
+    let form = *forms.get(scope.user_top_form)?;
+    let mut cursor = form;
+
+    for lambda_idx in &scope.lambda_path {
+        let lambda_node = find_nth_lambda_in_scope(cursor, *lambda_idx)?;
+        cursor = lambda_body_child(lambda_node).unwrap_or(lambda_node);
+    }
+
+    Some((scope.user_top_form, cursor))
+}
+
+fn push_typed_tree_lines(
+    out: &mut Vec<String>,
+    node: &TypedExpression,
+    depth: usize,
+    max_nodes: usize
+) {
+    if out.len() >= max_nodes {
+        return;
+    }
+
+    let indent = "  ".repeat(depth);
+    let typ = node.typ.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "_".to_string());
+    out.push(format!("{}{} :: {}", indent, typed_node_label(&node.expr), typ));
+
+    for child in &node.children {
+        if out.len() >= max_nodes {
+            break;
+        }
+        push_typed_tree_lines(out, child, depth + 1, max_nodes);
+    }
+}
+
+fn typed_user_forms_debug_dump(typed: &TypedExpression, user_form_count: usize) -> String {
+    let mut lines = Vec::new();
+    let forms = user_form_nodes(typed, user_form_count);
+    for (idx, form) in forms.iter().enumerate() {
+        lines.push(format!("form[{}]:", idx));
+        push_typed_tree_lines(&mut lines, form, 1, 220);
+        if lines.len() >= 220 {
+            break;
+        }
+    }
+
+    if lines.len() >= 220 {
+        lines.push("... truncated ...".to_string());
+    }
+
+    lines.join("\n")
+}
+
+fn build_debug_error_report(
+    debug_mode: DebugMode,
+    phase: &str,
+    source_text: &str,
+    message: &str,
+    scope: Option<&InferErrorScope>,
+    user_desugared: Option<&Expression>,
+    user_form_count: usize,
+    typed: Option<&TypedExpression>
+) -> String {
+    let mut out = Vec::new();
+    out.push(format!("debug.phase: {}", phase));
+    out.push(format!("debug.error: {}", message));
+    if debug_mode.includes_code() || debug_mode.includes_types() {
+        out.push(format!("debug.summary: {}", diagnostic_summary_without_snippet(message)));
+    }
+    out.push(format!("debug.scope_path: {}", format_scope_path(scope)));
+    out.push(
+        "debug.location_explainer: location[i] ranges are in the original source file (not desugared), 1-based line:column; i=0 is the primary match."
+            .to_string()
+    );
+    push_location_lines(&mut out, source_text, message, scope);
+
+    if debug_mode.includes_code() {
+        if let Some(desugared) = user_desugared {
+            out.push("debug.desugared_source:".to_string());
+            out.push(desugared.to_lisp());
+        }
+    }
+
+    if debug_mode.includes_types() {
+        if let Some(typed_ast) = typed {
+            if let Some((form_idx, focus)) = scope_focus_node(typed_ast, user_form_count, scope) {
+                let mut focus_lines = Vec::new();
+                push_typed_tree_lines(&mut focus_lines, focus, 0, usize::MAX);
+                out.push(format!("debug.focus: form={} scope={}", form_idx, format_scope_path(scope)));
+                out.extend(focus_lines);
+            }
+
+            out.push("debug.types:".to_string());
+            out.push(typed_user_forms_debug_dump(typed_ast, user_form_count));
+        }
+    }
+
+    out.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ take_shell_policy_from_argv, ShellPermission, ShellPolicy };
+    use super::{ DebugMode, take_debug_mode_from_argv, take_shell_policy_from_argv, ShellPermission, ShellPolicy };
     use std::collections::HashSet;
 
     #[test]
@@ -683,13 +1002,13 @@ mod tests {
     #[test]
     fn parse_policy_with_permissions() {
         let mut args = vec![
-            "main.fez".to_string(),
+            "main.que".to_string(),
             "--allow".to_string(),
             "read".to_string(),
             "write".to_string()
         ];
         let policy = take_shell_policy_from_argv(&mut args).unwrap();
-        assert_eq!(args, vec!["main.fez".to_string()]);
+        assert_eq!(args, vec!["main.que".to_string()]);
         assert!(policy.require(ShellPermission::Read, "read", "./x").is_ok());
         assert!(policy.require(ShellPermission::Write, "mkdir", "./x").is_ok());
         assert!(policy.require(ShellPermission::Delete, "delete", "./x").is_err());
@@ -697,7 +1016,7 @@ mod tests {
 
     #[test]
     fn parse_policy_rejects_unknown_permission() {
-        let mut args = vec!["main.fez".to_string(), "--allow".to_string(), "foo".to_string()];
+        let mut args = vec!["main.que".to_string(), "--allow".to_string(), "foo".to_string()];
         let err = take_shell_policy_from_argv(&mut args).unwrap_err();
         assert!(err.contains("unknown shell permission 'foo'"));
     }
@@ -718,6 +1037,85 @@ mod tests {
         assert!(policy.require(ShellPermission::Write, "mkdir", "./x").is_err());
         assert!(policy.require(ShellPermission::Network, "curl", "-sL").is_err());
     }
+
+    #[test]
+    fn take_debug_basic_strips_flag() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "foo".to_string(),
+            "--debug".to_string(),
+            "bar".to_string()
+        ];
+        let mode = take_debug_mode_from_argv(&mut args);
+        assert_eq!(mode, DebugMode::Basic);
+        assert_eq!(args, vec!["script.que".to_string(), "foo".to_string(), "bar".to_string()]);
+    }
+
+    #[test]
+    fn take_debug_all_and_allow_can_coexist() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--debug".to_string(),
+            "all".to_string(),
+            "--allow".to_string(),
+            "read".to_string()
+        ];
+        let mode = take_debug_mode_from_argv(&mut args);
+        assert_eq!(mode, DebugMode::All);
+        let policy = take_shell_policy_from_argv(&mut args).expect("policy should parse");
+        assert_eq!(args, vec!["script.que".to_string()]);
+        assert!(policy.require(ShellPermission::Read, "read", "./x").is_ok());
+    }
+
+    #[test]
+    fn take_debug_code_mode() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--debug".to_string(),
+            "code".to_string()
+        ];
+        let mode = take_debug_mode_from_argv(&mut args);
+        assert_eq!(mode, DebugMode::Code);
+        assert_eq!(args, vec!["script.que".to_string()]);
+    }
+
+    #[test]
+    fn take_debug_types_mode() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--debug".to_string(),
+            "types".to_string()
+        ];
+        let mode = take_debug_mode_from_argv(&mut args);
+        assert_eq!(mode, DebugMode::Types);
+        assert_eq!(args, vec!["script.que".to_string()]);
+    }
+
+    #[test]
+    fn take_debug_code_plus_types_merges_to_all() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--debug".to_string(),
+            "code".to_string(),
+            "--debug".to_string(),
+            "types".to_string()
+        ];
+        let mode = take_debug_mode_from_argv(&mut args);
+        assert_eq!(mode, DebugMode::All);
+        assert_eq!(args, vec!["script.que".to_string()]);
+    }
+
+    #[test]
+    fn take_debug_does_not_consume_unrelated_next_arg() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--debug".to_string(),
+            "user-arg".to_string()
+        ];
+        let mode = take_debug_mode_from_argv(&mut args);
+        assert_eq!(mode, DebugMode::Basic);
+        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
+    }
 }
 
 pub fn run_native_shell() -> Result<(), String> {
@@ -726,6 +1124,7 @@ pub fn run_native_shell() -> Result<(), String> {
         return Err("missing file_path. Usage: fez-rs <script.fez> [arg ...]".to_string());
     };
     let mut argv: Vec<String> = args.iter().skip(2).cloned().collect();
+    let debug_mode = crate::io::take_debug_mode_from_argv(&mut argv);
     let shell_policy = crate::io
         ::take_shell_policy_from_argv(&mut argv)
         .map_err(|e| format!("invalid shell policy: {}", e))?;
@@ -740,19 +1139,88 @@ pub fn run_native_shell() -> Result<(), String> {
         .or_else(|| Path::new(file_path).parent().map(Path::to_path_buf))
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| PathBuf::from("."));
+    let analysis_source = crate::lsp_native_core::strip_comment_bodies_preserve_newlines(&program);
+    let user_form_count = if debug_mode.is_enabled() {
+        crate::lsp_native_core
+            ::parse_user_exprs_for_symbol_collection(&analysis_source)
+            .as_ref()
+            .map(|exprs| exprs.len())
+            .unwrap_or_else(|| crate::lsp_native_core::top_level_form_ranges(&program).len())
+    } else {
+        0
+    };
+    let user_desugared = if debug_mode.includes_code() {
+        crate::parser::build(&program).ok()
+    } else {
+        None
+    };
+
     let std_ast = crate::baked::load_ast();
     let wrapped_ast = match &std_ast {
-        crate::parser::Expression::Apply(items) => {
-            crate::parser
-                ::merge_std_and_program(&program, items[1..].to_vec())
-                .map_err(|e| e.to_string())?
-        }
+        crate::parser::Expression::Apply(items) =>
+            match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+                Ok(expr) => expr,
+                Err(message) => {
+                    if debug_mode.is_enabled() {
+                        return Err(
+                            build_debug_error_report(
+                                debug_mode,
+                                "parse+desugar",
+                                &program,
+                                &message,
+                                None,
+                                user_desugared.as_ref(),
+                                user_form_count,
+                                None
+                            )
+                        );
+                    }
+                    return Err(message);
+                }
+            }
         _ => {
             return Err("failed to load standard library AST".to_string());
         }
     };
 
-    let wat_src = crate::wat::compile_program_to_wat(&wrapped_ast)?;
+    let wat_src = if debug_mode.is_enabled() {
+        let (base_env, base_next_id) = crate::types
+            ::create_builtin_environment(crate::types::TypeEnv::new());
+        let inferred = crate::infer
+            ::infer_with_builtins_typed_lsp(&wrapped_ast, (base_env, base_next_id), user_form_count);
+
+        match inferred {
+            Ok((_typ, typed_ast)) =>
+                crate::wat::compile_program_to_wat_typed(&typed_ast).map_err(|message|
+                    build_debug_error_report(
+                        debug_mode,
+                        "wat-lowering",
+                        &program,
+                        &message,
+                        None,
+                        user_desugared.as_ref(),
+                        user_form_count,
+                        Some(&typed_ast)
+                    )
+                )?,
+            Err(InferErrorInfo { message, scope, partial_typed_ast }) => {
+                return Err(
+                    build_debug_error_report(
+                        debug_mode,
+                        "type-inference",
+                        &program,
+                        &message,
+                        scope.as_ref(),
+                        user_desugared.as_ref(),
+                        user_form_count,
+                        partial_typed_ast.as_ref()
+                    )
+                );
+            }
+        }
+    } else {
+        crate::wat::compile_program_to_wat(&wrapped_ast)?
+    };
     let store_data = ShellStoreData::new_with_security(Some(script_cwd), shell_policy).map_err(|e|
         e.to_string()
     )?;
