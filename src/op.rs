@@ -13,6 +13,10 @@ enum MapFilterOp {
         func: Expression,
         with_index: bool,
     },
+    FlatMap {
+        func: Expression,
+    },
+    Flat,
     Filter {
         predicate: Expression,
         keep_when_true: bool,
@@ -455,7 +459,7 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
     let Expression::Apply(items) = expr else {
         return None;
     };
-    if items.len() != 3 {
+    if items.len() < 2 {
         return None;
     }
     let Expression::Word(name) = items.first()? else {
@@ -480,8 +484,18 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
                 },
                 items.get(2)?.clone(),
             )),
+        // flat-map fn xs
+        "flat-map" if items.len() == 3 =>
+            Some((
+                MapFilterOp::FlatMap {
+                    func: items.get(1)?.clone(),
+                },
+                items.get(2)?.clone(),
+            )),
+        // flat xs (one-level flatten)
+        "flat" if items.len() == 2 => Some((MapFilterOp::Flat, items.get(1)?.clone())),
         // filter fn xs
-        "filter" =>
+        "filter" if items.len() == 3 =>
             Some((
                 MapFilterOp::Filter {
                     predicate: items.get(1)?.clone(),
@@ -491,7 +505,7 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
                 items.get(2)?.clone(),
             )),
         // filter/i fn xs
-        "filter/i" =>
+        "filter/i" if items.len() == 3 =>
             Some((
                 MapFilterOp::Filter {
                     predicate: items.get(1)?.clone(),
@@ -501,7 +515,7 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
                 items.get(2)?.clone(),
             )),
         // select fn xs (same behavior as filter)
-        "select" =>
+        "select" if items.len() == 3 =>
             Some((
                 MapFilterOp::Filter {
                     predicate: items.get(1)?.clone(),
@@ -511,7 +525,7 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
                 items.get(2)?.clone(),
             )),
         // exclude fn xs (inverse filter)
-        "exclude" =>
+        "exclude" if items.len() == 3 =>
             Some((
                 MapFilterOp::Filter {
                     predicate: items.get(1)?.clone(),
@@ -632,6 +646,23 @@ fn build_direct_fused_loop(
     sink: FuseSink,
     name_state: &mut FuseNameState
 ) -> Option<Expression> {
+    let has_flatten = ops_outer_to_inner.iter().any(|op| matches!(op, MapFilterOp::Flat | MapFilterOp::FlatMap { .. }));
+    if has_flatten {
+        let has_indexed_stage = ops_outer_to_inner.iter().any(|op| {
+            matches!(
+                op,
+                MapFilterOp::Map { with_index: true, .. } | MapFilterOp::Filter { with_index: true, .. }
+            )
+        });
+        let unsupported_sink = match &sink {
+            FuseSink::Collect => false,
+            FuseSink::Reduce { with_index, .. } => *with_index,
+            FuseSink::Some { .. } | FuseSink::Every { .. } | FuseSink::Find { .. } => true,
+        };
+        if has_indexed_stage || unsupported_sink {
+            return None;
+        }
+    }
     let suffix = name_state.next_suffix();
     match sink {
         FuseSink::Some {
@@ -673,26 +704,43 @@ fn build_collect_loop(
     let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
-    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, i_word.clone())?;
+    let process_body = if ops_outer_to_inner
+        .iter()
+        .any(|op| matches!(op, MapFilterOp::Flat | MapFilterOp::FlatMap { .. }))
+    {
+        let mut flat_tmp_counter = 0usize;
+        let ops_inner_to_outer = ops_outer_to_inner.iter().rev().cloned().collect::<Vec<_>>();
+        build_collect_step_with_flatten(
+            &ops_inner_to_outer,
+            0,
+            x_expr,
+            i_word.clone(),
+            &out_name,
+            suffix,
+            &mut flat_tmp_counter
+        )?
+    } else {
+        let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, i_word.clone())?;
 
-    let push_expr = Expression::Apply(vec![
-        Expression::Word("set!".to_string()),
-        Expression::Word(out_name.clone()),
-        Expression::Apply(vec![
-            Expression::Word("length".to_string()),
+        let push_expr = Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
             Expression::Word(out_name.clone()),
-        ]),
-        mapped,
-    ]);
-    let process_body = match guard {
-        Some(cond) =>
             Expression::Apply(vec![
-                Expression::Word("if".to_string()),
-                cond,
-                push_expr,
-                no_op_unit_expr(),
+                Expression::Word("length".to_string()),
+                Expression::Word(out_name.clone()),
             ]),
-        None => push_expr,
+            mapped,
+        ]);
+        match guard {
+            Some(cond) =>
+                Expression::Apply(vec![
+                    Expression::Word("if".to_string()),
+                    cond,
+                    push_expr,
+                    no_op_unit_expr(),
+                ]),
+            None => push_expr,
+        }
     };
     let process_lambda = Expression::Apply(vec![
         Expression::Word("lambda".to_string()),
@@ -739,34 +787,52 @@ fn build_reduce_loop(
     let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
-    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, i_word.clone())?;
-
-    let acc_get = Expression::Apply(vec![
-        Expression::Word("get".to_string()),
-        Expression::Word(out_name.clone()),
-        Expression::Int(0),
-    ]);
-    let reduced = if with_index {
-        call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped, i_word.clone()])?
+    let process_body = if ops_outer_to_inner
+        .iter()
+        .any(|op| matches!(op, MapFilterOp::Flat | MapFilterOp::FlatMap { .. }))
+    {
+        let mut flat_tmp_counter = 0usize;
+        let ops_inner_to_outer = ops_outer_to_inner.iter().rev().cloned().collect::<Vec<_>>();
+        build_reduce_step_with_flatten(
+            &ops_inner_to_outer,
+            0,
+            x_expr,
+            i_word.clone(),
+            &reduce_fn,
+            &out_name,
+            suffix,
+            &mut flat_tmp_counter
+        )?
     } else {
-        call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped])?
+        let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, i_word.clone())?;
+
+        let acc_get = Expression::Apply(vec![
+            Expression::Word("get".to_string()),
+            Expression::Word(out_name.clone()),
+            Expression::Int(0),
+        ]);
+        let reduced = if with_index {
+            call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped, i_word.clone()])?
+        } else {
+            call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped])?
+        };
+        let next_acc = match guard {
+            Some(cond) =>
+                Expression::Apply(vec![
+                    Expression::Word("if".to_string()),
+                    cond,
+                    reduced,
+                    acc_get,
+                ]),
+            None => reduced,
+        };
+        Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(out_name.clone()),
+            Expression::Int(0),
+            next_acc,
+        ])
     };
-    let next_acc = match guard {
-        Some(cond) =>
-            Expression::Apply(vec![
-                Expression::Word("if".to_string()),
-                cond,
-                reduced,
-                acc_get,
-            ]),
-        None => reduced,
-    };
-    let process_body = Expression::Apply(vec![
-        Expression::Word("set!".to_string()),
-        Expression::Word(out_name.clone()),
-        Expression::Int(0),
-        next_acc,
-    ]);
     let process_lambda = Expression::Apply(vec![
         Expression::Word("lambda".to_string()),
         Expression::Word(i_name),
@@ -1353,6 +1419,265 @@ fn make_short_circuit_source_bindings(
     }
 }
 
+fn next_flatten_tmp_name(prefix: &str, suffix: &str, counter: &mut usize) -> String {
+    let name = format!("{}_{}", fuse_tmp_name(prefix, suffix), *counter);
+    *counter += 1;
+    name
+}
+
+fn build_collect_step_with_flatten(
+    ops_inner_to_outer: &[MapFilterOp],
+    idx: usize,
+    current_value: Expression,
+    current_index: Expression,
+    out_name: &str,
+    suffix: &str,
+    flat_tmp_counter: &mut usize
+) -> Option<Expression> {
+    if idx >= ops_inner_to_outer.len() {
+        return Some(Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(out_name.to_string()),
+            Expression::Apply(vec![
+                Expression::Word("length".to_string()),
+                Expression::Word(out_name.to_string()),
+            ]),
+            current_value,
+        ]));
+    }
+
+    match &ops_inner_to_outer[idx] {
+        MapFilterOp::Map { func, with_index } => {
+            let mapped = if *with_index {
+                call_callable_expr(func, vec![current_value, current_index.clone()])?
+            } else {
+                call_callable_expr(func, vec![current_value])?
+            };
+            build_collect_step_with_flatten(
+                ops_inner_to_outer,
+                idx + 1,
+                mapped,
+                current_index,
+                out_name,
+                suffix,
+                flat_tmp_counter
+            )
+        }
+        MapFilterOp::Filter {
+            predicate,
+            keep_when_true,
+            with_index,
+        } => {
+            let pred = if *with_index {
+                call_callable_expr(predicate, vec![current_value.clone(), current_index.clone()])?
+            } else {
+                call_callable_expr(predicate, vec![current_value.clone()])?
+            };
+            let cond = if *keep_when_true {
+                pred
+            } else {
+                Expression::Apply(vec![Expression::Word("not".to_string()), pred])
+            };
+            let then_expr = build_collect_step_with_flatten(
+                ops_inner_to_outer,
+                idx + 1,
+                current_value,
+                current_index,
+                out_name,
+                suffix,
+                flat_tmp_counter
+            )?;
+            Some(Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                cond,
+                then_expr,
+                no_op_unit_expr(),
+            ]))
+        }
+        MapFilterOp::Flat | MapFilterOp::FlatMap { .. } => {
+            let list_expr = match &ops_inner_to_outer[idx] {
+                MapFilterOp::Flat => current_value,
+                MapFilterOp::FlatMap { func } => call_callable_expr(func, vec![current_value])?,
+                _ => unreachable!(),
+            };
+            let xs_name = next_flatten_tmp_name("__fuse_flat_xs", suffix, flat_tmp_counter);
+            let proc_name = next_flatten_tmp_name("__fuse_flat_process", suffix, flat_tmp_counter);
+            let i_name = next_flatten_tmp_name("__fuse_flat_i", suffix, flat_tmp_counter);
+            let i_word = Expression::Word(i_name.clone());
+            let item_expr = Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(xs_name.clone()),
+                i_word.clone(),
+            ]);
+            let process_body = build_collect_step_with_flatten(
+                ops_inner_to_outer,
+                idx + 1,
+                item_expr,
+                i_word,
+                out_name,
+                suffix,
+                flat_tmp_counter
+            )?;
+            Some(Expression::Apply(vec![
+                Expression::Word("do".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("let".to_string()),
+                    Expression::Word(xs_name.clone()),
+                    list_expr,
+                ]),
+                Expression::Apply(vec![
+                    Expression::Word("let".to_string()),
+                    Expression::Word(proc_name.clone()),
+                    Expression::Apply(vec![
+                        Expression::Word("lambda".to_string()),
+                        Expression::Word(i_name),
+                        process_body,
+                    ]),
+                ]),
+                Expression::Apply(vec![
+                    Expression::Word("loop".to_string()),
+                    Expression::Int(0),
+                    Expression::Apply(vec![
+                        Expression::Word("length".to_string()),
+                        Expression::Word(xs_name),
+                    ]),
+                    Expression::Word(proc_name),
+                ]),
+            ]))
+        }
+    }
+}
+
+fn build_reduce_step_with_flatten(
+    ops_inner_to_outer: &[MapFilterOp],
+    idx: usize,
+    current_value: Expression,
+    current_index: Expression,
+    reduce_fn: &Expression,
+    out_name: &str,
+    suffix: &str,
+    flat_tmp_counter: &mut usize
+) -> Option<Expression> {
+    if idx >= ops_inner_to_outer.len() {
+        let acc_get = Expression::Apply(vec![
+            Expression::Word("get".to_string()),
+            Expression::Word(out_name.to_string()),
+            Expression::Int(0),
+        ]);
+        let reduced = call_callable_expr(reduce_fn, vec![acc_get, current_value])?;
+        return Some(Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(out_name.to_string()),
+            Expression::Int(0),
+            reduced,
+        ]));
+    }
+
+    match &ops_inner_to_outer[idx] {
+        MapFilterOp::Map { func, with_index } => {
+            let mapped = if *with_index {
+                call_callable_expr(func, vec![current_value, current_index.clone()])?
+            } else {
+                call_callable_expr(func, vec![current_value])?
+            };
+            build_reduce_step_with_flatten(
+                ops_inner_to_outer,
+                idx + 1,
+                mapped,
+                current_index,
+                reduce_fn,
+                out_name,
+                suffix,
+                flat_tmp_counter
+            )
+        }
+        MapFilterOp::Filter {
+            predicate,
+            keep_when_true,
+            with_index,
+        } => {
+            let pred = if *with_index {
+                call_callable_expr(predicate, vec![current_value.clone(), current_index.clone()])?
+            } else {
+                call_callable_expr(predicate, vec![current_value.clone()])?
+            };
+            let cond = if *keep_when_true {
+                pred
+            } else {
+                Expression::Apply(vec![Expression::Word("not".to_string()), pred])
+            };
+            let then_expr = build_reduce_step_with_flatten(
+                ops_inner_to_outer,
+                idx + 1,
+                current_value,
+                current_index,
+                reduce_fn,
+                out_name,
+                suffix,
+                flat_tmp_counter
+            )?;
+            Some(Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                cond,
+                then_expr,
+                no_op_unit_expr(),
+            ]))
+        }
+        MapFilterOp::Flat | MapFilterOp::FlatMap { .. } => {
+            let list_expr = match &ops_inner_to_outer[idx] {
+                MapFilterOp::Flat => current_value,
+                MapFilterOp::FlatMap { func } => call_callable_expr(func, vec![current_value])?,
+                _ => unreachable!(),
+            };
+            let xs_name = next_flatten_tmp_name("__fuse_flat_xs", suffix, flat_tmp_counter);
+            let proc_name = next_flatten_tmp_name("__fuse_flat_process", suffix, flat_tmp_counter);
+            let i_name = next_flatten_tmp_name("__fuse_flat_i", suffix, flat_tmp_counter);
+            let i_word = Expression::Word(i_name.clone());
+            let item_expr = Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(xs_name.clone()),
+                i_word.clone(),
+            ]);
+            let process_body = build_reduce_step_with_flatten(
+                ops_inner_to_outer,
+                idx + 1,
+                item_expr,
+                i_word,
+                reduce_fn,
+                out_name,
+                suffix,
+                flat_tmp_counter
+            )?;
+            Some(Expression::Apply(vec![
+                Expression::Word("do".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("let".to_string()),
+                    Expression::Word(xs_name.clone()),
+                    list_expr,
+                ]),
+                Expression::Apply(vec![
+                    Expression::Word("let".to_string()),
+                    Expression::Word(proc_name.clone()),
+                    Expression::Apply(vec![
+                        Expression::Word("lambda".to_string()),
+                        Expression::Word(i_name),
+                        process_body,
+                    ]),
+                ]),
+                Expression::Apply(vec![
+                    Expression::Word("loop".to_string()),
+                    Expression::Int(0),
+                    Expression::Apply(vec![
+                        Expression::Word("length".to_string()),
+                        Expression::Word(xs_name),
+                    ]),
+                    Expression::Word(proc_name),
+                ]),
+            ]))
+        }
+    }
+}
+
 fn compose_map_filter_value_and_guard(
     ops_outer_to_inner: &[MapFilterOp],
     input_expr: Expression,
@@ -1393,6 +1718,7 @@ fn compose_map_filter_value_and_guard(
                     );
                 }
             }
+            MapFilterOp::Flat | MapFilterOp::FlatMap { .. } => return None,
         }
     }
     let guard = if guards.is_empty() {
@@ -1452,6 +1778,8 @@ fn map_filter_op_is_fusion_safe(op: &MapFilterOp) -> bool {
     match op {
         MapFilterOp::Map { func, .. } => is_fusion_safe_callable(func),
         MapFilterOp::Filter { predicate, .. } => is_fusion_safe_callable(predicate),
+        MapFilterOp::Flat => true,
+        MapFilterOp::FlatMap { func } => is_fusion_safe_callable(func),
     }
 }
 

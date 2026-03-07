@@ -18,6 +18,8 @@ fn is_fusion_reserved_word(name: &str) -> bool {
             "every?" |
             "every/i?" |
             "find" |
+            "flat" |
+            "flat-map" |
             "range" |
             "range/int" |
             "range/float" |
