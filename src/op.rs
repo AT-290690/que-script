@@ -95,11 +95,191 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     for _ in 0..MAX_OPT_FIXPOINT_PASSES {
         let next = optimize_typed_ast_once(&cur);
         if next.expr.to_lisp() == cur.expr.to_lisp() {
-            return next;
+            return dead_code_eliminate_top_level_defs(&next);
         }
         cur = next;
     }
-    cur
+    dead_code_eliminate_top_level_defs(&cur)
+}
+
+fn dead_code_eliminate_top_level_defs(node: &TypedExpression) -> TypedExpression {
+    let Expression::Apply(items) = &node.expr else {
+        return node.clone();
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") || items.len() <= 1 {
+        return node.clone();
+    }
+    let Some(normalized_do) = normalize_do_node(node, items) else {
+        return node.clone();
+    };
+    let Expression::Apply(norm_items) = &normalized_do.expr else {
+        return normalized_do;
+    };
+    if norm_items.len() != normalized_do.children.len() {
+        return normalized_do;
+    }
+
+    let mut defs_rhs: HashMap<String, Expression> = HashMap::new();
+    let mut top_def_names: HashSet<String> = HashSet::new();
+    let mut roots: Vec<Expression> = Vec::new();
+
+    for item in norm_items.iter().skip(1) {
+        if let Some((name, rhs)) = top_level_let_def(item) {
+            defs_rhs.insert(name.clone(), rhs.clone());
+            top_def_names.insert(name.clone());
+        } else {
+            roots.push(item.clone());
+        }
+    }
+
+    if defs_rhs.is_empty() {
+        return normalized_do;
+    }
+
+    let mut needed: HashSet<String> = HashSet::new();
+    for root in &roots {
+        let mut refs = HashSet::new();
+        let mut bound = HashSet::new();
+        collect_unbound_words(root, &mut bound, &mut refs);
+        for r in refs {
+            if top_def_names.contains(&r) {
+                needed.insert(r);
+            }
+        }
+    }
+
+    let mut stack: Vec<String> = needed.iter().cloned().collect();
+    while let Some(name) = stack.pop() {
+        let Some(rhs) = defs_rhs.get(&name) else {
+            continue;
+        };
+        let mut refs = HashSet::new();
+        let mut bound = HashSet::new();
+        collect_unbound_words(rhs, &mut bound, &mut refs);
+        for r in refs {
+            if top_def_names.contains(&r) && needed.insert(r.clone()) {
+                stack.push(r);
+            }
+        }
+    }
+
+    let mut removed_any = false;
+    let mut new_items = Vec::with_capacity(norm_items.len());
+    let mut new_children = Vec::with_capacity(normalized_do.children.len());
+    new_items.push(norm_items[0].clone());
+    new_children.push(normalized_do.children[0].clone());
+
+    for (idx, item) in norm_items.iter().enumerate().skip(1) {
+        if let Some((name, _rhs)) = top_level_let_def(item) {
+            if !needed.contains(name) {
+                removed_any = true;
+                continue;
+            }
+        }
+        new_items.push(item.clone());
+        if let Some(child) = normalized_do.children.get(idx).cloned() {
+            new_children.push(child);
+        } else {
+            return normalized_do;
+        }
+    }
+
+    if !removed_any {
+        return normalized_do;
+    }
+    TypedExpression {
+        expr: Expression::Apply(new_items),
+        typ: normalized_do.typ.clone(),
+        children: new_children,
+    }
+}
+
+fn top_level_let_def(expr: &Expression) -> Option<(&String, &Expression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), rhs] = &items[..] else {
+        return None;
+    };
+    if kw == "let" || kw == "let*" {
+        Some((name, rhs))
+    } else {
+        None
+    }
+}
+
+fn collect_bound_pattern_words(expr: &Expression, out: &mut HashSet<String>) {
+    match expr {
+        Expression::Word(w) => {
+            out.insert(w.clone());
+        }
+        Expression::Apply(items) => {
+            for it in items {
+                collect_bound_pattern_words(it, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_unbound_words(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSet<String>) {
+    match expr {
+        Expression::Word(w) => {
+            if !bound.contains(w) {
+                out.insert(w.clone());
+            }
+        }
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return;
+            }
+            if let Expression::Word(op) = &items[0] {
+                if op == "lambda" {
+                    let mut scoped = bound.clone();
+                    for p in &items[1..items.len().saturating_sub(1)] {
+                        collect_bound_pattern_words(p, &mut scoped);
+                    }
+                    if let Some(body) = items.last() {
+                        collect_unbound_words(body, &mut scoped, out);
+                    }
+                    return;
+                }
+                if op == "do" {
+                    for it in &items[1..] {
+                        if let Some((name, rhs)) = top_level_let_def(it) {
+                            collect_unbound_words(rhs, bound, out);
+                            bound.insert(name.clone());
+                            continue;
+                        }
+                        collect_unbound_words(it, bound, out);
+                    }
+                    return;
+                }
+                if op == "let" || op == "let*" {
+                    if let [_, bind, rhs] = &items[..] {
+                        collect_unbound_words(rhs, bound, out);
+                        collect_bound_pattern_words(bind, bound);
+                        return;
+                    }
+                    if let Some(rhs) = items.get(2) {
+                        collect_unbound_words(rhs, bound, out);
+                    }
+                    return;
+                }
+                // Type/cast hints are compile-time-only.
+                if op == "as" || op == "char" {
+                    if let Some(v) = items.get(1) {
+                        collect_unbound_words(v, bound, out);
+                    }
+                    return;
+                }
+            }
+            for it in items {
+                collect_unbound_words(it, bound, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn fuse_entry_expression_for_program(expr: &Expression) -> Expression {

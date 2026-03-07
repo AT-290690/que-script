@@ -31,7 +31,7 @@
       "patterns": [
         {
           "name": "keyword.control.que",
-          "match": "\\b(do|let|let~|let\\*|loop|if|unless|cond|lambda|mod|length|as|get|at|set|pop|push|pull|swap|emod|not|and|or|identity|boole-set|boole-eqv|eq|integer|floating|boolean|variable|que|string|chars|digits|vector|bigint|tuple|table|fst|snd|car|cdr|has|in-bounds|apply|eq|comp|matrix|shell|Vector|String|Matrix|BigInt|Tuple|Table|Set|Que|Integer|Float|Boolean)\\b"
+          "match": "\\b(do|let|let~|let\\*|loop|if|unless|cond|lambda|mod|length|as|get|at|set|pop|push|pull|swap|emod|not|and|or|identity|boole-set|boole-eqv|eq|integer|floating|boolean|variable|que|string|chars|digits|vector|bigint|tuple|table|fst|snd|car|cdr|has|in-bounds|apply|eq|comp|matrix|shell|Vector|String|Matrix|BigInt|Tuple|Table|Set|Que|Integer|Float|Booleanmap|filter|reduce|every|some|select|exclude|find|sum|product|slice|take|drop|range)\\b"
         }
       ]
     },
@@ -43,7 +43,7 @@
         },
         {
           "name": "support.function.que",
-          "match": "\\b(enumerate|sum|nl|sp|ep|dq|sq|bt|map|filter|reduce|every|some|empty|copy|reverse|slice|cons|sort|range|square|sqrt|expt|floor|ceil|max|min|abs|first|last|count|points|zip|unzip|permutation|window|flat|pair|product|find|lcm|gcd|call|odd|even|upper|lower|match|digit|fill|take|drop|clamp|one|zero|ones|zeroes|positive|negative|invert|divisible|maximum|minimum|for|subset|scan|extreme|neighborhood|unique|transpose|interleave|intersperse|cycle|replicate|avg|mean|median|each|const|select|exclude|group|append|tail|head|split|join|replace|list-dir|delete|mkdir|move|read|write|curl|clear|print|sleep)\\b"
+          "match": "\\b(enumerate|nl|sp|ep|dq|sq|bt|empty|copy|reverse|cons|sort|square|sqrt|expt|floor|ceil|max|min|abs|first|last|count|points|zip|unzip|permutation|window|flat|pair|lcm|gcd|call|odd|even|upper|lower|match|digit|fill|clamp|one|zero|ones|zeroes|positive|negative|invert|divisible|maximum|minimum|for|subset|scan|extreme|neighborhood|unique|transpose|interleave|intersperse|cycle|replicate|avg|mean|median|each|const|group|append|tail|head|split|join|replace|list-dir|delete|mkdir|move|read|write|curl|clear|print|sleep)\\b"
         }
       ]
     },

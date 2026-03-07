@@ -1,5 +1,34 @@
 use std::collections::{ HashMap, HashSet };
 
+fn is_fusion_reserved_word(name: &str) -> bool {
+    matches!(
+        name,
+        "map" |
+            "map/i" |
+            "filter" |
+            "filter/i" |
+            "select" |
+            "exclude" |
+            "reduce" |
+            "reduce/i" |
+            "sum" |
+            "product" |
+            "some?" |
+            "some/i?" |
+            "every?" |
+            "every/i?" |
+            "find" |
+            "range" |
+            "range/int" |
+            "range/float" |
+            "slice" |
+            "take/first" |
+            "drop/first" |
+            "take/last" |
+            "drop/last"
+    )
+}
+
 fn collect_pattern_words(expr: &Expression, acc: &mut HashSet<String>) {
     match expr {
         Expression::Word(w) => {
@@ -1726,6 +1755,9 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                     &list[..]
                             {
                                 if kw == "let" || kw == "let*" {
+                                    if is_fusion_reserved_word(name) {
+                                        return Err(format!("Variable '{}' is forbidden", name));
+                                    }
                                     definitions.insert(name.to_string());
                                 }
                             }
@@ -1769,10 +1801,7 @@ pub fn build(program: &str) -> Result<Expression, String> {
     let top_level = transform_let_destructuring_in_do(desugared, &mut binding_counter)?;
     Ok(
         Expression::Apply(
-            std::iter
-                ::once(Expression::Word("do".to_string()))
-                .chain(top_level)
-                .collect()
-        ),
+            std::iter::once(Expression::Word("do".to_string())).chain(top_level).collect()
+        )
     )
 }
