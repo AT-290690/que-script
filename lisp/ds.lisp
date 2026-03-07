@@ -189,3 +189,65 @@
 (let Int/eq? (lambda a b (= a b)))
 (let Bool/eq? (lambda a b (=? a b)))
 (let Float/eq? (lambda a b (=. a b)))
+
+; data-last aliases mirroring Table/*
+(let Hash-Table/size std/vector/flat/length)
+(let Hash-Table/new (lambda (std/vector/hash/table/dynamic 32)))
+(let Hash-Table/new/capacity (lambda n (std/vector/hash/table/dynamic n)))
+
+(let Hash-Table/entries std/vector/hash/table/dynamic/entries)
+(let Hash-Table/keys std/vector/hash/table/dynamic/keys)
+(let Hash-Table/values std/vector/hash/table/dynamic/values)
+
+(let Hash-Table/get (lambda key table (std/vector/hash/table/dynamic/get table key)))
+(let Hash-Table/get* (lambda key table
+  (if (std/vector/hash/table/dynamic/has? table key)
+      { true [ (snd (get (std/vector/hash/table/dynamic/get table key) 0)) ] }
+      { false [] })))
+(let Hash-Table/get! (lambda key table (snd (get (std/vector/hash/table/dynamic/get table key) 0))))
+
+(let Hash-Table/has? (lambda key table (std/vector/hash/table/dynamic/has? table key)))
+(let Hash-Table/set! (lambda key value table (do (std/vector/hash/table/dynamic/set! table key value) nil)))
+(let Hash-Table/remove! (lambda key table (do (std/vector/hash/table/dynamic/remove! table key) nil)))
+(let Hash-Table/count std/vector/hash/table/dynamic/count)
+
+(let Hash-Table/drop! (lambda keys table (std/vector/hash/table/dynamic/drop! table keys)))
+(let Hash-Table/keep (lambda keys table (std/vector/hash/table/dynamic/keep table keys)))
+(let Hash-Table/omit (lambda keys table (std/vector/hash/table/dynamic/omit table keys)))
+
+(let Hash-Table/merge! (lambda other table (do (std/vector/hash/table/dynamic/merge! table other) nil)))
+(let Hash-Table/merge (lambda other table (std/vector/hash/table/dynamic/merge table other)))
+
+(let Hash-Table/resize! (lambda n table (do (std/vector/hash/table/dynamic/resize! table n) nil)))
+(let Hash-Table/compact! (lambda table (do (std/vector/hash/table/dynamic/compact! table) nil)))
+
+(let Vector->Hash-Table std/convert/vector->table/dynamic)
+
+; data-last aliases mirroring Set/*
+(let Hash-Set/size std/vector/flat/length)
+(let Hash-Set/values std/vector/flat-one)
+(let Hash-Set/new (lambda (std/vector/hash/set/dynamic 32)))
+(let Hash-Set/new/capacity (lambda n (std/vector/hash/set/dynamic n)))
+
+(let Hash-Set/intersection std/vector/hash/set/dynamic/intersection)
+(let Hash-Set/difference std/vector/hash/set/dynamic/difference)
+(let Hash-Set/xor std/vector/hash/set/dynamic/xor)
+(let Hash-Set/union std/vector/hash/set/dynamic/union)
+
+(let Hash-Set/add! (lambda item table (do (std/vector/hash/set/dynamic/add! table item) nil)))
+(let Hash-Set/remove! (lambda item table (do (std/vector/hash/set/dynamic/remove! table item) nil)))
+(let Hash-Set/has? (lambda item table (std/vector/hash/set/dynamic/has? table item)))
+(let Hash-Set/resize! (lambda n table (do (std/vector/hash/set/dynamic/resize! table n) nil)))
+(let Hash-Set/compact! (lambda table (do (std/vector/hash/set/dynamic/compact! table) nil)))
+
+(let Vector->Hash-Set std/convert/vector->set/dynamic)
+
+(let Heap/compare? (lambda i j fn? heap (std/heap/greater? heap i j fn?)))
+(let Heap/peek! std/heap/peek)
+(let Heap/push! (lambda value fn heap (std/heap/push! heap value fn)))
+(let Heap/pop! (lambda fn heap (std/heap/pop! heap fn)))
+(let Heap/replace! (lambda value fn heap (std/heap/replace! heap value fn)))
+(let Heap/empty? std/vector/empty?)
+(let Heap/not-empty? std/vector/not-empty?)
+(let Heap/empty! std/vector/empty!)
+(let Vector->Heap (lambda fn xs (std/convert/vector->heap xs fn)))

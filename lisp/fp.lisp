@@ -221,6 +221,8 @@
 (let neighborhood/von-neumann std/vector/3d/von-neumann-neighborhood)
 
 (let group (lambda fn xs (std/vector/tuple/hash/table/group-by xs fn)))
+(let group-by (lambda fn xs (std/vector/tuple/hash/table/dynamic/group-by xs fn)))
+
 (let append! (lambda x xs (do (push! xs x) xs)))
 (let tail (lambda xs (std/vector/slice xs 1 (length xs))))
 (let head (lambda xs (std/vector/slice xs 0 (- (length xs) 1))))
