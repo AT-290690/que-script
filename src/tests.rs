@@ -531,6 +531,52 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_indexed_variants_fuse_with_whitelist() {
+        let expr = crate::parser::parse(
+            "(reduce/i (lambda a x i (+ a (+ x i))) 0
+                (map/i (lambda x i (+ x i))
+                    (filter/i (lambda x i (> (+ x i) 3))
+                        (range/int 1 8))))"
+        ).expect("input should parse").remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(
+            fused_lisp.contains("(loop __fuse_from (+ __fuse_to 1) __fuse_process)"),
+            "indexed variants over range/int should fuse to direct loop, got: {}",
+            fused_lisp
+        );
+        assert!(!fused_lisp.contains("(reduce/i "), "reduce/i should be fused, got: {}", fused_lisp);
+        assert!(!fused_lisp.contains("(map/i "), "map/i should be fused, got: {}", fused_lisp);
+        assert!(
+            !fused_lisp.contains("(filter/i "),
+            "filter/i should be fused, got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_some_i_every_i_and_range_float_fuse() {
+        let some_i = crate::parser::parse(
+            "(some/i? (lambda x i (> (+ x i) 10)) (range/float 1 6))"
+        ).expect("input should parse").remove(0);
+        let every_i = crate::parser::parse(
+            "(every/i? (lambda x i (> (+ x i) 0)) (range/int 1 6))"
+        ).expect("input should parse").remove(0);
+        let fused_some = crate::op::fuse_map_filter_reduce_for_test(&some_i).to_lisp();
+        let fused_every = crate::op::fuse_map_filter_reduce_for_test(&every_i).to_lisp();
+
+        assert!(fused_some.contains("(loop-finish"), "some/i? should short-circuit fuse, got: {}", fused_some);
+        assert!(fused_every.contains("(loop-finish"), "every/i? should short-circuit fuse, got: {}", fused_every);
+        assert!(!fused_some.contains("(some/i? "), "some/i? should be fused, got: {}", fused_some);
+        assert!(!fused_every.contains("(every/i? "), "every/i? should be fused, got: {}", fused_every);
+        assert!(
+            fused_some.contains("(Int->Float"),
+            "range/float fusion should convert loop index to float value, got: {}",
+            fused_some
+        );
+    }
+
+    #[test]
     fn test_wat_pipeline_map_filter_reduce_fuses_to_single_reduce_loop_in_codegen_path() {
         let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
         let std_ast = crate::baked::load_ast();

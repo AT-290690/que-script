@@ -9,10 +9,14 @@ const MAX_OPT_FIXPOINT_PASSES: usize = 8;
 
 #[derive(Clone)]
 enum MapFilterOp {
-    Map(Expression),
+    Map {
+        func: Expression,
+        with_index: bool,
+    },
     Filter {
         predicate: Expression,
         keep_when_true: bool,
+        with_index: bool,
     },
 }
 
@@ -22,19 +26,26 @@ enum FuseSink {
     Reduce {
         reduce_fn: Expression,
         init_expr: Expression,
+        with_index: bool,
     },
     Some {
         predicate: Expression,
+        with_index: bool,
     },
     Every {
         predicate: Expression,
+        with_index: bool,
     },
 }
 
 #[derive(Clone)]
 enum FuseSource {
     Vector(Expression),
-    Range {
+    RangeInt {
+        start: Expression,
+        end: Expression,
+    },
+    RangeFloat {
         start: Expression,
         end: Expression,
     },
@@ -146,6 +157,17 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 FuseSink::Reduce {
                     reduce_fn: items.get(1)?.clone(),
                     init_expr: items.get(2)?.clone(),
+                    with_index: false,
+                },
+                items.get(3)?.clone(),
+            )),
+        // reduce/i fn init xs
+        "reduce/i" if items.len() == 4 =>
+            Some((
+                FuseSink::Reduce {
+                    reduce_fn: items.get(1)?.clone(),
+                    init_expr: items.get(2)?.clone(),
+                    with_index: true,
                 },
                 items.get(3)?.clone(),
             )),
@@ -155,6 +177,7 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 FuseSink::Reduce {
                     reduce_fn: Expression::Word("+".to_string()),
                     init_expr: Expression::Int(0),
+                    with_index: false,
                 },
                 items.get(1)?.clone(),
             )),
@@ -164,6 +187,7 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 FuseSink::Reduce {
                     reduce_fn: Expression::Word("*".to_string()),
                     init_expr: Expression::Int(1),
+                    with_index: false,
                 },
                 items.get(1)?.clone(),
             )),
@@ -172,6 +196,16 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
             Some((
                 FuseSink::Some {
                     predicate: items.get(1)?.clone(),
+                    with_index: false,
+                },
+                items.get(2)?.clone(),
+            )),
+        // some/i? pred xs
+        "some/i?" if items.len() == 3 =>
+            Some((
+                FuseSink::Some {
+                    predicate: items.get(1)?.clone(),
+                    with_index: true,
                 },
                 items.get(2)?.clone(),
             )),
@@ -180,6 +214,16 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
             Some((
                 FuseSink::Every {
                     predicate: items.get(1)?.clone(),
+                    with_index: false,
+                },
+                items.get(2)?.clone(),
+            )),
+        // every/i? pred xs
+        "every/i?" if items.len() == 3 =>
+            Some((
+                FuseSink::Every {
+                    predicate: items.get(1)?.clone(),
+                    with_index: true,
                 },
                 items.get(2)?.clone(),
             )),
@@ -199,13 +243,40 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
     };
     match name.as_str() {
         // map fn xs
-        "map" => Some((MapFilterOp::Map(items.get(1)?.clone()), items.get(2)?.clone())),
+        "map" =>
+            Some((
+                MapFilterOp::Map {
+                    func: items.get(1)?.clone(),
+                    with_index: false,
+                },
+                items.get(2)?.clone(),
+            )),
+        // map/i fn xs
+        "map/i" =>
+            Some((
+                MapFilterOp::Map {
+                    func: items.get(1)?.clone(),
+                    with_index: true,
+                },
+                items.get(2)?.clone(),
+            )),
         // filter fn xs
         "filter" =>
             Some((
                 MapFilterOp::Filter {
                     predicate: items.get(1)?.clone(),
                     keep_when_true: true,
+                    with_index: false,
+                },
+                items.get(2)?.clone(),
+            )),
+        // filter/i fn xs
+        "filter/i" =>
+            Some((
+                MapFilterOp::Filter {
+                    predicate: items.get(1)?.clone(),
+                    keep_when_true: true,
+                    with_index: true,
                 },
                 items.get(2)?.clone(),
             )),
@@ -215,6 +286,7 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
                 MapFilterOp::Filter {
                     predicate: items.get(1)?.clone(),
                     keep_when_true: true,
+                    with_index: false,
                 },
                 items.get(2)?.clone(),
             )),
@@ -224,6 +296,7 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
                 MapFilterOp::Filter {
                     predicate: items.get(1)?.clone(),
                     keep_when_true: false,
+                    with_index: false,
                 },
                 items.get(2)?.clone(),
             )),
@@ -250,7 +323,23 @@ fn parse_fuse_source(base_expr: Expression) -> FuseSource {
         Expression::Apply(items) if
             items.len() == 3 && matches!(items.first(), Some(Expression::Word(w)) if w == "range")
         => {
-            FuseSource::Range {
+            FuseSource::RangeInt {
+                start: items[1].clone(),
+                end: items[2].clone(),
+            }
+        }
+        Expression::Apply(items) if
+            items.len() == 3 && matches!(items.first(), Some(Expression::Word(w)) if w == "range/int")
+        => {
+            FuseSource::RangeInt {
+                start: items[1].clone(),
+                end: items[2].clone(),
+            }
+        }
+        Expression::Apply(items) if
+            items.len() == 3 && matches!(items.first(), Some(Expression::Word(w)) if w == "range/float")
+        => {
+            FuseSource::RangeFloat {
                 start: items[1].clone(),
                 end: items[2].clone(),
             }
@@ -265,11 +354,20 @@ fn build_direct_fused_loop(
     sink: FuseSink
 ) -> Option<Expression> {
     match sink {
-        FuseSink::Some { predicate } => build_some_every_loop(source, ops_outer_to_inner, predicate, true),
-        FuseSink::Every { predicate } => build_some_every_loop(source, ops_outer_to_inner, predicate, false),
+        FuseSink::Some {
+            predicate,
+            with_index,
+        } => build_some_every_loop(source, ops_outer_to_inner, predicate, with_index, true),
+        FuseSink::Every {
+            predicate,
+            with_index,
+        } => build_some_every_loop(source, ops_outer_to_inner, predicate, with_index, false),
         FuseSink::Collect => build_collect_loop(source, ops_outer_to_inner),
-        FuseSink::Reduce { reduce_fn, init_expr } =>
-            build_reduce_loop(source, ops_outer_to_inner, reduce_fn, init_expr),
+        FuseSink::Reduce {
+            reduce_fn,
+            init_expr,
+            with_index,
+        } => build_reduce_loop(source, ops_outer_to_inner, reduce_fn, init_expr, with_index),
     }
 }
 
@@ -281,7 +379,7 @@ fn build_collect_loop(source: FuseSource, ops_outer_to_inner: &[MapFilterOp]) ->
     let i_name = "__fuse_i".to_string();
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
-    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr)?;
+    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, i_word.clone())?;
 
     let push_expr = Expression::Apply(vec![
         Expression::Word("set!".to_string()),
@@ -335,7 +433,8 @@ fn build_reduce_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
     reduce_fn: Expression,
-    init_expr: Expression
+    init_expr: Expression,
+    with_index: bool
 ) -> Option<Expression> {
     let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(source)?;
 
@@ -344,14 +443,18 @@ fn build_reduce_loop(
     let i_name = "__fuse_i".to_string();
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
-    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr)?;
+    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, i_word.clone())?;
 
     let acc_get = Expression::Apply(vec![
         Expression::Word("get".to_string()),
         Expression::Word(out_name.clone()),
         Expression::Int(0),
     ]);
-    let reduced = call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped])?;
+    let reduced = if with_index {
+        call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped, i_word.clone()])?
+    } else {
+        call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped])?
+    };
     let next_acc = match guard {
         Some(cond) =>
             Expression::Apply(vec![
@@ -405,6 +508,7 @@ fn build_some_every_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
     predicate: Expression,
+    with_index: bool,
     is_some: bool
 ) -> Option<Expression> {
     let (mut setup_bindings, idx_ref_name, cond_bound_expr, value_expr_for_idx_ref) =
@@ -418,8 +522,12 @@ fn build_some_every_loop(
         Expression::Int(0),
     ]);
     let x_expr = value_expr_for_idx_ref(&idx_get);
-    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr)?;
-    let pred_value = call_callable_expr(&predicate, vec![mapped])?;
+    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, idx_get.clone())?;
+    let pred_value = if with_index {
+        call_callable_expr(&predicate, vec![mapped, idx_get.clone()])?
+    } else {
+        call_callable_expr(&predicate, vec![mapped])?
+    };
 
     let flag_get = Expression::Apply(vec![
         Expression::Word("get".to_string()),
@@ -564,7 +672,7 @@ fn make_loop_source_bindings(
             });
             Some((setup, start_expr, end_expr, value))
         }
-        FuseSource::Range { start, end } => {
+        FuseSource::RangeInt { start, end } => {
             let from_name = "__fuse_from".to_string();
             let to_name = "__fuse_to".to_string();
             let from_word = Expression::Word(from_name.clone());
@@ -588,6 +696,36 @@ fn make_loop_source_bindings(
                 Expression::Int(1),
             ]);
             let value = Box::new(|i_expr: &Expression| i_expr.clone());
+            Some((setup, start_expr, end_expr, value))
+        }
+        FuseSource::RangeFloat { start, end } => {
+            let from_name = "__fuse_from".to_string();
+            let to_name = "__fuse_to".to_string();
+            let from_word = Expression::Word(from_name.clone());
+            let to_word = Expression::Word(to_name.clone());
+            let mut setup = Vec::new();
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(from_name),
+                start,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name),
+                end,
+            ]));
+            let start_expr = from_word;
+            let end_expr = Expression::Apply(vec![
+                Expression::Word("+".to_string()),
+                to_word,
+                Expression::Int(1),
+            ]);
+            let value = Box::new(|i_expr: &Expression| {
+                Expression::Apply(vec![
+                    Expression::Word("Int->Float".to_string()),
+                    i_expr.clone(),
+                ])
+            });
             Some((setup, start_expr, end_expr, value))
         }
     }
@@ -643,7 +781,7 @@ fn make_short_circuit_source_bindings(
             });
             Some((setup, idx_ref_name, cond, value))
         }
-        FuseSource::Range { start, end } => {
+        FuseSource::RangeInt { start, end } => {
             let idx_ref_name = "__fuse_i".to_string();
             let to_name = "__fuse_to".to_string();
             let mut setup = Vec::new();
@@ -673,25 +811,73 @@ fn make_short_circuit_source_bindings(
             let value = Box::new(|i_expr: &Expression| i_expr.clone());
             Some((setup, idx_ref_name, cond, value))
         }
+        FuseSource::RangeFloat { start, end } => {
+            let idx_ref_name = "__fuse_i".to_string();
+            let to_name = "__fuse_to".to_string();
+            let mut setup = Vec::new();
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Apply(vec![Expression::Word("vector".to_string()), start]),
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name.clone()),
+                end,
+            ]));
+            let cond = Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(idx_ref_name.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Apply(vec![
+                    Expression::Word("+".to_string()),
+                    Expression::Word(to_name),
+                    Expression::Int(1),
+                ]),
+            ]);
+            let value = Box::new(|i_expr: &Expression| {
+                Expression::Apply(vec![
+                    Expression::Word("Int->Float".to_string()),
+                    i_expr.clone(),
+                ])
+            });
+            Some((setup, idx_ref_name, cond, value))
+        }
     }
 }
 
 fn compose_map_filter_value_and_guard(
     ops_outer_to_inner: &[MapFilterOp],
-    input_expr: Expression
+    input_expr: Expression,
+    index_expr: Expression
 ) -> Option<(Expression, Option<Expression>)> {
     let mut cur = input_expr;
     let mut guards: Vec<Expression> = Vec::new();
     for op in ops_outer_to_inner.iter().rev() {
         match op {
-            MapFilterOp::Map(map_fn) => {
-                cur = call_callable_expr(map_fn, vec![cur])?;
+            MapFilterOp::Map {
+                func,
+                with_index,
+            } => {
+                cur = if *with_index {
+                    call_callable_expr(func, vec![cur, index_expr.clone()])?
+                } else {
+                    call_callable_expr(func, vec![cur])?
+                };
             }
             MapFilterOp::Filter {
                 predicate,
                 keep_when_true,
+                with_index,
             } => {
-                let pred_value = call_callable_expr(predicate, vec![cur.clone()])?;
+                let pred_value = if *with_index {
+                    call_callable_expr(predicate, vec![cur.clone(), index_expr.clone()])?
+                } else {
+                    call_callable_expr(predicate, vec![cur.clone()])?
+                };
                 if *keep_when_true {
                     guards.push(pred_value);
                 } else {
@@ -760,7 +946,7 @@ fn no_op_unit_expr() -> Expression {
 
 fn map_filter_op_is_fusion_safe(op: &MapFilterOp) -> bool {
     match op {
-        MapFilterOp::Map(f) => is_fusion_safe_callable(f),
+        MapFilterOp::Map { func, .. } => is_fusion_safe_callable(func),
         MapFilterOp::Filter { predicate, .. } => is_fusion_safe_callable(predicate),
     }
 }
@@ -769,7 +955,7 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
     match sink {
         FuseSink::Collect => true,
         FuseSink::Reduce { reduce_fn, .. } => is_fusion_safe_callable(reduce_fn),
-        FuseSink::Some { predicate } | FuseSink::Every { predicate } =>
+        FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } =>
             is_fusion_safe_callable(predicate),
     }
 }
