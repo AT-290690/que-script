@@ -7,8 +7,28 @@ const MAX_INLINE_BODY_COST: usize = 16;
 const MAX_INLINE_FIXPOINT_PASSES: usize = 16;
 const MAX_OPT_FIXPOINT_PASSES: usize = 8;
 
+#[derive(Clone)]
+enum MapFilterOp {
+    Map(Expression),
+    Filter(Expression),
+}
+
 pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
-    let mut cur = optimize_typed_ast_once(node);
+    let mut seed = node.clone();
+    let fused_expr = fuse_entry_expression_for_program(&node.expr);
+    if fused_expr.to_lisp() != node.expr.to_lisp() {
+        if
+            let Ok((_typ, fused_typed)) = crate::infer
+                ::infer_with_builtins_typed(
+                    &fused_expr,
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                )
+        {
+            seed = fused_typed;
+        }
+    }
+
+    let mut cur = optimize_typed_ast_once(&seed);
     for _ in 0..MAX_OPT_FIXPOINT_PASSES {
         let next = optimize_typed_ast_once(&cur);
         if next.expr.to_lisp() == cur.expr.to_lisp() {
@@ -17,6 +37,349 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
         cur = next;
     }
     cur
+}
+
+fn fuse_entry_expression_for_program(expr: &Expression) -> Expression {
+    match expr {
+        Expression::Apply(items) if
+            matches!(items.first(), Some(Expression::Word(w)) if w == "do") && items.len() > 1
+        => {
+            let mut out = items.clone();
+            let last = out.len() - 1;
+            out[last] = fuse_map_filter_reduce_chains_expr(&out[last]);
+            Expression::Apply(out)
+        }
+        _ => fuse_map_filter_reduce_chains_expr(expr),
+    }
+}
+
+fn fuse_map_filter_reduce_chains_expr(expr: &Expression) -> Expression {
+    match expr {
+        Expression::Apply(items) => {
+            // Prioritize whole-chain fusions before rewriting children, so map/filter
+            // combos become a single loop rather than nested loop wrappers.
+            if let Some(fused) = fuse_reduce_over_map_filter_chain(expr) {
+                return fuse_map_filter_reduce_chains_expr(&fused);
+            }
+            if let Some(fused) = fuse_map_filter_chain_to_reduce(expr) {
+                return fused;
+            }
+
+            let rewritten_items = items
+                .iter()
+                .map(fuse_map_filter_reduce_chains_expr)
+                .collect::<Vec<_>>();
+            let rewritten = Expression::Apply(rewritten_items);
+            rewritten
+        }
+        _ => expr.clone(),
+    }
+}
+
+fn fuse_reduce_over_map_filter_chain(expr: &Expression) -> Option<Expression> {
+    let (reduce_fn, init, reduce_input) = parse_reduce_call(expr)?;
+    let (base, ops) = collect_map_filter_chain(reduce_input)?;
+    if ops.is_empty() {
+        return None;
+    }
+    if !is_fusion_safe_callable(&reduce_fn) || !ops.iter().all(map_filter_op_is_fusion_safe) {
+        return None;
+    }
+    build_direct_reduce_loop(base, &ops, reduce_fn, init)
+}
+
+fn fuse_map_filter_chain_to_reduce(expr: &Expression) -> Option<Expression> {
+    let (_, _) = parse_map_or_filter_call(expr)?;
+    let (base, ops) = collect_map_filter_chain(expr.clone())?;
+    if ops.is_empty() {
+        return None;
+    }
+    if !ops.iter().all(map_filter_op_is_fusion_safe) {
+        return None;
+    }
+    build_direct_map_filter_loop(base, &ops)
+}
+
+fn parse_reduce_call(expr: &Expression) -> Option<(Expression, Expression, Expression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if items.len() != 4 {
+        return None;
+    }
+    let Expression::Word(name) = items.first()? else {
+        return None;
+    };
+    match name.as_str() {
+        // reduce fn init xs
+        "reduce" => Some((items.get(1)?.clone(), items.get(2)?.clone(), items.get(3)?.clone())),
+        _ => None,
+    }
+}
+
+fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if items.len() != 3 {
+        return None;
+    }
+    let Expression::Word(name) = items.first()? else {
+        return None;
+    };
+    match name.as_str() {
+        // map fn xs
+        "map" => Some((MapFilterOp::Map(items.get(1)?.clone()), items.get(2)?.clone())),
+        // filter fn xs
+        "filter" => Some((MapFilterOp::Filter(items.get(1)?.clone()), items.get(2)?.clone())),
+        _ => None,
+    }
+}
+
+fn collect_map_filter_chain(root: Expression) -> Option<(Expression, Vec<MapFilterOp>)> {
+    let mut ops: Vec<MapFilterOp> = Vec::new();
+    let mut current = root;
+    while let Some((op, next)) = parse_map_or_filter_call(&current) {
+        ops.push(op);
+        current = next;
+    }
+    if ops.is_empty() {
+        None
+    } else {
+        Some((current, ops))
+    }
+}
+
+fn build_direct_reduce_loop(
+    xs_expr: Expression,
+    ops_outer_to_inner: &[MapFilterOp],
+    reduce_fn: Expression,
+    init_expr: Expression
+) -> Option<Expression> {
+    let xs_name = "__fuse_xs".to_string();
+    let out_name = "__fuse_out".to_string();
+    let process_name = "__fuse_process".to_string();
+    let i_name = "__fuse_i".to_string();
+
+    let xs_word = Expression::Word(xs_name.clone());
+    let i_word = Expression::Word(i_name.clone());
+    let x_expr = Expression::Apply(vec![Expression::Word("get".to_string()), xs_word.clone(), i_word.clone()]);
+    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr)?;
+
+    let acc_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Int(0),
+    ]);
+    let reduced = call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped])?;
+    let next_acc = match guard {
+        Some(cond) =>
+            Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                cond,
+                reduced,
+                acc_get,
+            ]),
+        None => reduced,
+    };
+
+    let process_body = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Int(0),
+        next_acc,
+    ]);
+    let process_lambda = Expression::Apply(vec![
+        Expression::Word("lambda".to_string()),
+        Expression::Word(i_name),
+        process_body,
+    ]);
+
+    Some(
+        Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs_expr,
+            ]),
+            Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(out_name.clone()),
+                Expression::Apply(vec![Expression::Word("vector".to_string()), init_expr]),
+            ]),
+            Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(process_name.clone()),
+                process_lambda,
+            ]),
+            Expression::Apply(vec![
+                Expression::Word("loop".to_string()),
+                Expression::Int(0),
+                Expression::Apply(vec![Expression::Word("length".to_string()), xs_word]),
+                Expression::Word(process_name),
+            ]),
+            Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(out_name),
+                Expression::Int(0),
+            ]),
+        ])
+    )
+}
+
+fn build_direct_map_filter_loop(xs_expr: Expression, ops_outer_to_inner: &[MapFilterOp]) -> Option<Expression> {
+    let xs_name = "__fuse_xs".to_string();
+    let out_name = "__fuse_out".to_string();
+    let process_name = "__fuse_process".to_string();
+    let i_name = "__fuse_i".to_string();
+
+    let xs_word = Expression::Word(xs_name.clone());
+    let i_word = Expression::Word(i_name.clone());
+    let x_expr = Expression::Apply(vec![Expression::Word("get".to_string()), xs_word.clone(), i_word.clone()]);
+    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr)?;
+
+    let push_expr = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Apply(vec![
+            Expression::Word("length".to_string()),
+            Expression::Word(out_name.clone()),
+        ]),
+        mapped,
+    ]);
+    let process_body = match guard {
+        Some(cond) =>
+            Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                cond,
+                push_expr,
+                no_op_unit_expr(),
+            ]),
+        None => push_expr,
+    };
+    let process_lambda = Expression::Apply(vec![
+        Expression::Word("lambda".to_string()),
+        Expression::Word(i_name),
+        process_body,
+    ]);
+
+    Some(
+        Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs_expr,
+            ]),
+            Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(out_name.clone()),
+                Expression::Apply(vec![Expression::Word("vector".to_string())]),
+            ]),
+            Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(process_name.clone()),
+                process_lambda,
+            ]),
+            Expression::Apply(vec![
+                Expression::Word("loop".to_string()),
+                Expression::Int(0),
+                Expression::Apply(vec![Expression::Word("length".to_string()), xs_word]),
+                Expression::Word(process_name),
+            ]),
+            Expression::Word(out_name),
+        ])
+    )
+}
+
+fn compose_map_filter_value_and_guard(
+    ops_outer_to_inner: &[MapFilterOp],
+    input_expr: Expression
+) -> Option<(Expression, Option<Expression>)> {
+    let mut cur = input_expr;
+    let mut guards: Vec<Expression> = Vec::new();
+    for op in ops_outer_to_inner.iter().rev() {
+        match op {
+            MapFilterOp::Map(map_fn) => {
+                cur = call_callable_expr(map_fn, vec![cur])?;
+            }
+            MapFilterOp::Filter(pred_fn) => {
+                guards.push(call_callable_expr(pred_fn, vec![cur.clone()])?);
+            }
+        }
+    }
+    let guard = if guards.is_empty() {
+        None
+    } else {
+        let mut cond = guards[0].clone();
+        for g in guards.iter().skip(1) {
+            cond = Expression::Apply(vec![Expression::Word("and".to_string()), cond, g.clone()]);
+        }
+        Some(cond)
+    };
+    Some((cur, guard))
+}
+
+fn call_callable_expr(callable: &Expression, args: Vec<Expression>) -> Option<Expression> {
+    match callable {
+        Expression::Word(w) => {
+            let mut items = Vec::with_capacity(1 + args.len());
+            items.push(Expression::Word(w.clone()));
+            items.extend(args);
+            Some(Expression::Apply(items))
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") => {
+            if items.len() < 2 {
+                return None;
+            }
+            let params = &items[1..items.len() - 1];
+            if params.len() != args.len() {
+                return None;
+            }
+            let mut out = items.last()?.clone();
+            for (p, arg) in params.iter().zip(args.iter()) {
+                let Expression::Word(name) = p else {
+                    return None;
+                };
+                out = substitute_word_with_expr(&out, name, arg);
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+fn no_op_unit_expr() -> Expression {
+    // A std-independent no-op expression with Unit type.
+    Expression::Apply(vec![
+        Expression::Word("loop-finish".to_string()),
+        Expression::Word("false".to_string()),
+        Expression::Apply(vec![
+            Expression::Word("lambda".to_string()),
+            Expression::Int(0),
+        ]),
+    ])
+}
+
+fn map_filter_op_is_fusion_safe(op: &MapFilterOp) -> bool {
+    match op {
+        MapFilterOp::Map(f) | MapFilterOp::Filter(f) => is_fusion_safe_callable(f),
+    }
+}
+
+fn is_fusion_safe_callable(expr: &Expression) -> bool {
+    match expr {
+        Expression::Word(_) => true,
+        Expression::Apply(items) =>
+            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda"),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn fuse_map_filter_reduce_for_test(expr: &Expression) -> Expression {
+    fuse_map_filter_reduce_chains_expr(expr)
 }
 
 fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
@@ -661,6 +1024,18 @@ fn count_word_uses_expr(expr: &Expression, name: &str) -> usize {
     }
 }
 
+fn word_used_as_call_head(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(w)) if w == name) {
+                return true;
+            }
+            items.iter().any(|it| word_used_as_call_head(it, name))
+        }
+        _ => false,
+    }
+}
+
 fn substitute_word_with_expr(expr: &Expression, name: &str, replacement: &Expression) -> Expression {
     match expr {
         Expression::Word(w) => {
@@ -887,24 +1262,53 @@ fn try_inline_call(
         Some(Expression::Word(w)) => w,
         _ => return None,
     };
+
     let def = defs.get(callee)?;
-    let arg_exprs = &call_items[1..];
-    if arg_exprs.len() != def.params.len() || node.children.len() != call_items.len() {
+    inline_call_with_def(def, &call_items[1..], &node.children[1..], state)
+}
+
+fn inline_call_with_def(
+    def: &InlineLambdaDef,
+    arg_exprs: &[Expression],
+    arg_nodes: &[TypedExpression],
+    state: &mut InlineState
+) -> Option<(Vec<(Expression, TypedExpression)>, Expression, TypedExpression)> {
+    if arg_exprs.len() != def.params.len() || arg_nodes.len() != def.params.len() {
         return None;
     }
 
-    let mut subst = HashMap::new();
+    let mut expr_subst: HashMap<String, Expression> = HashMap::new();
+    let mut typed_subst: HashMap<String, TypedExpression> = HashMap::new();
     let mut prep = Vec::new();
+
     for (idx, param) in def.params.iter().enumerate() {
         let arg_expr = arg_exprs[idx].clone();
-        let arg_node = node.children.get(idx + 1)?.clone();
+        let arg_node = arg_nodes[idx].clone();
+        let arg_typ = arg_node.typ.as_ref()?;
+        let uses = count_word_uses_expr(&def.body_expr, param);
+        let head_used = word_used_as_call_head(&def.body_expr, param);
+        let direct_lambda =
+            is_lambda_expr(&arg_expr) && lambda_takes_only_scalar_args(arg_typ) && !head_used;
+        let direct_scalar = is_no_temp_inline_scalar_type(arg_typ) && (uses <= 1 || is_atomic_inline_arg_expr(&arg_expr));
+        if direct_lambda || direct_scalar {
+            expr_subst.insert(param.clone(), arg_expr);
+            typed_subst.insert(param.clone(), arg_node);
+            continue;
+        }
+
         let tmp = state.fresh_tmp();
-        subst.insert(param.clone(), tmp.clone());
+        let tmp_expr = Expression::Word(tmp.clone());
+        expr_subst.insert(param.clone(), tmp_expr.clone());
+        typed_subst.insert(param.clone(), TypedExpression {
+            expr: tmp_expr.clone(),
+            typ: arg_node.typ.clone(),
+            children: Vec::new(),
+        });
 
         let let_expr = Expression::Apply(vec![
             Expression::Word("let".to_string()),
             Expression::Word(tmp.clone()),
-            arg_expr.clone(),
+            arg_exprs[idx].clone(),
         ]);
         let let_typed = TypedExpression {
             expr: let_expr.clone(),
@@ -926,8 +1330,8 @@ fn try_inline_call(
         prep.push((let_expr, let_typed));
     }
 
-    let inlined_expr = substitute_words_expr(&def.body_expr, &subst);
-    let inlined_typed = substitute_words_typed(&def.body_typed, &subst);
+    let inlined_expr = substitute_params_expr(&def.body_expr, &expr_subst);
+    let inlined_typed = substitute_params_typed(&def.body_typed, &expr_subst, &typed_subst);
     Some((prep, inlined_expr, inlined_typed))
 }
 
@@ -1075,30 +1479,17 @@ fn try_inline_let_rhs(
     Some((prep, rewritten_expr, rewritten_typed))
 }
 
-fn substitute_words_expr(expr: &Expression, subst: &HashMap<String, String>) -> Expression {
-    match expr {
-        Expression::Word(w) => {
-            if let Some(repl) = subst.get(w) {
-                Expression::Word(repl.clone())
-            } else {
-                Expression::Word(w.clone())
+fn lambda_takes_only_scalar_args(typ: &Type) -> bool {
+    let mut cur = typ;
+    loop {
+        match cur {
+            Type::Function(a, b) => {
+                if !is_no_temp_inline_scalar_type(a) {
+                    return false;
+                }
+                cur = b;
             }
+            _ => return true,
         }
-        Expression::Apply(items) =>
-            Expression::Apply(items.iter().map(|it| substitute_words_expr(it, subst)).collect()),
-        Expression::Int(n) => Expression::Int(*n),
-        Expression::Float(n) => Expression::Float(*n),
-    }
-}
-
-fn substitute_words_typed(node: &TypedExpression, subst: &HashMap<String, String>) -> TypedExpression {
-    let new_children = node.children
-        .iter()
-        .map(|ch| substitute_words_typed(ch, subst))
-        .collect::<Vec<_>>();
-    TypedExpression {
-        expr: substitute_words_expr(&node.expr, subst),
-        typ: node.typ.clone(),
-        children: new_children,
     }
 }
