@@ -339,6 +339,257 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_map_short_name_fuses_to_direct_loop() {
+        let typed = infer_typed(
+            "(do (let std/vector/map (lambda xs fn (fn (get xs 0)))) (let map (lambda fn xs (std/vector/map xs fn))) (map (lambda x (+ x 1)) (vector 41)))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            !optimized_lisp.contains("(map "),
+            "short map call should be inlined, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.contains("(loop 0 (length __fuse_xs) __fuse_process)"),
+            "map chain should lower to one loop, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_filter_short_name_fuses_to_direct_loop() {
+        let typed = infer_typed(
+            "(do (let std/vector/filter (lambda xs fn (fn (get xs 0)))) (let filter (lambda fn xs (std/vector/filter xs fn))) (filter (lambda x (> x 0)) (vector 41)))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            !optimized_lisp.contains("(filter "),
+            "short filter call should be inlined, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.contains("(> (get __fuse_xs __fuse_i) 0)"),
+            "filter predicate should be preserved in optimized expression, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_reduce_short_name_without_map_filter_chain_is_unchanged() {
+        let typed = infer_typed(
+            "(do (let std/vector/reduce (lambda xs fn init (fn init (get xs 0)))) (let reduce (lambda fn init xs (std/vector/reduce xs fn init))) (reduce (lambda a x (+ a x)) 10 (vector 32)))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            optimized_lisp.contains("(reduce (lambda a x (+ a x)) 10 (vector 32))"),
+            "reduce call should remain when there is no map/filter chain to fuse, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_map_map_map_chain_fuses_to_single_reduce_loop() {
+        let expr = crate::parser::parse(
+            "(map (lambda x (+ x 1))
+                (map (lambda x (+ x 2))
+                    (map (lambda x (+ x 3)) (vector 1 2 3))))"
+        ).expect("input should parse").remove(0);
+        let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
+        let fused_lisp = fused.to_lisp();
+
+        assert!(
+            fused_lisp.contains("(loop 0 (length __fuse_xs) __fuse_process)"),
+            "map-only chain should fuse to a single loop, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(map (lambda"),
+            "fused expression should not keep map calls in pipeline, got: {}",
+            fused_lisp
+        );
+        assert_eq!(
+            fused_lisp.matches("(loop ").count(),
+            1,
+            "map-only chain should lower to exactly one loop, got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_map_filter_filter_map_map_reduce_chain_fuses_to_single_reduce_loop() {
+        let expr = crate::parser::parse(
+            "(reduce
+                (lambda a x (+ a x))
+                0
+                (map (lambda x (+ x 1))
+                    (map (lambda x (+ x 2))
+                        (filter (lambda x (> x 1))
+                                (filter (lambda x (> x 0))
+                                        (map (lambda x (+ x 3)) (vector 1 2 3)))))))"
+        ).expect("input should parse").remove(0);
+        let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
+        let fused_lisp = fused.to_lisp();
+
+        assert!(
+            fused_lisp.contains("(loop 0 (length __fuse_xs) __fuse_process)"),
+            "map/filter/reduce chain should fuse into one loop, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(map (lambda"),
+            "fused expression should not keep map calls in pipeline, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(filter (lambda"),
+            "fused expression should not keep filter calls in pipeline, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(reduce "),
+            "fused expression should not keep short reduce call, got: {}",
+            fused_lisp
+        );
+        assert_eq!(
+            fused_lisp.matches("(loop ").count(),
+            1,
+            "map/filter/reduce chain should lower to exactly one loop, got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_wat_pipeline_map_filter_reduce_fuses_to_single_reduce_loop_in_codegen_path() {
+        let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) =>
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std"),
+            _ => panic!("std ast should be (do ...)"),
+        };
+
+        let wat = crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $v_filter"),
+            "main should not call v_filter after fusion, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $v_map"),
+            "main should not call v_map after fusion, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $v_reduce"),
+            "main should not call v_reduce after direct loop fusion, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.contains("\n    block\n      loop\n"),
+            "main should contain a single lowered loop after fusion, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_fused_user_entry_reinfers_in_optimizer_seed_path() {
+        let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) =>
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std"),
+            _ => panic!("std ast should be (do ...)"),
+        };
+        let fused_wrapped = match &wrapped {
+            crate::parser::Expression::Apply(items) if
+                matches!(items.first(), Some(crate::parser::Expression::Word(w)) if w == "do") &&
+                items.len() > 1
+            => {
+                let mut out = items.clone();
+                let last = out.len() - 1;
+                out[last] = crate::op::fuse_map_filter_reduce_for_test(&out[last]);
+                crate::parser::Expression::Apply(out)
+            }
+            _ => crate::op::fuse_map_filter_reduce_for_test(&wrapped),
+        };
+        let reinfer = crate::infer::infer_with_builtins_typed(
+            &fused_wrapped,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            reinfer.is_ok(),
+            "fused whole-program expression must re-infer; got: {}",
+            reinfer.err().unwrap_or_else(|| "unknown error".to_string())
+        );
+    }
+
+    fn has_non_word_call_head(expr: &crate::parser::Expression) -> bool {
+        match expr {
+            crate::parser::Expression::Apply(items) => {
+                if items.is_empty() {
+                    return false;
+                }
+                if !matches!(items.first(), Some(crate::parser::Expression::Word(_))) {
+                    return true;
+                }
+                items.iter().any(has_non_word_call_head)
+            }
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn test_fused_pipeline_expression_has_word_only_call_heads() {
+        let expr = crate::parser::parse(
+            "(reduce + 0 (map square (filter even? (vector 1 2 3 4 5))))"
+        ).expect("input should parse").remove(0);
+        let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
+        assert!(
+            !has_non_word_call_head(&fused),
+            "fused expression must not contain non-word call heads: {}",
+            fused.to_lisp()
+        );
+    }
+
+    #[test]
+    fn test_optimized_wrapped_pipeline_has_word_only_call_heads() {
+        let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) =>
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std"),
+            _ => panic!("std ast should be (do ...)"),
+        };
+        let (_typ, typed) = crate::infer
+            ::infer_with_builtins_typed(
+                &wrapped,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("wrapped should infer");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert!(
+            !has_non_word_call_head(&optimized.expr),
+            "optimized wrapped expression must not contain non-word call heads: {}",
+            optimized.expr.to_lisp()
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
         let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
         let hover: serde_json::Value = serde_json
