@@ -379,7 +379,7 @@ Concequent and alternative must match types
     }
 
     #[test]
-    fn test_typed_optimization_reduce_short_name_without_map_filter_chain_is_unchanged() {
+    fn test_typed_optimization_reduce_short_name_fuses_to_direct_loop() {
         let typed = infer_typed(
             "(do (let std/vector/reduce (lambda xs fn init (fn init (get xs 0)))) (let reduce (lambda fn init xs (std/vector/reduce xs fn init))) (reduce (lambda a x (+ a x)) 10 (vector 32)))"
         );
@@ -387,8 +387,13 @@ Concequent and alternative must match types
         let optimized_lisp = optimized.expr.to_lisp();
 
         assert!(
-            optimized_lisp.contains("(reduce (lambda a x (+ a x)) 10 (vector 32))"),
-            "reduce call should remain when there is no map/filter chain to fuse, got: {}",
+            !optimized_lisp.contains("(reduce (lambda a x (+ a x)) 10 (vector 32))"),
+            "reduce call should be lowered into direct loop, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.contains("(loop 0 (length __fuse_xs) __fuse_process)"),
+            "reduce should lower to one loop, got: {}",
             optimized_lisp
         );
     }
@@ -462,6 +467,67 @@ Concequent and alternative must match types
             "map/filter/reduce chain should lower to exactly one loop, got: {}",
             fused_lisp
         );
+    }
+
+    #[test]
+    fn test_typed_optimization_select_exclude_sum_range_fuses_with_whitelist_names() {
+        let expr = crate::parser::parse(
+            "(sum (map (lambda x (+ x 1))
+                  (select (lambda x (> x 2))
+                    (exclude (lambda x (= x 5))
+                      (range 1 10)))))"
+        ).expect("input should parse").remove(0);
+        let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
+        let fused_lisp = fused.to_lisp();
+
+        assert!(
+            fused_lisp.contains("(loop __fuse_from (+ __fuse_to 1) __fuse_process)"),
+            "range source should fuse into a direct numeric loop, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(sum "),
+            "sum should be absorbed into loop sink, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(select "),
+            "select stage should be absorbed into loop guard, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(exclude "),
+            "exclude stage should be absorbed into loop guard, got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_some_and_every_fuse_to_short_circuit_loops() {
+        let some_expr = crate::parser::parse(
+            "(some? (lambda x (> x 20))
+               (map (lambda x (+ x 1)) (range 1 10)))"
+        ).expect("some input should parse").remove(0);
+        let every_expr = crate::parser::parse(
+            "(every? (lambda x (> x 0))
+                (filter (lambda x (> x 1)) (range 1 10)))"
+        ).expect("every input should parse").remove(0);
+
+        let some_fused = crate::op::fuse_map_filter_reduce_for_test(&some_expr).to_lisp();
+        let every_fused = crate::op::fuse_map_filter_reduce_for_test(&every_expr).to_lisp();
+
+        assert!(
+            some_fused.contains("(loop-finish"),
+            "some? should lower to short-circuit loop-finish, got: {}",
+            some_fused
+        );
+        assert!(
+            every_fused.contains("(loop-finish"),
+            "every? should lower to short-circuit loop-finish, got: {}",
+            every_fused
+        );
+        assert!(!some_fused.contains("(some? "), "some? call should be fused, got: {}", some_fused);
+        assert!(!every_fused.contains("(every? "), "every? call should be fused, got: {}", every_fused);
     }
 
     #[test]
