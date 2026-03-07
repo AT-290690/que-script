@@ -46,6 +46,12 @@ function splitSignatureTopLevel(signature) {
   return parts;
 }
 
+function signatureTypePart(signature) {
+  const idx = signature.indexOf(":");
+  if (idx === -1) return signature.trim();
+  return signature.slice(idx + 1).trim();
+}
+
 function findCallStart(text) {
   let inString = false;
   let bracketDepth = 0;
@@ -147,7 +153,11 @@ async function fetchInferredSignature(document, symbol, position) {
         ? { line: position.line, character: position.character }
         : null,
     });
-    if (result && typeof result.signature === "string" && result.signature.trim().length > 0) {
+    if (
+      result &&
+      typeof result.signature === "string" &&
+      result.signature.trim().length > 0
+    ) {
       return result.signature.trim();
     }
   } catch {
@@ -177,17 +187,25 @@ function registerQueSignatureHelp() {
         if (tokens.length === 0) return null;
 
         const funcName = tokens[0];
-        const signature = await fetchInferredSignature(document, funcName, position);
+        const signature = await fetchInferredSignature(
+          document,
+          funcName,
+          position
+        );
         if (!signature) return null;
 
-        const allParts = splitSignatureTopLevel(signature);
+        const typeSignature = signatureTypePart(signature);
+        const allParts = splitSignatureTopLevel(typeSignature);
         const paramLabels = allParts.slice(0, -1);
         if (paramLabels.length === 0) return null;
 
-        const fullLabel = `${funcName}: ${signature}`;
+        const fullLabel = signature.includes(":")
+          ? signature
+          : `${funcName}: ${typeSignature}`;
         const signatureInfo = new vscode.SignatureInformation(fullLabel);
 
-        let searchFrom = 0;
+        const colonIdx = fullLabel.indexOf(":");
+        let searchFrom = colonIdx === -1 ? 0 : colonIdx + 1;
         signatureInfo.parameters = paramLabels.map((param) => {
           const idx = fullLabel.indexOf(param, searchFrom);
           if (idx === -1) return new vscode.ParameterInformation(param);
@@ -202,8 +220,13 @@ function registerQueSignatureHelp() {
         help.activeSignature = 0;
 
         const argsTyped = Math.max(0, tokens.length - 1);
-        let activeParam = endsWithTopLevelSpace ? argsTyped : Math.max(0, argsTyped - 1);
-        activeParam = Math.min(activeParam, Math.max(0, paramLabels.length - 1));
+        let activeParam = endsWithTopLevelSpace
+          ? argsTyped
+          : Math.max(0, argsTyped - 1);
+        activeParam = Math.min(
+          activeParam,
+          Math.max(0, paramLabels.length - 1)
+        );
         help.activeParameter = activeParam;
         return help;
       },
@@ -272,7 +295,11 @@ function resolveServerCommand(context) {
 
 function createClient(context) {
   const server = resolveServerCommand(context);
-  const run = { command: server.command, args: server.args, transport: TransportKind.stdio };
+  const run = {
+    command: server.command,
+    args: server.args,
+    transport: TransportKind.stdio,
+  };
   if (server.cwd) {
     run.options = { cwd: server.cwd };
   }
