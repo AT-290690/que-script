@@ -1,9 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# Native LSP binary for editor integration.
-cargo build --release --features io --bin quelsp
-
 # WebAssembly LSP module (exports from src/wasm_api.rs).
 cargo build --release --target wasm32-unknown-unknown --lib --no-default-features
 
@@ -13,3 +10,8 @@ wasm-bindgen \
   --out-dir ./dist \
   --target web \
   --out-name quelsp
+
+# Native LSP binary for editor integration.
+cargo build --release --features io --bin quelsp
+
+

@@ -315,6 +315,30 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_beta_reduces_apply_first_lambda_call() {
+        let typed = infer_typed(
+            "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ x 1)) 41))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(
+            optimized.expr.to_lisp(),
+            "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) 42)"
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_apply_first_beta_reduce_skips_managed_args() {
+        let typed = infer_typed(
+            "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ (get x 0) (get x 1))) (vector 10 20)))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(
+            optimized.expr.to_lisp(),
+            "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ (get x 0) (get x 1))) (vector 10 20)))"
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
         let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
         let hover: serde_json::Value = serde_json
