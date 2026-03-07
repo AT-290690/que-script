@@ -699,6 +699,43 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_flat_stage_fuses_as_one_level_nested_loops() {
+        let expr = crate::parser
+            ::parse("(flat (map (lambda x (vector x x)) (vector 1 2 3)))")
+            .expect("input should parse")
+            .remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(!fused_lisp.contains("(flat "), "flat should be fused away, got: {}", fused_lisp);
+        assert!(
+            fused_lisp.matches("(loop ").count() >= 2,
+            "flat fusion should emit nested loops (outer + one-level inner), got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_flat_map_reduce_fuses_as_one_level_nested_loops() {
+        let expr = crate::parser
+            ::parse("(reduce + 0 (flat-map (lambda x (vector x x)) (vector 1 2 3)))")
+            .expect("input should parse")
+            .remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(
+            !fused_lisp.contains("(flat-map "),
+            "flat-map should be fused away, got: {}",
+            fused_lisp
+        );
+        assert!(!fused_lisp.contains("(reduce "), "reduce should be fused, got: {}", fused_lisp);
+        assert!(
+            fused_lisp.matches("(loop ").count() >= 2,
+            "flat-map reduce fusion should emit nested loops, got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
     fn test_wat_pipeline_map_filter_reduce_fuses_to_single_reduce_loop_in_codegen_path() {
         let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
         let std_ast = crate::baked::load_ast();
