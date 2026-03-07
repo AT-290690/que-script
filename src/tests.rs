@@ -133,6 +133,20 @@ Concequent and alternative must match types
         }
     }
 
+    #[test]
+    fn test_merge_std_rejects_forbidden_fusion_name_shadowing() {
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) =>
+                crate::parser::merge_std_and_program("(let map 10)\nmap", items[1..].to_vec()),
+            _ => panic!("std ast should be (do ...)"),
+        };
+        assert_eq!(
+            wrapped.err().unwrap_or_else(|| "expected error".to_string()),
+            "Variable 'map' is forbidden"
+        );
+    }
+
     fn infer_typed(input: &str) -> crate::infer::TypedExpression {
         let exprs = crate::parser::parse(input).expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -320,10 +334,7 @@ Concequent and alternative must match types
             "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ x 1)) 41))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
-        assert_eq!(
-            optimized.expr.to_lisp(),
-            "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) 42)"
-        );
+        assert_eq!(optimized.expr.to_lisp(), "(do 42)");
     }
 
     #[test]
@@ -400,11 +411,14 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_map_map_map_chain_fuses_to_single_reduce_loop() {
-        let expr = crate::parser::parse(
-            "(map (lambda x (+ x 1))
+        let expr = crate::parser
+            ::parse(
+                "(map (lambda x (+ x 1))
                 (map (lambda x (+ x 2))
                     (map (lambda x (+ x 3)) (vector 1 2 3))))"
-        ).expect("input should parse").remove(0);
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
         let fused_lisp = fused.to_lisp();
 
@@ -428,8 +442,9 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_map_filter_filter_map_map_reduce_chain_fuses_to_single_reduce_loop() {
-        let expr = crate::parser::parse(
-            "(reduce
+        let expr = crate::parser
+            ::parse(
+                "(reduce
                 (lambda a x (+ a x))
                 0
                 (map (lambda x (+ x 1))
@@ -437,7 +452,9 @@ Concequent and alternative must match types
                         (filter (lambda x (> x 1))
                                 (filter (lambda x (> x 0))
                                         (map (lambda x (+ x 3)) (vector 1 2 3)))))))"
-        ).expect("input should parse").remove(0);
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
         let fused_lisp = fused.to_lisp();
 
@@ -471,12 +488,15 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_select_exclude_sum_range_fuses_with_whitelist_names() {
-        let expr = crate::parser::parse(
-            "(sum (map (lambda x (+ x 1))
+        let expr = crate::parser
+            ::parse(
+                "(sum (map (lambda x (+ x 1))
                   (select (lambda x (> x 2))
                     (exclude (lambda x (= x 5))
                       (range 1 10)))))"
-        ).expect("input should parse").remove(0);
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
         let fused_lisp = fused.to_lisp();
 
@@ -504,14 +524,20 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_some_and_every_fuse_to_short_circuit_loops() {
-        let some_expr = crate::parser::parse(
-            "(some? (lambda x (> x 20))
+        let some_expr = crate::parser
+            ::parse(
+                "(some? (lambda x (> x 20))
                (map (lambda x (+ x 1)) (range 1 10)))"
-        ).expect("some input should parse").remove(0);
-        let every_expr = crate::parser::parse(
-            "(every? (lambda x (> x 0))
+            )
+            .expect("some input should parse")
+            .remove(0);
+        let every_expr = crate::parser
+            ::parse(
+                "(every? (lambda x (> x 0))
                 (filter (lambda x (> x 1)) (range 1 10)))"
-        ).expect("every input should parse").remove(0);
+            )
+            .expect("every input should parse")
+            .remove(0);
 
         let some_fused = crate::op::fuse_map_filter_reduce_for_test(&some_expr).to_lisp();
         let every_fused = crate::op::fuse_map_filter_reduce_for_test(&every_expr).to_lisp();
@@ -527,17 +553,24 @@ Concequent and alternative must match types
             every_fused
         );
         assert!(!some_fused.contains("(some? "), "some? call should be fused, got: {}", some_fused);
-        assert!(!every_fused.contains("(every? "), "every? call should be fused, got: {}", every_fused);
+        assert!(
+            !every_fused.contains("(every? "),
+            "every? call should be fused, got: {}",
+            every_fused
+        );
     }
 
     #[test]
     fn test_typed_optimization_indexed_variants_fuse_with_whitelist() {
-        let expr = crate::parser::parse(
-            "(reduce/i (lambda a x i (+ a (+ x i))) 0
+        let expr = crate::parser
+            ::parse(
+                "(reduce/i (lambda a x i (+ a (+ x i))) 0
                 (map/i (lambda x i (+ x i))
                     (filter/i (lambda x i (> (+ x i) 3))
                         (range/int 1 8))))"
-        ).expect("input should parse").remove(0);
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
@@ -545,7 +578,11 @@ Concequent and alternative must match types
             "indexed variants over range/int should fuse to direct loop, got: {}",
             fused_lisp
         );
-        assert!(!fused_lisp.contains("(reduce/i "), "reduce/i should be fused, got: {}", fused_lisp);
+        assert!(
+            !fused_lisp.contains("(reduce/i "),
+            "reduce/i should be fused, got: {}",
+            fused_lisp
+        );
         assert!(!fused_lisp.contains("(map/i "), "map/i should be fused, got: {}", fused_lisp);
         assert!(
             !fused_lisp.contains("(filter/i "),
@@ -556,19 +593,33 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_some_i_every_i_and_range_float_fuse() {
-        let some_i = crate::parser::parse(
-            "(some/i? (lambda x i (> (+ x i) 10)) (range/float 1 6))"
-        ).expect("input should parse").remove(0);
-        let every_i = crate::parser::parse(
-            "(every/i? (lambda x i (> (+ x i) 0)) (range/int 1 6))"
-        ).expect("input should parse").remove(0);
+        let some_i = crate::parser
+            ::parse("(some/i? (lambda x i (> (+ x i) 10)) (range/float 1 6))")
+            .expect("input should parse")
+            .remove(0);
+        let every_i = crate::parser
+            ::parse("(every/i? (lambda x i (> (+ x i) 0)) (range/int 1 6))")
+            .expect("input should parse")
+            .remove(0);
         let fused_some = crate::op::fuse_map_filter_reduce_for_test(&some_i).to_lisp();
         let fused_every = crate::op::fuse_map_filter_reduce_for_test(&every_i).to_lisp();
 
-        assert!(fused_some.contains("(loop-finish"), "some/i? should short-circuit fuse, got: {}", fused_some);
-        assert!(fused_every.contains("(loop-finish"), "every/i? should short-circuit fuse, got: {}", fused_every);
+        assert!(
+            fused_some.contains("(loop-finish"),
+            "some/i? should short-circuit fuse, got: {}",
+            fused_some
+        );
+        assert!(
+            fused_every.contains("(loop-finish"),
+            "every/i? should short-circuit fuse, got: {}",
+            fused_every
+        );
         assert!(!fused_some.contains("(some/i? "), "some/i? should be fused, got: {}", fused_some);
-        assert!(!fused_every.contains("(every/i? "), "every/i? should be fused, got: {}", fused_every);
+        assert!(
+            !fused_every.contains("(every/i? "),
+            "every/i? should be fused, got: {}",
+            fused_every
+        );
         assert!(
             fused_some.contains("(Int->Float"),
             "range/float fusion should convert loop index to float value, got: {}",
@@ -578,9 +629,12 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_slice_source_fuses_with_map_filter_reduce() {
-        let expr = crate::parser::parse(
-            "(reduce + 0 (map (lambda x (* x x)) (filter even? (slice 1 6 (vector 1 2 3 4 5 6 7)))))"
-        ).expect("input should parse").remove(0);
+        let expr = crate::parser
+            ::parse(
+                "(reduce + 0 (map (lambda x (* x x)) (filter even? (slice 1 6 (vector 1 2 3 4 5 6 7)))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
@@ -588,18 +642,29 @@ Concequent and alternative must match types
             "slice source should fuse to start/end bounded loop, got: {}",
             fused_lisp
         );
-        assert!(!fused_lisp.contains("(slice "), "slice call should be eliminated by fusion source lowering, got: {}", fused_lisp);
+        assert!(
+            !fused_lisp.contains("(slice "),
+            "slice call should be eliminated by fusion source lowering, got: {}",
+            fused_lisp
+        );
         assert!(!fused_lisp.contains("(reduce "), "reduce should be fused, got: {}", fused_lisp);
     }
 
     #[test]
     fn test_typed_optimization_find_fuses_and_tracks_filtered_logical_index() {
-        let expr = crate::parser::parse(
-            "(find (lambda x (= x 16)) (map (lambda x (* x x)) (filter even? (vector 1 2 3 4 5 6))))"
-        ).expect("input should parse").remove(0);
+        let expr = crate::parser
+            ::parse(
+                "(find (lambda x (= x 16)) (map (lambda x (* x x)) (filter even? (vector 1 2 3 4 5 6))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
-        assert!(fused_lisp.contains("(loop-finish"), "find should fuse to short-circuit loop-finish, got: {}", fused_lisp);
+        assert!(
+            fused_lisp.contains("(loop-finish"),
+            "find should fuse to short-circuit loop-finish, got: {}",
+            fused_lisp
+        );
         assert!(!fused_lisp.contains("(find "), "find call should be fused, got: {}", fused_lisp);
         assert!(
             fused_lisp.contains("__fuse_logical_i"),
@@ -625,7 +690,11 @@ Concequent and alternative must match types
                 "take/drop alias source should fuse via slice-style bounded loop, got: {}",
                 fused_lisp
             );
-            assert!(!fused_lisp.contains("(reduce "), "reduce should be fused, got: {}", fused_lisp);
+            assert!(
+                !fused_lisp.contains("(reduce "),
+                "reduce should be fused, got: {}",
+                fused_lisp
+            );
         }
     }
 
@@ -641,7 +710,9 @@ Concequent and alternative must match types
             _ => panic!("std ast should be (do ...)"),
         };
 
-        let wat = crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
         let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
@@ -702,7 +773,9 @@ Concequent and alternative must match types
             reinfer.err().unwrap_or_else(|| "unknown error".to_string())
         );
 
-        let wat = crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
         let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
@@ -720,6 +793,29 @@ Concequent and alternative must match types
             main_wat.contains("\n    block\n      loop\n"),
             "main should contain lowered loop(s) after segmentation fusion, got:\n{}",
             main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_post_opt_dce_drops_unused_top_level_user_def() {
+        let program =
+            "(do (let unused_dce_probe (lambda x (+ x 1))) (let used_dce_probe (lambda x (+ x 2))) (used_dce_probe 3))";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) =>
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std"),
+            _ => panic!("std ast should be (do ...)"),
+        };
+
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
+        assert!(
+            !wat.contains("$v_unused_dce_probe"),
+            "post-optimization DCE should remove unused top-level def from emitted wat, got:\n{}",
+            wat
         );
     }
 
@@ -774,9 +870,10 @@ Concequent and alternative must match types
 
     #[test]
     fn test_fused_pipeline_expression_has_word_only_call_heads() {
-        let expr = crate::parser::parse(
-            "(reduce + 0 (map square (filter even? (vector 1 2 3 4 5))))"
-        ).expect("input should parse").remove(0);
+        let expr = crate::parser
+            ::parse("(reduce + 0 (map square (filter even? (vector 1 2 3 4 5))))")
+            .expect("input should parse")
+            .remove(0);
         let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
         assert!(
             !has_non_word_call_head(&fused),
@@ -1005,9 +1102,7 @@ Concequent and alternative must match types
         let diagnostics: serde_json::Value = serde_json
             ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
 
         assert!(!items.is_empty(), "expected at least one diagnostic, got: {}", diagnostics_json);
 
@@ -1067,9 +1162,7 @@ Concequent and alternative must match types
         let diagnostics: serde_json::Value = serde_json
             ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
 
         assert!(!items.is_empty(), "expected at least one diagnostic, got: {}", diagnostics_json);
 
@@ -1114,16 +1207,20 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wasm_lsp_diagnostics_empty_application_scoped_to_its_top_form() {
-        let program = "(let fn1 (lambda x x))\n(let fn2 (lambda x x))\n() ; Error!: Empty application";
+        let program =
+            "(let fn1 (lambda x x))\n(let fn2 (lambda x x))\n() ; Error!: Empty application";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
         let diagnostics: serde_json::Value = serde_json
             ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
 
-        assert_eq!(items.len(), 1, "expected a single scoped diagnostic, got: {}", diagnostics_json);
+        assert_eq!(
+            items.len(),
+            1,
+            "expected a single scoped diagnostic, got: {}",
+            diagnostics_json
+        );
         let item = &items[0];
         let start_line = item
             .get("range")
