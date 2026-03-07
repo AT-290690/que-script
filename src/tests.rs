@@ -577,6 +577,59 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_slice_source_fuses_with_map_filter_reduce() {
+        let expr = crate::parser::parse(
+            "(reduce + 0 (map (lambda x (* x x)) (filter even? (slice 1 6 (vector 1 2 3 4 5 6 7)))))"
+        ).expect("input should parse").remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(
+            fused_lisp.contains("(loop __fuse_from __fuse_to __fuse_process)"),
+            "slice source should fuse to start/end bounded loop, got: {}",
+            fused_lisp
+        );
+        assert!(!fused_lisp.contains("(slice "), "slice call should be eliminated by fusion source lowering, got: {}", fused_lisp);
+        assert!(!fused_lisp.contains("(reduce "), "reduce should be fused, got: {}", fused_lisp);
+    }
+
+    #[test]
+    fn test_typed_optimization_find_fuses_and_tracks_filtered_logical_index() {
+        let expr = crate::parser::parse(
+            "(find (lambda x (= x 16)) (map (lambda x (* x x)) (filter even? (vector 1 2 3 4 5 6))))"
+        ).expect("input should parse").remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(fused_lisp.contains("(loop-finish"), "find should fuse to short-circuit loop-finish, got: {}", fused_lisp);
+        assert!(!fused_lisp.contains("(find "), "find call should be fused, got: {}", fused_lisp);
+        assert!(
+            fused_lisp.contains("__fuse_logical_i"),
+            "find fusion should keep logical index for filtered streams, got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_take_drop_aliases_fuse_as_slice_sources() {
+        let programs = [
+            "(reduce + 0 (map (lambda x x) (take/first 3 (vector 1 2 3 4 5))))",
+            "(reduce + 0 (map (lambda x x) (drop/first 2 (vector 1 2 3 4 5))))",
+            "(reduce + 0 (map (lambda x x) (take/last 2 (vector 1 2 3 4 5))))",
+            "(reduce + 0 (map (lambda x x) (drop/last 2 (vector 1 2 3 4 5))))",
+        ];
+
+        for program in programs {
+            let expr = crate::parser::parse(program).expect("input should parse").remove(0);
+            let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+            assert!(
+                fused_lisp.contains("(loop __fuse_from __fuse_to __fuse_process)"),
+                "take/drop alias source should fuse via slice-style bounded loop, got: {}",
+                fused_lisp
+            );
+            assert!(!fused_lisp.contains("(reduce "), "reduce should be fused, got: {}", fused_lisp);
+        }
+    }
+
+    #[test]
     fn test_wat_pipeline_map_filter_reduce_fuses_to_single_reduce_loop_in_codegen_path() {
         let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
         let std_ast = crate::baked::load_ast();
@@ -610,6 +663,62 @@ Concequent and alternative must match types
         assert!(
             main_wat.contains("\n    block\n      loop\n"),
             "main should contain a single lowered loop after fusion, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_pipeline_with_wrapper_barrier_still_segment_fuses() {
+        let program =
+            "(do (let mymap (lambda fn xs (map square xs))) (|> (range 1 10) (filter even?) (mymap square) (map square) (reduce + 0)))";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) =>
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std"),
+            _ => panic!("std ast should be (do ...)"),
+        };
+
+        let fused_wrapped = match &wrapped {
+            crate::parser::Expression::Apply(items) if
+                matches!(items.first(), Some(crate::parser::Expression::Word(w)) if w == "do") &&
+                items.len() > 1
+            => {
+                let mut out = items.clone();
+                let last = out.len() - 1;
+                out[last] = crate::op::fuse_map_filter_reduce_for_test(&out[last]);
+                crate::parser::Expression::Apply(out)
+            }
+            _ => crate::op::fuse_map_filter_reduce_for_test(&wrapped),
+        };
+        let reinfer = crate::infer::infer_with_builtins_typed(
+            &fused_wrapped,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            reinfer.is_ok(),
+            "segmented fused wrapper case must re-infer; got: {}",
+            reinfer.err().unwrap_or_else(|| "unknown error".to_string())
+        );
+
+        let wat = crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $v_filter"),
+            "main should not call v_filter when left segment fuses, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $v_reduce"),
+            "main should not call v_reduce when right segment fuses, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.contains("\n    block\n      loop\n"),
+            "main should contain lowered loop(s) after segmentation fusion, got:\n{}",
             main_wat
         );
     }
