@@ -8,14 +8,15 @@
 (let map/snd (lambda fn xs (std/tuple/map/snd xs fn)))
 (let flat-map (lambda fn xs (std/vector/flat-map xs fn)))
 (let map (lambda fn xs (std/vector/map xs fn)))
+(let filter (lambda fn? xs (std/vector/filter xs fn?)))
+(let reduce (lambda fn init xs (std/vector/reduce xs fn init)))
+
 (let for (lambda fn xs (std/vector/for xs fn)))
 (let for/i (lambda fn xs (std/vector/for/i xs fn)))
 
 (let each (lambda xs fn (do (std/vector/for xs fn) xs)))
 (let each/i (lambda xs fn (do (std/vector/for/i xs fn) xs)))
 
-(let filter (lambda fn? xs (std/vector/filter xs fn?)))
-(let reduce (lambda fn init xs (std/vector/reduce xs fn init)))
 (let transpose std/vector/3d/rotate)
 (let interleave std/vector/2d/interleave)
 (let intersperse (lambda xs x (std/vector/intersperse x xs)))

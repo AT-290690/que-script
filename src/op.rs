@@ -36,6 +36,9 @@ enum FuseSink {
         predicate: Expression,
         with_index: bool,
     },
+    Find {
+        predicate: Expression,
+    },
 }
 
 #[derive(Clone)]
@@ -49,6 +52,28 @@ enum FuseSource {
         start: Expression,
         end: Expression,
     },
+    Slice {
+        xs: Expression,
+        start: Expression,
+        end: Expression,
+    },
+}
+
+#[derive(Default)]
+struct FuseNameState {
+    next_loop_id: usize,
+}
+
+impl FuseNameState {
+    fn next_suffix(&mut self) -> String {
+        let id = self.next_loop_id;
+        self.next_loop_id += 1;
+        if id == 0 {
+            String::new()
+        } else {
+            format!("_{}", id)
+        }
+    }
 }
 
 pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
@@ -78,34 +103,35 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
 }
 
 fn fuse_entry_expression_for_program(expr: &Expression) -> Expression {
+    let mut name_state = FuseNameState::default();
     match expr {
         Expression::Apply(items) if
             matches!(items.first(), Some(Expression::Word(w)) if w == "do") && items.len() > 1
         => {
             let mut out = items.clone();
             let last = out.len() - 1;
-            out[last] = fuse_map_filter_reduce_chains_expr(&out[last]);
+            out[last] = fuse_map_filter_reduce_chains_expr(&out[last], &mut name_state);
             Expression::Apply(out)
         }
-        _ => fuse_map_filter_reduce_chains_expr(expr),
+        _ => fuse_map_filter_reduce_chains_expr(expr, &mut name_state),
     }
 }
 
-fn fuse_map_filter_reduce_chains_expr(expr: &Expression) -> Expression {
+fn fuse_map_filter_reduce_chains_expr(expr: &Expression, name_state: &mut FuseNameState) -> Expression {
     match expr {
         Expression::Apply(items) => {
             // Prioritize whole-chain fusions before rewriting children, so map/filter
             // combos become a single loop rather than nested loop wrappers.
-            if let Some(fused) = fuse_terminal_over_map_filter_chain(expr) {
-                return fuse_map_filter_reduce_chains_expr(&fused);
+            if let Some(fused) = fuse_terminal_over_map_filter_chain(expr, name_state) {
+                return fuse_map_filter_reduce_chains_expr(&fused, name_state);
             }
-            if let Some(fused) = fuse_map_filter_chain_to_collect(expr) {
+            if let Some(fused) = fuse_map_filter_chain_to_collect(expr, name_state) {
                 return fused;
             }
 
             let rewritten_items = items
                 .iter()
-                .map(fuse_map_filter_reduce_chains_expr)
+                .map(|item| fuse_map_filter_reduce_chains_expr(item, name_state))
                 .collect::<Vec<_>>();
             let rewritten = Expression::Apply(rewritten_items);
             rewritten
@@ -114,7 +140,10 @@ fn fuse_map_filter_reduce_chains_expr(expr: &Expression) -> Expression {
     }
 }
 
-fn fuse_terminal_over_map_filter_chain(expr: &Expression) -> Option<Expression> {
+fn fuse_terminal_over_map_filter_chain(
+    expr: &Expression,
+    name_state: &mut FuseNameState
+) -> Option<Expression> {
     let (sink, input_expr) = parse_terminal_call(expr)?;
     let (base, ops) = match collect_map_filter_chain(input_expr.clone()) {
         Some((base, ops)) => (base, ops),
@@ -127,10 +156,13 @@ fn fuse_terminal_over_map_filter_chain(expr: &Expression) -> Option<Expression> 
         return None;
     }
     let source = parse_fuse_source(base);
-    build_direct_fused_loop(source, &ops, sink)
+    build_direct_fused_loop(source, &ops, sink, name_state)
 }
 
-fn fuse_map_filter_chain_to_collect(expr: &Expression) -> Option<Expression> {
+fn fuse_map_filter_chain_to_collect(
+    expr: &Expression,
+    name_state: &mut FuseNameState
+) -> Option<Expression> {
     let (_, _) = parse_map_or_filter_call(expr)?;
     let (base, ops) = collect_map_filter_chain(expr.clone())?;
     if ops.is_empty() {
@@ -140,7 +172,7 @@ fn fuse_map_filter_chain_to_collect(expr: &Expression) -> Option<Expression> {
         return None;
     }
     let source = parse_fuse_source(base);
-    build_direct_fused_loop(source, &ops, FuseSink::Collect)
+    build_direct_fused_loop(source, &ops, FuseSink::Collect, name_state)
 }
 
 fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
@@ -224,6 +256,14 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 FuseSink::Every {
                     predicate: items.get(1)?.clone(),
                     with_index: true,
+                },
+                items.get(2)?.clone(),
+            )),
+        // find pred xs => first matching index, -1 if none
+        "find" if items.len() == 3 =>
+            Some((
+                FuseSink::Find {
+                    predicate: items.get(1)?.clone(),
                 },
                 items.get(2)?.clone(),
             )),
@@ -344,6 +384,64 @@ fn parse_fuse_source(base_expr: Expression) -> FuseSource {
                 end: items[2].clone(),
             }
         }
+        Expression::Apply(items) if
+            items.len() == 4 && matches!(items.first(), Some(Expression::Word(w)) if w == "slice")
+        => {
+            FuseSource::Slice {
+                start: items[1].clone(),
+                end: items[2].clone(),
+                xs: items[3].clone(),
+            }
+        }
+        // take/first n xs => slice 0 n xs
+        Expression::Apply(items) if
+            items.len() == 3 && matches!(items.first(), Some(Expression::Word(w)) if w == "take/first")
+        => {
+            FuseSource::Slice {
+                start: Expression::Int(0),
+                end: items[1].clone(),
+                xs: items[2].clone(),
+            }
+        }
+        // drop/first n xs => slice n (length xs) xs
+        Expression::Apply(items) if
+            items.len() == 3 && matches!(items.first(), Some(Expression::Word(w)) if w == "drop/first")
+        => {
+            FuseSource::Slice {
+                start: items[1].clone(),
+                end: Expression::Apply(vec![Expression::Word("length".to_string()), items[2].clone()]),
+                xs: items[2].clone(),
+            }
+        }
+        // take/last n xs => slice (length xs - n) (length xs) xs
+        Expression::Apply(items) if
+            items.len() == 3 && matches!(items.first(), Some(Expression::Word(w)) if w == "take/last")
+        => {
+            let len_expr = Expression::Apply(vec![Expression::Word("length".to_string()), items[2].clone()]);
+            FuseSource::Slice {
+                start: Expression::Apply(vec![
+                    Expression::Word("-".to_string()),
+                    len_expr.clone(),
+                    items[1].clone(),
+                ]),
+                end: len_expr,
+                xs: items[2].clone(),
+            }
+        }
+        // drop/last n xs => slice 0 (length xs - n) xs
+        Expression::Apply(items) if
+            items.len() == 3 && matches!(items.first(), Some(Expression::Word(w)) if w == "drop/last")
+        => {
+            FuseSource::Slice {
+                start: Expression::Int(0),
+                end: Expression::Apply(vec![
+                    Expression::Word("-".to_string()),
+                    Expression::Apply(vec![Expression::Word("length".to_string()), items[2].clone()]),
+                    items[1].clone(),
+                ]),
+                xs: items[2].clone(),
+            }
+        }
         _ => FuseSource::Vector(base_expr),
     }
 }
@@ -351,32 +449,48 @@ fn parse_fuse_source(base_expr: Expression) -> FuseSource {
 fn build_direct_fused_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
-    sink: FuseSink
+    sink: FuseSink,
+    name_state: &mut FuseNameState
 ) -> Option<Expression> {
+    let suffix = name_state.next_suffix();
     match sink {
         FuseSink::Some {
             predicate,
             with_index,
-        } => build_some_every_loop(source, ops_outer_to_inner, predicate, with_index, true),
+        } => build_some_every_loop(source, ops_outer_to_inner, predicate, with_index, true, &suffix),
         FuseSink::Every {
             predicate,
             with_index,
-        } => build_some_every_loop(source, ops_outer_to_inner, predicate, with_index, false),
-        FuseSink::Collect => build_collect_loop(source, ops_outer_to_inner),
+        } => build_some_every_loop(source, ops_outer_to_inner, predicate, with_index, false, &suffix),
+        FuseSink::Collect => build_collect_loop(source, ops_outer_to_inner, &suffix),
         FuseSink::Reduce {
             reduce_fn,
             init_expr,
             with_index,
-        } => build_reduce_loop(source, ops_outer_to_inner, reduce_fn, init_expr, with_index),
+        } => build_reduce_loop(source, ops_outer_to_inner, reduce_fn, init_expr, with_index, &suffix),
+        FuseSink::Find { predicate } => build_find_loop(source, ops_outer_to_inner, predicate, &suffix),
     }
 }
 
-fn build_collect_loop(source: FuseSource, ops_outer_to_inner: &[MapFilterOp]) -> Option<Expression> {
-    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(source)?;
+fn fuse_tmp_name(base: &str, suffix: &str) -> String {
+    if suffix.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}{}", base, suffix)
+    }
+}
 
-    let out_name = "__fuse_out".to_string();
-    let process_name = "__fuse_process".to_string();
-    let i_name = "__fuse_i".to_string();
+fn build_collect_loop(
+    source: FuseSource,
+    ops_outer_to_inner: &[MapFilterOp],
+    suffix: &str
+) -> Option<Expression> {
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) =
+        make_loop_source_bindings(source, suffix)?;
+
+    let out_name = fuse_tmp_name("__fuse_out", suffix);
+    let process_name = fuse_tmp_name("__fuse_process", suffix);
+    let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
     let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, i_word.clone())?;
@@ -434,13 +548,15 @@ fn build_reduce_loop(
     ops_outer_to_inner: &[MapFilterOp],
     reduce_fn: Expression,
     init_expr: Expression,
-    with_index: bool
+    with_index: bool,
+    suffix: &str
 ) -> Option<Expression> {
-    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(source)?;
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) =
+        make_loop_source_bindings(source, suffix)?;
 
-    let out_name = "__fuse_out".to_string();
-    let process_name = "__fuse_process".to_string();
-    let i_name = "__fuse_i".to_string();
+    let out_name = fuse_tmp_name("__fuse_out", suffix);
+    let process_name = fuse_tmp_name("__fuse_process", suffix);
+    let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
     let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, i_word.clone())?;
@@ -509,13 +625,14 @@ fn build_some_every_loop(
     ops_outer_to_inner: &[MapFilterOp],
     predicate: Expression,
     with_index: bool,
-    is_some: bool
+    is_some: bool,
+    suffix: &str
 ) -> Option<Expression> {
     let (mut setup_bindings, idx_ref_name, cond_bound_expr, value_expr_for_idx_ref) =
-        make_short_circuit_source_bindings(source)?;
+        make_short_circuit_source_bindings(source, suffix)?;
 
-    let flag_name = "__fuse_flag".to_string();
-    let process_name = "__fuse_process".to_string();
+    let flag_name = fuse_tmp_name("__fuse_flag", suffix);
+    let process_name = fuse_tmp_name("__fuse_process", suffix);
     let idx_get = Expression::Apply(vec![
         Expression::Word("get".to_string()),
         Expression::Word(idx_ref_name.clone()),
@@ -641,8 +758,141 @@ fn build_some_every_loop(
     Some(Expression::Apply(do_items))
 }
 
+fn build_find_loop(
+    source: FuseSource,
+    ops_outer_to_inner: &[MapFilterOp],
+    predicate: Expression,
+    suffix: &str
+) -> Option<Expression> {
+    let (mut setup_bindings, idx_ref_name, cond_bound_expr, value_expr_for_idx_ref) =
+        make_short_circuit_source_bindings(source, suffix)?;
+
+    let out_name = fuse_tmp_name("__fuse_out", suffix);
+    let logical_i_name = fuse_tmp_name("__fuse_logical_i", suffix);
+    let process_name = fuse_tmp_name("__fuse_process", suffix);
+
+    let idx_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(idx_ref_name.clone()),
+        Expression::Int(0),
+    ]);
+    let x_expr = value_expr_for_idx_ref(&idx_get);
+    let (mapped, guard) = compose_map_filter_value_and_guard(ops_outer_to_inner, x_expr, idx_get.clone())?;
+
+    let logical_i_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(logical_i_name.clone()),
+        Expression::Int(0),
+    ]);
+    let pred_value = call_callable_expr(&predicate, vec![mapped])?;
+    let set_found = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Int(0),
+        logical_i_get.clone(),
+    ]);
+    let maybe_set_found = Expression::Apply(vec![
+        Expression::Word("if".to_string()),
+        pred_value,
+        set_found,
+        no_op_unit_expr(),
+    ]);
+    let inc_logical_i = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(logical_i_name.clone()),
+        Expression::Int(0),
+        Expression::Apply(vec![
+            Expression::Word("+".to_string()),
+            logical_i_get,
+            Expression::Int(1),
+        ]),
+    ]);
+    let included_step = Expression::Apply(vec![
+        Expression::Word("do".to_string()),
+        maybe_set_found,
+        inc_logical_i,
+    ]);
+    let guarded_step = match guard {
+        Some(cond) =>
+            Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                cond,
+                included_step,
+                no_op_unit_expr(),
+            ]),
+        None => included_step,
+    };
+    let idx_inc = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(idx_ref_name.clone()),
+        Expression::Int(0),
+        Expression::Apply(vec![
+            Expression::Word("+".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Int(0),
+            ]),
+            Expression::Int(1),
+        ]),
+    ]);
+    let process_lambda = Expression::Apply(vec![
+        Expression::Word("lambda".to_string()),
+        Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            guarded_step,
+            idx_inc,
+        ]),
+    ]);
+
+    let continue_cond = Expression::Apply(vec![
+        Expression::Word("and".to_string()),
+        cond_bound_expr,
+        Expression::Apply(vec![
+            Expression::Word("=".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(out_name.clone()),
+                Expression::Int(0),
+            ]),
+            Expression::Int(-1),
+        ]),
+    ]);
+
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(-1)]),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(logical_i_name.clone()),
+        Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)]),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(process_name.clone()),
+        process_lambda,
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("loop-finish".to_string()),
+        continue_cond,
+        Expression::Word(process_name),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(out_name),
+        Expression::Int(0),
+    ]));
+
+    let mut do_items = vec![Expression::Word("do".to_string())];
+    do_items.extend(setup_bindings);
+    Some(Expression::Apply(do_items))
+}
+
 fn make_loop_source_bindings(
-    source: FuseSource
+    source: FuseSource,
+    suffix: &str
 ) -> Option<
     (
         Vec<Expression>,
@@ -653,7 +903,7 @@ fn make_loop_source_bindings(
 > {
     match source {
         FuseSource::Vector(xs_expr) => {
-            let xs_name = "__fuse_xs".to_string();
+            let xs_name = fuse_tmp_name("__fuse_xs", suffix);
             let xs_word = Expression::Word(xs_name.clone());
             let mut setup = Vec::new();
             setup.push(Expression::Apply(vec![
@@ -673,8 +923,8 @@ fn make_loop_source_bindings(
             Some((setup, start_expr, end_expr, value))
         }
         FuseSource::RangeInt { start, end } => {
-            let from_name = "__fuse_from".to_string();
-            let to_name = "__fuse_to".to_string();
+            let from_name = fuse_tmp_name("__fuse_from", suffix);
+            let to_name = fuse_tmp_name("__fuse_to", suffix);
             let from_word = Expression::Word(from_name.clone());
             let to_word = Expression::Word(to_name.clone());
             let mut setup = Vec::new();
@@ -699,8 +949,8 @@ fn make_loop_source_bindings(
             Some((setup, start_expr, end_expr, value))
         }
         FuseSource::RangeFloat { start, end } => {
-            let from_name = "__fuse_from".to_string();
-            let to_name = "__fuse_to".to_string();
+            let from_name = fuse_tmp_name("__fuse_from", suffix);
+            let to_name = fuse_tmp_name("__fuse_to", suffix);
             let from_word = Expression::Word(from_name.clone());
             let to_word = Expression::Word(to_name.clone());
             let mut setup = Vec::new();
@@ -728,11 +978,46 @@ fn make_loop_source_bindings(
             });
             Some((setup, start_expr, end_expr, value))
         }
+        FuseSource::Slice { xs, start, end } => {
+            let xs_name = fuse_tmp_name("__fuse_xs", suffix);
+            let from_name = fuse_tmp_name("__fuse_from", suffix);
+            let to_name = fuse_tmp_name("__fuse_to", suffix);
+            let xs_word = Expression::Word(xs_name.clone());
+            let from_word = Expression::Word(from_name.clone());
+            let to_word = Expression::Word(to_name.clone());
+            let mut setup = Vec::new();
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(from_name),
+                start,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name),
+                end,
+            ]));
+            let start_expr = from_word;
+            let end_expr = to_word;
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    xs_word.clone(),
+                    i_expr.clone(),
+                ])
+            });
+            Some((setup, start_expr, end_expr, value))
+        }
     }
 }
 
 fn make_short_circuit_source_bindings(
-    source: FuseSource
+    source: FuseSource,
+    suffix: &str
 ) -> Option<
     (
         Vec<Expression>,
@@ -743,9 +1028,9 @@ fn make_short_circuit_source_bindings(
 > {
     match source {
         FuseSource::Vector(xs_expr) => {
-            let xs_name = "__fuse_xs".to_string();
-            let len_name = "__fuse_len".to_string();
-            let idx_ref_name = "__fuse_i".to_string();
+            let xs_name = fuse_tmp_name("__fuse_xs", suffix);
+            let len_name = fuse_tmp_name("__fuse_len", suffix);
+            let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
             let xs_word = Expression::Word(xs_name.clone());
             let mut setup = Vec::new();
             setup.push(Expression::Apply(vec![
@@ -782,8 +1067,8 @@ fn make_short_circuit_source_bindings(
             Some((setup, idx_ref_name, cond, value))
         }
         FuseSource::RangeInt { start, end } => {
-            let idx_ref_name = "__fuse_i".to_string();
-            let to_name = "__fuse_to".to_string();
+            let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
+            let to_name = fuse_tmp_name("__fuse_to", suffix);
             let mut setup = Vec::new();
             setup.push(Expression::Apply(vec![
                 Expression::Word("let".to_string()),
@@ -812,8 +1097,8 @@ fn make_short_circuit_source_bindings(
             Some((setup, idx_ref_name, cond, value))
         }
         FuseSource::RangeFloat { start, end } => {
-            let idx_ref_name = "__fuse_i".to_string();
-            let to_name = "__fuse_to".to_string();
+            let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
+            let to_name = fuse_tmp_name("__fuse_to", suffix);
             let mut setup = Vec::new();
             setup.push(Expression::Apply(vec![
                 Expression::Word("let".to_string()),
@@ -841,6 +1126,45 @@ fn make_short_circuit_source_bindings(
             let value = Box::new(|i_expr: &Expression| {
                 Expression::Apply(vec![
                     Expression::Word("Int->Float".to_string()),
+                    i_expr.clone(),
+                ])
+            });
+            Some((setup, idx_ref_name, cond, value))
+        }
+        FuseSource::Slice { xs, start, end } => {
+            let xs_name = fuse_tmp_name("__fuse_xs", suffix);
+            let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
+            let to_name = fuse_tmp_name("__fuse_to", suffix);
+            let xs_word = Expression::Word(xs_name.clone());
+            let mut setup = Vec::new();
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Apply(vec![Expression::Word("vector".to_string()), start]),
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name.clone()),
+                end,
+            ]));
+            let cond = Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(idx_ref_name.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Word(to_name),
+            ]);
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    xs_word.clone(),
                     i_expr.clone(),
                 ])
             });
@@ -957,6 +1281,7 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
         FuseSink::Reduce { reduce_fn, .. } => is_fusion_safe_callable(reduce_fn),
         FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } =>
             is_fusion_safe_callable(predicate),
+        FuseSink::Find { predicate } => is_fusion_safe_callable(predicate),
     }
 }
 
@@ -971,7 +1296,8 @@ fn is_fusion_safe_callable(expr: &Expression) -> bool {
 
 #[cfg(test)]
 pub(crate) fn fuse_map_filter_reduce_for_test(expr: &Expression) -> Expression {
-    fuse_map_filter_reduce_chains_expr(expr)
+    let mut name_state = FuseNameState::default();
+    fuse_map_filter_reduce_chains_expr(expr, &mut name_state)
 }
 
 fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
