@@ -98,6 +98,38 @@
 (let sq std/char/single-quote)
 (let bt std/char/backtick)
 
+(let std/float/floor (lambda n (-. n (mod. n 1.0))))
+(let std/float/ceil (lambda n (do 
+    (let sign (if (>=. n 0.0) 1 -1))
+    (let absn (if (>=. n 0.0) n (-. n)))
+    (let frac (mod. absn 1.0))
+    (let intpart (-. absn frac))
+    (cond (=. n 0.0) n (if (= sign 1) (+. intpart 1.0) (-. intpart))))))
+
+(let std/vector/length (lambda xs (length xs)))
+(let std/vector/get (lambda xs i (get xs i)))
+(let get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
+(let std/vector/2d/length std/vector/length)
+(let std/vector/2d/get get)
+(let std/vector/2d/get/default get/default)
+(let std/vector/pop! (lambda xs (pop! xs)))
+(let std/vector/set! (lambda xs i x (set! xs i x)))
+(let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp))))
+(let std/vector/push! (lambda xs x (do (set! xs (length xs) x) xs)))
+(let std/vector/pop-and-get! (lambda xs (do 
+      (let out (get xs (- (length xs) 1))) 
+      (pop! xs)
+      out)))
+(let std/vector/push-and-get! (lambda xs x (do (set! xs (length xs) x) x)))
+(let std/vector/update! (lambda xs i value (do (set! xs i value) xs)))
+(let std/vector/tail! (lambda xs (do (pop! xs) xs)))
+(let std/vector/append! (lambda xs x (do (std/vector/push! xs x) xs)))
+(let std/vector/at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
+(let std/vector/first (lambda xs (get xs 0)))
+(let std/vector/second (lambda xs (get xs 1)))
+(let std/vector/third (lambda xs (get xs 3)))
+(let std/vector/last (lambda xs (get xs (- (length xs) 1))))
+
 (let box (lambda value [ value ]))
 (let set (lambda vrbl x (set! vrbl 0 x)))
 (let =! (lambda vrbl x (set! vrbl 0 x)))
@@ -137,31 +169,6 @@
 (let std/char/digit? (lambda ch (and (>=# ch std/char/0) (<=# ch std/char/9))))
 (let std/char/upper (lambda char (if (and (>=# char std/char/a) (<=# char std/char/z)) (-# char std/char/space) char)))
 (let std/char/lower (lambda char (if (and (>=# char std/char/A) (<=# char std/char/Z)) (+# char std/char/space) char)))
-(let std/vector/length (lambda xs (length xs)))
-(let std/vector/flat/length (lambda matrix (length (std/vector/flat-one matrix))))
-(let std/vector/get (lambda xs i (get xs i)))
-(let get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
-(let std/vector/2d/length std/vector/length)
-(let std/vector/2d/get get)
-(let std/vector/2d/get/default get/default)
-(let std/vector/pop! (lambda xs (pop! xs)))
-(let std/vector/set! (lambda xs i x (set! xs i x)))
-(let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp))))
-(let std/vector/push! (lambda xs x (do (set! xs (length xs) x) xs)))
-(let std/vector/pop-and-get! (lambda xs (do 
-      (let out (get xs (- (length xs) 1))) 
-      (pop! xs)
-      out)))
-(let std/vector/push-and-get! (lambda xs x (do (set! xs (length xs) x) x)))
-(let std/vector/update! (lambda xs i value (do (set! xs i value) xs)))
-(let std/vector/tail! (lambda xs (do (pop! xs) xs)))
-(let std/vector/append! (lambda xs x (do (std/vector/push! xs x) xs)))
-(let std/vector/at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
-(let std/vector/first (lambda xs (get xs 0)))
-(let std/vector/second (lambda xs (get xs 1)))
-(let std/vector/third (lambda xs (get xs 3)))
-(let std/vector/last (lambda xs (get xs (- (length xs) 1))))
-
 
 (let std/float/safe? (lambda value (and (>=. value const/float/min-safe) (<=. value const/float/max-safe))))
 (let std/float/get-safe (lambda vrbl (if (std/float/safe? (get vrbl)) (get vrbl) Float)))
@@ -173,13 +180,6 @@
 (let std/int/safe? (lambda value (and (>= value const/int/min-safe) (<= value const/int/max-safe))))
 (let std/int/get-safe (lambda vrbl (if (std/int/safe? (get vrbl)) (get vrbl) Int)))
 
-(let std/float/floor (lambda n (-. n (mod. n 1.0))))
-(let std/float/ceil (lambda n (do 
-    (let sign (if (>=. n 0.0) 1 -1))
-    (let absn (if (>=. n 0.0) n (-. n)))
-    (let frac (mod. absn 1.0))
-    (let intpart (-. absn frac))
-    (cond (=. n 0.0) n (if (= sign 1) (+. intpart 1.0) (-. intpart))))))
 
 ; Extra keywords
 (let std/fn/apply/0 (lambda fn (fn)))
@@ -256,7 +256,7 @@
 (let std/fn/rec (lambda init-frame handler (do 
   (let stack [init-frame])
   (let result [[]])
-  (loop (not (empty? stack)) (lambda (do 
+  (loop (not (std/vector/empty? stack)) (lambda (do 
     (let frame (pull! stack))
     (let action (handler frame))
     ; Action grammar:
@@ -284,6 +284,7 @@
 (let std/vector/in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
 (let std/vector/for (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i))))))
 (let std/vector/for/i (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i) i)))))
+
 (let std/vector/filter (lambda xs fn? (if (std/vector/empty? xs) xs (do 
      (let out [])
      (let process (lambda i (do
@@ -1192,6 +1193,7 @@ nil)))
      (std/vector/empty? xs) []
      (= (length xs) 1) (get xs)
      (std/vector/reduce xs (lambda a b (std/vector/cons a b)) []))))
+(let std/vector/flat/length (lambda matrix (length (std/vector/flat-one matrix))))
 
 (let std/vector/hash/table/keys (lambda table (<| table (std/vector/flat-one) (std/vector/map std/vector/first))))
 (let std/vector/hash/table/values (lambda table (<| table (std/vector/flat-one) (std/vector/map std/vector/second))))

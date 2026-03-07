@@ -3303,14 +3303,7 @@ fn emit_vector_runtime(
                 ""
             },
         ),
-        (
-            ";; __DBG_RC_RELEASE_VEC_DEC__",
-            if debug_rc_enabled {
-                ""
-            } else {
-                ""
-            },
-        ),
+        (";; __DBG_RC_RELEASE_VEC_DEC__", if debug_rc_enabled { "" } else { "" }),
         (
             ";; __DBG_RC_RELEASE_VEC_RC_HIST__",
             if debug_rc_enabled {
@@ -3646,6 +3639,9 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         ">=." => {
             return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge"));
         }
+        "let" | "let*" | "loop" | "loop-finish" => {
+            return Err(format!("Unsupported return of builtin {}", op));
+        }
         _ => {
             return Err(format!("Unsupported builtin {}", op));
         }
@@ -3687,7 +3683,9 @@ const MAX_BORROW_ANALYSIS_DEPTH: usize = 64;
 fn apply_child_at<'a>(node: &'a TypedExpression, item_idx: usize) -> Option<&'a TypedExpression> {
     let items = match &node.expr {
         Expression::Apply(items) => items,
-        _ => return None,
+        _ => {
+            return None;
+        }
     };
     let child_offset = if node.children.len() + 1 == items.len() { 1 } else { 0 };
     if item_idx < child_offset {
@@ -3697,10 +3695,14 @@ fn apply_child_at<'a>(node: &'a TypedExpression, item_idx: usize) -> Option<&'a 
     }
 }
 
-fn lambda_params_and_body<'a>(lambda_node: &'a TypedExpression) -> Option<(Vec<String>, &'a TypedExpression)> {
+fn lambda_params_and_body<'a>(
+    lambda_node: &'a TypedExpression
+) -> Option<(Vec<String>, &'a TypedExpression)> {
     let items = match &lambda_node.expr {
         Expression::Apply(items) => items,
-        _ => return None,
+        _ => {
+            return None;
+        }
     };
     if !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") || items.len() < 2 {
         return None;
@@ -3735,25 +3737,59 @@ fn is_borrowed_managed_rhs_with_env(
         Expression::Apply(items) if !items.is_empty() => {
             let op = match &items[0] {
                 Expression::Word(w) => w.as_str(),
-                _ => return false,
+                _ => {
+                    return false;
+                }
             };
             if op == "as" || op == "char" {
-                return apply_child_at(node, 1).map(|n|
-                    is_borrowed_managed_rhs_with_env(n, env, lambda_bindings, call_stack, depth + 1)
-                ).unwrap_or(false);
+                return apply_child_at(node, 1)
+                    .map(|n|
+                        is_borrowed_managed_rhs_with_env(
+                            n,
+                            env,
+                            lambda_bindings,
+                            call_stack,
+                            depth + 1
+                        )
+                    )
+                    .unwrap_or(false);
             }
             if is_borrowing_accessor_expr(node) {
-                return apply_child_at(node, 1).map(|n|
-                    is_borrowed_managed_rhs_with_env(n, env, lambda_bindings, call_stack, depth + 1)
-                ).unwrap_or(false);
+                return apply_child_at(node, 1)
+                    .map(|n|
+                        is_borrowed_managed_rhs_with_env(
+                            n,
+                            env,
+                            lambda_bindings,
+                            call_stack,
+                            depth + 1
+                        )
+                    )
+                    .unwrap_or(false);
             }
             if op == "if" {
-                let then_borrowed = apply_child_at(node, 2).map(|n|
-                    is_borrowed_managed_rhs_with_env(n, env, lambda_bindings, call_stack, depth + 1)
-                ).unwrap_or(false);
-                let else_borrowed = apply_child_at(node, 3).map(|n|
-                    is_borrowed_managed_rhs_with_env(n, env, lambda_bindings, call_stack, depth + 1)
-                ).unwrap_or(false);
+                let then_borrowed = apply_child_at(node, 2)
+                    .map(|n|
+                        is_borrowed_managed_rhs_with_env(
+                            n,
+                            env,
+                            lambda_bindings,
+                            call_stack,
+                            depth + 1
+                        )
+                    )
+                    .unwrap_or(false);
+                let else_borrowed = apply_child_at(node, 3)
+                    .map(|n|
+                        is_borrowed_managed_rhs_with_env(
+                            n,
+                            env,
+                            lambda_bindings,
+                            call_stack,
+                            depth + 1
+                        )
+                    )
+                    .unwrap_or(false);
                 return then_borrowed && else_borrowed;
             }
             if op == "do" {
@@ -3761,7 +3797,10 @@ fn is_borrowed_managed_rhs_with_env(
                 if items.len() > 1 {
                     for i in 1..items.len() - 1 {
                         if let Expression::Apply(let_items) = &items[i] {
-                            if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
+                            if
+                                let [Expression::Word(kw), Expression::Word(name), _] =
+                                    &let_items[..]
+                            {
                                 if kw == "let" || kw == "let*" {
                                     let rhs_borrowed = apply_child_at(node, i)
                                         .and_then(|let_node| let_node.children.get(2))
@@ -3781,9 +3820,17 @@ fn is_borrowed_managed_rhs_with_env(
                         }
                     }
                 }
-                return apply_child_at(node, items.len() - 1).map(|last|
-                    is_borrowed_managed_rhs_with_env(last, &scoped_env, lambda_bindings, call_stack, depth + 1)
-                ).unwrap_or(false);
+                return apply_child_at(node, items.len() - 1)
+                    .map(|last|
+                        is_borrowed_managed_rhs_with_env(
+                            last,
+                            &scoped_env,
+                            lambda_bindings,
+                            call_stack,
+                            depth + 1
+                        )
+                    )
+                    .unwrap_or(false);
             }
             if let Some(lambda_node) = lambda_bindings.get(op) {
                 if call_stack.iter().any(|name| name == op) {
@@ -3792,13 +3839,23 @@ fn is_borrowed_managed_rhs_with_env(
                 }
                 let (params, body) = match lambda_params_and_body(lambda_node) {
                     Some(pb) => pb,
-                    None => return false,
+                    None => {
+                        return false;
+                    }
                 };
                 let mut lambda_env: HashMap<String, bool> = HashMap::new();
                 for (idx, param_name) in params.iter().enumerate() {
-                    let arg_borrowed = apply_child_at(node, idx + 1).map(|arg|
-                        is_borrowed_managed_rhs_with_env(arg, env, lambda_bindings, call_stack, depth + 1)
-                    ).unwrap_or(false);
+                    let arg_borrowed = apply_child_at(node, idx + 1)
+                        .map(|arg|
+                            is_borrowed_managed_rhs_with_env(
+                                arg,
+                                env,
+                                lambda_bindings,
+                                call_stack,
+                                depth + 1
+                            )
+                        )
+                        .unwrap_or(false);
                     lambda_env.insert(param_name.clone(), arg_borrowed);
                 }
                 call_stack.push(op.to_string());
@@ -3832,10 +3889,7 @@ fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
         Expression::Apply(items) if !items.is_empty() => {
             if let Expression::Word(op) = &items[0] {
                 if op == "as" || op == "char" {
-                    return node.children
-                        .get(1)
-                        .map(is_fresh_owned_managed_expr)
-                        .unwrap_or(false);
+                    return node.children.get(1).map(is_fresh_owned_managed_expr).unwrap_or(false);
                 }
                 return matches!(
                     op.as_str(),
@@ -3931,9 +3985,9 @@ fn compile_do(
                             .get(name)
                             .map(is_managed_local_type)
                             .unwrap_or(false);
-                        let borrowed_rhs = val_node.map(|n|
-                            is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings)
-                        ).unwrap_or(false);
+                        let borrowed_rhs = val_node
+                            .map(|n| is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings))
+                            .unwrap_or(false);
                         let value = if managed_local && borrowed_rhs {
                             let tmp_owned = ctx.tmp_i32 + 2;
                             format!(
@@ -4177,11 +4231,7 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     let managed_slots = managed_local_slots(ctx);
     let target_tmp = ctx.tmp_i32 + 3;
     let target_keep = ctx.tmp_i32 + 4;
-    let target_prefix = if release_target {
-        format!("{xs}\nlocal.tee {target_tmp}")
-    } else {
-        xs
-    };
+    let target_prefix = if release_target { format!("{xs}\nlocal.tee {target_tmp}") } else { xs };
     let target_release = if release_target {
         emit_release_managed_temp_if_not_local_alias(target_tmp, target_keep, &managed_slots)
     } else {
@@ -4211,7 +4261,13 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         if target_release.is_empty() {
             Ok(format!("{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}", elem.suffix()))
         } else {
-            Ok(format!("{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}\n{}", elem.suffix(), target_release))
+            Ok(
+                format!(
+                    "{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}\n{}",
+                    elem.suffix(),
+                    target_release
+                )
+            )
         }
     }
 }
@@ -4517,10 +4573,7 @@ fn compile_fast_cell_set(
             &managed_slots
         );
         Ok(
-            format!(
-                "{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\n{}",
-                release
-            )
+            format!("{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\n{}", release)
         )
     } else {
         Ok(format!("{cell_prefix}\ni32.const 0\n{value}\ncall $vec_set_i32"))
@@ -4914,8 +4967,16 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     let keep_tmp = ctx.tmp_i32 + 2;
     let ret_tmp = ctx.tmp_i32 + 3;
     let managed_slots = managed_local_slots(ctx);
-    let release_path = emit_release_managed_temp_if_not_local_alias(path_tmp, keep_tmp, &managed_slots);
-    let release_data = emit_release_managed_temp_if_not_local_alias(data_tmp, keep_tmp, &managed_slots);
+    let release_path = emit_release_managed_temp_if_not_local_alias(
+        path_tmp,
+        keep_tmp,
+        &managed_slots
+    );
+    let release_data = emit_release_managed_temp_if_not_local_alias(
+        data_tmp,
+        keep_tmp,
+        &managed_slots
+    );
     Ok(
         format!(
             "{path}\nlocal.set {path_tmp}\n{data}\nlocal.set {data_tmp}\nlocal.get {path_tmp}\nlocal.get {data_tmp}\ncall $host_write_file\nlocal.set {ret_tmp}\n{release_path}\n{release_data}\nlocal.get {ret_tmp}"
@@ -4956,8 +5017,16 @@ fn compile_host_binary_string_call(
     let keep_tmp = ctx.tmp_i32 + 2;
     let ret_tmp = ctx.tmp_i32 + 3;
     let managed_slots = managed_local_slots(ctx);
-    let release_left = emit_release_managed_temp_if_not_local_alias(left_tmp, keep_tmp, &managed_slots);
-    let release_right = emit_release_managed_temp_if_not_local_alias(right_tmp, keep_tmp, &managed_slots);
+    let release_left = emit_release_managed_temp_if_not_local_alias(
+        left_tmp,
+        keep_tmp,
+        &managed_slots
+    );
+    let release_right = emit_release_managed_temp_if_not_local_alias(
+        right_tmp,
+        keep_tmp,
+        &managed_slots
+    );
     Ok(
         format!(
             "{left}\nlocal.set {left_tmp}\n{right}\nlocal.set {right_tmp}\nlocal.get {left_tmp}\nlocal.get {right_tmp}\ncall ${host_symbol}\nlocal.set {ret_tmp}\n{release_left}\n{release_right}\nlocal.get {ret_tmp}"
@@ -5480,8 +5549,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "curl!" => compile_host_unary_string_call(node, ctx, "curl!", "host_curl"),
                         "print!" =>
                             compile_host_unary_string_call(node, ctx, "print!", "host_print"),
-                        "sleep!" =>
-                            compile_host_unary_int_call(node, ctx, "sleep!", "host_sleep"),
+                        "sleep!" => compile_host_unary_int_call(node, ctx, "sleep!", "host_sleep"),
                         "clear!" => compile_host_unit_call(node, ctx, "clear!", "host_clear"),
                         "write!" => compile_host_write_call(node, ctx),
                         "move!" => compile_host_binary_string_call(node, ctx, "move!", "host_move"),

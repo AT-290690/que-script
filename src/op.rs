@@ -46,6 +46,12 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         Expression::Apply(items) => items.clone(),
         _ => return node,
     };
+    if let Some(apply_fused) = fuse_apply_wrapper_call(&node, &items) {
+        return apply_fused;
+    }
+    if let Some(beta_reduced) = beta_reduce_immediate_lambda_call(&node, &items) {
+        return beta_reduced;
+    }
     let Some(Expression::Word(op)) = items.first() else {
         return node;
     };
@@ -86,6 +92,134 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
 
         _ => node,
     }
+}
+
+fn fuse_apply_wrapper_call(node: &TypedExpression, call_items: &[Expression]) -> Option<TypedExpression> {
+    let op = match call_items.first() {
+        Some(Expression::Word(w)) => w.as_str(),
+        _ => return None,
+    };
+    if !op.starts_with("std/fn/apply/") {
+        return None;
+    }
+    if node.children.len() != call_items.len() {
+        return None;
+    }
+
+    if op.starts_with("std/fn/apply/first/") {
+        if call_items.len() < 2 {
+            return None;
+        }
+        let callee = call_items.get(1)?.clone();
+        if !is_lambda_expr(&callee) {
+            return None;
+        }
+        let mut new_items = vec![callee];
+        new_items.extend(call_items.iter().skip(2).cloned());
+
+        let mut new_children = vec![node.children.get(1)?.clone()];
+        new_children.extend(node.children.iter().skip(2).cloned());
+        let rewritten = TypedExpression {
+            expr: Expression::Apply(new_items),
+            typ: node.typ.clone(),
+            children: new_children,
+        };
+        return beta_reduce_immediate_lambda_call(
+            &rewritten,
+            match &rewritten.expr {
+                Expression::Apply(items) => items,
+                _ => return None,
+            }
+        );
+    }
+
+    // (std/fn/apply/N a b ... fn) => (fn a b ...)
+    if call_items.len() < 2 {
+        return None;
+    }
+    let callee = call_items.last()?.clone();
+    if !is_lambda_expr(&callee) {
+        return None;
+    }
+    let mut new_items = vec![callee];
+    new_items.extend(call_items.iter().skip(1).take(call_items.len() - 2).cloned());
+
+    let mut new_children = vec![node.children.last()?.clone()];
+    new_children.extend(node.children.iter().skip(1).take(node.children.len() - 2).cloned());
+    let rewritten = TypedExpression {
+        expr: Expression::Apply(new_items),
+        typ: node.typ.clone(),
+        children: new_children,
+    };
+    beta_reduce_immediate_lambda_call(
+        &rewritten,
+        match &rewritten.expr {
+            Expression::Apply(items) => items,
+            _ => return None,
+        }
+    )
+}
+
+fn is_lambda_expr(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
+    )
+}
+
+fn beta_reduce_immediate_lambda_call(
+    node: &TypedExpression,
+    call_items: &[Expression]
+) -> Option<TypedExpression> {
+    let Expression::Apply(lambda_items) = call_items.first()? else {
+        return None;
+    };
+    if !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") {
+        return None;
+    }
+    if lambda_items.len() < 2 || node.children.len() != call_items.len() {
+        return None;
+    }
+
+    let params_expr = &lambda_items[1..lambda_items.len() - 1];
+    if params_expr.len() != call_items.len().saturating_sub(1) {
+        return None;
+    }
+
+    let lambda_typed = node.children.first()?;
+    let body_expr = lambda_items.last()?;
+    let body_typed = lambda_typed.children.last()?;
+
+    let params = params_expr
+        .iter()
+        .map(|p| match p {
+            Expression::Word(w) => Some(w.clone()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    let mut expr_subst: HashMap<String, Expression> = HashMap::new();
+    let mut typed_subst: HashMap<String, TypedExpression> = HashMap::new();
+
+    for (idx, param) in params.iter().enumerate() {
+        let arg_expr = call_items.get(idx + 1)?.clone();
+        let arg_node = node.children.get(idx + 1)?.clone();
+        let arg_typ = arg_node.typ.as_ref()?;
+
+        if !is_no_temp_inline_scalar_type(arg_typ) {
+            return None;
+        }
+
+        let uses = count_word_uses_expr(body_expr, param);
+        if uses > 1 && !is_atomic_inline_arg_expr(&arg_expr) {
+            return None;
+        }
+
+        expr_subst.insert(param.clone(), arg_expr);
+        typed_subst.insert(param.clone(), arg_node);
+    }
+
+    Some(substitute_params_typed(body_typed, &expr_subst, &typed_subst))
 }
 
 fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
