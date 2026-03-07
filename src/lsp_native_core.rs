@@ -123,6 +123,20 @@ pub fn load_std_definitions() -> Vec<Expression> {
     Vec::new()
 }
 
+pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for expr in std_defs {
+        if let Expression::Apply(items) = expr {
+            if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
+                if keyword == "let" || keyword == "let*" {
+                    names.insert(name.clone());
+                }
+            }
+        }
+    }
+    names
+}
+
 pub fn infer_std_signatures(
     base_env: &TypeEnv,
     base_next_id: u64,

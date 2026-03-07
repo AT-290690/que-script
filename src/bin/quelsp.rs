@@ -69,6 +69,7 @@ struct LspCore {
     base_env: TypeEnv,
     base_next_id: u64,
     global_signatures: HashMap<String, String>,
+    std_fallback_names: HashSet<String>,
 }
 
 struct PendingChange {
@@ -177,11 +178,16 @@ fn run() -> Result<(), String> {
 fn build_lsp_core() -> LspCore {
     let std_defs = load_std_definitions();
     let (base_env, base_next_id, global_signatures) = build_base_environment(&std_defs);
+    let std_fallback_names = collect_std_top_level_let_names(&std_defs)
+        .into_iter()
+        .filter(|name| !name.starts_with("std/"))
+        .collect();
     LspCore {
         std_defs,
         base_env,
         base_next_id,
         global_signatures,
+        std_fallback_names,
     }
 }
 
@@ -435,7 +441,7 @@ impl ServerState {
     fn completion_items_for_document(&self, params: &CompletionParams) -> Vec<CompletionItem> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let mut merged_signatures: HashMap<String, String> = HashMap::new();
+        let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         let mut items = Vec::new();
 
         for keyword in ["lambda", "if", "let", "let*", "do", "as"] {
@@ -446,38 +452,51 @@ impl ServerState {
             });
         }
 
-        self.with_core(|core| {
-            for (name, signature) in &core.global_signatures {
-                merged_signatures.insert(name.clone(), signature.clone());
-            }
-        });
-
         if let Some(doc) = self.documents.get(uri) {
             for (name, signature) in &doc.symbol_types {
                 let should_override =
                     doc.user_bound_symbols.contains(name) || self.global_signature(name).is_none();
                 if should_override {
-                    merged_signatures.insert(name.clone(), signature.clone());
+                    inferred_signatures.insert(name.clone(), signature.clone());
                 }
             }
 
             if let Some(form_signatures) = self.form_signatures_at(doc, position) {
                 for (name, signature) in form_signatures {
-                    merged_signatures.insert(name.clone(), signature.clone());
+                    inferred_signatures.insert(name.clone(), signature.clone());
                 }
             }
         }
 
-        for (name, signature) in merged_signatures {
+        for (name, signature) in &inferred_signatures {
             items.push(CompletionItem {
-                label: name,
-                detail: Some(normalize_signature(&signature)),
-                kind: Some(kind_for_signature(&signature)),
+                label: name.clone(),
+                detail: Some(normalize_signature(signature)),
+                kind: Some(kind_for_signature(signature)),
                 ..CompletionItem::default()
             });
         }
 
+        if inferred_signatures.is_empty() {
+            self.with_core(|core| {
+                for name in &core.std_fallback_names {
+                    let detail = core.global_signatures.get(name).cloned();
+                    let kind = detail
+                        .as_ref()
+                        .map(|sig| kind_for_signature(sig))
+                        .unwrap_or(CompletionItemKind::FUNCTION);
+                    items.push(CompletionItem {
+                        label: name.clone(),
+                        detail: detail.as_ref().map(|sig| normalize_signature(sig)),
+                        kind: Some(kind),
+                        ..CompletionItem::default()
+                    });
+                }
+            });
+        }
+
         items.sort_by(|a, b| a.label.cmp(&b.label));
+        items.dedup_by(|a, b| a.label == b.label);
         items
     }
 
@@ -582,6 +601,10 @@ fn build_base_environment(std_defs: &[Expression]) -> (TypeEnv, u64, HashMap<Str
 
 fn load_std_definitions() -> Vec<Expression> {
     native_core::load_std_definitions()
+}
+
+fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<String> {
+    native_core::collect_std_top_level_let_names(std_defs)
 }
 
 fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<String, Type>) {

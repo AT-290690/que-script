@@ -64,6 +64,7 @@ struct WasmLspCore {
     base_env: TypeEnv,
     base_next_id: u64,
     global_signatures: HashMap<String, String>,
+    std_fallback_names: HashSet<String>,
 }
 
 thread_local! {
@@ -87,16 +88,25 @@ fn with_lsp_core<R>(f: impl FnOnce(&WasmLspCore) -> R) -> R {
 fn build_lsp_core() -> WasmLspCore {
     let std_defs = load_std_definitions();
     let (base_env, base_next_id, global_signatures) = build_base_environment(&std_defs);
+    let std_fallback_names = collect_std_top_level_let_names(&std_defs)
+        .into_iter()
+        .filter(|name| !name.starts_with("std/"))
+        .collect();
     WasmLspCore {
         std_defs,
         base_env,
         base_next_id,
         global_signatures,
+        std_fallback_names,
     }
 }
 
 fn load_std_definitions() -> Vec<Expression> {
     native_core::load_std_definitions()
+}
+
+fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<String> {
+    native_core::collect_std_top_level_let_names(std_defs)
 }
 
 fn infer_standalone_std_symbol_signature(core: &WasmLspCore, symbol: &str) -> Option<String> {
@@ -201,19 +211,15 @@ pub fn lsp_diagnostics(text: String) -> String {
 pub fn lsp_completions(text: String) -> String {
     with_lsp_core(|core| {
         let analysis = analyze_document_text(&text, core);
-        let mut merged_signatures: HashMap<String, String> = HashMap::new();
-
-        for (name, signature) in &core.global_signatures {
-            merged_signatures.insert(name.clone(), signature.clone());
-        }
+        let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         for (name, signature) in &analysis.symbol_types {
             if analysis.user_bound_symbols.contains(name) {
-                merged_signatures.insert(name.clone(), signature.clone());
+                inferred_signatures.insert(name.clone(), signature.clone());
                 continue;
             }
 
             if !core.global_signatures.contains_key(name) {
-                merged_signatures.insert(name.clone(), signature.clone());
+                inferred_signatures.insert(name.clone(), signature.clone());
             }
         }
 
@@ -225,15 +231,33 @@ pub fn lsp_completions(text: String) -> String {
                 kind: "keyword".to_string(),
             });
         }
-        for (label, detail) in merged_signatures {
+        for (label, detail) in &inferred_signatures {
             let kind = if detail.contains("->") { "function" } else { "constant" };
             items.push(JsonCompletionItem {
-                label,
-                detail: Some(normalize_signature(&detail)),
+                label: label.clone(),
+                detail: Some(normalize_signature(detail)),
                 kind: kind.to_string(),
             });
         }
+
+        if inferred_signatures.is_empty() {
+            for name in &core.std_fallback_names {
+                let detail = core.global_signatures.get(name).cloned();
+                let kind = if detail.as_ref().map(|s| s.contains("->")).unwrap_or(true) {
+                    "function"
+                } else {
+                    "constant"
+                };
+                items.push(JsonCompletionItem {
+                    label: name.clone(),
+                    detail: detail.as_ref().map(|sig| normalize_signature(sig)),
+                    kind: kind.to_string(),
+                });
+            }
+        }
+
         items.sort_by(|a, b| a.label.cmp(&b.label));
+        items.dedup_by(|a, b| a.label == b.label);
 
         serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string())
     })
