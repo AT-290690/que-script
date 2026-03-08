@@ -358,7 +358,8 @@ fn desugar_with_counter(
                     "integer" => Ok(integer_transform(exprs)),
                     "floating" => Ok(float_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
-                    "loop" => Ok(loop_transform(exprs)?),
+                    "loop" => Ok(loop_transform(exprs, binding_counter)?),
+                    "loop-while" => Ok(loop_while_transform(exprs)?),
                     "lambda" => lambda_destructure_transform(exprs, binding_counter),
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
@@ -822,7 +823,55 @@ fn lambda_destructure_transform(
     lambda_exprs.push(new_body);
     Ok(Expression::Apply(lambda_exprs))
 }
-fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+fn ensure_do_body_with_trailing_nil(body_expr: Expression) -> Expression {
+    match body_expr {
+        Expression::Apply(mut body_items) if
+            matches!(body_items.first(), Some(Expression::Word(head)) if head == "do")
+        => {
+            body_items.push(Expression::Word("nil".to_string()));
+            Expression::Apply(body_items)
+        }
+        other =>
+            Expression::Apply(vec![Expression::Word("do".to_string()), other, Expression::Word("nil".to_string())]),
+    }
+}
+
+fn normalize_loop_while_body_from_arg(body_arg: &Expression) -> Result<Expression, String> {
+    match body_arg {
+        Expression::Apply(items) if !items.is_empty() => {
+            if let Expression::Word(head) = &items[0] {
+                if head == "lambda" {
+                    if items.len() < 2 {
+                        return Err(format!("loop condition form lambda missing body\n{}", body_arg.to_lisp()));
+                    }
+                    let params = &items[1..items.len() - 1];
+                    let param_count = params.len();
+                    if param_count != 0 {
+                        return Err(
+                            format!(
+                                "loop condition form expects lambda with 0 parameters, found {}\n{}",
+                                param_count,
+                                body_arg.to_lisp()
+                            )
+                        );
+                    }
+                    return Ok(Expression::Apply(vec![body_arg.clone()]));
+                }
+            }
+            Ok(body_arg.clone())
+        }
+        Expression::Word(name) => {
+            // Preserve old (loop cond process) behavior by invoking zero-arg process each iteration.
+            Ok(Expression::Apply(vec![Expression::Word(name.clone())]))
+        }
+        _ => Ok(body_arg.clone()),
+    }
+}
+
+fn loop_transform(
+    mut exprs: Vec<Expression>,
+    binding_counter: &mut usize
+) -> Result<Expression, String> {
     exprs.remove(0);
     let len = exprs.len();
 
@@ -841,133 +890,226 @@ fn loop_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
         );
     }
 
-    let lambda_expr = exprs.last().unwrap(); // last element is the lambda
+    if len == 2 {
+        let condition = exprs[0].clone();
+        let raw_body = normalize_loop_while_body_from_arg(&exprs[1])?;
+        let body_with_unit = ensure_do_body_with_trailing_nil(raw_body);
+        return Ok(
+            Expression::Apply(
+                vec![Expression::Word("loop-while".to_string()), condition, body_with_unit]
+            )
+        );
+    }
 
-    // Check it's a lambda form
-    match lambda_expr {
-        Expression::Apply(items) if !items.is_empty() => {
-            if let Expression::Word(head) = &items[0] {
-                if head != "lambda" {
-                    return Err(
-                        format!(
-                            "loop last argument must be a lambda \n{}",
-                            exprs
-                                .into_iter()
-                                .map(|e| e.to_lisp())
-                                .collect::<Vec<String>>()
-                                .join(" ")
-                        )
-                    );
-                }
-
-                // Count lambda params
-                let params = &items[1..items.len() - 1];
-                let param_count = params.len();
-
-                if len == 2 {
-                    // (loop cond (lambda ...))
-                    if param_count != 0 {
-                        return Err(
-                            format!(
-                                "loop condition form expects lambda with 0 parameters, found {}\n{}",
-                                param_count,
-                                exprs
-                                    .into_iter()
-                                    .map(|e| e.to_lisp())
-                                    .collect::<Vec<String>>()
-                                    .join(" ")
-                            )
-                        );
-                    }
-
-                    return Ok(
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("loop-finish".to_string()),
-                                exprs[0].clone(),
-                                lambda_expr.clone()
-                            ]
-                        )
-                    );
-                } else {
-                    // (loop start end (lambda i ...))
-                    if param_count != 1 {
-                        return Err(
-                            format!(
-                                "loop range form expects lambda with 1 parameter, found {}\n{}",
-                                param_count,
-                                exprs
-                                    .into_iter()
-                                    .map(|e| e.to_lisp())
-                                    .collect::<Vec<String>>()
-                                    .join(" ")
-                            )
-                        );
-                    }
-
-                    return Ok(
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("loop".to_string()),
-                                exprs[0].clone(),
-                                exprs[1].clone(),
-                                lambda_expr.clone()
-                            ]
-                        )
-                    );
-                }
-            }
-        }
-
-        Expression::Word(items) if !items.is_empty() => {
-            if len == 2 {
-                return Ok(
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("loop-finish".to_string()),
-                            exprs[0].clone(),
-                            lambda_expr.clone()
-                        ]
-                    )
-                );
-            } else {
-                return Ok(
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("loop".to_string()),
-                            exprs[0].clone(),
-                            exprs[1].clone(),
-                            lambda_expr.clone()
-                        ]
+    let fn_expr = &exprs[2];
+    match fn_expr {
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(head)) if head == "lambda") =>
+        {
+            let params = &items[1..items.len() - 1];
+            let param_count = params.len();
+            if param_count != 1 {
+                return Err(
+                    format!(
+                        "loop range form expects lambda with 1 parameter, found {}\n{}",
+                        param_count,
+                        exprs
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" ")
                     )
                 );
             }
-        }
+            {
+                let i_name = next_destructure_temp("loop_i", 0, binding_counter);
+                let end_name = next_destructure_temp("loop_end", 0, binding_counter);
+                let cb_name = next_destructure_temp("loop_cb", 0, binding_counter);
 
-        _ => {
-            return Err(
+                let call_cb = Expression::Apply(
+                    vec![
+                        Expression::Word(cb_name.clone()),
+                        Expression::Word(i_name.clone()),
+                    ]
+                );
+                let inc_i = Expression::Apply(
+                    vec![
+                        Expression::Word("alter!".to_string()),
+                        Expression::Word(i_name.clone()),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("+".to_string()),
+                                Expression::Word(i_name.clone()),
+                                Expression::Int(1),
+                            ]
+                        ),
+                    ]
+                );
+                let loop_body = Expression::Apply(
+                    vec![
+                        Expression::Word("do".to_string()),
+                        call_cb,
+                        inc_i,
+                        Expression::Word("nil".to_string()),
+                    ]
+                );
+                let cond = Expression::Apply(
+                    vec![
+                        Expression::Word("<".to_string()),
+                        Expression::Word(i_name.clone()),
+                        Expression::Word(end_name.clone()),
+                    ]
+                );
+
+                Ok(
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("do".to_string()),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("mut".to_string()),
+                                    Expression::Word(i_name),
+                                    exprs[0].clone(),
+                                ]
+                            ),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("let".to_string()),
+                                    Expression::Word(end_name),
+                                    exprs[1].clone(),
+                                ]
+                            ),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("let".to_string()),
+                                    Expression::Word(cb_name),
+                                    fn_expr.clone(),
+                                ]
+                            ),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("loop-while".to_string()),
+                                    cond,
+                                    loop_body,
+                                ]
+                            ),
+                        ]
+                    )
+                )
+            }
+        }
+        Expression::Word(name) if !name.is_empty() =>
+            {
+                let i_name = next_destructure_temp("loop_i", 0, binding_counter);
+                let end_name = next_destructure_temp("loop_end", 0, binding_counter);
+                let cb_name = next_destructure_temp("loop_cb", 0, binding_counter);
+
+                let call_cb = Expression::Apply(
+                    vec![
+                        Expression::Word(cb_name.clone()),
+                        Expression::Word(i_name.clone()),
+                    ]
+                );
+                let inc_i = Expression::Apply(
+                    vec![
+                        Expression::Word("alter!".to_string()),
+                        Expression::Word(i_name.clone()),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("+".to_string()),
+                                Expression::Word(i_name.clone()),
+                                Expression::Int(1),
+                            ]
+                        ),
+                    ]
+                );
+                let loop_body = Expression::Apply(
+                    vec![
+                        Expression::Word("do".to_string()),
+                        call_cb,
+                        inc_i,
+                        Expression::Word("nil".to_string()),
+                    ]
+                );
+                let cond = Expression::Apply(
+                    vec![
+                        Expression::Word("<".to_string()),
+                        Expression::Word(i_name.clone()),
+                        Expression::Word(end_name.clone()),
+                    ]
+                );
+
+                Ok(
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("do".to_string()),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("mut".to_string()),
+                                    Expression::Word(i_name),
+                                    exprs[0].clone(),
+                                ]
+                            ),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("let".to_string()),
+                                    Expression::Word(end_name),
+                                    exprs[1].clone(),
+                                ]
+                            ),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("let".to_string()),
+                                    Expression::Word(cb_name),
+                                    fn_expr.clone(),
+                                ]
+                            ),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("loop-while".to_string()),
+                                    cond,
+                                    loop_body,
+                                ]
+                            ),
+                        ]
+                    )
+                )
+            },
+        _ =>
+            Err(
                 format!(
-                    "loop last argument must be a lambda expression\n{}",
+                    "loop range form expects lambda or function name as the last argument\n{}",
                     exprs
                         .into_iter()
                         .map(|e| e.to_lisp())
                         .collect::<Vec<String>>()
                         .join(" ")
                 )
-            );
-        }
+            ),
+    }
+}
+
+fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    exprs.remove(0);
+    let len = exprs.len();
+    if len != 2 {
+        return Err(
+            format!(
+                "loop-while expects exactly 2 arguments: condition and body expression, got {}\n{}",
+                len,
+                exprs
+                    .into_iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<String>>()
+                    .join(" ")
+            )
+        );
     }
 
-    Err(
-        format!(
-            "loop invalid structure\n{}",
-            exprs
-                .into_iter()
-                .map(|e| e.to_lisp())
-                .collect::<Vec<String>>()
-                .join(" ")
-        )
-    )
+    let condition = exprs[0].clone();
+    let raw_body = normalize_loop_while_body_from_arg(&exprs[1])?;
+    let body_with_unit = ensure_do_body_with_trailing_nil(raw_body);
+    Ok(Expression::Apply(vec![Expression::Word("loop-while".to_string()), condition, body_with_unit]))
 }
 
 fn cdr_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
