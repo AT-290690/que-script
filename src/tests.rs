@@ -40,6 +40,10 @@ mod tests {
 xs)"#,
                 "[[[Bool]]]",
             ),
+            (
+                "(do (mut x 0) (loop 0 3 (lambda i (alter! x (+ x i)))) x)",
+                "Int",
+            ),
         ];
 
         for (inp, out) in &test_cases {
@@ -104,6 +108,14 @@ Concequent and alternative must match types
 (set! xs (length xs) false)
 (set! xs (length xs) 1))"#,
                 "Cannot unify Int with Bool\n(set! xs (length xs) 1)",
+            ),
+            (
+                "(do (mut x 1) (let f (lambda y x)) (f 0))",
+                "mut variable 'x' cannot be captured by lambda; use integer/floating/boolean cells for closure-shared mutation",
+            ),
+            (
+                "(do (mut x 1) (let f (lambda y (alter! x y))) (f 0))",
+                "mut variable 'x' cannot be captured by lambda; use integer/floating/boolean cells for closure-shared mutation",
             ),
         ];
 
