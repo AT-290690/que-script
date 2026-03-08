@@ -989,9 +989,9 @@ fn build_some_every_loop(
         process_lambda,
     ]));
     setup_bindings.push(Expression::Apply(vec![
-        Expression::Word("loop-finish".to_string()),
+        Expression::Word("loop-while".to_string()),
         continue_cond,
-        Expression::Word(process_name),
+        Expression::Apply(vec![Expression::Word(process_name)]),
     ]));
     setup_bindings.push(Expression::Apply(vec![
         Expression::Word("get".to_string()),
@@ -1121,9 +1121,9 @@ fn build_find_loop(
         process_lambda,
     ]));
     setup_bindings.push(Expression::Apply(vec![
-        Expression::Word("loop-finish".to_string()),
+        Expression::Word("loop-while".to_string()),
         continue_cond,
-        Expression::Word(process_name),
+        Expression::Apply(vec![Expression::Word(process_name)]),
     ]));
     setup_bindings.push(Expression::Apply(vec![
         Expression::Word("get".to_string()),
@@ -1765,12 +1765,9 @@ fn call_callable_expr(callable: &Expression, args: Vec<Expression>) -> Option<Ex
 fn no_op_unit_expr() -> Expression {
     // A std-independent no-op expression with Unit type.
     Expression::Apply(vec![
-        Expression::Word("loop-finish".to_string()),
+        Expression::Word("loop-while".to_string()),
         Expression::Word("false".to_string()),
-        Expression::Apply(vec![
-            Expression::Word("lambda".to_string()),
-            Expression::Int(0),
-        ]),
+        Expression::Word("nil".to_string()),
     ])
 }
 

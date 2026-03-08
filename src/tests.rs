@@ -160,6 +160,61 @@ Concequent and alternative must match types
         );
     }
 
+    #[test]
+    fn test_loop_while_desugars_to_do_body_with_trailing_nil() {
+        let expr = crate::parser
+            ::build("(loop-while false (+ 1 2))")
+            .expect("loop-while should desugar");
+        let lisp = expr.to_lisp();
+        assert!(
+            lisp.contains("(loop-while false (do (+ 1 2) nil))"),
+            "expected loop-while to desugar to do body + trailing nil, got: {}",
+            lisp
+        );
+    }
+
+    #[test]
+    fn test_loop_while_allows_mutating_body_without_lambda_argument() {
+        let expr = crate::parser
+            ::build("(do (mut i 0) (loop-while (< i 3) (alter! i (+ i 1))) i)")
+            .expect("program should build");
+        let (typ, _typed) = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("program should infer");
+        assert_eq!(typ.to_string(), "Int");
+    }
+
+    #[test]
+    fn test_loop_range_desugars_to_loop_while_with_captured_bounds_and_callback() {
+        let expr = crate::parser
+            ::build("(loop 0 3 (lambda i (+ i 1)))")
+            .expect("loop range form should desugar");
+        let lisp = expr.to_lisp();
+        assert!(
+            !lisp.contains("(loop 0 3"),
+            "range loop should not remain as raw loop form, got: {}",
+            lisp
+        );
+        assert!(
+            lisp.contains("(loop-while (< _loop_i_"),
+            "range loop should lower to loop-while over temp counter, got: {}",
+            lisp
+        );
+        assert!(
+            lisp.contains("(let _loop_end_"),
+            "range loop should capture end expression once, got: {}",
+            lisp
+        );
+        assert!(
+            lisp.contains("(let _loop_cb_"),
+            "range loop should capture callback once, got: {}",
+            lisp
+        );
+    }
+
     fn infer_typed(input: &str) -> crate::infer::TypedExpression {
         let exprs = crate::parser::parse(input).expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -556,13 +611,13 @@ Concequent and alternative must match types
         let every_fused = crate::op::fuse_map_filter_reduce_for_test(&every_expr).to_lisp();
 
         assert!(
-            some_fused.contains("(loop-finish"),
-            "some? should lower to short-circuit loop-finish, got: {}",
+            some_fused.contains("(loop-while"),
+            "some? should lower to short-circuit loop-while, got: {}",
             some_fused
         );
         assert!(
-            every_fused.contains("(loop-finish"),
-            "every? should lower to short-circuit loop-finish, got: {}",
+            every_fused.contains("(loop-while"),
+            "every? should lower to short-circuit loop-while, got: {}",
             every_fused
         );
         assert!(!some_fused.contains("(some? "), "some? call should be fused, got: {}", some_fused);
@@ -618,12 +673,12 @@ Concequent and alternative must match types
         let fused_every = crate::op::fuse_map_filter_reduce_for_test(&every_i).to_lisp();
 
         assert!(
-            fused_some.contains("(loop-finish"),
+            fused_some.contains("(loop-while"),
             "some/i? should short-circuit fuse, got: {}",
             fused_some
         );
         assert!(
-            fused_every.contains("(loop-finish"),
+            fused_every.contains("(loop-while"),
             "every/i? should short-circuit fuse, got: {}",
             fused_every
         );
@@ -674,8 +729,8 @@ Concequent and alternative must match types
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
-            fused_lisp.contains("(loop-finish"),
-            "find should fuse to short-circuit loop-finish, got: {}",
+            fused_lisp.contains("(loop-while"),
+            "find should fuse to short-circuit loop-while, got: {}",
             fused_lisp
         );
         assert!(!fused_lisp.contains("(find "), "find call should be fused, got: {}", fused_lisp);

@@ -98,7 +98,6 @@ pub struct InferenceContext {
     pub env: TypeEnv,
     pub mut_scopes: Vec<HashSet<String>>,
     pub lambda_scope_bases: Vec<usize>,
-    pub lambda_non_escaping: Vec<bool>,
     pub constraints: Vec<(Type, Type, TypeError)>,
     pub fresh_var_counter: u64,
     pub expr_types: HashMap<usize, Type>,
@@ -224,9 +223,6 @@ impl InferenceContext {
     }
 
     pub fn is_mut_capture_in_lambda(&self, name: &str) -> bool {
-        if self.lambda_non_escaping.last().copied().unwrap_or(false) {
-            return false;
-        }
         let Some(lambda_scope_base) = self.lambda_scope_bases.last().copied() else {
             return false;
         };
@@ -491,22 +487,8 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
 
 // Type inference for lambda expressions
 fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
-    infer_lambda_with_mode(exprs, ctx, false)
-}
-
-fn infer_lambda_non_escaping(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
-    infer_lambda_with_mode(exprs, ctx, true)
-}
-
-fn infer_lambda_with_mode(
-    exprs: &[Expression],
-    ctx: &mut InferenceContext,
-    non_escaping: bool
-) -> Result<Type, String> {
     ctx.enter_lambda_scope();
-    ctx.lambda_non_escaping.push(non_escaping);
     let result = infer_lambda_inner(exprs, ctx);
-    ctx.lambda_non_escaping.pop();
     ctx.exit_lambda_scope();
     result
 }
@@ -1185,10 +1167,6 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     }
     let func_expr = &exprs[0];
     let args = &exprs[1..];
-    let func_name = match func_expr {
-        Expression::Word(name) => Some(name.as_str()),
-        _ => None,
-    };
 
     let mut func_type = infer_expr(func_expr, ctx)?;
     // TODO: remove repetitive logic for 0 args and +=1 args
@@ -1227,9 +1205,8 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
         }
     }
-    let allow_non_escaping_lambda = matches!(func_name, Some("loop" | "loop-finish"));
     for arg in args {
-        let arg_type = infer_call_arg(arg, ctx, allow_non_escaping_lambda)?;
+        let arg_type = infer_call_arg(arg, ctx)?;
         match func_type {
             Type::Function(param_ty, ret_ty) =>
                 {
@@ -1287,23 +1264,8 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     Ok(func_type)
 }
 
-fn infer_call_arg(
-    arg: &Expression,
-    ctx: &mut InferenceContext,
-    allow_non_escaping_lambda: bool
-) -> Result<Type, String> {
-    let inferred = if allow_non_escaping_lambda {
-        match arg {
-            Expression::Apply(items)
-                if matches!(items.first(), Some(Expression::Word(name)) if name == "lambda") =>
-            {
-                infer_lambda_non_escaping(items, ctx)
-            }
-            _ => infer_expr(arg, ctx),
-        }
-    } else {
-        infer_expr(arg, ctx)
-    };
+fn infer_call_arg(arg: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
+    let inferred = infer_expr(arg, ctx);
 
     if inferred.is_err() && ctx.last_error_scope.is_none() {
         ctx.last_error_scope = ctx.current_error_scope();
@@ -1327,7 +1289,6 @@ fn infer_with_builtins_typed_internal(
         env,
         mut_scopes: vec![HashSet::new()],
         lambda_scope_bases: Vec::new(),
-        lambda_non_escaping: Vec::new(),
         constraints: Vec::new(),
         fresh_var_counter: init_id,
         expr_types: HashMap::new(),

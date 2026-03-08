@@ -272,8 +272,7 @@ fn is_special_word(w: &str) -> bool {
             "set!" |
             "alter!" |
             "pop!" |
-            "loop" |
-            "loop-finish" |
+            "loop-while" |
             "curl!" |
             "read!" |
             "write!" |
@@ -3642,7 +3641,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         ">=." => {
             return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge"));
         }
-        "let" | "let*" | "mut" | "loop" | "loop-finish" => {
+        "let" | "let*" | "mut" | "loop-while" => {
             return Err(format!("Unsupported return of builtin {}", op));
         }
         _ => {
@@ -4453,64 +4452,13 @@ fn compile_loop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
     )
 }
 
-fn compile_loop_finish(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let cond = compile_expr(
-        node.children.get(1).ok_or_else(|| "loop-finish missing condition".to_string())?,
+        node.children.get(1).ok_or_else(|| "loop-while missing condition".to_string())?,
         ctx
     )?;
-    let fn_node = node.children.get(2).ok_or_else(|| "loop-finish missing fn".to_string())?;
-
-    let body_and_drop = match &fn_node.expr {
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
-        => {
-            if items.len() < 2 {
-                return Err("loop-finish lambda missing body".to_string());
-            }
-            // zero-arg thunk only
-            if items.len() != 2 {
-                return Err("loop-finish lambda must have 0 params".to_string());
-            }
-            let body_node = fn_node.children
-                .last()
-                .ok_or_else(|| "loop-finish lambda missing typed body".to_string())?;
-            let body = compile_expr(body_node, ctx)?;
-            format!("{body}\ndrop")
-        }
-        Expression::Word(name) => {
-            if let Some(lambda_node) = ctx.lambda_bindings.get(name) {
-                let items = match &lambda_node.expr {
-                    Expression::Apply(xs) => xs,
-                    _ => {
-                        return Err(format!("loop-finish local '{}' is not a lambda", name));
-                    }
-                };
-                if items.len() != 2 {
-                    return Err(format!("loop-finish local lambda '{}' must take 0 args", name));
-                }
-                let body_node = lambda_node.children
-                    .last()
-                    .ok_or_else(|| {
-                        format!("loop-finish local lambda '{}' missing typed body", name)
-                    })?;
-                let body = compile_expr(body_node, ctx)?;
-                format!("{body}\ndrop")
-            } else if let Some((params, _ret)) = ctx.fn_sigs.get(name) {
-                if params.is_empty() {
-                    format!("call ${}\ndrop", ident(name))
-                } else {
-                    return Err(
-                        format!("loop-finish fn '{}' must take 0 args in wasm backend", name)
-                    );
-                }
-            } else {
-                return Err(format!("Unknown loop-finish function '{}'", name));
-            }
-        }
-        _ => {
-            return Err("Unsupported loop-finish function form in wasm backend".to_string());
-        }
-    };
+    let body_node = node.children.get(2).ok_or_else(|| "loop-while missing body".to_string())?;
+    let body_and_drop = format!("{}\ndrop", compile_expr(body_node, ctx)?);
 
     Ok(
         format!(
@@ -5576,8 +5524,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "set!" => compile_set(node, ctx),
                         "alter!" => compile_alter(node, ctx),
                         "pop!" => compile_pop(node, ctx),
-                        "loop" => compile_loop(node, ctx),
-                        "loop-finish" => compile_loop_finish(node, ctx),
+                        "loop-while" => compile_loop_while(node, ctx),
                         "list-dir!" =>
                             compile_host_unary_string_call(node, ctx, "list-dir!", "host_list_dir"),
                         "read!" =>

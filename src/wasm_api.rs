@@ -224,7 +224,7 @@ pub fn lsp_completions(text: String) -> String {
         }
 
         let mut items = Vec::new();
-        for keyword in ["lambda", "if", "let", "let*", "mut", "do", "as", "alter!"] {
+        for keyword in ["lambda", "if", "let", "let*", "mut", "do", "as", "alter!", "loop-while"] {
             items.push(JsonCompletionItem {
                 label: keyword.to_string(),
                 detail: None,

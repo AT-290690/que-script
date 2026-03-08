@@ -329,57 +329,57 @@
   (variable out initial)
   (boolean placed false)
   (integer i 0)
-  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
+  (loop-while (and (false? placed) (< (get i) (length xs))) (do 
     (let x (get xs (get i)))
     (let a (get out 0))
     (unless (fn? a x) (set out (fn a x)) (set placed true))
-    (++ i))))
+    (++ i)))
 (get out))))
 
 (let std/vector/reduce/until/i (lambda xs fn fn? initial (do 
   (variable out initial)
   (boolean placed false)
   (integer i 0)
-  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
+  (loop-while (and (false? placed) (< (get i) (length xs))) (do 
     (let idx (get i))
     (let x (get xs idx))
     (let a (get out 0))
     (unless (fn? a x idx) (set out (fn a x idx)) (set placed true))
-    (++ i))))
+    (++ i)))
 (get out))))
 
 (let std/vector/for/until (lambda xs fn fn? (do 
   (boolean placed false)
   (integer i 0)
-  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
+  (loop-while (and (false? placed) (< (get i) (length xs))) (do 
     (let x (get xs (get i)))
-    (unless (fn? x) (do (fn x) nil) (set placed true)) (++ i)))))))
+    (unless (fn? x) (do (fn x) nil) (set placed true)) (++ i))))))
 
 (let std/vector/for/until/i (lambda xs fn fn? (do 
   (boolean placed false)
   (integer i 0)
-  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do
+  (loop-while (and (false? placed) (< (get i) (length xs))) (do
     (let idx (get i))
     (let x (get xs idx))
-    (unless (fn? x idx) (do (fn x idx) nil) (set placed true)) (++ i)))))))
+    (unless (fn? x idx) (do (fn x idx) nil) (set placed true)) (++ i))))))
 
 (let std/vector/map/until (lambda xs fn fn? (do
   (let out [])
   (boolean placed false)
   (integer i 0)
-  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do 
+  (loop-while (and (false? placed) (< (get i) (length xs))) (do 
     (let x (get xs (get i)))
-    (unless (fn? x) (do (push! out (fn x)) nil) (set placed true)) (++ i))))
+    (unless (fn? x) (do (push! out (fn x)) nil) (set placed true)) (++ i)))
   out)))
 
 (let std/vector/map/until/i (lambda xs fn fn? (do
   (let out [])
   (boolean placed false)
   (integer i 0)
-  (loop (and (false? placed) (< (get i) (length xs))) (lambda (do
+  (loop-while (and (false? placed) (< (get i) (length xs))) (do
     (let idx (get i))
     (let x (get xs idx))
-    (unless (fn? x idx) (do (push! out (fn x idx)) nil) (set placed true)) (++ i))))
+    (unless (fn? x idx) (do (push! out (fn x idx)) nil) (set placed true)) (++ i)))
   out)))
 
 (let std/vector/int/range (lambda start end (do
@@ -508,11 +508,11 @@
 (let std/int/gcd (lambda a b (do
     (mut A a)
     (mut B b)
-    (loop (> B 0) (lambda (do
+    (loop-while (> B 0) (do
         (let a A)
         (let b B)
         (alter! A b)
-        (alter! B (mod a b)))))
+        (alter! B (mod a b))))
     A)))
 (let std/int/lcm (lambda a b (/ (* a b) (std/int/gcd  a b))))
 
@@ -629,8 +629,8 @@
     (mut high n)
     (mut mid 0)
     (mut res 0)
-    (loop (<= low high)
-      (lambda (do
+    (loop-while (<= low high)
+      (do
         (alter! mid (+ low (/ (- high low) 2)))
         (if (<= mid 0)
           (do
@@ -640,19 +640,18 @@
             (do
               (alter! res mid)
               (alter! low (+ mid 1)))
-            (alter! high (- mid 1)))))))
+            (alter! high (- mid 1))))))
     res)))
 (let std/int/expt (lambda base exp (do
   (if (< exp 0) 0 (do
       (mut result 1)
       (mut b base)
       (mut e exp)
-      (loop (> e 0)
-        (lambda (do
+      (loop-while (> e 0) (do
           (if (= (mod e 2) 1)
             (alter! result (* result b)))
-          (alter! b (* b b))
-          (alter! e (/ e 2)))))
+            (alter! b (* b b))
+            (alter! e (/ e 2))))
       result)))))
 ; a helper for infix ^ power
 ; has to be data first
@@ -1219,10 +1218,11 @@ nil)))
     (let digits (if std/int/negative? (std/vector/map digits-with-sign std/int/abs) digits-with-sign))
     (mut num 0)
     (mut base (/ (std/int/expt 10 (length digits)) 10))
-    (loop 0 (length digits) (lambda i (do 
+    (mut i 0)
+    (loop-while (< i (length digits)) (do 
       (alter! num (+ num (* base (get digits i))))
       (alter! base (/ base 10))
-    )))
+      (alter! i (+ i 1))))
     (alter! num (* num (if std/int/negative? -1 1)))
     num)))
 
@@ -1263,24 +1263,24 @@ nil)))
     (let pairs [])
     (let len (length xs))
     (mut i 0)
-    (loop (< i len) (lambda (do 
+    (loop-while (< i len) (do 
         (mut j (+ i 1))
-        (loop (< j len) (lambda (do 
+        (loop-while (< j len) (do 
             (std/vector/push! pairs [(get xs i) (get xs j)])
-            (alter! j (+ j 1)))))
-        (alter! i (+ i 1)))))
+            (alter! j (+ j 1))))
+        (alter! i (+ i 1))))
     pairs)))
 
   (let std/vector/tuple/unique-pairs (lambda xs (do 
     (let pairs [])
     (let len (length xs))
     (mut i 0)
-    (loop (< i len) (lambda (do 
+    (loop-while (< i len) (do 
         (mut j (+ i 1))
-        (loop (< j len) (lambda (do 
+        (loop-while (< j len) (do 
             (std/vector/push! pairs { (get xs i) (get xs j) })
-            (alter! j (+ j 1)))))
-        (alter! i (+ i 1)))))
+            (alter! j (+ j 1))))
+        (alter! i (+ i 1))))
     pairs)))
 
 (let std/vector/int/unique (lambda xs 

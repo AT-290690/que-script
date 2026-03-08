@@ -444,7 +444,7 @@ impl ServerState {
         let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         let mut items = Vec::new();
 
-        for keyword in ["lambda", "if", "let", "let*", "mut", "do", "as", "alter!"] {
+        for keyword in ["lambda", "if", "let", "let*", "mut", "do", "as", "alter!", "loop-while"] {
             let insert_text = match keyword {
                 "mut" | "alter!" => Some(format!("{} ", keyword)),
                 _ => None,

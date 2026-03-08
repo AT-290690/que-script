@@ -330,41 +330,12 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         );
     }
     {
-        let e = fresh_var();
-
         let _ = env.insert(
-            "loop".to_string(),
-            TypeScheme::new(
-                vec![e.var_id().unwrap()],
-                Type::Function(
-                    Box::new(Type::Int),
-                    Box::new(
-                        Type::Function(
-                            Box::new(Type::Int),
-                            Box::new(
-                                Type::Function(
-                                    Box::new(
-                                        Type::Function(Box::new(Type::Int), Box::new(e.clone()))
-                                    ),
-                                    Box::new(Type::Unit)
-                                )
-                            )
-                        )
-                    )
-                )
-            )
-        );
-    }
-    {
-        let e = fresh_var();
-
-        let _ = env.insert(
-            "loop-finish".to_string(),
-            TypeScheme::new(
-                vec![e.var_id().unwrap()],
+            "loop-while".to_string(),
+            TypeScheme::monotype(
                 Type::Function(
                     Box::new(Type::Bool),
-                    Box::new(Type::Function(Box::new(e.clone()), Box::new(Type::Unit)))
+                    Box::new(Type::Function(Box::new(Type::Unit), Box::new(Type::Unit)))
                 )
             )
         );
