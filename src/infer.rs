@@ -1,6 +1,6 @@
 use crate::parser::Expression;
 use crate::types::{ generalize, Type, TypeEnv, TypeScheme, TypeVar };
-use std::collections::{ HashMap, VecDeque };
+use std::collections::{ HashMap, HashSet, VecDeque };
 
 #[derive(Clone, Debug)]
 pub enum TypeErrorVariant {
@@ -96,6 +96,7 @@ pub struct SolveError {
 
 pub struct InferenceContext {
     pub env: TypeEnv,
+    pub mut_scopes: Vec<HashSet<String>>,
     pub constraints: Vec<(Type, Type, TypeError)>,
     pub fresh_var_counter: u64,
     pub expr_types: HashMap<usize, Type>,
@@ -180,6 +181,36 @@ impl InferenceContext {
         }
         self.scope_lambda_path.pop();
     }
+
+    pub fn enter_lexical_scope(&mut self) {
+        self.env.enter_scope();
+        self.mut_scopes.push(HashSet::new());
+    }
+
+    pub fn exit_lexical_scope(&mut self) {
+        self.env.exit_scope();
+        if self.mut_scopes.len() > 1 {
+            self.mut_scopes.pop();
+        }
+    }
+
+    pub fn mark_mut_binding(&mut self, name: String) {
+        if let Some(scope) = self.mut_scopes.last_mut() {
+            scope.insert(name);
+        }
+    }
+
+    pub fn is_mut_binding(&self, name: &str) -> bool {
+        for (scope_idx, scope) in self.env.scopes.iter().enumerate().rev() {
+            if scope.contains_key(name) {
+                return self.mut_scopes
+                    .get(scope_idx)
+                    .map(|mut_scope| mut_scope.contains(name))
+                    .unwrap_or(false);
+            }
+        }
+        false
+    }
 }
 
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
@@ -206,7 +237,9 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "lambda" => infer_lambda(exprs, ctx),
                     "if" => infer_if(&exprs, ctx),
                     "let" => infer_let(&exprs, ctx),
+                    "mut" => infer_mut(&exprs, ctx),
                     "let*" => infer_rec(&exprs, ctx),
+                    "alter!" => infer_alter(&exprs, ctx),
                     "do" => infer_do(expr, &exprs, ctx),
                     _ => infer_function_call(exprs, ctx),
                 }
@@ -459,7 +492,7 @@ fn infer_lambda_inner(exprs: &[Expression], ctx: &mut InferenceContext) -> Resul
     }
 
     // Enter new lexical scope
-    ctx.env.enter_scope();
+    ctx.enter_lexical_scope();
     let body_result = (|| -> Result<Type, String> {
         // Insert parameters
         for (name, typ) in param_names.iter().zip(param_types.iter()) {
@@ -471,7 +504,7 @@ fn infer_lambda_inner(exprs: &[Expression], ctx: &mut InferenceContext) -> Resul
         // Infer body type
         infer_expr(body, ctx)
     })();
-    ctx.env.exit_scope();
+    ctx.exit_lexical_scope();
     let body_type = body_result?;
 
     // Build function type
@@ -502,13 +535,21 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 
     // Infer condition type - should be Bool
     let cond_type = infer_expr(condition, ctx)?;
-    ctx.add_constraint(cond_type.clone(), Type::Bool, ctx.type_error(TypeErrorVariant::IfCond, args.to_vec()));
+    ctx.add_constraint(
+        cond_type.clone(),
+        Type::Bool,
+        ctx.type_error(TypeErrorVariant::IfCond, args.to_vec())
+    );
     // Infer then and else types
     let then_type = infer_expr(then_expr, ctx)?;
     let else_type = infer_expr(else_expr, ctx)?;
 
     // Both branches must have the same type
-    ctx.add_constraint(then_type.clone(), else_type, ctx.type_error(TypeErrorVariant::IfBody, args.to_vec()));
+    ctx.add_constraint(
+        then_type.clone(),
+        else_type,
+        ctx.type_error(TypeErrorVariant::IfBody, args.to_vec())
+    );
 
     Ok(then_type)
 }
@@ -822,8 +863,107 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     }
 }
 
+fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
+    if args.len() != 2 {
+        return Err(
+            format!(
+                "mut requires exactly 2 arguments: variable and value\n({})",
+                exprs
+                    .iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        );
+    }
+
+    let var_expr = &args[0];
+    let value_expr = &args[1];
+
+    if let Expression::Word(var_name) = var_expr {
+        let value_type = infer_expr(value_expr, ctx)?;
+
+        let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
+            .iter()
+            .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
+            .collect();
+
+        let subst_map = solve_constraints_list(&constraints_vec).map_err(|e| {
+            ctx.last_error_scope = e.scope;
+            e.message
+        })?;
+
+        let solved_type = apply_subst_map_to_type(&subst_map, &value_type);
+        ctx.env.apply_substitution_map(&subst_map);
+
+        if matches!(solved_type, Type::Function(_, _)) {
+            return Err("mut cannot bind function values".to_string());
+        }
+        if matches!(solved_type, Type::List(_)) {
+            return Err("mut cannot bind vector values".to_string());
+        }
+        if matches!(solved_type, Type::Tuple(_)) {
+            return Err("mut cannot bind tuple values".to_string());
+        }
+        // Mutable bindings are monomorphic by design.
+        ctx.env.insert(var_name.clone(), TypeScheme::monotype(solved_type))?;
+        ctx.mark_mut_binding(var_name.clone());
+        Ok(Type::Unit)
+    } else {
+        Err("mut variable must be a variable name".to_string())
+    }
+}
+
+fn infer_alter(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
+    if args.len() != 2 {
+        return Err(
+            format!(
+                "alter! requires exactly 2 arguments: variable and value\n({})",
+                exprs
+                    .iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        );
+    }
+
+    let var_expr = &args[0];
+    let value_expr = &args[1];
+
+    let var_name = match var_expr {
+        Expression::Word(name) => name,
+        _ => {
+            return Err("alter! first argument must be a mutable variable name".to_string());
+        }
+    };
+
+    let Some(var_scheme) = ctx.env.get(var_name) else {
+        return Err(format!("Undefined variable: {}", var_name));
+    };
+
+    if !ctx.is_mut_binding(var_name) {
+        return Err(format!("alter! can only update mutable variables: {}", var_name));
+    }
+
+    let var_type = ctx.instantiate(&var_scheme);
+    let value_type = infer_expr(value_expr, ctx)?;
+    ctx.add_constraint(
+        var_type,
+        value_type,
+        ctx.type_error(TypeErrorVariant::Source, args.to_vec())
+    );
+    Ok(Type::Unit)
+}
+
 // Type inference for do expressions
-fn infer_do(expr: &Expression, exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+fn infer_do(
+    expr: &Expression,
+    exprs: &[Expression],
+    ctx: &mut InferenceContext
+) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.is_empty() {
         return Err("do requires at least one expression".to_string());
@@ -1094,6 +1234,7 @@ fn infer_with_builtins_typed_internal(
 ) -> Result<(Type, TypedExpression), InferErrorInfo> {
     let mut ctx = InferenceContext {
         env,
+        mut_scopes: vec![HashSet::new()],
         constraints: Vec::new(),
         fresh_var_counter: init_id,
         expr_types: HashMap::new(),

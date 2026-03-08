@@ -351,7 +351,7 @@ fn desugar_with_counter(
                     "or" => Ok(or_transform(exprs)),
                     "!=" => Ok(not_equal_transform(exprs)),
                     "<>" => Ok(not_equal_transform(exprs)),
-                    "." | "get" => Ok(accessor_transform(exprs)?),
+                    "get" => Ok(accessor_transform(exprs)?),
                     "cdr" => Ok(cdr_transform(exprs)?),
                     "set!" => Ok(setter_transform(exprs)?),
                     "variable" => Ok(variable_transform(exprs)),
