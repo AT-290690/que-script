@@ -97,6 +97,8 @@ pub struct SolveError {
 pub struct InferenceContext {
     pub env: TypeEnv,
     pub mut_scopes: Vec<HashSet<String>>,
+    pub lambda_scope_bases: Vec<usize>,
+    pub lambda_non_escaping: Vec<bool>,
     pub constraints: Vec<(Type, Type, TypeError)>,
     pub fresh_var_counter: u64,
     pub expr_types: HashMap<usize, Type>,
@@ -211,6 +213,41 @@ impl InferenceContext {
         }
         false
     }
+
+    pub fn binding_scope_index(&self, name: &str) -> Option<usize> {
+        for (scope_idx, scope) in self.env.scopes.iter().enumerate().rev() {
+            if scope.contains_key(name) {
+                return Some(scope_idx);
+            }
+        }
+        None
+    }
+
+    pub fn is_mut_capture_in_lambda(&self, name: &str) -> bool {
+        if self.lambda_non_escaping.last().copied().unwrap_or(false) {
+            return false;
+        }
+        let Some(lambda_scope_base) = self.lambda_scope_bases.last().copied() else {
+            return false;
+        };
+        let Some(binding_scope_idx) = self.binding_scope_index(name) else {
+            return false;
+        };
+        if binding_scope_idx >= lambda_scope_base {
+            return false;
+        }
+        self.mut_scopes
+            .get(binding_scope_idx)
+            .map(|scope| scope.contains(name))
+            .unwrap_or(false)
+    }
+}
+
+fn mut_capture_error(name: &str) -> String {
+    format!(
+        "mut variable '{}' cannot be captured by lambda; use integer/floating/boolean cells for closure-shared mutation",
+        name
+    )
 }
 
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
@@ -219,6 +256,9 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
         Expression::Float(_) => Ok(Type::Float),
 
         Expression::Word(name) => {
+            if ctx.is_mut_capture_in_lambda(name) {
+                return Err(mut_capture_error(name));
+            }
             if let Some(scheme) = ctx.env.get(name) {
                 Ok(ctx.instantiate(&scheme))
             } else {
@@ -451,8 +491,22 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
 
 // Type inference for lambda expressions
 fn infer_lambda(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    infer_lambda_with_mode(exprs, ctx, false)
+}
+
+fn infer_lambda_non_escaping(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    infer_lambda_with_mode(exprs, ctx, true)
+}
+
+fn infer_lambda_with_mode(
+    exprs: &[Expression],
+    ctx: &mut InferenceContext,
+    non_escaping: bool
+) -> Result<Type, String> {
     ctx.enter_lambda_scope();
+    ctx.lambda_non_escaping.push(non_escaping);
     let result = infer_lambda_inner(exprs, ctx);
+    ctx.lambda_non_escaping.pop();
     ctx.exit_lambda_scope();
     result
 }
@@ -491,7 +545,9 @@ fn infer_lambda_inner(exprs: &[Expression], ctx: &mut InferenceContext) -> Resul
         param_types.push(ctx.fresh_var());
     }
 
-    // Enter new lexical scope
+    // Track lexical scope base for this lambda, then enter its parameter/body scope.
+    let lambda_scope_base = ctx.env.scopes.len();
+    ctx.lambda_scope_bases.push(lambda_scope_base);
     ctx.enter_lexical_scope();
     let body_result = (|| -> Result<Type, String> {
         // Insert parameters
@@ -505,6 +561,7 @@ fn infer_lambda_inner(exprs: &[Expression], ctx: &mut InferenceContext) -> Resul
         infer_expr(body, ctx)
     })();
     ctx.exit_lexical_scope();
+    ctx.lambda_scope_bases.pop();
     let body_type = body_result?;
 
     // Build function type
@@ -906,6 +963,9 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         if matches!(solved_type, Type::Tuple(_)) {
             return Err("mut cannot bind tuple values".to_string());
         }
+        if matches!(solved_type, Type::Unit) {
+            return Err("mut cannot bind Unit values".to_string());
+        }
         // Mutable bindings are monomorphic by design.
         ctx.env.insert(var_name.clone(), TypeScheme::monotype(solved_type))?;
         ctx.mark_mut_binding(var_name.clone());
@@ -939,6 +999,10 @@ fn infer_alter(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
             return Err("alter! first argument must be a mutable variable name".to_string());
         }
     };
+
+    if ctx.is_mut_capture_in_lambda(var_name) {
+        return Err(mut_capture_error(var_name));
+    }
 
     let Some(var_scheme) = ctx.env.get(var_name) else {
         return Err(format!("Undefined variable: {}", var_name));
@@ -1121,6 +1185,10 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     }
     let func_expr = &exprs[0];
     let args = &exprs[1..];
+    let func_name = match func_expr {
+        Expression::Word(name) => Some(name.as_str()),
+        _ => None,
+    };
 
     let mut func_type = infer_expr(func_expr, ctx)?;
     // TODO: remove repetitive logic for 0 args and +=1 args
@@ -1159,42 +1227,34 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
         }
     }
+    let allow_non_escaping_lambda = matches!(func_name, Some("loop" | "loop-finish"));
     for arg in args {
+        let arg_type = infer_call_arg(arg, ctx, allow_non_escaping_lambda)?;
         match func_type {
             Type::Function(param_ty, ret_ty) =>
-                match infer_expr(arg, ctx) {
-                    Ok(arg_ty) => {
-                        ctx.add_constraint(
-                            *param_ty.clone(),
-                            arg_ty,
-                            ctx.type_error(TypeErrorVariant::Call, exprs.to_vec())
-                        );
-                        func_type = *ret_ty;
-                    }
-                    Err(e) => {
-                        return Err(e);
-                    }
+                {
+                    ctx.add_constraint(
+                        *param_ty.clone(),
+                        arg_type,
+                        ctx.type_error(TypeErrorVariant::Call, exprs.to_vec())
+                    );
+                    func_type = *ret_ty;
                 }
             Type::Var(tv) => {
                 // If it's a type variable, assume it's a function type
-                match infer_expr(arg, ctx) {
-                    Ok(arg_ty) => {
-                        let ret_ty = ctx.fresh_var();
-                        let func_ty = Type::Function(
-                            Box::new(arg_ty.clone()),
-                            Box::new(ret_ty.clone())
-                        );
-                        // Constrain tv = (arg -> ret)
-                        ctx.add_constraint(
-                            Type::Var(tv.clone()),
-                            func_ty,
-                            ctx.type_error(TypeErrorVariant::Source, vec![arg.clone()])
-                        );
-                        func_type = ret_ty;
-                    }
-                    Err(e) => {
-                        return Err(e);
-                    }
+                {
+                    let ret_ty = ctx.fresh_var();
+                    let func_ty = Type::Function(
+                        Box::new(arg_type.clone()),
+                        Box::new(ret_ty.clone())
+                    );
+                    // Constrain tv = (arg -> ret)
+                    ctx.add_constraint(
+                        Type::Var(tv.clone()),
+                        func_ty,
+                        ctx.type_error(TypeErrorVariant::Source, vec![arg.clone()])
+                    );
+                    func_type = ret_ty;
                 }
             }
             _ => {
@@ -1227,6 +1287,37 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     Ok(func_type)
 }
 
+fn infer_call_arg(
+    arg: &Expression,
+    ctx: &mut InferenceContext,
+    allow_non_escaping_lambda: bool
+) -> Result<Type, String> {
+    let inferred = if allow_non_escaping_lambda {
+        match arg {
+            Expression::Apply(items)
+                if matches!(items.first(), Some(Expression::Word(name)) if name == "lambda") =>
+            {
+                infer_lambda_non_escaping(items, ctx)
+            }
+            _ => infer_expr(arg, ctx),
+        }
+    } else {
+        infer_expr(arg, ctx)
+    };
+
+    if inferred.is_err() && ctx.last_error_scope.is_none() {
+        ctx.last_error_scope = ctx.current_error_scope();
+    }
+
+    if ctx.collect_expr_types {
+        if let Ok(typ) = &inferred {
+            ctx.expr_types.insert(expression_id(arg), typ.clone());
+        }
+    }
+
+    inferred
+}
+
 fn infer_with_builtins_typed_internal(
     expr: &Expression,
     (env, init_id): (TypeEnv, u64),
@@ -1235,6 +1326,8 @@ fn infer_with_builtins_typed_internal(
     let mut ctx = InferenceContext {
         env,
         mut_scopes: vec![HashSet::new()],
+        lambda_scope_bases: Vec::new(),
+        lambda_non_escaping: Vec::new(),
         constraints: Vec::new(),
         fresh_var_counter: init_id,
         expr_types: HashMap::new(),

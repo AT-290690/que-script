@@ -3641,7 +3641,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         ">=." => {
             return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge"));
         }
-        "let" | "let*" | "loop" | "loop-finish" => {
+        "let" | "let*" | "mut" | "loop" | "loop-finish" => {
             return Err(format!("Unsupported return of builtin {}", op));
         }
         _ => {
@@ -3957,7 +3957,11 @@ fn compile_do(
                             }
                             Expression::Word(alias) => {
                                 if kw != "mut" {
-                                    if let Some(target) = scoped_lambda_bindings.get(alias).cloned() {
+                                    if
+                                        let Some(target) = scoped_lambda_bindings
+                                            .get(alias)
+                                            .cloned()
+                                    {
                                         scoped_lambda_bindings.insert(name.clone(), target);
                                     }
                                 }
