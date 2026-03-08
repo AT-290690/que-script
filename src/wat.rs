@@ -272,7 +272,7 @@ fn is_special_word(w: &str) -> bool {
             "set!" |
             "alter!" |
             "pop!" |
-            "loop-while" |
+            "while" |
             "curl!" |
             "read!" |
             "write!" |
@@ -3641,7 +3641,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         ">=." => {
             return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge"));
         }
-        "let" | "let*" | "mut" | "loop-while" => {
+        "let" | "let*" | "mut" | "while" => {
             return Err(format!("Unsupported return of builtin {}", op));
         }
         _ => {
@@ -3681,6 +3681,12 @@ fn is_borrowing_accessor_expr(node: &TypedExpression) -> bool {
 }
 
 const MAX_BORROW_ANALYSIS_DEPTH: usize = 64;
+
+#[derive(Clone)]
+enum CallableBinding {
+    Named(String),
+    Lambda(TypedExpression),
+}
 
 fn apply_child_at<'a>(node: &'a TypedExpression, item_idx: usize) -> Option<&'a TypedExpression> {
     let items = match &node.expr {
@@ -3722,9 +3728,95 @@ fn lambda_params_and_body<'a>(
     Some((params, body))
 }
 
+fn resolve_callable_binding_from_arg(
+    arg: &TypedExpression,
+    callable_env: &HashMap<String, CallableBinding>,
+    lambda_bindings: &HashMap<String, TypedExpression>
+) -> Option<CallableBinding> {
+    match &arg.expr {
+        Expression::Word(name) => {
+            if let Some(binding) = callable_env.get(name) {
+                Some(binding.clone())
+            } else if lambda_bindings.contains_key(name) {
+                Some(CallableBinding::Named(name.clone()))
+            } else {
+                None
+            }
+        }
+        Expression::Apply(items) if !items.is_empty() => {
+            if let Expression::Word(op) = &items[0] {
+                if op == "lambda" {
+                    return Some(CallableBinding::Lambda(arg.clone()));
+                }
+                if op == "as" || op == "char" {
+                    return apply_child_at(arg, 1).and_then(|inner|
+                        resolve_callable_binding_from_arg(inner, callable_env, lambda_bindings)
+                    );
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn analyze_borrow_for_lambda_invocation(
+    lambda_node: &TypedExpression,
+    call_node: &TypedExpression,
+    env: &HashMap<String, bool>,
+    callable_env: &HashMap<String, CallableBinding>,
+    lambda_bindings: &HashMap<String, TypedExpression>,
+    call_stack: &mut Vec<String>,
+    depth: usize
+) -> Option<bool> {
+    let (params, body) = lambda_params_and_body(lambda_node)?;
+    let mut lambda_env: HashMap<String, bool> = HashMap::new();
+    let mut lambda_callable_env: HashMap<String, CallableBinding> = HashMap::new();
+    for (idx, param_name) in params.iter().enumerate() {
+        let arg_node = apply_child_at(call_node, idx + 1);
+        let arg_borrowed = arg_node
+            .map(|arg|
+                is_borrowed_managed_rhs_with_env(
+                    arg,
+                    env,
+                    callable_env,
+                    lambda_bindings,
+                    call_stack,
+                    depth + 1
+                )
+            )
+            .unwrap_or(false);
+        lambda_env.insert(param_name.clone(), arg_borrowed);
+
+        if let Some(arg_node) = arg_node {
+            if
+                let Some(callable_binding) = resolve_callable_binding_from_arg(
+                    arg_node,
+                    callable_env,
+                    lambda_bindings
+                )
+            {
+                lambda_callable_env.insert(param_name.clone(), callable_binding);
+            }
+        }
+    }
+
+    Some(
+        is_borrowed_managed_rhs_with_env(
+            body,
+            &lambda_env,
+            &lambda_callable_env,
+            lambda_bindings,
+            call_stack,
+            depth + 1
+        )
+    )
+}
+
 fn is_borrowed_managed_rhs_with_env(
     node: &TypedExpression,
     env: &HashMap<String, bool>,
+    callable_env: &HashMap<String, CallableBinding>,
     lambda_bindings: &HashMap<String, TypedExpression>,
     call_stack: &mut Vec<String>,
     depth: usize
@@ -3749,6 +3841,7 @@ fn is_borrowed_managed_rhs_with_env(
                         is_borrowed_managed_rhs_with_env(
                             n,
                             env,
+                            callable_env,
                             lambda_bindings,
                             call_stack,
                             depth + 1
@@ -3762,6 +3855,7 @@ fn is_borrowed_managed_rhs_with_env(
                         is_borrowed_managed_rhs_with_env(
                             n,
                             env,
+                            callable_env,
                             lambda_bindings,
                             call_stack,
                             depth + 1
@@ -3775,6 +3869,7 @@ fn is_borrowed_managed_rhs_with_env(
                         is_borrowed_managed_rhs_with_env(
                             n,
                             env,
+                            callable_env,
                             lambda_bindings,
                             call_stack,
                             depth + 1
@@ -3786,6 +3881,7 @@ fn is_borrowed_managed_rhs_with_env(
                         is_borrowed_managed_rhs_with_env(
                             n,
                             env,
+                            callable_env,
                             lambda_bindings,
                             call_stack,
                             depth + 1
@@ -3796,6 +3892,7 @@ fn is_borrowed_managed_rhs_with_env(
             }
             if op == "do" {
                 let mut scoped_env = env.clone();
+                let mut scoped_callable_env = callable_env.clone();
                 if items.len() > 1 {
                     for i in 1..items.len() - 1 {
                         if let Expression::Apply(let_items) = &items[i] {
@@ -3810,6 +3907,7 @@ fn is_borrowed_managed_rhs_with_env(
                                             is_borrowed_managed_rhs_with_env(
                                                 rhs,
                                                 &scoped_env,
+                                                &scoped_callable_env,
                                                 lambda_bindings,
                                                 call_stack,
                                                 depth + 1
@@ -3817,6 +3915,19 @@ fn is_borrowed_managed_rhs_with_env(
                                         )
                                         .unwrap_or(false);
                                     scoped_env.insert(name.clone(), rhs_borrowed);
+                                    if let Some(rhs_node) = apply_child_at(node, i).and_then(|n| n.children.get(2)) {
+                                        if
+                                            let Some(callable_binding) = resolve_callable_binding_from_arg(
+                                                rhs_node,
+                                                &scoped_callable_env,
+                                                lambda_bindings
+                                            )
+                                        {
+                                            scoped_callable_env.insert(name.clone(), callable_binding);
+                                        } else {
+                                            scoped_callable_env.remove(name);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -3827,6 +3938,7 @@ fn is_borrowed_managed_rhs_with_env(
                         is_borrowed_managed_rhs_with_env(
                             last,
                             &scoped_env,
+                            &scoped_callable_env,
                             lambda_bindings,
                             call_stack,
                             depth + 1
@@ -3834,44 +3946,66 @@ fn is_borrowed_managed_rhs_with_env(
                     )
                     .unwrap_or(false);
             }
+            if let Some(binding) = callable_env.get(op) {
+                match binding {
+                    CallableBinding::Named(name) => {
+                        if call_stack.iter().any(|item| item == name) {
+                            return true;
+                        }
+                        if let Some(lambda_node) = lambda_bindings.get(name) {
+                            call_stack.push(name.clone());
+                            let result = analyze_borrow_for_lambda_invocation(
+                                lambda_node,
+                                node,
+                                env,
+                                callable_env,
+                                lambda_bindings,
+                                call_stack,
+                                depth + 1
+                            ).unwrap_or(false);
+                            call_stack.pop();
+                            return result;
+                        }
+                    }
+                    CallableBinding::Lambda(lambda_node) => {
+                        return analyze_borrow_for_lambda_invocation(
+                            lambda_node,
+                            node,
+                            env,
+                            callable_env,
+                            lambda_bindings,
+                            call_stack,
+                            depth + 1
+                        ).unwrap_or(false);
+                    }
+                }
+            }
             if let Some(lambda_node) = lambda_bindings.get(op) {
                 if call_stack.iter().any(|name| name == op) {
                     // Recursive/cyclic wrapper chain: stay conservative.
                     return true;
                 }
-                let (params, body) = match lambda_params_and_body(lambda_node) {
-                    Some(pb) => pb,
-                    None => {
-                        return false;
-                    }
-                };
-                let mut lambda_env: HashMap<String, bool> = HashMap::new();
-                for (idx, param_name) in params.iter().enumerate() {
-                    let arg_borrowed = apply_child_at(node, idx + 1)
-                        .map(|arg|
-                            is_borrowed_managed_rhs_with_env(
-                                arg,
-                                env,
-                                lambda_bindings,
-                                call_stack,
-                                depth + 1
-                            )
-                        )
-                        .unwrap_or(false);
-                    lambda_env.insert(param_name.clone(), arg_borrowed);
-                }
                 call_stack.push(op.to_string());
-                let result = is_borrowed_managed_rhs_with_env(
-                    body,
-                    &lambda_env,
+                let result = analyze_borrow_for_lambda_invocation(
+                    lambda_node,
+                    node,
+                    env,
+                    callable_env,
                     lambda_bindings,
                     call_stack,
                     depth + 1
-                );
+                ).unwrap_or(false);
                 call_stack.pop();
                 return result;
             }
-            false
+            if matches!(op, "vector" | "tuple" | "lambda" | "box" | "int" | "float" | "bool") {
+                // Fresh constructors return owned values.
+                return false;
+            }
+            // Unknown call heads (e.g. higher-order callback params like `cb`)
+            // are ambiguous: they may return borrowed aliases. Be conservative
+            // to avoid use-after-free from auto-releasing discarded `do` values.
+            true
         }
         _ => false,
     }
@@ -3882,8 +4016,16 @@ fn is_borrowed_managed_rhs_expr(
     lambda_bindings: &HashMap<String, TypedExpression>
 ) -> bool {
     let env = HashMap::new();
+    let callable_env = HashMap::new();
     let mut call_stack = Vec::new();
-    is_borrowed_managed_rhs_with_env(node, &env, lambda_bindings, &mut call_stack, 0)
+    is_borrowed_managed_rhs_with_env(
+        node,
+        &env,
+        &callable_env,
+        lambda_bindings,
+        &mut call_stack,
+        0
+    )
 }
 
 fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
@@ -4051,7 +4193,15 @@ fn compile_do(
             };
             let c = compile_expr(n, &scoped_ctx)?;
             let managed = n.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
-            if managed {
+            // Non-last managed expressions in `do` are usually temporaries and should be
+            // released, but borrowed aliases (e.g. push! returning the same vector) must not
+            // be released here.
+            let borrowed = if managed {
+                is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings)
+            } else {
+                false
+            };
+            if managed && !borrowed {
                 let tmp_val = ctx.tmp_i32;
                 let tmp_keep = ctx.tmp_i32 + 1;
                 let mut blk = Vec::new();
@@ -4337,127 +4487,12 @@ fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     Ok(format!("{xs}\n{start}\ncall $vec_slice_{}", elem.suffix()))
 }
 
-fn compile_loop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let start = compile_expr(
-        node.children.get(1).ok_or_else(|| "loop missing start".to_string())?,
-        ctx
-    )?;
-    let end = compile_expr(
-        node.children.get(2).ok_or_else(|| "loop missing end".to_string())?,
-        ctx
-    )?;
-    let fn_node = node.children.get(3).ok_or_else(|| "loop missing fn".to_string())?;
-
-    let i_local = ctx.tmp_i32 + 1;
-    let end_local = ctx.tmp_i32 + 2;
-    let nested_tmp = ctx.tmp_i32 + 3;
-
-    let body_and_drop = match &fn_node.expr {
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
-        => {
-            if items.len() < 3 {
-                return Err("loop lambda must have one param and a body".to_string());
-            }
-            let param = match &items[1] {
-                Expression::Word(w) => w.clone(),
-                _ => {
-                    return Err("loop lambda param must be a word".to_string());
-                }
-            };
-            let body_idx = items.len() - 1;
-            let body_node = fn_node.children
-                .get(body_idx)
-                .ok_or_else(|| "loop lambda missing typed body".to_string())?;
-            let mut locals = ctx.locals.clone();
-            locals.insert(param.clone(), i_local);
-            let body_ctx = Ctx {
-                fn_sigs: ctx.fn_sigs,
-                fn_ids: ctx.fn_ids,
-                lambda_ids: ctx.lambda_ids,
-                closure_defs: ctx.closure_defs,
-                lambda_bindings: ctx.lambda_bindings,
-                locals,
-                local_types: {
-                    let mut tys = ctx.local_types.clone();
-                    tys.insert(param.clone(), Type::Int);
-                    tys
-                },
-                tmp_i32: nested_tmp,
-            };
-            let body = compile_expr(body_node, &body_ctx)?;
-            format!("{body}\ndrop")
-        }
-        Expression::Word(name) => {
-            if let Some(lambda_node) = ctx.lambda_bindings.get(name) {
-                let items = match &lambda_node.expr {
-                    Expression::Apply(xs) => xs,
-                    _ => {
-                        return Err(format!("loop local '{}' is not a lambda", name));
-                    }
-                };
-                if items.len() < 3 {
-                    return Err(format!("loop local lambda '{}' missing body", name));
-                }
-                let param = match &items[1] {
-                    Expression::Word(w) => w.clone(),
-                    _ => {
-                        return Err(format!("loop local lambda '{}' has non-word param", name));
-                    }
-                };
-                let body_idx = items.len() - 1;
-                let body_node = lambda_node.children
-                    .get(body_idx)
-                    .ok_or_else(|| format!("loop local lambda '{}' missing typed body", name))?;
-                let mut locals = ctx.locals.clone();
-                locals.insert(param.clone(), i_local);
-                let body_ctx = Ctx {
-                    fn_sigs: ctx.fn_sigs,
-                    fn_ids: ctx.fn_ids,
-                    lambda_ids: ctx.lambda_ids,
-                    closure_defs: ctx.closure_defs,
-                    lambda_bindings: ctx.lambda_bindings,
-                    locals,
-                    local_types: {
-                        let mut tys = ctx.local_types.clone();
-                        tys.insert(param.clone(), Type::Int);
-                        tys
-                    },
-                    tmp_i32: nested_tmp,
-                };
-                let body = compile_expr(body_node, &body_ctx)?;
-                format!("{body}\ndrop")
-            } else {
-                let (params, _ret) = ctx.fn_sigs
-                    .get(name)
-                    .ok_or_else(|| format!("Unknown loop fn '{}'", name))?;
-                if params.len() == 1 {
-                    format!("local.get {i_local}\ncall ${}\ndrop", ident(name))
-                } else {
-                    return Err(
-                        format!("loop fn '{}' must take exactly one argument in wasm backend", name)
-                    );
-                }
-            }
-        }
-        _ => {
-            return Err("Unsupported loop function form in wasm backend".to_string());
-        }
-    };
-
-    Ok(
-        format!(
-            "{start}\nlocal.set {i_local}\n{end}\nlocal.set {end_local}\nblock\n  loop\n    local.get {i_local}\n    local.get {end_local}\n    i32.ge_s\n    br_if 1\n    {body_and_drop}\n    local.get {i_local}\n    i32.const 1\n    i32.add\n    local.set {i_local}\n    br 0\n  end\nend\ni32.const 0"
-        )
-    )
-}
-
 fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let cond = compile_expr(
-        node.children.get(1).ok_or_else(|| "loop-while missing condition".to_string())?,
+        node.children.get(1).ok_or_else(|| "while missing condition".to_string())?,
         ctx
     )?;
-    let body_node = node.children.get(2).ok_or_else(|| "loop-while missing body".to_string())?;
+    let body_node = node.children.get(2).ok_or_else(|| "while missing body".to_string())?;
     let body_and_drop = format!("{}\ndrop", compile_expr(body_node, ctx)?);
 
     Ok(
@@ -5524,7 +5559,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "set!" => compile_set(node, ctx),
                         "alter!" => compile_alter(node, ctx),
                         "pop!" => compile_pop(node, ctx),
-                        "loop-while" => compile_loop_while(node, ctx),
+                        "while" => compile_loop_while(node, ctx),
                         "list-dir!" =>
                             compile_host_unary_string_call(node, ctx, "list-dir!", "host_list_dir"),
                         "read!" =>

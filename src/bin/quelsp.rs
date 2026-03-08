@@ -444,7 +444,21 @@ impl ServerState {
         let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         let mut items = Vec::new();
 
-        for keyword in ["lambda", "if", "let", "let*", "mut", "do", "as", "alter!", "loop-while"] {
+        for keyword in [
+            "lambda",
+            "if",
+            "let",
+            "let*",
+            "mut",
+            "do",
+            "as",
+            "alter!",
+            "while",
+            "loop",
+            "vector",
+            "string",
+            "tuple",
+        ] {
             let insert_text = match keyword {
                 "mut" | "alter!" => Some(format!("{} ", keyword)),
                 _ => None,
@@ -669,13 +683,16 @@ fn analyze_document_text(
         }
     };
 
-    match infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count) {
+    match
+        infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count)
+    {
         Ok((_typ, typed)) => {
             collect_symbol_types(&typed, &mut symbol_types_raw);
             collect_let_binding_types(&typed, &mut let_binding_types_raw);
             form_scoped_symbols = build_form_scoped_analyses(text, user_form_count, &typed);
         }
-        Err(err) => diagnostics.extend(make_error_diagnostic(text, err.message, err.scope.as_ref())),
+        Err(err) =>
+            diagnostics.extend(make_error_diagnostic(text, err.message, err.scope.as_ref())),
     }
 
     let symbol_types: HashMap<String, String> = symbol_types_raw
@@ -962,11 +979,7 @@ fn make_error_diagnostic(
         normalized_message
     };
 
-    let ranges = if inferred_ranges.is_empty() {
-        vec![full_range(text)]
-    } else {
-        inferred_ranges
-    };
+    let ranges = if inferred_ranges.is_empty() { vec![full_range(text)] } else { inferred_ranges };
 
     ranges
         .into_iter()
@@ -985,11 +998,7 @@ fn diagnostic_summary_without_snippet(message: &str) -> String {
 }
 
 fn infer_error_ranges(text: &str, message: &str, scope: Option<&InferErrorScope>) -> Vec<Range> {
-    native_core
-        ::infer_error_ranges(text, message, scope)
-        .into_iter()
-        .map(from_core_range)
-        .collect()
+    native_core::infer_error_ranges(text, message, scope).into_iter().map(from_core_range).collect()
 }
 
 fn find_matching_paren_byte(text: &str, open_idx: usize) -> Option<usize> {

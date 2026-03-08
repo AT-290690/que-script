@@ -331,7 +331,7 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     }
     {
         let _ = env.insert(
-            "loop-while".to_string(),
+            "while".to_string(),
             TypeScheme::monotype(
                 Type::Function(
                     Box::new(Type::Bool),

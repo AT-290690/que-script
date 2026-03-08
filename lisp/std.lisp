@@ -256,7 +256,7 @@
 (let std/fn/rec (lambda init-frame handler (do 
   (let stack [init-frame])
   (let result [[]])
-  (loop (not (std/vector/empty? stack)) (lambda (do 
+  (while (not (std/vector/empty? stack)) (do 
     (let frame (pull! stack))
     (let action (handler frame))
     ; Action grammar:
@@ -267,7 +267,7 @@
       (= (fst action) std/fn/return) (do (set! result 0 (snd action)) nil)
       (= (fst action) std/fn/push) (do (loop 0 (length (snd action)) (lambda i (push! stack (get (snd action) i)))) nil)
       nil
-    ))))
+    )))
   (get result))))
 
 
@@ -282,54 +282,63 @@
      xs))))
 (let std/vector/not-empty? (lambda xs (not (= (length xs) 0))))
 (let std/vector/in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
-(let std/vector/for (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i))))))
-(let std/vector/for/i (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i) i)))))
-
+(let std/vector/for (lambda xs fn (do
+  (mut i 0)
+  (let len (length xs))
+  (while (< i len) (do (fn (get xs i)) (alter! i (+ i 1)))))))
+(let std/vector/for/i (lambda xs fn (do
+  (mut i 0)
+  (let len (length xs))
+  (while (< i len) (do (fn (get xs i) i) (alter! i (+ i 1)))))))
 (let std/vector/filter (lambda xs fn? (if (std/vector/empty? xs) xs (do 
      (let out [])
-     (let process (lambda i (do
-      (let x (get xs i))
-      (if (fn? x) (set! out (length out) x)))))
-     (loop 0 (length xs) process)
+     (mut i 0)
+     (while (< i (length xs)) (do 
+            (let x (get xs i))
+            (if (fn? x) (set! out (length out) x))
+            (alter! i (+ i 1))))
      out))))
 
+    ;  (mut i 0)
+    ;  (while (< i (length xs)) (do ... (alter! i (+ i 1))))
 (let std/vector/filter/i (lambda xs fn? (if (std/vector/empty? xs) xs (do 
      (let out [])
-     (let process (lambda i (do
-      (let x (get xs i))
-      (if (fn? x i) (set! out (length out) x)))))
-     (loop 0 (length xs) process)
+     (mut i 0)
+     (while (< i (length xs)) (do 
+            (let x (get xs i))
+            (if (fn? x i) (set! out (length out) x))
+            (alter! i (+ i 1))))
      out))))
 
 (let std/vector/reduce (lambda xs fn initial (do
-     (let out [ initial ])
-     (let process (lambda i (set! out 0 (fn (get out 0) (get xs i)))))
-     (loop 0 (length xs) process)
-     (get out))))
+     (mut out initial)
+     (mut i 0)
+     (while (< i (length xs)) (do (alter! out (fn out (get xs i))) (alter! i (+ i 1))))
+     out)))
 
 (let std/vector/reduce/i (lambda xs fn initial (do
-     (let out [ initial ])
-     (let process (lambda i (set! out 0 (fn (get out 0) (get xs i) i))))
-     (loop 0 (length xs) process)
-     (get out))))
+     (mut out initial)
+     (mut i 0)
+     (while (< i (length xs)) (do (alter! out (fn out (get xs i) i)) (alter! i (+ i 1))))
+     out)))
 
 (let std/vector/map (lambda xs fn (if (std/vector/empty? xs) [] (do
      (let out [(fn (get xs 0))])
-     (let process (lambda i (set! out (length out) (fn (get xs i)))))
-     (loop 1 (length xs) process)
+     (mut i 1)
+     (while (< i (length xs)) (do (set! out (length out) (fn (get xs i))) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/map/i (lambda xs fn (if (std/vector/empty? xs) [] (do
      (let out [(fn (get xs 0) 0)])
-     (let process (lambda i (set! out (length out) (fn (get xs i) i))))
-     (loop 1 (length xs) process)
+     (mut i 1)
+     (while (< i (length xs)) (do (set! out (length out) (fn (get xs i) i)) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/reduce/until (lambda xs fn fn? initial (do 
   (variable out initial)
   (boolean placed false)
   (integer i 0)
-  (loop-while (and (false? placed) (< (get i) (length xs))) (do 
+  (while (and (false? placed) (< (get i) (length xs))) (do 
     (let x (get xs (get i)))
     (let a (get out 0))
     (unless (fn? a x) (set out (fn a x)) (set placed true))
@@ -340,7 +349,7 @@
   (variable out initial)
   (boolean placed false)
   (integer i 0)
-  (loop-while (and (false? placed) (< (get i) (length xs))) (do 
+  (while (and (false? placed) (< (get i) (length xs))) (do 
     (let idx (get i))
     (let x (get xs idx))
     (let a (get out 0))
@@ -351,14 +360,14 @@
 (let std/vector/for/until (lambda xs fn fn? (do 
   (boolean placed false)
   (integer i 0)
-  (loop-while (and (false? placed) (< (get i) (length xs))) (do 
+  (while (and (false? placed) (< (get i) (length xs))) (do 
     (let x (get xs (get i)))
     (unless (fn? x) (do (fn x) nil) (set placed true)) (++ i))))))
 
 (let std/vector/for/until/i (lambda xs fn fn? (do 
   (boolean placed false)
   (integer i 0)
-  (loop-while (and (false? placed) (< (get i) (length xs))) (do
+  (while (and (false? placed) (< (get i) (length xs))) (do
     (let idx (get i))
     (let x (get xs idx))
     (unless (fn? x idx) (do (fn x idx) nil) (set placed true)) (++ i))))))
@@ -367,7 +376,7 @@
   (let out [])
   (boolean placed false)
   (integer i 0)
-  (loop-while (and (false? placed) (< (get i) (length xs))) (do 
+  (while (and (false? placed) (< (get i) (length xs))) (do 
     (let x (get xs (get i)))
     (unless (fn? x) (do (push! out (fn x)) nil) (set placed true)) (++ i)))
   out)))
@@ -376,7 +385,7 @@
   (let out [])
   (boolean placed false)
   (integer i 0)
-  (loop-while (and (false? placed) (< (get i) (length xs))) (do
+  (while (and (false? placed) (< (get i) (length xs))) (do
     (let idx (get i))
     (let x (get xs idx))
     (unless (fn? x idx) (do (push! out (fn x idx)) nil) (set placed true)) (++ i)))
@@ -384,51 +393,49 @@
 
 (let std/vector/int/range (lambda start end (do
      (let out [ start ])
-     (let process (lambda i (set! out (length out) i)))
-     (loop (+ start 1) (+ end 1) process)
+     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) i)))
      out))) 
 
 
 (let std/vector/float/range (lambda start end (do
      (let out [ (Int->Float start) ])
-     (let process (lambda i (set! out (length out) (Int->Float i))))
-     (loop (+ start 1) (+ end 1) process)
+     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) (Int->Float i))))
      out))) 
     
  (let std/vector/float/ones (lambda n (do
      (let out [ 1.0 ])
-     (let process (lambda i (set! out (length out) 1.0)))
-     (loop 1 n process)
+     (loop 1 n (lambda i (set! out (length out) 1.0)))
      out))) 
 
  (let std/vector/float/zeroes (lambda n (do
      (let out [ 0.0 ])
-     (let process (lambda i (set! out (length out) 0.0)))
-     (loop 1 n process)
+     (loop 1 n (lambda i (set! out (length out) 0.0)))
      out)))
 
 
  (let std/vector/int/ones (lambda n (do
      (let out [ 1 ])
-     (let process (lambda i (set! out (length out) 1)))
-     (loop 1 n process)
+     (loop 1 n (lambda i (set! out (length out) 1)))
      out))) 
 
  (let std/vector/int/zeroes (lambda n (do
      (let out [ 0 ])
-     (let process (lambda i (set! out (length out) 0)))
-     (loop 1 n process)
+     (loop 1 n (lambda i (set! out (length out) 0)))
      out)))
 
 (let std/vector/3d/int/range (lambda s w h (do 
-  (integer i s)
+  (mut i s)
   (let matrix [])
-  (loop 0 w (lambda . (do
+  (mut j 0)
+  (while (< j w) (do
+    (mut k 0)
     (let current [])
     (push! matrix current)
-    (loop 0 h (lambda . (do 
-        (push! current (get i))
-        (++ i)))))))
+    (while (< k h) (do 
+        (push! current i)
+        (alter! i (+ i 1))
+        (alter! k (+ k 1))))
+    (alter! j (+ j 1))))
     matrix)))
 
 (let std/vector/2d/int/range std/vector/int/range)
@@ -436,8 +443,7 @@
 
 (let std/vector/char/blanks (lambda n (do
     (let out [ std/char/empty ])
-    (let process (lambda i (set! out (length out) std/char/empty)))
-    (loop 1 n process)
+    (loop 1 n (lambda i (set! out (length out) std/char/empty)))
     out))) 
 
 (let std/vector/int/all-equal? (lambda xs (do (let x (get xs 0)) (std/vector/every? xs (lambda y (= y x))))))
@@ -480,35 +486,35 @@
 (let std/vector/concat! (lambda xs os (std/vector/reduce os std/vector/cons! xs)))
 
 (let std/vector/every? (lambda xs predicate? (do
-           (let i [ 0 ])
+           (mut i 0)
            (let len (length xs))
-           (loop (and (< (get i) len) (predicate? (get xs (get i)))) (lambda (set! i 0 (+ (get i) 1))))
-           (not (> len (get i))))))
+           (while (and (< i len) (predicate? (get xs i))) (alter! i (+ i 1)))
+           (not (> len i)))))
 
 (let std/vector/some? (lambda xs predicate? (do
-           (let i [ 0 ])
+           (mut i 0)
            (let len (length xs))
-           (loop (and (< (get i) len) (not (predicate? (get xs (get i))))) (lambda (set! i 0 (+ (get i) 1))))
-           (or (= len 0) (> len (get i))))))
+           (while (and (< i len) (not (predicate? (get xs i)))) (alter! i (+ i 1)))
+           (or (= len 0) (> len i)))))
 
 (let std/vector/every/i? (lambda xs predicate? (do
-           (let i [ 0 ])
+           (mut i 0)
            (let len (length xs))
-           (loop (and (< (get i) len) (predicate? (get xs (get i)) (get i))) (lambda (set! i 0 (+ (get i) 1))))
-           (not (> len (get i))))))
+           (while (and (< i len) (predicate? (get xs i) i)) (alter! i (+ i 1)))
+           (not (> len i)))))
 
 (let std/vector/some/i? (lambda xs predicate? (do
-           (let i [ 0 ])
+           (mut i 0)
            (let len (length xs))
-           (loop (and (< (get i) len) (not (predicate? (get xs (get i)) (get i)))) (lambda (set! i 0 (+ (get i) 1))))
-           (or (= len 0) (> len (get i))))))
+           (while (and (< i len) (not (predicate? (get xs i) i))) (alter! i (+ i 1)))
+           (or (= len 0) (> len i)))))
 
 (let std/vector/cartesian-product (lambda a b (std/vector/reduce a (lambda p x (std/vector/cons p (std/vector/map b (lambda y { x y })))) [])))
 
 (let std/int/gcd (lambda a b (do
     (mut A a)
     (mut B b)
-    (loop-while (> B 0) (do
+    (while (> B 0) (do
         (let a A)
         (let b B)
         (alter! A b)
@@ -629,7 +635,7 @@
     (mut high n)
     (mut mid 0)
     (mut res 0)
-    (loop-while (<= low high)
+    (while (<= low high)
       (do
         (alter! mid (+ low (/ (- high low) 2)))
         (if (<= mid 0)
@@ -647,7 +653,7 @@
       (mut result 1)
       (mut b base)
       (mut e exp)
-      (loop-while (> e 0) (do
+      (while (> e 0) (do
           (if (= (mod e 2) 1)
             (alter! result (* result b)))
             (alter! b (* b b))
@@ -663,13 +669,13 @@
     (floating mid 0.)
     (floating i 0.)
     ; Loop 100 times for high precision
-    (loop (<. (get i) 100.)
-      (lambda (do
+    (while (<. (get i) 100.)
+      (do
         (set mid (/. (+. (get low) (get high)) 2.))
         (if (<=. (*. (get mid) (get mid)) n)
             (set low (get mid))
             (set high (get mid)))
-        (set i (+. (get i) 1.)))))
+        (set i (+. (get i) 1.))))
     (get low))))
 
 (let std/float/expt (lambda base exp
@@ -679,12 +685,12 @@
     (floating e exp)
     
     ; 1. Handle the integer part of the exponent
-    (loop (>=. (get e) 1.)
-      (lambda (do
+    (while (>=. (get e) 1.)
+      (do
         (if (=. (mod. (floor (get e)) 2.) 1.)
             (set res (*. (get res) (get b))))
         (set b (*. (get b) (get b)))
-        (set e (/. (floor (get e)) 2.)))))
+        (set e (/. (floor (get e)) 2.))))
     
     ; 2. Handle the fractional part using square roots
     ; Refresh 'b' to original base and 'e' to the remaining fraction
@@ -695,15 +701,15 @@
     
     ; Loop 22. times for precision (handles bits of the fraction)
     (floating i 0.)
-    (loop (<. (get i) 22.)
-      (lambda (do
+    (while (<. (get i) 22.)
+      (do
         (if (>=. (get e) (get frac))
             (do 
               (set res (*. (get res) (get root)))
               (set e (-. (get e) (get frac)))))
         (set root (std/float/sqrt (get root)))
         (set frac (/. (get frac) 2.))
-        (set i (+. (get i) 1.)))))
+        (set i (+. (get i) 1.))))
     (get res))))
 
 
@@ -810,8 +816,7 @@ nil)))
 
 (let std/vector/zipper (lambda a b (do 
       (let out [[(get a 0) (get b 0)]])
-      (let process (lambda i (set! out (length out) [(get a i) (get b i)])))
-      (loop 1 (length a) process)
+      (loop 1 (length a) (lambda i (set! out (length out) [(get a i) (get b i)])))
       out)))
 
 (let std/vector/zip (lambda xs (std/vector/zipper (std/vector/first xs) (std/vector/second xs))))
@@ -820,8 +825,7 @@ nil)))
 
 (let std/vector/tuple/zipper (lambda a b (do
       (let out [{ (get a 0) (get b 0) }])
-      (let process (lambda i (set! out (length out) { (get a i) (get b i) })))
-      (loop 1 (length a) process)
+      (loop 1 (length a) (lambda i (set! out (length out) { (get a i) (get b i) })))
       out)))
 
 (let std/vector/tuple/zip (lambda xs (std/vector/tuple/zipper (fst xs) (snd xs))))
@@ -836,63 +840,54 @@ nil)))
      (let end (length xs))
      (let bounds (- end start))
      (let out [])
-     (let process (lambda i (set! out (length out) (get xs (+ start i)))))
-     (loop 0 bounds process)
+     (loop 0 bounds (lambda i (set! out (length out) (get xs (+ start i)))))
      out))))
      
 (let std/vector/slice (lambda xs start end (if (std/vector/empty? xs) xs (do
      (let bounds (- end start))
      (let out [])
-     (let process (lambda i (set! out (length out) (get xs (+ start i)))))
-     (loop 0 bounds process)
+     (loop 0 bounds (lambda i (set! out (length out) (get xs (+ start i)))))
      out))))
 
 (let std/vector/drop (lambda xs start (if (std/vector/empty? xs) xs (do
      (let end (length xs))
      (let bounds (- end start))
      (let out [])
-     (let process (lambda i (set! out (length out) (get xs (+ start i)))))
-     (loop 0 bounds process)
+     (loop 0 bounds (lambda i (set! out (length out) (get xs (+ start i)))))
      out))))
 
 (let std/vector/drop/last (lambda xs end (if (std/vector/empty? xs) xs (do
      (let bounds (- (length xs) end))
      (let out [])
-     (let process (lambda i (set! out (length out) (get xs i))))
-     (loop 0 bounds process)
+     (loop 0 bounds (lambda i (set! out (length out) (get xs i))))
      out))))
 
 (let std/vector/take (lambda xs end (if (std/vector/empty? xs) xs (do
      (let out [])
-     (let process (lambda i (set! out (length out) (get xs i))))
-     (loop 0 end process)
+     (loop 0 end (lambda i (set! out (length out) (get xs i))))
      out))))
 
 (let std/vector/take/last (lambda xs start (if (std/vector/empty? xs) xs (do
      (let out [])
-     (let process (lambda i (set! out (length out) (get xs i))))
-     (loop (- (length xs) start) (length xs) process)
+     (loop (- (length xs) start) (length xs) (lambda i (set! out (length out) (get xs i))))
      out))))
 
 (let std/vector/reverse (lambda xs (if (std/vector/empty? xs) xs (do
      (let out [])
      (let len (length xs))
-     (let process (lambda i (set! out (length out) (get xs (- len i 1)))))
-     (loop 0 len process)
+     (loop 0 len (lambda i (set! out (length out) (get xs (- len i 1)))))
      out))))
 
 (let std/vector/reverse! (lambda xs (loop 0 (/ (length xs) 2) (lambda i (std/vector/swap! xs i (- (length xs) i 1))))))
 
 (let std/vector/find-index (lambda xs fn? (do
-     (let i [ 0 ])
-     (let index [ -1 ])
+     (mut i 0)
+     (mut index -1)
      (let len (length xs))
-     (let process (lambda
-           (if (fn? (get xs (get i)))
-              (set! index 0 (get i))
-              (set! i 0 (+ (get i) 1)))))
-     (loop (and (< (get i) len) (= (get index 0) -1)) process)
-     (get index 0))))
+     (while (and (< i len) (= index -1)) (if (fn? (get xs i))
+              (alter! index i)
+              (alter! i (+ i 1))))
+     index)))
 
 (let std/vector/buckets (lambda size (do
      (let out [[]])
@@ -938,40 +933,35 @@ nil)))
 
 (let std/vector/sort-partition! (lambda arr start end fn (do
      (let pivot (get arr end))
-     (let i [(- start 1)])
-     (let j [ start ])
+     (mut i (- start 1))
+     (mut j start)
 
-     (let helper (lambda i j (do
-          (set! i 0 (+ (get i) 1))
-          (std/vector/swap! arr (get i) (get j))
-          nil)))
+     (while (< j end) (do
+           (if (fn (get arr j) pivot) (do
+          (alter! i (+ i 1))
+          (std/vector/swap! arr i j)
+          nil))
+          (alter! j (+ j 1))))
 
-     (let process (lambda (do
-           (if (fn (get arr (get j)) pivot) (helper i j))
-           (set! j 0 (+ (get j) 1)))))
-     (loop (< (get j) end) process)
-
-     (std/vector/swap! arr (+ (get i) 1) end)
-     (+ (get i) 1))))
+     (std/vector/swap! arr (+ i 1) end)
+     (+ i 1))))
 
 (let std/vector/sort! (lambda arr fn (do
      (let stack [])
-     (std/vector/push! stack 0)
-     (std/vector/push! stack (- (length arr) 1))
-     (let process (lambda (do
+     (push! stack 0)
+     (push! stack (- (length arr) 1))
+     (while (> (length stack) 0) (do
            (let end (get stack (- (length stack) 1)))
            (pop! stack)
            (let start (get stack (- (length stack) 1)))
            (pop! stack)
-           (let helper (lambda (do
+           (if (< start end) (do
                  (let pivot-index (std/vector/sort-partition! arr start end fn))
-                 (std/vector/push! stack start)
-                 (std/vector/push! stack (- pivot-index 1))
-                 (std/vector/push! stack (+ pivot-index 1))
-                 (std/vector/push! stack end)
-                 nil)))
-           (if (< start end) (helper)))))
-     (loop (> (length stack) 0) process)
+                 (push! stack start)
+                 (push! stack (- pivot-index 1))
+                 (push! stack (+ pivot-index 1))
+                 (push! stack end)
+                 nil))))
      arr)))
 
 (let std/vector/safe-sort! (lambda v fn
@@ -988,11 +978,11 @@ nil)))
               (let pivot (get vec high))
               (let i (box low))
               (let j (box low))
-              (loop (< (get j 0) high) (lambda (do
+              (while (< (get j 0) high) (do
                   (if (fn (get vec (get j 0)) pivot)
                       (do (std/vector/swap! vec (get i 0) (get j 0)) (++ i))
                       nil)
-                  (++ j))))
+                  (++ j)))
               (std/vector/swap! vec (get i 0) high)
               (let p (get i 0))
               {std/fn/push [{{low (- p 1)} vec} {{(+ p 1) high} vec}]})))))
@@ -1002,17 +992,14 @@ nil)))
 (let std/int/hash
  (lambda table key (do
      (let prime-num 31)
-     (let total [ 0 ])
-     (let i [ 0 ])
+     (mut total 0)
+     (mut i 0)
      (let bounds (if (< (- (length key) 1) 100) (- (length key) 1) 100))
-
-     (let process (lambda (do
-           (let letter (get key (get i)))
-           (set! total 0 (std/int/euclidean-mod (+ (* (get total 0 ) prime-num) (as letter Int)) (length table)))
-           (set! i 0 (+ (get i) 1)))))
-
-     (loop (< (get i) bounds) process)
-     (get total 0))))
+     (while (< i bounds) (do
+           (let letter (get key i))
+           (alter! total (std/int/euclidean-mod (+ (* total prime-num) (as letter Int)) (length table)))
+           (alter! i (+ i 1))))
+     total)))
 
 (let std/vector/hash/set/has? (lambda table key (do
      (let idx (std/int/hash table key))
@@ -1219,7 +1206,7 @@ nil)))
     (mut num 0)
     (mut base (/ (std/int/expt 10 (length digits)) 10))
     (mut i 0)
-    (loop-while (< i (length digits)) (do 
+    (while (< i (length digits)) (do 
       (alter! num (+ num (* base (get digits i))))
       (alter! base (/ base 10))
       (alter! i (+ i 1))))
@@ -1256,16 +1243,16 @@ nil)))
 (let std/convert/chars->float (lambda xs 
   (if (=# (get xs 0) std/char/minus) (*. (std/convert/chars->ufloat (std/vector/slice xs 1 (length xs))) -1.0) (std/convert/chars->ufloat xs))))
 
-(let std/convert/int->char/alphabet 
+(let std/convert/int->char/alphabet
   (lambda x offset (Int->Char (+ x (Char->Int offset)))))
 
 (let std/vector/unique-pairs (lambda xs (do 
     (let pairs [])
     (let len (length xs))
     (mut i 0)
-    (loop-while (< i len) (do 
+    (while (< i len) (do 
         (mut j (+ i 1))
-        (loop-while (< j len) (do 
+        (while (< j len) (do 
             (std/vector/push! pairs [(get xs i) (get xs j)])
             (alter! j (+ j 1))))
         (alter! i (+ i 1))))
@@ -1275,9 +1262,9 @@ nil)))
     (let pairs [])
     (let len (length xs))
     (mut i 0)
-    (loop-while (< i len) (do 
+    (while (< i len) (do 
         (mut j (+ i 1))
-        (loop-while (< j len) (do 
+        (while (< j len) (do 
             (std/vector/push! pairs { (get xs i) (get xs j) })
             (alter! j (+ j 1))))
         (alter! i (+ i 1))))
@@ -1626,15 +1613,6 @@ q)))
    (std/vector/3d/for/i matrix (lambda cell y x (if (fn? cell) (do (std/vector/push! coords [ y x ]) nil)))) 
     coords)))
 
-(let std/vector/reduce/until (lambda xs fn untill? initial (do
-                  (let* tail-call/reduce/until (lambda i out (unless (std/vector/in-bounds? xs i) out (do 
-                        (let next (fn out (get xs i)))
-                        (cond 
-                            (untill? next) next 
-                            (> (length xs) i) (tail-call/reduce/until (+ i 1) next)
-                            out)))))
-                      (tail-call/reduce/until 0 initial))))
-
 (let std/vector/concat/with (lambda xs ch (std/vector/reduce/i xs (lambda a b i (if (and (> i 0) (< i (length xs))) (std/vector/cons (std/vector/cons a [ ch ]) b) (std/vector/cons a b))) [])))
 
 (let std/vector/char/lines (lambda xs (std/convert/string->vector xs std/char/new-line)))
@@ -1653,13 +1631,13 @@ q)))
     (do
       (integer i 0)
       (boolean result true)
-      (loop (< (get i) (length a)) (lambda (do
+      (while (< (get i) (length a)) (do
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (not (= da db)) (do
           (boolean/set result false)
           (set i (length a))))
-        (set i (+ (get i) 1)))))
+        (set i (+ (get i) 1))))
       (if (true? result) true false)))))))
 
 (let std/convert/integer->bits (lambda num  
@@ -1733,10 +1711,14 @@ q)))
     (let H (length matrix))
     (let W (length (get matrix 0)))
     (let out [])
-    (loop 0 W (lambda i (do
+    (mut i 0)
+    (while (< i W) (do
+        (mut j 0)
         (std/vector/push! out [])
-        (loop 0 H (lambda j 
-            (std/vector/push! (std/vector/at out -1) (get matrix j i)))))))
+        (while (< j H) (do
+          (std/vector/push! (std/vector/at out -1) (get matrix j i))
+          (alter! j (+ j 1))))
+        (alter! i (+ i 1))))
     out))))
 
 (let std/vector/2d/interleave (lambda xs ys (do 
@@ -1776,8 +1758,7 @@ q)))
 
 (let std/vector/int/big/range (lambda start end (do
      (let out [ (std/int/big/new (std/convert/integer->string start)) ])
-     (let process (lambda i (set! out (length out) (std/int/big/new (std/convert/integer->string i)))))
-     (loop (+ start 1) (+ end 1) process)
+     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) (std/int/big/new (std/convert/integer->string i)))))
    out))) 
 
 (let std/int/big/add (lambda a1 b1 (do
@@ -1794,9 +1775,9 @@ q)))
     (set carry (/ sum 10)))
   ))
   ; Handle remaining carry
-  (loop (> (get carry) 0) (lambda (do
+  (while (> (get carry) 0) (do
     (std/vector/push! result (mod (get carry) 10))
-    (set carry (/ (get carry) 10)))))
+    (set carry (/ (get carry) 10))))
   (std/vector/reverse result))))
   
 (let std/int/big/sub (lambda a1 b1 (do
@@ -1818,9 +1799,9 @@ q)))
         (set borrow 0))))))
   ; Remove trailing zeros (from the most significant end)
   (integer i (- (length result) 1))
-  (loop (and (> (get i) 0) (= (get result (get i)) 0)) (lambda (do
+  (while (and (> (get i) 0) (= (get result (get i)) 0)) (do
     (pop! result)
-    (set i (- (get i) 1)))))
+    (set i (- (get i) 1))))
   (std/vector/reverse result))))
 
 (let std/int/big/mul (lambda a1 b1 (do
@@ -1840,17 +1821,17 @@ q)))
       (set carry (/ prod 10)))))
     ; Handle carry for this digit-a
     (integer k (+ i (length b)))
-    (loop (> (get carry) 0) (lambda (do
+    (while (> (get carry) 0) (do
       (if (not (< (get k) (length result))) (do (std/vector/push! result 0) nil) nil)
       (let sum (+ (get result (get k)) (get carry)))
       (set! result (get k) (mod sum 10))
       (set carry (/ sum 10))
-      (set k (+ (get k) 1))))))))
+      (set k (+ (get k) 1)))))))
   ; Remove trailing zeros (from the most significant end), but keep at least one digit
   (integer i (- (length result) 1))
-  (loop (and (> (get i) 0) (= (get result (get i)) 0) (> (length result) 1)) (lambda (do
+  (while (and (> (get i) 0) (= (get result (get i)) 0) (> (length result) 1)) (do
     (pop! result)
-    (set i (- (get i) 1)))))
+    (set i (- (get i) 1))))
   (std/vector/reverse result))))
 
 (let std/vector/int/remove-leading-zeroes (lambda digits (do
@@ -1868,7 +1849,7 @@ q)))
     (do
       (integer i 0)
       (boolean result true) ; assume a <= b
-      (loop (< (get i) (length a)) (lambda (do
+      (while (< (get i) (length a)) (do
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (< da db) (do
@@ -1877,7 +1858,7 @@ q)))
         (if (> da db) (do
           (boolean/set result false)
           (set i (length a))))
-        (set i (+ (get i) 1)))))
+        (set i (+ (get i) 1))))
       (if (true? result) true false)))))))
 
 (let std/int/big/greater-or-equal? (lambda a b (do
@@ -1887,7 +1868,7 @@ q)))
     (do
       (integer i 0)
       (boolean result true) ; assume a >= b
-      (loop (< (get i) (length a)) (lambda (do
+      (while (< (get i) (length a)) (do
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (> da db) (do
@@ -1896,7 +1877,7 @@ q)))
         (if (< da db) (do
           (boolean/set result false)
           (set i (length a))))
-        (set i (+ (get i) 1)))))
+        (set i (+ (get i) 1))))
       (if (true? result) true false)))))))
 
 (let std/int/big/less-than? (lambda a b (do
@@ -1906,7 +1887,7 @@ q)))
     (do
       (integer i 0)
       (boolean found-less false) ; true if a < b at some digit
-      (loop (< (get i) (length a)) (lambda (do
+      (while (< (get i) (length a)) (do
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (< da db) (do
@@ -1914,7 +1895,7 @@ q)))
           (set i (length a))))
         (if (> da db) (do
           (set i (length a)))) ; stop on a > b, keep found-less false
-        (set i (+ (get i) 1)))))
+        (set i (+ (get i) 1))))
       (if (true? found-less) true false)))))))
 
 (let std/int/big/greater-than? (lambda a b (do
@@ -1924,7 +1905,7 @@ q)))
     (do
       (integer i 0)
       (boolean found-greater false) ; true if a > b at some digit
-      (loop (< (get i) (length a)) (lambda (do
+      (while (< (get i) (length a)) (do
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (> da db) (do
@@ -1932,7 +1913,7 @@ q)))
           (set i (length a))))
         (if (< da db) (do
           (set i (length a)))) ; stop on a < b, keep found-greater false
-        (set i (+ (get i) 1)))))
+        (set i (+ (get i) 1))))
       (if (true? found-greater) true false)))))))
 
 (let std/int/big/equal? std/vector/equal?)
@@ -1943,28 +1924,28 @@ q)))
   (let len (length dividend))
   (integer i 0)
   ; Main loop/ process each digit of the dividend
-  (loop (< (get i) len) (lambda (do
+  (while (< (get i) len) (do
     (let digit (get dividend (get i)))
     (set current (std/vector/int/remove-leading-zeroes (std/vector/cons (get current) [ digit ])))
     ; Find max digit q such that (divisor * q) <= current
     (integer low 0)
     (integer high 9)
     (integer q 0)
-    (loop (<= (get low) (get high)) (lambda (do
+    (while (<= (get low) (get high)) (do
       (let mid (/ (+ (get low) (get high)) 2))
       (let prod (std/int/big/mul divisor [ mid ]))
       (if (std/int/big/less-or-equal? prod (get current))
         (do
           (set q mid)
           (set low (+ mid 1)))
-        (set high (- mid 1))))))
+        (set high (- mid 1)))))
 
     (std/vector/push! result (get q))
 
     ; current /= current - (divisor * q)
     (let sub (std/int/big/mul divisor [ (get q) ]))
     (set current (std/int/big/sub (get current) sub))
-    (++ i))))
+    (++ i)))
   (let out (std/vector/int/remove-leading-zeroes result))
   (if (std/vector/empty? out) [ 0 ] out))))
 (let std/int/big/square (lambda x (std/int/big/mul x x)))
@@ -1980,7 +1961,7 @@ q)))
   (integer p 1) ; Use numeric variable for p
   (integer carry 0) ; Use numeric variable for carry
   ; Loop to calculate n^pow
-  (loop (< (get p) pow) (lambda (do
+  (while (< (get p) pow) (do
     (set carry 0) ; Reset carry to 0
     (loop 0 (length digits) (lambda exp (do
       (let prod (+ (* (get digits exp) n) (get carry)))
@@ -1989,12 +1970,12 @@ q)))
       ; Update carry using variable helper
       (set carry new-carry))))
     ; Handle carry
-    (loop (> (get carry) 0) (lambda (do
+    (while (> (get carry) 0) (do
       (std/vector/push! digits (mod (get carry) 10))
       ; Update carry using variable helper
-      (/= carry 10))))
+      (/= carry 10)))
     ; Increment p using variable helper
-    (++ p))))
+    (++ p)))
   (std/vector/reverse digits))))
 
 (let std/int/big/pow (lambda a b (if (= b 0) [ 1 ] (do 
@@ -2005,9 +1986,9 @@ q)))
 (let std/int/big/expt (lambda a b (if (and (= (length b) 1) (= (get b 0) 0)) [ 1 ] (do 
     (variable out a)
     (variable expt (std/int/big/sub b [ 1 ]))
-    (loop (not (and (= (length (get expt)) 1) (= (get (get expt) 0) 0))) (lambda (do 
+    (while (not (and (= (length (get expt)) 1) (= (get (get expt) 0) 0))) (do 
       (set out (std/int/big/mul (get out) a))
-      (set expt (std/int/big/sub (get expt) [ 1 ])))))
+      (set expt (std/int/big/sub (get expt) [ 1 ]))))
     (get out)))))
 
 (let std/convert/integer->digits-base (lambda num base  
@@ -2084,15 +2065,15 @@ q)))
         (do
           (let out [])
           (variable i 0)
-          (loop (< (get i) (length arr)) (lambda (do
+          (while (< (get i) (length arr)) (do
               (let rest (std/vector/filter/i arr (lambda y j (not (= j (get i))))))
               (let perms (permute rest))
               (let x (get arr (get i)))
               (variable j 0)
-              (loop (< (get j) (length perms)) (lambda (do
+              (while (< (get j) (length perms)) (do
                   (set! out (length out) (std/vector/cons! [x] (get perms (get j))))
-                  (++ j))))
-              (++ i))))
+                  (++ j)))
+              (++ i)))
           out))))
     (permute arr))))
 
@@ -2178,9 +2159,9 @@ q)))
          (do
            (integer i 0)
            (integer hash 0)
-           (loop (< (get i) (length key)) (lambda (do
+           (while (< (get i) (length key)) (do
              (set hash (std/int/euclidean-mod (+ (* (get hash) 131) (as (get key (get i)) Int)) cap))
-             (++ i))))
+             (++ i)))
            (get hash))))))
 
 (let std/vector/hash/set/dynamic (lambda capacity (std/vector/buckets (std/int/max 4 capacity))))
@@ -2195,21 +2176,21 @@ q)))
       (do
         (integer i 0)
         (boolean matches true)
-        (loop (and (get matches) (< (get i) len)) (lambda (do
+        (while (and (get matches) (< (get i) len)) (do
           (if (not (=# (get a (get i)) (get b (get i))))
               (boolean/set matches false)
               nil)
-          (++ i))))
+          (++ i)))
         (get matches))))))
 
 (let std/vector/hash/set/dynamic/find-index (lambda bucket key (do
   (integer i 0)
   (integer found -1)
-  (loop (and (= (get found) -1) (< (get i) (length bucket))) (lambda (do
+  (while (and (= (get found) -1) (< (get i) (length bucket))) (do
     (if (std/vector/hash/set/dynamic/key-equal? (get bucket (get i)) key)
         (set found (get i))
         nil)
-    (++ i))))
+    (++ i)))
   (get found))))
 
 (let std/vector/hash/set/dynamic/for-each (lambda table fn (do
@@ -2342,11 +2323,11 @@ q)))
 (let std/vector/hash/table/dynamic/find-index (lambda bucket key (do
   (integer i 0)
   (integer found -1)
-  (loop (and (= (get found) -1) (< (get i) (length bucket))) (lambda (do
+  (while (and (= (get found) -1) (< (get i) (length bucket))) (do
     (if (std/vector/hash/set/dynamic/key-equal? (fst (get bucket (get i))) key)
         (set found (get i))
         nil)
-    (++ i))))
+    (++ i)))
   (get found))))
 
 (let std/vector/hash/table/dynamic/for-each (lambda table fn (do
