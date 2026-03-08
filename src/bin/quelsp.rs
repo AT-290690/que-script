@@ -444,10 +444,15 @@ impl ServerState {
         let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         let mut items = Vec::new();
 
-        for keyword in ["lambda", "if", "let", "let*", "do", "as"] {
+        for keyword in ["lambda", "if", "let", "let*", "mut", "do", "as", "alter!"] {
+            let insert_text = match keyword {
+                "mut" | "alter!" => Some(format!("{} ", keyword)),
+                _ => None,
+            };
             items.push(CompletionItem {
                 label: keyword.to_string(),
                 kind: Some(CompletionItemKind::KEYWORD),
+                insert_text,
                 ..CompletionItem::default()
             });
         }
@@ -1057,7 +1062,7 @@ fn is_let_binding_name_at_position(text: &str, symbol_range: Range, symbol: &str
     ) else {
         return false;
     };
-    if head != "let" && head != "let*" {
+    if head != "let" && head != "let*" && head != "mut" {
         return false;
     }
 
