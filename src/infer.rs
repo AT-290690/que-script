@@ -272,6 +272,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "as" => infer_as(exprs, ctx),
                     "lambda" => infer_lambda(exprs, ctx),
                     "if" => infer_if(&exprs, ctx),
+                    "while" => infer_while(&exprs, ctx),
                     "let" => infer_let(&exprs, ctx),
                     "mut" => infer_mut(&exprs, ctx),
                     "let*" => infer_rec(&exprs, ctx),
@@ -592,6 +593,46 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 
     Ok(then_type)
 }
+
+fn infer_while(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
+    if args.len() != 2 {
+        return Err(
+            format!(
+                "while expects exactly 2 arguments: condition and body\n{}",
+                format!(
+                    "({})",
+                    exprs
+                        .iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<String>>()
+                        .join(" ")
+                )
+            )
+        );
+    }
+
+    let cond_type = infer_expr(&args[0], ctx)?;
+    ctx.add_constraint(
+        cond_type,
+        Type::Bool,
+        ctx.type_error(TypeErrorVariant::Source, vec![args[0].clone()])
+    );
+
+    // while body is lexical: declarations inside it should not leak into surrounding scope.
+    ctx.enter_lexical_scope();
+    let body_result = infer_expr(&args[1], ctx);
+    ctx.exit_lexical_scope();
+    let body_type = body_result?;
+    ctx.add_constraint(
+        body_type,
+        Type::Unit,
+        ctx.type_error(TypeErrorVariant::Source, vec![args[1].clone()])
+    );
+
+    Ok(Type::Unit)
+}
+
 fn is_nonexpansive(expr: &Expression) -> bool {
     match expr {
         Expression::Word(_) | Expression::Int(_) | Expression::Float(_) => true,

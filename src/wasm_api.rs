@@ -1,4 +1,9 @@
-use crate::infer::{ infer_with_builtins_typed, infer_with_builtins_typed_lsp, InferErrorScope, TypedExpression };
+use crate::infer::{
+    infer_with_builtins_typed,
+    infer_with_builtins_typed_lsp,
+    InferErrorScope,
+    TypedExpression,
+};
 use crate::lsp_native_core as native_core;
 use crate::parser::{ self, Expression };
 use crate::types::{ Type, TypeEnv };
@@ -165,13 +170,18 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
     };
 
     match
-        infer_with_builtins_typed_lsp(&program, (core.base_env.clone(), core.base_next_id), user_form_count)
+        infer_with_builtins_typed_lsp(
+            &program,
+            (core.base_env.clone(), core.base_next_id),
+            user_form_count
+        )
     {
         Ok((_typ, typed)) => {
             collect_symbol_types(&typed, &mut symbol_types_raw);
             collect_let_binding_types(&typed, &mut let_binding_types_raw);
         }
-        Err(err) => diagnostics.extend(make_error_diagnostic(text, err.message, err.scope.as_ref())),
+        Err(err) =>
+            diagnostics.extend(make_error_diagnostic(text, err.message, err.scope.as_ref())),
     }
 
     for (name, typ) in let_binding_types_raw {
@@ -224,7 +234,21 @@ pub fn lsp_completions(text: String) -> String {
         }
 
         let mut items = Vec::new();
-        for keyword in ["lambda", "if", "let", "let*", "mut", "do", "as", "alter!", "loop-while"] {
+        for keyword in [
+            "lambda",
+            "if",
+            "let",
+            "let*",
+            "mut",
+            "do",
+            "as",
+            "alter!",
+            "while",
+            "loop",
+            "vector",
+            "string",
+            "tuple",
+        ] {
             items.push(JsonCompletionItem {
                 label: keyword.to_string(),
                 detail: None,
@@ -243,7 +267,12 @@ pub fn lsp_completions(text: String) -> String {
         if inferred_signatures.is_empty() {
             for name in &core.std_fallback_names {
                 let detail = core.global_signatures.get(name).cloned();
-                let kind = if detail.as_ref().map(|s| s.contains("->")).unwrap_or(true) {
+                let kind = if
+                    detail
+                        .as_ref()
+                        .map(|s| s.contains("->"))
+                        .unwrap_or(true)
+                {
                     "function"
                 } else {
                     "constant"
@@ -364,10 +393,7 @@ fn parse_user_exprs_for_symbol_collection(text: &str) -> Option<Vec<Expression>>
 }
 
 fn top_level_form_ranges(text: &str) -> Vec<TextRange> {
-    native_core::top_level_form_ranges(text)
-        .into_iter()
-        .map(from_core_range)
-        .collect()
+    native_core::top_level_form_ranges(text).into_iter().map(from_core_range).collect()
 }
 
 fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
@@ -430,11 +456,7 @@ fn make_error_diagnostic(
         normalized_message
     };
 
-    let ranges = if inferred_ranges.is_empty() {
-        vec![full_range(text)]
-    } else {
-        inferred_ranges
-    };
+    let ranges = if inferred_ranges.is_empty() { vec![full_range(text)] } else { inferred_ranges };
 
     ranges
         .into_iter()
@@ -454,11 +476,7 @@ fn infer_error_ranges(
     message: &str,
     scope: Option<&InferErrorScope>
 ) -> Vec<TextRange> {
-    native_core
-        ::infer_error_ranges(text, message, scope)
-        .into_iter()
-        .map(from_core_range)
-        .collect()
+    native_core::infer_error_ranges(text, message, scope).into_iter().map(from_core_range).collect()
 }
 
 fn full_range(text: &str) -> TextRange {

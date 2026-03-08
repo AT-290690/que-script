@@ -359,7 +359,7 @@ fn desugar_with_counter(
                     "floating" => Ok(float_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
                     "loop" => Ok(loop_transform(exprs, binding_counter)?),
-                    "loop-while" => Ok(loop_while_transform(exprs)?),
+                    "while" => Ok(loop_while_transform(exprs)?),
                     "lambda" => lambda_destructure_transform(exprs, binding_counter),
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
@@ -832,7 +832,9 @@ fn ensure_do_body_with_trailing_nil(body_expr: Expression) -> Expression {
             Expression::Apply(body_items)
         }
         other =>
-            Expression::Apply(vec![Expression::Word("do".to_string()), other, Expression::Word("nil".to_string())]),
+            Expression::Apply(
+                vec![Expression::Word("do".to_string()), other, Expression::Word("nil".to_string())]
+            ),
     }
 }
 
@@ -842,7 +844,12 @@ fn normalize_loop_while_body_from_arg(body_arg: &Expression) -> Result<Expressio
             if let Expression::Word(head) = &items[0] {
                 if head == "lambda" {
                     if items.len() < 2 {
-                        return Err(format!("loop condition form lambda missing body\n{}", body_arg.to_lisp()));
+                        return Err(
+                            format!(
+                                "loop condition form lambda missing body\n{}",
+                                body_arg.to_lisp()
+                            )
+                        );
                     }
                     let params = &items[1..items.len() - 1];
                     let param_count = params.len();
@@ -896,16 +903,16 @@ fn loop_transform(
         let body_with_unit = ensure_do_body_with_trailing_nil(raw_body);
         return Ok(
             Expression::Apply(
-                vec![Expression::Word("loop-while".to_string()), condition, body_with_unit]
+                vec![Expression::Word("while".to_string()), condition, body_with_unit]
             )
         );
     }
 
     let fn_expr = &exprs[2];
     match fn_expr {
-        Expression::Apply(items)
-            if matches!(items.first(), Some(Expression::Word(head)) if head == "lambda") =>
-        {
+        Expression::Apply(items) if
+            matches!(items.first(), Some(Expression::Word(head)) if head == "lambda")
+        => {
             let params = &items[1..items.len() - 1];
             let param_count = params.len();
             if param_count != 1 {
@@ -921,160 +928,141 @@ fn loop_transform(
                     )
                 );
             }
-            {
-                let i_name = next_destructure_temp("loop_i", 0, binding_counter);
-                let end_name = next_destructure_temp("loop_end", 0, binding_counter);
-                let cb_name = next_destructure_temp("loop_cb", 0, binding_counter);
-
-                let call_cb = Expression::Apply(
-                    vec![
-                        Expression::Word(cb_name.clone()),
-                        Expression::Word(i_name.clone()),
-                    ]
-                );
-                let inc_i = Expression::Apply(
-                    vec![
-                        Expression::Word("alter!".to_string()),
-                        Expression::Word(i_name.clone()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("+".to_string()),
-                                Expression::Word(i_name.clone()),
-                                Expression::Int(1),
-                            ]
-                        ),
-                    ]
-                );
-                let loop_body = Expression::Apply(
-                    vec![
-                        Expression::Word("do".to_string()),
-                        call_cb,
-                        inc_i,
-                        Expression::Word("nil".to_string()),
-                    ]
-                );
-                let cond = Expression::Apply(
-                    vec![
-                        Expression::Word("<".to_string()),
-                        Expression::Word(i_name.clone()),
-                        Expression::Word(end_name.clone()),
-                    ]
-                );
-
-                Ok(
+            let i_name = next_destructure_temp("loop_i", 0, binding_counter);
+            let end_name = next_destructure_temp("loop_end", 0, binding_counter);
+            let cb_name = next_destructure_temp("loop_cb", 0, binding_counter);
+            let call_cb = Expression::Apply(
+                vec![Expression::Word(cb_name.clone()), Expression::Word(i_name.clone())]
+            );
+            let inc_i = Expression::Apply(
+                vec![
+                    Expression::Word("alter!".to_string()),
+                    Expression::Word(i_name.clone()),
                     Expression::Apply(
                         vec![
-                            Expression::Word("do".to_string()),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("mut".to_string()),
-                                    Expression::Word(i_name),
-                                    exprs[0].clone(),
-                                ]
-                            ),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("let".to_string()),
-                                    Expression::Word(end_name),
-                                    exprs[1].clone(),
-                                ]
-                            ),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("let".to_string()),
-                                    Expression::Word(cb_name),
-                                    fn_expr.clone(),
-                                ]
-                            ),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("loop-while".to_string()),
-                                    cond,
-                                    loop_body,
-                                ]
-                            ),
+                            Expression::Word("+".to_string()),
+                            Expression::Word(i_name.clone()),
+                            Expression::Int(1)
                         ]
                     )
+                ]
+            );
+            let loop_body = Expression::Apply(
+                vec![
+                    Expression::Word("do".to_string()),
+                    call_cb,
+                    inc_i,
+                    Expression::Word("nil".to_string())
+                ]
+            );
+            let cond = Expression::Apply(
+                vec![
+                    Expression::Word("<".to_string()),
+                    Expression::Word(i_name.clone()),
+                    Expression::Word(end_name.clone())
+                ]
+            );
+
+            Ok(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("do".to_string()),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("mut".to_string()),
+                                Expression::Word(i_name),
+                                exprs[0].clone()
+                            ]
+                        ),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(end_name),
+                                exprs[1].clone()
+                            ]
+                        ),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(cb_name),
+                                fn_expr.clone()
+                            ]
+                        ),
+                        Expression::Apply(
+                            vec![Expression::Word("while".to_string()), cond, loop_body]
+                        )
+                    ]
                 )
-            }
+            )
         }
-        Expression::Word(name) if !name.is_empty() =>
-            {
-                let i_name = next_destructure_temp("loop_i", 0, binding_counter);
-                let end_name = next_destructure_temp("loop_end", 0, binding_counter);
-                let cb_name = next_destructure_temp("loop_cb", 0, binding_counter);
-
-                let call_cb = Expression::Apply(
-                    vec![
-                        Expression::Word(cb_name.clone()),
-                        Expression::Word(i_name.clone()),
-                    ]
-                );
-                let inc_i = Expression::Apply(
-                    vec![
-                        Expression::Word("alter!".to_string()),
-                        Expression::Word(i_name.clone()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("+".to_string()),
-                                Expression::Word(i_name.clone()),
-                                Expression::Int(1),
-                            ]
-                        ),
-                    ]
-                );
-                let loop_body = Expression::Apply(
-                    vec![
-                        Expression::Word("do".to_string()),
-                        call_cb,
-                        inc_i,
-                        Expression::Word("nil".to_string()),
-                    ]
-                );
-                let cond = Expression::Apply(
-                    vec![
-                        Expression::Word("<".to_string()),
-                        Expression::Word(i_name.clone()),
-                        Expression::Word(end_name.clone()),
-                    ]
-                );
-
-                Ok(
+        Expression::Word(name) if !name.is_empty() => {
+            let i_name = next_destructure_temp("loop_i", 0, binding_counter);
+            let end_name = next_destructure_temp("loop_end", 0, binding_counter);
+            let cb_name = next_destructure_temp("loop_cb", 0, binding_counter);
+            let call_cb = Expression::Apply(
+                vec![Expression::Word(cb_name.clone()), Expression::Word(i_name.clone())]
+            );
+            let inc_i = Expression::Apply(
+                vec![
+                    Expression::Word("alter!".to_string()),
+                    Expression::Word(i_name.clone()),
                     Expression::Apply(
                         vec![
-                            Expression::Word("do".to_string()),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("mut".to_string()),
-                                    Expression::Word(i_name),
-                                    exprs[0].clone(),
-                                ]
-                            ),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("let".to_string()),
-                                    Expression::Word(end_name),
-                                    exprs[1].clone(),
-                                ]
-                            ),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("let".to_string()),
-                                    Expression::Word(cb_name),
-                                    fn_expr.clone(),
-                                ]
-                            ),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("loop-while".to_string()),
-                                    cond,
-                                    loop_body,
-                                ]
-                            ),
+                            Expression::Word("+".to_string()),
+                            Expression::Word(i_name.clone()),
+                            Expression::Int(1)
                         ]
                     )
+                ]
+            );
+            let loop_body = Expression::Apply(
+                vec![
+                    Expression::Word("do".to_string()),
+                    call_cb,
+                    inc_i,
+                    Expression::Word("nil".to_string())
+                ]
+            );
+            let cond = Expression::Apply(
+                vec![
+                    Expression::Word("<".to_string()),
+                    Expression::Word(i_name.clone()),
+                    Expression::Word(end_name.clone())
+                ]
+            );
+
+            Ok(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("do".to_string()),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("mut".to_string()),
+                                Expression::Word(i_name),
+                                exprs[0].clone()
+                            ]
+                        ),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(end_name),
+                                exprs[1].clone()
+                            ]
+                        ),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(cb_name),
+                                fn_expr.clone()
+                            ]
+                        ),
+                        Expression::Apply(
+                            vec![Expression::Word("while".to_string()), cond, loop_body]
+                        )
+                    ]
                 )
-            },
+            )
+        }
         _ =>
             Err(
                 format!(
@@ -1095,7 +1083,7 @@ fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String
     if len != 2 {
         return Err(
             format!(
-                "loop-while expects exactly 2 arguments: condition and body expression, got {}\n{}",
+                "while expects exactly 2 arguments: condition and body expression, got {}\n{}",
                 len,
                 exprs
                     .into_iter()
@@ -1109,7 +1097,7 @@ fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String
     let condition = exprs[0].clone();
     let raw_body = normalize_loop_while_body_from_arg(&exprs[1])?;
     let body_with_unit = ensure_do_body_with_trailing_nil(raw_body);
-    Ok(Expression::Apply(vec![Expression::Word("loop-while".to_string()), condition, body_with_unit]))
+    Ok(Expression::Apply(vec![Expression::Word("while".to_string()), condition, body_with_unit]))
 }
 
 fn cdr_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {

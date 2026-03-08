@@ -3,6 +3,14 @@ use crate::parser::{ self, Expression };
 use crate::types::{ create_builtin_environment, Type, TypeEnv };
 use std::collections::{ HashMap, HashSet };
 
+pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 5] = [
+    ("alter!", "T -> T -> ()"),
+    ("vector", "T... -> [T]"),
+    ("string", "Char... -> [Char]"),
+    ("tuple", "T... -> {T...}"),
+    ("loop", "Int -> Int -> (Int -> ()) -> ()"),
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CorePosition {
     pub line: u32,
@@ -110,6 +118,11 @@ pub fn build_base_environment(std_defs: &[Expression]) -> (TypeEnv, u64, HashMap
 
     for (name, signature) in infer_std_signatures(&env, next_id, std_defs) {
         signatures.insert(name, normalize_signature(&signature));
+    }
+    for (name, signature) in LSP_SPECIAL_KEYWORD_SIGNATURES {
+        signatures
+            .entry(name.to_string())
+            .or_insert_with(|| normalize_signature(signature));
     }
 
     (env, next_id, signatures)
