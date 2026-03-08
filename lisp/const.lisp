@@ -14,7 +14,6 @@
 (let Float 0.0)
 (let Char (get "a"))
 (let Bool false)
-(let nil (loop 0 0 (lambda . 0)))
 (let Nil nil)
 (let as (lambda . t t))
 (let : (lambda t x (do [ t x ] x)))

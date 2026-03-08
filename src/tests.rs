@@ -19,6 +19,7 @@ mod tests {
             ),
             ("(vector 1 2 3)", "[Int]"),
             ("(vector (vector (vector 1)))", "[[[Int]]]"),
+            ("nil", "()"),
             ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
             (
                 "(do (let fn (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn)",
@@ -1553,6 +1554,7 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn test_correctness() {
         let test_cases = [
+            ("nil", "0"),
             ("(+ 1 2)", "3"),
             ("(std/vector/int/sum [ 1 2 ])", "3"),
             ("\"Hello world\"", "Hello world"),

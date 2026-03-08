@@ -326,7 +326,8 @@ fn is_special_word(w: &str) -> bool {
             "Int->Float" |
             "Float->Int" |
             "true" |
-            "false"
+            "false" |
+            "nil"
     )
 }
 
@@ -5507,6 +5508,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
             match w.as_str() {
                 "true" => Ok("i32.const 1".to_string()),
                 "false" => Ok("i32.const 0".to_string()),
+                "nil" => Ok("i32.const 0".to_string()),
                 _ => {
                     if let Some(local_idx) = ctx.locals.get(w) {
                         Ok(format!("local.get {}", local_idx))
