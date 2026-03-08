@@ -128,7 +128,7 @@ pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<Strin
     for expr in std_defs {
         if let Expression::Apply(items) = expr {
             if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
-                if keyword == "let" || keyword == "let*" {
+                if keyword == "let" || keyword == "let*" || keyword == "mut" {
                     names.insert(name.clone());
                 }
             }
@@ -172,7 +172,7 @@ pub fn infer_std_signatures(
 pub fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<String, Type>) {
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
-            if keyword == "let" || keyword == "let*" {
+            if keyword == "let" || keyword == "let*" || keyword == "mut" {
                 if let Some(rhs_type) = node.children.get(2).and_then(|child| child.typ.as_ref()) {
                     match signatures.get(name) {
                         Some(existing) => {
@@ -435,7 +435,7 @@ pub fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut Has
 fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
     if let Expression::Apply(items) = expr {
         if let Some(Expression::Word(head)) = items.first() {
-            if head == "let" || head == "let*" {
+            if head == "let" || head == "let*" || head == "mut" {
                 if let Some(Expression::Word(name)) = items.get(1) {
                     out.insert(name.clone());
                 }
