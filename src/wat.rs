@@ -256,6 +256,7 @@ fn is_special_word(w: &str) -> bool {
         w,
         "do" |
             "let" |
+            "mut" |
             "let*" |
             "lambda" |
             "if" |
@@ -269,6 +270,7 @@ fn is_special_word(w: &str) -> bool {
             "fst" |
             "snd" |
             "set!" |
+            "alter!" |
             "pop!" |
             "loop" |
             "loop-finish" |
@@ -371,7 +373,7 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                                 let [Expression::Word(kw), Expression::Word(name), rhs] =
                                     &let_items[..]
                             {
-                                if kw == "let" || kw == "let*" {
+                                if kw == "let" || kw == "let*" || kw == "mut" {
                                     collect_refs(rhs, bound, out);
                                     bound.insert(name.clone());
                                     continue;
@@ -382,7 +384,7 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     }
                     return;
                 }
-                if op == "let" || op == "let*" {
+                if op == "let" || op == "let*" || op == "mut" {
                     if let [_, Expression::Word(name), rhs] = &items[..] {
                         collect_refs(rhs, bound, out);
                         bound.insert(name.clone());
@@ -3801,7 +3803,7 @@ fn is_borrowed_managed_rhs_with_env(
                                 let [Expression::Word(kw), Expression::Word(name), _] =
                                     &let_items[..]
                             {
-                                if kw == "let" || kw == "let*" {
+                                if kw == "let" || kw == "let*" || kw == "mut" {
                                     let rhs_borrowed = apply_child_at(node, i)
                                         .and_then(|let_node| let_node.children.get(2))
                                         .map(|rhs|
@@ -3930,10 +3932,11 @@ fn compile_do(
     for i in 1..items.len() - 1 {
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
-                if kw == "let" || kw == "let*" {
+                if kw == "let" || kw == "let*" || kw == "mut" {
                     let val_node = child_at(i).and_then(|n| n.children.get(2));
                     let self_capture_idx = val_node.and_then(|n| {
                         if
+                            kw != "mut" &&
                             matches!(&n.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
                         {
                             let key = n.expr.to_lisp();
@@ -3947,13 +3950,16 @@ fn compile_do(
                     if let Some(n) = val_node {
                         match &n.expr {
                             Expression::Apply(xs) if
+                                kw != "mut" &&
                                 matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
                             => {
                                 scoped_lambda_bindings.insert(name.clone(), n.clone());
                             }
                             Expression::Word(alias) => {
-                                if let Some(target) = scoped_lambda_bindings.get(alias).cloned() {
-                                    scoped_lambda_bindings.insert(name.clone(), target);
+                                if kw != "mut" {
+                                    if let Some(target) = scoped_lambda_bindings.get(alias).cloned() {
+                                        scoped_lambda_bindings.insert(name.clone(), target);
+                                    }
                                 }
                             }
                             _ => {}
@@ -4270,6 +4276,33 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             )
         }
     }
+}
+
+fn compile_alter(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let target_name = match &node.expr {
+        Expression::Apply(items) => {
+            if items.len() != 3 {
+                return Err("alter! requires exactly 2 arguments".to_string());
+            }
+            match &items[1] {
+                Expression::Word(name) => name.clone(),
+                _ => {
+                    return Err("alter! first argument must be a mutable variable name".to_string());
+                }
+            }
+        }
+        _ => {
+            return Err("alter! invalid form".to_string());
+        }
+    };
+    let local_idx = *ctx.locals
+        .get(&target_name)
+        .ok_or_else(|| format!("alter! unknown local '{}'", target_name))?;
+    let value = compile_expr(
+        node.children.get(2).ok_or_else(|| "alter! missing value".to_string())?,
+        ctx
+    )?;
+    Ok(format!("{value}\nlocal.set {local_idx}\ni32.const 0"))
 }
 
 fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -5535,6 +5568,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         }
                         "cdr" => compile_cdr(node, ctx),
                         "set!" => compile_set(node, ctx),
+                        "alter!" => compile_alter(node, ctx),
                         "pop!" => compile_pop(node, ctx),
                         "loop" => compile_loop(node, ctx),
                         "loop-finish" => compile_loop_finish(node, ctx),
@@ -5606,7 +5640,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
 fn collect_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
-            if kw == "let" || kw == "let*" {
+            if kw == "let" || kw == "let*" || kw == "mut" {
                 if let Some(t) = node.children.get(2).and_then(|n| n.typ.as_ref()) {
                     if !out.iter().any(|(n, _)| n == name) {
                         out.push((name.clone(), t.clone()));

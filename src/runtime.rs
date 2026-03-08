@@ -1,4 +1,4 @@
-use wasmtime::{ Engine, Linker, Memory, Module as WasmModule, Store };
+use wasmtime::{ Config, Engine, Linker, Memory, Module as WasmModule, OptLevel, Store, Strategy };
 use wat as wat_crate;
 
 fn extract_type_from_wat(src: &str) -> Option<String> {
@@ -33,7 +33,11 @@ fn read_vec<T>(memory: &Memory, store: &Store<T>, vec_ptr: i32) -> Result<VecHea
     })
 }
 
-fn read_vec_items<T>(memory: &Memory, store: &Store<T>, hdr: &VecHeader) -> Result<Vec<i32>, String> {
+fn read_vec_items<T>(
+    memory: &Memory,
+    store: &Store<T>,
+    hdr: &VecHeader
+) -> Result<Vec<i32>, String> {
     if hdr.len < 0 {
         return Err(format!("negative vector length: {}", hdr.len));
     }
@@ -159,7 +163,10 @@ pub fn decode_value<T>(
         let raw_items = read_tuple(memory, store, ptr)?;
         let mut decoded = Vec::with_capacity(raw_items.len());
         for (i, item_ptr) in raw_items.into_iter().enumerate() {
-            let typ = parts.get(i).map(|s| s.as_str()).unwrap_or("Int");
+            let typ = parts
+                .get(i)
+                .map(|s| s.as_str())
+                .unwrap_or("Int");
             decoded.push(decode_value(item_ptr, typ, memory, store)?);
         }
         return Ok(format!("{{ {} }}", decoded.join(" ")));
@@ -224,24 +231,54 @@ fn debug_rc_snapshot<T>(instance: &wasmtime::Instance, store: &mut Store<T>) -> 
     let elem_ref_0 = read_debug_global_i64(instance, store, "dbg_vec_set_elem_ref_0").unwrap_or(0);
     let elem_ref_1 = read_debug_global_i64(instance, store, "dbg_vec_set_elem_ref_1").unwrap_or(0);
     let rel_vec_gt0 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_gt0").unwrap_or(0);
-    let rel_vec_free = read_debug_global_i64(instance, store, "dbg_rc_release_vec_free").unwrap_or(0);
+    let rel_vec_free = read_debug_global_i64(instance, store, "dbg_rc_release_vec_free").unwrap_or(
+        0
+    );
     let set_append = read_debug_global_i64(instance, store, "dbg_vec_set_append_path").unwrap_or(0);
-    let set_replace = read_debug_global_i64(instance, store, "dbg_vec_set_replace_path").unwrap_or(0);
-    let rel_rc_eq1 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_eq_1").unwrap_or(0);
-    let rel_rc_ge2 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_ge_2").unwrap_or(0);
+    let set_replace = read_debug_global_i64(instance, store, "dbg_vec_set_replace_path").unwrap_or(
+        0
+    );
+    let rel_rc_eq1 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_eq_1").unwrap_or(
+        0
+    );
+    let rel_rc_ge2 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_ge_2").unwrap_or(
+        0
+    );
     let old_rc_eq1 = read_debug_global_i64(instance, store, "dbg_vec_set_old_rc_eq_1").unwrap_or(0);
     let old_rc_ge2 = read_debug_global_i64(instance, store, "dbg_vec_set_old_rc_ge_2").unwrap_or(0);
-    let old_not_vec = read_debug_global_i64(instance, store, "dbg_vec_set_old_not_vec").unwrap_or(0);
+    let old_not_vec = read_debug_global_i64(instance, store, "dbg_vec_set_old_not_vec").unwrap_or(
+        0
+    );
     let tmp_rel_exec = read_debug_global_i64(instance, store, "dbg_tmp_release_exec").unwrap_or(0);
     let tmp_rel_skip = read_debug_global_i64(instance, store, "dbg_tmp_release_skip").unwrap_or(0);
     let v_rc_eq1 = read_debug_global_i64(instance, store, "dbg_vec_set_v_rc_eq_1").unwrap_or(0);
     let v_rc_ge2 = read_debug_global_i64(instance, store, "dbg_vec_set_v_rc_ge_2").unwrap_or(0);
     let v_not_vec = read_debug_global_i64(instance, store, "dbg_vec_set_v_not_vec").unwrap_or(0);
-    let tmp_post_eq1 = read_debug_global_i64(instance, store, "dbg_tmp_release_post_rc_eq_1").unwrap_or(0);
-    let tmp_post_other = read_debug_global_i64(instance, store, "dbg_tmp_release_post_rc_other").unwrap_or(0);
-    let tmp_post_not_vec = read_debug_global_i64(instance, store, "dbg_tmp_release_post_not_vec").unwrap_or(0);
-    let rel_reject_not_vec = read_debug_global_i64(instance, store, "dbg_rc_release_reject_not_vec").unwrap_or(0);
-    let rel_take_vec = read_debug_global_i64(instance, store, "dbg_rc_release_take_vec_path").unwrap_or(0);
+    let tmp_post_eq1 = read_debug_global_i64(
+        instance,
+        store,
+        "dbg_tmp_release_post_rc_eq_1"
+    ).unwrap_or(0);
+    let tmp_post_other = read_debug_global_i64(
+        instance,
+        store,
+        "dbg_tmp_release_post_rc_other"
+    ).unwrap_or(0);
+    let tmp_post_not_vec = read_debug_global_i64(
+        instance,
+        store,
+        "dbg_tmp_release_post_not_vec"
+    ).unwrap_or(0);
+    let rel_reject_not_vec = read_debug_global_i64(
+        instance,
+        store,
+        "dbg_rc_release_reject_not_vec"
+    ).unwrap_or(0);
+    let rel_take_vec = read_debug_global_i64(
+        instance,
+        store,
+        "dbg_rc_release_take_vec_path"
+    ).unwrap_or(0);
 
     Some(
         format!(
@@ -250,18 +287,38 @@ fn debug_rc_snapshot<T>(instance: &wasmtime::Instance, store: &mut Store<T>) -> 
     )
 }
 
+fn configured_engine() -> Result<Engine, String> {
+    let mut config = Config::new();
+    config.strategy(Strategy::Cranelift);
+    config.parallel_compilation(true);
+
+    let opt = std::env::var("QUE_WASM_OPT").unwrap_or_else(|_| "speed".to_string());
+    let opt_level = match opt.trim().to_ascii_lowercase().as_str() {
+        "none" => OptLevel::None,
+        "speed" => OptLevel::Speed,
+        "speed_and_size" | "speed-size" | "size" => OptLevel::SpeedAndSize,
+        other => {
+            return Err(
+                format!("invalid QUE_WASM_OPT='{}'. expected one of: none, speed, speed_and_size", other)
+            );
+        }
+    };
+    config.cranelift_opt_level(opt_level);
+
+    Engine::new(&config).map_err(|e| format!("engine error: {}", e))
+}
+
 pub fn run_wat_text<T: 'static, F>(
     wat_src: &str,
     store_data: T,
     argv: &[String],
     link_imports: F
 ) -> Result<String, String>
-where
-    F: FnOnce(&mut Linker<T>) -> Result<(), String>,
+    where F: FnOnce(&mut Linker<T>) -> Result<(), String>
 {
     let typ = extract_type_from_wat(wat_src).unwrap_or_else(|| "Int".to_string());
     let wasm_bytes = wat_crate::parse_str(wat_src).map_err(|e| e.to_string())?;
-    let engine = Engine::default();
+    let engine = configured_engine()?;
     let module = WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
     let mut linker = Linker::new(&engine);
     link_imports(&mut linker)?;
