@@ -3915,15 +3915,23 @@ fn is_borrowed_managed_rhs_with_env(
                                         )
                                         .unwrap_or(false);
                                     scoped_env.insert(name.clone(), rhs_borrowed);
-                                    if let Some(rhs_node) = apply_child_at(node, i).and_then(|n| n.children.get(2)) {
+                                    if
+                                        let Some(rhs_node) = apply_child_at(node, i).and_then(|n|
+                                            n.children.get(2)
+                                        )
+                                    {
                                         if
-                                            let Some(callable_binding) = resolve_callable_binding_from_arg(
-                                                rhs_node,
-                                                &scoped_callable_env,
-                                                lambda_bindings
-                                            )
+                                            let Some(callable_binding) =
+                                                resolve_callable_binding_from_arg(
+                                                    rhs_node,
+                                                    &scoped_callable_env,
+                                                    lambda_bindings
+                                                )
                                         {
-                                            scoped_callable_env.insert(name.clone(), callable_binding);
+                                            scoped_callable_env.insert(
+                                                name.clone(),
+                                                callable_binding
+                                            );
                                         } else {
                                             scoped_callable_env.remove(name);
                                         }
@@ -4018,14 +4026,7 @@ fn is_borrowed_managed_rhs_expr(
     let env = HashMap::new();
     let callable_env = HashMap::new();
     let mut call_stack = Vec::new();
-    is_borrowed_managed_rhs_with_env(
-        node,
-        &env,
-        &callable_env,
-        lambda_bindings,
-        &mut call_stack,
-        0
-    )
+    is_borrowed_managed_rhs_with_env(node, &env, &callable_env, lambda_bindings, &mut call_stack, 0)
 }
 
 fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
@@ -6338,9 +6339,16 @@ fn compile_dynamic_partial_helper_func(h: &DynamicPartialHelper) -> String {
     out
 }
 
-pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<String, String> {
-    let optimized_typed_ast = crate::op::optimize_typed_ast(typed_ast);
-    let typed_ast = &optimized_typed_ast;
+pub fn compile_program_to_wat_typed_with_opts(
+    typed_ast: &TypedExpression,
+    enable_optimizer: bool
+) -> Result<String, String> {
+    let optimized_typed_ast = if enable_optimizer {
+        Some(crate::op::optimize_typed_ast(typed_ast))
+    } else {
+        None
+    };
+    let typed_ast = optimized_typed_ast.as_ref().unwrap_or(typed_ast);
 
     let (top_defs, main_expr, main_node) = match &typed_ast.expr {
         Expression::Apply(items) if
@@ -6860,10 +6868,21 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
     Ok(wat)
 }
 
-pub fn compile_program_to_wat(expr: &Expression) -> Result<String, String> {
+pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<String, String> {
+    compile_program_to_wat_typed_with_opts(typed_ast, true)
+}
+
+pub fn compile_program_to_wat_with_opts(
+    expr: &Expression,
+    enable_optimizer: bool
+) -> Result<String, String> {
     let (_typ, typed_ast) = crate::infer::infer_with_builtins_typed(
         expr,
         crate::types::create_builtin_environment(crate::types::TypeEnv::new())
     )?;
-    compile_program_to_wat_typed(&typed_ast)
+    compile_program_to_wat_typed_with_opts(&typed_ast, enable_optimizer)
+}
+
+pub fn compile_program_to_wat(expr: &Expression) -> Result<String, String> {
+    compile_program_to_wat_with_opts(expr, true)
 }

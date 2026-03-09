@@ -473,6 +473,9 @@ impl ServerState {
 
         if let Some(doc) = self.documents.get(uri) {
             for (name, signature) in &doc.symbol_types {
+                if should_hide_completion_symbol(name) {
+                    continue;
+                }
                 let should_override =
                     doc.user_bound_symbols.contains(name) || self.global_signature(name).is_none();
                 if should_override {
@@ -482,6 +485,9 @@ impl ServerState {
 
             if let Some(form_signatures) = self.form_signatures_at(doc, position) {
                 for (name, signature) in form_signatures {
+                    if should_hide_completion_symbol(name) {
+                        continue;
+                    }
                     inferred_signatures.insert(name.clone(), signature.clone());
                 }
             }
@@ -499,6 +505,9 @@ impl ServerState {
         if inferred_signatures.is_empty() {
             self.with_core(|core| {
                 for name in &core.std_fallback_names {
+                    if should_hide_completion_symbol(name) {
+                        continue;
+                    }
                     let detail = core.global_signatures.get(name).cloned();
                     let kind = detail
                         .as_ref()
@@ -1035,6 +1044,10 @@ fn kind_for_signature(signature: &str) -> CompletionItemKind {
     } else {
         CompletionItemKind::CONSTANT
     }
+}
+
+fn should_hide_completion_symbol(symbol: &str) -> bool {
+    symbol.starts_with('_')
 }
 
 fn symbol_at_position(text: &str, position: Position) -> Option<(String, Range)> {

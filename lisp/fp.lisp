@@ -151,7 +151,7 @@
 (let unzip std/vector/tuple/unzip)
 (let zip-with (lambda f xs ys (std/vector/tuple/zip-with xs ys f)))
 
-(let window std/vector/sliding-window)
+(let window (lambda n xs (std/vector/sliding-window xs n)))
 (let flat std/vector/flat-one)
 (let enumerate std/vector/enumerate)
 (let clamp (lambda limit x (std/int/clamp x limit)))
