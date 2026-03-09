@@ -419,7 +419,6 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
-    #[ignore = "temporary: isolated regression tracker for loop-callback std/vector/for path"]
     fn test_regression_std_vector_for_isolated_behavior() {
         let output = run_program_output(
             r#"(do
@@ -433,7 +432,6 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
-    #[ignore = "temporary: isolated regression tracker for nested loop-callback rotate path"]
     fn test_regression_std_vector_3d_rotate_isolated_behavior() {
         let output = run_program_output(
             r#"(do

@@ -45,7 +45,7 @@
 (let Set->Vector std/convert/set->vector)
 (let Vector->Set std/convert/vector->set)
 
-(let Vector/equal? std/vector/equal?)
+(let Vector/equal? (lambda fn? xs ys (std/vector/equal? xs ys fn?)))
 
 (let Set/size std/vector/flat/length)
 (let Table/size std/vector/flat/length)
@@ -251,3 +251,5 @@
 (let Heap/not-empty? std/vector/not-empty?)
 (let Heap/empty! std/vector/empty!)
 (let Vector->Heap (lambda fn xs (std/convert/vector->heap xs fn)))
+
+(let Matrix->String (comp (map (Vector->String sp)) (Vector->String nl)))

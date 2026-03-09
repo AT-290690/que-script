@@ -25,3 +25,48 @@
 (let Char/nil (Int->Char 0))
 (let Char/start (Int->Char 2))
 (let Char/end (Int->Char 3))
+
+
+(let const/float/two-pi (+. const/float/pi const/float/pi))
+
+(let const/float/wrap-pi (lambda x (do
+  (mut y x)
+  (while (>. y const/float/pi) (do
+    (alter! y (-. y const/float/two-pi))))
+  (while (<. y (-. const/float/pi)) (do
+    (alter! y (+. y const/float/two-pi))))
+  y)))
+
+(let const/float/sin/terms (lambda x terms (do
+  (let y (const/float/wrap-pi x))
+  (let x2 (*. y y))
+  (mut term y)
+  (mut sum y)
+  (mut n 0)
+  (while (< n terms) (do
+    (let a (+ (* 2 n) 2))
+    (let b (+ (* 2 n) 3))
+    (let denom (Int->Float (* a b)))
+    (alter! term (/. (-. (*. term x2)) denom))
+    (alter! sum (+. sum term))
+    (alter! n (+ n 1))))
+  sum)))
+
+(let const/float/cos/terms (lambda x terms (do
+  (let y (const/float/wrap-pi x))
+  (let x2 (*. y y))
+  (mut term 1.0)
+  (mut sum 1.0)
+  (mut n 0)
+  (while (< n terms) (do
+    (let a (+ (* 2 n) 1))
+    (let b (+ (* 2 n) 2))
+    (let denom (Int->Float (* a b)))
+    (alter! term (/. (-. (*. term x2)) denom))
+    (alter! sum (+. sum term))
+    (alter! n (+ n 1))))
+  sum)))
+
+; Public helpers (good default precision)
+(let sin (lambda x (const/float/sin/terms x 8)))
+(let cos (lambda x (const/float/cos/terms x 8)))

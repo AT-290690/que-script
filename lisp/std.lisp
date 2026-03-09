@@ -335,60 +335,70 @@
      out))))
 
 (let std/vector/reduce/until (lambda xs fn fn? initial (do 
-  (variable out initial)
-  (boolean placed false)
-  (integer i 0)
-  (while (and (false? placed) (< (get i) (length xs))) (do 
-    (let x (get xs (get i)))
-    (let a (get out 0))
-    (unless (fn? a x) (set out (fn a x)) (set placed true))
-    (++ i)))
-(get out))))
+  (mut out initial)
+  (mut placed false)
+  (mut i 0)
+  (let len (length xs))
+  (while (and (not placed) (< i len)) (do 
+    (let x (get xs i))
+    (let a out)
+    (unless (fn? a x) (alter! out (fn a x)) (alter! placed true))
+    (alter! i (+ i 1))))
+out)))
 
 (let std/vector/reduce/until/i (lambda xs fn fn? initial (do 
-  (variable out initial)
-  (boolean placed false)
-  (integer i 0)
-  (while (and (false? placed) (< (get i) (length xs))) (do 
-    (let idx (get i))
+  (mut out initial)
+  (mut placed false)
+  (mut i 0)
+  (let len (length xs))
+  (while (and (not placed) (< i len)) (do 
+    (let idx i)
     (let x (get xs idx))
-    (let a (get out 0))
-    (unless (fn? a x idx) (set out (fn a x idx)) (set placed true))
-    (++ i)))
-(get out))))
+    (let a out)
+    (unless (fn? a x idx) (alter! out (fn a x idx)) (alter! placed true))
+    (alter! i (+ i 1))))
+out)))
 
 (let std/vector/for/until (lambda xs fn fn? (do 
-  (boolean placed false)
-  (integer i 0)
-  (while (and (false? placed) (< (get i) (length xs))) (do 
-    (let x (get xs (get i)))
-    (unless (fn? x) (do (fn x) nil) (set placed true)) (++ i))))))
+  (mut placed false)
+  (mut i 0)
+  (let len (length xs))
+  (while (and (not placed) (< i len)) (do 
+    (let x (get xs i))
+    (unless (fn? x) (do (fn x) nil) (alter! placed true))
+    (alter! i (+ i 1)))))))
 
 (let std/vector/for/until/i (lambda xs fn fn? (do 
-  (boolean placed false)
-  (integer i 0)
-  (while (and (false? placed) (< (get i) (length xs))) (do
-    (let idx (get i))
+  (mut placed false)
+  (mut i 0)
+  (let len (length xs))
+  (while (and (not placed) (< i len)) (do
+    (let idx i)
     (let x (get xs idx))
-    (unless (fn? x idx) (do (fn x idx) nil) (set placed true)) (++ i))))))
+    (unless (fn? x idx) (do (fn x idx) nil) (alter! placed true))
+    (alter! i (+ i 1)))))))
 
 (let std/vector/map/until (lambda xs fn fn? (do
   (let out [])
-  (boolean placed false)
-  (integer i 0)
-  (while (and (false? placed) (< (get i) (length xs))) (do 
-    (let x (get xs (get i)))
-    (unless (fn? x) (do (push! out (fn x)) nil) (set placed true)) (++ i)))
+  (mut placed false)
+  (mut i 0)
+  (let len (length xs))
+  (while (and (not placed) (< i len)) (do 
+    (let x (get xs i))
+    (unless (fn? x) (do (push! out (fn x)) nil) (alter! placed true))
+    (alter! i (+ i 1))))
   out)))
 
 (let std/vector/map/until/i (lambda xs fn fn? (do
   (let out [])
-  (boolean placed false)
-  (integer i 0)
-  (while (and (false? placed) (< (get i) (length xs))) (do
-    (let idx (get i))
+  (mut placed false)
+  (mut i 0)
+  (let len (length xs))
+  (while (and (not placed) (< i len)) (do
+    (let idx i)
     (let x (get xs idx))
-    (unless (fn? x idx) (do (push! out (fn x idx)) nil) (set placed true)) (++ i)))
+    (unless (fn? x idx) (do (push! out (fn x idx)) nil) (alter! placed true))
+    (alter! i (+ i 1))))
   out)))
 
 (let std/vector/int/range (lambda start end (do
@@ -411,7 +421,6 @@
      (let out [ 0.0 ])
      (loop 1 n (lambda i (set! out (length out) 0.0)))
      out)))
-
 
  (let std/vector/int/ones (lambda n (do
      (let out [ 1 ])
@@ -1625,20 +1634,70 @@ q)))
 (let std/vector/sort/asc! (lambda xs (std/vector/sort! xs <)))
 (let std/vector/sort/desc! (lambda xs (std/vector/sort! xs >)))
 
-(let std/vector/equal? (lambda a b (do
+(let std/vector/equal? (lambda a b fn? (do
   (if (< (length a) (length b)) false
   (if (> (length a) (length b)) false
     (do
-      (integer i 0)
-      (boolean result true)
-      (while (< (get i) (length a)) (do
-        (let da (get a (get i)))
-        (let db (get b (get i)))
+      (mut i 0)
+      (mut result true)
+      (let len (length a))
+      (while (< i len) (do
+        (let da (get a i))
+        (let db (get b i))
+        (if (not (fn? da db)) (do
+          (alter! result false)
+          (alter! i len)))
+        (alter! i (+ i 1))))
+      (if result true false)))))))
+
+
+(let std/vector/int/equal? (lambda a b (do
+  (if (< (length a) (length b)) false
+  (if (> (length a) (length b)) false
+    (do
+      (mut i 0)
+      (mut result true)
+      (let len (length a))
+      (while (< i len) (do
+        (let da (get a i))
+        (let db (get b i))
         (if (not (= da db)) (do
-          (boolean/set result false)
-          (set i (length a))))
-        (set i (+ (get i) 1))))
-      (if (true? result) true false)))))))
+          (alter! result false)
+          (alter! i len)))
+        (alter! i (+ i 1))))
+      (if result true false)))))))
+
+(let std/vector/float/equal? (lambda a b (do
+  (if (< (length a) (length b)) false
+  (if (> (length a) (length b)) false
+    (do
+      (mut i 0)
+      (mut result true)
+      (let len (length a))
+      (while (< i len) (do
+        (let da (get a i))
+        (let db (get b i))
+        (if (not (=. da db)) (do
+          (alter! result false)
+          (alter! i len)))
+        (alter! i (+ i 1))))
+      (if result true false)))))))
+
+(let std/vector/bool/equal? (lambda a b (do
+  (if (< (length a) (length b)) false
+  (if (> (length a) (length b)) false
+    (do
+      (mut i 0)
+      (mut result true)
+      (let len (length a))
+      (while (< i len) (do
+        (let da (get a i))
+        (let db (get b i))
+        (if (not (=? da db)) (do
+          (alter! result false)
+          (alter! i len)))
+        (alter! i (+ i 1))))
+      (if result true false)))))))
 
 (let std/convert/integer->bits (lambda num  
     (if (= num 0) [ 0 ] (do 
@@ -1916,7 +1975,7 @@ q)))
         (set i (+ (get i) 1))))
       (if (true? found-greater) true false)))))))
 
-(let std/int/big/equal? std/vector/equal?)
+(let std/int/big/equal? std/vector/int/equal?)
 
 (let std/int/big/div (lambda dividend divisor (do
   (let result (as [] [Int]))
@@ -2149,7 +2208,9 @@ q)))
 (let add std/int/add)
 (let sub std/int/sub)
 
-
+; -------------------------
+; Fast Set/Table implementation
+; -------------------------
 (let std/int/hash/dynamic
  (lambda table key
    (do
@@ -2157,13 +2218,16 @@ q)))
      (if (= cap 0)
          0
          (do
-           (integer i 0)
-           (integer hash 0)
-           (while (< (get i) (length key)) (do
-             (set hash (std/int/euclidean-mod (+ (* (get hash) 131) (as (get key (get i)) Int)) cap))
-             (++ i)))
-           (get hash))))))
-
+           (mut i 0)
+           (mut hash 0)
+           (let len (length key))
+           (while (< i len) (do
+             (alter! hash (std/int/euclidean-mod (+ (* hash 131) (as (get key i) Int)) cap))
+             (alter! i (+ i 1))))
+           hash)))))
+; -------------------------
+; Fast Set implementation
+; -------------------------
 (let std/vector/hash/set/dynamic (lambda capacity (std/vector/buckets (std/int/max 4 capacity))))
 (let std/vector/hash/set/dynamic/new std/vector/hash/set/dynamic)
 (let std/vector/hash/set/dynamic/max-capacity (lambda a b (std/vector/hash/set/dynamic (std/int/max (length a) (length b)))))
@@ -2174,34 +2238,46 @@ q)))
   (if (not (= len (length b)))
       false
       (do
-        (integer i 0)
-        (boolean matches true)
-        (while (and (get matches) (< (get i) len)) (do
-          (if (not (=# (get a (get i)) (get b (get i))))
-              (boolean/set matches false)
+        (mut i 0)
+        (mut matches true)
+        (while (and matches (< i len)) (do
+          (if (not (=# (get a i) (get b i)))
+              (alter! matches false)
               nil)
-          (++ i)))
-        (get matches))))))
+          (alter! i (+ i 1))))
+        matches)))))
 
 (let std/vector/hash/set/dynamic/find-index (lambda bucket key (do
-  (integer i 0)
-  (integer found -1)
-  (while (and (= (get found) -1) (< (get i) (length bucket))) (do
-    (if (std/vector/hash/set/dynamic/key-equal? (get bucket (get i)) key)
-        (set found (get i))
+  (mut i 0)
+  (mut found -1)
+  (let len (length bucket))
+  (while (and (= found -1) (< i len)) (do
+    (if (std/vector/hash/set/dynamic/key-equal? (get bucket i) key)
+        (alter! found i)
         nil)
-    (++ i)))
-  (get found))))
-
-(let std/vector/hash/set/dynamic/for-each (lambda table fn (do
-  (loop 0 (length table) (lambda i (do
-    (let bucket (get table i))
-    (loop 0 (length bucket) (lambda j (fn (get bucket j))))))))))
+    (alter! i (+ i 1))))
+  found)))
 
 (let std/vector/hash/set/dynamic/count (lambda table (do
-  (integer total 0)
-  (loop 0 (length table) (lambda i (+= total (length (get table i)))))
-  (get total))))
+  (mut total 0)
+  (let len (length table))
+  (mut i 0)
+  (while (< i (length table)) (do 
+    (alter! total (+ total (length (get table i))))
+    (alter! i (+ i 1))))
+  total)))
+
+(let std/vector/hash/set/dynamic/for-each (lambda table fn (do
+  (mut i 0)
+  (let table-len (length table))
+  (while (< i table-len) (do
+    (let bucket (get table i))
+    (mut j 0)
+    (let bucket-len (length bucket))
+    (while (< j bucket-len) (do
+      (fn (get bucket j))
+      (alter! j (+ j 1))))
+    (alter! i (+ i 1)))))))
 
 (let std/vector/hash/set/dynamic/add!/raw (lambda table key (do
   (let idx (std/int/hash/dynamic table key))
@@ -2217,8 +2293,15 @@ q)))
         (let entries [])
         (std/vector/hash/set/dynamic/for-each table (lambda key (set! entries (length entries) key)))
         (std/vector/empty! table)
-        (loop 0 target (lambda . (set! table (length table) [])))
-        (loop 0 (length entries) (lambda i (std/vector/hash/set/dynamic/add!/raw table (get entries i))))
+        (mut i 0)
+        (while (< i target) (do
+          (set! table (length table) [])
+          (alter! i (+ i 1))))
+        (mut j 0)
+        (let entries-len (length entries))
+        (while (< j entries-len) (do
+          (std/vector/hash/set/dynamic/add!/raw table (get entries j))
+          (alter! j (+ j 1))))
         table)))))
 
 (let std/vector/hash/set/dynamic/compact! (lambda table (do
@@ -2270,7 +2353,11 @@ q)))
 
 (let std/convert/vector->set/dynamic (lambda xs (do
   (let out (std/vector/hash/set/dynamic (std/int/max 32 (length xs))))
-  (loop 0 (length xs) (lambda i (std/vector/hash/set/dynamic/add! out (get xs i))))
+  (mut i 0)
+  (let len (length xs))
+  (while (< i len) (do
+    (std/vector/hash/set/dynamic/add! out (get xs i))
+    (alter! i (+ i 1))))
   out)))
 
 (let std/vector/hash/set/dynamic/intersection (lambda a b (do
@@ -2321,24 +2408,36 @@ q)))
 (let std/vector/hash/table/dynamic/max-capacity (lambda a b (std/vector/hash/table/dynamic (std/int/max (length a) (length b)))))
 
 (let std/vector/hash/table/dynamic/find-index (lambda bucket key (do
-  (integer i 0)
-  (integer found -1)
-  (while (and (= (get found) -1) (< (get i) (length bucket))) (do
-    (if (std/vector/hash/set/dynamic/key-equal? (fst (get bucket (get i))) key)
-        (set found (get i))
+  (mut i 0)
+  (mut found -1)
+  (let len (length bucket))
+  (while (and (= found -1) (< i len)) (do
+    (if (std/vector/hash/set/dynamic/key-equal? (fst (get bucket i)) key)
+        (alter! found i)
         nil)
-    (++ i)))
-  (get found))))
+    (alter! i (+ i 1))))
+  found)))
 
 (let std/vector/hash/table/dynamic/for-each (lambda table fn (do
-  (loop 0 (length table) (lambda i (do
+  (mut i 0)
+  (let table-len (length table))
+  (while (< i table-len) (do
     (let bucket (get table i))
-    (loop 0 (length bucket) (lambda j (fn (get bucket j))))))))))
+    (mut j 0)
+    (let bucket-len (length bucket))
+    (while (< j bucket-len) (do
+      (fn (get bucket j))
+      (alter! j (+ j 1))))
+    (alter! i (+ i 1)))))))
 
 (let std/vector/hash/table/dynamic/count-entries (lambda table (do
-  (integer total 0)
-  (loop 0 (length table) (lambda i (+= total (length (get table i)))))
-  (get total))))
+  (mut total 0)
+  (mut i 0)
+  (let len (length table))
+  (while (< i len) (do
+    (alter! total (+ total (length (get table i))))
+    (alter! i (+ i 1))))
+  total)))
 
 (let std/vector/hash/table/dynamic/set!/raw (lambda table key value (do
   (let idx (std/int/hash/dynamic table key))
@@ -2354,10 +2453,16 @@ q)))
         (let entries [])
         (std/vector/hash/table/dynamic/for-each table (lambda entry (set! entries (length entries) entry)))
         (std/vector/empty! table)
-        (loop 0 target (lambda . (set! table (length table) [])))
-        (loop 0 (length entries) (lambda i (do
-          (let entry (get entries i))
-          (std/vector/hash/table/dynamic/set!/raw table (fst entry) (snd entry)))))
+        (mut i 0)
+        (while (< i target) (do
+          (set! table (length table) [])
+          (alter! i (+ i 1))))
+        (mut j 0)
+        (let entries-len (length entries))
+        (while (< j entries-len) (do
+          (let entry (get entries j))
+          (std/vector/hash/table/dynamic/set!/raw table (fst entry) (snd entry))
+          (alter! j (+ j 1))))
         table)))))
 
 (let std/vector/hash/table/dynamic/compact! (lambda table (do
@@ -2425,43 +2530,64 @@ q)))
 (let std/vector/hash/table/dynamic/keys (lambda table (do
   (let entries (std/vector/hash/table/dynamic/entries table))
   (let out [])
-  (loop 0 (length entries) (lambda i (set! out (length out) (fst (get entries i)))))
+  (mut i 0)
+  (let len (length entries))
+  (while (< i len) (do
+    (set! out (length out) (fst (get entries i)))
+    (alter! i (+ i 1))))
   out)))
 
 (let std/vector/hash/table/dynamic/values (lambda table (do
   (let entries (std/vector/hash/table/dynamic/entries table))
   (let out [])
-  (loop 0 (length entries) (lambda i (set! out (length out) (snd (get entries i)))))
+  (mut i 0)
+  (let len (length entries))
+  (while (< i len) (do
+    (set! out (length out) (snd (get entries i)))
+    (alter! i (+ i 1))))
   out)))
 
 (let std/vector/hash/table/dynamic/count (lambda arr (do
   (let table (std/vector/hash/table/dynamic (std/int/max 64 (length arr))))
-  (loop 0 (length arr) (lambda i (do
+  (mut i 0)
+  (let len (length arr))
+  (while (< i len) (do
     (let key (get arr i))
     (let hit (std/vector/hash/table/dynamic/get table key))
     (if (= (length hit) 0)
         (std/vector/hash/table/dynamic/set! table key 1)
-        (std/vector/hash/table/dynamic/set! table key (+ (snd (get hit 0)) 1))))))
+        (std/vector/hash/table/dynamic/set! table key (+ (snd (get hit 0)) 1)))
+    (alter! i (+ i 1))))
   table)))
 
-(let std/vector/hash/table/dynamic/drop! (lambda table keys
-  (loop 0 (length keys) (lambda i (std/vector/hash/table/dynamic/remove! table (get keys i))))))
+(let std/vector/hash/table/dynamic/drop! (lambda table keys (do
+  (mut i 0)
+  (let len (length keys))
+  (while (< i len) (do
+    (std/vector/hash/table/dynamic/remove! table (get keys i))
+    (alter! i (+ i 1)))))))
 
 (let std/vector/hash/table/dynamic/keep (lambda table keys (do
   (let out (std/vector/hash/table/dynamic (std/int/max 32 (length keys))))
-  (loop 0 (length keys) (lambda i (do
+  (mut i 0)
+  (let len (length keys))
+  (while (< i len) (do
     (let key (get keys i))
     (let hit (std/vector/hash/table/dynamic/get table key))
     (if (> (length hit) 0)
         (do (std/vector/hash/table/dynamic/set! out key (fst (get hit 0))) nil)
-        nil))))
+        nil)
+    (alter! i (+ i 1))))
   out)))
 
 (let std/vector/hash/table/dynamic/merge! (lambda a b (do
   (let entries (std/vector/hash/table/dynamic/entries b))
-  (loop 0 (length entries) (lambda i (do
+  (mut i 0)
+  (let len (length entries))
+  (while (< i len) (do
     (let entry (get entries i))
-    (std/vector/hash/table/dynamic/set! a (fst entry) (snd entry)))))
+    (std/vector/hash/table/dynamic/set! a (fst entry) (snd entry))
+    (alter! i (+ i 1))))
   a)))
 
 (let std/vector/hash/table/dynamic/merge (lambda a b (do
@@ -2477,18 +2603,24 @@ q)))
 
 (let std/convert/vector->table/dynamic (lambda entries (do
   (let out (std/vector/hash/table/dynamic (std/int/max 32 (length entries))))
-  (loop 0 (length entries) (lambda i (do
+  (mut i 0)
+  (let len (length entries))
+  (while (< i len) (do
     (let entry (get entries i))
-    (std/vector/hash/table/dynamic/set! out (fst entry) (snd entry)))))
+    (std/vector/hash/table/dynamic/set! out (fst entry) (snd entry))
+    (alter! i (+ i 1))))
   out)))
 
 (let std/vector/tuple/hash/table/dynamic/group-by (lambda xs fn (do
   (let out (std/vector/hash/table/dynamic 32))
-  (loop 0 (length xs) (lambda i (do
+  (mut i 0)
+  (let len (length xs))
+  (while (< i len) (do
     (let item (get xs i))
     (let key (fn item))
     (let hit (std/vector/hash/table/dynamic/get out key))
     (if (= (length hit) 0)
         (do (std/vector/hash/table/dynamic/set! out key [item]) nil)
-        (do (push! (snd (get hit 0)) item) nil)))))
+        (do (push! (snd (get hit 0)) item) nil))
+    (alter! i (+ i 1))))
   out)))
