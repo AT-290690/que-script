@@ -161,6 +161,74 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_parser_reports_structured_unexpected_closer_for_offbalance_delimiters() {
+        let err = crate::parser::build("(do (let x 1)))").expect_err("should fail delimiter check");
+        assert!(
+            err.contains("parse.delimiter_error: unexpected_closer"),
+            "missing error kind, got:\n{}",
+            err
+        );
+        assert!(err.contains("parse.found: ')' at"), "missing found location, got:\n{}", err);
+        assert!(
+            err.contains("parse.fix_hint[0]:"),
+            "missing repair hint, got:\n{}",
+            err
+        );
+        assert!(
+            err.contains("parse.line_balance["),
+            "missing line balance window, got:\n{}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_parser_reports_structured_unclosed_opener_at_eof() {
+        let err = crate::parser::build("(do (let x 1)").expect_err("should fail delimiter check");
+        assert!(
+            err.contains("parse.delimiter_error: unclosed_opener"),
+            "missing error kind, got:\n{}",
+            err
+        );
+        assert!(
+            err.contains("parse.expected_before_eof: ')'"),
+            "missing eof expectation, got:\n{}",
+            err
+        );
+        assert!(
+            err.contains("parse.open_stack[0]:"),
+            "missing open stack, got:\n{}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_lsp_undefined_variable_suggestions_rank_typo_closest() {
+        let suggestions = crate::lsp_native_core::suggest_undefined_variable_candidates(
+            "Undefined variable: rnage",
+            ["range", "reduce", "map", "window"].iter().copied(),
+            3
+        );
+        assert_eq!(suggestions.first().map(String::as_str), Some("range"));
+    }
+
+    #[test]
+    fn test_lsp_undefined_variable_suggestions_append_only_for_undefined_variable_errors() {
+        let unchanged = crate::lsp_native_core::append_undefined_variable_suggestions(
+            "Cannot unify Int with Bool",
+            ["range", "reduce", "map"].iter().copied(),
+            3
+        );
+        assert_eq!(unchanged, "Cannot unify Int with Bool");
+
+        let with_hint = crate::lsp_native_core::append_undefined_variable_suggestions(
+            "Undefined variable: mpa",
+            ["map", "filter", "reduce"].iter().copied(),
+            3
+        );
+        assert!(with_hint.contains("Did you mean: map"), "got:\n{}", with_hint);
+    }
+
+    #[test]
     fn test_loop_while_desugars_to_do_body_with_trailing_nil() {
         let expr = crate::parser::build("(while false (+ 1 2))").expect("while should desugar");
         let lisp = expr.to_lisp();

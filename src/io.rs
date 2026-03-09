@@ -238,6 +238,51 @@ pub fn take_debug_mode_from_argv(argv: &mut Vec<String>) -> DebugMode {
     mode
 }
 
+fn take_help_flag_from_argv(argv: &mut Vec<String>) -> bool {
+    let mut found = false;
+    let mut out = Vec::with_capacity(argv.len());
+    for token in argv.iter() {
+        if token == "--help" || token == "-h" {
+            found = true;
+            continue;
+        }
+        out.push(token.clone());
+    }
+    *argv = out;
+    found
+}
+
+fn take_no_result_flag_from_argv(argv: &mut Vec<String>) -> bool {
+    let mut found = false;
+    let mut out = Vec::with_capacity(argv.len());
+    for token in argv.iter() {
+        if token == "--no-result" {
+            found = true;
+            continue;
+        }
+        out.push(token.clone());
+    }
+    *argv = out;
+    found
+}
+
+fn native_shell_help(bin_name: &str) -> String {
+    format!(
+        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|network|all> [...]]\n\
+         \n\
+         Flags:\n\
+           --help, -h     Show this help and exit.\n\
+           --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
+           --no-result    Do not print/decode the final evaluated program value.\n\
+           --allow        Enable host io permissions (read, write, delete, network, all).\n\
+         \n\
+         Notes:\n\
+           - Script arguments come before --allow.\n\
+           - --debug, --no-result and --help can appear after the script path.",
+        bin = bin_name
+    )
+}
+
 pub struct ShellStoreData {
     pub wasi_ctx: WasiCtx,
     pub resource_table: ResourceTable,
@@ -988,7 +1033,7 @@ fn build_debug_error_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{ DebugMode, take_debug_mode_from_argv, take_shell_policy_from_argv, ShellPermission, ShellPolicy };
+    use super::{ DebugMode, take_debug_mode_from_argv, take_help_flag_from_argv, take_no_result_flag_from_argv, take_shell_policy_from_argv, ShellPermission, ShellPolicy };
     use std::collections::HashSet;
 
     #[test]
@@ -1116,14 +1161,69 @@ mod tests {
         assert_eq!(mode, DebugMode::Basic);
         assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
     }
+
+    #[test]
+    fn take_help_strips_help_flags() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--help".to_string(),
+            "-h".to_string(),
+            "user-arg".to_string()
+        ];
+        let has_help = take_help_flag_from_argv(&mut args);
+        assert!(has_help);
+        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
+    }
+
+    #[test]
+    fn take_help_returns_false_when_missing() {
+        let mut args = vec!["script.que".to_string(), "user-arg".to_string()];
+        let has_help = take_help_flag_from_argv(&mut args);
+        assert!(!has_help);
+        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
+    }
+
+    #[test]
+    fn take_no_result_strips_flag() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--no-result".to_string(),
+            "user-arg".to_string()
+        ];
+        let has_no_result = take_no_result_flag_from_argv(&mut args);
+        assert!(has_no_result);
+        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
+    }
+
+    #[test]
+    fn take_no_result_returns_false_when_missing() {
+        let mut args = vec!["script.que".to_string(), "user-arg".to_string()];
+        let has_no_result = take_no_result_flag_from_argv(&mut args);
+        assert!(!has_no_result);
+        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
+    }
 }
 
 pub fn run_native_shell() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
+    let bin_name = args
+        .first()
+        .and_then(|p| Path::new(p).file_name())
+        .and_then(|p| p.to_str())
+        .unwrap_or("queio");
+    if matches!(args.get(1).map(String::as_str), Some("--help" | "-h")) {
+        println!("{}", native_shell_help(bin_name));
+        return Ok(());
+    }
     let Some(file_path) = args.get(1) else {
-        return Err("missing file_path. Usage: fez-rs <script.fez> [arg ...]".to_string());
+        return Err(format!("missing file_path\n{}", native_shell_help(bin_name)));
     };
     let mut argv: Vec<String> = args.iter().skip(2).cloned().collect();
+    if take_help_flag_from_argv(&mut argv) {
+        println!("{}", native_shell_help(bin_name));
+        return Ok(());
+    }
+    let suppress_result_output = take_no_result_flag_from_argv(&mut argv);
     let debug_mode = crate::io::take_debug_mode_from_argv(&mut argv);
     let shell_policy = crate::io
         ::take_shell_policy_from_argv(&mut argv)
@@ -1224,10 +1324,16 @@ pub fn run_native_shell() -> Result<(), String> {
     let store_data = ShellStoreData::new_with_security(Some(script_cwd), shell_policy).map_err(|e|
         e.to_string()
     )?;
-    let decoded = crate::runtime::run_wat_text(&wat_src, store_data, &argv, |linker|
-        add_shell_to_linker(linker).map_err(|e| e.to_string())
-    )?;
-    println!("\x1b[32m{}\x1b[0m", decoded);
+    if suppress_result_output {
+        crate::runtime::run_wat_text_no_result(&wat_src, store_data, &argv, |linker|
+            add_shell_to_linker(linker).map_err(|e| e.to_string())
+        )?;
+    } else {
+        let decoded = crate::runtime::run_wat_text(&wat_src, store_data, &argv, |linker|
+            add_shell_to_linker(linker).map_err(|e| e.to_string())
+        )?;
+        println!("\x1b[32m{}\x1b[0m", decoded);
+    }
 
     Ok(())
 }

@@ -12,7 +12,11 @@ fn is_fusion_reserved_word(name: &str) -> bool {
             "reduce" |
             "reduce/i" |
             "sum" |
+            "sum/int" |
+            "sum/float" |
             "product" |
+            "product/int" |
+            "product/float" |
             "some?" |
             "some/i?" |
             "every?" |
@@ -166,6 +170,339 @@ fn flush(buf: &mut String, out: &mut Vec<String>) {
     }
 }
 
+#[derive(Clone, Copy)]
+enum DelimiterMode {
+    ParenOnly,
+    SourceDelimiters,
+}
+
+#[derive(Clone, Copy)]
+struct OpenDelimiter {
+    open: char,
+    close: char,
+    line: usize,
+    col: usize,
+}
+
+fn delimiter_close_for_open(ch: char, mode: DelimiterMode) -> Option<char> {
+    match mode {
+        DelimiterMode::ParenOnly => if ch == '(' { Some(')') } else { None }
+        DelimiterMode::SourceDelimiters =>
+            match ch {
+                '(' => Some(')'),
+                '[' => Some(']'),
+                '{' => Some('}'),
+                _ => None,
+            }
+    }
+}
+
+fn is_delimiter_close(ch: char, mode: DelimiterMode) -> bool {
+    match mode {
+        DelimiterMode::ParenOnly => ch == ')',
+        DelimiterMode::SourceDelimiters => matches!(ch, ')' | ']' | '}'),
+    }
+}
+
+fn ensure_line_delta(line_deltas: &mut Vec<i32>, line: usize) {
+    if line_deltas.len() < line {
+        line_deltas.resize(line, 0);
+    }
+}
+
+fn push_open_stack_lines(out: &mut Vec<String>, stack: &[OpenDelimiter]) {
+    if stack.is_empty() {
+        out.push("parse.open_stack: <empty>".to_string());
+        return;
+    }
+
+    for (idx, item) in stack.iter().rev().take(8).enumerate() {
+        out.push(
+            format!(
+                "parse.open_stack[{}]: '{}' opened at {}:{} expects '{}'",
+                idx,
+                item.open,
+                item.line,
+                item.col,
+                item.close
+            )
+        );
+    }
+    if stack.len() > 8 {
+        out.push(format!("parse.open_stack_more: {}", stack.len() - 8));
+    }
+}
+
+fn push_balance_window_lines(
+    out: &mut Vec<String>,
+    source_lines: &[&str],
+    line_deltas: &[i32],
+    focus_line: usize
+) {
+    if line_deltas.is_empty() {
+        return;
+    }
+
+    let mut cumulative = Vec::with_capacity(line_deltas.len());
+    let mut bal = 0i32;
+    let mut first_underflow = None;
+    for (idx, delta) in line_deltas.iter().enumerate() {
+        bal += delta;
+        cumulative.push(bal);
+        if bal < 0 && first_underflow.is_none() {
+            first_underflow = Some(idx + 1);
+        }
+    }
+
+    let max_line = line_deltas.len().max(1);
+    let start = focus_line.saturating_sub(2).max(1);
+    let end = (focus_line + 2).min(max_line);
+    for line in start..=end {
+        let idx = line - 1;
+        let src = source_lines.get(idx).copied().unwrap_or("");
+        out.push(
+            format!(
+                "parse.line_balance[{}]: delta={:+} cumulative={:+} | {}",
+                line,
+                line_deltas[idx],
+                cumulative[idx],
+                src.trim_end()
+            )
+        );
+    }
+    if let Some(line) = first_underflow {
+        out.push(format!("parse.first_underflow_line: {}", line));
+    }
+}
+
+fn delimiter_report_unexpected_closer(
+    source_lines: &[&str],
+    line_deltas: &[i32],
+    stack: &[OpenDelimiter],
+    found: char,
+    line: usize,
+    col: usize
+) -> String {
+    let mut out = Vec::new();
+    out.push("parse.delimiter_error: unexpected_closer".to_string());
+    out.push(format!("parse.found: '{}' at {}:{}", found, line, col));
+    if let Some(top) = stack.last().copied() {
+        out.push(
+            format!(
+                "parse.expected: '{}' to close '{}' opened at {}:{}",
+                top.close,
+                top.open,
+                top.line,
+                top.col
+            )
+        );
+        out.push(
+            format!(
+                "parse.fix_hint[0]: Replace '{}' with '{}' at {}:{}.",
+                found,
+                top.close,
+                line,
+                col
+            )
+        );
+        out.push(
+            format!(
+                "parse.fix_hint[1]: Or insert '{}' before {}:{} and keep '{}'.",
+                top.close,
+                line,
+                col,
+                found
+            )
+        );
+    } else {
+        out.push("parse.expected: <no opener in scope>".to_string());
+        out.push(format!("parse.fix_hint[0]: Remove '{}' at {}:{}.", found, line, col));
+        out.push(format!("parse.fix_hint[1]: Or add matching opener before {}:{}.", line, col));
+    }
+    push_open_stack_lines(&mut out, stack);
+    push_balance_window_lines(&mut out, source_lines, line_deltas, line);
+    out.join("\n")
+}
+
+fn delimiter_report_unclosed_opener(
+    source_lines: &[&str],
+    line_deltas: &[i32],
+    stack: &[OpenDelimiter],
+    opener: OpenDelimiter
+) -> String {
+    let mut out = Vec::new();
+    out.push("parse.delimiter_error: unclosed_opener".to_string());
+    out.push(format!("parse.unclosed: '{}' opened at {}:{}", opener.open, opener.line, opener.col));
+    out.push(format!("parse.expected_before_eof: '{}'", opener.close));
+    out.push(format!("parse.fix_hint[0]: Add '{}' before end of file.", opener.close));
+    push_open_stack_lines(&mut out, stack);
+    push_balance_window_lines(&mut out, source_lines, line_deltas, opener.line);
+    out.join("\n")
+}
+
+fn delimiter_report_unclosed_literal(
+    source_lines: &[&str],
+    line_deltas: &[i32],
+    kind: &str,
+    line: usize,
+    col: usize
+) -> String {
+    let mut out = Vec::new();
+    out.push(format!("parse.delimiter_error: unclosed_{}", kind));
+    out.push(format!("parse.unclosed_{}: opened at {}:{}", kind, line, col));
+    let closer = if kind == "string_literal" { "\"" } else { "'" };
+    out.push(format!("parse.fix_hint[0]: Add closing {}.", closer));
+    push_balance_window_lines(&mut out, source_lines, line_deltas, line);
+    out.join("\n")
+}
+
+fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
+    let source_lines: Vec<&str> = source.lines().collect();
+    let mut line_deltas = vec![0i32; 1];
+
+    let mut stack: Vec<OpenDelimiter> = Vec::new();
+    let mut line = 1usize;
+    let mut col = 1usize;
+
+    let mut in_comment = false;
+    let mut in_string_start = None::<(usize, usize)>;
+    let mut in_char_start = None::<(usize, usize)>;
+
+    for ch in source.chars() {
+        ensure_line_delta(&mut line_deltas, line);
+
+        if in_comment {
+            if ch == '\n' {
+                in_comment = false;
+                line += 1;
+                col = 1;
+                ensure_line_delta(&mut line_deltas, line);
+            } else {
+                col += 1;
+            }
+            continue;
+        }
+
+        if in_string_start.is_some() {
+            if ch == '"' {
+                in_string_start = None;
+            }
+            if ch == '\n' {
+                line += 1;
+                col = 1;
+                ensure_line_delta(&mut line_deltas, line);
+            } else {
+                col += 1;
+            }
+            continue;
+        }
+
+        if in_char_start.is_some() {
+            if ch == '\'' {
+                in_char_start = None;
+            }
+            if ch == '\n' {
+                line += 1;
+                col = 1;
+                ensure_line_delta(&mut line_deltas, line);
+            } else {
+                col += 1;
+            }
+            continue;
+        }
+
+        match ch {
+            ';' => {
+                in_comment = true;
+                col += 1;
+            }
+            '"' => {
+                in_string_start = Some((line, col));
+                col += 1;
+            }
+            '\'' => {
+                in_char_start = Some((line, col));
+                col += 1;
+            }
+            '\n' => {
+                line += 1;
+                col = 1;
+                ensure_line_delta(&mut line_deltas, line);
+            }
+            _ => {
+                if let Some(close) = delimiter_close_for_open(ch, mode) {
+                    line_deltas[line - 1] += 1;
+                    stack.push(OpenDelimiter { open: ch, close, line, col });
+                    col += 1;
+                    continue;
+                }
+
+                if is_delimiter_close(ch, mode) {
+                    line_deltas[line - 1] -= 1;
+                    let Some(top) = stack.last().copied() else {
+                        return Some(
+                            delimiter_report_unexpected_closer(
+                                &source_lines,
+                                &line_deltas,
+                                &stack,
+                                ch,
+                                line,
+                                col
+                            )
+                        );
+                    };
+                    if ch != top.close {
+                        return Some(
+                            delimiter_report_unexpected_closer(
+                                &source_lines,
+                                &line_deltas,
+                                &stack,
+                                ch,
+                                line,
+                                col
+                            )
+                        );
+                    }
+                    stack.pop();
+                    col += 1;
+                    continue;
+                }
+
+                col += 1;
+            }
+        }
+    }
+
+    if let Some((sline, scol)) = in_string_start {
+        return Some(
+            delimiter_report_unclosed_literal(
+                &source_lines,
+                &line_deltas,
+                "string_literal",
+                sline,
+                scol
+            )
+        );
+    }
+    if let Some((sline, scol)) = in_char_start {
+        return Some(
+            delimiter_report_unclosed_literal(
+                &source_lines,
+                &line_deltas,
+                "char_literal",
+                sline,
+                scol
+            )
+        );
+    }
+
+    if let Some(opener) = stack.last().copied() {
+        return Some(delimiter_report_unclosed_opener(&source_lines, &line_deltas, &stack, opener));
+    }
+
+    None
+}
+
 fn tokenize(input: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut buf = String::new();
@@ -230,6 +567,9 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
     }
 }
 pub fn parse(src: &str) -> Result<Vec<Expression>, String> {
+    if let Some(report) = delimiter_debug_report(src, DelimiterMode::ParenOnly) {
+        return Err(report);
+    }
     let tokens = tokenize(src);
     let mut i = 0;
     let mut exprs = Vec::new();
@@ -245,6 +585,9 @@ pub fn parse(src: &str) -> Result<Vec<Expression>, String> {
     Ok(exprs)
 }
 fn preprocess(source: &str) -> Result<String, String> {
+    if let Some(report) = delimiter_debug_report(source, DelimiterMode::SourceDelimiters) {
+        return Err(report);
+    }
     let mut out = String::new();
     let mut chars = source.chars().peekable();
 

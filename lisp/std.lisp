@@ -2639,3 +2639,67 @@ q)))
         (do (push! (snd (get hit 0)) item) nil))
     (alter! i (+ i 1))))
   out)))
+
+(let std/int/min/3 (lambda a b c (std/int/min (std/int/min a b) c)))
+(let std/int/min/4 (lambda a b c d (std/int/min (std/int/min a b) (std/int/min c d))))
+(let std/int/min/2 std/int/min)
+
+(let std/vector/char/damerau-levenshtein (lambda a b (do
+  (let n (length a))
+  (let m (length b))
+  (let matrix (Matrix/new (lambda . . 0) (+ n 1) (+ m 1)))
+
+  (mut i0 0)
+  (while (<= i0 n) (do
+    (let row (get matrix i0))
+    (set! row 0 i0)
+    (alter! i0 (+ i0 1))))
+
+  (let first-row (get matrix 0))
+  (mut j0 0)
+  (while (<= j0 m) (do
+    (set! first-row j0 j0)
+    (alter! j0 (+ j0 1))))
+
+  (mut i 1)
+  (while (<= i n) (do
+    (let current-row (get matrix i))
+    (let prev-row (get matrix (- i 1)))
+    (mut j 1)
+    (while (<= j m) (do
+      (let a-char (get a (- i 1)))
+      (let b-char (get b (- j 1)))
+      (let replace-cost (if (=# a-char b-char) 0 1))
+
+      (let delete-cost (+ (get prev-row j) 1))
+      (let insert-cost (+ (get current-row (- j 1)) 1))
+      (let subst-cost (+ (get prev-row (- j 1)) replace-cost))
+      (let best (std/int/min/3 delete-cost insert-cost subst-cost))
+
+      (let with-transpose
+        (if (and (> i 1)
+                 (> j 1)
+                 (=# a-char (get b (- j 2)))
+                 (=# (get a (- i 2)) b-char))
+            (std/int/min best (+ (get (get matrix (- i 2)) (- j 2)) 1))
+            best))
+      (set! current-row j with-transpose)
+      (alter! j (+ j 1))))
+    (alter! i (+ i 1))))
+
+  (get (get matrix n) m))))
+
+(let std/vector/char/autocorrect (lambda word dictionary (do
+  (let first (get dictionary 0))
+  (variable best-word first)
+  (mut best-dist (std/vector/char/damerau-levenshtein word first))
+  (mut i 1)
+  (while (< i (length dictionary)) (do
+    (let candidate (get dictionary i))
+    (let dist (std/vector/char/damerau-levenshtein word candidate))
+    (if (< dist best-dist)
+        (do
+          (set best-word candidate)
+          (alter! best-dist dist)))
+    (alter! i (+ i 1))))
+  { (get best-word) best-dist })))

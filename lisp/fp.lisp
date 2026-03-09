@@ -255,3 +255,5 @@
    out)))
 
 (let replace (lambda a b xs (|> xs (split a) (join b))))
+
+(let autocorrect (lambda dict word (std/vector/char/autocorrect word dict)))
