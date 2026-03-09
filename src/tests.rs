@@ -317,7 +317,9 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn run_program_output(src: &str) -> String {
         let expr = crate::parser::build(src).expect("program should build");
-        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
         let store_data = crate::io::ShellStoreData
@@ -331,6 +333,45 @@ Concequent and alternative must match types
         #[cfg(not(feature = "io"))]
         let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         run_result.expect("program should run without trap")
+    }
+
+    #[cfg(feature = "runtime")]
+    fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
+        let std_ast = crate::baked::load_ast();
+        let expr = match std_ast {
+            crate::parser::Expression::Apply(items) =>
+                crate::parser
+                    ::merge_std_and_program(src, items[1..].to_vec())
+                    .expect("program + std should merge"),
+            _ => panic!("std ast should be (do ...)"),
+        };
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, enable_optimizer)
+            .expect("program should compile");
+        let argv: Vec<String> = Vec::new();
+        #[cfg(feature = "io")]
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
+        #[cfg(feature = "io")]
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
+        );
+        #[cfg(not(feature = "io"))]
+        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
+        run_result.expect("program should run without trap")
+    }
+
+    #[cfg(feature = "runtime")]
+    fn assert_std_program_output_matches_with_and_without_optimizer(src: &str) {
+        let output_no_opts = run_program_output_with_std_and_opts(src, false);
+        let output_with_opts = run_program_output_with_std_and_opts(src, true);
+        assert_eq!(
+            output_with_opts,
+            output_no_opts,
+            "optimizer output must match non-optimized output"
+        );
     }
 
     #[test]
@@ -395,6 +436,69 @@ Concequent and alternative must match types
                  (valid-path 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)])"#
         );
         assert_eq!(output, "[[[1 2] [0 2] [1 0]] [[1 2] [0] [0] [5 4] [5 3] [3 4]]]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_correctness_fusion_opt_equivalence_smoke() {
+        assert_std_program_output_matches_with_and_without_optimizer(
+            r#"(do
+  (let z (|> (zip (pair (range 1 5) (map odd? (range 1 5))))
+             (map (lambda t (tuple (+ (fst t) 1) (snd t))))
+             (filter (lambda t (> (fst t) 2)))
+             unzip))
+  [(sum (fst z)) (length (snd z)) (|> (window 2 [1 2 3 4]) (map length) sum)])"#
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_correctness_fusion_opt_equivalence_smoke2() {
+        assert_std_program_output_matches_with_and_without_optimizer(
+            r#"(|> 
+  (range 1 10)
+  (filter even?) 
+  (map square)
+  (map/i (lambda x i { x i }))
+  unzip
+  zip
+  (map (lambda { a b } (* a b)))
+  sum)"#
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_correctness_fusion_opt_equivalence_smoke3() {
+        assert_std_program_output_matches_with_and_without_optimizer(
+            r#"(|> (range 1 (|> (range 1 20) (map (lambda x (+ x 1))) (find (lambda x (> x 15))))) (map odd?) (every? (Bool/eq? true)))"#
+        )
+    }
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_correctness_fusion_opt_equivalence_smoke4() {
+        assert_std_program_output_matches_with_and_without_optimizer(
+            r#"
+            (let a (|> (range 1 5) (map/i (lambda x i { x i }))))
+(let b (map/i (lambda x i { x i }) [1 2 3 4 5]))
+[a b]"#
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_correctness_fusion_opt_equivalence_template() {
+        assert_std_program_output_matches_with_and_without_optimizer(
+            r#"(|> (range 1 10) (map (lambda x (+ x 1))) (filter (lambda x (> x 3))) (reduce + 0))"#
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_correctness_fusion_opt_equivalence_template6() {
+        assert_std_program_output_matches_with_and_without_optimizer(
+            r#"(|> (range 1 10) (map (lambda x (+ x 1))) (window 3) (map sum) (filter even?) sum)"#
+        );
     }
 
     #[test]
@@ -828,6 +932,136 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_mean_aliases_fuse_to_single_pass_mean_loop() {
+        let int_expr = crate::parser
+            ::parse("(mean (map (lambda x (+ x 1)) (filter (lambda x (> x 2)) (range 1 10))))")
+            .expect("mean input should parse")
+            .remove(0);
+        let float_expr = crate::parser
+            ::parse(
+                "(mean/float (map (lambda x (+. x 1.0)) (filter (lambda x (>. x 2.0)) (range/float 1 10))))"
+            )
+            .expect("mean/float input should parse")
+            .remove(0);
+        let avg_expr = crate::parser::parse("(avg 2 4)").expect("avg input should parse").remove(0);
+
+        let int_fused = crate::op::fuse_map_filter_reduce_for_test(&int_expr).to_lisp();
+        let float_fused = crate::op::fuse_map_filter_reduce_for_test(&float_expr).to_lisp();
+        let avg_fused = crate::op::fuse_map_filter_reduce_for_test(&avg_expr).to_lisp();
+
+        assert!(
+            int_fused.contains("(while (< __fuse_i __fuse_i_end)"),
+            "mean should fuse to one direct loop, got: {}",
+            int_fused
+        );
+        assert!(
+            !int_fused.contains("(mean "),
+            "mean call should be fused away, got: {}",
+            int_fused
+        );
+        assert!(
+            float_fused.contains("(/. (get __fuse_sum 0) (Int->Float (get __fuse_count 0)))"),
+            "mean/float should emit float division by Int->Float(count), got: {}",
+            float_fused
+        );
+        assert!(
+            !float_fused.contains("(mean/float "),
+            "mean/float call should be fused away, got: {}",
+            float_fused
+        );
+        assert_eq!(avg_fused, "(avg 2 4)", "avg should remain binary and unfused");
+    }
+
+    #[test]
+    fn test_typed_optimization_window_source_fuses_with_pipeline_sinks() {
+        let expr = crate::parser
+            ::parse(
+                "(reduce + 0 (map length (window 2 (vector (vector 1) (vector 2) (vector 3)))))"
+            )
+            .expect("input should parse")
+            .remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(
+            fused_lisp.contains("(while (< __fuse_i __fuse_i_end)"),
+            "window source should fuse to bounded loop, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(window "),
+            "window call should be lowered to source bindings, got: {}",
+            fused_lisp
+        );
+        assert!(
+            fused_lisp.contains("(slice __fuse_i (+ __fuse_i __fuse_window_size) __fuse_xs)"),
+            "window fusion should derive values via slice(i, i+size, xs), got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_zip_map_filter_unzip_fuses_to_single_loop() {
+        let expr = crate::parser
+            ::parse(
+                "(unzip (filter (lambda t (> (fst t) 2))
+                    (map (lambda t (tuple (+ (fst t) 1) (snd t)))
+                        (zip (tuple (vector 1 2 3 4) (vector true false true false))))))"
+            )
+            .expect("input should parse")
+            .remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(
+            fused_lisp.contains("(while (< __fuse_i __fuse_i_end)"),
+            "zip->map/filter->unzip should fuse to one loop, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(zip "),
+            "zip should be fused as a source, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(unzip "),
+            "unzip should be fused as a sink, got: {}",
+            fused_lisp
+        );
+        assert!(
+            fused_lisp.contains("(tuple __fuse_out_a __fuse_out_b)"),
+            "unzip fusion should return tuple of output vectors, got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_zip_pair_form_is_also_fused() {
+        let expr = crate::parser
+            ::parse(
+                "(unzip (map (lambda t t)
+                    (zip (pair (vector 1 2 3) (vector true false true)))))"
+            )
+            .expect("input should parse")
+            .remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(
+            fused_lisp.contains("(while (< __fuse_i __fuse_i_end)"),
+            "zip(pair ..) source should fuse into one loop, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(zip "),
+            "zip should be fused as source, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(unzip "),
+            "unzip should be fused as sink, got: {}",
+            fused_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_some_and_every_fuse_to_short_circuit_loops() {
         let some_expr = crate::parser
             ::parse(
@@ -956,7 +1190,7 @@ Concequent and alternative must match types
     }
 
     #[test]
-    fn test_typed_optimization_find_fuses_and_tracks_filtered_logical_index() {
+    fn test_typed_optimization_find_fuses_over_filtered_stream() {
         let expr = crate::parser
             ::parse(
                 "(find (lambda x (= x 16)) (map (lambda x (* x x)) (filter even? (vector 1 2 3 4 5 6))))"
@@ -972,8 +1206,8 @@ Concequent and alternative must match types
         );
         assert!(!fused_lisp.contains("(find "), "find call should be fused, got: {}", fused_lisp);
         assert!(
-            fused_lisp.contains("__fuse_logical_i"),
-            "find fusion should keep logical index for filtered streams, got: {}",
+            fused_lisp.contains("(set! __fuse_out 0"),
+            "find fusion should update output index inside fused loop, got: {}",
             fused_lisp
         );
     }

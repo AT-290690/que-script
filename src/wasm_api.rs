@@ -223,6 +223,9 @@ pub fn lsp_completions(text: String) -> String {
         let analysis = analyze_document_text(&text, core);
         let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         for (name, signature) in &analysis.symbol_types {
+            if should_hide_completion_symbol(name) {
+                continue;
+            }
             if analysis.user_bound_symbols.contains(name) {
                 inferred_signatures.insert(name.clone(), signature.clone());
                 continue;
@@ -266,6 +269,9 @@ pub fn lsp_completions(text: String) -> String {
 
         if inferred_signatures.is_empty() {
             for name in &core.std_fallback_names {
+                if should_hide_completion_symbol(name) {
+                    continue;
+                }
                 let detail = core.global_signatures.get(name).cloned();
                 let kind = if
                     detail
@@ -382,6 +388,10 @@ fn from_core_range(range: native_core::CoreRange) -> TextRange {
         start: from_core_position(range.start),
         end: from_core_position(range.end),
     }
+}
+
+fn should_hide_completion_symbol(symbol: &str) -> bool {
+    symbol.starts_with('_')
 }
 
 fn is_standalone_symbol_expr_at_range(text: &str, range: TextRange, symbol: &str) -> bool {

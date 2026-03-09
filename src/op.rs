@@ -32,6 +32,10 @@ enum FuseSink {
         init_expr: Expression,
         with_index: bool,
     },
+    Average {
+        float: bool,
+    },
+    Unzip,
     Some {
         predicate: Expression,
         with_index: bool,
@@ -48,6 +52,10 @@ enum FuseSink {
 #[derive(Clone)]
 enum FuseSource {
     Vector(Expression),
+    Zip {
+        left: Expression,
+        right: Expression,
+    },
     RangeInt {
         start: Expression,
         end: Expression,
@@ -60,6 +68,10 @@ enum FuseSource {
         xs: Expression,
         start: Expression,
         end: Expression,
+    },
+    Window {
+        xs: Expression,
+        size: Expression,
     },
 }
 
@@ -399,7 +411,7 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 items.get(3)?.clone(),
             )),
         // sum xs => reduce + 0 xs
-        "sum" if items.len() == 2 =>
+        "sum" | "sum/int" if items.len() == 2 =>
             Some((
                 FuseSink::Reduce {
                     reduce_fn: Expression::Word("+".to_string()),
@@ -408,8 +420,18 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 },
                 items.get(1)?.clone(),
             )),
+        // sum/float xs => reduce +. 0. xs
+        "sum/float" if items.len() == 2 =>
+            Some((
+                FuseSink::Reduce {
+                    reduce_fn: Expression::Word("+.".to_string()),
+                    init_expr: Expression::Float(0.0),
+                    with_index: false,
+                },
+                items.get(1)?.clone(),
+            )),
         // product xs => reduce * 1 xs
-        "product" if items.len() == 2 =>
+        "product" | "product/int" if items.len() == 2 =>
             Some((
                 FuseSink::Reduce {
                     reduce_fn: Expression::Word("*".to_string()),
@@ -418,6 +440,23 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 },
                 items.get(1)?.clone(),
             )),
+        // product xs => reduce *. 1. xs
+        "product/float" if items.len() == 2 =>
+            Some((
+                FuseSink::Reduce {
+                    reduce_fn: Expression::Word("*.".to_string()),
+                    init_expr: Expression::Float(1.0),
+                    with_index: false,
+                },
+                items.get(1)?.clone(),
+            )),
+        // mean aliases over vectors
+        "mean" | "mean/int" if items.len() == 2 =>
+            Some((FuseSink::Average { float: false }, items.get(1)?.clone())),
+        "mean/float" if items.len() == 2 =>
+            Some((FuseSink::Average { float: true }, items.get(1)?.clone())),
+        // unzip xs => tuple of mapped first/second in one pass
+        "unzip" if items.len() == 2 => Some((FuseSink::Unzip, items.get(1)?.clone())),
         // some? pred xs
         "some?" if items.len() == 3 =>
             Some((
@@ -566,6 +605,16 @@ fn collect_map_filter_chain(root: Expression) -> Option<(Expression, Vec<MapFilt
 fn parse_fuse_source(base_expr: Expression) -> FuseSource {
     match &base_expr {
         Expression::Apply(items) if
+            items.len() == 2 &&
+            matches!(items.first(), Some(Expression::Word(w)) if w == "zip")
+        => {
+            if let Some((left, right)) = parse_zip_pair_expr(&items[1]) {
+                FuseSource::Zip { left, right }
+            } else {
+                FuseSource::Vector(base_expr)
+            }
+        }
+        Expression::Apply(items) if
             items.len() == 3 &&
             matches!(items.first(), Some(Expression::Word(w)) if w == "range")
         => {
@@ -600,6 +649,15 @@ fn parse_fuse_source(base_expr: Expression) -> FuseSource {
                 start: items[1].clone(),
                 end: items[2].clone(),
                 xs: items[3].clone(),
+            }
+        }
+        Expression::Apply(items) if
+            items.len() == 3 &&
+            matches!(items.first(), Some(Expression::Word(w)) if w == "window")
+        => {
+            FuseSource::Window {
+                size: items[1].clone(),
+                xs: items[2].clone(),
             }
         }
         // take/first n xs => slice 0 n xs
@@ -687,6 +745,8 @@ fn build_direct_fused_loop(
         let unsupported_sink = match &sink {
             FuseSink::Collect => false,
             FuseSink::Reduce { with_index, .. } => *with_index,
+            FuseSink::Average { .. } => true,
+            FuseSink::Unzip => true,
             FuseSink::Some { .. } | FuseSink::Every { .. } | FuseSink::Find { .. } => true,
         };
         if has_indexed_stage || unsupported_sink {
@@ -716,6 +776,9 @@ fn build_direct_fused_loop(
                 with_index,
                 &suffix
             ),
+        FuseSink::Average { float } =>
+            build_average_loop(source, ops_outer_to_inner, float, &suffix),
+        FuseSink::Unzip => build_unzip_loop(source, ops_outer_to_inner, &suffix),
         FuseSink::Find { predicate } =>
             build_find_loop(source, ops_outer_to_inner, predicate, &suffix),
     }
@@ -743,7 +806,7 @@ fn build_while_range_call(
             i_word.clone(),
             Expression::Apply(
                 vec![Expression::Word("+".to_string()), i_word.clone(), Expression::Int(1)]
-            ),
+            )
         ]
     );
     let body = Expression::Apply(
@@ -751,7 +814,7 @@ fn build_while_range_call(
             Expression::Word("do".to_string()),
             process_call,
             inc_i,
-            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string())
         ]
     );
     Expression::Apply(
@@ -761,7 +824,7 @@ fn build_while_range_call(
                 vec![
                     Expression::Word("mut".to_string()),
                     Expression::Word(i_name.to_string()),
-                    start_expr,
+                    start_expr
                 ]
             ),
             Expression::Apply(
@@ -771,11 +834,156 @@ fn build_while_range_call(
                 vec![
                     Expression::Word("while".to_string()),
                     Expression::Apply(vec![Expression::Word("<".to_string()), i_word, end_word]),
-                    body,
+                    body
                 ]
-            ),
+            )
         ]
     )
+}
+
+fn build_non_flatten_chain_process<F>(
+    ops_outer_to_inner: &[MapFilterOp],
+    input_value: Expression,
+    raw_index: Expression,
+    suffix: &str,
+    setup_bindings: &mut Vec<Expression>,
+    sink_builder: &F
+) -> Option<Expression>
+where
+    F: Fn(Expression, Expression) -> Option<Expression>,
+{
+    let ops_inner_to_outer = ops_outer_to_inner.iter().rev().cloned().collect::<Vec<_>>();
+    let mut filter_output_index_refs: Vec<Option<String>> = Vec::with_capacity(
+        ops_inner_to_outer.len()
+    );
+    for (idx, op) in ops_inner_to_outer.iter().enumerate() {
+        if matches!(op, MapFilterOp::Filter { .. }) {
+            let ref_name = fuse_tmp_name(&format!("__fuse_idx_after_filter_{}", idx), suffix);
+            setup_bindings.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(ref_name.clone()),
+                        Expression::Apply(
+                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
+                        )
+                    ]
+                )
+            );
+            filter_output_index_refs.push(Some(ref_name));
+        } else {
+            filter_output_index_refs.push(None);
+        }
+    }
+
+    build_non_flatten_chain_step(
+        &ops_inner_to_outer,
+        0,
+        input_value,
+        raw_index,
+        &filter_output_index_refs,
+        sink_builder
+    )
+}
+
+fn build_non_flatten_chain_step<F>(
+    ops_inner_to_outer: &[MapFilterOp],
+    idx: usize,
+    current_value: Expression,
+    current_index: Expression,
+    filter_output_index_refs: &[Option<String>],
+    sink_builder: &F
+) -> Option<Expression>
+where
+    F: Fn(Expression, Expression) -> Option<Expression>,
+{
+    if idx >= ops_inner_to_outer.len() {
+        return sink_builder(current_value, current_index);
+    }
+
+    match &ops_inner_to_outer[idx] {
+        MapFilterOp::Map { func, with_index } => {
+            let mapped = if *with_index {
+                call_callable_expr(func, vec![current_value, current_index.clone()])?
+            } else {
+                call_callable_expr(func, vec![current_value])?
+            };
+            build_non_flatten_chain_step(
+                ops_inner_to_outer,
+                idx + 1,
+                mapped,
+                current_index,
+                filter_output_index_refs,
+                sink_builder
+            )
+        }
+        MapFilterOp::Filter { predicate, keep_when_true, with_index } => {
+            let pred_value = if *with_index {
+                call_callable_expr(predicate, vec![current_value.clone(), current_index.clone()])?
+            } else {
+                call_callable_expr(predicate, vec![current_value.clone()])?
+            };
+            let pass_cond = if *keep_when_true {
+                pred_value
+            } else {
+                Expression::Apply(vec![Expression::Word("not".to_string()), pred_value])
+            };
+
+            let counter_name = match filter_output_index_refs.get(idx).and_then(|n| n.as_ref()) {
+                Some(name) => name,
+                None => {
+                    return None;
+                }
+            };
+            let counter_word = Expression::Word(counter_name.clone());
+            let next_stage_index = Expression::Apply(
+                vec![Expression::Word("get".to_string()), counter_word.clone(), Expression::Int(0)]
+            );
+
+            let then_stage = build_non_flatten_chain_step(
+                ops_inner_to_outer,
+                idx + 1,
+                current_value,
+                next_stage_index,
+                filter_output_index_refs,
+                sink_builder
+            )?;
+            let inc_counter = Expression::Apply(
+                vec![
+                    Expression::Word("set!".to_string()),
+                    counter_word.clone(),
+                    Expression::Int(0),
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("+".to_string()),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("get".to_string()),
+                                    counter_word,
+                                    Expression::Int(0)
+                                ]
+                            ),
+                            Expression::Int(1)
+                        ]
+                    )
+                ]
+            );
+            let then_expr = Expression::Apply(
+                vec![
+                    Expression::Word("do".to_string()),
+                    then_stage,
+                    inc_counter,
+                    Expression::Word("nil".to_string())
+                ]
+            );
+            Some(
+                Expression::Apply(
+                    vec![Expression::Word("if".to_string()), pass_cond, then_expr, no_op_unit_expr()]
+                )
+            )
+        }
+        MapFilterOp::Flat | MapFilterOp::FlatMap { .. } => None,
+    }
 }
 
 fn build_collect_loop(
@@ -810,36 +1018,35 @@ fn build_collect_loop(
             &mut flat_tmp_counter
         )?
     } else {
-        let (mapped, guard) = compose_map_filter_value_and_guard(
+        let out_name_for_sink = out_name.clone();
+        let sink_builder = |mapped: Expression, _logical_i: Expression| {
+            Some(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("set!".to_string()),
+                        Expression::Word(out_name_for_sink.clone()),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("length".to_string()),
+                                Expression::Word(out_name_for_sink.clone())
+                            ]
+                        ),
+                        mapped
+                    ]
+                )
+            )
+        };
+        build_non_flatten_chain_process(
             ops_outer_to_inner,
             x_expr,
-            i_word.clone()
-        )?;
-
-        let push_expr = Expression::Apply(
-            vec![
-                Expression::Word("set!".to_string()),
-                Expression::Word(out_name.clone()),
-                Expression::Apply(
-                    vec![Expression::Word("length".to_string()), Expression::Word(out_name.clone())]
-                ),
-                mapped
-            ]
-        );
-        match guard {
-            Some(cond) =>
-                Expression::Apply(
-                    vec![Expression::Word("if".to_string()), cond, push_expr, no_op_unit_expr()]
-                ),
-            None => push_expr,
-        }
+            i_word.clone(),
+            suffix,
+            &mut setup_bindings,
+            &sink_builder
+        )?
     };
     let process_lambda = Expression::Apply(
-        vec![
-            Expression::Word("lambda".to_string()),
-            Expression::Word(i_name.clone()),
-            process_body,
-        ]
+        vec![Expression::Word("lambda".to_string()), Expression::Word(i_name.clone()), process_body]
     );
 
     setup_bindings.push(
@@ -904,44 +1111,46 @@ fn build_reduce_loop(
             &mut flat_tmp_counter
         )?
     } else {
-        let (mapped, guard) = compose_map_filter_value_and_guard(
+        let out_name_for_sink = out_name.clone();
+        let reduce_fn_for_sink = reduce_fn.clone();
+        let sink_builder = move |mapped: Expression, logical_i: Expression| {
+            let acc_get = Expression::Apply(
+                vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(out_name_for_sink.clone()),
+                    Expression::Int(0)
+                ]
+            );
+            let reduced = if with_index {
+                call_callable_expr(
+                    &reduce_fn_for_sink,
+                    vec![acc_get.clone(), mapped, logical_i]
+                )?
+            } else {
+                call_callable_expr(&reduce_fn_for_sink, vec![acc_get.clone(), mapped])?
+            };
+            Some(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("set!".to_string()),
+                        Expression::Word(out_name_for_sink.clone()),
+                        Expression::Int(0),
+                        reduced
+                    ]
+                )
+            )
+        };
+        build_non_flatten_chain_process(
             ops_outer_to_inner,
             x_expr,
-            i_word.clone()
-        )?;
-
-        let acc_get = Expression::Apply(
-            vec![
-                Expression::Word("get".to_string()),
-                Expression::Word(out_name.clone()),
-                Expression::Int(0)
-            ]
-        );
-        let reduced = if with_index {
-            call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped, i_word.clone()])?
-        } else {
-            call_callable_expr(&reduce_fn, vec![acc_get.clone(), mapped])?
-        };
-        let next_acc = match guard {
-            Some(cond) =>
-                Expression::Apply(vec![Expression::Word("if".to_string()), cond, reduced, acc_get]),
-            None => reduced,
-        };
-        Expression::Apply(
-            vec![
-                Expression::Word("set!".to_string()),
-                Expression::Word(out_name.clone()),
-                Expression::Int(0),
-                next_acc
-            ]
-        )
+            i_word.clone(),
+            suffix,
+            &mut setup_bindings,
+            &sink_builder
+        )?
     };
     let process_lambda = Expression::Apply(
-        vec![
-            Expression::Word("lambda".to_string()),
-            Expression::Word(i_name.clone()),
-            process_body,
-        ]
+        vec![Expression::Word("lambda".to_string()), Expression::Word(i_name.clone()), process_body]
     );
 
     setup_bindings.push(
@@ -978,6 +1187,257 @@ fn build_reduce_loop(
     Some(Expression::Apply(do_items))
 }
 
+fn build_average_loop(
+    source: FuseSource,
+    ops_outer_to_inner: &[MapFilterOp],
+    float: bool,
+    suffix: &str
+) -> Option<Expression> {
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(
+        source,
+        suffix
+    )?;
+
+    let sum_name = fuse_tmp_name("__fuse_sum", suffix);
+    let count_name = fuse_tmp_name("__fuse_count", suffix);
+    let process_name = fuse_tmp_name("__fuse_process", suffix);
+    let i_name = fuse_tmp_name("__fuse_i", suffix);
+    let i_word = Expression::Word(i_name.clone());
+    let x_expr = value_expr_for_i(&i_word);
+    let sum_name_for_sink = sum_name.clone();
+    let count_name_for_sink = count_name.clone();
+    let sink_builder = move |mapped: Expression, _logical_i: Expression| {
+        let sum_get = Expression::Apply(
+            vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(sum_name_for_sink.clone()),
+                Expression::Int(0)
+            ]
+        );
+        let next_sum = Expression::Apply(
+            vec![Expression::Word((if float { "+." } else { "+" }).to_string()), sum_get, mapped]
+        );
+        let set_sum = Expression::Apply(
+            vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(sum_name_for_sink.clone()),
+                Expression::Int(0),
+                next_sum
+            ]
+        );
+        let set_count = Expression::Apply(
+            vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(count_name_for_sink.clone()),
+                Expression::Int(0),
+                Expression::Apply(
+                    vec![
+                        Expression::Word("+".to_string()),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("get".to_string()),
+                                Expression::Word(count_name_for_sink.clone()),
+                                Expression::Int(0)
+                            ]
+                        ),
+                        Expression::Int(1)
+                    ]
+                )
+            ]
+        );
+        Some(
+            Expression::Apply(
+                vec![
+                    Expression::Word("do".to_string()),
+                    set_sum,
+                    set_count,
+                    Expression::Word("nil".to_string())
+                ]
+            )
+        )
+    };
+    let process_body = build_non_flatten_chain_process(
+        ops_outer_to_inner,
+        x_expr,
+        i_word.clone(),
+        suffix,
+        &mut setup_bindings,
+        &sink_builder
+    )?;
+    let process_lambda = Expression::Apply(
+        vec![Expression::Word("lambda".to_string()), Expression::Word(i_name.clone()), process_body]
+    );
+
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(sum_name.clone()),
+                Expression::Apply(
+                    vec![Expression::Word("vector".to_string()), if float {
+                        Expression::Float(0.0)
+                    } else {
+                        Expression::Int(0)
+                    }]
+                )
+            ]
+        )
+    );
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(count_name.clone()),
+                Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
+            ]
+        )
+    );
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(process_name.clone()),
+                process_lambda
+            ]
+        )
+    );
+    setup_bindings.push(build_while_range_call(start_expr, end_expr, &i_name, &process_name));
+
+    let count_get = Expression::Apply(
+        vec![Expression::Word("get".to_string()), Expression::Word(count_name), Expression::Int(0)]
+    );
+    let sum_get = Expression::Apply(
+        vec![Expression::Word("get".to_string()), Expression::Word(sum_name), Expression::Int(0)]
+    );
+    let mean_expr = if float {
+        Expression::Apply(
+            vec![
+                Expression::Word("/.".to_string()),
+                sum_get,
+                Expression::Apply(vec![Expression::Word("Int->Float".to_string()), count_get])
+            ]
+        )
+    } else {
+        Expression::Apply(vec![Expression::Word("/".to_string()), sum_get, count_get])
+    };
+    setup_bindings.push(mean_expr);
+
+    let mut do_items = vec![Expression::Word("do".to_string())];
+    do_items.extend(setup_bindings);
+    Some(Expression::Apply(do_items))
+}
+
+fn build_unzip_loop(
+    source: FuseSource,
+    ops_outer_to_inner: &[MapFilterOp],
+    suffix: &str
+) -> Option<Expression> {
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(
+        source,
+        suffix
+    )?;
+
+    let out_a_name = fuse_tmp_name("__fuse_out_a", suffix);
+    let out_b_name = fuse_tmp_name("__fuse_out_b", suffix);
+    let process_name = fuse_tmp_name("__fuse_process", suffix);
+    let i_name = fuse_tmp_name("__fuse_i", suffix);
+    let i_word = Expression::Word(i_name.clone());
+    let x_expr = value_expr_for_i(&i_word);
+    let out_a_for_sink = out_a_name.clone();
+    let out_b_for_sink = out_b_name.clone();
+    let sink_builder = move |mapped: Expression, _logical_i: Expression| {
+        let push_a = Expression::Apply(
+            vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(out_a_for_sink.clone()),
+                Expression::Apply(
+                    vec![
+                        Expression::Word("length".to_string()),
+                        Expression::Word(out_a_for_sink.clone())
+                    ]
+                ),
+                Expression::Apply(vec![Expression::Word("fst".to_string()), mapped.clone()])
+            ]
+        );
+        let push_b = Expression::Apply(
+            vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(out_b_for_sink.clone()),
+                Expression::Apply(
+                    vec![
+                        Expression::Word("length".to_string()),
+                        Expression::Word(out_b_for_sink.clone())
+                    ]
+                ),
+                Expression::Apply(vec![Expression::Word("snd".to_string()), mapped])
+            ]
+        );
+        Some(
+            Expression::Apply(
+                vec![
+                    Expression::Word("do".to_string()),
+                    push_a,
+                    push_b,
+                    Expression::Word("nil".to_string())
+                ]
+            )
+        )
+    };
+    let process_body = build_non_flatten_chain_process(
+        ops_outer_to_inner,
+        x_expr,
+        i_word.clone(),
+        suffix,
+        &mut setup_bindings,
+        &sink_builder
+    )?;
+    let process_lambda = Expression::Apply(
+        vec![Expression::Word("lambda".to_string()), Expression::Word(i_name.clone()), process_body]
+    );
+
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(out_a_name.clone()),
+                Expression::Apply(vec![Expression::Word("vector".to_string())])
+            ]
+        )
+    );
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(out_b_name.clone()),
+                Expression::Apply(vec![Expression::Word("vector".to_string())])
+            ]
+        )
+    );
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(process_name.clone()),
+                process_lambda
+            ]
+        )
+    );
+    setup_bindings.push(build_while_range_call(start_expr, end_expr, &i_name, &process_name));
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("tuple".to_string()),
+                Expression::Word(out_a_name),
+                Expression::Word(out_b_name)
+            ]
+        )
+    );
+
+    let mut do_items = vec![Expression::Word("do".to_string())];
+    do_items.extend(setup_bindings);
+    Some(Expression::Apply(do_items))
+}
+
 fn build_some_every_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
@@ -999,16 +1459,6 @@ fn build_some_every_loop(
         ]
     );
     let x_expr = value_expr_for_idx_ref(&idx_get);
-    let (mapped, guard) = compose_map_filter_value_and_guard(
-        ops_outer_to_inner,
-        x_expr,
-        idx_get.clone()
-    )?;
-    let pred_value = if with_index {
-        call_callable_expr(&predicate, vec![mapped, idx_get.clone()])?
-    } else {
-        call_callable_expr(&predicate, vec![mapped])?
-    };
 
     let flag_get = Expression::Apply(
         vec![
@@ -1033,23 +1483,43 @@ fn build_some_every_loop(
             Expression::Word("false".to_string())
         ]
     );
-    let sink_action = if is_some {
-        Expression::Apply(
-            vec![Expression::Word("if".to_string()), pred_value, set_flag_true, no_op_unit_expr()]
-        )
-    } else {
-        Expression::Apply(
-            vec![Expression::Word("if".to_string()), pred_value, no_op_unit_expr(), set_flag_false]
-        )
-    };
-
-    let step_action = match guard {
-        Some(cond) =>
-            Expression::Apply(
-                vec![Expression::Word("if".to_string()), cond, sink_action, no_op_unit_expr()]
-            ),
-        None => sink_action,
-    };
+    let predicate_for_sink = predicate.clone();
+    let set_flag_true_for_sink = set_flag_true.clone();
+    let set_flag_false_for_sink = set_flag_false.clone();
+    let step_action = build_non_flatten_chain_process(
+        ops_outer_to_inner,
+        x_expr,
+        idx_get.clone(),
+        suffix,
+        &mut setup_bindings,
+        &move |mapped: Expression, logical_i: Expression| {
+            let pred_value = if with_index {
+                call_callable_expr(&predicate_for_sink, vec![mapped, logical_i])?
+            } else {
+                call_callable_expr(&predicate_for_sink, vec![mapped])?
+            };
+            let action = if is_some {
+                Expression::Apply(
+                    vec![
+                        Expression::Word("if".to_string()),
+                        pred_value,
+                        set_flag_true_for_sink.clone(),
+                        no_op_unit_expr()
+                    ]
+                )
+            } else {
+                Expression::Apply(
+                    vec![
+                        Expression::Word("if".to_string()),
+                        pred_value,
+                        no_op_unit_expr(),
+                        set_flag_false_for_sink.clone()
+                    ]
+                )
+            };
+            Some(action)
+        }
+    )?;
     let idx_inc = Expression::Apply(
         vec![
             Expression::Word("set!".to_string()),
@@ -1148,7 +1618,6 @@ fn build_find_loop(
         make_short_circuit_source_bindings(source, suffix)?;
 
     let out_name = fuse_tmp_name("__fuse_out", suffix);
-    let logical_i_name = fuse_tmp_name("__fuse_logical_i", suffix);
     let process_name = fuse_tmp_name("__fuse_process", suffix);
 
     let idx_get = Expression::Apply(
@@ -1159,51 +1628,31 @@ fn build_find_loop(
         ]
     );
     let x_expr = value_expr_for_idx_ref(&idx_get);
-    let (mapped, guard) = compose_map_filter_value_and_guard(
+    let out_name_for_sink = out_name.clone();
+    let predicate_for_sink = predicate.clone();
+    let guarded_step = build_non_flatten_chain_process(
         ops_outer_to_inner,
         x_expr,
-        idx_get.clone()
-    )?;
-
-    let logical_i_get = Expression::Apply(
-        vec![
-            Expression::Word("get".to_string()),
-            Expression::Word(logical_i_name.clone()),
-            Expression::Int(0)
-        ]
-    );
-    let pred_value = call_callable_expr(&predicate, vec![mapped])?;
-    let set_found = Expression::Apply(
-        vec![
-            Expression::Word("set!".to_string()),
-            Expression::Word(out_name.clone()),
-            Expression::Int(0),
-            logical_i_get.clone()
-        ]
-    );
-    let maybe_set_found = Expression::Apply(
-        vec![Expression::Word("if".to_string()), pred_value, set_found, no_op_unit_expr()]
-    );
-    let inc_logical_i = Expression::Apply(
-        vec![
-            Expression::Word("set!".to_string()),
-            Expression::Word(logical_i_name.clone()),
-            Expression::Int(0),
-            Expression::Apply(
-                vec![Expression::Word("+".to_string()), logical_i_get, Expression::Int(1)]
+        idx_get.clone(),
+        suffix,
+        &mut setup_bindings,
+        &move |mapped: Expression, logical_i: Expression| {
+            let pred_value = call_callable_expr(&predicate_for_sink, vec![mapped])?;
+            let set_found = Expression::Apply(
+                vec![
+                    Expression::Word("set!".to_string()),
+                    Expression::Word(out_name_for_sink.clone()),
+                    Expression::Int(0),
+                    logical_i
+                ]
+            );
+            Some(
+                Expression::Apply(
+                    vec![Expression::Word("if".to_string()), pred_value, set_found, no_op_unit_expr()]
+                )
             )
-        ]
-    );
-    let included_step = Expression::Apply(
-        vec![Expression::Word("do".to_string()), maybe_set_found, inc_logical_i]
-    );
-    let guarded_step = match guard {
-        Some(cond) =>
-            Expression::Apply(
-                vec![Expression::Word("if".to_string()), cond, included_step, no_op_unit_expr()]
-            ),
-        None => included_step,
-    };
+        }
+    )?;
     let idx_inc = Expression::Apply(
         vec![
             Expression::Word("set!".to_string()),
@@ -1257,15 +1706,6 @@ fn build_find_loop(
                 Expression::Word("let".to_string()),
                 Expression::Word(out_name.clone()),
                 Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(-1)])
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(logical_i_name.clone()),
-                Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
             ]
         )
     );
@@ -1327,6 +1767,49 @@ fn make_loop_source_bindings(
             });
             Some((setup, start_expr, end_expr, value))
         }
+        FuseSource::Zip { left, right } => {
+            let left_name = fuse_tmp_name("__fuse_left", suffix);
+            let right_name = fuse_tmp_name("__fuse_right", suffix);
+            let len_name = fuse_tmp_name("__fuse_zip_len", suffix);
+            let left_word = Expression::Word(left_name.clone());
+            let right_word = Expression::Word(right_name.clone());
+            let mut setup = Vec::new();
+            setup.push(
+                Expression::Apply(
+                    vec![Expression::Word("let".to_string()), Expression::Word(left_name), left]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![Expression::Word("let".to_string()), Expression::Word(right_name), right]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(len_name.clone()),
+                        Expression::Apply(vec![Expression::Word("length".to_string()), left_word.clone()])
+                    ]
+                )
+            );
+            let start_expr = Expression::Int(0);
+            let end_expr = Expression::Word(len_name);
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(
+                    vec![
+                        Expression::Word("tuple".to_string()),
+                        Expression::Apply(
+                            vec![Expression::Word("get".to_string()), left_word.clone(), i_expr.clone()]
+                        ),
+                        Expression::Apply(
+                            vec![Expression::Word("get".to_string()), right_word.clone(), i_expr.clone()]
+                        )
+                    ]
+                )
+            });
+            Some((setup, start_expr, end_expr, value))
+        }
         FuseSource::RangeInt { start, end } => {
             let from_name = fuse_tmp_name("__fuse_from", suffix);
             let to_name = fuse_tmp_name("__fuse_to", suffix);
@@ -1343,12 +1826,21 @@ fn make_loop_source_bindings(
                     vec![Expression::Word("let".to_string()), Expression::Word(to_name), end]
                 )
             );
-            let start_expr = from_word;
-            // range is inclusive in user language, loop end is exclusive.
+            // Use a normalized 0-based loop counter for consistent /i semantics.
+            let start_expr = Expression::Int(0);
+            // range is inclusive in user language, loop end is exclusive; normalize to count.
             let end_expr = Expression::Apply(
-                vec![Expression::Word("+".to_string()), to_word, Expression::Int(1)]
+                vec![
+                    Expression::Word("+".to_string()),
+                    Expression::Apply(vec![Expression::Word("-".to_string()), to_word, from_word.clone()]),
+                    Expression::Int(1)
+                ]
             );
-            let value = Box::new(|i_expr: &Expression| i_expr.clone());
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(
+                    vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
+                )
+            });
             Some((setup, start_expr, end_expr, value))
         }
         FuseSource::RangeFloat { start, end } => {
@@ -1367,12 +1859,23 @@ fn make_loop_source_bindings(
                     vec![Expression::Word("let".to_string()), Expression::Word(to_name), end]
                 )
             );
-            let start_expr = from_word;
+            let start_expr = Expression::Int(0);
             let end_expr = Expression::Apply(
-                vec![Expression::Word("+".to_string()), to_word, Expression::Int(1)]
+                vec![
+                    Expression::Word("+".to_string()),
+                    Expression::Apply(vec![Expression::Word("-".to_string()), to_word, from_word.clone()]),
+                    Expression::Int(1)
+                ]
             );
-            let value = Box::new(|i_expr: &Expression| {
-                Expression::Apply(vec![Expression::Word("Int->Float".to_string()), i_expr.clone()])
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(
+                    vec![
+                        Expression::Word("Int->Float".to_string()),
+                        Expression::Apply(
+                            vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
+                        )
+                    ]
+                )
             });
             Some((setup, start_expr, end_expr, value))
         }
@@ -1399,11 +1902,79 @@ fn make_loop_source_bindings(
                     vec![Expression::Word("let".to_string()), Expression::Word(to_name), end]
                 )
             );
-            let start_expr = from_word;
-            let end_expr = to_word;
+            let start_expr = Expression::Int(0);
+            let end_expr = Expression::Apply(
+                vec![Expression::Word("-".to_string()), to_word, from_word.clone()]
+            );
             let value = Box::new(move |i_expr: &Expression| {
                 Expression::Apply(
-                    vec![Expression::Word("get".to_string()), xs_word.clone(), i_expr.clone()]
+                    vec![
+                        Expression::Word("get".to_string()),
+                        xs_word.clone(),
+                        Expression::Apply(
+                            vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
+                        )
+                    ]
+                )
+            });
+            Some((setup, start_expr, end_expr, value))
+        }
+        FuseSource::Window { xs, size } => {
+            let xs_name = fuse_tmp_name("__fuse_xs", suffix);
+            let size_name = fuse_tmp_name("__fuse_window_size", suffix);
+            let len_name = fuse_tmp_name("__fuse_window_len", suffix);
+            let end_name = fuse_tmp_name("__fuse_window_end", suffix);
+            let xs_word = Expression::Word(xs_name.clone());
+            let size_word = Expression::Word(size_name.clone());
+            let len_word = Expression::Word(len_name.clone());
+            let end_word = Expression::Word(end_name.clone());
+            let mut setup = Vec::new();
+            setup.push(
+                Expression::Apply(
+                    vec![Expression::Word("let".to_string()), Expression::Word(xs_name), xs]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![Expression::Word("let".to_string()), Expression::Word(size_name), size]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(len_name.clone()),
+                        Expression::Apply(
+                            vec![Expression::Word("length".to_string()), xs_word.clone()]
+                        )
+                    ]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(end_name),
+                        build_window_end_expr(len_word.clone(), size_word.clone())
+                    ]
+                )
+            );
+            let start_expr = Expression::Int(0);
+            let end_expr = end_word;
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(
+                    vec![
+                        Expression::Word("slice".to_string()),
+                        i_expr.clone(),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("+".to_string()),
+                                i_expr.clone(),
+                                size_word.clone()
+                            ]
+                        ),
+                        xs_word.clone()
+                    ]
                 )
             });
             Some((setup, start_expr, end_expr, value))
@@ -1469,16 +2040,84 @@ fn make_short_circuit_source_bindings(
             });
             Some((setup, idx_ref_name, cond, value))
         }
-        FuseSource::RangeInt { start, end } => {
+        FuseSource::Zip { left, right } => {
+            let left_name = fuse_tmp_name("__fuse_left", suffix);
+            let right_name = fuse_tmp_name("__fuse_right", suffix);
+            let len_name = fuse_tmp_name("__fuse_zip_len", suffix);
             let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
-            let to_name = fuse_tmp_name("__fuse_to", suffix);
+            let left_word = Expression::Word(left_name.clone());
+            let right_word = Expression::Word(right_name.clone());
             let mut setup = Vec::new();
+            setup.push(
+                Expression::Apply(
+                    vec![Expression::Word("let".to_string()), Expression::Word(left_name), left]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![Expression::Word("let".to_string()), Expression::Word(right_name), right]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(len_name.clone()),
+                        Expression::Apply(vec![Expression::Word("length".to_string()), left_word.clone()])
+                    ]
+                )
+            );
             setup.push(
                 Expression::Apply(
                     vec![
                         Expression::Word("let".to_string()),
                         Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(vec![Expression::Word("vector".to_string()), start])
+                        Expression::Apply(
+                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
+                        )
+                    ]
+                )
+            );
+            let cond = Expression::Apply(
+                vec![
+                    Expression::Word("<".to_string()),
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("get".to_string()),
+                            Expression::Word(idx_ref_name.clone()),
+                            Expression::Int(0)
+                        ]
+                    ),
+                    Expression::Word(len_name)
+                ]
+            );
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(
+                    vec![
+                        Expression::Word("tuple".to_string()),
+                        Expression::Apply(
+                            vec![Expression::Word("get".to_string()), left_word.clone(), i_expr.clone()]
+                        ),
+                        Expression::Apply(
+                            vec![Expression::Word("get".to_string()), right_word.clone(), i_expr.clone()]
+                        )
+                    ]
+                )
+            });
+            Some((setup, idx_ref_name, cond, value))
+        }
+        FuseSource::RangeInt { start, end } => {
+            let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
+            let from_name = fuse_tmp_name("__fuse_from", suffix);
+            let to_name = fuse_tmp_name("__fuse_to", suffix);
+            let from_word = Expression::Word(from_name.clone());
+            let mut setup = Vec::new();
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(from_name),
+                        start
                     ]
                 )
             );
@@ -1488,6 +2127,15 @@ fn make_short_circuit_source_bindings(
                         Expression::Word("let".to_string()),
                         Expression::Word(to_name.clone()),
                         end
+                    ]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(idx_ref_name.clone()),
+                        Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
                     ]
                 )
             );
@@ -1504,25 +2152,37 @@ fn make_short_circuit_source_bindings(
                     Expression::Apply(
                         vec![
                             Expression::Word("+".to_string()),
-                            Expression::Word(to_name),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("-".to_string()),
+                                    Expression::Word(to_name),
+                                    from_word.clone()
+                                ]
+                            ),
                             Expression::Int(1)
                         ]
                     )
                 ]
             );
-            let value = Box::new(|i_expr: &Expression| i_expr.clone());
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(
+                    vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
+                )
+            });
             Some((setup, idx_ref_name, cond, value))
         }
         FuseSource::RangeFloat { start, end } => {
             let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
+            let from_name = fuse_tmp_name("__fuse_from", suffix);
             let to_name = fuse_tmp_name("__fuse_to", suffix);
+            let from_word = Expression::Word(from_name.clone());
             let mut setup = Vec::new();
             setup.push(
                 Expression::Apply(
                     vec![
                         Expression::Word("let".to_string()),
-                        Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(vec![Expression::Word("vector".to_string()), start])
+                        Expression::Word(from_name),
+                        start
                     ]
                 )
             );
@@ -1532,6 +2192,15 @@ fn make_short_circuit_source_bindings(
                         Expression::Word("let".to_string()),
                         Expression::Word(to_name.clone()),
                         end
+                    ]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(idx_ref_name.clone()),
+                        Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
                     ]
                 )
             );
@@ -1548,22 +2217,37 @@ fn make_short_circuit_source_bindings(
                     Expression::Apply(
                         vec![
                             Expression::Word("+".to_string()),
-                            Expression::Word(to_name),
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("-".to_string()),
+                                    Expression::Word(to_name),
+                                    from_word.clone()
+                                ]
+                            ),
                             Expression::Int(1)
                         ]
                     )
                 ]
             );
-            let value = Box::new(|i_expr: &Expression| {
-                Expression::Apply(vec![Expression::Word("Int->Float".to_string()), i_expr.clone()])
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(
+                    vec![
+                        Expression::Word("Int->Float".to_string()),
+                        Expression::Apply(
+                            vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
+                        )
+                    ]
+                )
             });
             Some((setup, idx_ref_name, cond, value))
         }
         FuseSource::Slice { xs, start, end } => {
             let xs_name = fuse_tmp_name("__fuse_xs", suffix);
             let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
+            let from_name = fuse_tmp_name("__fuse_from", suffix);
             let to_name = fuse_tmp_name("__fuse_to", suffix);
             let xs_word = Expression::Word(xs_name.clone());
+            let from_word = Expression::Word(from_name.clone());
             let mut setup = Vec::new();
             setup.push(
                 Expression::Apply(
@@ -1574,8 +2258,17 @@ fn make_short_circuit_source_bindings(
                 Expression::Apply(
                     vec![
                         Expression::Word("let".to_string()),
+                        Expression::Word(from_name),
+                        start
+                    ]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
                         Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(vec![Expression::Word("vector".to_string()), start])
+                        Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
                     ]
                 )
             );
@@ -1598,17 +2291,149 @@ fn make_short_circuit_source_bindings(
                             Expression::Int(0)
                         ]
                     ),
-                    Expression::Word(to_name)
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("-".to_string()),
+                            Expression::Word(to_name),
+                            from_word.clone()
+                        ]
+                    )
                 ]
             );
             let value = Box::new(move |i_expr: &Expression| {
                 Expression::Apply(
-                    vec![Expression::Word("get".to_string()), xs_word.clone(), i_expr.clone()]
+                    vec![
+                        Expression::Word("get".to_string()),
+                        xs_word.clone(),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("+".to_string()),
+                                from_word.clone(),
+                                i_expr.clone()
+                            ]
+                        )
+                    ]
+                )
+            });
+            Some((setup, idx_ref_name, cond, value))
+        }
+        FuseSource::Window { xs, size } => {
+            let xs_name = fuse_tmp_name("__fuse_xs", suffix);
+            let size_name = fuse_tmp_name("__fuse_window_size", suffix);
+            let len_name = fuse_tmp_name("__fuse_window_len", suffix);
+            let end_name = fuse_tmp_name("__fuse_window_end", suffix);
+            let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
+            let xs_word = Expression::Word(xs_name.clone());
+            let size_word = Expression::Word(size_name.clone());
+            let len_word = Expression::Word(len_name.clone());
+            let mut setup = Vec::new();
+            setup.push(
+                Expression::Apply(
+                    vec![Expression::Word("let".to_string()), Expression::Word(xs_name), xs]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![Expression::Word("let".to_string()), Expression::Word(size_name), size]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(len_name.clone()),
+                        Expression::Apply(
+                            vec![Expression::Word("length".to_string()), xs_word.clone()]
+                        )
+                    ]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(end_name.clone()),
+                        build_window_end_expr(len_word, size_word.clone())
+                    ]
+                )
+            );
+            setup.push(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(idx_ref_name.clone()),
+                        Expression::Apply(
+                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
+                        )
+                    ]
+                )
+            );
+            let cond = Expression::Apply(
+                vec![
+                    Expression::Word("<".to_string()),
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("get".to_string()),
+                            Expression::Word(idx_ref_name.clone()),
+                            Expression::Int(0)
+                        ]
+                    ),
+                    Expression::Word(end_name)
+                ]
+            );
+            let value = Box::new(move |i_expr: &Expression| {
+                Expression::Apply(
+                    vec![
+                        Expression::Word("slice".to_string()),
+                        i_expr.clone(),
+                        Expression::Apply(
+                            vec![
+                                Expression::Word("+".to_string()),
+                                i_expr.clone(),
+                                size_word.clone()
+                            ]
+                        ),
+                        xs_word.clone()
+                    ]
                 )
             });
             Some((setup, idx_ref_name, cond, value))
         }
     }
+}
+
+fn build_window_end_expr(len_expr: Expression, size_expr: Expression) -> Expression {
+    Expression::Apply(
+        vec![
+            Expression::Word("if".to_string()),
+            Expression::Apply(
+                vec![Expression::Word(">".to_string()), size_expr.clone(), len_expr.clone()]
+            ),
+            Expression::Int(0),
+            Expression::Apply(
+                vec![
+                    Expression::Word("if".to_string()),
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("=".to_string()),
+                            size_expr.clone(),
+                            Expression::Int(0)
+                        ]
+                    ),
+                    len_expr.clone(),
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("+".to_string()),
+                            Expression::Apply(
+                                vec![Expression::Word("-".to_string()), len_expr, size_expr]
+                            ),
+                            Expression::Int(1)
+                        ]
+                    )
+                ]
+            )
+        ]
+    )
 }
 
 fn next_flatten_tmp_name(prefix: &str, suffix: &str, counter: &mut usize) -> String {
@@ -1742,7 +2567,7 @@ fn build_collect_step_with_flatten(
                             Expression::Apply(
                                 vec![
                                     Expression::Word("length".to_string()),
-                                    Expression::Word(xs_name),
+                                    Expression::Word(xs_name)
                                 ]
                             ),
                             &i_name,
@@ -1887,7 +2712,7 @@ fn build_reduce_step_with_flatten(
                             Expression::Apply(
                                 vec![
                                     Expression::Word("length".to_string()),
-                                    Expression::Word(xs_name),
+                                    Expression::Word(xs_name)
                                 ]
                             ),
                             &i_name,
@@ -1898,53 +2723,6 @@ fn build_reduce_step_with_flatten(
             )
         }
     }
-}
-
-fn compose_map_filter_value_and_guard(
-    ops_outer_to_inner: &[MapFilterOp],
-    input_expr: Expression,
-    index_expr: Expression
-) -> Option<(Expression, Option<Expression>)> {
-    let mut cur = input_expr;
-    let mut guards: Vec<Expression> = Vec::new();
-    for op in ops_outer_to_inner.iter().rev() {
-        match op {
-            MapFilterOp::Map { func, with_index } => {
-                cur = if *with_index {
-                    call_callable_expr(func, vec![cur, index_expr.clone()])?
-                } else {
-                    call_callable_expr(func, vec![cur])?
-                };
-            }
-            MapFilterOp::Filter { predicate, keep_when_true, with_index } => {
-                let pred_value = if *with_index {
-                    call_callable_expr(predicate, vec![cur.clone(), index_expr.clone()])?
-                } else {
-                    call_callable_expr(predicate, vec![cur.clone()])?
-                };
-                if *keep_when_true {
-                    guards.push(pred_value);
-                } else {
-                    guards.push(
-                        Expression::Apply(vec![Expression::Word("not".to_string()), pred_value])
-                    );
-                }
-            }
-            MapFilterOp::Flat | MapFilterOp::FlatMap { .. } => {
-                return None;
-            }
-        }
-    }
-    let guard = if guards.is_empty() {
-        None
-    } else {
-        let mut cond = guards[0].clone();
-        for g in guards.iter().skip(1) {
-            cond = Expression::Apply(vec![Expression::Word("and".to_string()), cond, g.clone()]);
-        }
-        Some(cond)
-    };
-    Some((cur, guard))
 }
 
 fn call_callable_expr(callable: &Expression, args: Vec<Expression>) -> Option<Expression> {
@@ -1996,9 +2774,25 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
     match sink {
         FuseSink::Collect => true,
         FuseSink::Reduce { reduce_fn, .. } => is_fusion_safe_callable(reduce_fn),
+        FuseSink::Average { .. } => true,
+        FuseSink::Unzip => true,
         FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } =>
             is_fusion_safe_callable(predicate),
         FuseSink::Find { predicate } => is_fusion_safe_callable(predicate),
+    }
+}
+
+fn parse_zip_pair_expr(expr: &Expression) -> Option<(Expression, Expression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let Expression::Word(head) = items.first()? else {
+        return None;
+    };
+    if (head == "tuple" || head == "pair") && items.len() == 3 {
+        Some((items[1].clone(), items[2].clone()))
+    } else {
+        None
     }
 }
 

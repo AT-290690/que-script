@@ -323,14 +323,14 @@
      out)))
 
 (let std/vector/map (lambda xs fn (if (std/vector/empty? xs) [] (do
-     (let out [(fn (get xs 0))])
-     (mut i 1)
+     (let out [])
+     (mut i 0)
      (while (< i (length xs)) (do (set! out (length out) (fn (get xs i))) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/map/i (lambda xs fn (if (std/vector/empty? xs) [] (do
-     (let out [(fn (get xs 0) 0)])
-     (mut i 1)
+     (let out [])
+     (mut i 0)
      (while (< i (length xs)) (do (set! out (length out) (fn (get xs i) i)) (alter! i (+ i 1))))
      out))))
 
@@ -822,69 +822,80 @@ nil)))
   nil)))
 
 
-
 (let std/vector/zipper (lambda a b (do 
+      (mut i 1)
+      (let len (length a))
       (let out [[(get a 0) (get b 0)]])
-      (loop 1 (length a) (lambda i (set! out (length out) [(get a i) (get b i)])))
+      (while (< i len) (do (set! out (length out) [(get a i) (get b i)]) (alter! i (+ i 1))))
       out)))
 
 (let std/vector/zip (lambda xs (std/vector/zipper (std/vector/first xs) (std/vector/second xs))))
 (let std/vector/unzip (lambda xs [ (std/vector/map xs std/vector/first) (std/vector/map xs std/vector/second) ]))
 
-
 (let std/vector/tuple/zipper (lambda a b (do
+      (mut i 1)
+      (let len (length a))
       (let out [{ (get a 0) (get b 0) }])
-      (loop 1 (length a) (lambda i (set! out (length out) { (get a i) (get b i) })))
+      (while (< i len) (do (set! out (length out) { (get a i) (get b i) }) (alter! i (+ i 1))))
       out)))
 
 (let std/vector/tuple/zip (lambda xs (std/vector/tuple/zipper (fst xs) (snd xs))))
 (let std/vector/tuple/unzip (lambda xs { (std/vector/map xs (lambda x (fst x))) (std/vector/map xs (lambda x (snd x))) }))
 (let std/vector/tuple/zip-with (lambda a b f (do 
-    (let out []) 
-    (loop 0 (length a) (lambda i 
-      (set! out (length out) (f (get a i) (get b i)))))
-     out)))
-(std/vector/tuple/zipWith + [1 2 3] [4 5 6])
+    (let out [])
+    (mut i 0)
+    (let len (length a))
+    (while (< i len) (do (set! out (length out) (f (get a i) (get b i))) (alter! i (+ i 1))))
+    out)))
+
 (let std/vector/rest (lambda xs start (if (std/vector/empty? xs) xs (do
      (let end (length xs))
      (let bounds (- end start))
      (let out [])
-     (loop 0 bounds (lambda i (set! out (length out) (get xs (+ start i)))))
+     (mut i 0)
+     (while (< i bounds) (do (set! out (length out) (get xs (+ start i))) (alter! i (+ i 1))))
      out))))
      
 (let std/vector/slice (lambda xs start end (if (std/vector/empty? xs) xs (do
      (let bounds (- end start))
      (let out [])
-     (loop 0 bounds (lambda i (set! out (length out) (get xs (+ start i)))))
+     (mut i 0)
+     (while (< i bounds) (do (set! out (length out) (get xs (+ start i))) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/drop (lambda xs start (if (std/vector/empty? xs) xs (do
      (let end (length xs))
      (let bounds (- end start))
      (let out [])
-     (loop 0 bounds (lambda i (set! out (length out) (get xs (+ start i)))))
+     (mut i 0)
+     (while (< i bounds) (do (set! out (length out) (get xs (+ start i))) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/drop/last (lambda xs end (if (std/vector/empty? xs) xs (do
      (let bounds (- (length xs) end))
      (let out [])
-     (loop 0 bounds (lambda i (set! out (length out) (get xs i))))
+     (mut i 0)
+     (while (< i bounds) (do (set! out (length out) (get xs i)) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/take (lambda xs end (if (std/vector/empty? xs) xs (do
      (let out [])
-     (loop 0 end (lambda i (set! out (length out) (get xs i))))
+     (mut i 0)
+     (while (< i end) (do (set! out (length out) (get xs i)) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/take/last (lambda xs start (if (std/vector/empty? xs) xs (do
      (let out [])
-     (loop (- (length xs) start) (length xs) (lambda i (set! out (length out) (get xs i))))
+     (let len (length xs))
+     (mut i (- len start))
+     (while (< i len) (do (set! out (length out) (get xs i)) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/reverse (lambda xs (if (std/vector/empty? xs) xs (do
      (let out [])
      (let len (length xs))
-     (loop 0 len (lambda i (set! out (length out) (get xs (- len i 1)))))
+     (mut i 0)
+     (while (< i len) (do (set! out (length out) (get xs (- len i 1))) (alter! i (+ i 1))))
      out))))
 
 (let std/vector/reverse! (lambda xs (loop 0 (/ (length xs) 2) (lambda i (std/vector/swap! xs i (- (length xs) i 1))))))
@@ -900,7 +911,8 @@ nil)))
 
 (let std/vector/buckets (lambda size (do
      (let out [[]])
-     (loop 1 size (lambda . (set! out (length out) [])))
+     (mut i 1)
+     (while (< i size) (do (set! out (length out) []) (alter! i (+ i 1))))
      out)))
 
 (let std/vector/char/equal? (lambda a b (and (= (length a) (length b)) (<|
@@ -935,9 +947,12 @@ nil)))
 
 (let std/vector/partition (lambda xs n (if (= n (length xs)) [xs] (do 
     (let a [])
-    (loop 0 (length xs) (lambda i (if (= (mod i n) 0)
+    (mut i 0)
+    (let len (length xs))
+    (while (< i len) (do (if (= (mod i n) 0)
         (set! a (length a) [(get xs i)])
-        (set! (std/vector/at a -1) (length (std/vector/at a -1)) (get xs i)))))
+        (set! (std/vector/at a -1) (length (std/vector/at a -1)) (get xs i)))
+        (alter! i (+ i 1))))
      a))))
 
 (let std/vector/sort-partition! (lambda arr start end fn (do
