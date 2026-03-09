@@ -247,7 +247,9 @@ impl ServerState {
                     &change.text,
                     &core.std_defs,
                     &core.base_env,
-                    core.base_next_id
+                    core.base_next_id,
+                    &core.global_signatures,
+                    &core.std_fallback_names
                 )
             });
             self.publish_diagnostics(uri.clone(), Some(change.version), &analysis.diagnostics)?;
@@ -300,7 +302,9 @@ impl ServerState {
                         &params.text_document.text,
                         &core.std_defs,
                         &core.base_env,
-                        core.base_next_id
+                        core.base_next_id,
+                        &core.global_signatures,
+                        &core.std_fallback_names
                     )
                 });
                 self.publish_diagnostics(
@@ -643,7 +647,9 @@ fn analyze_document_text(
     text: &str,
     std_defs: &[Expression],
     base_env: &TypeEnv,
-    base_next_id: u64
+    base_next_id: u64,
+    global_signatures: &HashMap<String, String>,
+    std_fallback_names: &HashSet<String>
 ) -> DocAnalysis {
     if text.trim().is_empty() {
         return DocAnalysis {
@@ -700,8 +706,21 @@ fn analyze_document_text(
             collect_let_binding_types(&typed, &mut let_binding_types_raw);
             form_scoped_symbols = build_form_scoped_analyses(text, user_form_count, &typed);
         }
-        Err(err) =>
-            diagnostics.extend(make_error_diagnostic(text, err.message, err.scope.as_ref())),
+        Err(err) => {
+            let mut candidate_symbols = user_bound_symbols.clone();
+            candidate_symbols.extend(global_signatures.keys().cloned());
+            candidate_symbols.extend(std_fallback_names.iter().cloned());
+            candidate_symbols.extend(symbol_types_raw.keys().cloned());
+            candidate_symbols.extend(let_binding_types_raw.keys().cloned());
+            let message_with_suggestions = native_core::append_undefined_variable_suggestions(
+                &err.message,
+                candidate_symbols.iter().map(|s| s.as_str()),
+                3
+            );
+            diagnostics.extend(
+                make_error_diagnostic(text, message_with_suggestions, err.scope.as_ref())
+            );
+        }
     }
 
     let symbol_types: HashMap<String, String> = symbol_types_raw
@@ -735,11 +754,22 @@ fn analyze_document_text_safe(
     text: &str,
     std_defs: &[Expression],
     base_env: &TypeEnv,
-    base_next_id: u64
+    base_next_id: u64,
+    global_signatures: &HashMap<String, String>,
+    std_fallback_names: &HashSet<String>
 ) -> DocAnalysis {
     match
         catch_unwind(
-            AssertUnwindSafe(|| { analyze_document_text(text, std_defs, base_env, base_next_id) })
+            AssertUnwindSafe(|| {
+                analyze_document_text(
+                    text,
+                    std_defs,
+                    base_env,
+                    base_next_id,
+                    global_signatures,
+                    std_fallback_names
+                )
+            })
         )
     {
         Ok(analysis) => analysis,

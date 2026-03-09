@@ -180,8 +180,21 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             collect_symbol_types(&typed, &mut symbol_types_raw);
             collect_let_binding_types(&typed, &mut let_binding_types_raw);
         }
-        Err(err) =>
-            diagnostics.extend(make_error_diagnostic(text, err.message, err.scope.as_ref())),
+        Err(err) => {
+            let mut candidate_symbols = user_bound_symbols.clone();
+            candidate_symbols.extend(core.global_signatures.keys().cloned());
+            candidate_symbols.extend(core.std_fallback_names.iter().cloned());
+            candidate_symbols.extend(symbol_types_raw.keys().cloned());
+            candidate_symbols.extend(let_binding_types_raw.keys().cloned());
+            let message_with_suggestions = native_core::append_undefined_variable_suggestions(
+                &err.message,
+                candidate_symbols.iter().map(|s| s.as_str()),
+                3
+            );
+            diagnostics.extend(
+                make_error_diagnostic(text, message_with_suggestions, err.scope.as_ref())
+            );
+        }
     }
 
     for (name, typ) in let_binding_types_raw {
@@ -520,6 +533,68 @@ fn write_to_output(s: &str) -> *const u8 {
 }
 
 #[cfg(feature = "compiler")]
+fn format_scope_path(scope: Option<&InferErrorScope>) -> String {
+    match scope {
+        Some(meta) => {
+            let lambda_path = if meta.lambda_path.is_empty() {
+                "<root>".to_string()
+            } else {
+                meta.lambda_path
+                    .iter()
+                    .map(|idx| format!("#{}", idx))
+                    .collect::<Vec<String>>()
+                    .join(" -> ")
+            };
+            format!("top_form={} lambda_path={}", meta.user_top_form, lambda_path)
+        }
+        None => "<none>".to_string(),
+    }
+}
+
+#[cfg(feature = "compiler")]
+fn format_basic_debug_error_report(
+    phase: &str,
+    source_text: &str,
+    message: &str,
+    scope: Option<&InferErrorScope>
+) -> String {
+    let mut out = Vec::new();
+    out.push(format!("debug.phase: {}", phase));
+    out.push(format!("debug.error: {}", message));
+    out.push(format!("debug.scope_path: {}", format_scope_path(scope)));
+    out.push(
+        "debug.location_explainer: location[i] ranges are in the original source file (not desugared), 1-based line:column; i=0 is the primary match."
+            .to_string()
+    );
+
+    let ranges = infer_error_ranges(source_text, message, scope);
+    if ranges.is_empty() {
+        out.push("location: <unresolved>".to_string());
+    } else {
+        for (idx, range) in ranges.iter().copied().take(8).enumerate() {
+            out.push(
+                format!(
+                    "location[{}]: {}:{} -> {}:{}",
+                    idx,
+                    range.start.line + 1,
+                    range.start.character + 1,
+                    range.end.line + 1,
+                    range.end.character + 1
+                )
+            );
+            if let Some(line) = source_text.lines().nth(range.start.line as usize) {
+                out.push(format!("location_line[{}]: {}", idx, line.trim_end()));
+            }
+        }
+        if ranges.len() > 8 {
+            out.push(format!("location_more: {}", ranges.len() - 8));
+        }
+    }
+
+    out.join("\n")
+}
+
+#[cfg(feature = "compiler")]
 #[wasm_bindgen]
 pub fn get_output_ptr() -> *const u8 {
     OUTPUT.with(|buf| buf.borrow().as_ptr())
@@ -538,12 +613,50 @@ pub fn wat(program: String) -> *const u8 {
         let std_ast = std.borrow();
         if let parser::Expression::Apply(items) = &*std_ast {
             match parser::merge_std_and_program(&program, items[1..].to_vec()) {
-                Ok(wrapped_ast) =>
-                    match wat::compile_program_to_wat(&wrapped_ast) {
-                        Ok(wat_src) => wat_src,
-                        Err(err) => format!("3\n{}", err),
+                Ok(wrapped_ast) => {
+                    let analysis_source = strip_comment_bodies_preserve_newlines(&program);
+                    let user_form_count = parse_user_exprs_for_symbol_collection(&analysis_source)
+                        .as_ref()
+                        .map(|exprs| exprs.len())
+                        .unwrap_or_else(|| top_level_form_ranges(&program).len());
+                    let infer_result = infer_with_builtins_typed_lsp(
+                        &wrapped_ast,
+                        crate::types::create_builtin_environment(TypeEnv::new()),
+                        user_form_count
+                    );
+
+                    match infer_result {
+                        Ok((_typ, typed_ast)) =>
+                            match wat::compile_program_to_wat_typed(&typed_ast) {
+                                Ok(wat_src) => wat_src,
+                                Err(err) =>
+                                    format!(
+                                        "3\n{}",
+                                        format_basic_debug_error_report(
+                                            "wat-lowering",
+                                            &program,
+                                            &err,
+                                            None
+                                        )
+                                    ),
+                            }
+                        Err(err) =>
+                            format!(
+                                "3\n{}",
+                                format_basic_debug_error_report(
+                                    "type-inference",
+                                    &program,
+                                    &err.message,
+                                    err.scope.as_ref()
+                                )
+                            ),
                     }
-                Err(err) => format!("2\n{}", err),
+                }
+                Err(err) =>
+                    format!(
+                        "2\n{}",
+                        format_basic_debug_error_report("parse+desugar", &program, &err, None)
+                    ),
             }
         } else {
             "1\nNo expressions...".to_string()

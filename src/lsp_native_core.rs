@@ -1535,6 +1535,154 @@ fn extract_symbol_from_error(message: &str) -> Option<String> {
     None
 }
 
+pub fn extract_undefined_variable_name(message: &str) -> Option<String> {
+    const PREFIX: &str = "Undefined variable: ";
+    for line in message.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix(PREFIX) {
+            let symbol = rest
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_matches(|c: char| matches!(c, ',' | ';' | ')' | '('));
+            if !symbol.is_empty() {
+                return Some(symbol.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn damerau_levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let n = a_chars.len();
+    let m = b_chars.len();
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
+
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in 0..=n {
+        dp[i][0] = i;
+    }
+    for j in 0..=m {
+        dp[0][j] = j;
+    }
+
+    for i in 1..=n {
+        for j in 1..=m {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let deletion = dp[i - 1][j] + 1;
+            let insertion = dp[i][j - 1] + 1;
+            let substitution = dp[i - 1][j - 1] + cost;
+            let mut best = deletion.min(insertion).min(substitution);
+
+            if
+                i > 1 &&
+                j > 1 &&
+                a_chars[i - 1] == b_chars[j - 2] &&
+                a_chars[i - 2] == b_chars[j - 1]
+            {
+                best = best.min(dp[i - 2][j - 2] + 1);
+            }
+
+            dp[i][j] = best;
+        }
+    }
+
+    dp[n][m]
+}
+
+fn max_typo_distance_for_len(len: usize) -> usize {
+    match len {
+        0..=3 => 1,
+        4..=7 => 2,
+        8..=12 => 3,
+        _ => 4,
+    }
+}
+
+pub fn suggest_undefined_variable_candidates<'a, I>(
+    message: &str,
+    candidates: I,
+    limit: usize
+) -> Vec<String>
+    where I: IntoIterator<Item = &'a str>
+{
+    let Some(missing) = extract_undefined_variable_name(message) else {
+        return Vec::new();
+    };
+    if limit == 0 {
+        return Vec::new();
+    }
+
+    let missing_lc = missing.to_ascii_lowercase();
+    let missing_len = missing_lc.chars().count();
+    let base_threshold = max_typo_distance_for_len(missing_len);
+    let prefix_len = missing_lc.chars().take(2).count();
+    let missing_prefix: String = missing_lc.chars().take(prefix_len).collect();
+
+    let mut scored: Vec<(usize, usize, usize, String)> = Vec::new();
+    let mut seen = HashSet::new();
+    for cand in candidates {
+        if cand.is_empty() || cand.starts_with('_') || cand == missing {
+            continue;
+        }
+        let cand_lc = cand.to_ascii_lowercase();
+        if !seen.insert(cand_lc.clone()) {
+            continue;
+        }
+
+        let cand_len = cand_lc.chars().count();
+        let distance = damerau_levenshtein_distance(&missing_lc, &cand_lc);
+        let len_threshold = max_typo_distance_for_len(cand_len);
+        let threshold = base_threshold.max(len_threshold);
+        if distance > threshold {
+            continue;
+        }
+
+        let prefix_penalty = if
+            !missing_prefix.is_empty() && cand_lc.starts_with(&missing_prefix)
+        {
+            0
+        } else {
+            1
+        };
+        let len_diff = missing_len.abs_diff(cand_len);
+        scored.push((distance, prefix_penalty, len_diff, cand.to_string()));
+    }
+
+    scored.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| a.3.cmp(&b.3))
+    });
+    scored.into_iter().take(limit).map(|(_, _, _, name)| name).collect()
+}
+
+pub fn append_undefined_variable_suggestions<'a, I>(
+    message: &str,
+    candidates: I,
+    limit: usize
+) -> String
+    where I: IntoIterator<Item = &'a str>
+{
+    if extract_undefined_variable_name(message).is_none() || message.contains("Did you mean:") {
+        return message.to_string();
+    }
+
+    let suggestions = suggest_undefined_variable_candidates(message, candidates, limit);
+    if suggestions.is_empty() {
+        return message.to_string();
+    }
+
+    format!("{}\nDid you mean: {}", message.trim_end(), suggestions.join(", "))
+}
+
 fn is_ident_char(ch: char) -> bool {
     ch.is_alphanumeric() ||
         matches!(ch, '_' | '-' | '/' | '?' | '!' | '*' | '+' | '<' | '>' | '=' | '.')

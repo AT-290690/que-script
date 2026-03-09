@@ -350,3 +350,39 @@ pub fn run_wat_text<T: 'static, F>(
     };
     decode_value(ptr, &typ, &memory, &store)
 }
+
+pub fn run_wat_text_no_result<T: 'static, F>(
+    wat_src: &str,
+    store_data: T,
+    argv: &[String],
+    link_imports: F
+) -> Result<(), String>
+    where F: FnOnce(&mut Linker<T>) -> Result<(), String>
+{
+    let wasm_bytes = wat_crate::parse_str(wat_src).map_err(|e| e.to_string())?;
+    let engine = configured_engine()?;
+    let module = WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
+    let mut linker = Linker::new(&engine);
+    link_imports(&mut linker)?;
+    let mut store = Store::new(&engine, store_data);
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .map_err(|e| format!("inst error: {:#}", e))?;
+
+    set_argv_strings(&mut store, &instance, argv).map_err(|e| e.to_string())?;
+
+    let main = instance
+        .get_typed_func::<(), i32>(&mut store, "main")
+        .map_err(|e| format!("main func error: {:#}", e))?;
+
+    if let Err(e) = main.call(&mut store, ()) {
+        let mut msg = format!("call error: {:#}", e);
+        if let Some(debug) = debug_rc_snapshot(&instance, &mut store) {
+            msg.push('\n');
+            msg.push_str(&debug);
+        }
+        return Err(msg);
+    }
+
+    Ok(())
+}
