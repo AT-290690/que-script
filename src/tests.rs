@@ -404,6 +404,27 @@ Concequent and alternative must match types
     }
 
     #[cfg(feature = "runtime")]
+    fn run_program_error(src: &str) -> String {
+        let expr = crate::parser::build(src).expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let argv: Vec<String> = Vec::new();
+        #[cfg(feature = "io")]
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
+        #[cfg(feature = "io")]
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
+        );
+        #[cfg(not(feature = "io"))]
+        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
+        run_result.expect_err("program should fail at runtime")
+    }
+
+    #[cfg(feature = "runtime")]
     fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
         let std_ast = crate::baked::load_ast();
         let expr = match std_ast {
@@ -453,6 +474,57 @@ Concequent and alternative must match types
                 xs)"#
         );
         assert_eq!(output, "[0 1 2 3 4 5 6 7 8 9]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_vector_get_out_of_bounds_traps() {
+        let err = run_program_error(
+            r#"(do
+                (let xs [ 1 2 3 4 ])
+                [(get xs -1) (get xs 4) (get xs 10)])"#
+        );
+        assert!(
+            err.contains("call error"),
+            "expected runtime call error for out-of-bounds get, got: {}",
+            err
+        );
+        assert!(
+            err.contains("unreachable"),
+            "expected unreachable trap for out-of-bounds get, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_int_overflow_wraps_by_default() {
+        let output = run_program_output(r#"(+ 2147483647 1)"#);
+        assert_eq!(output, "-2147483648");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_int_div_zero_traps_by_default() {
+        let err = run_program_error(r#"(do (let id (lambda x x)) (/ 1 (id 0)))"#);
+        assert!(
+            err.contains("unreachable"),
+            "expected unreachable trap for int divide-by-zero, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_float_div_zero_traps_by_default() {
+        let err = run_program_error(
+            r#"(do (let f (lambda z (/. (Int->Float 1) z))) (f (Int->Float 0)))"#
+        );
+        assert!(
+            err.contains("unreachable"),
+            "expected unreachable trap for float divide-by-zero, got: {}",
+            err
+        );
     }
 
     #[test]
@@ -550,6 +622,44 @@ Concequent and alternative must match types
             (let a (|> (range 1 5) (map/i (lambda x i { x i }))))
 (let b (map/i (lambda x i { x i }) [1 2 3 4 5]))
 [a b]"#
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_correctness_fusion_opt_equivalence_reduce_until_i() {
+        assert_std_program_output_matches_with_and_without_optimizer(
+            r#"(let two-sum-test (lambda nums target (snd (|> nums 
+            (filter (lambda x (< x 1000))) 
+            (filter/i (lambda x i (and (< x 100) (< i 10)))) 
+            (map identity) (reduce/until/i (lambda { a out } b i (do
+        (let check (Integer->String (- target b)))
+        (if (Table/has? check a) (do 
+            (push! out i)  (push! out (snd (get (Table/get check a))))))
+        (let key (Integer->String b))
+        (Table/set! key i a)
+        { a out }))
+        (lambda { . out } . . (not-empty? out))
+        { (Hash-Table/new) [] } )))))
+[
+    (two-sum-test [ 2 7 11 15 ] 9)
+    (two-sum-test [3 2 4] 6)
+    (two-sum-test [ 2 7 11 15 ] 9)
+]"#
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_correctness_fusion_opt_equivalence_reduce_until() {
+        assert_std_program_output_matches_with_and_without_optimizer(
+            r#"(|> [1 2 3 4 5 6]
+    (filter odd?)
+    (map (lambda x (* x 2)))
+    (reduce/until
+        (lambda a x (+ a x))
+        (lambda a x (> (+ a x) 7))
+        0))"#
         )
     }
 

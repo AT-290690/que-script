@@ -45,6 +45,51 @@ struct Ctx<'a> {
 }
 const EXTRA_I32_LOCALS: usize = 16;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DevirtualizeMode {
+    Off,
+    KnownHeads,
+    Aggressive,
+}
+
+#[derive(Clone, Copy)]
+struct ArithmeticCheckConfig {
+    int_overflow_check: bool,
+    float_overflow_check: bool,
+    div_zero_check: bool,
+}
+
+fn parse_env_bool_like(name: &str, default: bool) -> bool {
+    std::env
+        ::var(name)
+        .ok()
+        .map(|v| {
+            !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no")
+        })
+        .unwrap_or(default)
+}
+
+fn arithmetic_check_config() -> ArithmeticCheckConfig {
+    ArithmeticCheckConfig {
+        int_overflow_check: parse_env_bool_like("QUE_INT_OVERFLOW_CHECK", false),
+        float_overflow_check: parse_env_bool_like("QUE_FLOAT_OVERFLOW_CHECK", false),
+        div_zero_check: parse_env_bool_like("QUE_DIV_ZERO_CHECK", true),
+    }
+}
+
+fn devirtualize_mode_from_env() -> Result<DevirtualizeMode, String> {
+    let raw = std::env::var("QUE_DEVIRTUALIZE").unwrap_or_else(|_| "aggressive".to_string());
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "off" => Ok(DevirtualizeMode::Off),
+        "known-heads" | "known_heads" | "known" => Ok(DevirtualizeMode::KnownHeads),
+        "aggressive" => Ok(DevirtualizeMode::Aggressive),
+        other =>
+            Err(
+                format!("invalid QUE_DEVIRTUALIZE='{}'. expected one of: off, known-heads, aggressive", other)
+            ),
+    }
+}
+
 #[derive(Clone, Copy)]
 enum VecElemKind {
     I32,
@@ -621,6 +666,20 @@ fn emit_vector_runtime(
     closure_defs: &HashMap<String, ClosureDef>,
     apply_arities: &HashSet<usize>
 ) -> String {
+    fn parse_env_i32(name: &str, default: i32, min: i32, max: i32) -> i32 {
+        std::env
+            ::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse::<i32>().ok())
+            .map(|v| v.clamp(min, max))
+            .unwrap_or(default)
+    }
+
+    let vec_min_cap = parse_env_i32("QUE_VEC_MIN_CAP", 2, 1, 4096);
+    let vec_growth_num = parse_env_i32("QUE_VEC_GROWTH_NUM", 2, 1, 64);
+    let vec_growth_den = parse_env_i32("QUE_VEC_GROWTH_DEN", 1, 1, 64);
+    let vec_bounds_check_enabled = parse_env_bool_like("QUE_BOUNDS_CHECK", true);
+
     let mut apply_arities = apply_arities.clone();
     // apply3 fallback chains through apply1, so ensure apply1 runtime exists.
     if apply_arities.contains(&3) {
@@ -1967,10 +2026,10 @@ fn emit_vector_runtime(
     (local $i i32)
     ;; __DBG_RC_VEC_NEW_INC__
     local.get $len
-    i32.const 2
+    i32.const __VEC_MIN_CAP__
     i32.lt_s
     if (result i32)
-      i32.const 2
+      i32.const __VEC_MIN_CAP__
     else
       local.get $len
     end
@@ -2039,6 +2098,8 @@ fn emit_vector_runtime(
   )
 
   (func $vec_get_i32 (param $ptr i32) (param $idx i32) (result i32)
+    (local $len i32)
+    ;; __VEC_GET_BOUNDS_CHECK__
     local.get $ptr
     i32.const 16
     i32.add
@@ -2064,9 +2125,20 @@ fn emit_vector_runtime(
     i32.load
     local.set $cap
     local.get $cap
-    i32.const 2
+    i32.const __VEC_GROWTH_NUM__
     i32.mul
+    i32.const __VEC_GROWTH_DEN__
+    i32.div_s
     local.set $new_cap
+    local.get $new_cap
+    local.get $cap
+    i32.le_s
+    if
+      local.get $cap
+      i32.const 1
+      i32.add
+      local.set $new_cap
+    end
     local.get $new_cap
     i32.const 1
     i32.lt_s
@@ -3134,6 +3206,29 @@ fn emit_vector_runtime(
         out.push_str(&emit_high_arity_apply_i32(arity, fn_ids, fn_sigs, closure_defs));
     }
     let debug_rc_enabled = cfg!(feature = "debug-rc");
+    out = out.replace("__VEC_MIN_CAP__", &vec_min_cap.to_string());
+    out = out.replace("__VEC_GROWTH_NUM__", &vec_growth_num.to_string());
+    out = out.replace("__VEC_GROWTH_DEN__", &vec_growth_den.to_string());
+    out = out.replace(";; __VEC_GET_BOUNDS_CHECK__", if vec_bounds_check_enabled {
+        r#"local.get $idx
+    i32.const 0
+    i32.lt_s
+    if
+      unreachable
+    end
+    local.get $ptr
+    i32.load
+    local.set $len
+    local.get $idx
+    local.get $len
+    i32.ge_s
+    if
+      unreachable
+    end"#
+    } else {
+        ""
+    });
+
     let replacements = [
         (
             ";; __DBG_RC_GLOBALS__",
@@ -3553,6 +3648,44 @@ fn emit_vector_runtime(
 }
 
 fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    fn emit_int_div_zero_check(rhs_local: usize) -> String {
+        format!("local.get {rhs_local}\ni32.eqz\nif\n  unreachable\nend")
+    }
+
+    fn emit_float_div_zero_check(rhs_local: usize) -> String {
+        format!(
+            "local.get {rhs_local}\nf32.reinterpret_i32\nf32.const 0\nf32.eq\nif\n  unreachable\nend"
+        )
+    }
+
+    fn emit_float_overflow_or_nan_check(result_local: usize) -> String {
+        format!(
+            "local.get {result_local}\nf32.reinterpret_i32\nlocal.get {result_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n  unreachable\nend\nlocal.get {result_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n  unreachable\nend"
+        )
+    }
+
+    fn emit_int_add_overflow_check(lhs_local: usize, rhs_local: usize, res_local: usize) -> String {
+        format!(
+            "local.get {lhs_local}\nlocal.get {res_local}\ni32.xor\nlocal.get {rhs_local}\nlocal.get {res_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend"
+        )
+    }
+
+    fn emit_int_sub_overflow_check(lhs_local: usize, rhs_local: usize, res_local: usize) -> String {
+        format!(
+            "local.get {lhs_local}\nlocal.get {rhs_local}\ni32.xor\nlocal.get {lhs_local}\nlocal.get {res_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend"
+        )
+    }
+
+    fn emit_int_mul_overflow_check(lhs_local: usize, rhs_local: usize, res_local: usize) -> String {
+        format!(
+            "local.get {rhs_local}\ni32.const 0\ni32.ne\nif\n  local.get {res_local}\n  local.get {rhs_local}\n  i32.div_s\n  local.get {lhs_local}\n  i32.ne\n  if\n    unreachable\n  end\nend"
+        )
+    }
+
+    let checks = arithmetic_check_config();
+    let lhs_local = ctx.tmp_i32;
+    let rhs_local = ctx.tmp_i32 + 1;
+    let res_local = ctx.tmp_i32 + 2;
     let a = node.children
         .get(1)
         .ok_or_else(|| format!("Missing lhs for {}", op))
@@ -3562,11 +3695,61 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         .ok_or_else(|| format!("Missing rhs for {}", op))
         .and_then(|n| compile_expr(n, ctx))?;
     let code = match op {
-        "+" | "+#" => "i32.add",
-        "-" | "-#" => "i32.sub",
-        "*" | "*#" => "i32.mul",
-        "/" | "/#" => "i32.div_s",
-        "mod" => "i32.rem_s",
+        "+" | "+#" => {
+            if checks.int_overflow_check {
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.add\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        emit_int_add_overflow_check(lhs_local, rhs_local, res_local)
+                    )
+                );
+            }
+            "i32.add"
+        }
+        "-" | "-#" => {
+            if checks.int_overflow_check {
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.sub\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        emit_int_sub_overflow_check(lhs_local, rhs_local, res_local)
+                    )
+                );
+            }
+            "i32.sub"
+        }
+        "*" | "*#" => {
+            if checks.int_overflow_check {
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.mul\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        emit_int_mul_overflow_check(lhs_local, rhs_local, res_local)
+                    )
+                );
+            }
+            "i32.mul"
+        }
+        "/" | "/#" => {
+            if checks.div_zero_check {
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\n{}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.div_s",
+                        emit_int_div_zero_check(rhs_local)
+                    )
+                );
+            }
+            "i32.div_s"
+        }
+        "mod" => {
+            if checks.div_zero_check {
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\n{}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.rem_s",
+                        emit_int_div_zero_check(rhs_local)
+                    )
+                );
+            }
+            "i32.rem_s"
+        }
         "=" | "=?" | "=#" => "i32.eq",
         "<" | "<#" => "i32.lt_s",
         ">" | ">#" => "i32.gt_s",
@@ -3592,6 +3775,14 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         "<<" => "i32.shl",
         ">>" => "i32.shr_s",
         "+." => {
+            if checks.float_overflow_check {
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.add\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        emit_float_overflow_or_nan_check(res_local)
+                    )
+                );
+            }
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.add\ni32.reinterpret_f32"
@@ -3599,6 +3790,14 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             );
         }
         "-." => {
+            if checks.float_overflow_check {
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.sub\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        emit_float_overflow_or_nan_check(res_local)
+                    )
+                );
+            }
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.sub\ni32.reinterpret_f32"
@@ -3606,6 +3805,14 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             );
         }
         "*." => {
+            if checks.float_overflow_check {
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        emit_float_overflow_or_nan_check(res_local)
+                    )
+                );
+            }
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32"
@@ -3613,6 +3820,23 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             );
         }
         "/." => {
+            if checks.div_zero_check || checks.float_overflow_check {
+                let div_zero_check = if checks.div_zero_check {
+                    format!("{}\n", emit_float_div_zero_check(rhs_local))
+                } else {
+                    String::new()
+                };
+                let overflow_check = if checks.float_overflow_check {
+                    format!("{}\n", emit_float_overflow_or_nan_check(res_local))
+                } else {
+                    String::new()
+                };
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\n{div_zero_check}local.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.div\ni32.reinterpret_f32\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
+                    )
+                );
+            }
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.div\ni32.reinterpret_f32"
@@ -3620,6 +3844,23 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             );
         }
         "mod." => {
+            if checks.div_zero_check || checks.float_overflow_check {
+                let div_zero_check = if checks.div_zero_check {
+                    format!("{}\n", emit_float_div_zero_check(rhs_local))
+                } else {
+                    String::new()
+                };
+                let overflow_check = if checks.float_overflow_check {
+                    format!("{}\n", emit_float_overflow_or_nan_check(res_local))
+                } else {
+                    String::new()
+                };
+                return Ok(
+                    format!(
+                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\n{div_zero_check}local.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.div\nf32.trunc\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.mul\nf32.sub\ni32.reinterpret_f32\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
+                    )
+                );
+            }
             return Ok(
                 format!(
                     "{a}\nf32.reinterpret_i32\n{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.div\nf32.trunc\n{b}\nf32.reinterpret_i32\nf32.mul\nf32.sub\ni32.reinterpret_f32"
@@ -4608,6 +4849,7 @@ fn compile_fast_cell_update_int_binary(
     ctx: &Ctx<'_>,
     wasm_op: &str
 ) -> Result<String, String> {
+    let checks = arithmetic_check_config();
     if node.children.len() != 3 {
         return Err(format!("{} requires exactly 2 arguments", op));
     }
@@ -4621,15 +4863,34 @@ fn compile_fast_cell_update_int_binary(
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
-        tmp_i32: ctx.tmp_i32 + 3,
+        tmp_i32: ctx.tmp_i32 + 5,
     };
     let cell = compile_expr(cell_node, &nested_ctx)?;
     let rhs = compile_expr(rhs_node, &nested_ctx)?;
     let cell_local = ctx.tmp_i32;
-    let value_local = ctx.tmp_i32 + 1;
+    let old_local = ctx.tmp_i32 + 1;
+    let rhs_local = ctx.tmp_i32 + 2;
+    let value_local = ctx.tmp_i32 + 3;
+    let checks_wat = match wasm_op {
+        "i32.add" if checks.int_overflow_check =>
+            format!(
+                "local.get {old_local}\nlocal.get {value_local}\ni32.xor\nlocal.get {rhs_local}\nlocal.get {value_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend\n"
+            ),
+        "i32.sub" if checks.int_overflow_check =>
+            format!(
+                "local.get {old_local}\nlocal.get {rhs_local}\ni32.xor\nlocal.get {old_local}\nlocal.get {value_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend\n"
+            ),
+        "i32.mul" if checks.int_overflow_check =>
+            format!(
+                "local.get {rhs_local}\ni32.const 0\ni32.ne\nif\n  local.get {value_local}\n  local.get {rhs_local}\n  i32.div_s\n  local.get {old_local}\n  i32.ne\n  if\n    unreachable\n  end\nend\n"
+            ),
+        "i32.div_s" if checks.div_zero_check =>
+            format!("local.get {rhs_local}\ni32.eqz\nif\n  unreachable\nend\n"),
+        _ => String::new(),
+    };
     Ok(
         format!(
-            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\n{rhs}\n{wasm_op}\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{rhs}\nlocal.set {rhs_local}\n{checks_wat}local.get {old_local}\nlocal.get {rhs_local}\n{wasm_op}\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
         )
     )
 }
@@ -4639,6 +4900,7 @@ fn compile_fast_cell_update_int_unary(
     node: &TypedExpression,
     ctx: &Ctx<'_>
 ) -> Result<String, String> {
+    let checks = arithmetic_check_config();
     if node.children.len() != 2 {
         return Err(format!("{} requires exactly 1 argument", op));
     }
@@ -4667,9 +4929,24 @@ fn compile_fast_cell_update_int_unary(
             return Err(format!("Unsupported int unary fast helper '{}'", op));
         }
     };
+    let checks_wat = match op {
+        "++" if checks.int_overflow_check =>
+            format!(
+                "local.get {old_local}\ni32.const 2147483647\ni32.eq\nif\n  unreachable\nend\n"
+            ),
+        "--" if checks.int_overflow_check =>
+            format!(
+                "local.get {old_local}\ni32.const -2147483648\ni32.eq\nif\n  unreachable\nend\n"
+            ),
+        "**" if checks.int_overflow_check =>
+            format!(
+                "local.get {old_local}\ni32.const 0\ni32.ne\nif\n  local.get {value_local}\n  local.get {old_local}\n  i32.div_s\n  local.get {old_local}\n  i32.ne\n  if\n    unreachable\n  end\nend\n"
+            ),
+        _ => String::new(),
+    };
     Ok(
         format!(
-            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{update_expr}\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{update_expr}\nlocal.set {value_local}\n{checks_wat}local.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
         )
     )
 }
@@ -4680,6 +4957,7 @@ fn compile_fast_cell_update_float_binary(
     ctx: &Ctx<'_>,
     wasm_op: &str
 ) -> Result<String, String> {
+    let checks = arithmetic_check_config();
     if node.children.len() != 3 {
         return Err(format!("{} requires exactly 2 arguments", op));
     }
@@ -4693,16 +4971,31 @@ fn compile_fast_cell_update_float_binary(
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
-        tmp_i32: ctx.tmp_i32 + 4,
+        tmp_i32: ctx.tmp_i32 + 5,
     };
     let cell = compile_expr(cell_node, &nested_ctx)?;
     let rhs = compile_expr(rhs_node, &nested_ctx)?;
     let cell_local = ctx.tmp_i32;
     let old_local = ctx.tmp_i32 + 1;
-    let value_local = ctx.tmp_i32 + 2;
+    let rhs_local = ctx.tmp_i32 + 2;
+    let value_local = ctx.tmp_i32 + 3;
+    let div_zero_check = if checks.div_zero_check && wasm_op == "f32.div" {
+        format!(
+            "local.get {rhs_local}\nf32.reinterpret_i32\nf32.const 0\nf32.eq\nif\n  unreachable\nend\n"
+        )
+    } else {
+        String::new()
+    };
+    let float_overflow_check = if checks.float_overflow_check {
+        format!(
+            "local.get {value_local}\nf32.reinterpret_i32\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n  unreachable\nend\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n  unreachable\nend\n"
+        )
+    } else {
+        String::new()
+    };
     Ok(
         format!(
-            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\nlocal.get {old_local}\nf32.reinterpret_i32\n{rhs}\nf32.reinterpret_i32\n{wasm_op}\ni32.reinterpret_f32\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{rhs}\nlocal.set {rhs_local}\n{div_zero_check}local.get {old_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\n{wasm_op}\ni32.reinterpret_f32\nlocal.set {value_local}\n{float_overflow_check}local.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
         )
     )
 }
@@ -4712,6 +5005,7 @@ fn compile_fast_cell_update_float_unary(
     node: &TypedExpression,
     ctx: &Ctx<'_>
 ) -> Result<String, String> {
+    let checks = arithmetic_check_config();
     if node.children.len() != 2 {
         return Err(format!("{} requires exactly 1 argument", op));
     }
@@ -4749,38 +5043,16 @@ fn compile_fast_cell_update_float_unary(
             return Err(format!("Unsupported float unary fast helper '{}'", op));
         }
     };
-    Ok(
+    let float_overflow_check = if checks.float_overflow_check {
         format!(
-            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{update_expr}\nlocal.set {value_local}\nlocal.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+            "local.get {value_local}\nf32.reinterpret_i32\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n  unreachable\nend\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n  unreachable\nend\n"
         )
-    )
-}
-
-fn compile_fast_cell_inc_simple(
-    op: &str,
-    node: &TypedExpression,
-    ctx: &Ctx<'_>
-) -> Result<String, String> {
-    if node.children.len() != 2 {
-        return Err(format!("{} requires exactly 1 argument", op));
-    }
-    let nested_ctx = Ctx {
-        fn_sigs: ctx.fn_sigs,
-        fn_ids: ctx.fn_ids,
-        lambda_ids: ctx.lambda_ids,
-        closure_defs: ctx.closure_defs,
-        lambda_bindings: ctx.lambda_bindings,
-        locals: ctx.locals.clone(),
-        local_types: ctx.local_types.clone(),
-        tmp_i32: ctx.tmp_i32 + 2,
+    } else {
+        String::new()
     };
-    let cell = compile_expr(
-        node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?,
-        &nested_ctx
-    )?;
     Ok(
         format!(
-            "{cell}\ni32.const 0\n{cell}\ni32.const 0\ncall $vec_get_i32\ni32.const 1\ni32.add\ncall $vec_set_i32"
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{update_expr}\nlocal.set {value_local}\n{float_overflow_check}local.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
         )
     )
 }
@@ -4829,8 +5101,7 @@ fn compile_fast_cell_helper(
         "-=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.sub")),
         "*=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.mul")),
         "/=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.div_s")),
-        "++" => Some(compile_fast_cell_inc_simple(op, node, ctx)),
-        "--" | "**" => Some(compile_fast_cell_update_int_unary(op, node, ctx)),
+        "++" | "--" | "**" => Some(compile_fast_cell_update_int_unary(op, node, ctx)),
         "+=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.add")),
         "-=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.sub")),
         "*=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.mul")),
@@ -5421,6 +5692,31 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
     Ok(out.join("\n"))
 }
 
+fn resolve_local_devirtualized_head(
+    local_head: &str,
+    ctx: &Ctx<'_>
+) -> Result<Option<String>, String> {
+    let mode = devirtualize_mode_from_env()?;
+    if mode == DevirtualizeMode::Off {
+        return Ok(None);
+    }
+    let Some(lambda_node) = ctx.lambda_bindings.get(local_head) else {
+        return Ok(None);
+    };
+    let key = lambda_node.expr.to_lisp();
+    if ctx.closure_defs.contains_key(&key) {
+        return Ok(None);
+    }
+    let Some(target_id) = ctx.lambda_ids.get(&key).copied() else {
+        return Ok(None);
+    };
+    Ok(
+        ctx.fn_ids
+            .iter()
+            .find_map(|(name, id)| if *id == target_id { Some(name.clone()) } else { None })
+    )
+}
+
 fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let key = node.expr.to_lisp();
     if let Some(id) = ctx.lambda_ids.get(&key) {
@@ -5523,7 +5819,18 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                 Expression::Word(op) => {
                     let op_full = op.as_str();
                     match op_full {
-                        _ if ctx.locals.contains_key(op_full) => compile_dynamic_call(node, ctx),
+                        _ if ctx.locals.contains_key(op_full) => {
+                            if
+                                let Some(target_name) = resolve_local_devirtualized_head(
+                                    op_full,
+                                    ctx
+                                )?
+                            {
+                                compile_call(node, &target_name, ctx)
+                            } else {
+                                compile_dynamic_call(node, ctx)
+                            }
+                        }
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
@@ -5938,6 +6245,10 @@ fn compile_lambda_func(
 
     let tmp_i32 = params.len() + local_defs.len();
     let mut scoped_lambda_bindings = lambda_bindings.clone();
+    // Function params shadow outer lambda bindings with the same name.
+    for (pname, _) in &params {
+        scoped_lambda_bindings.remove(pname);
+    }
     let mut local_lambda_bindings = HashMap::new();
     collect_let_lambda_bindings(body_node, &mut local_lambda_bindings);
     for (k, v) in local_lambda_bindings {
@@ -6069,6 +6380,10 @@ fn compile_closure_func(
 
     let tmp_i32 = params.len() + local_defs.len();
     let mut scoped_lambda_bindings = lambda_bindings.clone();
+    // Function params (captures + user params) shadow outer lambda bindings.
+    for (pname, _) in &params {
+        scoped_lambda_bindings.remove(pname);
+    }
     let mut local_lambda_bindings = HashMap::new();
     collect_let_lambda_bindings(body_node, &mut local_lambda_bindings);
     for (k, v) in local_lambda_bindings {
@@ -6343,6 +6658,8 @@ pub fn compile_program_to_wat_typed_with_opts(
     typed_ast: &TypedExpression,
     enable_optimizer: bool
 ) -> Result<String, String> {
+    // Validate devirtualization mode early so invalid env values fail deterministically.
+    let _ = devirtualize_mode_from_env()?;
     let optimized_typed_ast = if enable_optimizer {
         Some(crate::op::optimize_typed_ast(typed_ast))
     } else {

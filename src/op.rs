@@ -32,6 +32,12 @@ enum FuseSink {
         init_expr: Expression,
         with_index: bool,
     },
+    ReduceUntil {
+        reduce_fn: Expression,
+        stop_fn: Expression,
+        init_expr: Expression,
+        with_index: bool,
+    },
     Average {
         float: bool,
     },
@@ -410,6 +416,28 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 },
                 items.get(3)?.clone(),
             )),
+        // reduce/until fn stop? init xs
+        "reduce/until" if items.len() == 5 =>
+            Some((
+                FuseSink::ReduceUntil {
+                    reduce_fn: items.get(1)?.clone(),
+                    stop_fn: items.get(2)?.clone(),
+                    init_expr: items.get(3)?.clone(),
+                    with_index: false,
+                },
+                items.get(4)?.clone(),
+            )),
+        // reduce/until/i fn stop? init xs
+        "reduce/until/i" if items.len() == 5 =>
+            Some((
+                FuseSink::ReduceUntil {
+                    reduce_fn: items.get(1)?.clone(),
+                    stop_fn: items.get(2)?.clone(),
+                    init_expr: items.get(3)?.clone(),
+                    with_index: true,
+                },
+                items.get(4)?.clone(),
+            )),
         // sum xs => reduce + 0 xs
         "sum" | "sum/int" if items.len() == 2 =>
             Some((
@@ -745,6 +773,7 @@ fn build_direct_fused_loop(
         let unsupported_sink = match &sink {
             FuseSink::Collect => false,
             FuseSink::Reduce { with_index, .. } => *with_index,
+            FuseSink::ReduceUntil { .. } => true,
             FuseSink::Average { .. } => true,
             FuseSink::Unzip => true,
             FuseSink::Some { .. } | FuseSink::Every { .. } | FuseSink::Find { .. } => true,
@@ -772,6 +801,16 @@ fn build_direct_fused_loop(
                 source,
                 ops_outer_to_inner,
                 reduce_fn,
+                init_expr,
+                with_index,
+                &suffix
+            ),
+        FuseSink::ReduceUntil { reduce_fn, stop_fn, init_expr, with_index } =>
+            build_reduce_until_loop(
+                source,
+                ops_outer_to_inner,
+                reduce_fn,
+                stop_fn,
                 init_expr,
                 with_index,
                 &suffix
@@ -1172,6 +1211,191 @@ fn build_reduce_loop(
         )
     );
     setup_bindings.push(build_while_range_call(start_expr, end_expr, &i_name, &process_name));
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(out_name),
+                Expression::Int(0)
+            ]
+        )
+    );
+
+    let mut do_items = vec![Expression::Word("do".to_string())];
+    do_items.extend(setup_bindings);
+    Some(Expression::Apply(do_items))
+}
+
+fn build_reduce_until_loop(
+    source: FuseSource,
+    ops_outer_to_inner: &[MapFilterOp],
+    reduce_fn: Expression,
+    stop_fn: Expression,
+    init_expr: Expression,
+    with_index: bool,
+    suffix: &str
+) -> Option<Expression> {
+    let (mut setup_bindings, idx_ref_name, cond_bound_expr, value_expr_for_idx_ref) =
+        make_short_circuit_source_bindings(source, suffix)?;
+
+    let out_name = fuse_tmp_name("__fuse_out", suffix);
+    let placed_name = fuse_tmp_name("__fuse_placed", suffix);
+    let process_name = fuse_tmp_name("__fuse_process", suffix);
+
+    let idx_get = Expression::Apply(
+        vec![
+            Expression::Word("get".to_string()),
+            Expression::Word(idx_ref_name.clone()),
+            Expression::Int(0)
+        ]
+    );
+    let x_expr = value_expr_for_idx_ref(&idx_get);
+    let out_name_for_sink = out_name.clone();
+    let placed_name_for_sink = placed_name.clone();
+    let reduce_fn_for_sink = reduce_fn.clone();
+    let stop_fn_for_sink = stop_fn.clone();
+    let step_action = build_non_flatten_chain_process(
+        ops_outer_to_inner,
+        x_expr,
+        idx_get.clone(),
+        suffix,
+        &mut setup_bindings,
+        &move |mapped: Expression, logical_i: Expression| {
+            let acc_get = Expression::Apply(
+                vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(out_name_for_sink.clone()),
+                    Expression::Int(0)
+                ]
+            );
+            let stop_value = if with_index {
+                call_callable_expr(
+                    &stop_fn_for_sink,
+                    vec![acc_get.clone(), mapped.clone(), logical_i.clone()]
+                )?
+            } else {
+                call_callable_expr(&stop_fn_for_sink, vec![acc_get.clone(), mapped.clone()])?
+            };
+            let reduced = if with_index {
+                call_callable_expr(&reduce_fn_for_sink, vec![acc_get, mapped, logical_i])?
+            } else {
+                call_callable_expr(&reduce_fn_for_sink, vec![acc_get, mapped])?
+            };
+            let set_placed_true = Expression::Apply(
+                vec![
+                    Expression::Word("set!".to_string()),
+                    Expression::Word(placed_name_for_sink.clone()),
+                    Expression::Int(0),
+                    Expression::Word("true".to_string())
+                ]
+            );
+            let set_out = Expression::Apply(
+                vec![
+                    Expression::Word("set!".to_string()),
+                    Expression::Word(out_name_for_sink.clone()),
+                    Expression::Int(0),
+                    reduced
+                ]
+            );
+            Some(
+                Expression::Apply(
+                    vec![
+                        Expression::Word("if".to_string()),
+                        stop_value,
+                        set_placed_true,
+                        set_out
+                    ]
+                )
+            )
+        }
+    )?;
+    let idx_inc = Expression::Apply(
+        vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(idx_ref_name.clone()),
+            Expression::Int(0),
+            Expression::Apply(
+                vec![
+                    Expression::Word("+".to_string()),
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("get".to_string()),
+                            Expression::Word(idx_ref_name.clone()),
+                            Expression::Int(0)
+                        ]
+                    ),
+                    Expression::Int(1)
+                ]
+            )
+        ]
+    );
+    let process_lambda = Expression::Apply(
+        vec![
+            Expression::Word("lambda".to_string()),
+            Expression::Apply(vec![Expression::Word("do".to_string()), step_action, idx_inc])
+        ]
+    );
+
+    let continue_cond = Expression::Apply(
+        vec![
+            Expression::Word("and".to_string()),
+            cond_bound_expr,
+            Expression::Apply(
+                vec![
+                    Expression::Word("not".to_string()),
+                    Expression::Apply(
+                        vec![
+                            Expression::Word("get".to_string()),
+                            Expression::Word(placed_name.clone()),
+                            Expression::Int(0)
+                        ]
+                    )
+                ]
+            )
+        ]
+    );
+
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(out_name.clone()),
+                Expression::Apply(vec![Expression::Word("vector".to_string()), init_expr])
+            ]
+        )
+    );
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(placed_name.clone()),
+                Expression::Apply(
+                    vec![
+                        Expression::Word("vector".to_string()),
+                        Expression::Word("false".to_string())
+                    ]
+                )
+            ]
+        )
+    );
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(process_name.clone()),
+                process_lambda
+            ]
+        )
+    );
+    setup_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("while".to_string()),
+                continue_cond,
+                Expression::Apply(vec![Expression::Word(process_name)])
+            ]
+        )
+    );
     setup_bindings.push(
         Expression::Apply(
             vec![
@@ -2774,6 +2998,8 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
     match sink {
         FuseSink::Collect => true,
         FuseSink::Reduce { reduce_fn, .. } => is_fusion_safe_callable(reduce_fn),
+        FuseSink::ReduceUntil { reduce_fn, stop_fn, .. } =>
+            is_fusion_safe_callable(reduce_fn) && is_fusion_safe_callable(stop_fn),
         FuseSink::Average { .. } => true,
         FuseSink::Unzip => true,
         FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } =>
@@ -2860,7 +3086,7 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         "not" => fold_not(node, &items),
 
         "+" | "+#" => fold_int_add(node, &items),
-        "-" | "-#" => fold_int_bin(node, &items, i32::wrapping_sub),
+        "-" | "-#" => fold_int_sub(node, &items),
         "*" | "*#" => fold_int_mul(node, &items),
         "/" | "/#" => fold_int_checked_bin(node, &items, i32::checked_div),
         "mod" => fold_int_checked_bin(node, &items, i32::checked_rem),
@@ -2871,11 +3097,11 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         "<=" | "<=#" => fold_int_cmp(node, &items, |a, b| a <= b),
         ">=" | ">=#" => fold_int_cmp(node, &items, |a, b| a >= b),
 
-        "+." => fold_float_bin(node, &items, |a, b| a + b),
-        "-." => fold_float_bin(node, &items, |a, b| a - b),
-        "*." => fold_float_bin(node, &items, |a, b| a * b),
-        "/." => fold_float_bin(node, &items, |a, b| a / b),
-        "mod." => fold_float_bin(node, &items, |a, b| a - (a / b).trunc() * b),
+        "+." => fold_float_bin(node, &items, "+.", |a, b| a + b),
+        "-." => fold_float_bin(node, &items, "-.", |a, b| a - b),
+        "*." => fold_float_bin(node, &items, "*.", |a, b| a * b),
+        "/." => fold_float_bin(node, &items, "/.", |a, b| a / b),
+        "mod." => fold_float_bin(node, &items, "mod.", |a, b| a - (a / b).trunc() * b),
 
         "=." => fold_float_cmp(node, &items, |a, b| a == b),
         "<." => fold_float_cmp(node, &items, |a, b| a < b),
@@ -3137,7 +3363,11 @@ fn fold_int_add(node: TypedExpression, items: &[Expression]) -> TypedExpression 
     if let Some(0) = items.get(2).and_then(int_literal) {
         return node.children.get(1).cloned().unwrap_or(node);
     }
-    fold_int_bin(node, items, i32::wrapping_add)
+    fold_int_bin_with_overflow_policy(node, items, i32::wrapping_add, i32::checked_add)
+}
+
+fn fold_int_sub(node: TypedExpression, items: &[Expression]) -> TypedExpression {
+    fold_int_bin_with_overflow_policy(node, items, i32::wrapping_sub, i32::checked_sub)
 }
 
 fn fold_int_mul(node: TypedExpression, items: &[Expression]) -> TypedExpression {
@@ -3150,7 +3380,7 @@ fn fold_int_mul(node: TypedExpression, items: &[Expression]) -> TypedExpression 
     if let Some(1) = items.get(2).and_then(int_literal) {
         return node.children.get(1).cloned().unwrap_or(node);
     }
-    fold_int_bin(node, items, i32::wrapping_mul)
+    fold_int_bin_with_overflow_policy(node, items, i32::wrapping_mul, i32::checked_mul)
 }
 
 fn fold_if(node: TypedExpression, items: &[Expression]) -> TypedExpression {
@@ -3207,10 +3437,23 @@ fn fold_not(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     )
 }
 
-fn fold_int_bin(
+fn parse_env_bool_like(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|v| {
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off" | "no"
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn fold_int_bin_with_overflow_policy(
     node: TypedExpression,
     items: &[Expression],
-    f: fn(i32, i32) -> i32
+    wrapping: fn(i32, i32) -> i32,
+    checked: fn(i32, i32) -> Option<i32>
 ) -> TypedExpression {
     let (Some(a), Some(b)) = (
         items.get(1).and_then(int_literal),
@@ -3218,7 +3461,13 @@ fn fold_int_bin(
     ) else {
         return node;
     };
-    make_folded_literal(&node, Expression::Int(f(a, b)), Type::Int)
+    if parse_env_bool_like("QUE_INT_OVERFLOW_CHECK", false) {
+        let Some(v) = checked(a, b) else {
+            return node;
+        };
+        return make_folded_literal(&node, Expression::Int(v), Type::Int);
+    }
+    make_folded_literal(&node, Expression::Int(wrapping(a, b)), Type::Int)
 }
 
 fn fold_int_checked_bin(
@@ -3260,6 +3509,7 @@ fn fold_int_cmp(
 fn fold_float_bin(
     node: TypedExpression,
     items: &[Expression],
+    op: &str,
     f: fn(f32, f32) -> f32
 ) -> TypedExpression {
     let (Some(a), Some(b)) = (
@@ -3268,7 +3518,15 @@ fn fold_float_bin(
     ) else {
         return node;
     };
-    make_folded_literal(&node, Expression::Float(f(a, b)), Type::Float)
+    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", true) && (op == "/." || op == "mod.") && b == 0.0
+    {
+        return node;
+    }
+    let result = f(a, b);
+    if parse_env_bool_like("QUE_FLOAT_OVERFLOW_CHECK", false) && !result.is_finite() {
+        return node;
+    }
+    make_folded_literal(&node, Expression::Float(result), Type::Float)
 }
 
 fn fold_float_cmp(
