@@ -11,6 +11,8 @@ fn is_fusion_reserved_word(name: &str) -> bool {
             "exclude" |
             "reduce" |
             "reduce/i" |
+            "reduce/until" |
+            "reduce/until/i" |
             "sum" |
             "sum/int" |
             "sum/float" |

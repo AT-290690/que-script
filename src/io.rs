@@ -278,7 +278,23 @@ fn native_shell_help(bin_name: &str) -> String {
          \n\
          Notes:\n\
            - Script arguments come before --allow.\n\
-           - --debug, --no-result and --help can appear after the script path.",
+           - --debug, --no-result and --help can appear after the script path.\n\
+         \n\
+         Environment:\n\
+           QUE_WASM_OPT       Wasmtime/Cranelift optimization level (default: speed).\n\
+                              Allowed: none | speed | speed_and_size.\n\
+           QUE_DEVIRTUALIZE   Call-head devirtualization mode (default: aggressive).\n\
+                              Allowed: off | known-heads | aggressive.\n\
+           QUE_BOUNDS_CHECK   Vector get() bounds check (default: on). Disable with 0|false|off|no.\n\
+           QUE_VEC_MIN_CAP    Minimum initial vector capacity (default: 2, range: 1..4096).\n\
+           QUE_VEC_GROWTH_NUM Vector growth numerator (default: 2, range: 1..64).\n\
+           QUE_VEC_GROWTH_DEN Vector growth denominator (default: 1, range: 1..64).\n\
+           QUE_DIV_ZERO_CHECK Division/modulo by zero trap check (default: on). Disable with 0|false|off|no.\n\
+           QUE_INT_OVERFLOW_CHECK   Integer overflow trap check for +,-,* and mut ops (default: off).\n\
+           QUE_FLOAT_OVERFLOW_CHECK Float NaN/Inf trap check for +.,-.,*.,/. and mut ops (default: off).\n\
+         \n\
+         Example:\n\
+           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que",
         bin = bin_name
     )
 }
@@ -795,7 +811,10 @@ pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Res
     Ok(())
 }
 
-fn user_form_nodes<'a>(typed: &'a TypedExpression, user_form_count: usize) -> Vec<&'a TypedExpression> {
+fn user_form_nodes<'a>(
+    typed: &'a TypedExpression,
+    user_form_count: usize
+) -> Vec<&'a TypedExpression> {
     if let Expression::Apply(_) = &typed.expr {
         if typed.children.len() > 1 {
             let forms = &typed.children[1..];
@@ -898,7 +917,10 @@ fn lambda_body_child(node: &TypedExpression) -> Option<&TypedExpression> {
     node.children.last()
 }
 
-fn find_nth_lambda_in_scope<'a>(root: &'a TypedExpression, nth: usize) -> Option<&'a TypedExpression> {
+fn find_nth_lambda_in_scope<'a>(
+    root: &'a TypedExpression,
+    nth: usize
+) -> Option<&'a TypedExpression> {
     fn walk<'a>(
         node: &'a TypedExpression,
         nth: usize,
@@ -955,7 +977,10 @@ fn push_typed_tree_lines(
     }
 
     let indent = "  ".repeat(depth);
-    let typ = node.typ.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "_".to_string());
+    let typ = node.typ
+        .as_ref()
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "_".to_string());
     out.push(format!("{}{} :: {}", indent, typed_node_label(&node.expr), typ));
 
     for child in &node.children {
@@ -1002,8 +1027,7 @@ fn build_debug_error_report(
     }
     out.push(format!("debug.scope_path: {}", format_scope_path(scope)));
     out.push(
-        "debug.location_explainer: location[i] ranges are in the original source file (not desugared), 1-based line:column; i=0 is the primary match."
-            .to_string()
+        "debug.location_explainer: location[i] ranges are in the original source file (not desugared), 1-based line:column; i=0 is the primary match.".to_string()
     );
     push_location_lines(&mut out, source_text, message, scope);
 
@@ -1019,7 +1043,9 @@ fn build_debug_error_report(
             if let Some((form_idx, focus)) = scope_focus_node(typed_ast, user_form_count, scope) {
                 let mut focus_lines = Vec::new();
                 push_typed_tree_lines(&mut focus_lines, focus, 0, usize::MAX);
-                out.push(format!("debug.focus: form={} scope={}", form_idx, format_scope_path(scope)));
+                out.push(
+                    format!("debug.focus: form={} scope={}", form_idx, format_scope_path(scope))
+                );
                 out.extend(focus_lines);
             }
 
@@ -1033,7 +1059,15 @@ fn build_debug_error_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{ DebugMode, take_debug_mode_from_argv, take_help_flag_from_argv, take_no_result_flag_from_argv, take_shell_policy_from_argv, ShellPermission, ShellPolicy };
+    use super::{
+        DebugMode,
+        take_debug_mode_from_argv,
+        take_help_flag_from_argv,
+        take_no_result_flag_from_argv,
+        take_shell_policy_from_argv,
+        ShellPermission,
+        ShellPolicy,
+    };
     use std::collections::HashSet;
 
     #[test]
@@ -1114,11 +1148,7 @@ mod tests {
 
     #[test]
     fn take_debug_code_mode() {
-        let mut args = vec![
-            "script.que".to_string(),
-            "--debug".to_string(),
-            "code".to_string()
-        ];
+        let mut args = vec!["script.que".to_string(), "--debug".to_string(), "code".to_string()];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::Code);
         assert_eq!(args, vec!["script.que".to_string()]);
@@ -1126,11 +1156,7 @@ mod tests {
 
     #[test]
     fn take_debug_types_mode() {
-        let mut args = vec![
-            "script.que".to_string(),
-            "--debug".to_string(),
-            "types".to_string()
-        ];
+        let mut args = vec!["script.que".to_string(), "--debug".to_string(), "types".to_string()];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::Types);
         assert_eq!(args, vec!["script.que".to_string()]);
@@ -1284,25 +1310,31 @@ pub fn run_native_shell() -> Result<(), String> {
     };
 
     let wat_src = if debug_mode.is_enabled() {
-        let (base_env, base_next_id) = crate::types
-            ::create_builtin_environment(crate::types::TypeEnv::new());
-        let inferred = crate::infer
-            ::infer_with_builtins_typed_lsp(&wrapped_ast, (base_env, base_next_id), user_form_count);
+        let (base_env, base_next_id) = crate::types::create_builtin_environment(
+            crate::types::TypeEnv::new()
+        );
+        let inferred = crate::infer::infer_with_builtins_typed_lsp(
+            &wrapped_ast,
+            (base_env, base_next_id),
+            user_form_count
+        );
 
         match inferred {
             Ok((_typ, typed_ast)) =>
-                crate::wat::compile_program_to_wat_typed(&typed_ast).map_err(|message|
-                    build_debug_error_report(
-                        debug_mode,
-                        "wat-lowering",
-                        &program,
-                        &message,
-                        None,
-                        user_desugared.as_ref(),
-                        user_form_count,
-                        Some(&typed_ast)
-                    )
-                )?,
+                crate::wat
+                    ::compile_program_to_wat_typed(&typed_ast)
+                    .map_err(|message|
+                        build_debug_error_report(
+                            debug_mode,
+                            "wat-lowering",
+                            &program,
+                            &message,
+                            None,
+                            user_desugared.as_ref(),
+                            user_form_count,
+                            Some(&typed_ast)
+                        )
+                    )?,
             Err(InferErrorInfo { message, scope, partial_typed_ast }) => {
                 return Err(
                     build_debug_error_report(
