@@ -177,8 +177,10 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         )
     {
         Ok((_typ, typed)) => {
-            collect_symbol_types(&typed, &mut symbol_types_raw);
-            collect_let_binding_types(&typed, &mut let_binding_types_raw);
+            for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
+                collect_symbol_types(form, &mut symbol_types_raw);
+                collect_let_binding_types(form, &mut let_binding_types_raw);
+            }
         }
         Err(err) => {
             let mut candidate_symbols = user_bound_symbols.clone();
@@ -437,6 +439,23 @@ fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<St
 
 fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String, Type>) {
     native_core::collect_symbol_types(node, symbols)
+}
+
+fn extract_user_top_level_typed_forms<'a>(
+    typed_program: &'a TypedExpression,
+    user_form_count: usize
+) -> Vec<&'a TypedExpression> {
+    if let Expression::Apply(_) = &typed_program.expr {
+        if typed_program.children.len() <= 1 {
+            return Vec::new();
+        }
+
+        let forms = &typed_program.children[1..];
+        let start = forms.len().saturating_sub(user_form_count);
+        return forms[start..].iter().collect();
+    }
+
+    Vec::new()
 }
 
 fn type_specificity_score(typ: &Type) -> i32 {

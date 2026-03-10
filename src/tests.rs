@@ -1620,6 +1620,64 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_hover_zip_lambda_params_use_local_element_type_not_std_impl_param_type() {
+        let program = r#"(let xs [ 1 2 3 4 ])
+(|>
+    { (|> xs (map identity) (sort! <)) xs }
+    (zip)
+    (map (lambda { a b } (<> a b)))
+)"#;
+
+        let needle = "(<> a b)";
+        let base = program.find(needle).expect("program should contain comparison form");
+        let a_off = base + needle.find('a').expect("comparison should contain 'a'");
+        let b_off = base + needle.rfind('b').expect("comparison should contain 'b'");
+
+        let a_pos = crate::lsp_native_core::byte_offset_to_position(program, a_off);
+        let b_pos = crate::lsp_native_core::byte_offset_to_position(program, b_off);
+
+        let a_hover_json = crate::wasm_api::lsp_hover(program.to_string(), a_pos.line, a_pos.character);
+        let b_hover_json = crate::wasm_api::lsp_hover(program.to_string(), b_pos.line, b_pos.character);
+
+        let a_hover: serde_json::Value = serde_json
+            ::from_str(&a_hover_json)
+            .expect("a hover response should be valid JSON");
+        let b_hover: serde_json::Value = serde_json
+            ::from_str(&b_hover_json)
+            .expect("b hover response should be valid JSON");
+
+        let a_contents = a_hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("a hover response should include string contents");
+        let b_contents = b_hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("b hover response should include string contents");
+
+        assert!(
+            a_contents.contains("a : Int"),
+            "expected a to resolve to element type Int, got: {}",
+            a_contents
+        );
+        assert!(
+            b_contents.contains("b : Int"),
+            "expected b to resolve to element type Int, got: {}",
+            b_contents
+        );
+        assert!(
+            !a_contents.contains("a : ["),
+            "expected a not to resolve to std zip impl vector param type, got: {}",
+            a_contents
+        );
+        assert!(
+            !b_contents.contains("b : ["),
+            "expected b not to resolve to std zip impl vector param type, got: {}",
+            b_contents
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_diagnostics_reports_if_branch_type_mismatch() {
         let diagnostics_json = crate::wasm_api::lsp_diagnostics("(if true 8 2.)".to_string());
         let diagnostics: serde_json::Value = serde_json
