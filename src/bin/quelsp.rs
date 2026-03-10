@@ -421,14 +421,18 @@ impl ServerState {
             });
         }
 
+        let scoped_sig = self
+            .form_signatures_at(doc, position)
+            .and_then(|symbols| symbols.get(&symbol))
+            .cloned();
         let doc_sig = doc.symbol_types.get(&symbol).cloned();
         let global_sig = self.global_signature(&symbol);
         let type_info = (if doc.user_bound_symbols.contains(&symbol) {
-            doc_sig.or(global_sig)
+            scoped_sig.or(doc_sig).or(global_sig)
         } else if is_standalone_symbol_expr_at_range(&doc.text, symbol_range, &symbol) {
-            global_sig.or(doc_sig)
+            global_sig.or(scoped_sig).or(doc_sig)
         } else {
-            doc_sig.or(global_sig)
+            scoped_sig.or(doc_sig).or(global_sig)
         })?;
         let type_info = normalize_signature(&type_info);
 
@@ -702,8 +706,10 @@ fn analyze_document_text(
         infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count)
     {
         Ok((_typ, typed)) => {
-            collect_symbol_types(&typed, &mut symbol_types_raw);
-            collect_let_binding_types(&typed, &mut let_binding_types_raw);
+            for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
+                collect_symbol_types(form, &mut symbol_types_raw);
+                collect_let_binding_types(form, &mut let_binding_types_raw);
+            }
             form_scoped_symbols = build_form_scoped_analyses(text, user_form_count, &typed);
         }
         Err(err) => {
