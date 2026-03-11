@@ -339,7 +339,6 @@ fn is_special_word(w: &str) -> bool {
             "alter!" |
             "pop!" |
             "while" |
-            "curl!" |
             "read!" |
             "write!" |
             "delete!" |
@@ -5897,7 +5896,6 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             compile_host_unary_string_call(node, ctx, "mkdir!", "host_mkdir_p"),
                         "delete!" =>
                             compile_host_unary_string_call(node, ctx, "delete!", "host_delete"),
-                        "curl!" => compile_host_unary_string_call(node, ctx, "curl!", "host_curl"),
                         "print!" =>
                             compile_host_unary_string_call(node, ctx, "print!", "host_print"),
                         "sleep!" => compile_host_unary_int_call(node, ctx, "sleep!", "host_sleep"),
@@ -5975,8 +5973,7 @@ fn typed_expr_uses_host_io(node: &TypedExpression) -> bool {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() => {
             let uses_here = if let Some(Expression::Word(op)) = items.first() {
-                op == "curl!" ||
-                    op == "read!" ||
+                op == "read!" ||
                     op == "write!" ||
                     op == "list-dir!" ||
                     op == "mkdir!" ||
@@ -7191,7 +7188,6 @@ pub fn compile_program_to_wat_typed_with_opts(
         wat.push_str(
             "  (import \"host\" \"move\" (func $host_move (param i32 i32) (result i32)))\n"
         );
-        wat.push_str("  (import \"host\" \"curl\" (func $host_curl (param i32) (result i32)))\n");
         wat.push_str("  (import \"host\" \"print\" (func $host_print (param i32) (result i32)))\n");
         wat.push_str("  (import \"host\" \"sleep\" (func $host_sleep (param i32) (result i32)))\n");
         wat.push_str("  (import \"host\" \"clear\" (func $host_clear (result i32)))\n");
