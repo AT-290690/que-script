@@ -161,6 +161,23 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_merge_std_rejects_reserved_lambda_param_name() {
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) =>
+                crate::parser::merge_std_and_program(
+                    "(let lower (lambda char char))\nlower",
+                    items[1..].to_vec()
+                ),
+            _ => panic!("std ast should be (do ...)"),
+        };
+        assert_eq!(
+            wrapped.err().unwrap_or_else(|| "expected error".to_string()),
+            "Variable 'char' is forbidden"
+        );
+    }
+
+    #[test]
     fn test_parser_reports_structured_unexpected_closer_for_offbalance_delimiters() {
         let err = crate::parser::build("(do (let x 1)))").expect_err("should fail delimiter check");
         assert!(
@@ -169,16 +186,8 @@ Concequent and alternative must match types
             err
         );
         assert!(err.contains("parse.found: ')' at"), "missing found location, got:\n{}", err);
-        assert!(
-            err.contains("parse.fix_hint[0]:"),
-            "missing repair hint, got:\n{}",
-            err
-        );
-        assert!(
-            err.contains("parse.line_balance["),
-            "missing line balance window, got:\n{}",
-            err
-        );
+        assert!(err.contains("parse.fix_hint[0]:"), "missing repair hint, got:\n{}", err);
+        assert!(err.contains("parse.line_balance["), "missing line balance window, got:\n{}", err);
     }
 
     #[test]
@@ -194,11 +203,7 @@ Concequent and alternative must match types
             "missing eof expectation, got:\n{}",
             err
         );
-        assert!(
-            err.contains("parse.open_stack[0]:"),
-            "missing open stack, got:\n{}",
-            err
-        );
+        assert!(err.contains("parse.open_stack[0]:"), "missing open stack, got:\n{}", err);
     }
 
     #[test]
@@ -1731,7 +1736,8 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wasm_lsp_hover_zip_lambda_params_use_local_element_type_not_std_impl_param_type() {
-        let program = r#"(let xs [ 1 2 3 4 ])
+        let program =
+            r#"(let xs [ 1 2 3 4 ])
 (|>
     { (|> xs (map identity) (sort! <)) xs }
     (zip)
@@ -1746,8 +1752,16 @@ Concequent and alternative must match types
         let a_pos = crate::lsp_native_core::byte_offset_to_position(program, a_off);
         let b_pos = crate::lsp_native_core::byte_offset_to_position(program, b_off);
 
-        let a_hover_json = crate::wasm_api::lsp_hover(program.to_string(), a_pos.line, a_pos.character);
-        let b_hover_json = crate::wasm_api::lsp_hover(program.to_string(), b_pos.line, b_pos.character);
+        let a_hover_json = crate::wasm_api::lsp_hover(
+            program.to_string(),
+            a_pos.line,
+            a_pos.character
+        );
+        let b_hover_json = crate::wasm_api::lsp_hover(
+            program.to_string(),
+            b_pos.line,
+            b_pos.character
+        );
 
         let a_hover: serde_json::Value = serde_json
             ::from_str(&a_hover_json)
@@ -2824,8 +2838,8 @@ D:=,=,=,+,=,=,=,+,=,=")
             ),
             (
                 r#"(let palindrome? (lambda str (do 
-    (let q (std/vector/queue/new std/char/0))
-    (let s (std/vector/stack/new std/char/0))
+    (let q (std/vector/queue/new '0'))
+    (let s (std/vector/stack/new '0'))
     
     (std/vector/for str (lambda x (do
         (std/vector/stack/push! s x)
@@ -2991,9 +3005,9 @@ D:=,=,=,+,=,=,=,+,=,=")
         (let rod-char (get rings (+ i 1)))
         (let rod (get rods (- (std/convert/char->digit rod-char) 0)))
         (cond
-          (=# color std/char/R) (set! rod 0 true)
-          (=# color std/char/G) (set! rod 1 true)
-          (=# color std/char/B) (set! rod 2 true)
+          (=# color 'R') (set! rod 0 true)
+          (=# color 'G') (set! rod 1 true)
+          (=# color 'B') (set! rod 2 true)
           nil))))))
   (std/vector/count-of rods (lambda rod (and (get rod 0) (get rod 1) (get rod 2)))))))
 
@@ -3185,7 +3199,7 @@ out
 (let delta/pairs (lambda [ y x . ] (+ (abs y) (abs x))))
 (let part1 (lambda input (|> input
     (reduce (lambda [ y x a .] [ D M .] (do
-                                (let F (mod (+ a (if (=# (Int->Char D) std/char/R) 1 3)) 4))
+                                (let F (mod (+ a (if (=# (Int->Char D) 'R') 1 3)) 4))
                                 (cond 
                                     (= F 0) [y (+ x M) F]
                                     (= F 1) [(- y M) x F]
@@ -3200,7 +3214,7 @@ out
 ; How many blocks away is the first location you visit twice?
 (let turn
   (lambda facing D
-    (mod (+ facing (if (=# (Int->Char D) std/char/R) 1 3)) 4)))
+    (mod (+ facing (if (=# (Int->Char D) 'R') 1 3)) 4)))
 (let step
   (lambda y x facing
     (cond
@@ -3263,14 +3277,14 @@ out
 
 (let part1 (lambda input (<| input 
     (std/vector/filter (lambda line (do
-        (let slice (<| line 
+        (let slc (<| line 
                        (std/vector/drop/last 1)
                        (std/vector/zipper (std/vector/drop line 1))
                        (std/vector/map std/vector/int/pair/sub)))
         ; The levels are either all increasing or all decreasing.
         ; Any two adjacent levels differ by at least one and at most three.
-        (or (std/vector/every? slice (lambda x (and (>= x 1) (<= x 3)))) 
-            (std/vector/every? slice (lambda x (and (<= x -1) (>= x -3))))))))
+        (or (std/vector/every? slc (lambda x (and (>= x 1) (<= x 3)))) 
+            (std/vector/every? slc (lambda x (and (<= x -1) (>= x -3))))))))
     (length))))
 
 (let part2 (lambda input (<| input

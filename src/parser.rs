@@ -1,6 +1,6 @@
 use std::collections::{ HashMap, HashSet };
 
-fn is_fusion_reserved_word(name: &str) -> bool {
+fn is_reserved_word(name: &str) -> bool {
     matches!(
         name,
         "map" |
@@ -29,6 +29,7 @@ fn is_fusion_reserved_word(name: &str) -> bool {
             "flat" |
             "flat-map" |
             "window" |
+            "char" |
             "mean" |
             "mean/int" |
             "mean/float" |
@@ -41,6 +42,41 @@ fn is_fusion_reserved_word(name: &str) -> bool {
             "take/last" |
             "drop/last"
     )
+}
+
+fn validate_reserved_words_in_binders(expr: &Expression) -> Result<(), String> {
+    match expr {
+        Expression::Apply(list) if !list.is_empty() => {
+            if let Expression::Word(op) = &list[0] {
+                match op.as_str() {
+                    "let" | "let*" | "mut" => {
+                        if let Some(Expression::Word(name)) = list.get(1) {
+                            if is_reserved_word(name) {
+                                return Err(format!("Variable '{}' is forbidden", name));
+                            }
+                        }
+                    }
+                    "lambda" => {
+                        for p in &list[1..list.len().saturating_sub(1)] {
+                            let mut names = HashSet::new();
+                            collect_pattern_words(p, &mut names);
+                            for name in names {
+                                if is_reserved_word(&name) {
+                                    return Err(format!("Variable '{}' is forbidden", name));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for child in list {
+                validate_reserved_words_in_binders(child)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn collect_pattern_words(expr: &Expression, acc: &mut HashSet<String>) {
@@ -2225,6 +2261,9 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                             }
                         }
                     }
+                    for expr in &desugared {
+                        validate_reserved_words_in_binders(expr)?;
+                    }
                     let mut used: HashSet<String> = HashSet::new();
                     for e in &desugared {
                         let mut scoped = HashSet::new();
@@ -2238,7 +2277,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                     &list[..]
                             {
                                 if kw == "let" || kw == "let*" {
-                                    if is_fusion_reserved_word(name) {
+                                    if is_reserved_word(name) {
                                         return Err(format!("Variable '{}' is forbidden", name));
                                     }
                                     definitions.insert(name.to_string());
