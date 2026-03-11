@@ -839,10 +839,10 @@ out)))
     (let init-frame {{0 (- (length v) 1)} v})
     (let handler (lambda frame
       (do
-        (let range (fst frame))
+        (let rng (fst frame))
         (let vec (snd frame))
-        (let low (fst range))
-        (let high (snd range))
+        (let low (fst rng))
+        (let high (snd rng))
         (if (>= low high) {std/fn/none []} 
             (do
               (let pivot (get vec high))
@@ -1408,9 +1408,9 @@ q)))
     (std/vector/deque/head! q)
     last)))
 (let std/vector/deque/pop-left! (lambda q (do
-    (let first (std/vector/deque/first q))
+    (let f (std/vector/deque/first q))
     (std/vector/deque/tail! q)
-    first)))
+    f)))
 (let std/vector/deque/rotate-left! (lambda q n (do
   (let N (mod n (std/vector/deque/length q)))
   (let* tail-call/std/vector/deque/rotate-left! (lambda index bounds (do
@@ -1431,18 +1431,18 @@ q)))
   (let len (std/vector/deque/length entity))
   (let start (if (< s 0) (std/int/max (+ len s) 0) (std/int/min s len)))
   (let end (if (< e 0) (std/int/max (+ len e) 0) (std/int/min e len)))
-  (let slice (std/vector/deque/new))
+  (let scl (std/vector/deque/new))
   (let slice-len (std/int/max (- end start) 0))
   (let half (/ slice-len 2))
   (let* tail-call/left/std/vector/deque/slice (lambda index (do
-      (std/vector/deque/add-to-left! slice (std/vector/deque/get entity (+ start index)))
+      (std/vector/deque/add-to-left! scl (std/vector/deque/get entity (+ start index)))
       (if (> index 0) (tail-call/left/std/vector/deque/slice (- index 1)) Int))))
   (tail-call/left/std/vector/deque/slice (- half 1))
   (let* tail-call/right/std/vector/deque/slice (lambda index bounds (do
-      (std/vector/deque/add-to-right! slice (std/vector/deque/get entity (+ start index)))
+      (std/vector/deque/add-to-right! scl (std/vector/deque/get entity (+ start index)))
       (if (< index bounds) (tail-call/right/std/vector/deque/slice (+ index 1) bounds) Int))))
   (tail-call/right/std/vector/deque/slice half (- slice-len 1))
-  slice)))
+  scl)))
 
 (let std/vector/queue/new std/vector/deque/new)
 (let std/vector/stack/new std/vector/deque/new)
@@ -1620,12 +1620,12 @@ q)))
   (let rowsB (get dimsB 0))
   (let colsB (get dimsB 1))
   (if (= colsA rowsB) (std/vector/3d/fill rowsA colsB (lambda i j
-      (std/int/reduce colsA (lambda sum k (+ sum (* (get A i k) (get B k j)))) 0))) []))))
+      (std/int/reduce colsA (lambda sm k (+ sm (* (get A i k) (get B k j)))) 0))) []))))
 (let std/vector/3d/dot-product (lambda a b (do
   (let lenA (length a))
   (let lenB (length b))
   (if (= lenA lenB)
-    (std/int/reduce lenA (lambda sum i (+ sum (* (get a i) (get b i)))) 0) Int))))
+    (std/int/reduce lenA (lambda sm i (+ sm (* (get a i) (get b i)))) 0) Int))))
 
 (let std/vector/3d/rotate (lambda matrix (if (std/vector/empty? matrix) matrix (do 
     (let H (length matrix))
@@ -1690,9 +1690,9 @@ q)))
   (loop 0 max-length (lambda i (do
     (let digit-A (if (< i (length a)) (get a i) 0))
     (let digit-B (if (< i (length b)) (get b i) 0))
-    (let sum (+ digit-A digit-B (get carry)))
-    (std/vector/push! result (mod sum 10))
-    (set carry (/ sum 10)))
+    (let sm (+ digit-A digit-B (get carry)))
+    (std/vector/push! result (mod sm 10))
+    (set carry (/ sm 10)))
   ))
   ; Handle remaining carry
   (while (> (get carry) 0) (do
@@ -1743,9 +1743,9 @@ q)))
     (integer k (+ i (length b)))
     (while (> (get carry) 0) (do
       (if (not (< (get k) (length result))) (do (std/vector/push! result 0) nil) nil)
-      (let sum (+ (get result (get k)) (get carry)))
-      (set! result (get k) (mod sum 10))
-      (set carry (/ sum 10))
+      (let sm (+ (get result (get k)) (get carry)))
+      (set! result (get k) (mod sm 10))
+      (set carry (/ sm 10))
       (set k (+ (get k) 1)))))))
   ; Remove trailing zeros (from the most significant end), but keep at least one digit
   (integer i (- (length result) 1))
@@ -1926,20 +1926,21 @@ q)))
 (let std/vector/adjacent-difference (lambda xsi fn (do
   (let len (length xsi))
   (let xs (std/vector/copy xsi))
-  (if (= len 1) xs
-    (do
-      (let* tail-call/vector/adjacent-difference (lambda i result (if (< i len) (do
-        (tail-call/vector/adjacent-difference (+ i 1) (std/vector/update! result i (fn (get xs (- i 1)) (get xs i))))) result)))
-        (tail-call/vector/adjacent-difference 1 xs))))))
+  (mut i 1)
+  (while (< i len) (do
+    (std/vector/update! xs i (fn (get xs (- i 1)) (get xs i)))
+    (alter! i (+ i 1))))
+  xs)))
 
 (let std/vector/adjacent-difference! (lambda xs fn (do
   (let len (length xs))
   (unless (= len 1)
     (do
-      (let* tail-call/vector/adjacent-difference (lambda i result (if (< i len) (do
-        (tail-call/vector/adjacent-difference (+ i 1) (std/vector/update! result i (fn (get xs (- i 1)) (get xs i))))) result)))
-        (tail-call/vector/adjacent-difference 1 xs)
-        nil)))))
+      (mut i 1)
+      (while (< i len) (do
+        (std/vector/update! xs i (fn (get xs (- i 1)) (get xs i)))
+        (alter! i (+ i 1))))
+      nil)))))
 
 
 (let std/convert/vector/3d->string (lambda xs a b (std/convert/vector->string (std/vector/map xs (lambda x (std/convert/vector->string x b))) a)))
@@ -2536,9 +2537,9 @@ q)))
   (get (get matrix n) m))))
 
 (let std/vector/char/autocorrect (lambda word dictionary (do
-  (let first (get dictionary 0))
-  (variable best-word first)
-  (mut best-dist (std/vector/char/damerau-levenshtein word first))
+  (let f (get dictionary 0))
+  (variable best-word f)
+  (mut best-dist (std/vector/char/damerau-levenshtein word f))
   (mut i 1)
   (while (< i (length dictionary)) (do
     (let candidate (get dictionary i))
