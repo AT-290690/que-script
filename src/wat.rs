@@ -52,6 +52,12 @@ enum DevirtualizeMode {
     Aggressive,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TailCallMode {
+    Conservative,
+    Aggressive,
+}
+
 #[derive(Clone, Copy)]
 struct ArithmeticCheckConfig {
     int_overflow_check: bool,
@@ -86,6 +92,21 @@ fn devirtualize_mode_from_env() -> Result<DevirtualizeMode, String> {
         other =>
             Err(
                 format!("invalid QUE_DEVIRTUALIZE='{}'. expected one of: off, known-heads, aggressive", other)
+            ),
+    }
+}
+
+fn tail_call_mode_from_env() -> Result<TailCallMode, String> {
+    let raw = std::env::var("QUE_TCO").unwrap_or_else(|_| "conservative".to_string());
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "conservative" | "safe" | "default" => Ok(TailCallMode::Conservative),
+        "aggressive" => Ok(TailCallMode::Aggressive),
+        other =>
+            Err(
+                format!(
+                    "invalid QUE_TCO='{}'. expected one of: conservative, aggressive",
+                    other
+                )
             ),
     }
 }
@@ -6173,7 +6194,8 @@ fn compile_lambda_func(
     fn_ids: &HashMap<String, i32>,
     lambda_ids: &HashMap<String, i32>,
     closure_defs: &HashMap<String, ClosureDef>,
-    lambda_bindings: &HashMap<String, TypedExpression>
+    lambda_bindings: &HashMap<String, TypedExpression>,
+    tail_call_mode: TailCallMode
 ) -> Result<String, String> {
     let items = match lambda_expr {
         Expression::Apply(xs) => xs,
@@ -6282,9 +6304,11 @@ fn compile_lambda_func(
             ref_slots.push(params.len() + i);
         }
     }
-    let tco_safe =
-        !is_managed_local_type(&ret_ty) &&
-        local_defs.iter().all(|(_, t)| !is_managed_local_type(t));
+    let has_managed_locals = local_defs.iter().any(|(_, t)| is_managed_local_type(t));
+    let tco_safe = match tail_call_mode {
+        TailCallMode::Conservative => !is_managed_local_type(&ret_ty) && !has_managed_locals,
+        TailCallMode::Aggressive => !has_managed_locals,
+    };
     let tail_body_code = if tco_safe {
         compile_tail_expr(body_node, &ctx, name, params.len())?
     } else {
@@ -6660,6 +6684,7 @@ pub fn compile_program_to_wat_typed_with_opts(
 ) -> Result<String, String> {
     // Validate devirtualization mode early so invalid env values fail deterministically.
     let _ = devirtualize_mode_from_env()?;
+    let tail_call_mode = tail_call_mode_from_env()?;
     let optimized_typed_ast = if enable_optimizer {
         Some(crate::op::optimize_typed_ast(typed_ast))
     } else {
@@ -7013,7 +7038,8 @@ pub fn compile_program_to_wat_typed_with_opts(
                         &fn_ids,
                         &lambda_ids,
                         &closure_defs,
-                        &lambda_bindings
+                        &lambda_bindings,
+                        tail_call_mode
                     )?
                 );
             }
@@ -7071,7 +7097,8 @@ pub fn compile_program_to_wat_typed_with_opts(
                     &fn_ids,
                     &lambda_ids,
                     &closure_defs,
-                    &lambda_bindings
+                    &lambda_bindings,
+                    tail_call_mode
                 )?
             );
         }

@@ -285,6 +285,8 @@ fn native_shell_help(bin_name: &str) -> String {
                               Allowed: none | speed | speed_and_size.\n\
            QUE_DEVIRTUALIZE   Call-head devirtualization mode (default: aggressive).\n\
                               Allowed: off | known-heads | aggressive.\n\
+           QUE_TCO            Tail-call optimization mode (default: conservative).\n\
+                              Allowed: conservative | aggressive.\n\
            QUE_BOUNDS_CHECK   Vector get() bounds check (default: on). Disable with 0|false|off|no.\n\
            QUE_VEC_MIN_CAP    Minimum initial vector capacity (default: 2, range: 1..4096).\n\
            QUE_VEC_GROWTH_NUM Vector growth numerator (default: 2, range: 1..64).\n\
@@ -294,7 +296,7 @@ fn native_shell_help(bin_name: &str) -> String {
            QUE_FLOAT_OVERFLOW_CHECK Float NaN/Inf trap check for +.,-.,*.,/. and mut ops (default: off).\n\
          \n\
          Example:\n\
-           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que",
+           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que",
         bin = bin_name
     )
 }

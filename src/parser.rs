@@ -2276,7 +2276,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                 let [Expression::Word(kw), Expression::Word(name), _rest @ ..] =
                                     &list[..]
                             {
-                                if kw == "let" || kw == "let*" {
+                                if kw == "let" || kw == "let*" || kw == "mut" {
                                     if is_reserved_word(name) {
                                         return Err(format!("Variable '{}' is forbidden", name));
                                     }
