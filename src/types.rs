@@ -571,15 +571,6 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             TypeScheme::monotype(Type::Function(Box::new(Type::Unit), Box::new(Type::Unit)))
         );
         let _ = env.insert(
-            "curl!".to_string(),
-            TypeScheme::monotype(
-                Type::Function(
-                    Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(Type::List(Box::new(Type::Char)))
-                )
-            )
-        );
-        let _ = env.insert(
             "list-dir!".to_string(),
             TypeScheme::monotype(
                 Type::Function(

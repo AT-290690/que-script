@@ -11,7 +11,6 @@ use std::fs;
 use std::io;
 use std::io::Write as _;
 use std::path::{ Path, PathBuf };
-use std::process::Command;
 use std::thread;
 use std::time::Duration;
 use wasmtime::{ Caller, Extern, Memory, TypedFunc };
@@ -30,7 +29,6 @@ pub enum ShellPermission {
     Read,
     Write,
     Delete,
-    Network,
 }
 
 impl ShellPermission {
@@ -39,7 +37,6 @@ impl ShellPermission {
             ShellPermission::Read => "read",
             ShellPermission::Write => "write",
             ShellPermission::Delete => "delete",
-            ShellPermission::Network => "network",
         }
     }
 }
@@ -78,7 +75,7 @@ impl ShellPolicy {
         if !self.shell_enabled {
             return Err(
                 format!(
-                    "host io is disabled. pass --allow <read|write|delete|network> [...]. denied operation '{}' for '{}'",
+                    "host io is disabled. pass --allow <read|write|delete> [...]. denied operation '{}' for '{}'",
                     operation,
                     target
                 )
@@ -120,15 +117,12 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
                 "delete" => {
                     permissions.insert(ShellPermission::Delete);
                 }
-                "network" => {
-                    permissions.insert(ShellPermission::Network);
-                }
                 "all" | "*" => {
                     grant_all = true;
                 }
                 _ => {
                     return Err(
-                        format!("unknown shell permission '{}'. expected one of: read, write, delete, network", token)
+                        format!("unknown shell permission '{}'. expected one of: read, write, delete", token)
                     );
                 }
             }
@@ -139,7 +133,6 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
         permissions.insert(ShellPermission::Read);
         permissions.insert(ShellPermission::Write);
         permissions.insert(ShellPermission::Delete);
-        permissions.insert(ShellPermission::Network);
     }
 
     Ok(ShellPolicy::enabled(permissions))
@@ -268,13 +261,13 @@ fn take_no_result_flag_from_argv(argv: &mut Vec<String>) -> bool {
 
 fn native_shell_help(bin_name: &str) -> String {
     format!(
-        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|network|all> [...]]\n\
+        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
          \n\
          Flags:\n\
            --help, -h     Show this help and exit.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
-           --allow        Enable host io permissions (read, write, delete, network, all).\n\
+           --allow        Enable host io permissions (read, write, delete, all).\n\
          \n\
          Notes:\n\
            - Script arguments come before --allow.\n\
@@ -471,73 +464,6 @@ fn resolve_target_path(caller: &Caller<'_, ShellStoreData>, raw: &str) -> PathBu
     candidate.to_path_buf()
 }
 
-fn split_shell_like_args(input: &str) -> Result<Vec<String>, String> {
-    let mut args = Vec::new();
-    let mut token = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut escaped = false;
-
-    let push_token = |token: &mut String, args: &mut Vec<String>| {
-        if !token.is_empty() {
-            args.push(std::mem::take(token));
-        }
-    };
-
-    for ch in input.chars() {
-        if escaped {
-            token.push(ch);
-            escaped = false;
-            continue;
-        }
-
-        if in_single {
-            if ch == '\'' {
-                in_single = false;
-            } else {
-                token.push(ch);
-            }
-            continue;
-        }
-
-        if in_double {
-            if ch == '"' {
-                in_double = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else {
-                token.push(ch);
-            }
-            continue;
-        }
-
-        match ch {
-            '\\' => {
-                escaped = true;
-            }
-            '\'' => {
-                in_single = true;
-            }
-            '"' => {
-                in_double = true;
-            }
-            c if c.is_whitespace() => push_token(&mut token, &mut args),
-            _ => token.push(ch),
-        }
-    }
-
-    if in_single || in_double {
-        return Err("unterminated quoted string in curl args".to_string());
-    }
-
-    if escaped {
-        token.push('\\');
-    }
-
-    push_token(&mut token, &mut args);
-    Ok(args)
-}
-
 fn list_dir_text(path: &Path) -> Result<String, String> {
     let entries = fs
         ::read_dir(path)
@@ -718,40 +644,6 @@ pub fn host_move(
     Ok(0)
 }
 
-pub fn host_curl(
-    mut caller: Caller<'_, ShellStoreData>,
-    args_vec_ptr: i32
-) -> wasmtime::Result<i32> {
-    let args_text = read_lisp_string(&mut caller, args_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy.require(ShellPermission::Network, "curl!", &args_text)
-        .map_err(wasmtime::Error::msg)?;
-
-    let mut args = split_shell_like_args(&args_text).map_err(wasmtime::Error::msg)?;
-    if args.first().map(|x| x.to_ascii_lowercase()) == Some("curl".to_string()) {
-        args.remove(0);
-    }
-
-    let mut command = Command::new("curl");
-    command.args(&args);
-    if let Some(script_cwd) = caller.data().script_cwd.as_ref() {
-        command.current_dir(script_cwd);
-    }
-    let output = command
-        .output()
-        .map_err(|e| wasmtime::Error::msg(format!("failed to run curl: {}", e)))?;
-
-    let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
-    combined.push_str(&String::from_utf8_lossy(&output.stderr));
-    if combined.is_empty() && !output.status.success() {
-        combined = format!("curl failed with status {}", output.status);
-    }
-
-    write_lisp_string(&mut caller, &combined)
-}
-
 pub fn host_print(
     mut caller: Caller<'_, ShellStoreData>,
     text_vec_ptr: i32
@@ -806,7 +698,6 @@ pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Res
     linker.func_wrap("host", "mkdir_p", host_mkdir_p)?;
     linker.func_wrap("host", "delete", host_delete)?;
     linker.func_wrap("host", "move", host_move)?;
-    linker.func_wrap("host", "curl", host_curl)?;
     linker.func_wrap("host", "print", host_print)?;
     linker.func_wrap("host", "sleep", host_sleep)?;
     linker.func_wrap("host", "clear", host_clear)?;
@@ -1116,7 +1007,6 @@ mod tests {
         let policy = ShellPolicy::enabled(perms);
         assert!(policy.require(ShellPermission::Read, "list-dir", ".").is_ok());
         assert!(policy.require(ShellPermission::Write, "mkdir", "./x").is_err());
-        assert!(policy.require(ShellPermission::Network, "curl", "-sL").is_err());
     }
 
     #[test]
