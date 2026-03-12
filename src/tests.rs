@@ -1943,6 +1943,34 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_hover_local_mutation_without_bang_is_local_mutate() {
+        let hover_json = crate::wasm_api::lsp_hover(
+            "(let fn (lambda xs (do (let out []) (push! out 0) out)))\nfn".to_string(),
+            1,
+            1
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("effects: local-mutate"),
+            "expected local mutation classification, got: {}",
+            contents
+        );
+        assert!(
+            !contents.contains("effects: mutate"),
+            "expected not to classify as external mutate, got: {}",
+            contents
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_string_literal_has_fenced_que_format() {
         let hover_json = crate::wasm_api::lsp_hover("\"dsadas\"".to_string(), 0, 2);
         let hover: serde_json::Value = serde_json
