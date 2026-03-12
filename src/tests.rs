@@ -22,7 +22,7 @@ mod tests {
             ("nil", "()"),
             ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
             (
-                "(do (let fn (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn)",
+                "(do (let fn! (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn!)",
                 "Int -> Int -> Bool -> [Int -> Bool] -> Bool",
             ),
             (
@@ -801,6 +801,25 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_do_cleanup_drops_safe_pure_call_statement() {
+        let typed = infer_typed("(do (= 1 1) 7)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "7");
+    }
+
+    #[test]
+    fn test_typed_optimization_do_cleanup_keeps_impure_call_statement() {
+        let typed = infer_typed("(do (print! (vector)) 7)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.contains("(print! (vector))"),
+            "impure call statement should not be dropped, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_inline_avoids_duplicate_vector_eval() {
         let typed = infer_typed(
             "(do (let f (lambda x (+ (get x 0) (get x 0)))) (f (vector 1 2 3)))"
@@ -921,6 +940,42 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_infer_impure_function_requires_bang_suffix() {
+        let exprs = crate::parser
+            ::parse("(let fn (lambda xs (do (set! xs 0 1) xs)))")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        let err = inferred.expect_err("impure function without ! should fail");
+        assert!(
+            err.contains("Impure function 'fn' must end with '!'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_impure_function_alias_requires_bang_suffix() {
+        let exprs = crate::parser
+            ::parse("(do (let reverse! (lambda xs (do (set! xs 0 1) xs))) (let reverse reverse!) reverse)")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        let err = inferred.expect_err("impure function alias without ! should fail");
+        assert!(
+            err.contains("Impure function 'reverse' must end with '!'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_beta_reduces_apply_first_lambda_call() {
         let typed = infer_typed(
             "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ x 1)) 41))"
@@ -938,6 +993,30 @@ Concequent and alternative must match types
         assert_eq!(
             optimized.expr.to_lisp(),
             "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ (get x 0) (get x 1))) (vector 10 20)))"
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_inline_does_not_drop_impure_unused_arg() {
+        let typed = infer_typed("(do (let f (lambda x 1)) (f (print! (vector))) 0)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.contains("(print! (vector))"),
+            "inlining should preserve eager evaluation of impure args, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_dce_keeps_unused_impure_top_level_definition() {
+        let typed = infer_typed("(do (let side (print! (vector))) 1)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.contains("(let side (print! (vector)))"),
+            "unused impure top-level definitions must not be removed, got: {}",
+            optimized_lisp
         );
     }
 
@@ -1720,6 +1799,78 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_hover_user_fn_includes_effects_for_mutation() {
+        let hover_json = crate::wasm_api::lsp_hover(
+            "(let touch! (lambda xs (do (set! xs 0 1) xs)))\ntouch!".to_string(),
+            1,
+            2
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("touch! : [Int] -> [Int]"),
+            "expected touch hover type info, got: {}",
+            contents
+        );
+        assert!(
+            contents.contains("effects: mutate"),
+            "expected touch hover to include mutate effect, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_alias_preserves_mutation_effect() {
+        let program =
+            "(let std/vector/reverse! (lambda xs (do (set! xs 0 1) xs)))\n(let reverse! std/vector/reverse!)\nreverse!";
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 2, 3);
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("effects: mutate"),
+            "expected alias hover to include mutate effect, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_std_usage_includes_global_effects() {
+        let hover_json = crate::wasm_api::lsp_hover(
+            "(std/vector/reverse! [ 1 2 3 ])".to_string(),
+            0,
+            6
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("effects: mutate"),
+            "expected std symbol usage hover to include mutate effect, got: {}",
+            contents
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_string_literal_has_fenced_que_format() {
         let hover_json = crate::wasm_api::lsp_hover("\"dsadas\"".to_string(), 0, 2);
         let hover: serde_json::Value = serde_json
@@ -2112,7 +2263,7 @@ Concequent and alternative must match types
 (let int box)
 (let float box)
 (let bool box)
-(let set (lambda vrbl x (set! vrbl 0 x)))
+(let set-box! (lambda vrbl x (set! vrbl 0 x)))
 (let =! (lambda vrbl x (set! vrbl 0 x)))
 (let boole-set (lambda vrbl x (set! vrbl 0 (if x true false))))
 (let boole-eqv (lambda a b (=? (get a) (get b))))

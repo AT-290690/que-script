@@ -1,4 +1,4 @@
-use crate::infer::TypedExpression;
+use crate::infer::{ EffectFlags, TypedExpression };
 use crate::parser::Expression;
 use crate::types::Type;
 use std::collections::{ HashMap, HashSet };
@@ -6102,6 +6102,7 @@ fn specialize_typed_expr(node: &TypedExpression, subst: &HashMap<u64, Type>) -> 
     TypedExpression {
         expr: node.expr.clone(),
         typ: node.typ.as_ref().map(|t| apply_type_subst(t, subst)),
+        effect: node.effect,
         children: node.children
             .iter()
             .map(|c| specialize_typed_expr(c, subst))
@@ -6737,14 +6738,19 @@ pub fn compile_program_to_wat_typed_with_opts(
                 main_items_nodes.push(TypedExpression {
                     expr: Expression::Int(0),
                     typ: Some(Type::Int),
+                    effect: EffectFlags::PURE,
                     children: Vec::new(),
                 });
             }
             let main_expr = Expression::Apply(main_items_expr);
             let main_typ = main_items_nodes.last().and_then(|n| n.typ.clone());
+            let main_effect = main_items_nodes
+                .iter()
+                .fold(EffectFlags::PURE, |acc, n| acc | n.effect);
             let main_node = TypedExpression {
                 expr: main_expr.clone(),
                 typ: main_typ,
+                effect: main_effect,
                 children: main_items_nodes,
             };
             (defs, main_expr, main_node)

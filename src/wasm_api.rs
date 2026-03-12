@@ -1,4 +1,5 @@
 use crate::infer::{
+    EffectFlags,
     infer_with_builtins_typed,
     infer_with_builtins_typed_lsp,
     InferErrorScope,
@@ -61,6 +62,7 @@ struct JsonCompletionItem {
 struct DocAnalysis {
     diagnostics: Vec<JsonDiagnostic>,
     symbol_types: HashMap<String, String>,
+    let_binding_effects: HashMap<String, EffectFlags>,
     user_bound_symbols: HashSet<String>,
 }
 
@@ -69,6 +71,7 @@ struct WasmLspCore {
     base_env: TypeEnv,
     base_next_id: u64,
     global_signatures: HashMap<String, String>,
+    global_effects: HashMap<String, EffectFlags>,
     std_fallback_names: HashSet<String>,
 }
 
@@ -92,7 +95,9 @@ fn with_lsp_core<R>(f: impl FnOnce(&WasmLspCore) -> R) -> R {
 
 fn build_lsp_core() -> WasmLspCore {
     let std_defs = load_std_definitions();
-    let (base_env, base_next_id, global_signatures) = build_base_environment(&std_defs);
+    let (base_env, base_next_id, global_signatures, global_effects) = build_base_environment(
+        &std_defs
+    );
     let std_fallback_names = collect_std_top_level_let_names(&std_defs)
         .into_iter()
         .filter(|name| !name.starts_with("std/"))
@@ -102,6 +107,7 @@ fn build_lsp_core() -> WasmLspCore {
         base_env,
         base_next_id,
         global_signatures,
+        global_effects,
         std_fallback_names,
     }
 }
@@ -123,7 +129,9 @@ fn infer_standalone_std_symbol_signature(core: &WasmLspCore, symbol: &str) -> Op
     Some(normalize_signature(&typ.to_string()))
 }
 
-fn build_base_environment(std_defs: &[Expression]) -> (TypeEnv, u64, HashMap<String, String>) {
+fn build_base_environment(
+    std_defs: &[Expression]
+) -> (TypeEnv, u64, HashMap<String, String>, HashMap<String, EffectFlags>) {
     native_core::build_base_environment(std_defs)
 }
 
@@ -132,6 +140,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         return DocAnalysis {
             diagnostics: Vec::new(),
             symbol_types: HashMap::new(),
+            let_binding_effects: HashMap::new(),
             user_bound_symbols: HashSet::new(),
         };
     }
@@ -139,6 +148,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
     let mut diagnostics = Vec::new();
     let mut symbol_types_raw: HashMap<String, Type> = HashMap::new();
     let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();
+    let mut let_binding_effects: HashMap<String, EffectFlags> = HashMap::new();
     let mut user_bound_symbols = HashSet::new();
     let analysis_source = strip_comment_bodies_preserve_newlines(text);
 
@@ -162,6 +172,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                     return DocAnalysis {
                         diagnostics,
                         symbol_types: HashMap::new(),
+                        let_binding_effects: HashMap::new(),
                         user_bound_symbols,
                     };
                 }
@@ -180,6 +191,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
                 collect_symbol_types(form, &mut symbol_types_raw);
                 collect_let_binding_types(form, &mut let_binding_types_raw);
+                collect_let_binding_effects(form, &mut let_binding_effects, &core.global_effects);
             }
         }
         Err(err) => {
@@ -220,6 +232,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
     DocAnalysis {
         diagnostics,
         symbol_types,
+        let_binding_effects,
         user_bound_symbols,
     }
 }
@@ -355,9 +368,25 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             return "null".to_string();
         };
         let type_info = normalize_signature(&type_info);
+        let symbol_effect = analysis
+            .let_binding_effects
+            .get(&symbol)
+            .copied()
+            .or_else(|| core.global_effects.get(&symbol).copied())
+            .or_else(|| native_core::known_symbol_effect(&symbol));
+        let effect_summary = if type_info.contains("->") {
+            symbol_effect.and_then(native_core::format_effect_flags)
+        } else {
+            None
+        };
+        let contents = if let Some(effect) = effect_summary {
+            format!("{} : {} | effects: {}", symbol, type_info, effect)
+        } else {
+            format!("{} : {}", symbol, type_info)
+        };
 
         let hover = JsonHover {
-            contents: format!("{} : {}", symbol, type_info),
+            contents,
             range: to_json_range(range),
         };
         serde_json::to_string(&Some(hover)).unwrap_or_else(|_| "null".to_string())
@@ -435,6 +464,14 @@ fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut HashSet
 
 fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<String, Type>) {
     native_core::collect_let_binding_types(node, signatures)
+}
+
+fn collect_let_binding_effects(
+    node: &TypedExpression,
+    effects: &mut HashMap<String, EffectFlags>,
+    fallback_effects: &HashMap<String, EffectFlags>
+) {
+    native_core::collect_let_binding_effects(node, effects, fallback_effects)
 }
 
 fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String, Type>) {
