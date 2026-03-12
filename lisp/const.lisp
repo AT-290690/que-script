@@ -1,5 +1,5 @@
 (let *Id* [0])
-(let Id (lambda (do 
+(let Id! (lambda (do 
   (let id (get *Id*))
   (++ *Id*)
   id)))

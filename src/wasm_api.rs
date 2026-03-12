@@ -63,6 +63,7 @@ struct DocAnalysis {
     diagnostics: Vec<JsonDiagnostic>,
     symbol_types: HashMap<String, String>,
     let_binding_effects: HashMap<String, EffectFlags>,
+    let_binding_external_impure: HashMap<String, bool>,
     user_bound_symbols: HashSet<String>,
 }
 
@@ -141,6 +142,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             diagnostics: Vec::new(),
             symbol_types: HashMap::new(),
             let_binding_effects: HashMap::new(),
+            let_binding_external_impure: HashMap::new(),
             user_bound_symbols: HashSet::new(),
         };
     }
@@ -149,6 +151,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
     let mut symbol_types_raw: HashMap<String, Type> = HashMap::new();
     let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();
     let mut let_binding_effects: HashMap<String, EffectFlags> = HashMap::new();
+    let mut let_binding_external_impure: HashMap<String, bool> = HashMap::new();
     let mut user_bound_symbols = HashSet::new();
     let analysis_source = strip_comment_bodies_preserve_newlines(text);
 
@@ -173,6 +176,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                         diagnostics,
                         symbol_types: HashMap::new(),
                         let_binding_effects: HashMap::new(),
+                        let_binding_external_impure: HashMap::new(),
                         user_bound_symbols,
                     };
                 }
@@ -192,6 +196,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                 collect_symbol_types(form, &mut symbol_types_raw);
                 collect_let_binding_types(form, &mut let_binding_types_raw);
                 collect_let_binding_effects(form, &mut let_binding_effects, &core.global_effects);
+                collect_let_binding_external_impurity(form, &mut let_binding_external_impure);
             }
         }
         Err(err) => {
@@ -233,6 +238,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         diagnostics,
         symbol_types,
         let_binding_effects,
+        let_binding_external_impure,
         user_bound_symbols,
     }
 }
@@ -374,8 +380,11 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             .copied()
             .or_else(|| core.global_effects.get(&symbol).copied())
             .or_else(|| native_core::known_symbol_effect(&symbol));
+        let symbol_external_impure = analysis.let_binding_external_impure.get(&symbol).copied();
         let effect_summary = if type_info.contains("->") {
-            symbol_effect.and_then(|eff| native_core::format_effect_flags_for_symbol(&symbol, eff))
+            symbol_effect.and_then(|eff|
+                native_core::format_effect_flags_for_symbol(&symbol, eff, symbol_external_impure)
+            )
         } else {
             None
         };
@@ -472,6 +481,10 @@ fn collect_let_binding_effects(
     fallback_effects: &HashMap<String, EffectFlags>
 ) {
     native_core::collect_let_binding_effects(node, effects, fallback_effects)
+}
+
+fn collect_let_binding_external_impurity(node: &TypedExpression, out: &mut HashMap<String, bool>) {
+    crate::infer::collect_top_level_function_external_impurity(node, out)
 }
 
 fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String, Type>) {

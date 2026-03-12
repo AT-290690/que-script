@@ -357,13 +357,17 @@ pub fn format_effect_flags(effect: EffectFlags) -> Option<String> {
     }
 }
 
-pub fn format_effect_flags_for_symbol(symbol: &str, effect: EffectFlags) -> Option<String> {
+pub fn format_effect_flags_for_symbol(
+    symbol: &str,
+    effect: EffectFlags,
+    externally_impure: Option<bool>
+) -> Option<String> {
     if effect.is_pure() {
         return None;
     }
     let mut labels = Vec::new();
     if effect.contains(EffectFlags::MUTATE) {
-        if symbol.ends_with('!') || symbol == "set" {
+        if symbol.ends_with('!') || symbol == "set" || externally_impure == Some(true) {
             labels.push("mutate");
         } else {
             labels.push("local-mutate");

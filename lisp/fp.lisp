@@ -212,7 +212,10 @@
 (let call (lambda fn xs (std/fn/exec xs fn)))
 
 (let copy std/vector/copy)
-(let sort (lambda fn xs (std/vector/sort! (std/vector/copy xs) fn)))
+(let sort (lambda fn xs (do 
+  (let out (std/vector/copy xs))
+  (std/vector/sort! out fn)
+  out)))
 
 (let neighborhood (lambda directions y x fn xs (std/vector/3d/adjacent xs directions y x fn)))
 (let neighborhood/moore std/vector/3d/moore-neighborhood)
@@ -247,10 +250,10 @@
 
 (let join (lambda str xs (do 
     (let out [])
-    (let lst (pull! xs))
+    (let lst (std/vector/last xs))
     (for (lambda current (do 
         (loop 0 (length current) (lambda i (push! out (get current i))))
-        (loop 0 (length str) (lambda i (push! out (get str i)))))) xs)
+        (loop 0 (length str) (lambda i (push! out (get str i)))))) (std/vector/copy xs))
     (loop 0 (length lst) (lambda i (push! out (get lst i))))
    out)))
 

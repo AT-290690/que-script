@@ -1,4 +1,4 @@
 #!/bin/bash
 set -euo pipefail
 
-cargo run --release --bin quebake
+cargo run --release --features repo-tools --bin quebake
