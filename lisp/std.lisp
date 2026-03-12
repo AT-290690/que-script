@@ -70,9 +70,6 @@
 (let box (lambda value [ value ]))
 (let set (lambda vrbl x (set! vrbl 0 x)))
 (let =! (lambda vrbl x (set! vrbl 0 x)))
-(let boole-set (lambda vrbl x (set! vrbl 0 (if x true false))))
-(let boole-eqv (lambda a b (=? (get a) (get b))))
-(let boolean/set (lambda vrbl x (set! vrbl 0 (if x true false))))
 (let true? (lambda vrbl (if (get vrbl) true false)))
 (let false? (lambda vrbl (if (get vrbl) false true)))
 (let += (lambda vrbl n (=! vrbl (+ (get vrbl) n))))
@@ -761,30 +758,50 @@ out)))
      (while (< i size) (do (set! out (length out) []) (alter! i (+ i 1))))
      out)))
 
-(let std/vector/char/equal? (lambda a b (and (= (length a) (length b)) (<|
-  a
-  (std/vector/zipper b)
-  (std/vector/every? (lambda x (=# (get x 0) (get x 1))))))))
+(let std/vector/char/equal? (lambda a b (do
+    (let len-a (length a))
+    (let len-b (length b))
+    (if (<> len-a len-b) false (do
+        (mut i 0)
+        (mut same true)
+        (while (and same (< i len-a)) (do
+            (if (not (=# (get a i) (get b i))) (alter! same false) nil)
+            (alter! i (+ i 1))))
+        same)))))
 
-(let std/vector/char/greater? (lambda A B (and (not (std/vector/char/equal? A B)) (do
-    (let a (if (< (length A) (length B)) (std/vector/cons! A (std/vector/char/blanks (- (length B) (length A)))) A))
-    (let b (if (> (length A) (length B)) (std/vector/cons! B (std/vector/char/blanks (- (length A) (length B)))) B))
-    (let pairs (std/vector/reverse (std/vector/zipper a b)))
-    (let* tail-call/string/greater (lambda is (unless (std/vector/empty? pairs) (do 
-        (let current (std/vector/pop-and-get! pairs))
-        (if (=# (std/vector/first current) (std/vector/second current)) (tail-call/string/greater is) (># (std/vector/first current) (std/vector/second current))))
-        is)))
-    (tail-call/string/greater false)))))
+(let std/vector/char/greater? (lambda a b (do
+    (let len-a (length a))
+    (let len-b (length b))
+    (let min-len (if (< len-a len-b) len-a len-b))
+    (mut i 0)
+    (mut decided false)
+    (mut out false)
+    (while (and (not decided) (< i min-len)) (do
+        (let ca (get a i))
+        (let cb (get b i))
+        (if (=# ca cb)
+            (alter! i (+ i 1))
+            (do
+                (alter! out (># ca cb))
+                (alter! decided true)))))
+    (if decided out (> len-a len-b)))))
 
-(let std/vector/char/lesser? (lambda A B (and (not (std/vector/char/equal? A B)) (do
-    (let a (if (< (length A) (length B)) (std/vector/cons! A (std/vector/char/blanks (- (length B) (length A)))) A))
-    (let b (if (> (length A) (length B)) (std/vector/cons! B (std/vector/char/blanks (- (length A) (length B)))) B))
-    (let pairs (std/vector/reverse (std/vector/zipper a b)))
-    (let* tail-call/string/lesser (lambda is (unless (std/vector/empty? pairs) (do 
-        (let current (std/vector/pop-and-get! pairs))
-        (if (=# (std/vector/first current) (std/vector/second current)) (tail-call/string/lesser is) (<# (std/vector/first current) (std/vector/second current))))
-        is)))
-    (tail-call/string/lesser false)))))
+(let std/vector/char/lesser? (lambda a b (do
+    (let len-a (length a))
+    (let len-b (length b))
+    (let min-len (if (< len-a len-b) len-a len-b))
+    (mut i 0)
+    (mut decided false)
+    (mut out false)
+    (while (and (not decided) (< i min-len)) (do
+        (let ca (get a i))
+        (let cb (get b i))
+        (if (=# ca cb)
+            (alter! i (+ i 1))
+            (do
+                (alter! out (<# ca cb))
+                (alter! decided true)))))
+    (if decided out (< len-a len-b)))))
     
 (let std/vector/char/match? std/vector/char/equal?)
 (let std/vector/char/greater-or-equal? (lambda A B (or (std/vector/char/equal? A B) (std/vector/char/greater? A B))))
@@ -1759,7 +1776,7 @@ q)))
   (<| digits (std/vector/reduce (lambda a b (if
   (and (true? tr) (std/int/zero? b)) a
     (do
-      (if (true? tr) (boolean/set tr false))
+      (if (true? tr) (set tr false))
       (std/vector/cons! a [b])))) [])))))
 
 (let std/int/big/less-or-equal? (lambda a b (do
@@ -1773,10 +1790,10 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (< da db) (do
-          (boolean/set result true)
+          (set result true)
           (set i (length a))))
         (if (> da db) (do
-          (boolean/set result false)
+          (set result false)
           (set i (length a))))
         (set i (+ (get i) 1))))
       (if (true? result) true false)))))))
@@ -1792,10 +1809,10 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (> da db) (do
-          (boolean/set result true)
+          (set result true)
           (set i (length a))))
         (if (< da db) (do
-          (boolean/set result false)
+          (set result false)
           (set i (length a))))
         (set i (+ (get i) 1))))
       (if (true? result) true false)))))))
@@ -1811,7 +1828,7 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (< da db) (do
-          (boolean/set found-less true)
+          (set found-less true)
           (set i (length a))))
         (if (> da db) (do
           (set i (length a)))) ; stop on a > b, keep found-less false
@@ -1829,7 +1846,7 @@ q)))
         (let da (get a (get i)))
         (let db (get b (get i)))
         (if (> da db) (do
-          (boolean/set found-greater true)
+          (set found-greater true)
           (set i (length a))))
         (if (< da db) (do
           (set i (length a)))) ; stop on a < b, keep found-greater false
@@ -2058,11 +2075,11 @@ q)))
 
 (let push! (lambda xs x (set! xs (length xs) x)))
 (let pull! std/vector/pop-and-get!)
-(let swap! (lambda i j xs (std/vector/swap! xs i j)))
+(let swap! std/vector/swap!)
 (let scan! (lambda fn xs (std/vector/adjacent-difference! xs fn)))
 (let empty! (lambda xs (do (std/vector/empty! xs) nil)))
 (let reverse! std/vector/reverse!)
-(let sort! (lambda dir xs (std/vector/sort! xs dir)))
+(let sort! std/vector/sort!)
 
 (let emod std/int/euclidean-mod)
 (let mul std/int/mul)
@@ -2494,7 +2511,7 @@ q)))
 (let std/vector/char/damerau-levenshtein (lambda a b (do
   (let n (length a))
   (let m (length b))
-  (let matrix (Matrix/new (lambda . . 0) (+ n 1) (+ m 1)))
+  (let matrix (Matrix/new (lambda . . 0) (+ n 1) (+ m 1) ))
 
   (mut i0 0)
   (while (<= i0 n) (do

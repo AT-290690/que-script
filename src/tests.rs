@@ -22,8 +22,8 @@ mod tests {
             ("nil", "()"),
             ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
             (
-                "(do (let fn! (lambda a b c d (do (set! d (length d) (if c (lambda x (> (+ a b) x)) (lambda . false))) (> (length d) 10)))) fn!)",
-                "Int -> Int -> Bool -> [Int -> Bool] -> Bool",
+                "(do (let fn! (lambda a b c d (do (set! a (length a) (if d (lambda x (> (+ c b) x)) (lambda . false))) nil))) fn!)",
+                "[Int -> Bool] -> Int -> Int -> Bool -> ()",
             ),
             (
                 "(do (let Int 0) (let as (lambda . t t)) (let xs (as (vector) (vector Int))) xs)",
@@ -566,7 +566,7 @@ Concequent and alternative must match types
      (let process (lambda i (set! out (length out) 0)))
      (loop 1 n process)
      out)))
-     (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) xs)))
+     (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) nil)))
 
                 (let valid-path (lambda n edges source destination (do
                   (let graph (std/vector/map (std/vector/int/zeroes n) (lambda . [])))
@@ -642,7 +642,7 @@ Concequent and alternative must match types
         (if (Table/has? check a) (do 
             (push! out i)  (push! out (snd (get (Table/get check a))))))
         (let key (Integer->String b))
-        (Table/set! key i a)
+        (Table/set! a key i)
         { a out }))
         (lambda { . out } . . (not-empty? out))
         { (Hash-Table/new) [] } )))))
@@ -723,7 +723,7 @@ Concequent and alternative must match types
         let output = run_program_output(
             r#"(do
                 (let std/vector/empty? (lambda xs (= (length xs) 0)))
-                (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) xs)))
+                (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) nil)))
                 (let std/vector/at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
                 (let std/vector/3d/rotate (lambda matrix (if (std/vector/empty? matrix) matrix (do 
                     (let H (length matrix))
@@ -1014,7 +1014,7 @@ Concequent and alternative must match types
     #[test]
     fn test_infer_impure_function_requires_bang_suffix() {
         let exprs = crate::parser
-            ::parse("(let fn (lambda xs (do (set! xs 0 1) xs)))")
+            ::parse("(let fn (lambda xs (set! xs 0 1)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
@@ -1032,7 +1032,7 @@ Concequent and alternative must match types
     #[test]
     fn test_infer_impure_function_alias_requires_bang_suffix() {
         let exprs = crate::parser
-            ::parse("(do (let reverse! (lambda xs (do (set! xs 0 1) xs))) (let reverse reverse!) reverse)")
+            ::parse("(do (let reverse! (lambda xs (set! xs 0 1))) (let reverse reverse!) reverse)")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
@@ -1044,6 +1044,173 @@ Concequent and alternative must match types
             err.contains("Impure function 'reverse' must end with '!'"),
             "unexpected error: {}",
             err
+        );
+    }
+
+    #[test]
+    fn test_infer_impure_wrapper_call_requires_bang_suffix() {
+        let exprs = crate::parser
+            ::parse(
+                "(do (let reverse! (lambda xs (set! xs 0 1))) (let wrap (lambda xs (reverse! xs))) wrap)"
+            )
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        let err = inferred.expect_err("impure wrapper without ! should fail");
+        assert!(
+            err.contains("Impure function 'wrap' must end with '!'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_impure_function_non_unit_return_allowed_by_default() {
+        let exprs = crate::parser
+            ::parse("(let append-ten! (lambda xs (do (set! xs 0 1) xs)))")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            inferred.is_ok(),
+            "non-unit impure return should be allowed by default, got: {:?}",
+            inferred
+        );
+    }
+
+    #[test]
+    fn test_infer_impure_hyphenated_function_requires_bang_suffix() {
+        let exprs = crate::parser
+            ::parse("(let append-ten (lambda xs (set! xs (length xs) 10)))")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        let err = inferred.expect_err("impure hyphenated function without ! should fail");
+        assert!(
+            err.contains("Impure function 'append-ten' must end with '!'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_impure_function_mutation_target_must_be_first_param() {
+        let exprs = crate::parser
+            ::parse("(let set-middle! (lambda a b c (set! b 0 1)))")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        let err = inferred.expect_err("impure function mutating middle param should fail");
+        assert!(err.contains("must mutate its first parameter"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn test_infer_impure_function_mutating_first_param_is_allowed() {
+        let exprs = crate::parser
+            ::parse("(let sort! (lambda xs fn (set! xs 0 1)))")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            inferred.is_ok(),
+            "impure function mutating arg1 should be allowed, got: {:?}",
+            inferred
+        );
+    }
+
+    #[test]
+    fn test_infer_impure_function_mutating_last_param_is_rejected() {
+        let exprs = crate::parser
+            ::parse("(let sort! (lambda fn xs (set! xs 0 1)))")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        let err = inferred.expect_err("impure function mutating last param should fail");
+        assert!(err.contains("must mutate its first parameter"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn test_infer_impure_nested_mutation_target_rooted_in_first_param_is_allowed() {
+        let exprs = crate::parser
+            ::parse(
+                "(let std/vector/3d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))"
+            )
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            inferred.is_ok(),
+            "nested target rooted in first param should be allowed, got: {:?}",
+            inferred
+        );
+    }
+
+    #[test]
+    fn test_infer_impure_operator_aliases_and_set_are_exempt_from_bang_suffix() {
+        let exprs = crate::parser
+            ::parse(
+                "(do
+                    (let update-set! (lambda vrbl x (set! vrbl 0 x)))
+                    (let boolean-set! (lambda vrbl x (set! vrbl 0 x)))
+                    (let += (lambda vrbl n (set! vrbl 0 n)))
+                    1)"
+            )
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            inferred.is_ok(),
+            "update-set and operator aliases should be exempt from ! suffix, got: {:?}",
+            inferred
+        );
+    }
+
+    #[test]
+    fn test_infer_local_nested_set_target_does_not_require_bang() {
+        let exprs = crate::parser
+            ::parse(
+                "(do
+                    (let at (lambda xs i (get xs i)))
+                    (let partition (lambda xs n (do
+                        (let a (vector (vector 0)))
+                        (set! (at a 0) 0 1)
+                        a)))
+                    partition)"
+            )
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            inferred.is_ok(),
+            "local nested set! target should not require ! suffix, got: {:?}",
+            inferred
         );
     }
 
@@ -1873,7 +2040,7 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_hover_user_fn_includes_effects_for_mutation() {
         let hover_json = crate::wasm_api::lsp_hover(
-            "(let touch! (lambda xs (do (set! xs 0 1) xs)))\ntouch!".to_string(),
+            "(let touch! (lambda xs (do (set! xs 0 1) nil)))\ntouch!".to_string(),
             1,
             2
         );
@@ -1887,7 +2054,7 @@ Concequent and alternative must match types
             .expect("hover response should include string contents");
 
         assert!(
-            contents.contains("touch! : [Int] -> [Int]"),
+            contents.contains("touch! : [Int] -> ()"),
             "expected touch hover type info, got: {}",
             contents
         );
@@ -1901,7 +2068,7 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_hover_alias_preserves_mutation_effect() {
         let program =
-            "(let std/vector/reverse! (lambda xs (do (set! xs 0 1) xs)))\n(let reverse! std/vector/reverse!)\nreverse!";
+            "(let std/vector/reverse! (lambda xs (do (set! xs 0 1) nil)))\n(let reverse! std/vector/reverse!)\nreverse!";
         let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 2, 3);
         let hover: serde_json::Value = serde_json
             ::from_str(&hover_json)
@@ -1971,6 +2138,57 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_hover_param_mutation_with_bang_is_mutate() {
+        let hover_json = crate::wasm_api::lsp_hover(
+            "(let append-ten! (lambda xs (push! xs 10)))\nappend-ten!".to_string(),
+            1,
+            3
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("effects: mutate"),
+            "expected parameter mutation classification, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_exempt_name_calling_impure_callee_is_mutate() {
+        let hover_json = crate::wasm_api::lsp_hover(
+            "(let _fn (lambda xs (std/vector/reverse! xs)))\n_fn".to_string(),
+            1,
+            1
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("effects: mutate"),
+            "expected external mutation classification via impure callee, got: {}",
+            contents
+        );
+        assert!(
+            !contents.contains("effects: local-mutate"),
+            "expected not to classify as local-only mutation, got: {}",
+            contents
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_string_literal_has_fenced_que_format() {
         let hover_json = crate::wasm_api::lsp_hover("\"dsadas\"".to_string(), 0, 2);
         let hover: serde_json::Value = serde_json
@@ -1990,7 +2208,7 @@ Concequent and alternative must match types
         let program =
             r#"(let xs [ 1 2 3 4 ])
 (|>
-    { (|> xs (map identity) (sort! <)) xs }
+    { (|> xs (map identity) (sort <)) xs }
     (zip)
     (map (lambda { a b } (<> a b)))
 )"#;
@@ -2365,9 +2583,8 @@ Concequent and alternative must match types
 (let bool box)
 (let set-box! (lambda vrbl x (set! vrbl 0 x)))
 (let =! (lambda vrbl x (set! vrbl 0 x)))
-(let boole-set (lambda vrbl x (set! vrbl 0 (if x true false))))
+(let boole-set! (lambda vrbl x (set! vrbl 0 (if x true false))))
 (let boole-eqv (lambda a b (=? (get a) (get b))))
-(let boolean/set (lambda vrbl x (set! vrbl 0 (if x true false))))
 (let true? (lambda vrbl (if (get vrbl) true false)))
 (let false? (lambda vrbl (if (get vrbl) false true)))
 (let += (lambda vrbl n (=! vrbl (+ (get vrbl) n))))
@@ -2741,16 +2958,16 @@ Concequent and alternative must match types
                 "[2 3]",
             ),
             (
-                r#"(let flood-fill (lambda image sr sc color (do 
+                r#"(let flood-fill! (lambda image sr sc color (do 
     (let old (get image sr sc))
-    (if (= old color) 
-        image 
+    (unless (= old color) 
         (do 
             (let m (length image))
             (let n (length (std/vector/first image)))
             (let stack [[sr sc]])
             (while (std/vector/not-empty? stack) (do 
-                (let t (std/vector/pop-and-get! stack))
+                (let t (std/vector/last stack))
+                (pop! stack)
                 (let i (std/vector/first t))
                 (let j (std/vector/second t))
                 (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get image i j) old)) (do
@@ -2760,25 +2977,26 @@ Concequent and alternative must match types
                     (std/vector/push! stack [i (+ j 1)])
                     (std/vector/push! stack [i (- j 1)])
                     nil))))
-        image)))))
+        nil)))))
 
 
 (let image [[1 1 1] [1 1 0] [1 0 1]])
-(flood-fill image 1 1 2)
+(flood-fill! image 1 1 2)
+image
 ; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#,
                 "[[2 2 2] [2 2 0] [2 0 1]]",
             ),
             (
-                r#"(let flood-fill (lambda image sr sc color (do 
+                r#"(let flood-fill! (lambda image sr sc color (do 
     (let old (get image sr sc))
-    (if (= old color) 
-        image 
+    (unless (= old color) 
         (do 
             (let m (length image))
             (let n (length (get image 0)))
             (let stack [[sr sc]])
             (while (not-empty? stack) (do 
-                (let t (pull! stack))
+                (let t (std/vector/last stack))
+                (pop! stack)
                 (let i (get t 0))
                 (let j (get t 1))
                 (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get image i j) old)) (do
@@ -2788,11 +3006,12 @@ Concequent and alternative must match types
                     (push! stack [i (+ j 1)])
                     (push! stack [i (- j 1)])
                     nil))))
-        image)))))
+        nil)))))
 
 
 (let image [[1 1 1] [1 1 0] [1 0 1]])
-(flood-fill image 1 1 2)
+(flood-fill! image 1 1 2)
+image
 ; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#,
                 "[[2 2 2] [2 2 0] [2 0 1]]",
             ),
@@ -2811,9 +3030,10 @@ Concequent and alternative must match types
       (std/vector/set! visited source 1)
       (boolean found false)
       (while (and (not (true? found)) (> (length queue) 0)) (do
-        (let current (std/vector/pop-and-get! queue))
+        (let current (std/vector/last queue))
+        (pop! queue)
         (if (= current destination)
-          (boole-set found true)
+          (set found true)
           (std/vector/for (get graph current) (lambda neighbor (do
             (if (= (get visited neighbor) 0)
               (do
@@ -2947,7 +3167,8 @@ Concequent and alternative must match types
         (std/vector/map (lambda x (- x m)))
         (std/vector/int/sum)))))
 
- (let part2 (lambda input (do 
+ (let part2 (lambda inp (do
+    (let input (copy inp))
     (std/vector/sort/desc! input)
     (let m (std/vector/int/median input))
     (<| input
@@ -2985,9 +3206,10 @@ Concequent and alternative must match types
     (while (< (get c) len) (do 
         (set! xs (get c) 0)
         (++ c)))
-    xs)))
+    nil)))
 
-(solve! xs)"#,
+(solve! xs)
+xs"#,
                 "[1 2 4 3 5 0 0 0]",
             ),
             (
@@ -3073,18 +3295,18 @@ D:=,=,=,+,=,=,=,+,=,=")
 )))
     
 (let app (lambda a x 
-    (cond (=# x std/char/plus) (std/vector/append! a (+ (std/vector/last a) 1))
-    (=# x std/char/minus) (std/vector/append! a (- (std/vector/last a) 1))
-    (=# x std/char/equal) (std/vector/append! a (std/vector/last a))
-    (std/vector/append! a (std/vector/last a)))))
-(let part1 (lambda xs (do
+    (cond (=# x std/char/plus) (std/vector/cons a [(+ (std/vector/last a) 1)])
+    (=# x std/char/minus) (std/vector/cons a [(- (std/vector/last a) 1)])
+    (=# x std/char/equal) (std/vector/cons a [(std/vector/last a)])
+    (std/vector/cons a [(std/vector/last a)]))))
+(let part1! (lambda xs (do
     (let letters (<| input (std/vector/char/lines) (std/vector/map std/vector/first)))
     (<| xs (std/vector/map (lambda x (<| x (std/vector/reduce app [0])))) 
     (std/vector/map std/vector/int/sum)
     (std/vector/map/i (lambda x i [i (+ x 100)]))
     (std/vector/sort! (lambda a b (> (get a 1) (get b 1))))
     (std/vector/map (lambda [i .] (get letters i)))))))
-(<| input (parse) (part1))"#,
+(<| input (parse) (part1!))"#,
                 "BDCA",
             ),
             (
@@ -3101,7 +3323,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (mut i 0)
     (while (< i (/ (length str) 2)) (do
       (if (not (=# (std/vector/stack/peek s) (std/vector/queue/peek q)))
-           (boole-set p? false) 
+           (set p? false) 
            (do 
                (std/vector/stack/pop! s)
                (std/vector/queue/dequeue! q)
@@ -3115,7 +3337,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"(let palindrome? (lambda str (do 
     (let p? [true])
-    (loop 0 (/ (length str) 2) (lambda i (if (not (=# (get str i) (get str (- (length str) i 1)))) (boole-set p? false))))
+    (loop 0 (/ (length str) 2) (lambda i (if (not (=# (get str i) (get str (- (length str) i 1)))) (set p? false))))
     (true? p?))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[true false]",
@@ -3126,12 +3348,12 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[true false]",
             ),
             (
-                r#"(let* rev (lambda xs ys 
+                r#"(let* rev! (lambda ys xs 
     (if (std/vector/empty? xs) 
          ys 
-        (rev (std/vector/drop/last xs 1) (std/vector/append! ys (std/vector/at xs -1))))))
+        (rev! (do (std/vector/push! ys (std/vector/at xs -1)) ys) (std/vector/drop/last xs 1)))))
 ;
-(rev [ 1 2 3 4 5 ] [])"#,
+(rev! [] [ 1 2 3 4 5 ])"#,
                 "[5 4 3 2 1]",
             ),
             (
@@ -3296,7 +3518,8 @@ D:=,=,=,+,=,=,=,+,=,=")
 -3")
 
 (let parse (lambda input (<| input (std/convert/string->vector std/char/new-line) (std/vector/map std/convert/chars->integer))))
-(let part1 (lambda input (do 
+(let part1 (lambda ip (do
+    (let input (copy ip))
     (integer pointer (get input))
     (integer steps 0)
     (integer index 0)
@@ -3304,11 +3527,12 @@ D:=,=,=,+,=,=,=,+,=,=")
     (while (false? escaped?) (do
         (set! input (get index) (+ (get pointer) 1))
         (+= index (get pointer))
-        (if (std/vector/in-bounds? input (get index)) (set pointer (get input (get index))) (boole-set escaped? true))
+        (if (std/vector/in-bounds? input (get index)) (set pointer (get input (get index))) (set escaped? true))
         (++ steps)))
     (get steps))))
 
-(let part2 (lambda input (do 
+(let part2 (lambda ip (do 
+    (let input (copy ip))
     (integer pointer (get input))
     (integer steps 0)
     (integer index 0)
@@ -3316,7 +3540,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (while (false? escaped?) (do
         (set! input (get index) (+ (get pointer) (if (>= (get pointer) 3) -1 1)))
         (+= index (get pointer))
-        (if (std/vector/in-bounds? input (get index)) (set pointer (get input (get index))) (boole-set escaped? true))
+        (if (std/vector/in-bounds? input (get index)) (set pointer (get input (get index))) (set escaped? true))
         (++ steps)))
     (get steps))))
     
@@ -3443,7 +3667,7 @@ out
 (let parse (lambda input 
     (|> 
         input 
-        (Vector/append! std/char/comma)
+        (Vector/cons [std/char/comma])
         (String->Vector std/char/space)
         (map (lambda x (drop/last 1 x)))
         (map (lambda [ D M ] [ (Char->Int D) (std/convert/chars->integer M) ])))))
@@ -3485,7 +3709,7 @@ out
       (integer facing 0) ; North
 
       (let visited (buckets 128))
-      (Table/set! (point->key (get y) (get x)) true visited)
+      (Table/set! visited (point->key (get y) (get x)) true)
 
       (integer result 0)
 
@@ -3505,7 +3729,7 @@ out
                           (if (Table/has? key visited)
                               (set result (+ (std/int/abs (get y))
                                              (std/int/abs (get x))))
-                              (Table/set! key true visited))))))))) input)
+                              (Table/set! visited key true))))))))) input)
 
       (get result))))
 
@@ -3551,40 +3775,6 @@ out
                 "[2 4]",
             ),
             (
-                r#"(let INPUT "12
-14
-1969
-100756")
-
-(let parse (lambda input 
-    (<| input (std/vector/char/lines) (std/vector/map std/convert/chars->integer))))
-
-(let PARSED (parse INPUT))
-
-(let part1 (lambda input (<|    
-    input 
-    (std/vector/map (lambda x (- (/ x 3) 2)))
-    (std/vector/int/sum))))
-
-(let part2 (lambda input (do
-
-(let retry (lambda x (do
-    (let* tail-call:retry! (lambda x out (do 
-        (let result (- (/ x 3) 2))
-        (if (<= result 0) out 
-            (tail-call:retry! result (std/vector/append! out result))))))
-     (tail-call:retry! x []))))
-     
- (<|
-    input 
-    (std/vector/map retry)
-    (std/vector/map std/vector/int/sum)
-    (std/vector/int/sum)))))
-    
-[(part1 PARSED) (part2 PARSED)]"#,
-                "[34241 51316]",
-            ),
-            (
                 r#"(let fn (lambda { a b } (do 
 (if (= b 1) [ a  ] [ false ])
 b
@@ -3608,24 +3798,24 @@ b
                 "{ false 12 }",
             ),
             (
-                r#"(let factorial (lambda N (snd (pull! (Rec { N 1 } (lambda { n acc } 
-      (if (= n 0) 
-          { Rec/return [ { n acc } ]} 
-          { Rec/push [ { (- n 1) (* acc n) } ] })))))))
+                r#"(let factorial! (lambda N (snd (pull! (Rec { N 1 } (lambda { n acc }
+                  (if (= n 0)
+                      { Rec/return [ { n acc } ]}
+                      { Rec/push [ { (- n 1) (* acc n) } ] })))))))
 
-(let rec-sum (lambda N (snd (get (Rec { N 0 } (lambda { n acc } 
-    (if (= 0 n) 
-        { Rec/return [ { n acc } ] } 
-        { Rec/push [ { (- n 1) (+ acc n) } ] })))))))
+            (let rec-sum (lambda N (snd (get (Rec { N 0 } (lambda { n acc }
+                (if (= 0 n)
+                    { Rec/return [ { n acc } ] }
+                    { Rec/push [ { (- n 1) (+ acc n) } ] })))))))
 
-(let factorialVec (lambda N (first (pull! (Rec [ 1 N ] (lambda [ acc n . ] 
-      (if (= n 0) 
-          { Rec/return [ [ acc n ] ]} 
-          { Rec/push [ [ (* acc n) (- n 1) ] ] })))))))
+            (let factorialVec! (lambda N (first (pull! (Rec [ 1 N ] (lambda [ acc n . ]
+                  (if (= n 0)
+                      { Rec/return [ [ acc n ] ]}
+                      { Rec/push [ [ (* acc n) (- n 1) ] ] })))))))
 
-(factorialVec 5)
+            (factorialVec! 5)
 
-[(factorial 5) (factorialVec 5) (rec-sum 10)]"#,
+            [(factorial! 5) (factorialVec! 5) (rec-sum 10)]"#,
                 "[120 120 55]",
             ),
             (
@@ -3644,8 +3834,8 @@ b
   (loop 0 (length sword) (lambda j (do 
     (let segment (get sword j))
     (cond
-        (and (false? placed) (< num (get segment 1)) (= (get segment 0) -1)) (do (set! segment 0 num) (boolean/set placed true))
-        (and (false? placed) (> num (get segment 1)) (= (get segment 2) -1)) (do (set! segment 2 num) (boolean/set placed true))
+        (and (false? placed) (< num (get segment 1)) (= (get segment 0) -1)) (do (set! segment 0 num) (set placed true))
+        (and (false? placed) (> num (get segment 1)) (= (get segment 2) -1)) (do (set! segment 2 num) (set placed true))
         nil))))
     (if (false? placed) (push! sword [-1 num -1])))))
 sword)))
@@ -3654,12 +3844,12 @@ sword)))
                 "[[3 5 7] [4 8 9] [5 10 -1] [-1 7 8] [-1 8 -1]]",
             ),
             (
-                r#"(let scan/sum (lambda a b (do (push! a (+ (last a) b)) a)))
+                r#"(let scan/sum! (lambda a b (push! a (+ (last a) b))))
 
 (let left-right-sum-diff (lambda input 
   (|> (zip {
-        (|> input (reduce scan/sum [0]) (drop/last 1))
-        (|> input (reverse) (reduce scan/sum [0]) (drop/last 1) (reverse))
+        (|> input (reduce (lambda a b (do (scan/sum! a b) a)) [0]) (drop/last 1))
+        (|> input (reverse) (reduce (lambda a b (do (scan/sum! a b) a)) [0]) (drop/last 1) (reverse))
     }) 
     (map (lambda { a b } (abs (- a b)))))))
 
@@ -3838,8 +4028,8 @@ L82")
 
 (let part1 (lambda { ranges fruits } (length (filter (lambda fruit (some? (lambda [ low high . ] (and (BigInt/gte? fruit low) (BigInt/lte? fruit high))) ranges)) fruits))))
 
-(let part2 (lambda { ranges . } (do
-  (sort! (lambda [ a . ] [ b . ] (BigInt/lt? a b)) ranges)
+(let part2 (lambda { rng . } (do
+  (let ranges (sort (lambda [ a . ] [ b . ] (BigInt/lt? a b)) rng))
   (variable low (get ranges 0 0))
   (variable high (get ranges 0 1))
   (variable out [ 0 ])
@@ -3867,7 +4057,8 @@ L82")
 *   +   *   +  ")
 (let parse (lambda input (do 
   (let groups (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (filter (lambda x (not (empty? x)))))))))
-  (let op (map first (pull! groups)))
+  (let op (map first (last groups)))
+  (pop! groups)
   (let ints (map (lambda x (map BigInt/new x)) groups))
   (let numbers (reduce (lambda a i (do (push! a (map (lambda n (get n i)) ints)) a)) [] (range 0 (- (length (get ints 0)) 1))))
   {numbers op }
@@ -3907,33 +4098,33 @@ L82")
   (let visited [[] [] [] [] [] [] [] [] []])
   (let queue (Que/new [Int]))
   (let start (points (lambda x (=# x 'S')) input))
-  (Que/enque! (get start 0) queue)
+  (Que/enque! queue (get start 0))
   (while (Que/not-empty? queue) (do 
     (let current (Que/peek queue))
     (Que/deque! queue)
     (let [ y x . ] current)
     (let key (cons (Integer->String y) "-" (Integer->String x)))
     (if (and (std/vector/3d/in-bounds? input y x) (not (Set/has? key visited))) (do
-        (Set/add! key visited)
+        (Set/add! visited key)
         (if (=# (get input y x) '^') (do 
           (++ total)
-          (Que/enque! [ y (+ x 1) ] queue)
-          (Que/enque! [ y (- x 1) ] queue)) (Que/enque! [ (+ y 1) x ] queue))))))
+          (Que/enque! queue [ y (+ x 1) ])
+          (Que/enque! queue [ y (- x 1) ])) (Que/enque! queue [ (+ y 1) x ]))))))
   (get total))))
 (let part2 (lambda input (do
   (integer total 0)
   (let queue (Que/new [Int]))
   (let start (first (points (lambda x (=# x 'S')) input)))
-  (Que/enque! [(get start 0) (get start 1) 1] queue)
+  (Que/enque! queue [(get start 0) (get start 1) 1])
   (while (Que/not-empty? queue) (do 
     (let current (Que/peek queue))
     (Que/deque! queue)
     (let [ y x c . ] current)
     (if (std/vector/3d/in-bounds? input y x) (do
         (if (=# (get input y x) '^') (do 
-            (Que/enque! [ y (+ x 1) c ] queue)
-            (Que/enque! [ y (- x 1) c ] queue)) 
-            (Que/enque! [ (+ y 1) x c ] queue)))
+            (Que/enque! queue [ y (+ x 1) c ])
+            (Que/enque! queue [ y (- x 1) c ])) 
+            (Que/enque! queue [ (+ y 1) x c ])))
         (+= total c))))
   (get total))))
 (let PARSED (parse INPUT))
@@ -4016,7 +4207,8 @@ L82")
   (loop 0 len (lambda i (do 
     (loop i len (lambda j (if (<> i j) 
       (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) })))))))
-  (let edges (map fst (sort! (lambda { . d1 } { . d2 } (< d1 d2)) dist)))
+  (sort! dist (lambda { . d1 } { . d2 } (< d1 d2)))
+  (let edges (map fst dist))
   (let parent (range 0 (- (length input) 1)))
   (let* root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
   (let merge (lambda a b (set! parent (root a) (root b))))
@@ -4028,7 +4220,7 @@ L82")
       (set! a i (+ (get a i) 1))
       a)) 
     (zeroes (length input)))
-    (sort! >)
+    (sort >)
     (take/first 3)
     (product)))))
 
@@ -4042,7 +4234,8 @@ L82")
       (push! dist { [i j] (distance/3d (get input i) (get input j)) })))))
 
   ; sort edges by distance
-  (let edges (|> dist (sort! (lambda { . d1 } { . d2 } (< d1 d2))) (map fst)))
+  (sort! dist (lambda { . d1 } { . d2 } (< d1 d2))) 
+  (let edges (|> dist (map fst)))
 
   ; initialize union-find
   (let parent (range 0 len))
@@ -4215,16 +4408,15 @@ UUUUD")
  (map box)
  (Table/count)
  (Table/entries)
- (sort! (lambda { . a } { . b } (> a b)))
+ (sort (lambda { . a } { . b } (> a b)))
  (car)
  (fst))"#,
                 "e",
             ),
             (
-                r#"(let flood-fill (lambda image sr sc color (do 
+                r#"(let flood-fill! (lambda image sr sc color (do 
     (let old (get image sr sc))
-    (if (= old color) 
-        image 
+    (unless (= old color) 
         (do 
         (let m (length image))
         (let n (length (first image)))
@@ -4236,10 +4428,11 @@ UUUUD")
                     (adj r (- c 1))
                 nil))))
         (adj sr sc)
-        image)))))
+        nil)))))
 
 (let image [[1 1 1] [1 1 0] [1 0 1]])
-(flood-fill image 1 1 2)
+(flood-fill! image 1 1 2)
+image
 ; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#,
                 "[[2 2 2] [2 2 0] [2 0 1]]",
             ),
@@ -4251,14 +4444,14 @@ UUUUD")
             ),
             (
                 r#"(let memo [[] [] [] []])
-(let* fibonacci (lambda n
+(let* fibonacci! (lambda n
     (do 
     (let key (Integer->String n))
     (if (< n 2) n (if (Table/has? key memo) (snd (first (Table/get key memo))) (do 
-      (let res (+ (fibonacci (- n 1)) (fibonacci (- n 2))))
-      (Table/set! key res memo)
+      (let res (+ (fibonacci! (- n 1)) (fibonacci! (- n 2))))
+      (Table/set! memo key res)
       res))))))
-(fibonacci 10)"#,
+(fibonacci! 10)"#,
                 "55",
             ),
             (
@@ -4367,7 +4560,7 @@ bbrgwb")
     })))
 
 (let part1 (lambda { patterns-input towels } (do 
-  (let patterns (reduce (lambda a b (do (Set/add! b a) a)) [[] [] [] [] [] [] [] [] []] patterns-input))
+  (let patterns (reduce (lambda a b (do (Set/add! a b) a)) [[] [] [] [] [] [] [] [] []] patterns-input))
   (let* dp? (lambda str (loop/some-range? 1 (length str) (lambda i (do 
     (let a (slice 0 i str))
     (let b (slice i (length str) str))
@@ -4446,7 +4639,7 @@ bbrgwb")
               (= i (length numbers)))
             result
             (do
-              (Set/add! (Integer->String (get numbers i)) drawn)
+              (Set/add! drawn (Integer->String (get numbers i)))
               (let winners
                 (filter (lambda b (board-wins? b drawn)) boards))
               (step
@@ -4477,10 +4670,10 @@ bbrgwb")
             ),
             (
                 r#"
-(let Point   (Id))
-(let Segment (Id))
-(let Key     (Id))
-(let None    (Id))
+(let Point   (Id!))
+(let Segment (Id!))
+(let Key     (Id!))
+(let None    (Id!))
 
 ; Int -> Int -> { Point * { Int * Int } }
 (let make-point
@@ -4783,7 +4976,8 @@ bbrgwb")
     (let i (get blanks ind))
     (if (= (last disk) -1) (do (pop! disk) (fragment ind out))
       (if (not (<= (length disk) i)) (do 
-        (set! disk i (pull! disk))
+        (set! disk i (last disk))
+        (pop! disk)
         (fragment (+ ind 1) out)
       ) false)))))
   (fragment 0 true)
@@ -4978,7 +5172,7 @@ SECRET = SANTA")
                 (exclude empty?)))))
 
 (let ENV (reduce
-  (lambda a [ k v .] (do (Table/set! k v a) a))
+  (lambda a [ k v .] (do (Table/set! a k v) a))
   (buckets 32)
   (parse/env .env)))
 
@@ -5125,7 +5319,7 @@ SECRET = SANTA")
 (if (= r 0) 4 (if (= r 1) 11 (if (= r 2) 16 23)))
 (if (= r 0) 6 (if (= r 1) 10 (if (= r 2) 15 21)))))))))
 
-(let md5-a0 (lambda n (do
+(let md5-a0! (lambda n (do
 (loop 0 8 (lambda i (set! block i (get secret-bytes i))))
 
 (let div-init
@@ -5213,15 +5407,15 @@ nil)))
 
 (add32 a0 (get A)))))
 
-(let has-five-leading-zeroes (lambda n (do
-(let a (md5-a0 n))
+(let has-five-leading-zeroes! (lambda n (do
+(let a (md5-a0! n))
 (and (= (& a 255) 0)
  (= (& (>> a 8) 255) 0)
  (< (& (>> a 16) 255) 16)))))
 
 (integer answer 0)
 (loop 1 500001 (lambda candidate
-(if (and (= (get answer) 0) (has-five-leading-zeroes candidate))
+(if (and (= (get answer) 0) (has-five-leading-zeroes! candidate))
 (set answer candidate)
 nil)))
 (get answer)

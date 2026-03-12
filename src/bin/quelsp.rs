@@ -54,6 +54,7 @@ struct DocAnalysis {
     symbol_types: HashMap<String, String>,
     let_binding_types: HashMap<String, String>,
     let_binding_effects: HashMap<String, EffectFlags>,
+    let_binding_external_impure: HashMap<String, bool>,
     user_bound_symbols: HashSet<String>,
     form_scoped_symbols: Vec<FormScopedAnalysis>,
 }
@@ -64,6 +65,7 @@ struct FormScopedAnalysis {
     symbol_types: HashMap<String, String>,
     let_binding_types: HashMap<String, String>,
     let_binding_effects: HashMap<String, EffectFlags>,
+    let_binding_external_impure: HashMap<String, bool>,
 }
 
 struct LspCore {
@@ -339,6 +341,7 @@ impl ServerState {
                         symbol_types: HashMap::new(),
                         let_binding_types: HashMap::new(),
                         let_binding_effects: HashMap::new(),
+                        let_binding_external_impure: HashMap::new(),
                         user_bound_symbols: HashSet::new(),
                         form_scoped_symbols: Vec::new(),
                     });
@@ -425,8 +428,18 @@ impl ServerState {
                 .or_else(|| doc.let_binding_effects.get(&symbol).copied())
                 .or_else(|| self.with_core(|core| core.global_effects.get(&symbol).copied()))
                 .or_else(|| native_core::known_symbol_effect(&symbol));
+            let declaration_external_impure = self
+                .form_let_external_impurity_at(doc, position)
+                .and_then(|m| m.get(&symbol).copied())
+                .or_else(|| doc.let_binding_external_impure.get(&symbol).copied());
             let effect_text = if declaration_type.contains("->") {
-                declaration_effect.and_then(|eff| native_core::format_effect_flags_for_symbol(&symbol, eff))
+                declaration_effect.and_then(|eff|
+                    native_core::format_effect_flags_for_symbol(
+                        &symbol,
+                        eff,
+                        declaration_external_impure
+                    )
+                )
             } else {
                 None
             };
@@ -465,8 +478,14 @@ impl ServerState {
             .or_else(|| doc.let_binding_effects.get(&symbol).copied())
             .or_else(|| self.with_core(|core| core.global_effects.get(&symbol).copied()))
             .or_else(|| native_core::known_symbol_effect(&symbol));
+        let symbol_external_impure = self
+            .form_let_external_impurity_at(doc, position)
+            .and_then(|m| m.get(&symbol).copied())
+            .or_else(|| doc.let_binding_external_impure.get(&symbol).copied());
         let effect_text = if type_info.contains("->") {
-            symbol_effect.and_then(|eff| native_core::format_effect_flags_for_symbol(&symbol, eff))
+            symbol_effect.and_then(|eff|
+                native_core::format_effect_flags_for_symbol(&symbol, eff, symbol_external_impure)
+            )
         } else {
             None
         };
@@ -645,6 +664,17 @@ impl ServerState {
             .find(|form| range_contains_position(&form.range, position))
             .map(|form| &form.let_binding_effects)
     }
+
+    fn form_let_external_impurity_at<'a>(
+        &'a self,
+        doc: &'a DocAnalysis,
+        position: Position
+    ) -> Option<&'a HashMap<String, bool>> {
+        doc.form_scoped_symbols
+            .iter()
+            .find(|form| range_contains_position(&form.range, position))
+            .map(|form| &form.let_binding_external_impure)
+    }
 }
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, String> {
@@ -707,6 +737,10 @@ fn collect_let_binding_effects(
     native_core::collect_let_binding_effects(node, effects, fallback_effects)
 }
 
+fn collect_let_binding_external_impurity(node: &TypedExpression, out: &mut HashMap<String, bool>) {
+    que::infer::collect_top_level_function_external_impurity(node, out)
+}
+
 fn analyze_document_text(
     text: &str,
     std_defs: &[Expression],
@@ -723,6 +757,7 @@ fn analyze_document_text(
             symbol_types: HashMap::new(),
             let_binding_types: HashMap::new(),
             let_binding_effects: HashMap::new(),
+            let_binding_external_impure: HashMap::new(),
             user_bound_symbols: HashSet::new(),
             form_scoped_symbols: Vec::new(),
         };
@@ -732,6 +767,7 @@ fn analyze_document_text(
     let mut symbol_types_raw: HashMap<String, Type> = HashMap::new();
     let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();
     let mut let_binding_effects: HashMap<String, EffectFlags> = HashMap::new();
+    let mut let_binding_external_impure: HashMap<String, bool> = HashMap::new();
     let mut user_bound_symbols = HashSet::new();
     let mut form_scoped_symbols = Vec::new();
     let analysis_source = strip_comment_bodies_preserve_newlines(text);
@@ -758,6 +794,7 @@ fn analyze_document_text(
                         symbol_types: HashMap::new(),
                         let_binding_types: HashMap::new(),
                         let_binding_effects: HashMap::new(),
+                        let_binding_external_impure: HashMap::new(),
                         user_bound_symbols,
                         form_scoped_symbols,
                     };
@@ -774,6 +811,7 @@ fn analyze_document_text(
                 collect_symbol_types(form, &mut symbol_types_raw);
                 collect_let_binding_types(form, &mut let_binding_types_raw);
                 collect_let_binding_effects(form, &mut let_binding_effects, global_effects);
+                collect_let_binding_external_impurity(form, &mut let_binding_external_impure);
             }
             form_scoped_symbols = build_form_scoped_analyses(
                 text,
@@ -814,6 +852,7 @@ fn analyze_document_text(
         symbol_types,
         let_binding_types,
         let_binding_effects,
+        let_binding_external_impure,
         user_bound_symbols,
         form_scoped_symbols,
     }
@@ -863,6 +902,7 @@ fn analyze_document_text_safe(
                 symbol_types: HashMap::new(),
                 let_binding_types: HashMap::new(),
                 let_binding_effects: HashMap::new(),
+                let_binding_external_impure: HashMap::new(),
                 user_bound_symbols: HashSet::new(),
                 form_scoped_symbols: Vec::new(),
             }
@@ -902,9 +942,11 @@ fn build_form_scoped_analyses(
         let mut raw_symbols: HashMap<String, Type> = HashMap::new();
         let mut raw_let_bindings: HashMap<String, Type> = HashMap::new();
         let mut let_binding_effects = HashMap::new();
+        let mut let_binding_external_impure = HashMap::new();
         collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
         collect_let_binding_types(typed_user_forms[idx], &mut raw_let_bindings);
         collect_let_binding_effects(typed_user_forms[idx], &mut let_binding_effects, global_effects);
+        collect_let_binding_external_impurity(typed_user_forms[idx], &mut let_binding_external_impure);
         let symbol_types = raw_symbols
             .into_iter()
             .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
@@ -918,6 +960,7 @@ fn build_form_scoped_analyses(
             symbol_types,
             let_binding_types,
             let_binding_effects,
+            let_binding_external_impure,
         });
     }
 
