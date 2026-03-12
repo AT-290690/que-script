@@ -3417,6 +3417,18 @@ fn fold_if(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         return node;
     }
     let Some(cond) = items.get(1).and_then(bool_literal) else {
+        if items[2].to_lisp() == items[3].to_lisp() {
+            let Some(cond_node) = node.children.get(1).cloned() else {
+                return node;
+            };
+            let Some(branch_node) = node.children.get(2).cloned() else {
+                return node;
+            };
+            if cond_node.effect.is_pure() {
+                return branch_node;
+            }
+            return make_do_pair(&node, cond_node, branch_node);
+        }
         return node;
     };
     if cond {
@@ -3436,6 +3448,23 @@ fn fold_and(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         }
         return make_folded_literal(&node, Expression::Word("false".to_string()), Type::Bool);
     }
+    if let Some(rhs) = items.get(2).and_then(bool_literal) {
+        let Some(lhs_node) = node.children.get(1).cloned() else {
+            return node;
+        };
+        if rhs {
+            return lhs_node;
+        }
+        let false_node = make_folded_literal(
+            &node,
+            Expression::Word("false".to_string()),
+            Type::Bool
+        );
+        if lhs_node.effect.is_pure() {
+            return false_node;
+        }
+        return make_do_pair(&node, lhs_node, false_node);
+    }
     node
 }
 
@@ -3448,6 +3477,23 @@ fn fold_or(node: TypedExpression, items: &[Expression]) -> TypedExpression {
             return make_folded_literal(&node, Expression::Word("true".to_string()), Type::Bool);
         }
         return node.children.get(2).cloned().unwrap_or(node);
+    }
+    if let Some(rhs) = items.get(2).and_then(bool_literal) {
+        let Some(lhs_node) = node.children.get(1).cloned() else {
+            return node;
+        };
+        if !rhs {
+            return lhs_node;
+        }
+        let true_node = make_folded_literal(
+            &node,
+            Expression::Word("true".to_string()),
+            Type::Bool
+        );
+        if lhs_node.effect.is_pure() {
+            return true_node;
+        }
+        return make_do_pair(&node, lhs_node, true_node);
     }
     node
 }
@@ -3596,6 +3642,34 @@ fn make_folded_literal(node: &TypedExpression, expr: Expression, typ: Type) -> T
         typ: node.typ.clone().or(Some(typ)),
         effect: EffectFlags::PURE,
         children: Vec::new(),
+    }
+}
+
+fn make_do_pair(
+    parent: &TypedExpression,
+    first: TypedExpression,
+    second: TypedExpression
+) -> TypedExpression {
+    TypedExpression {
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("do".to_string()),
+                first.expr.clone(),
+                second.expr.clone()
+            ]
+        ),
+        typ: second.typ.clone().or(parent.typ.clone()),
+        effect: first.effect | second.effect,
+        children: vec![
+            TypedExpression {
+                expr: Expression::Word("do".to_string()),
+                typ: None,
+                effect: EffectFlags::PURE,
+                children: Vec::new(),
+            },
+            first,
+            second,
+        ],
     }
 }
 
