@@ -34,7 +34,7 @@ use lsp_types::{
     TextDocumentSyncKind,
     Uri,
 };
-use que::infer::{ infer_with_builtins_typed_lsp, InferErrorScope, TypedExpression };
+use que::infer::{ EffectFlags, infer_with_builtins_typed_lsp, InferErrorScope, TypedExpression };
 use que::lsp_native_core as native_core;
 use que::parser::Expression;
 use que::types::{ Type, TypeEnv };
@@ -53,6 +53,7 @@ struct DocAnalysis {
     diagnostics: Vec<Diagnostic>,
     symbol_types: HashMap<String, String>,
     let_binding_types: HashMap<String, String>,
+    let_binding_effects: HashMap<String, EffectFlags>,
     user_bound_symbols: HashSet<String>,
     form_scoped_symbols: Vec<FormScopedAnalysis>,
 }
@@ -62,6 +63,7 @@ struct FormScopedAnalysis {
     range: Range,
     symbol_types: HashMap<String, String>,
     let_binding_types: HashMap<String, String>,
+    let_binding_effects: HashMap<String, EffectFlags>,
 }
 
 struct LspCore {
@@ -69,6 +71,7 @@ struct LspCore {
     base_env: TypeEnv,
     base_next_id: u64,
     global_signatures: HashMap<String, String>,
+    global_effects: HashMap<String, EffectFlags>,
     std_fallback_names: HashSet<String>,
 }
 
@@ -177,7 +180,9 @@ fn run() -> Result<(), String> {
 
 fn build_lsp_core() -> LspCore {
     let std_defs = load_std_definitions();
-    let (base_env, base_next_id, global_signatures) = build_base_environment(&std_defs);
+    let (base_env, base_next_id, global_signatures, global_effects) = build_base_environment(
+        &std_defs
+    );
     let std_fallback_names = collect_std_top_level_let_names(&std_defs)
         .into_iter()
         .filter(|name| !name.starts_with("std/"))
@@ -187,6 +192,7 @@ fn build_lsp_core() -> LspCore {
         base_env,
         base_next_id,
         global_signatures,
+        global_effects,
         std_fallback_names,
     }
 }
@@ -249,6 +255,7 @@ impl ServerState {
                     &core.base_env,
                     core.base_next_id,
                     &core.global_signatures,
+                    &core.global_effects,
                     &core.std_fallback_names
                 )
             });
@@ -304,6 +311,7 @@ impl ServerState {
                         &core.base_env,
                         core.base_next_id,
                         &core.global_signatures,
+                        &core.global_effects,
                         &core.std_fallback_names
                     )
                 });
@@ -330,6 +338,7 @@ impl ServerState {
                         diagnostics: Vec::new(),
                         symbol_types: HashMap::new(),
                         let_binding_types: HashMap::new(),
+                        let_binding_effects: HashMap::new(),
                         user_bound_symbols: HashSet::new(),
                         form_scoped_symbols: Vec::new(),
                     });
@@ -410,8 +419,23 @@ impl ServerState {
                 .or_else(|| doc.let_binding_types.get(&symbol).cloned())
                 .or_else(|| self.global_signature(&symbol))?;
             let declaration_type = normalize_signature(&declaration_type);
+            let declaration_effect = self
+                .form_let_effects_at(doc, position)
+                .and_then(|m| m.get(&symbol).copied())
+                .or_else(|| doc.let_binding_effects.get(&symbol).copied())
+                .or_else(|| self.with_core(|core| core.global_effects.get(&symbol).copied()))
+                .or_else(|| native_core::known_symbol_effect(&symbol));
+            let effect_text = if declaration_type.contains("->") {
+                declaration_effect.and_then(native_core::format_effect_flags)
+            } else {
+                None
+            };
+            let value = if let Some(effect) = effect_text {
+                format!("```que\n{} : {}\n```\n`effects: {}`", symbol, declaration_type, effect)
+            } else {
+                format!("```que\n{} : {}\n```", symbol, declaration_type)
+            };
 
-            let value = format!("```que\n{} : {}\n```", symbol, declaration_type);
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
@@ -435,8 +459,23 @@ impl ServerState {
             scoped_sig.or(doc_sig).or(global_sig)
         })?;
         let type_info = normalize_signature(&type_info);
+        let symbol_effect = self
+            .form_let_effects_at(doc, position)
+            .and_then(|m| m.get(&symbol).copied())
+            .or_else(|| doc.let_binding_effects.get(&symbol).copied())
+            .or_else(|| self.with_core(|core| core.global_effects.get(&symbol).copied()))
+            .or_else(|| native_core::known_symbol_effect(&symbol));
+        let effect_text = if type_info.contains("->") {
+            symbol_effect.and_then(native_core::format_effect_flags)
+        } else {
+            None
+        };
+        let value = if let Some(effect) = effect_text {
+            format!("```que\n{} : {}\n```\n`effects: {}`", symbol, type_info, effect)
+        } else {
+            format!("```que\n{} : {}\n```", symbol, type_info)
+        };
 
-        let value = format!("```que\n{} : {}\n```", symbol, type_info);
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
@@ -595,6 +634,17 @@ impl ServerState {
             .find(|form| range_contains_position(&form.range, position))
             .map(|form| &form.let_binding_types)
     }
+
+    fn form_let_effects_at<'a>(
+        &'a self,
+        doc: &'a DocAnalysis,
+        position: Position
+    ) -> Option<&'a HashMap<String, EffectFlags>> {
+        doc.form_scoped_symbols
+            .iter()
+            .find(|form| range_contains_position(&form.range, position))
+            .map(|form| &form.let_binding_effects)
+    }
 }
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, String> {
@@ -631,7 +681,9 @@ fn strip_type_var_numbers(input: &str) -> String {
     native_core::strip_type_var_numbers(input)
 }
 
-fn build_base_environment(std_defs: &[Expression]) -> (TypeEnv, u64, HashMap<String, String>) {
+fn build_base_environment(
+    std_defs: &[Expression]
+) -> (TypeEnv, u64, HashMap<String, String>, HashMap<String, EffectFlags>) {
     native_core::build_base_environment(std_defs)
 }
 
@@ -647,12 +699,21 @@ fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<St
     native_core::collect_let_binding_types(node, signatures)
 }
 
+fn collect_let_binding_effects(
+    node: &TypedExpression,
+    effects: &mut HashMap<String, EffectFlags>,
+    fallback_effects: &HashMap<String, EffectFlags>
+) {
+    native_core::collect_let_binding_effects(node, effects, fallback_effects)
+}
+
 fn analyze_document_text(
     text: &str,
     std_defs: &[Expression],
     base_env: &TypeEnv,
     base_next_id: u64,
     global_signatures: &HashMap<String, String>,
+    global_effects: &HashMap<String, EffectFlags>,
     std_fallback_names: &HashSet<String>
 ) -> DocAnalysis {
     if text.trim().is_empty() {
@@ -661,6 +722,7 @@ fn analyze_document_text(
             diagnostics: Vec::new(),
             symbol_types: HashMap::new(),
             let_binding_types: HashMap::new(),
+            let_binding_effects: HashMap::new(),
             user_bound_symbols: HashSet::new(),
             form_scoped_symbols: Vec::new(),
         };
@@ -669,6 +731,7 @@ fn analyze_document_text(
     let mut diagnostics = Vec::new();
     let mut symbol_types_raw: HashMap<String, Type> = HashMap::new();
     let mut let_binding_types_raw: HashMap<String, Type> = HashMap::new();
+    let mut let_binding_effects: HashMap<String, EffectFlags> = HashMap::new();
     let mut user_bound_symbols = HashSet::new();
     let mut form_scoped_symbols = Vec::new();
     let analysis_source = strip_comment_bodies_preserve_newlines(text);
@@ -694,6 +757,7 @@ fn analyze_document_text(
                         diagnostics,
                         symbol_types: HashMap::new(),
                         let_binding_types: HashMap::new(),
+                        let_binding_effects: HashMap::new(),
                         user_bound_symbols,
                         form_scoped_symbols,
                     };
@@ -709,8 +773,14 @@ fn analyze_document_text(
             for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
                 collect_symbol_types(form, &mut symbol_types_raw);
                 collect_let_binding_types(form, &mut let_binding_types_raw);
+                collect_let_binding_effects(form, &mut let_binding_effects, global_effects);
             }
-            form_scoped_symbols = build_form_scoped_analyses(text, user_form_count, &typed);
+            form_scoped_symbols = build_form_scoped_analyses(
+                text,
+                user_form_count,
+                &typed,
+                global_effects
+            );
         }
         Err(err) => {
             let mut candidate_symbols = user_bound_symbols.clone();
@@ -743,6 +813,7 @@ fn analyze_document_text(
         diagnostics,
         symbol_types,
         let_binding_types,
+        let_binding_effects,
         user_bound_symbols,
         form_scoped_symbols,
     }
@@ -762,6 +833,7 @@ fn analyze_document_text_safe(
     base_env: &TypeEnv,
     base_next_id: u64,
     global_signatures: &HashMap<String, String>,
+    global_effects: &HashMap<String, EffectFlags>,
     std_fallback_names: &HashSet<String>
 ) -> DocAnalysis {
     match
@@ -773,6 +845,7 @@ fn analyze_document_text_safe(
                     base_env,
                     base_next_id,
                     global_signatures,
+                    global_effects,
                     std_fallback_names
                 )
             })
@@ -789,6 +862,7 @@ fn analyze_document_text_safe(
                 diagnostics: make_error_diagnostic(text, message, None),
                 symbol_types: HashMap::new(),
                 let_binding_types: HashMap::new(),
+                let_binding_effects: HashMap::new(),
                 user_bound_symbols: HashSet::new(),
                 form_scoped_symbols: Vec::new(),
             }
@@ -809,7 +883,8 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
 fn build_form_scoped_analyses(
     text: &str,
     user_form_count: usize,
-    typed_program: &TypedExpression
+    typed_program: &TypedExpression,
+    global_effects: &HashMap<String, EffectFlags>
 ) -> Vec<FormScopedAnalysis> {
     if user_form_count == 0 {
         return Vec::new();
@@ -826,8 +901,10 @@ fn build_form_scoped_analyses(
     for idx in 0..count {
         let mut raw_symbols: HashMap<String, Type> = HashMap::new();
         let mut raw_let_bindings: HashMap<String, Type> = HashMap::new();
+        let mut let_binding_effects = HashMap::new();
         collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
         collect_let_binding_types(typed_user_forms[idx], &mut raw_let_bindings);
+        collect_let_binding_effects(typed_user_forms[idx], &mut let_binding_effects, global_effects);
         let symbol_types = raw_symbols
             .into_iter()
             .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
@@ -840,6 +917,7 @@ fn build_form_scoped_analyses(
             range: form_ranges[idx],
             symbol_types,
             let_binding_types,
+            let_binding_effects,
         });
     }
 

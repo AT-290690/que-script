@@ -1,4 +1,4 @@
-use crate::infer::TypedExpression;
+use crate::infer::{ EffectFlags, TypedExpression };
 use crate::parser::Expression;
 use crate::types::Type;
 use std::collections::{ HashMap, HashSet };
@@ -196,8 +196,10 @@ fn dead_code_eliminate_top_level_defs(node: &TypedExpression) -> TypedExpression
     for (idx, item) in norm_items.iter().enumerate().skip(1) {
         if let Some((name, _rhs)) = top_level_let_def(item) {
             if !needed.contains(name) {
-                removed_any = true;
-                continue;
+                if top_level_let_rhs_is_removable(&normalized_do, idx) {
+                    removed_any = true;
+                    continue;
+                }
             }
         }
         new_items.push(item.clone());
@@ -214,8 +216,24 @@ fn dead_code_eliminate_top_level_defs(node: &TypedExpression) -> TypedExpression
     TypedExpression {
         expr: Expression::Apply(new_items),
         typ: normalized_do.typ.clone(),
+        effect: normalized_do.effect,
         children: new_children,
     }
+}
+
+fn top_level_let_rhs_is_removable(do_node: &TypedExpression, idx: usize) -> bool {
+    do_node
+        .children
+        .get(idx)
+        .and_then(|let_node| let_node.children.get(2))
+        .map(|rhs| {
+            rhs.effect.is_pure() ||
+                matches!(
+                    &rhs.expr,
+                    Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
+                )
+        })
+        .unwrap_or(false)
 }
 
 fn top_level_let_def(expr: &Expression) -> Option<(&String, &Expression)> {
@@ -3043,6 +3061,7 @@ fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
     let rebuilt_node = TypedExpression {
         expr: rebuilt_expr,
         typ: node.typ.clone(),
+        effect: node.effect,
         children: optimized_children,
     };
     fold_constants(rebuilt_node)
@@ -3149,6 +3168,7 @@ fn fuse_apply_wrapper_call(
         let rewritten = TypedExpression {
             expr: Expression::Apply(new_items),
             typ: node.typ.clone(),
+            effect: node.effect,
             children: new_children,
         };
         return beta_reduce_immediate_lambda_call(&rewritten, match &rewritten.expr {
@@ -3187,6 +3207,7 @@ fn fuse_apply_wrapper_call(
     let rewritten = TypedExpression {
         expr: Expression::Apply(new_items),
         typ: node.typ.clone(),
+        effect: node.effect,
         children: new_children,
     };
     beta_reduce_immediate_lambda_call(&rewritten, match &rewritten.expr {
@@ -3250,7 +3271,7 @@ fn beta_reduce_immediate_lambda_call(
         }
 
         let uses = count_word_uses_expr(body_expr, param);
-        if uses > 1 && !is_atomic_inline_arg_expr(&arg_expr) {
+        if !can_no_temp_inline_arg(&arg_expr, &arg_node, uses) {
             return None;
         }
 
@@ -3293,7 +3314,11 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     let mut kept_indices: Vec<usize> = Vec::new();
     kept_indices.push(0); // keep "do"
     for i in 1..last_idx {
-        if !is_pure_literal_expr(&inlined_items[i]) {
+        let Some(child) = inlined_children.get(i) else {
+            kept_indices.push(i);
+            continue;
+        };
+        if !is_elidable_do_statement_expr(&inlined_items[i], child) {
             kept_indices.push(i);
         }
     }
@@ -3303,6 +3328,7 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         return TypedExpression {
             expr: Expression::Apply(inlined_items),
             typ: normalized_do.typ,
+            effect: normalized_do.effect,
             children: inlined_children,
         };
     }
@@ -3325,6 +3351,7 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     TypedExpression {
         expr: Expression::Apply(new_expr_items),
         typ: normalized_do.typ,
+        effect: normalized_do.effect,
         children: new_children,
     }
 }
@@ -3341,12 +3368,14 @@ fn normalize_do_node(node: &TypedExpression, items: &[Expression]) -> Option<Typ
         children.push(TypedExpression {
             expr: Expression::Word("do".to_string()),
             typ: None,
+            effect: EffectFlags::PURE,
             children: Vec::new(),
         });
         children.extend(node.children.clone());
         return Some(TypedExpression {
             expr: node.expr.clone(),
             typ: node.typ.clone(),
+            effect: node.effect,
             children,
         });
     }
@@ -3565,6 +3594,7 @@ fn make_folded_literal(node: &TypedExpression, expr: Expression, typ: Type) -> T
     TypedExpression {
         expr,
         typ: node.typ.clone().or(Some(typ)),
+        effect: EffectFlags::PURE,
         children: Vec::new(),
     }
 }
@@ -3597,6 +3627,64 @@ fn is_pure_literal_expr(expr: &Expression) -> bool {
         Expression::Word(w) if w == "true" || w == "false" => true,
         _ => false,
     }
+}
+
+fn is_elidable_do_statement_expr(expr: &Expression, typed: &TypedExpression) -> bool {
+    if !typed.effect.is_pure() {
+        return false;
+    }
+    if is_pure_literal_expr(expr) {
+        return true;
+    }
+    is_safe_pure_call_expr(expr)
+}
+
+fn is_safe_pure_call_expr(expr: &Expression) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    let Some(Expression::Word(op)) = items.first() else {
+        return false;
+    };
+    if !matches!(
+        op.as_str(),
+        "=" |
+            "=?" |
+            "=#" |
+            "=." |
+            "<" |
+            "<#" |
+            "<." |
+            ">" |
+            ">#" |
+            ">." |
+            "<=" |
+            "<=#" |
+            "<=." |
+            ">=" |
+            ">=#" |
+            ">=." |
+            "and" |
+            "or" |
+            "not" |
+            "~" |
+            "^" |
+            "|" |
+            "&" |
+            "<<" |
+            ">>" |
+            "length" |
+            "Int->Float" |
+            "Float->Int"
+    ) {
+        return false;
+    }
+
+    items.iter().skip(1).all(|arg| {
+        is_pure_literal_expr(arg) ||
+            matches!(arg, Expression::Word(_)) ||
+            is_safe_pure_call_expr(arg)
+    })
 }
 
 #[derive(Clone)]
@@ -3664,6 +3752,7 @@ fn inline_do_simple_calls(
         let cur_node = TypedExpression {
             expr: Expression::Apply(cur_items.clone()),
             typ: node.typ.clone(),
+            effect: node.effect,
             children: cur_children.clone(),
         };
         let (next_items, next_children, changed) = inline_do_simple_calls_once(&cur_node, state);
@@ -3825,6 +3914,7 @@ fn substitute_word_with_typed(
     TypedExpression {
         expr: new_expr,
         typ: node.typ.clone(),
+        effect: node.effect,
         children: new_children,
     }
 }
@@ -4054,9 +4144,14 @@ fn inline_call_with_def(
         let arg_typ = arg_node.typ.as_ref()?;
         let uses = count_word_uses_expr(&def.body_expr, param);
         let head_used = word_used_as_call_head(&def.body_expr, param);
+        let can_no_temp = can_no_temp_inline_arg(&arg_expr, &arg_node, uses);
         let direct_lambda =
-            is_lambda_expr(&arg_expr) && lambda_takes_only_scalar_args(arg_typ) && !head_used;
+            can_no_temp &&
+            is_lambda_expr(&arg_expr) &&
+            lambda_takes_only_scalar_args(arg_typ) &&
+            !head_used;
         let direct_scalar =
+            can_no_temp &&
             is_no_temp_inline_scalar_type(arg_typ) &&
             (uses <= 1 || is_atomic_inline_arg_expr(&arg_expr));
         if direct_lambda || direct_scalar {
@@ -4071,6 +4166,7 @@ fn inline_call_with_def(
         typed_subst.insert(param.clone(), TypedExpression {
             expr: tmp_expr.clone(),
             typ: arg_node.typ.clone(),
+            effect: EffectFlags::PURE,
             children: Vec::new(),
         });
 
@@ -4084,15 +4180,18 @@ fn inline_call_with_def(
         let let_typed = TypedExpression {
             expr: let_expr.clone(),
             typ: arg_node.typ.clone(),
+            effect: arg_node.effect,
             children: vec![
                 TypedExpression {
                     expr: Expression::Word("let".to_string()),
                     typ: None,
+                    effect: EffectFlags::PURE,
                     children: Vec::new(),
                 },
                 TypedExpression {
                     expr: Expression::Word(tmp),
                     typ: arg_node.typ.clone(),
+                    effect: EffectFlags::PURE,
                     children: Vec::new(),
                 },
                 arg_node
@@ -4124,6 +4223,7 @@ fn inline_nested_calls(
     let rewritten_node = TypedExpression {
         expr: rewritten_expr,
         typ: node.typ.clone(),
+        effect: node.effect,
         children: rewritten_children,
     };
 
@@ -4166,7 +4266,7 @@ fn try_inline_call_no_temps(
             return None;
         }
         let uses = count_word_uses_expr(&def.body_expr, param);
-        if uses > 1 && !is_atomic_inline_arg_expr(&arg_expr) {
+        if !can_no_temp_inline_arg(&arg_expr, &arg_node, uses) {
             return None;
         }
         expr_subst.insert(param.clone(), arg_expr);
@@ -4178,6 +4278,20 @@ fn try_inline_call_no_temps(
 
 fn is_atomic_inline_arg_expr(expr: &Expression) -> bool {
     matches!(expr, Expression::Word(_) | Expression::Int(_) | Expression::Float(_))
+}
+
+fn can_no_temp_inline_arg(arg_expr: &Expression, arg_node: &TypedExpression, uses: usize) -> bool {
+    if uses > 1 && !is_atomic_inline_arg_expr(arg_expr) {
+        return false;
+    }
+
+    if !arg_node.effect.is_pure() {
+        // Without a temp binding, substitution can drop or re-order evaluation.
+        // Keep no-temp inlining only when the argument is a single atomic read.
+        return is_atomic_inline_arg_expr(arg_expr) && uses == 1;
+    }
+
+    true
 }
 
 fn is_no_temp_inline_scalar_type(typ: &Type) -> bool {
@@ -4231,6 +4345,7 @@ fn substitute_params_typed(
     TypedExpression {
         expr: new_expr,
         typ: node.typ.clone(),
+        effect: node.effect,
         children: new_children,
     }
 }

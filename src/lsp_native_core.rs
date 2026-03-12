@@ -1,4 +1,4 @@
-use crate::infer::{ infer_with_builtins_typed, InferErrorScope, TypedExpression };
+use crate::infer::{ EffectFlags, infer_with_builtins_typed, InferErrorScope, TypedExpression };
 use crate::parser::{ self, Expression };
 use crate::types::{ create_builtin_environment, Type, TypeEnv };
 use std::collections::{ HashMap, HashSet };
@@ -104,7 +104,9 @@ pub fn strip_type_var_numbers(input: &str) -> String {
     out
 }
 
-pub fn build_base_environment(std_defs: &[Expression]) -> (TypeEnv, u64, HashMap<String, String>) {
+pub fn build_base_environment(
+    std_defs: &[Expression]
+) -> (TypeEnv, u64, HashMap<String, String>, HashMap<String, EffectFlags>) {
     let (env, next_id) = create_builtin_environment(TypeEnv::new());
 
     let mut signatures = HashMap::new();
@@ -125,7 +127,9 @@ pub fn build_base_environment(std_defs: &[Expression]) -> (TypeEnv, u64, HashMap
             .or_insert_with(|| normalize_signature(signature));
     }
 
-    (env, next_id, signatures)
+    let std_effects = infer_std_effects(&env, next_id, std_defs);
+
+    (env, next_id, signatures, std_effects)
 }
 
 pub fn load_std_definitions() -> Vec<Expression> {
@@ -182,6 +186,45 @@ pub fn infer_std_signatures(
         .collect()
 }
 
+pub fn infer_std_effects(
+    base_env: &TypeEnv,
+    base_next_id: u64,
+    std_defs: &[Expression]
+) -> HashMap<String, EffectFlags> {
+    if std_defs.is_empty() {
+        return HashMap::new();
+    }
+
+    let std_program = Expression::Apply(
+        std::iter
+            ::once(Expression::Word("do".to_string()))
+            .chain(std_defs.iter().cloned())
+            .collect()
+    );
+
+    let mut effects: HashMap<String, EffectFlags> = HashMap::new();
+    if
+        let Ok((_typ, typed)) = infer_with_builtins_typed(&std_program, (
+            base_env.clone(),
+            base_next_id,
+        ))
+    {
+        collect_let_binding_effects(&typed, &mut effects, &HashMap::new());
+        let mut fallback = effects.clone();
+        for _ in 0..8 {
+            let mut next = fallback.clone();
+            collect_let_binding_effects(&typed, &mut next, &fallback);
+            if next == fallback {
+                break;
+            }
+            fallback = next;
+        }
+        effects = fallback;
+    }
+
+    effects
+}
+
 pub fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<String, Type>) {
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
@@ -204,6 +247,113 @@ pub fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMa
 
     for child in &node.children {
         collect_let_binding_types(child, signatures);
+    }
+}
+
+fn effect_specificity_score(effect: EffectFlags) -> i32 {
+    let mut score = 0;
+    if effect.contains(EffectFlags::MUTATE) {
+        score += 1;
+    }
+    if effect.contains(EffectFlags::IO) {
+        score += 2;
+    }
+    if effect.contains(EffectFlags::UNKNOWN_CALL) {
+        score += 4;
+    }
+    score
+}
+
+fn should_replace_effect(existing: EffectFlags, candidate: EffectFlags) -> bool {
+    effect_specificity_score(candidate) > effect_specificity_score(existing)
+}
+
+pub fn collect_let_binding_effects(
+    node: &TypedExpression,
+    effects: &mut HashMap<String, EffectFlags>,
+    fallback_effects: &HashMap<String, EffectFlags>
+) {
+    if let Expression::Apply(items) = &node.expr {
+        if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
+            if keyword == "let" || keyword == "let*" || keyword == "mut" {
+                if let Some(rhs_node) = node.children.get(2) {
+                    let mut rhs_effect = rhs_node.effect;
+                    if rhs_effect.is_pure() {
+                        if let Expression::Word(alias_target) = &rhs_node.expr {
+                            if let Some(target_effect) = effects
+                                .get(alias_target)
+                                .copied()
+                                .or_else(|| fallback_effects.get(alias_target).copied())
+                                .or_else(|| known_symbol_effect(alias_target))
+                            {
+                                rhs_effect = target_effect;
+                            }
+                        }
+                    }
+                    match effects.get(name).copied() {
+                        Some(existing) => {
+                            if should_replace_effect(existing, rhs_effect) {
+                                effects.insert(name.clone(), rhs_effect);
+                            }
+                        }
+                        None => {
+                            effects.insert(name.clone(), rhs_effect);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for child in &node.children {
+        collect_let_binding_effects(child, effects, fallback_effects);
+    }
+}
+
+pub fn known_symbol_effect(symbol: &str) -> Option<EffectFlags> {
+    if
+        matches!(
+            symbol,
+            "read!" |
+                "write!" |
+                "list-dir!" |
+                "mkdir!" |
+                "delete!" |
+                "move!" |
+                "print!" |
+                "sleep!" |
+                "clear!"
+        )
+    {
+        return Some(EffectFlags::IO);
+    }
+    if matches!(symbol, "set!" | "alter!" | "pop!") {
+        return Some(EffectFlags::MUTATE);
+    }
+    if symbol.ends_with('!') {
+        return Some(EffectFlags::MUTATE);
+    }
+    None
+}
+
+pub fn format_effect_flags(effect: EffectFlags) -> Option<String> {
+    if effect.is_pure() {
+        return None;
+    }
+    let mut labels = Vec::new();
+    if effect.contains(EffectFlags::MUTATE) {
+        labels.push("mutate");
+    }
+    if effect.contains(EffectFlags::IO) {
+        labels.push("io");
+    }
+    if effect.contains(EffectFlags::UNKNOWN_CALL) {
+        labels.push("unknown-call");
+    }
+    if labels.is_empty() {
+        None
+    } else {
+        Some(labels.join(", "))
     }
 }
 

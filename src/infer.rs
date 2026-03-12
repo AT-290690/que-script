@@ -1,6 +1,7 @@
 use crate::parser::Expression;
 use crate::types::{ generalize, Type, TypeEnv, TypeScheme, TypeVar };
 use std::collections::{ HashMap, HashSet, VecDeque };
+use std::ops::{ BitOr, BitOrAssign };
 
 #[derive(Clone, Debug)]
 pub enum TypeErrorVariant {
@@ -35,7 +36,40 @@ pub struct InferErrorInfo {
 pub struct TypedExpression {
     pub expr: Expression,
     pub typ: Option<Type>,
+    pub effect: EffectFlags,
     pub children: Vec<TypedExpression>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub struct EffectFlags(pub u8);
+
+impl EffectFlags {
+    pub const PURE: Self = Self(0);
+    pub const MUTATE: Self = Self(1 << 0);
+    pub const IO: Self = Self(1 << 1);
+    pub const UNKNOWN_CALL: Self = Self(1 << 2);
+
+    pub fn is_pure(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+}
+
+impl BitOr for EffectFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for EffectFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
 }
 
 fn expression_id(expr: &Expression) -> usize {
@@ -58,7 +92,632 @@ fn build_typed_expression(
     TypedExpression {
         expr: expr.clone(),
         typ: solved_expr_types.get(&expression_id(expr)).cloned(),
+        effect: EffectFlags::PURE,
         children,
+    }
+}
+
+fn is_io_op(op: &str) -> bool {
+    matches!(
+        op,
+        "read!" |
+            "write!" |
+            "list-dir!" |
+            "mkdir!" |
+            "delete!" |
+            "move!" |
+            "print!" |
+            "sleep!" |
+            "clear!"
+    )
+}
+
+fn is_mutating_op(op: &str) -> bool {
+    matches!(op, "set!" | "alter!" | "pop!")
+}
+
+fn is_intrinsic_pure_op(op: &str) -> bool {
+    matches!(
+        op,
+        "+" |
+            "+#" |
+            "+." |
+            "-" |
+            "-#" |
+            "-." |
+            "*" |
+            "*#" |
+            "*." |
+            "/" |
+            "/#" |
+            "/." |
+            "mod" |
+            "mod." |
+            "=" |
+            "=?" |
+            "=#" |
+            "=." |
+            "<" |
+            "<#" |
+            "<." |
+            ">" |
+            ">#" |
+            ">." |
+            "<=" |
+            "<=#" |
+            "<=." |
+            ">=" |
+            ">=#" |
+            ">=." |
+            "and" |
+            "or" |
+            "not" |
+            "~" |
+            "^" |
+            "|" |
+            "&" |
+            "<<" |
+            ">>" |
+            "length" |
+            "get" |
+            "car" |
+            "cdr" |
+            "fst" |
+            "snd" |
+            "Int->Float" |
+            "Float->Int" |
+            "as" |
+            "char" |
+            "vector" |
+            "string" |
+            "tuple" |
+            "lambda" |
+            "if" |
+            "while" |
+            "let" |
+            "let*" |
+            "mut" |
+            "do"
+    )
+}
+
+fn local_lookup_fn_effect(
+    local_fn_scopes: &[HashMap<String, EffectFlags>],
+    name: &str
+) -> Option<EffectFlags> {
+    for scope in local_fn_scopes.iter().rev() {
+        if let Some(effect) = scope.get(name) {
+            return Some(*effect);
+        }
+    }
+    None
+}
+
+fn estimate_effect_immutable(
+    node: &TypedExpression,
+    top_fn_effects: &HashMap<String, EffectFlags>,
+    local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>
+) -> EffectFlags {
+    match &node.expr {
+        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => EffectFlags::PURE,
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return EffectFlags::PURE;
+            }
+
+            let Some(head) = items.first() else {
+                return EffectFlags::PURE;
+            };
+            let Some(head_child) = node.children.first() else {
+                return EffectFlags::PURE;
+            };
+
+            match head {
+                Expression::Word(op) if op == "lambda" => {
+                    if node.children.is_empty() {
+                        return EffectFlags::PURE;
+                    }
+                    let body_idx = node.children.len() - 1;
+                    local_fn_scopes.push(HashMap::new());
+                    let effect = estimate_effect_immutable(
+                        &node.children[body_idx],
+                        top_fn_effects,
+                        local_fn_scopes
+                    );
+                    local_fn_scopes.pop();
+                    effect
+                }
+                Expression::Word(op) if op == "if" => {
+                    node.children
+                        .iter()
+                        .skip(1)
+                        .fold(EffectFlags::PURE, |acc, ch|
+                            acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
+                        )
+                }
+                Expression::Word(op) if op == "while" => {
+                    node.children
+                        .iter()
+                        .skip(1)
+                        .fold(EffectFlags::PURE, |acc, ch|
+                            acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
+                        )
+                }
+                Expression::Word(op) if op == "do" => {
+                    local_fn_scopes.push(HashMap::new());
+                    let mut effect = EffectFlags::PURE;
+                    for (idx, ch) in node.children.iter().enumerate().skip(1) {
+                        effect |= estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes);
+                        if
+                            let Some(Expression::Apply(form_items)) = items.get(idx)
+                        {
+                            if
+                                let [Expression::Word(kw), Expression::Word(name), rhs] =
+                                    &form_items[..]
+                            {
+                                if (kw == "let" || kw == "let*") && matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")) {
+                                    if let Some(rhs_node) = ch.children.get(2) {
+                                        if let Some(scope) = local_fn_scopes.last_mut() {
+                                            scope.insert(name.clone(), rhs_node.effect);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    local_fn_scopes.pop();
+                    effect
+                }
+                Expression::Word(op) if op == "let" || op == "let*" || op == "mut" => {
+                    node.children
+                        .get(2)
+                        .map(|rhs| estimate_effect_immutable(rhs, top_fn_effects, local_fn_scopes))
+                        .unwrap_or(EffectFlags::PURE)
+                }
+                Expression::Word(op) => {
+                    let mut effect = EffectFlags::PURE;
+                    for ch in node.children.iter().skip(1) {
+                        effect |= estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes);
+                    }
+
+                    if is_io_op(op) {
+                        effect |= EffectFlags::IO;
+                    } else if is_mutating_op(op) {
+                        effect |= EffectFlags::MUTATE;
+                    } else if let Some(local_effect) = local_lookup_fn_effect(local_fn_scopes, op) {
+                        effect |= local_effect;
+                    } else if let Some(top_effect) = top_fn_effects.get(op) {
+                        effect |= *top_effect;
+                    } else if !is_intrinsic_pure_op(op) {
+                        effect |= EffectFlags::UNKNOWN_CALL;
+                    }
+
+                    effect
+                }
+                _ => {
+                    let mut effect = EffectFlags::UNKNOWN_CALL;
+                    effect |= estimate_effect_immutable(head_child, top_fn_effects, local_fn_scopes);
+                    for ch in node.children.iter().skip(1) {
+                        effect |= estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes);
+                    }
+                    effect
+                }
+            }
+        }
+    }
+}
+
+fn annotate_effects_mut(
+    node: &mut TypedExpression,
+    top_fn_effects: &HashMap<String, EffectFlags>,
+    local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>
+) -> EffectFlags {
+    let effect = match &node.expr {
+        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => EffectFlags::PURE,
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                EffectFlags::PURE
+            } else {
+                match items.first() {
+                    Some(Expression::Word(op)) if op == "lambda" => {
+                        if node.children.is_empty() {
+                            EffectFlags::PURE
+                        } else {
+                            let body_idx = node.children.len() - 1;
+                            local_fn_scopes.push(HashMap::new());
+                            let body_effect = annotate_effects_mut(
+                                &mut node.children[body_idx],
+                                top_fn_effects,
+                                local_fn_scopes
+                            );
+                            local_fn_scopes.pop();
+                            body_effect
+                        }
+                    }
+                    Some(Expression::Word(op)) if op == "if" || op == "while" => {
+                        let mut combined = EffectFlags::PURE;
+                        for ch in node.children.iter_mut().skip(1) {
+                            combined |= annotate_effects_mut(ch, top_fn_effects, local_fn_scopes);
+                        }
+                        combined
+                    }
+                    Some(Expression::Word(op)) if op == "do" => {
+                        local_fn_scopes.push(HashMap::new());
+                        let mut combined = EffectFlags::PURE;
+                        for idx in 1..node.children.len() {
+                            let child_effect = annotate_effects_mut(
+                                &mut node.children[idx],
+                                top_fn_effects,
+                                local_fn_scopes
+                            );
+                            combined |= child_effect;
+                            if
+                                let Some(Expression::Apply(form_items)) = items.get(idx)
+                            {
+                                if
+                                    let [Expression::Word(kw), Expression::Word(name), rhs] =
+                                        &form_items[..]
+                                {
+                                    if (kw == "let" || kw == "let*") && matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")) {
+                                        if let Some(rhs_node) = node.children[idx].children.get(2) {
+                                            if let Some(scope) = local_fn_scopes.last_mut() {
+                                                scope.insert(name.clone(), rhs_node.effect);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        local_fn_scopes.pop();
+                        combined
+                    }
+                    Some(Expression::Word(op)) if op == "let" || op == "let*" || op == "mut" => {
+                        node.children
+                            .get_mut(2)
+                            .map(|rhs| annotate_effects_mut(rhs, top_fn_effects, local_fn_scopes))
+                            .unwrap_or(EffectFlags::PURE)
+                    }
+                    Some(Expression::Word(op)) => {
+                        let mut combined = EffectFlags::PURE;
+                        for ch in node.children.iter_mut().skip(1) {
+                            combined |= annotate_effects_mut(ch, top_fn_effects, local_fn_scopes);
+                        }
+
+                        if is_io_op(op) {
+                            combined |= EffectFlags::IO;
+                        } else if is_mutating_op(op) {
+                            combined |= EffectFlags::MUTATE;
+                        } else if let Some(local_effect) = local_lookup_fn_effect(local_fn_scopes, op) {
+                            combined |= local_effect;
+                        } else if let Some(top_effect) = top_fn_effects.get(op) {
+                            combined |= *top_effect;
+                        } else if !is_intrinsic_pure_op(op) {
+                            combined |= EffectFlags::UNKNOWN_CALL;
+                        }
+
+                        combined
+                    }
+                    _ => {
+                        let mut combined = EffectFlags::UNKNOWN_CALL;
+                        for ch in node.children.iter_mut() {
+                            combined |= annotate_effects_mut(ch, top_fn_effects, local_fn_scopes);
+                        }
+                        combined
+                    }
+                }
+            }
+        }
+    };
+    node.effect = effect;
+    effect
+}
+
+fn collect_top_level_lambda_defs<'a>(
+    node: &'a TypedExpression
+) -> HashMap<String, &'a TypedExpression> {
+    let mut defs = HashMap::new();
+    let Expression::Apply(items) = &node.expr else {
+        return defs;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return defs;
+    }
+    for (idx, item) in items.iter().enumerate().skip(1) {
+        let Expression::Apply(form_items) = item else {
+            continue;
+        };
+        let [Expression::Word(kw), Expression::Word(name), rhs] = &form_items[..] else {
+            continue;
+        };
+        if kw != "let" && kw != "let*" {
+            continue;
+        }
+        if !matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")) {
+            continue;
+        }
+        if let Some(node_item) = node.children.get(idx).and_then(|n| n.children.get(2)) {
+            defs.insert(name.clone(), node_item);
+        }
+    }
+    defs
+}
+
+fn compute_top_level_function_effects(root: &TypedExpression) -> HashMap<String, EffectFlags> {
+    let defs = collect_top_level_lambda_defs(root);
+    let mut summaries: HashMap<String, EffectFlags> = defs
+        .keys()
+        .cloned()
+        .map(|name| (name, EffectFlags::PURE))
+        .collect();
+    if summaries.is_empty() {
+        return summaries;
+    }
+
+    let max_iters = summaries.len().saturating_mul(4).max(4);
+    for _ in 0..max_iters {
+        let mut changed = false;
+        for (name, lambda_node) in &defs {
+            let effect = if lambda_node.children.is_empty() {
+                EffectFlags::PURE
+            } else {
+                let body_idx = lambda_node.children.len() - 1;
+                let mut scopes = vec![HashMap::new()];
+                estimate_effect_immutable(&lambda_node.children[body_idx], &summaries, &mut scopes)
+            };
+            if summaries.get(name).copied() != Some(effect) {
+                summaries.insert(name.clone(), effect);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    summaries
+}
+
+fn annotate_effects(root: &mut TypedExpression) {
+    let top_effects = compute_top_level_function_effects(root);
+    let mut scopes = vec![HashMap::new()];
+    let _ = annotate_effects_mut(root, &top_effects, &mut scopes);
+}
+
+fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), String> {
+    let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
+    if let Expression::Apply(items) = &root.expr {
+        if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+            if items.len() != root.children.len() {
+                return Ok(());
+            }
+            for idx in 1..items.len() {
+                let Some(let_node) = root.children.get(idx) else {
+                    continue;
+                };
+                if
+                    let Some(message) = check_impure_binding_name(
+                        &items[idx],
+                        let_node,
+                        &mut known_requires_bang
+                    )
+                {
+                    return Err(message);
+                }
+            }
+            return Ok(());
+        }
+        if
+            let Some(message) = check_impure_binding_name(
+                &root.expr,
+                root,
+                &mut known_requires_bang
+            )
+        {
+            return Err(message);
+        }
+    }
+
+    Ok(())
+}
+
+fn check_impure_binding_name(
+    item_expr: &Expression,
+    let_node: &TypedExpression,
+    known_requires_bang: &mut HashMap<String, bool>
+) -> Option<String> {
+    let Expression::Apply(let_items) = item_expr else {
+        return None;
+    };
+    let [Expression::Word(keyword), Expression::Word(name), rhs] = &let_items[..] else {
+        return None;
+    };
+    if keyword != "let" && keyword != "let*" {
+        return None;
+    }
+
+    let rhs_node = let_node.children.get(2)?;
+    let is_function_binding = matches!(rhs_node.typ, Some(Type::Function(_, _)));
+    if !is_function_binding {
+        return None;
+    }
+
+    let requires_bang = match rhs {
+        Expression::Word(alias_target) =>
+            {
+                if alias_target.contains('/') {
+                    false
+                } else {
+                    known_requires_bang.get(alias_target).copied().unwrap_or(false)
+                }
+            },
+        _ => match rhs {
+            Expression::Apply(rhs_items) =>
+                matches!(rhs_items.first(), Some(Expression::Word(w)) if w == "lambda") &&
+                lambda_requires_bang(rhs, known_requires_bang),
+            _ => false,
+        },
+    };
+
+    known_requires_bang.insert(name.clone(), requires_bang);
+    if
+        !requires_bang ||
+        name.ends_with('!') ||
+        name.starts_with('_') ||
+        name.contains('/') ||
+        !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') ||
+        name.chars().any(|c| c.is_ascii_digit()) ||
+        name == "set"
+    {
+        return None;
+    }
+
+    Some(format!("Impure function '{}' must end with '!'\n{}", name, item_expr.to_lisp()))
+}
+
+fn lambda_requires_bang(lambda_expr: &Expression, known_requires_bang: &HashMap<String, bool>) -> bool {
+    let Expression::Apply(items) = lambda_expr else {
+        return false;
+    };
+    if items.len() < 2 || !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+        return false;
+    }
+
+    let mut scopes: Vec<HashMap<String, bool>> = vec![HashMap::new()];
+    if let Some(scope) = scopes.last_mut() {
+        for param in &items[1..items.len().saturating_sub(1)] {
+            if let Expression::Word(name) = param {
+                scope.insert(name.clone(), true);
+            }
+        }
+    }
+    if let Some(body) = items.last() {
+        expr_requires_bang(body, known_requires_bang, &mut scopes)
+    } else {
+        false
+    }
+}
+
+fn resolve_binding_kind(scopes: &[HashMap<String, bool>], name: &str) -> Option<bool> {
+    for scope in scopes.iter().rev() {
+        if let Some(kind) = scope.get(name) {
+            return Some(*kind);
+        }
+    }
+    None
+}
+
+fn expr_requires_bang(
+    expr: &Expression,
+    known_requires_bang: &HashMap<String, bool>,
+    scopes: &mut Vec<HashMap<String, bool>>
+) -> bool {
+    match expr {
+        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => false,
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return false;
+            }
+            let Some(head) = items.first() else {
+                return false;
+            };
+            match head {
+                Expression::Word(op) if op == "lambda" => {
+                    // Nested lambda effects are checked when that lambda itself is bound.
+                    false
+                }
+                Expression::Word(op) if op == "do" => {
+                    scopes.push(HashMap::new());
+                    for item in items.iter().skip(1) {
+                        if expr_requires_bang(item, known_requires_bang, scopes) {
+                            scopes.pop();
+                            return true;
+                        }
+                        if let Expression::Apply(form_items) = item {
+                            if
+                                let [Expression::Word(kw), Expression::Word(name), _rhs] =
+                                    &form_items[..]
+                            {
+                                if kw == "let" || kw == "let*" || kw == "mut" {
+                                    if let Some(scope) = scopes.last_mut() {
+                                        scope.insert(name.clone(), false);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    scopes.pop();
+                    false
+                }
+                Expression::Word(op) if op == "let" || op == "let*" || op == "mut" => {
+                    items
+                        .get(2)
+                        .map(|rhs| expr_requires_bang(rhs, known_requires_bang, scopes))
+                        .unwrap_or(false)
+                }
+                Expression::Word(op) if is_io_op(op) => true,
+                Expression::Word(op) if is_mutating_op(op) => {
+                    let Some(target) = items.get(1) else {
+                        return true;
+                    };
+                    match target {
+                        Expression::Word(name) => {
+                            if let Some(is_param) = resolve_binding_kind(scopes, name) {
+                                is_param
+                            } else {
+                                true
+                            }
+                        }
+                        _ => expr_uses_param_or_free_var(target, scopes),
+                    }
+                }
+                Expression::Word(op) => {
+                    if op == "push!" {
+                        let Some(target) = items.get(1) else {
+                            return true;
+                        };
+                        return match target {
+                            Expression::Word(name) => {
+                                if let Some(is_param) = resolve_binding_kind(scopes, name) {
+                                    is_param
+                                } else {
+                                    true
+                                }
+                            }
+                            _ => expr_uses_param_or_free_var(target, scopes),
+                        };
+                    }
+                    for arg in items.iter().skip(1) {
+                        if expr_requires_bang(arg, known_requires_bang, scopes) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+                _ => {
+                    for it in items {
+                        if expr_requires_bang(it, known_requires_bang, scopes) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+            }
+        }
+    }
+}
+
+fn expr_uses_param_or_free_var(expr: &Expression, scopes: &[HashMap<String, bool>]) -> bool {
+    match expr {
+        Expression::Int(_) | Expression::Float(_) => false,
+        Expression::Word(name) => {
+            if let Some(is_param) = resolve_binding_kind(scopes, name) {
+                is_param
+            } else {
+                true
+            }
+        }
+        Expression::Apply(items) => items
+            .iter()
+            .any(|item| expr_uses_param_or_free_var(item, scopes)),
     }
 }
 
@@ -1345,7 +2004,9 @@ fn infer_with_builtins_typed_internal(
     let inferred = match infer_expr(expr, &mut ctx) {
         Ok(value) => value,
         Err(message) => {
-            let partial_typed_ast = Some(build_typed_expression(expr, &ctx.expr_types));
+            let mut partial_typed = build_typed_expression(expr, &ctx.expr_types);
+            annotate_effects(&mut partial_typed);
+            let partial_typed_ast = Some(partial_typed);
             return Err(InferErrorInfo {
                 message,
                 scope: ctx.last_error_scope.clone(),
@@ -1362,7 +2023,9 @@ fn infer_with_builtins_typed_internal(
     let subst_map = match solve_constraints_list(&constraints_vec) {
         Ok(subst) => subst,
         Err(e) => {
-            let partial_typed_ast = Some(build_typed_expression(expr, &ctx.expr_types));
+            let mut partial_typed = build_typed_expression(expr, &ctx.expr_types);
+            annotate_effects(&mut partial_typed);
+            let partial_typed_ast = Some(partial_typed);
             return Err(InferErrorInfo {
                 message: e.message,
                 scope: e.scope,
@@ -1378,7 +2041,15 @@ fn infer_with_builtins_typed_internal(
         .map(|(id, typ)| (*id, apply_subst_map_to_type(&subst_map, typ)))
         .collect();
 
-    let typed_expr = build_typed_expression(expr, &solved_expr_types);
+    let mut typed_expr = build_typed_expression(expr, &solved_expr_types);
+    annotate_effects(&mut typed_expr);
+    if let Err(message) = validate_impure_function_name_suffix(&typed_expr) {
+        return Err(InferErrorInfo {
+            message,
+            scope: None,
+            partial_typed_ast: Some(typed_expr),
+        });
+    }
     Ok((solved_type, typed_expr))
 }
 
