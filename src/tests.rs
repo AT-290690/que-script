@@ -766,6 +766,30 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_if_with_same_branches_drops_pure_condition() {
+        let typed = infer_typed("(if (= 1 1) (+ 1 2) (+ 1 2))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "3");
+    }
+
+    #[test]
+    fn test_typed_optimization_if_with_same_branches_keeps_impure_condition_eval() {
+        let typed = infer_typed("(if (do (print! (vector)) true) 1 1)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.contains("(print! (vector))"),
+            "impure condition should still be evaluated, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            !optimized_lisp.contains("(if "),
+            "if with equal branches should rewrite away, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_keeps_div_by_zero_unfolded() {
         let typed = infer_typed("(/ 4 0)");
         let optimized = crate::op::optimize_typed_ast(&typed);
@@ -815,6 +839,54 @@ Concequent and alternative must match types
         assert!(
             optimized_lisp.contains("(print! (vector))"),
             "impure call statement should not be dropped, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_and_rhs_true_reduces_to_lhs() {
+        let typed = infer_typed("(lambda x (and x true))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(lambda x x)");
+    }
+
+    #[test]
+    fn test_typed_optimization_or_rhs_false_reduces_to_lhs() {
+        let typed = infer_typed("(lambda x (or x false))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(lambda x x)");
+    }
+
+    #[test]
+    fn test_typed_optimization_and_rhs_false_keeps_impure_lhs_eval() {
+        let typed = infer_typed("(and (do (print! (vector)) true) false)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.contains("(print! (vector))"),
+            "impure lhs should still be evaluated, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.ends_with(" false)"),
+            "expected constant false result after evaluation, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_or_rhs_true_keeps_impure_lhs_eval() {
+        let typed = infer_typed("(or (do (print! (vector)) false) true)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.contains("(print! (vector))"),
+            "impure lhs should still be evaluated, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.ends_with(" true)"),
+            "expected constant true result after evaluation, got: {}",
             optimized_lisp
         );
     }
