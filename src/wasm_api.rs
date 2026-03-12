@@ -375,7 +375,7 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             .or_else(|| core.global_effects.get(&symbol).copied())
             .or_else(|| native_core::known_symbol_effect(&symbol));
         let effect_summary = if type_info.contains("->") {
-            symbol_effect.and_then(native_core::format_effect_flags)
+            symbol_effect.and_then(|eff| native_core::format_effect_flags_for_symbol(&symbol, eff))
         } else {
             None
         };

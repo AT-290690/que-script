@@ -357,6 +357,31 @@ pub fn format_effect_flags(effect: EffectFlags) -> Option<String> {
     }
 }
 
+pub fn format_effect_flags_for_symbol(symbol: &str, effect: EffectFlags) -> Option<String> {
+    if effect.is_pure() {
+        return None;
+    }
+    let mut labels = Vec::new();
+    if effect.contains(EffectFlags::MUTATE) {
+        if symbol.ends_with('!') || symbol == "set" {
+            labels.push("mutate");
+        } else {
+            labels.push("local-mutate");
+        }
+    }
+    if effect.contains(EffectFlags::IO) {
+        labels.push("io");
+    }
+    if effect.contains(EffectFlags::UNKNOWN_CALL) {
+        labels.push("unknown-call");
+    }
+    if labels.is_empty() {
+        None
+    } else {
+        Some(labels.join(", "))
+    }
+}
+
 pub fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String, Type>) {
     if let Expression::Word(name) = &node.expr {
         if let Some(typ) = &node.typ {
