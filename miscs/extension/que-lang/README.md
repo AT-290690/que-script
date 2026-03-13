@@ -19,3 +19,18 @@ Notes:
 • {T \* K} is a tuple (but runtime a vector). It can be of only 2 different types (even another tuple)
 
 ---
+
+Shell eval highlighting:
+
+Use a `QUE` heredoc in shell files to get embedded Que highlighting:
+
+```bash
+que --eval "$(cat <<'QUE'
+(if (empty? ARGV) "Provide a file"
+  (do
+    (let [file .] ARGV)
+    (let text (map lower (read! file)))
+    text))
+QUE
+)" "./projects/rust-lisp/src/infer.rs" --allow read
+```
