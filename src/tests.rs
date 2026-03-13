@@ -645,7 +645,7 @@ Concequent and alternative must match types
         (Table/set! a key i)
         { a out }))
         (lambda { . out } . . (not-empty? out))
-        { (Hash-Table/new) [] } )))))
+        { (Table/new) [] } )))))
 [
     (two-sum-test [ 2 7 11 15 ] 9)
     (two-sum-test [3 2 4] 6)
@@ -2903,8 +2903,8 @@ Concequent and alternative must match types
   (do
     (let chars (<| deck
                     (std/vector/map std/convert/integer->string)
-                    (std/vector/tuple/hash/table/count)
-                    (std/vector/tuple/hash/table/entries)
+                    (std/vector/hash/table/count)
+                    (std/vector/hash/table/entries)
                     (std/vector/map snd)))
     
     (let counts (as chars [Int]))
@@ -3100,15 +3100,15 @@ image
             (let element (std/vector/queue/peek queue))
             (let y (std/vector/first element))
             (let x (std/vector/second element))  
-            (if (= (get matrix y x) 9) (+= score (as (std/vector/hash/table/get visited root-key) Int)))
+            (if (= (get matrix y x) 9) (+= score (snd (get (std/vector/hash/table/get visited root-key)))))
             (std/vector/queue/dequeue! queue)
             (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
                  (if (= (- cell (get matrix y x)) 1) (do
                     (std/vector/queue/enqueue! queue [ dy dx ])
                     (if (std/vector/hash/table/has? visited key) 
-                        (std/vector/hash/table/set! visited key (as (+# (std/vector/hash/table/get visited root-key) (std/vector/hash/table/get visited key)) Int)) 
-                        (std/vector/hash/table/set! visited key (as (std/vector/hash/table/get visited root-key) Int)))
+                        (std/vector/hash/table/set! visited key (+ (snd (get (std/vector/hash/table/get visited root-key))) (snd (get (std/vector/hash/table/get visited key))))) 
+                        (std/vector/hash/table/set! visited key (as (snd (get (std/vector/hash/table/get visited root-key))) Int)))
                       nil)))))))
         (+ a (get score)))) 0))))
 
@@ -3444,10 +3444,10 @@ D:=,=,=,+,=,=,=,+,=,=")
       (std/vector/map std/convert/integer->string)
       (std/vector/hash/table/count)
       (std/vector/hash/table/entries)
-   
-      (std/vector/reduce (lambda acc [str count .]
-        (+ acc (* (std/int/ceil/div (as (get count) Int) (+ (std/convert/chars->integer (as str [Char])) 1))
-                  (+ (std/convert/chars->integer (as str [Char])) 1))))
+                
+      (std/vector/reduce (lambda acc { str cnt }
+        (+ acc (* (std/int/ceil/div cnt (+ (std/convert/chars->integer str) 1))
+                  (+ (std/convert/chars->integer str) 1))))
       0)
       
       )))
@@ -5039,7 +5039,7 @@ bbrgwb")
             (
                 r#"; solve :: [[Char]] -> Int
 (let solve (comp 
-    (map (Vector/get! 1)) 
+    (map (Vector/get-unsafe 1)) 
     (map (lambda x (if (=# x '-') -1 1))) 
     sum))
 

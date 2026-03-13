@@ -554,16 +554,11 @@ fn check_impure_binding_name(
     let_node: &TypedExpression,
     known_requires_bang: &mut HashMap<String, bool>
 ) -> Option<String> {
-    let (name, requires_bang, returns_unit) = eval_function_binding_requires_bang(
+    let (name, requires_bang) = eval_function_binding_requires_bang(
         item_expr,
         let_node,
         known_requires_bang
     )?;
-    if should_enforce_impure_unit_return() && requires_bang && !returns_unit {
-        return Some(
-            format!("Impure function '{}' must return Unit ()\n{}", name, item_expr.to_lisp())
-        );
-    }
     if requires_bang {
         if let Some(offending_idx) = eval_function_binding_non_first_mutation_target(
             item_expr,
@@ -788,23 +783,6 @@ fn eval_function_binding_non_first_mutation_target(
     expr_mutates_non_first_param(body, known_requires_bang, &mut scopes)
 }
 
-fn parse_env_bool(raw: &str) -> Option<bool> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "on" | "yes" => Some(true),
-        "0" | "false" | "off" | "no" => Some(false),
-        _ => None,
-    }
-}
-
-fn should_enforce_impure_unit_return() -> bool {
-    std::env
-        ::var("QUE_STRICT_IMPURE_UNIT")
-        .ok()
-        .as_deref()
-        .and_then(parse_env_bool)
-        .unwrap_or(false)
-}
-
 fn is_impure_bang_exception_name(name: &str) -> bool {
     matches!(
         name,
@@ -831,7 +809,7 @@ fn eval_function_binding_requires_bang(
     item_expr: &Expression,
     let_node: &TypedExpression,
     known_requires_bang: &mut HashMap<String, bool>
-) -> Option<(String, bool, bool)> {
+) -> Option<(String, bool)> {
     let Expression::Apply(let_items) = item_expr else {
         return None;
     };
@@ -847,10 +825,6 @@ fn eval_function_binding_requires_bang(
     if !is_function_binding {
         return None;
     }
-    let returns_unit = rhs_node.typ
-        .as_ref()
-        .map(function_final_return_type_is_unit)
-        .unwrap_or(false);
 
     let requires_bang = match rhs {
         Expression::Word(alias_target) => {
@@ -870,15 +844,7 @@ fn eval_function_binding_requires_bang(
     };
 
     known_requires_bang.insert(name.clone(), requires_bang);
-    Some((name.clone(), requires_bang, returns_unit))
-}
-
-fn function_final_return_type_is_unit(typ: &Type) -> bool {
-    let mut current = typ;
-    while let Type::Function(_, ret) = current {
-        current = ret.as_ref();
-    }
-    matches!(current, Type::Unit)
+    Some((name.clone(), requires_bang))
 }
 
 pub fn collect_top_level_function_external_impurity(
@@ -893,27 +859,22 @@ pub fn collect_top_level_function_external_impurity(
                     let Some(let_node) = root.children.get(idx) else {
                         continue;
                     };
-                    if
-                        let Some((name, requires, _returns_unit)) =
-                            eval_function_binding_requires_bang(
-                                &items[idx],
-                                let_node,
-                                &mut known_requires_bang
-                            )
-                    {
+                    if let Some((name, requires)) = eval_function_binding_requires_bang(
+                        &items[idx],
+                        let_node,
+                        &mut known_requires_bang
+                    ) {
                         out.insert(name, requires);
                     }
                 }
             }
             return;
         }
-        if
-            let Some((name, requires, _returns_unit)) = eval_function_binding_requires_bang(
-                &root.expr,
-                root,
-                &mut known_requires_bang
-            )
-        {
+        if let Some((name, requires)) = eval_function_binding_requires_bang(
+            &root.expr,
+            root,
+            &mut known_requires_bang
+        ) {
             out.insert(name, requires);
         }
     }
