@@ -102,6 +102,11 @@ struct GetSignatureResult {
     signature: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AnalyzeTextParams {
+    text: String,
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("quelsp error: {}", err);
@@ -295,6 +300,11 @@ impl ServerState {
                     params.position
                 );
                 self.reply_ok(req.id, Some(GetSignatureResult { signature }))
+            }
+            "que/analyzeText" => {
+                let params: AnalyzeTextParams = parse_params(req.params)?;
+                let diagnostics = self.analyze_text(&params.text);
+                self.reply_ok(req.id, Some(diagnostics))
             }
             _ => self.reply_ok::<Value>(req.id, None),
         }
@@ -630,6 +640,20 @@ impl ServerState {
 
     fn global_signature(&self, symbol: &str) -> Option<String> {
         self.with_core(|core| core.global_signatures.get(symbol).cloned())
+    }
+
+    fn analyze_text(&self, text: &str) -> Vec<Diagnostic> {
+        self.with_core(|core| {
+            analyze_document_text_safe(
+                text,
+                &core.std_defs,
+                &core.base_env,
+                core.base_next_id,
+                &core.global_signatures,
+                &core.global_effects,
+                &core.std_fallback_names
+            )
+        }).diagnostics
     }
 
     fn form_signatures_at<'a>(

@@ -134,10 +134,7 @@ pub fn build_base_environment(
 
 pub fn load_std_definitions() -> Vec<Expression> {
     let ast = crate::baked::load_ast();
-    if let Expression::Apply(items) = ast {
-        return items.into_iter().skip(1).collect();
-    }
-    Vec::new()
+    crate::baked::ast_to_definitions(ast, "active library").unwrap_or_default()
 }
 
 pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<String> {

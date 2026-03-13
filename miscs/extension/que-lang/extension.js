@@ -6,6 +6,14 @@ const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 
 /** @type {LanguageClient | undefined} */
 let client;
+/** @type {vscode.DiagnosticCollection | undefined} */
+let shellDiagnostics;
+
+const QUE_HEREDOC_TAG = "QUE";
+const SHELL_ANALYSIS_DEBOUNCE_MS = 250;
+const SHELL_LANG_IDS = new Set(["shellscript", "shell", "bash", "zsh", "sh"]);
+/** @type {Map<string, ReturnType<typeof setTimeout>>} */
+const shellAnalysisTimers = new Map();
 
 function splitSignatureTopLevel(signature) {
   const parts = [];
@@ -141,6 +149,197 @@ function makeSignatureTriggerChars() {
   for (let c = 65; c <= 90; c += 1) chars.push(String.fromCharCode(c));
   chars.push("-", "+", "*", "/", "?", "!", "_", ":", ".");
   return Array.from(new Set(chars));
+}
+
+function isShellScriptDocument(document) {
+  return (
+    document &&
+    document.uri &&
+    document.uri.scheme === "file" &&
+    SHELL_LANG_IDS.has(document.languageId)
+  );
+}
+
+function parseQueHeredocBlocks(text) {
+  const lines = text.split(/\r?\n/);
+  const blocks = [];
+  const openRe = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const match = line.match(openRe);
+    if (!match) continue;
+
+    const marker = match[2];
+    if (marker !== QUE_HEREDOC_TAG) continue;
+
+    const allowIndent = match[0].includes("<<-");
+    const startLine = i + 1;
+    let endLine = startLine;
+
+    while (endLine < lines.length) {
+      const candidate = lines[endLine];
+      const normalized = allowIndent
+        ? candidate.replace(/^\t+/, "")
+        : candidate;
+      if (normalized.trim() === marker) break;
+      endLine += 1;
+    }
+
+    const hasTerminator = endLine < lines.length;
+    const contentLines = hasTerminator
+      ? lines.slice(startLine, endLine)
+      : lines.slice(startLine);
+
+    blocks.push({
+      startLine,
+      lineCount: contentLines.length,
+      text: contentLines.join("\n"),
+    });
+
+    if (!hasTerminator) break;
+    i = endLine;
+  }
+
+  return blocks;
+}
+
+async function fetchQueDiagnosticsForText(text) {
+  if (!client) return [];
+  try {
+    const result = await client.sendRequest("que/analyzeText", { text });
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+function lspSeverityToVscode(severity) {
+  switch (severity) {
+    case 2:
+      return vscode.DiagnosticSeverity.Warning;
+    case 3:
+      return vscode.DiagnosticSeverity.Information;
+    case 4:
+      return vscode.DiagnosticSeverity.Hint;
+    case 1:
+    default:
+      return vscode.DiagnosticSeverity.Error;
+  }
+}
+
+function clampLine(line, lineCount) {
+  if (!Number.isFinite(line)) return 0;
+  if (lineCount <= 0) return 0;
+  return Math.min(Math.max(0, line), lineCount - 1);
+}
+
+function mapBlockDiagnosticsToDocument(blockDiagnostics, blockStartLine, blockLineCount) {
+  if (blockLineCount <= 0) return [];
+
+  const mapped = [];
+  for (const diag of blockDiagnostics) {
+    if (!diag || !diag.range || !diag.range.start || !diag.range.end) continue;
+
+    const startRelLine = clampLine(diag.range.start.line, blockLineCount);
+    const endRelLine = clampLine(diag.range.end.line, blockLineCount);
+    const startChar = Math.max(0, diag.range.start.character || 0);
+    const endChar = Math.max(0, diag.range.end.character || 0);
+
+    const start = new vscode.Position(blockStartLine + startRelLine, startChar);
+    let end = new vscode.Position(blockStartLine + endRelLine, endChar);
+    if (end.isBefore(start)) end = start;
+
+    const out = new vscode.Diagnostic(
+      new vscode.Range(start, end),
+      typeof diag.message === "string" ? diag.message : "Que diagnostic",
+      lspSeverityToVscode(diag.severity)
+    );
+    out.source = diag.source || "que";
+    if (diag.code !== undefined) out.code = diag.code;
+    mapped.push(out);
+  }
+
+  return mapped;
+}
+
+async function updateShellHeredocDiagnostics(document) {
+  if (!shellDiagnostics || !isShellScriptDocument(document)) return;
+
+  const blocks = parseQueHeredocBlocks(document.getText());
+  if (blocks.length === 0) {
+    shellDiagnostics.delete(document.uri);
+    return;
+  }
+
+  const diagnostics = [];
+  for (const block of blocks) {
+    if (block.text.trim().length === 0) continue;
+    const blockDiagnostics = await fetchQueDiagnosticsForText(block.text);
+    diagnostics.push(
+      ...mapBlockDiagnosticsToDocument(
+        blockDiagnostics,
+        block.startLine,
+        block.lineCount
+      )
+    );
+  }
+
+  shellDiagnostics.set(document.uri, diagnostics);
+}
+
+function scheduleShellHeredocDiagnostics(document) {
+  if (!shellDiagnostics || !isShellScriptDocument(document)) return;
+
+  const key = document.uri.toString();
+  const prev = shellAnalysisTimers.get(key);
+  if (prev) clearTimeout(prev);
+
+  const handle = setTimeout(async () => {
+    shellAnalysisTimers.delete(key);
+    const latest = vscode.workspace.textDocuments.find(
+      (doc) => doc.uri.toString() === key
+    );
+    if (!latest) {
+      if (shellDiagnostics) shellDiagnostics.delete(document.uri);
+      return;
+    }
+    await updateShellHeredocDiagnostics(latest);
+  }, SHELL_ANALYSIS_DEBOUNCE_MS);
+
+  shellAnalysisTimers.set(key, handle);
+}
+
+function registerShellHeredocDiagnostics(context) {
+  shellDiagnostics = vscode.languages.createDiagnosticCollection("que-shell");
+  context.subscriptions.push(shellDiagnostics);
+
+  for (const doc of vscode.workspace.textDocuments) {
+    if (isShellScriptDocument(doc)) scheduleShellHeredocDiagnostics(doc);
+  }
+
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      if (isShellScriptDocument(doc)) scheduleShellHeredocDiagnostics(doc);
+    })
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((evt) => {
+      if (isShellScriptDocument(evt.document))
+        scheduleShellHeredocDiagnostics(evt.document);
+    })
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      const key = doc.uri.toString();
+      const timer = shellAnalysisTimers.get(key);
+      if (timer) {
+        clearTimeout(timer);
+        shellAnalysisTimers.delete(key);
+      }
+      if (shellDiagnostics) shellDiagnostics.delete(doc.uri);
+    })
+  );
 }
 
 async function fetchInferredSignature(document, symbol, position) {
@@ -346,11 +545,15 @@ async function restartClient(context) {
 async function activate(context) {
   await startClient(context);
   const signatureProvider = registerQueSignatureHelp();
+  registerShellHeredocDiagnostics(context);
 
   const restartCommand = vscode.commands.registerCommand(
     "que.restartLanguageServer",
     async () => {
       await restartClient(context);
+      for (const doc of vscode.workspace.textDocuments) {
+        if (isShellScriptDocument(doc)) scheduleShellHeredocDiagnostics(doc);
+      }
       vscode.window.showInformationMessage("Que language server restarted.");
     }
   );
@@ -360,6 +563,14 @@ async function activate(context) {
 }
 
 async function deactivate() {
+  for (const [, timer] of shellAnalysisTimers) {
+    clearTimeout(timer);
+  }
+  shellAnalysisTimers.clear();
+  if (shellDiagnostics) {
+    shellDiagnostics.dispose();
+    shellDiagnostics = undefined;
+  }
   if (!client) {
     return undefined;
   }
