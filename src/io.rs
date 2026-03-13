@@ -361,6 +361,7 @@ fn take_install_output_path_from_argv(argv: &mut Vec<String>) -> Result<Option<S
 fn native_shell_help(bin_name: &str) -> String {
     format!(
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
+         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
          or:    {bin} --learn\n\
@@ -371,6 +372,7 @@ fn native_shell_help(bin_name: &str) -> String {
            --help, -h     Show this help and exit.\n\
            --learn        Print Que language quick reference.\n\
            --env          Print environment flags and tuning examples.\n\
+           --eval, -e     Execute inline Que source without a script file.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
                          QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
@@ -384,6 +386,7 @@ fn native_shell_help(bin_name: &str) -> String {
            - `--lib names [pattern]` lists available library names.\n\
            - `--lib types [pattern]` prints name and inferred type.\n\
            - `--lib source <name>` prints the exact symbol source.\n\
+           - Inline eval example: `{bin} --eval '(+ 1 2)'`.\n\
            - Wildcards in pattern: `*` any sequence, `?` single char.\n\
            - --debug, --no-result and --help can appear after the script path.\n\
            - `--install` writes/extends an external library file (used by all binaries).\n\
@@ -1591,10 +1594,30 @@ pub fn run_native_shell() -> Result<(), String> {
         )?;
         return Ok(());
     }
-    let Some(file_path) = args.get(1) else {
-        return Err(format!("missing file_path\n{}", native_shell_help(bin_name)));
+    let eval_mode = matches!(args.get(1).map(String::as_str), Some("--eval" | "-e"));
+    let (program, mut argv, script_cwd) = if eval_mode {
+        let Some(source) = args.get(2) else {
+            return Err(format!("missing source after --eval\n{}", native_shell_help(bin_name)));
+        };
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        (source.clone(), args.iter().skip(3).cloned().collect::<Vec<_>>(), cwd)
+    } else {
+        let Some(file_path) = args.get(1) else {
+            return Err(format!("missing file_path\n{}", native_shell_help(bin_name)));
+        };
+        let program = fs
+            ::read_to_string(&file_path)
+            .map_err(|e| format!("failed to read '{}': {}", file_path, e))?;
+        let script_cwd = fs
+            ::canonicalize(file_path)
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .or_else(|| Path::new(file_path).parent().map(Path::to_path_buf))
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| PathBuf::from("."));
+        (program, args.iter().skip(2).cloned().collect::<Vec<_>>(), script_cwd)
     };
-    let mut argv: Vec<String> = args.iter().skip(2).cloned().collect();
+
     if take_help_flag_from_argv(&mut argv) {
         println!("{}", native_shell_help(bin_name));
         return Ok(());
@@ -1607,17 +1630,6 @@ pub fn run_native_shell() -> Result<(), String> {
     let shell_policy = crate::io
         ::take_shell_policy_from_argv(&mut argv)
         .map_err(|e| format!("invalid shell policy: {}", e))?;
-
-    let program = fs
-        ::read_to_string(&file_path)
-        .map_err(|e| format!("failed to read '{}': {}", file_path, e))?;
-    let script_cwd = fs
-        ::canonicalize(file_path)
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .or_else(|| Path::new(file_path).parent().map(Path::to_path_buf))
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| PathBuf::from("."));
     let analysis_source = crate::lsp_native_core::strip_comment_bodies_preserve_newlines(&program);
     let user_form_count = if debug_mode.is_enabled() {
         crate::lsp_native_core
