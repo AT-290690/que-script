@@ -178,6 +178,17 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_baked_ast_to_definitions_flattens_nested_top_level_do() {
+        let ast = crate::parser
+            ::build("(do (do (let inc (lambda x (+ x 1))) (let dec (lambda x (- x 1)))))")
+            .expect("nested do should parse");
+        let defs = crate::baked
+            ::ast_to_definitions(ast, "test")
+            .expect("nested top-level do should be flattened");
+        assert_eq!(defs.len(), 2);
+    }
+
+    #[test]
     fn test_parser_reports_structured_unexpected_closer_for_offbalance_delimiters() {
         let err = crate::parser::build("(do (let x 1)))").expect_err("should fail delimiter check");
         assert!(

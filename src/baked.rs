@@ -16,6 +16,36 @@ fn parse_ast_source(source: &str, label: &str) -> Result<Expression, String> {
     parser::build(source).map_err(|e| format!("Failed to parse library '{}': {}", label, e))
 }
 
+pub fn ast_to_definitions(ast: Expression, label: &str) -> Result<Vec<Expression>, String> {
+    let mut current = ast;
+    loop {
+        let Expression::Apply(items) = current else {
+            return Err(format!("library '{}' did not parse as top-level do expression", label));
+        };
+        if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+            return Err(format!("library '{}' did not parse as top-level do expression", label));
+        }
+
+        let mut forms = items.into_iter().skip(1).collect::<Vec<_>>();
+        if forms.len() == 1 {
+            let only = forms.remove(0);
+            match only {
+                Expression::Apply(inner) if
+                    matches!(inner.first(), Some(Expression::Word(w)) if w == "do")
+                => {
+                    current = Expression::Apply(inner);
+                    continue;
+                }
+                other => {
+                    return Ok(vec![other]);
+                }
+            }
+        }
+
+        return Ok(forms);
+    }
+}
+
 pub fn load_ast_from_path(path: &Path) -> Result<Expression, String> {
     let source = fs::read_to_string(path).map_err(|e|
         format!("Failed to read library '{}': {}", path.display(), e)

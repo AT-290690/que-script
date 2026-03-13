@@ -271,7 +271,7 @@ fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>
     let root = crate::parser
         ::build(source)
         .map_err(|e| format!("failed to parse bundle '{}': {}", label, e))?;
-    let defs = ast_to_definitions(root, label)?;
+    let defs = crate::baked::ast_to_definitions(root, label)?;
     for (idx, item) in defs.iter().enumerate() {
         let Expression::Apply(form) = item else {
             return Err(
@@ -503,7 +503,7 @@ fn binding_name_from_def(expr: &Expression) -> Option<String> {
 }
 
 fn active_library_definitions() -> Result<Vec<Expression>, String> {
-    ast_to_definitions(crate::baked::load_ast(), "active")
+    crate::baked::ast_to_definitions(crate::baked::load_ast(), "active")
 }
 
 fn wildcard_match(pattern: &str, text: &str) -> bool {
@@ -611,40 +611,10 @@ enum LibraryInstallMode {
     Uninstall,
 }
 
-fn ast_to_definitions(ast: Expression, label: &str) -> Result<Vec<Expression>, String> {
-    let mut current = ast;
-    loop {
-        let Expression::Apply(items) = current else {
-            return Err(format!("library '{}' did not parse as top-level do expression", label));
-        };
-        if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-            return Err(format!("library '{}' did not parse as top-level do expression", label));
-        }
-
-        let mut forms = items.into_iter().skip(1).collect::<Vec<_>>();
-        if forms.len() == 1 {
-            let only = forms.remove(0);
-            match only {
-                Expression::Apply(inner) if
-                    matches!(inner.first(), Some(Expression::Word(w)) if w == "do")
-                => {
-                    current = Expression::Apply(inner);
-                    continue;
-                }
-                other => {
-                    return Ok(vec![other]);
-                }
-            }
-        }
-
-        return Ok(forms);
-    }
-}
-
 fn load_existing_library_definitions(path: &Path) -> Result<Vec<Expression>, String> {
     if path.exists() {
         let ast = crate::baked::load_ast_from_path(path)?;
-        return ast_to_definitions(ast, &path.display().to_string());
+        return crate::baked::ast_to_definitions(ast, &path.display().to_string());
     }
     Ok(Vec::new())
 }
@@ -1659,7 +1629,7 @@ pub fn run_native_shell() -> Result<(), String> {
     };
 
     let std_ast = crate::baked::load_ast();
-    let lib_defs = ast_to_definitions(std_ast, "active library")?;
+    let lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
     let wrapped_ast = match crate::parser::merge_std_and_program(&program, lib_defs) {
         Ok(expr) => expr,
         Err(message) => {
