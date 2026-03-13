@@ -461,14 +461,26 @@ fn native_shell_learn() -> &'static str {
     - Vector [T] (homogeneous)\n\
     - Tuple {A B}\n\
     - String is [Char]\n\
-    - Char literal is 'x'.\n\
+    - Equality example: = (Int), =. (Float), =# (Char), =? (Bool)\n\
+    - Operator suffixes: '.' for Float, '#' for Char, '?' for Bool.\n\
+    - String literal uses double quotes, e.g. \"Hello World\".\n\
+    - Char literal uses single quotes, e.g. 'a'.\n\
+    \n\
+    Pipe operators:\n\
+    - `(|> x f g h)` means `(h (g (f x)))` (left-to-right flow with data last)\n\
     \n\
     Mutation and effects:\n\
     - mut/alter! are for local primitive scalar mutation only (Int/Float/Bool/Char), same lambda scope.\n\
     - Vector/state mutation uses set!, push!, pop!, pull!, set (boxed refs), etc.\n\
     - Functions with side effects (mutation or I/O) must end with !.\n\
     - If a function mutates args, the mutated arg must be the first arg.\n\
-    - If mutating multiple values, pass them inside the first arg (typically a tuple)."
+    - If mutating multiple values, pass them inside the first arg (typically a tuple).\n\
+    \n\
+    Built-ins:\n\
+    - set! pop! length get car cdr fst snd while\n\
+    + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
+    and or not & | ^ >> << ~ Int->Float Float->Int true false nil\n\
+    ARGV print! sleep! clear! list-dir! mkdir! read! delete! write! move!"
 }
 
 fn binding_name_from_def(expr: &Expression) -> Option<String> {

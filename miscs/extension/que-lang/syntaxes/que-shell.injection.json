@@ -1,0 +1,14 @@
+{
+  "scopeName": "que.shell.injection",
+  "injectionSelector": "L:source.shell",
+  "patterns": [{ "include": "#que_heredoc" }],
+  "repository": {
+    "que_heredoc": {
+      "name": "meta.embedded.block.que.shell",
+      "begin": "<<-?\\s*(['\"]?)QUE\\1\\s*$",
+      "end": "^\\s*QUE\\s*$",
+      "contentName": "source.que",
+      "patterns": [{ "include": "source.que" }]
+    }
+  }
+}

@@ -8,6 +8,7 @@
   "icon": "logo.png",
   "activationEvents": [
     "onLanguage:que",
+    "onLanguage:shellscript",
     "onCommand:que.restartLanguageServer"
   ],
   "categories": [
@@ -35,6 +36,16 @@
         "language": "que",
         "scopeName": "source.que",
         "path": "./syntaxes/que.tmLanguage.json"
+      },
+      {
+        "scopeName": "que.shell.injection",
+        "path": "./syntaxes/que-shell.injection.json",
+        "injectTo": [
+          "source.shell",
+          "source.shellscript",
+          "source.shell.bash",
+          "source.shell.zsh"
+        ]
       }
     ],
     "commands": [
