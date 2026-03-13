@@ -1,18 +1,9 @@
 #!/bin/bash
-APP_NAME="que"
+set -euo pipefail
 
-BINARY_URL="https://github.com/AT-290690/que-script/releases/latest/download/que"
-INSTALL_PATH="/usr/local/bin/$APP_NAME"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "Installing $APP_NAME..."
+"$SCRIPT_DIR/install-minimal.sh"
+"$SCRIPT_DIR/install-std-only.sh"
 
-if curl -fsSL "$BINARY_URL" -o "/tmp/$APP_NAME"; then
-    chmod +x "/tmp/$APP_NAME"
-    sudo mv "/tmp/$APP_NAME" "$INSTALL_PATH"
-    echo "✅ Success! You can now run: $APP_NAME yourfile.que"
-else
-    echo "❌ Error: Could not download binary."
-    echo "Check that you have a RELEASE and an ASSET named 'que' at:"
-    echo "https://github.com/AT-290690/que-script/releases"
-    exit 1
-fi
+echo "Done (binary + std library installed)."

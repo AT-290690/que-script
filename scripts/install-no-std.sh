@@ -46,5 +46,4 @@ for app in "${TARGETS[@]}"; do
   fi
 done
 
-echo "Done (binaries only; std library not installed)."
-echo "Install std separately with: scripts/install-std-only.sh"
+echo "Done (no std library installed)."
