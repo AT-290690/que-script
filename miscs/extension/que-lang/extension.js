@@ -263,6 +263,114 @@ function mapBlockDiagnosticsToDocument(blockDiagnostics, blockStartLine, blockLi
   return mapped;
 }
 
+async function fetchQueHoverForText(text, position) {
+  if (!client) return null;
+  try {
+    const result = await client.sendRequest("que/hoverText", { text, position });
+    return result || null;
+  } catch {
+    return null;
+  }
+}
+
+function findQueHeredocBlockAtPosition(document, position) {
+  const blocks = parseQueHeredocBlocks(document.getText());
+  for (const block of blocks) {
+    if (
+      position.line >= block.startLine &&
+      position.line < block.startLine + block.lineCount
+    ) {
+      return {
+        block,
+        relativePosition: {
+          line: position.line - block.startLine,
+          character: position.character,
+        },
+      };
+    }
+  }
+  return null;
+}
+
+function hoverContentsToVscode(contents) {
+  if (!contents) return null;
+  if (typeof contents === "string") return contents;
+  if (Array.isArray(contents)) {
+    const parts = contents
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part.value === "string") return part.value;
+        if (part && typeof part.language === "string" && typeof part.value === "string") {
+          return `\`\`\`${part.language}\n${part.value}\n\`\`\``;
+        }
+        return "";
+      })
+      .filter((x) => x.length > 0);
+    return parts.join("\n\n");
+  }
+  if (typeof contents === "object" && typeof contents.value === "string") {
+    return new vscode.MarkdownString(contents.value);
+  }
+  return null;
+}
+
+function mapRelativeHoverRangeToDocument(range, block, document) {
+  if (!range || !range.start || !range.end || block.lineCount <= 0) {
+    return undefined;
+  }
+  const maxRelLine = Math.max(0, block.lineCount - 1);
+  const startRelLine = Math.min(Math.max(0, range.start.line || 0), maxRelLine);
+  const endRelLine = Math.min(Math.max(0, range.end.line || 0), maxRelLine);
+  const start = new vscode.Position(
+    block.startLine + startRelLine,
+    Math.max(0, range.start.character || 0)
+  );
+  let end = new vscode.Position(
+    block.startLine + endRelLine,
+    Math.max(0, range.end.character || 0)
+  );
+  if (end.isBefore(start)) end = start;
+  const docLast = document.lineCount > 0 ? document.lineCount - 1 : 0;
+  if (start.line > docLast) return undefined;
+  if (end.line > docLast) {
+    end = new vscode.Position(docLast, document.lineAt(docLast).text.length);
+  }
+  return new vscode.Range(start, end);
+}
+
+function registerShellQueHoverProvider(context) {
+  const selector = [
+    { scheme: "file", language: "shellscript" },
+    { scheme: "file", language: "shell" },
+    { scheme: "file", language: "bash" },
+    { scheme: "file", language: "zsh" },
+    { scheme: "file", language: "sh" },
+  ];
+  const provider = vscode.languages.registerHoverProvider(selector, {
+    async provideHover(document, position) {
+      if (!isShellScriptDocument(document)) return null;
+      const located = findQueHeredocBlockAtPosition(document, position);
+      if (!located) return null;
+
+      const response = await fetchQueHoverForText(
+        located.block.text,
+        located.relativePosition
+      );
+      if (!response || !response.contents) return null;
+
+      const contents = hoverContentsToVscode(response.contents);
+      if (!contents) return null;
+      const mappedRange = mapRelativeHoverRangeToDocument(
+        response.range,
+        located.block,
+        document
+      );
+      return mappedRange ? new vscode.Hover(contents, mappedRange) : new vscode.Hover(contents);
+    },
+  });
+  context.subscriptions.push(provider);
+}
+
 async function updateShellHeredocDiagnostics(document) {
   if (!shellDiagnostics || !isShellScriptDocument(document)) return;
 
@@ -546,6 +654,7 @@ async function activate(context) {
   await startClient(context);
   const signatureProvider = registerQueSignatureHelp();
   registerShellHeredocDiagnostics(context);
+  registerShellQueHoverProvider(context);
 
   const restartCommand = vscode.commands.registerCommand(
     "que.restartLanguageServer",
