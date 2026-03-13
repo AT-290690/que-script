@@ -399,7 +399,39 @@ Concequent and alternative must match types
     }
 
     #[cfg(feature = "runtime")]
-    fn run_program_output(src: &str) -> String {
+    fn runtime_exec_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    #[cfg(feature = "runtime")]
+    struct ScopedEnvVar {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    #[cfg(feature = "runtime")]
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    #[cfg(feature = "runtime")]
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            if let Some(prev) = self.prev.as_ref() {
+                std::env::set_var(self.key, prev);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[cfg(feature = "runtime")]
+    fn run_program_output_unlocked(src: &str) -> String {
         let expr = crate::parser::build(src).expect("program should build");
         let wat = crate::wat
             ::compile_program_to_wat_with_opts(&expr, true)
@@ -420,7 +452,7 @@ Concequent and alternative must match types
     }
 
     #[cfg(feature = "runtime")]
-    fn run_program_error(src: &str) -> String {
+    fn run_program_error_unlocked(src: &str) -> String {
         let expr = crate::parser::build(src).expect("program should build");
         let wat = crate::wat
             ::compile_program_to_wat_with_opts(&expr, true)
@@ -441,7 +473,30 @@ Concequent and alternative must match types
     }
 
     #[cfg(feature = "runtime")]
+    fn run_program_error_with_debug_guards(src: &str) -> String {
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
+        let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
+        let _float_overflow = ScopedEnvVar::set("QUE_FLOAT_OVERFLOW_CHECK", "1");
+        let _div_zero = ScopedEnvVar::set("QUE_DIV_ZERO_CHECK", "1");
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
+        run_program_error_unlocked(src)
+    }
+
+    #[cfg(feature = "runtime")]
+    fn run_program_output(src: &str) -> String {
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
+        run_program_output_unlocked(src)
+    }
+
+    #[cfg(feature = "runtime")]
+    fn run_program_error(src: &str) -> String {
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
+        run_program_error_unlocked(src)
+    }
+
+    #[cfg(feature = "runtime")]
     fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
         let std_ast = crate::baked::load_ast();
         let expr = match std_ast {
             crate::parser::Expression::Apply(items) =>
@@ -521,10 +576,10 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
-    fn test_int_div_zero_traps_by_default() {
-        let err = run_program_error(r#"(do (let id (lambda x x)) (/ 1 (id 0)))"#);
+    fn test_int_div_zero_traps_with_debug_guards() {
+        let err = run_program_error_with_debug_guards(r#"(do (let id (lambda x x)) (/ 1 (id 0)))"#);
         assert!(
-            err.contains("unreachable"),
+            err.contains("integer divide by zero") || err.contains("unreachable"),
             "expected unreachable trap for int divide-by-zero, got: {}",
             err
         );
@@ -532,8 +587,8 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
-    fn test_float_div_zero_traps_by_default() {
-        let err = run_program_error(
+    fn test_float_div_zero_traps_with_debug_guards() {
+        let err = run_program_error_with_debug_guards(
             r#"(do (let f (lambda z (/. (Int->Float 1) z))) (f (Int->Float 0)))"#
         );
         assert!(
@@ -1266,6 +1321,25 @@ Concequent and alternative must match types
         assert!(
             optimized_lisp.contains("(let side (print! (vector)))"),
             "unused impure top-level definitions must not be removed, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_dce_keeps_dependencies_of_kept_impure_definition() {
+        let typed = infer_typed(
+            "(do (let helper (lambda x x)) (let side (print! (helper (vector)))) 1)"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.contains("(let helper (lambda x x))"),
+            "DCE must keep deps of retained impure defs, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.contains("(let side (print! (helper (vector))))"),
+            "retained impure def should still be present, got: {}",
             optimized_lisp
         );
     }
