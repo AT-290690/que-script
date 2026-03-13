@@ -23,7 +23,7 @@ pub fn load_ast_from_path(path: &Path) -> Result<Expression, String> {
     parse_ast_source(&source, &path.display().to_string())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
 fn candidate_library_paths() -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(path) = env::var(ENV_LIB_PATH) {
@@ -44,7 +44,7 @@ fn candidate_library_paths() -> Vec<PathBuf> {
     out
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
 fn load_from_external_paths() -> Result<Option<Expression>, String> {
     for path in candidate_library_paths() {
         if !path.exists() {
@@ -70,6 +70,18 @@ fn load_embedded_wasm_library() -> Result<Expression, String> {
     parser::build(&combined).map_err(|e| format!("Failed to parse embedded wasm library: {}", e))
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn load_embedded_test_library() -> Result<Expression, String> {
+    let combined = format!(
+        "{}\n{}\n{}\n{}",
+        include_str!("../lisp/const.lisp"),
+        include_str!("../lisp/std.lisp"),
+        include_str!("../lisp/fp.lisp"),
+        include_str!("../lisp/ds.lisp")
+    );
+    parser::build(&combined).map_err(|e| format!("Failed to parse embedded test library: {}", e))
+}
+
 pub fn load_ast() -> Expression {
     #[cfg(target_arch = "wasm32")]
     {
@@ -77,13 +89,19 @@ pub fn load_ast() -> Expression {
             .unwrap_or_else(|_| Expression::Apply(vec![Expression::Word("do".to_string())]));
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     {
-    match load_from_external_paths() {
-        Ok(Some(ast)) => return ast,
-        Ok(None) => {}
-        Err(err) => panic!("{}", err),
+        return load_embedded_test_library()
+            .unwrap_or_else(|_| Expression::Apply(vec![Expression::Word("do".to_string())]));
     }
-    Expression::Apply(vec![Expression::Word("do".to_string())])
+
+    #[cfg(all(not(test), not(target_arch = "wasm32")))]
+    {
+        match load_from_external_paths() {
+            Ok(Some(ast)) => return ast,
+            Ok(None) => {}
+            Err(err) => panic!("{}", err),
+        }
+        Expression::Apply(vec![Expression::Word("do".to_string())])
     }
 }

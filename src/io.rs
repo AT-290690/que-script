@@ -400,7 +400,16 @@ fn native_shell_help(bin_name: &str) -> String {
            QUE_FLOAT_OVERFLOW_CHECK Float NaN/Inf trap check for +.,-.,*.,/. and mut ops (default: off).\n\
          \n\
          Example:\n\
-           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que",
+           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que\n\
+         \n\
+         Setup some env flags:\n\
+         \n\
+           export QUE_WASM_OPT=speed QUE_TCO=aggressive QUE_DEVIRTUALIZE=aggressive QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=2 QUE_VEC_GROWTH_DEN=1\n\
+         \n\
+         Fallback to default ones:\n\
+         \n\
+           unset QUE_WASM_OPT QUE_TCO QUE_DEVIRTUALIZE QUE_BOUNDS_CHECK QUE_DIV_ZERO_CHECK QUE_VEC_MIN_CAP QUE_VEC_GROWTH_NUM QUE_VEC_GROWTH_DEN\n\
+         ",
         bin = bin_name
     )
 }
