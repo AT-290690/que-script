@@ -107,6 +107,12 @@ struct AnalyzeTextParams {
     text: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct HoverTextParams {
+    text: String,
+    position: Position,
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("quelsp error: {}", err);
@@ -306,6 +312,11 @@ impl ServerState {
                 let diagnostics = self.analyze_text(&params.text);
                 self.reply_ok(req.id, Some(diagnostics))
             }
+            "que/hoverText" => {
+                let params: HoverTextParams = parse_params(req.params)?;
+                let hover = self.hover_for_text(&params.text, params.position);
+                self.reply_ok(req.id, hover)
+            }
             _ => self.reply_ok::<Value>(req.id, None),
         }
     }
@@ -409,7 +420,25 @@ impl ServerState {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let doc = self.documents.get(uri)?;
+        self.hover_for_analyzed_doc(doc, position)
+    }
 
+    fn hover_for_text(&self, text: &str, position: Position) -> Option<Hover> {
+        let analysis = self.with_core(|core| {
+            analyze_document_text_safe(
+                text,
+                &core.std_defs,
+                &core.base_env,
+                core.base_next_id,
+                &core.global_signatures,
+                &core.global_effects,
+                &core.std_fallback_names
+            )
+        });
+        self.hover_for_analyzed_doc(&analysis, position)
+    }
+
+    fn hover_for_analyzed_doc(&self, doc: &DocAnalysis, position: Position) -> Option<Hover> {
         if let Some((literal_type, literal_range)) = literal_type_at_position(&doc.text, position) {
             let value = format!(
                 "```que\n{}\n```",
