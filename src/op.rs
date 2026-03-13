@@ -144,12 +144,14 @@ fn dead_code_eliminate_top_level_defs(node: &TypedExpression) -> TypedExpression
     }
 
     let mut defs_rhs: HashMap<String, Expression> = HashMap::new();
+    let mut def_indices: HashMap<String, usize> = HashMap::new();
     let mut top_def_names: HashSet<String> = HashSet::new();
     let mut roots: Vec<Expression> = Vec::new();
 
-    for item in norm_items.iter().skip(1) {
+    for (idx, item) in norm_items.iter().enumerate().skip(1) {
         if let Some((name, rhs)) = top_level_let_def(item) {
             defs_rhs.insert(name.clone(), rhs.clone());
+            def_indices.insert(name.clone(), idx);
             top_def_names.insert(name.clone());
         } else {
             roots.push(item.clone());
@@ -169,6 +171,14 @@ fn dead_code_eliminate_top_level_defs(node: &TypedExpression) -> TypedExpression
             if top_def_names.contains(&r) {
                 needed.insert(r);
             }
+        }
+    }
+
+    // Keep unused but non-removable top-level defs (impure or otherwise side-effectful),
+    // and seed dependency closure from them too.
+    for (name, idx) in &def_indices {
+        if !needed.contains(name) && !top_level_let_rhs_is_removable(&normalized_do, *idx) {
+            needed.insert(name.clone());
         }
     }
 
