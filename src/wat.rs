@@ -79,7 +79,7 @@ fn arithmetic_check_config() -> ArithmeticCheckConfig {
     ArithmeticCheckConfig {
         int_overflow_check: parse_env_bool_like("QUE_INT_OVERFLOW_CHECK", false),
         float_overflow_check: parse_env_bool_like("QUE_FLOAT_OVERFLOW_CHECK", false),
-        div_zero_check: parse_env_bool_like("QUE_DIV_ZERO_CHECK", true),
+        div_zero_check: parse_env_bool_like("QUE_DIV_ZERO_CHECK", false),
     }
 }
 

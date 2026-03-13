@@ -1,11 +1,12 @@
-use crate::infer::{ InferErrorInfo, InferErrorScope, TypedExpression };
+use crate::infer::{ infer_with_builtins_typed, InferErrorInfo, InferErrorScope, TypedExpression };
 use crate::lsp_native_core::{
     diagnostic_summary_without_snippet,
     extract_error_snippet,
     infer_error_ranges,
+    normalize_signature,
 };
 use crate::parser::Expression;
-use std::collections::HashSet;
+use std::collections::{ BTreeMap, HashSet };
 use std::env;
 use std::fs;
 use std::io;
@@ -259,21 +260,19 @@ fn take_no_result_flag_from_argv(argv: &mut Vec<String>) -> bool {
     found
 }
 
+fn enable_debug_runtime_guards() {
+    env::set_var("QUE_INT_OVERFLOW_CHECK", "1");
+    env::set_var("QUE_FLOAT_OVERFLOW_CHECK", "1");
+    env::set_var("QUE_DIV_ZERO_CHECK", "1");
+    env::set_var("QUE_BOUNDS_CHECK", "1");
+}
+
 fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>, String> {
     let root = crate::parser
         ::build(source)
         .map_err(|e| format!("failed to parse bundle '{}': {}", label, e))?;
-
-    let Expression::Apply(items) = root else {
-        return Err(format!("bundle '{}' did not parse as top-level do expression", label));
-    };
-
-    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-        return Err(format!("bundle '{}' did not parse as top-level do expression", label));
-    }
-
-    let mut defs = Vec::new();
-    for (idx, item) in items.iter().enumerate().skip(1) {
+    let defs = ast_to_definitions(root, label)?;
+    for (idx, item) in defs.iter().enumerate() {
         let Expression::Apply(form) = item else {
             return Err(
                 format!(
@@ -314,7 +313,6 @@ fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>
                 )
             );
         }
-        defs.push(item.clone());
     }
     Ok(defs)
 }
@@ -364,17 +362,29 @@ fn native_shell_help(bin_name: &str) -> String {
     format!(
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
+         or:    {bin} --lib <names|types|source> [pattern|name]\n\
+         or:    {bin} --learn\n\
+         or:    {bin} --env\n\
          or:    {bin} --uninstall [--out <que-lib.lisp>]\n\
          \n\
          Flags:\n\
            --help, -h     Show this help and exit.\n\
+           --learn        Print Que language quick reference.\n\
+           --env          Print environment flags and tuning examples.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
+                         Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
+                         QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
            --allow        Enable host io permissions (read, write, delete, all).\n\
          \n\
          Notes:\n\
+           - Recommended: run with `--debug` for stronger safety checks and richer diagnostics.\n\
            - Script arguments come before --allow.\n\
            - `--install` accepts helper .que files as positional arguments.\n\
+           - `--lib names [pattern]` lists available library names.\n\
+           - `--lib types [pattern]` prints name and inferred type.\n\
+           - `--lib source <name>` prints the exact symbol source.\n\
+           - Wildcards in pattern: `*` any sequence, `?` single char.\n\
            - --debug, --no-result and --help can appear after the script path.\n\
            - `--install` writes/extends an external library file (used by all binaries).\n\
            - `--uninstall` removes the active external library file.\n\
@@ -382,8 +392,14 @@ fn native_shell_help(bin_name: &str) -> String {
            - In installed setups, without an external library file only language builtins are available.\n\
            - After install/uninstall, restart editor/LSP to reload library state.\n\
            - Once installed, helper bundle source files can be removed.\n\
-         \n\
-         Environment:\n\
+         ",
+        bin = bin_name
+    )
+}
+
+fn native_shell_env_help(bin_name: &str) -> String {
+    format!(
+        "Environment:\n\
            QUE_LIB_PATH       Override external baked library file path.\n\
            QUE_WASM_OPT       Wasmtime/Cranelift optimization level (default: speed).\n\
                               Allowed: none | speed | speed_and_size.\n\
@@ -395,23 +411,184 @@ fn native_shell_help(bin_name: &str) -> String {
            QUE_VEC_MIN_CAP    Minimum initial vector capacity (default: 2, range: 1..4096).\n\
            QUE_VEC_GROWTH_NUM Vector growth numerator (default: 2, range: 1..64).\n\
            QUE_VEC_GROWTH_DEN Vector growth denominator (default: 1, range: 1..64).\n\
-           QUE_DIV_ZERO_CHECK Division/modulo by zero trap check (default: on). Disable with 0|false|off|no.\n\
+           QUE_DIV_ZERO_CHECK Division/modulo by zero trap check (default: off). Enable with 1|true|on|yes.\n\
            QUE_INT_OVERFLOW_CHECK   Integer overflow trap check for +,-,* and mut ops (default: off).\n\
            QUE_FLOAT_OVERFLOW_CHECK Float NaN/Inf trap check for +.,-.,*.,/. and mut ops (default: off).\n\
          \n\
          Example:\n\
-           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que\n\
+           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que\n\
          \n\
          Setup some env flags:\n\
          \n\
-           export QUE_WASM_OPT=speed QUE_TCO=aggressive QUE_DEVIRTUALIZE=aggressive QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=2 QUE_VEC_GROWTH_DEN=1\n\
+           export QUE_WASM_OPT=speed QUE_TCO=aggressive QUE_DEVIRTUALIZE=aggressive QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=2 QUE_VEC_GROWTH_DEN=1\n\
          \n\
          Fallback to default ones:\n\
          \n\
-           unset QUE_WASM_OPT QUE_TCO QUE_DEVIRTUALIZE QUE_BOUNDS_CHECK QUE_DIV_ZERO_CHECK QUE_VEC_MIN_CAP QUE_VEC_GROWTH_NUM QUE_VEC_GROWTH_DEN\n\
-         ",
+           unset QUE_WASM_OPT QUE_TCO QUE_DEVIRTUALIZE QUE_BOUNDS_CHECK QUE_VEC_MIN_CAP QUE_VEC_GROWTH_NUM QUE_VEC_GROWTH_DEN",
         bin = bin_name
     )
+}
+
+fn native_shell_learn() -> &'static str {
+    "Que is a functional, expression-only Lisp with S-expressions.\n\
+    \n\
+    Core:\n\
+    - Function call: (f a b)\n\
+    - Everything is an expression; last expression is the return value.\n\
+    - (let name value) creates immutable bindings.\n\
+    - (do e1 e2 ... en) evaluates in order, returns en, and does NOT create a new scope.\n\
+    - Unit is 0 (nil).\n\
+    \n\
+    Control:\n\
+    - (if cond then else)\n\
+    - (cond c1 e1 c2 e2 ... default)\n\
+    - Branches must return the same type.\n\
+    - Loop with (while cond body).\n\
+    \n\
+    Functions:\n\
+    - (lambda a b body)\n\
+    - Recursive functions must use let*: (let* f (lambda ... (f ...)))\n\
+    - Destructuring works in params:\n\
+      - tuples: {a b}\n\
+      - vectors: [a b c]\n\
+      - '.' skips/ignores rest; for vectors rest marker is last.\n\
+    \n\
+    Types:\n\
+    - Int, Float, Bool, Char\n\
+    - Vector [T] (homogeneous)\n\
+    - Tuple {A B}\n\
+    - String is [Char]\n\
+    - Char literal is 'x'.\n\
+    \n\
+    Mutation and effects:\n\
+    - mut/alter! are for local primitive scalar mutation only (Int/Float/Bool/Char), same lambda scope.\n\
+    - Vector/state mutation uses set!, push!, pop!, pull!, set (boxed refs), etc.\n\
+    - Functions with side effects (mutation or I/O) must end with !.\n\
+    - If a function mutates args, the mutated arg must be the first arg.\n\
+    - If mutating multiple values, pass them inside the first arg (typically a tuple)."
+}
+
+fn binding_name_from_def(expr: &Expression) -> Option<String> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if items.len() < 3 {
+        return None;
+    }
+    let Expression::Word(keyword) = &items[0] else {
+        return None;
+    };
+    if keyword != "let" && keyword != "let*" && keyword != "mut" {
+        return None;
+    }
+    let Expression::Word(name) = &items[1] else {
+        return None;
+    };
+    Some(name.clone())
+}
+
+fn active_library_definitions() -> Result<Vec<Expression>, String> {
+    ast_to_definitions(crate::baked::load_ast(), "active")
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let p = pattern.as_bytes();
+    let t = text.as_bytes();
+    let mut dp = vec![vec![false; t.len() + 1]; p.len() + 1];
+    dp[0][0] = true;
+    for i in 1..=p.len() {
+        if p[i - 1] == b'*' {
+            dp[i][0] = dp[i - 1][0];
+        }
+    }
+    for i in 1..=p.len() {
+        for j in 1..=t.len() {
+            dp[i][j] = match p[i - 1] {
+                b'*' => dp[i - 1][j] || dp[i][j - 1],
+                b'?' => dp[i - 1][j - 1],
+                c => c == t[j - 1] && dp[i - 1][j - 1],
+            };
+        }
+    }
+    dp[p.len()][t.len()]
+}
+
+fn infer_library_symbol_type(name: &str, lib_defs: &[Expression]) -> Result<String, String> {
+    let merged = crate::parser::merge_std_and_program(name, lib_defs.to_vec())?;
+    let (typ, _typed) = infer_with_builtins_typed(
+        &merged,
+        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+    )?;
+    Ok(normalize_signature(&typ.to_string()))
+}
+
+fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
+        println!(
+            "Usage: queio --lib names [pattern]\n\
+             or:    queio --lib types [pattern]\n\
+             or:    queio --lib source <name>\n\
+             \n\
+             Wildcards:\n\
+               *  matches any sequence\n\
+               ?  matches one character\n\
+             \n\
+             Examples:\n\
+               queio --lib names '*map*'\n\
+               queio --lib types 'std/vector/*'\n\
+               queio --lib source map"
+        );
+        return Ok(());
+    }
+
+    let lib_defs = active_library_definitions()?;
+    let mut by_name: BTreeMap<String, Expression> = BTreeMap::new();
+    for def in &lib_defs {
+        if let Some(name) = binding_name_from_def(def) {
+            by_name.insert(name, def.clone());
+        }
+    }
+    let all_names = by_name.keys().cloned().collect::<Vec<_>>();
+
+    match args[0].as_str() {
+        "names" => {
+            let pattern = args.get(1).map(String::as_str).unwrap_or("*");
+            if args.len() > 2 {
+                return Err("Usage: queio --lib names [pattern]".to_string());
+            }
+            for name in all_names.iter().filter(|name| wildcard_match(pattern, name)) {
+                println!("{}", name);
+            }
+            Ok(())
+        }
+        "types" => {
+            let pattern = args.get(1).map(String::as_str).unwrap_or("*");
+            if args.len() > 2 {
+                return Err("Usage: queio --lib types [pattern]".to_string());
+            }
+            for name in all_names.iter().filter(|name| wildcard_match(pattern, name)) {
+                match infer_library_symbol_type(name, &lib_defs) {
+                    Ok(typ) => println!("{} : {}", name, typ),
+                    Err(err) => println!("{} : <type error: {}>", name, err),
+                }
+            }
+            Ok(())
+        }
+        "source" => {
+            if args.len() != 2 {
+                return Err("Usage: queio --lib source <name>".to_string());
+            }
+            let name = &args[1];
+            let Some(expr) = by_name.get(name) else {
+                return Err(format!("library symbol '{}' not found", name));
+            };
+            println!("name: {}", name);
+            println!("source:");
+            println!("{}", expr.to_lisp());
+            Ok(())
+        }
+        other => Err(format!("unknown --lib command '{}'", other)),
+    }
 }
 
 enum LibraryInstallMode {
@@ -420,13 +597,33 @@ enum LibraryInstallMode {
 }
 
 fn ast_to_definitions(ast: Expression, label: &str) -> Result<Vec<Expression>, String> {
-    let Expression::Apply(items) = ast else {
-        return Err(format!("library '{}' did not parse as top-level do expression", label));
-    };
-    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-        return Err(format!("library '{}' did not parse as top-level do expression", label));
+    let mut current = ast;
+    loop {
+        let Expression::Apply(items) = current else {
+            return Err(format!("library '{}' did not parse as top-level do expression", label));
+        };
+        if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+            return Err(format!("library '{}' did not parse as top-level do expression", label));
+        }
+
+        let mut forms = items.into_iter().skip(1).collect::<Vec<_>>();
+        if forms.len() == 1 {
+            let only = forms.remove(0);
+            match only {
+                Expression::Apply(inner) if
+                    matches!(inner.first(), Some(Expression::Word(w)) if w == "do")
+                => {
+                    current = Expression::Apply(inner);
+                    continue;
+                }
+                other => {
+                    return Ok(vec![other]);
+                }
+            }
+        }
+
+        return Ok(forms);
     }
-    Ok(items.into_iter().skip(1).collect())
 }
 
 fn load_existing_library_definitions(path: &Path) -> Result<Vec<Expression>, String> {
@@ -1157,6 +1354,7 @@ fn build_debug_error_report(
 mod tests {
     use super::{
         DebugMode,
+        wildcard_match,
         parse_bundle_definitions,
         take_debug_mode_from_argv,
         take_help_flag_from_argv,
@@ -1333,10 +1531,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_bundle_definitions_accepts_nested_top_level_do() {
+        let src = "(do (let inc (lambda x (+ x 1))) (let dec (lambda x (- x 1))))";
+        let defs = parse_bundle_definitions(src, "bundle.que").expect("bundle should parse");
+        assert_eq!(defs.len(), 2);
+    }
+
+    #[test]
     fn parse_bundle_definitions_rejects_non_definition_form() {
         let src = "(let inc (lambda x (+ x 1)))\n(inc 1)";
         let err = parse_bundle_definitions(src, "bundle.que").expect_err("bundle should fail");
         assert!(err.contains("must contain only top-level definitions"));
+    }
+
+    #[test]
+    fn wildcard_match_supports_star_and_question() {
+        assert!(wildcard_match("*map*", "std/vector/map"));
+        assert!(wildcard_match("map/?", "map/i"));
+        assert!(wildcard_match("sum", "sum"));
+        assert!(!wildcard_match("map/?", "map/int"));
+        assert!(!wildcard_match("reduce/*/i", "reduce/i"));
     }
 }
 
@@ -1349,6 +1563,18 @@ pub fn run_native_shell() -> Result<(), String> {
         .unwrap_or("queio");
     if matches!(args.get(1).map(String::as_str), Some("--help" | "-h")) {
         println!("{}", native_shell_help(bin_name));
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("--learn")) {
+        println!("{}", native_shell_learn());
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("--env")) {
+        println!("{}", native_shell_env_help(bin_name));
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("--lib")) {
+        run_library_explore_via_io(&args.iter().skip(2).cloned().collect::<Vec<_>>())?;
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("--install" | "--bake")) {
@@ -1375,6 +1601,9 @@ pub fn run_native_shell() -> Result<(), String> {
     }
     let suppress_result_output = take_no_result_flag_from_argv(&mut argv);
     let debug_mode = crate::io::take_debug_mode_from_argv(&mut argv);
+    if debug_mode.is_enabled() {
+        enable_debug_runtime_guards();
+    }
     let shell_policy = crate::io
         ::take_shell_policy_from_argv(&mut argv)
         .map_err(|e| format!("invalid shell policy: {}", e))?;

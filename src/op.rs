@@ -3593,7 +3593,7 @@ fn fold_float_bin(
     ) else {
         return node;
     };
-    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", true) && (op == "/." || op == "mod.") && b == 0.0
+    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", false) && (op == "/." || op == "mod.") && b == 0.0
     {
         return node;
     }
