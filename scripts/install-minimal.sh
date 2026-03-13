@@ -17,4 +17,4 @@ else
 fi
 
 echo "✅ Success! Installed binary only (no std library)."
-echo "To install std separately, run: scripts/install-std-only.sh"
+echo "To install the full library bundle (const/std/fp/ds), run: scripts/install-lib-only.sh"
