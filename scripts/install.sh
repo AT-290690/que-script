@@ -18,6 +18,6 @@ run_step() {
 }
 
 run_step "install-minimal.sh"
-run_step "install-std-only.sh"
+run_step "install-lib-only.sh"
 
-echo "Done (binary + std library installed)."
+echo "Done (binary + const/std/fp/ds library installed)."
