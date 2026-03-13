@@ -1647,32 +1647,25 @@ pub fn run_native_shell() -> Result<(), String> {
     };
 
     let std_ast = crate::baked::load_ast();
-    let wrapped_ast = match &std_ast {
-        crate::parser::Expression::Apply(items) => {
-            let lib_defs = items[1..].to_vec();
-            match crate::parser::merge_std_and_program(&program, lib_defs) {
-                Ok(expr) => expr,
-                Err(message) => {
-                    if debug_mode.is_enabled() {
-                        return Err(
-                            build_debug_error_report(
-                                debug_mode,
-                                "parse+desugar",
-                                &program,
-                                &message,
-                                None,
-                                user_desugared.as_ref(),
-                                user_form_count,
-                                None
-                            )
-                        );
-                    }
-                    return Err(message);
-                }
+    let lib_defs = ast_to_definitions(std_ast, "active library")?;
+    let wrapped_ast = match crate::parser::merge_std_and_program(&program, lib_defs) {
+        Ok(expr) => expr,
+        Err(message) => {
+            if debug_mode.is_enabled() {
+                return Err(
+                    build_debug_error_report(
+                        debug_mode,
+                        "parse+desugar",
+                        &program,
+                        &message,
+                        None,
+                        user_desugared.as_ref(),
+                        user_form_count,
+                        None
+                    )
+                );
             }
-        }
-        _ => {
-            return Err("failed to load standard library AST".to_string());
+            return Err(message);
         }
     };
 
