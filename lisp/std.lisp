@@ -876,187 +876,6 @@ out)))
     (std/fn/rec init-frame handler)
     v)))
 
-(let std/int/hash
- (lambda table key (do
-     (let prime-num 31)
-     (mut total 0)
-     (mut i 0)
-     (let bounds (if (< (- (length key) 1) 100) (- (length key) 1) 100))
-     (while (< i bounds) (do
-           (let letter (get key i))
-           (alter! total (std/int/euclidean-mod (+ (* total prime-num) (as letter Int)) (length table)))
-           (alter! i (+ i 1))))
-     total)))
-
-(let std/vector/hash/set/has? (lambda table key (do
-     (let idx (std/int/hash table key))
-     (let current (get table idx))
-     (and (std/vector/in-bounds? table idx)
-                  (and (> (length current) 0)
-                       (>= (std/vector/find-index current (lambda x (std/vector/char/equal? x key))) 0))))))
-
-(let std/vector/hash/table/has? (lambda table key (do
-         (let idx (std/int/hash table key))
-         (let current (std/vector/map (get table idx) (lambda x (get x 0))))
-         (and (std/vector/in-bounds? table idx)
-         (and (> (length current) 0)
-           (>= (std/vector/find-index current
-             (lambda x
-               (std/vector/char/equal? x key))) 0))))))
-
-(let std/vector/hash/set/add!
-     (lambda table key
-       (do
-         (let idx (std/int/hash table key))
-         (if (not (std/vector/in-bounds? table idx)) (set! table idx (as [] [[Char]])) nil)
-         (let item (get table idx))
-         (let current (as item [[Char]]))
-         (let len (length current))
-         (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? x key))) -1))
-         (let entry key)
-         (if (= index -1)
-           (set! current (length current) entry)
-           (set! current index entry)) table)))
-
-(let std/vector/hash/set/remove!
- (lambda table key
-   (do
-     (let idx (std/int/hash table key))
-     (if (not (std/vector/in-bounds? table idx)) (set! table idx (as [] [[Char]])) nil)
-     (let item (get table idx))
-     (let current (as item [[Char]]))
-     (let len (length current))
-     (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? x key))) -1))
-     (let entry key)
-     (if (not (= index -1)) (do (set! current index (std/vector/at current -1)) (pop! current)) nil)
-     table)))
-
-(let std/vector/hash/table/set! (lambda table key value
-       (do
-         (let idx (std/int/hash table key))
-         (if (not (std/vector/in-bounds? table idx)) (set! table idx (as [] [[[Char]]])) nil)
-         (let item (get table idx))
-         (let current (as item [[[Char]]]))
-         (let len (length current))
-         (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (as (get x 0) [Char]) key))) -1))
-         (let entry [ key [(Int->Char value)] ])
-         (if (= index -1)
-           (set! current (length current) entry)
-           (set! current index entry))
-         table)))
-        
-(let std/vector/hash/table/delete! (lambda table key
-     (do
-       (let idx (std/int/hash table key))
-       (if (not (std/vector/in-bounds? table idx)) (set! table idx []) nil)
-       (let current (get table idx))
-       (let len (length current))
-       (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (get x 0) key))) -1))
-       (if (not (= index -1)) (do (set! current index (std/vector/at current -1)) (pop! current)) nil)
-       table)))
-
-(let std/vector/hash/clear! (lambda table (do 
-     (loop 0 (length table) (lambda i (std/vector/empty! (get table i))))
-     table)))
-
-(let std/vector/hash/table/get-helper (lambda table idx key (do
-   (let current (get table idx))
-   (let found-index (std/vector/find-index current (lambda x (std/vector/char/equal? key (as (get x 0) [Char])))))
-   (unless (= found-index -1) (get current found-index 1) []))))
-
-(let std/vector/hash/table/get (lambda table key (do
-     (let idx (std/int/hash table key))
-     (if (std/vector/in-bounds? table idx) (get (std/vector/hash/table/get-helper table idx key)) (as -1 Char)))))
-
-(let std/vector/hash/table/count (lambda arr 
-    (<| arr (std/vector/reduce (lambda table key (do 
-        (if (std/vector/hash/table/has? table key) 
-            (do 
-            (let v (std/vector/hash/table/get table key))
-            (std/vector/hash/table/set! table key (+ (as v Int) 1)))
-            (std/vector/hash/table/set! table key 1)))) (std/vector/buckets 64)))))
-
-(let std/vector/tuple/hash/table/set! (lambda table key value
-       (do
-         (let idx (std/int/hash table key))
-         (if (not (std/vector/in-bounds? table idx)) (set! table idx []) nil)
-         (let current (get table idx))
-         (let len (length current))
-         (let index (if (> len 0) (std/vector/find-index  current (lambda x (std/vector/char/equal? (fst (get x 0)) key))) -1))
-         (let entry [{ key value }])
-         (if (= index -1)
-           (set! current (length current) entry)
-           (set! current index entry))
-         table)))
-
-
-(let std/vector/tuple/hash/table/has? (lambda table key (do
-         (let idx (std/int/hash table key))
-         (let current (std/vector/map (get table idx) (lambda x (fst (get x 0)))))
-         (and (std/vector/in-bounds? table idx)
-         (and (> (length current) 0)
-           (>= (std/vector/find-index current
-             (lambda x
-               (std/vector/char/equal? x key))) 0))))))
-
-(let std/vector/tuple/hash/table/remove!
- (lambda table key
-   (do
-     (let idx (std/int/hash table key))
-     (if (not (std/vector/in-bounds? table idx)) (set! table idx []) nil)
-     (let current (get table idx))
-     (let len (length current))
-     (let index (if (> len 0) (std/vector/find-index current (lambda x (std/vector/char/equal? (fst (get x 0)) key))) -1))
-     (let entry key)
-     (if (not (= index -1)) (do (set! current index (std/vector/at current -1)) (pop! current)) nil)
-     table)))
-
-
-(let std/vector/tuple/hash/table/get-helper (lambda table idx key (do
-   (let current (get table idx))
-   (let found-index (std/vector/find-index current (lambda x (std/vector/char/equal? key (fst (get x 0))))))
-   (unless (= found-index -1) (get current found-index) []))))
-
-(let std/vector/tuple/hash/table/get (lambda table key (do
-     (let idx (std/int/hash table key))
-     (if (std/vector/in-bounds? table idx) (std/vector/tuple/hash/table/get-helper table idx key) []))))
-
-(let std/vector/tuple/hash/table/count (lambda arr 
-    (<| arr (std/vector/reduce (lambda table key (do 
-        (if (std/vector/tuple/hash/table/has? table key) 
-            (do 
-            (let v (snd (get (std/vector/tuple/hash/table/get table key))))
-            (std/vector/tuple/hash/table/set! table key (+ v 1)))
-            (std/vector/tuple/hash/table/set! table key 1)))) (std/vector/buckets 64)))))
-
-(let std/vector/tuple/hash/table/entries (lambda table (std/vector/map (flat table) (lambda x { (fst (get x)) (snd (get x))}))))
-(let std/vector/tuple/hash/table/keys (lambda table (std/vector/map (flat table) (lambda x (fst (get x))))))
-(let std/vector/tuple/hash/table/values (lambda table (std/vector/map (flat table) (lambda x (snd (get x))))))
-(let std/vector/tuple/hash/set/keys (lambda table (std/vector/map (flat table) (lambda x (get x)))))
-
-(let std/vector/tuple/hash/table/drop! (lambda table keys (loop 0 (length keys) (lambda i (std/vector/tuple/hash/table/remove! table (get keys i))))))
-(let std/vector/tuple/hash/table/keep (lambda table keys (do 
-  (let t2 (std/vector/buckets 32))
-  (loop 0 (length keys) (lambda i (std/vector/tuple/hash/table/set! t2 (get keys i) (fst (first (std/vector/tuple/hash/table/get table (get keys i)))))))
-  t2)))
-(let std/vector/tuple/hash/table/omit (lambda table keys (do 
-  (let t2 (std/vector/map table (lambda x (std/vector/map x identity))))
-  (loop 0 (length keys) (lambda i (std/vector/tuple/hash/table/remove! t2 (get keys i))))
-  t2)))
-
-(let std/vector/tuple/hash/table/merge! (lambda a b (do 
-  (let entries (std/vector/tuple/hash/table/entries b))
-  (std/vector/for entries (lambda { key value } (std/vector/tuple/hash/table/set! a key value))))))
-
-(let std/vector/tuple/hash/table/merge (lambda a b (do 
-  (let A (std/vector/tuple/hash/table/entries a))
-  (let B (std/vector/tuple/hash/table/entries b))
-  (let out (std/vector/buckets 32))
-  (std/vector/for A (lambda { key value } (std/vector/tuple/hash/table/set! out key value)))
-  (std/vector/for B (lambda { key value } (std/vector/tuple/hash/table/set! out key value)))
-  out)))
-
-
 (let std/vector/sliding-window (lambda xs size (cond 
      (std/vector/empty? xs) []
      (= size (length xs)) [xs]
@@ -1068,9 +887,6 @@ out)))
      (std/vector/reduce xs (lambda a b (std/vector/cons a b)) []))))
 (let std/vector/flat/length (lambda matrix (length (std/vector/flat-one matrix))))
 
-(let std/vector/hash/table/keys (lambda table (<| table (std/vector/flat-one) (std/vector/map std/vector/first))))
-(let std/vector/hash/table/values (lambda table (<| table (std/vector/flat-one) (std/vector/map std/vector/second))))
-(let std/vector/hash/table/entries (lambda table (<| table (std/vector/flat-one))))
 (let std/convert/char->digit (lambda digit (if (<# digit '0') 0 (- (as digit Int) (as '0' Int)))))
 (let std/convert/chars->digits (lambda digits (std/vector/map digits std/convert/char->digit)))
 (let std/convert/digit->char (lambda digit (if (< digit 0) '0' (+# (as digit Char) '0'))))
@@ -1189,11 +1005,6 @@ out)))
           (let dx (+ (std/vector/second dir) x))
           (fn a (get xs (std/int/euclidean-mod dy N) (std/int/euclidean-mod dx N))))) 0)))
 
-(let std/vector/tuple/hash/table/group-by (lambda xs fn (do 
-  (std/vector/reduce xs (lambda a b (do
-    (let key (fn b))
-    (if (std/vector/tuple/hash/table/has? a key) (push! (snd (get (std/vector/tuple/hash/table/get a key))) b) (do (std/vector/tuple/hash/table/set! a key [b]) nil))
-    a)) (std/vector/buckets 32)))))
 
 (let std/node/parent (lambda i (- (>> (+ i 1) 1) 1)))
 (let std/node/left (lambda i (+ (<< i 1) 1)))
@@ -1259,8 +1070,6 @@ heap)))
 (let std/convert/vector->heap (lambda xs fn (std/vector/reduce xs (lambda heap x (do (std/heap/push! heap x fn) heap)) [])))
 (let std/convert/set->vector (lambda xs (std/vector/filter (std/vector/flat-one xs) std/vector/not-empty?)))
 
-(let std/vector/hash/set/max-capacity (lambda a b (std/vector/buckets (std/int/max (length a) (length b)))))
-(let std/vector/hash/set/min-capacity (lambda a b (std/vector/buckets (std/int/min (length a) (length b)))))
 (let std/convert/integer->string-base (lambda num base  
     (if (= num 0) "0" (do 
         (let neg? (< num 0))
@@ -1275,28 +1084,6 @@ heap)))
         (std/vector/reverse (if neg? (std/vector/append! str std/char/dash) str))))))
 (let std/convert/integer->string (lambda x (std/convert/integer->string-base x 10)))
 (let std/convert/vector->set (lambda xs (std/vector/reduce xs (lambda s x (do (std/vector/hash/set/add! s x) s)) [ [] [] [] [] [] [] [] ])))
-(let std/vector/hash/set/intersection (lambda a b
-        (<| b
-          (std/convert/set->vector)
-          (std/vector/reduce (lambda out element
-          (do (if (std/vector/hash/set/has? a element)
-                    (std/vector/hash/set/add! out element) out) out)) (std/vector/hash/set/max-capacity a b)))))
-(let std/vector/hash/set/difference (lambda a b
-      (<| a
-        (std/convert/set->vector)
-        (std/vector/reduce (lambda out element
-                        (do (if (not (std/vector/hash/set/has? b element))
-                                        (std/vector/hash/set/add! out element) out) out)) (std/vector/hash/set/max-capacity a b)))))
-(let std/vector/hash/set/xor (lambda a b (do
-        (let out (std/vector/hash/set/max-capacity a b))
-        (<| a (std/convert/set->vector) (std/vector/for (lambda element (if (not (std/vector/hash/set/has? b element)) (std/vector/hash/set/add! out element) out))))
-        (<| b (std/convert/set->vector) (std/vector/for (lambda element (if (not (std/vector/hash/set/has? a element)) (std/vector/hash/set/add! out element) out))))
-        (as out [[[Char]]]))))
-(let std/vector/hash/set/union (lambda a b (do
-        (let out (std/vector/hash/set/max-capacity a b))
-        (<| a (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
-        (<| b (std/convert/set->vector) (std/vector/for (lambda element (std/vector/hash/set/add! out element))))
-        (as out [[[Char]]]))))
 
 (let std/integer/decimal-scaling 1000000)
 (let std/float/decimal-scaling 1000000.0)
@@ -1980,7 +1767,6 @@ q)))
 (let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
 (let std/vector/2d/get* get*)
 (let std/vector/3d/get* (lambda xs i j some none (if (std/vector/3d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))
-(let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))
 (let std/vector/enumerate (lambda xs (std/vector/tuple/zip { (std/vector/int/range 0 (- (length xs) 1)) xs })))
 
 (let std/int/factorial (lambda n (do 
@@ -2076,7 +1862,7 @@ q)))
 (let push! (lambda xs x (set! xs (length xs) x)))
 (let pull! std/vector/pop-and-get!)
 (let swap! std/vector/swap!)
-(let scan! (lambda fn xs (std/vector/adjacent-difference! xs fn)))
+(let scan! (lambda xs fn (std/vector/adjacent-difference! xs fn)))
 (let empty! (lambda xs (do (std/vector/empty! xs) nil)))
 (let reverse! std/vector/reverse!)
 (let sort! std/vector/sort!)
@@ -2090,7 +1876,7 @@ q)))
 ; -------------------------
 ; Fast Set/Table implementation
 ; -------------------------
-(let std/int/hash/dynamic
+(let std/int/hash
  (lambda table key
    (do
      (let cap (length table))
@@ -2107,12 +1893,12 @@ q)))
 ; -------------------------
 ; Fast Set implementation
 ; -------------------------
-(let std/vector/hash/set/dynamic (lambda capacity (std/vector/buckets (std/int/max 4 capacity))))
-(let std/vector/hash/set/dynamic/new std/vector/hash/set/dynamic)
-(let std/vector/hash/set/dynamic/max-capacity (lambda a b (std/vector/hash/set/dynamic (std/int/max (length a) (length b)))))
-(let std/vector/hash/set/dynamic/min-capacity (lambda a b (std/vector/hash/set/dynamic (std/int/min (length a) (length b)))))
+(let std/vector/hash/set (lambda capacity (std/vector/buckets (std/int/max 4 capacity))))
+(let std/vector/hash/set/new std/vector/hash/set)
+(let std/vector/hash/set/max-capacity (lambda a b (std/vector/hash/set (std/int/max (length a) (length b)))))
+(let std/vector/hash/set/min-capacity (lambda a b (std/vector/hash/set (std/int/min (length a) (length b)))))
 
-(let std/vector/hash/set/dynamic/key-equal? (lambda a b (do
+(let std/vector/hash/set/key-equal? (lambda a b (do
   (let len (length a))
   (if (not (= len (length b)))
       false
@@ -2126,18 +1912,18 @@ q)))
           (alter! i (+ i 1))))
         matches)))))
 
-(let std/vector/hash/set/dynamic/find-index (lambda bucket key (do
+(let std/vector/hash/set/find-index (lambda bucket key (do
   (mut i 0)
   (mut found -1)
   (let len (length bucket))
   (while (and (= found -1) (< i len)) (do
-    (if (std/vector/hash/set/dynamic/key-equal? (get bucket i) key)
+    (if (std/vector/hash/set/key-equal? (get bucket i) key)
         (alter! found i)
         nil)
     (alter! i (+ i 1))))
   found)))
 
-(let std/vector/hash/set/dynamic/count (lambda table (do
+(let std/vector/hash/set/count (lambda table (do
   (mut total 0)
   (let len (length table))
   (mut i 0)
@@ -2146,7 +1932,7 @@ q)))
     (alter! i (+ i 1))))
   total)))
 
-(let std/vector/hash/set/dynamic/for-each (lambda table fn (do
+(let std/vector/hash/set/for-each (lambda table fn (do
   (mut i 0)
   (let table-len (length table))
   (while (< i table-len) (do
@@ -2158,19 +1944,19 @@ q)))
       (alter! j (+ j 1))))
     (alter! i (+ i 1)))))))
 
-(let std/vector/hash/set/dynamic/add!/raw (lambda table key (do
-  (let idx (std/int/hash/dynamic table key))
+(let std/vector/hash/set/add!/raw (lambda table key (do
+  (let idx (std/int/hash table key))
   (let bucket (get table idx))
   (set! bucket (length bucket) key)
   table)))
 
-(let std/vector/hash/set/dynamic/resize! (lambda table new-capacity (do
+(let std/vector/hash/set/resize! (lambda table new-capacity (do
   (let target (std/int/max 4 new-capacity))
   (if (= target (length table))
       table
       (do
         (let entries [])
-        (std/vector/hash/set/dynamic/for-each table (lambda key (set! entries (length entries) key)))
+        (std/vector/hash/set/for-each table (lambda key (set! entries (length entries) key)))
         (std/vector/empty! table)
         (mut i 0)
         (while (< i target) (do
@@ -2179,43 +1965,43 @@ q)))
         (mut j 0)
         (let entries-len (length entries))
         (while (< j entries-len) (do
-          (std/vector/hash/set/dynamic/add!/raw table (get entries j))
+          (std/vector/hash/set/add!/raw table (get entries j))
           (alter! j (+ j 1))))
         table)))))
 
-(let std/vector/hash/set/dynamic/compact! (lambda table (do
-  (let used (std/vector/hash/set/dynamic/count table))
+(let std/vector/hash/set/compact! (lambda table (do
+  (let used (std/vector/hash/set/count table))
   (let target (std/int/max 32 (* used 2)))
-  (std/vector/hash/set/dynamic/resize! table target))))
+  (std/vector/hash/set/resize! table target))))
 
-(let std/vector/hash/set/dynamic/has? (lambda table key
+(let std/vector/hash/set/has? (lambda table key
   (if (= (length table) 0)
       false
       (do
-        (let idx (std/int/hash/dynamic table key))
+        (let idx (std/int/hash table key))
         (let bucket (get table idx))
-        (>= (std/vector/hash/set/dynamic/find-index bucket key) 0)))))
+        (>= (std/vector/hash/set/find-index bucket key) 0)))))
 
-(let std/vector/hash/set/dynamic/add! (lambda table key (do
-  (if (= (length table) 0) (do (std/vector/hash/set/dynamic/resize! table 32) nil) nil)
-  (let idx (std/int/hash/dynamic table key))
+(let std/vector/hash/set/add! (lambda table key (do
+  (if (= (length table) 0) (do (std/vector/hash/set/resize! table 32) nil) nil)
+  (let idx (std/int/hash table key))
   (let bucket (get table idx))
-  (if (= (std/vector/hash/set/dynamic/find-index bucket key) -1)
+  (if (= (std/vector/hash/set/find-index bucket key) -1)
         (do
         (set! bucket (length bucket) key)
         (if (> (length bucket) 8)
-            (do (std/vector/hash/set/dynamic/resize! table (* (length table) 2)) nil)
+            (do (std/vector/hash/set/resize! table (* (length table) 2)) nil)
             nil))
       nil)
   table)))
 
-(let std/vector/hash/set/dynamic/remove! (lambda table key (do
+(let std/vector/hash/set/remove! (lambda table key (do
   (if (= (length table) 0)
       table
       (do
-        (let idx (std/int/hash/dynamic table key))
+        (let idx (std/int/hash table key))
         (let bucket (get table idx))
-        (let index (std/vector/hash/set/dynamic/find-index bucket key))
+        (let index (std/vector/hash/set/find-index bucket key))
         (if (>= index 0)
             (do
               (set! bucket index (get bucket (- (length bucket) 1)))
@@ -2223,81 +2009,81 @@ q)))
             nil)
         (if (and (> (length table) 32) (= (length bucket) 0))
             (do
-              (let used (std/vector/hash/set/dynamic/count table))
+              (let used (std/vector/hash/set/count table))
               (if (< (* used 4) (length table))
-                  (do (std/vector/hash/set/dynamic/resize! table (std/int/max 32 (/ (length table) 2))) nil)
+                  (do (std/vector/hash/set/resize! table (std/int/max 32 (/ (length table) 2))) nil)
                   nil))
             nil)
         table)))))
 
 (let std/convert/vector->set/dynamic (lambda xs (do
-  (let out (std/vector/hash/set/dynamic (std/int/max 32 (length xs))))
+  (let out (std/vector/hash/set (std/int/max 32 (length xs))))
   (mut i 0)
   (let len (length xs))
   (while (< i len) (do
-    (std/vector/hash/set/dynamic/add! out (get xs i))
+    (std/vector/hash/set/add! out (get xs i))
     (alter! i (+ i 1))))
   out)))
 
-(let std/vector/hash/set/dynamic/intersection (lambda a b (do
-  (let out (std/vector/hash/set/dynamic/max-capacity a b))
-  (let a-count (std/vector/hash/set/dynamic/count a))
-  (let b-count (std/vector/hash/set/dynamic/count b))
+(let std/vector/hash/set/intersection (lambda a b (do
+  (let out (std/vector/hash/set/max-capacity a b))
+  (let a-count (std/vector/hash/set/count a))
+  (let b-count (std/vector/hash/set/count b))
   (let src (if (< a-count b-count) a b))
   (let trg (if (< a-count b-count) b a))
-  (std/vector/hash/set/dynamic/for-each src (lambda key
-    (if (and (std/vector/not-empty? key) (std/vector/hash/set/dynamic/has? trg key))
-        (do (std/vector/hash/set/dynamic/add! out key) nil)
+  (std/vector/hash/set/for-each src (lambda key
+    (if (and (std/vector/not-empty? key) (std/vector/hash/set/has? trg key))
+        (do (std/vector/hash/set/add! out key) nil)
         nil)))
   out)))
 
-(let std/vector/hash/set/dynamic/difference (lambda a b (do
-  (let out (std/vector/hash/set/dynamic/max-capacity a b))
-  (std/vector/hash/set/dynamic/for-each a (lambda key
-    (if (and (std/vector/not-empty? key) (not (std/vector/hash/set/dynamic/has? b key)))
-        (do (std/vector/hash/set/dynamic/add! out key) nil)
+(let std/vector/hash/set/difference (lambda a b (do
+  (let out (std/vector/hash/set/max-capacity a b))
+  (std/vector/hash/set/for-each a (lambda key
+    (if (and (std/vector/not-empty? key) (not (std/vector/hash/set/has? b key)))
+        (do (std/vector/hash/set/add! out key) nil)
         nil)))
   out)))
 
-(let std/vector/hash/set/dynamic/xor (lambda a b (do
-  (let out (std/vector/hash/set/dynamic/max-capacity a b))
-  (std/vector/hash/set/dynamic/for-each a (lambda key
-    (if (and (std/vector/not-empty? key) (not (std/vector/hash/set/dynamic/has? b key)))
-        (do (std/vector/hash/set/dynamic/add! out key) nil)
+(let std/vector/hash/set/xor (lambda a b (do
+  (let out (std/vector/hash/set/max-capacity a b))
+  (std/vector/hash/set/for-each a (lambda key
+    (if (and (std/vector/not-empty? key) (not (std/vector/hash/set/has? b key)))
+        (do (std/vector/hash/set/add! out key) nil)
         nil)))
-  (std/vector/hash/set/dynamic/for-each b (lambda key
-    (if (and (std/vector/not-empty? key) (not (std/vector/hash/set/dynamic/has? a key)))
-        (do (std/vector/hash/set/dynamic/add! out key) nil)
+  (std/vector/hash/set/for-each b (lambda key
+    (if (and (std/vector/not-empty? key) (not (std/vector/hash/set/has? a key)))
+        (do (std/vector/hash/set/add! out key) nil)
         nil)))
   out)))
 
-(let std/vector/hash/set/dynamic/union (lambda a b (do
-  (let out (std/vector/hash/set/dynamic/max-capacity a b))
-  (std/vector/hash/set/dynamic/for-each a (lambda key
-    (if (std/vector/not-empty? key) (do (std/vector/hash/set/dynamic/add! out key) nil) nil)))
-  (std/vector/hash/set/dynamic/for-each b (lambda key
-    (if (std/vector/not-empty? key) (do (std/vector/hash/set/dynamic/add! out key) nil) nil)))
+(let std/vector/hash/set/union (lambda a b (do
+  (let out (std/vector/hash/set/max-capacity a b))
+  (std/vector/hash/set/for-each a (lambda key
+    (if (std/vector/not-empty? key) (do (std/vector/hash/set/add! out key) nil) nil)))
+  (std/vector/hash/set/for-each b (lambda key
+    (if (std/vector/not-empty? key) (do (std/vector/hash/set/add! out key) nil) nil)))
   out)))
 
 ; -------------------------
 ; Fast Table implementation
 ; -------------------------
-(let std/vector/hash/table/dynamic (lambda capacity (std/vector/buckets (std/int/max 4 capacity))))
-(let std/vector/hash/table/dynamic/new std/vector/hash/table/dynamic)
-(let std/vector/hash/table/dynamic/max-capacity (lambda a b (std/vector/hash/table/dynamic (std/int/max (length a) (length b)))))
+(let std/vector/hash/table (lambda capacity (std/vector/buckets (std/int/max 4 capacity))))
+(let std/vector/hash/table/new std/vector/hash/table)
+(let std/vector/hash/table/max-capacity (lambda a b (std/vector/hash/table (std/int/max (length a) (length b)))))
 
-(let std/vector/hash/table/dynamic/find-index (lambda bucket key (do
+(let std/vector/hash/table/find-index (lambda bucket key (do
   (mut i 0)
   (mut found -1)
   (let len (length bucket))
   (while (and (= found -1) (< i len)) (do
-    (if (std/vector/hash/set/dynamic/key-equal? (fst (get bucket i)) key)
+    (if (std/vector/hash/set/key-equal? (fst (get bucket i)) key)
         (alter! found i)
         nil)
     (alter! i (+ i 1))))
   found)))
 
-(let std/vector/hash/table/dynamic/for-each (lambda table fn (do
+(let std/vector/hash/table/for-each (lambda table fn (do
   (mut i 0)
   (let table-len (length table))
   (while (< i table-len) (do
@@ -2309,7 +2095,7 @@ q)))
       (alter! j (+ j 1))))
     (alter! i (+ i 1)))))))
 
-(let std/vector/hash/table/dynamic/count-entries (lambda table (do
+(let std/vector/hash/table/count-entries (lambda table (do
   (mut total 0)
   (mut i 0)
   (let len (length table))
@@ -2318,19 +2104,19 @@ q)))
     (alter! i (+ i 1))))
   total)))
 
-(let std/vector/hash/table/dynamic/set!/raw (lambda table key value (do
-  (let idx (std/int/hash/dynamic table key))
+(let std/vector/hash/table/set!/raw (lambda table key value (do
+  (let idx (std/int/hash table key))
   (let bucket (get table idx))
   (set! bucket (length bucket) { key value })
   table)))
 
-(let std/vector/hash/table/dynamic/resize! (lambda table new-capacity (do
+(let std/vector/hash/table/resize! (lambda table new-capacity (do
   (let target (std/int/max 4 new-capacity))
   (if (= target (length table))
       table
       (do
         (let entries [])
-        (std/vector/hash/table/dynamic/for-each table (lambda entry (set! entries (length entries) entry)))
+        (std/vector/hash/table/for-each table (lambda entry (set! entries (length entries) entry)))
         (std/vector/empty! table)
         (mut i 0)
         (while (< i target) (do
@@ -2340,44 +2126,44 @@ q)))
         (let entries-len (length entries))
         (while (< j entries-len) (do
           (let entry (get entries j))
-          (std/vector/hash/table/dynamic/set!/raw table (fst entry) (snd entry))
+          (std/vector/hash/table/set!/raw table (fst entry) (snd entry))
           (alter! j (+ j 1))))
         table)))))
 
-(let std/vector/hash/table/dynamic/compact! (lambda table (do
-  (let used (std/vector/hash/table/dynamic/count-entries table))
+(let std/vector/hash/table/compact! (lambda table (do
+  (let used (std/vector/hash/table/count-entries table))
   (let target (std/int/max 32 (* used 2)))
-  (std/vector/hash/table/dynamic/resize! table target))))
+  (std/vector/hash/table/resize! table target))))
 
-(let std/vector/hash/table/dynamic/has? (lambda table key
+(let std/vector/hash/table/has? (lambda table key
   (if (= (length table) 0)
       false
       (do
-        (let idx (std/int/hash/dynamic table key))
+        (let idx (std/int/hash table key))
         (let bucket (get table idx))
-        (>= (std/vector/hash/table/dynamic/find-index bucket key) 0)))))
+        (>= (std/vector/hash/table/find-index bucket key) 0)))))
 
-(let std/vector/hash/table/dynamic/set! (lambda table key value (do
-  (if (= (length table) 0) (do (std/vector/hash/table/dynamic/resize! table 32) nil) nil)
-  (let idx (std/int/hash/dynamic table key))
+(let std/vector/hash/table/set! (lambda table key value (do
+  (if (= (length table) 0) (do (std/vector/hash/table/resize! table 32) nil) nil)
+  (let idx (std/int/hash table key))
   (let bucket (get table idx))
-  (let index (std/vector/hash/table/dynamic/find-index bucket key))
+  (let index (std/vector/hash/table/find-index bucket key))
   (if (= index -1)
       (do
         (set! bucket (length bucket) { key value })
         (if (> (length bucket) 8)
-            (do (std/vector/hash/table/dynamic/resize! table (* (length table) 2)) nil)
+            (do (std/vector/hash/table/resize! table (* (length table) 2)) nil)
             nil))
       (set! bucket index { key value }))
   table)))
 
-(let std/vector/hash/table/dynamic/remove! (lambda table key (do
+(let std/vector/hash/table/remove! (lambda table key (do
   (if (= (length table) 0)
       table
       (do
-        (let idx (std/int/hash/dynamic table key))
+        (let idx (std/int/hash table key))
         (let bucket (get table idx))
-        (let index (std/vector/hash/table/dynamic/find-index bucket key))
+        (let index (std/vector/hash/table/find-index bucket key))
         (if (>= index 0)
             (do
               (set! bucket index (get bucket (- (length bucket) 1)))
@@ -2385,29 +2171,32 @@ q)))
             nil)
         (if (and (> (length table) 32) (= (length bucket) 0))
             (do
-              (let used (std/vector/hash/table/dynamic/count-entries table))
+              (let used (std/vector/hash/table/count-entries table))
               (if (< (* used 4) (length table))
-                  (do (std/vector/hash/table/dynamic/resize! table (std/int/max 32 (/ (length table) 2))) nil)
+                  (do (std/vector/hash/table/resize! table (std/int/max 32 (/ (length table) 2))) nil)
                   nil))
             nil)
         table)))))
 
-(let std/vector/hash/table/dynamic/get (lambda table key
+
+(let std/vector/hash/table/get* (lambda xs i some none (if (std/vector/hash/table/has? xs i) (do (some (std/vector/hash/table/get xs i)) nil) (do (none) nil))))
+
+(let std/vector/hash/table/get (lambda table key
   (if (= (length table) 0)
       []
       (do
-        (let idx (std/int/hash/dynamic table key))
+        (let idx (std/int/hash table key))
         (let bucket (get table idx))
-        (let index (std/vector/hash/table/dynamic/find-index bucket key))
+        (let index (std/vector/hash/table/find-index bucket key))
         (if (>= index 0) [ (get bucket index) ] [])))))
 
-(let std/vector/hash/table/dynamic/entries (lambda table (do
+(let std/vector/hash/table/entries (lambda table (do
   (let out [])
-  (std/vector/hash/table/dynamic/for-each table (lambda entry (set! out (length out) entry)))
+  (std/vector/hash/table/for-each table (lambda entry (set! out (length out) entry)))
   out)))
 
-(let std/vector/hash/table/dynamic/keys (lambda table (do
-  (let entries (std/vector/hash/table/dynamic/entries table))
+(let std/vector/hash/table/keys (lambda table (do
+  (let entries (std/vector/hash/table/entries table))
   (let out [])
   (mut i 0)
   (let len (length entries))
@@ -2416,8 +2205,8 @@ q)))
     (alter! i (+ i 1))))
   out)))
 
-(let std/vector/hash/table/dynamic/values (lambda table (do
-  (let entries (std/vector/hash/table/dynamic/entries table))
+(let std/vector/hash/table/values (lambda table (do
+  (let entries (std/vector/hash/table/entries table))
   (let out [])
   (mut i 0)
   (let len (length entries))
@@ -2426,80 +2215,80 @@ q)))
     (alter! i (+ i 1))))
   out)))
 
-(let std/vector/hash/table/dynamic/count (lambda arr (do
-  (let table (std/vector/hash/table/dynamic (std/int/max 64 (length arr))))
+(let std/vector/hash/table/count (lambda arr (do
+  (let table (std/vector/hash/table (std/int/max 64 (length arr))))
   (mut i 0)
   (let len (length arr))
   (while (< i len) (do
     (let key (get arr i))
-    (let hit (std/vector/hash/table/dynamic/get table key))
+    (let hit (std/vector/hash/table/get table key))
     (if (= (length hit) 0)
-        (std/vector/hash/table/dynamic/set! table key 1)
-        (std/vector/hash/table/dynamic/set! table key (+ (snd (get hit 0)) 1)))
+        (std/vector/hash/table/set! table key 1)
+        (std/vector/hash/table/set! table key (+ (snd (get hit 0)) 1)))
     (alter! i (+ i 1))))
   table)))
 
-(let std/vector/hash/table/dynamic/drop! (lambda table keys (do
+(let std/vector/hash/table/drop! (lambda table keys (do
   (mut i 0)
   (let len (length keys))
   (while (< i len) (do
-    (std/vector/hash/table/dynamic/remove! table (get keys i))
+    (std/vector/hash/table/remove! table (get keys i))
     (alter! i (+ i 1)))))))
 
-(let std/vector/hash/table/dynamic/keep (lambda table keys (do
-  (let out (std/vector/hash/table/dynamic (std/int/max 32 (length keys))))
+(let std/vector/hash/table/keep (lambda table keys (do
+  (let out (std/vector/hash/table (std/int/max 32 (length keys))))
   (mut i 0)
   (let len (length keys))
   (while (< i len) (do
     (let key (get keys i))
-    (let hit (std/vector/hash/table/dynamic/get table key))
+    (let hit (std/vector/hash/table/get table key))
     (if (> (length hit) 0)
-        (do (std/vector/hash/table/dynamic/set! out key (fst (get hit 0))) nil)
+        (do (std/vector/hash/table/set! out key (fst (get hit 0))) nil)
         nil)
     (alter! i (+ i 1))))
   out)))
 
-(let std/vector/hash/table/dynamic/merge! (lambda a b (do
-  (let entries (std/vector/hash/table/dynamic/entries b))
+(let std/vector/hash/table/merge! (lambda a b (do
+  (let entries (std/vector/hash/table/entries b))
   (mut i 0)
   (let len (length entries))
   (while (< i len) (do
     (let entry (get entries i))
-    (std/vector/hash/table/dynamic/set! a (fst entry) (snd entry))
+    (std/vector/hash/table/set! a (fst entry) (snd entry))
     (alter! i (+ i 1))))
   a)))
 
-(let std/vector/hash/table/dynamic/merge (lambda a b (do
-  (let out (std/vector/hash/table/dynamic/max-capacity a b))
-  (std/vector/hash/table/dynamic/merge! out a)
-  (std/vector/hash/table/dynamic/merge! out b)
+(let std/vector/hash/table/merge (lambda a b (do
+  (let out (std/vector/hash/table/max-capacity a b))
+  (std/vector/hash/table/merge! out a)
+  (std/vector/hash/table/merge! out b)
   out)))
 
-(let std/vector/hash/table/dynamic/omit (lambda table keys (do
-  (let out (std/vector/hash/table/dynamic/merge (std/vector/hash/table/dynamic 32) table))
-  (std/vector/hash/table/dynamic/drop! out keys)
+(let std/vector/hash/table/omit (lambda table keys (do
+  (let out (std/vector/hash/table/merge (std/vector/hash/table 32) table))
+  (std/vector/hash/table/drop! out keys)
   out)))
 
-(let std/convert/vector->table/dynamic (lambda entries (do
-  (let out (std/vector/hash/table/dynamic (std/int/max 32 (length entries))))
+(let std/convert/vector->table (lambda entries (do
+  (let out (std/vector/hash/table (std/int/max 32 (length entries))))
   (mut i 0)
   (let len (length entries))
   (while (< i len) (do
     (let entry (get entries i))
-    (std/vector/hash/table/dynamic/set! out (fst entry) (snd entry))
+    (std/vector/hash/table/set! out (fst entry) (snd entry))
     (alter! i (+ i 1))))
   out)))
 
-(let std/vector/tuple/hash/table/dynamic/group-by (lambda xs fn (do
-  (let out (std/vector/hash/table/dynamic 32))
+(let std/vector/hash/table/group-by (lambda xs fn (do
+  (let out (std/vector/hash/table 32))
   (mut i 0)
   (let len (length xs))
   (while (< i len) (do
     (let item (get xs i))
     (let key (fn item))
-    (let hit (std/vector/hash/table/dynamic/get out key))
+    (let hit (std/vector/hash/table/get out key))
     (if (= (length hit) 0)
-        (do (std/vector/hash/table/dynamic/set! out key [item]) nil)
+        (do (std/vector/hash/table/set! out key [item]) nil)
         (do (push! (snd (get hit 0)) item) nil))
     (alter! i (+ i 1))))
   out)))
