@@ -259,9 +259,112 @@ fn take_no_result_flag_from_argv(argv: &mut Vec<String>) -> bool {
     found
 }
 
+fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>, String> {
+    let root = crate::parser
+        ::build(source)
+        .map_err(|e| format!("failed to parse bundle '{}': {}", label, e))?;
+
+    let Expression::Apply(items) = root else {
+        return Err(format!("bundle '{}' did not parse as top-level do expression", label));
+    };
+
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return Err(format!("bundle '{}' did not parse as top-level do expression", label));
+    }
+
+    let mut defs = Vec::new();
+    for (idx, item) in items.iter().enumerate().skip(1) {
+        let Expression::Apply(form) = item else {
+            return Err(
+                format!(
+                    "bundle '{}' must contain only top-level definitions; found non-definition at form {}: {}",
+                    label,
+                    idx,
+                    item.to_lisp()
+                )
+            );
+        };
+        if form.len() < 3 {
+            return Err(
+                format!(
+                    "bundle '{}' must contain only top-level definitions; malformed form {}: {}",
+                    label,
+                    idx,
+                    item.to_lisp()
+                )
+            );
+        }
+        let Expression::Word(kw) = &form[0] else {
+            return Err(
+                format!(
+                    "bundle '{}' must contain only top-level definitions; malformed form {}: {}",
+                    label,
+                    idx,
+                    item.to_lisp()
+                )
+            );
+        };
+        if kw != "let" && kw != "let*" && kw != "mut" {
+            return Err(
+                format!(
+                    "bundle '{}' must contain only top-level definitions; found '{}' at form {}",
+                    label,
+                    kw,
+                    idx
+                )
+            );
+        }
+        defs.push(item.clone());
+    }
+    Ok(defs)
+}
+
+fn load_bundle_definitions(
+    script_cwd: &Path,
+    bundle_paths: &[String]
+) -> Result<Vec<Expression>, String> {
+    let mut out = Vec::new();
+    for bundle_path in bundle_paths {
+        let raw = Path::new(bundle_path);
+        let resolved = if raw.is_absolute() { raw.to_path_buf() } else { script_cwd.join(raw) };
+        if resolved.extension().and_then(|e| e.to_str()) != Some("que") {
+            return Err(format!("bundle '{}' must be a .que file", resolved.display()));
+        }
+        let source = fs
+            ::read_to_string(&resolved)
+            .map_err(|e| format!("failed to read bundle '{}': {}", resolved.display(), e))?;
+        let mut defs = parse_bundle_definitions(&source, &resolved.display().to_string())?;
+        out.append(&mut defs);
+    }
+    Ok(out)
+}
+
+fn take_install_output_path_from_argv(argv: &mut Vec<String>) -> Result<Option<String>, String> {
+    let mut out_path: Option<String> = None;
+    let mut out = Vec::with_capacity(argv.len());
+    let mut i = 0usize;
+    while i < argv.len() {
+        if argv[i] == "--out" {
+            i += 1;
+            if i >= argv.len() || argv[i].starts_with("--") {
+                return Err("--out requires a path".to_string());
+            }
+            out_path = Some(argv[i].clone());
+            i += 1;
+            continue;
+        }
+        out.push(argv[i].clone());
+        i += 1;
+    }
+    *argv = out;
+    Ok(out_path)
+}
+
 fn native_shell_help(bin_name: &str) -> String {
     format!(
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
+         or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
+         or:    {bin} --uninstall [--out <que-lib.lisp>]\n\
          \n\
          Flags:\n\
            --help, -h     Show this help and exit.\n\
@@ -271,9 +374,17 @@ fn native_shell_help(bin_name: &str) -> String {
          \n\
          Notes:\n\
            - Script arguments come before --allow.\n\
+           - `--install` accepts helper .que files as positional arguments.\n\
            - --debug, --no-result and --help can appear after the script path.\n\
+           - `--install` writes/extends an external library file (used by all binaries).\n\
+           - `--uninstall` removes the active external library file.\n\
+           - Default output path: /usr/local/share/que/que-lib.lisp.\n\
+           - In installed setups, without an external library file only language builtins are available.\n\
+           - After install/uninstall, restart editor/LSP to reload library state.\n\
+           - Once installed, helper bundle source files can be removed.\n\
          \n\
          Environment:\n\
+           QUE_LIB_PATH       Override external baked library file path.\n\
            QUE_WASM_OPT       Wasmtime/Cranelift optimization level (default: speed).\n\
                               Allowed: none | speed | speed_and_size.\n\
            QUE_DEVIRTUALIZE   Call-head devirtualization mode (default: aggressive).\n\
@@ -292,6 +403,89 @@ fn native_shell_help(bin_name: &str) -> String {
            QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que",
         bin = bin_name
     )
+}
+
+enum LibraryInstallMode {
+    Install,
+    Uninstall,
+}
+
+fn ast_to_definitions(ast: Expression, label: &str) -> Result<Vec<Expression>, String> {
+    let Expression::Apply(items) = ast else {
+        return Err(format!("library '{}' did not parse as top-level do expression", label));
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return Err(format!("library '{}' did not parse as top-level do expression", label));
+    }
+    Ok(items.into_iter().skip(1).collect())
+}
+
+fn load_existing_library_definitions(path: &Path) -> Result<Vec<Expression>, String> {
+    if path.exists() {
+        let ast = crate::baked::load_ast_from_path(path)?;
+        return ast_to_definitions(ast, &path.display().to_string());
+    }
+    Ok(Vec::new())
+}
+
+fn run_library_install_via_io(mode: LibraryInstallMode, args: &[String]) -> Result<(), String> {
+    let mut argv = args.to_vec();
+    if take_help_flag_from_argv(&mut argv) {
+        println!(
+            "Usage: queio --install [helpers.que ...] [--out <lib.lisp>]\n\
+             or:    queio --uninstall [--out <lib.lisp>]"
+        );
+        return Ok(());
+    }
+
+    let out_path = take_install_output_path_from_argv(&mut argv).map_err(|e|
+        format!("invalid install args: {}", e)
+    )?;
+    let mut bundle_paths = Vec::new();
+    for token in argv {
+        if token.starts_with("--") {
+            return Err(format!("unknown install flag '{}'", token));
+        }
+        bundle_paths.push(token);
+    }
+
+    if matches!(mode, LibraryInstallMode::Uninstall) && !bundle_paths.is_empty() {
+        return Err("--uninstall does not accept bundle paths".to_string());
+    }
+
+    let output = out_path.map(PathBuf::from).unwrap_or_else(crate::baked::external_library_path);
+
+    if matches!(mode, LibraryInstallMode::Uninstall) {
+        if output.exists() {
+            fs
+                ::remove_file(&output)
+                .map_err(|e| format!("failed to remove library '{}': {}", output.display(), e))?;
+            eprintln!("library uninstalled from {}", output.display());
+        } else {
+            eprintln!("library '{}' is already absent", output.display());
+        }
+        return Ok(());
+    }
+
+    let cwd = env::current_dir().map_err(|e| format!("failed to read current directory: {}", e))?;
+    let mut defs = load_existing_library_definitions(&output)?;
+    defs.extend(load_bundle_definitions(&cwd, &bundle_paths)?);
+    let wrapped = Expression::Apply(
+        std::iter::once(Expression::Word("do".to_string())).chain(defs).collect()
+    );
+
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs
+                ::create_dir_all(parent)
+                .map_err(|e| format!("failed to create '{}': {}", parent.display(), e))?;
+        }
+    }
+    fs
+        ::write(&output, format!("{}\n", wrapped.to_lisp()))
+        .map_err(|e| format!("failed to write baked library '{}': {}", output.display(), e))?;
+    eprintln!("library installed to {}", output.display());
+    Ok(())
 }
 
 pub struct ShellStoreData {
@@ -954,6 +1148,7 @@ fn build_debug_error_report(
 mod tests {
     use super::{
         DebugMode,
+        parse_bundle_definitions,
         take_debug_mode_from_argv,
         take_help_flag_from_argv,
         take_no_result_flag_from_argv,
@@ -1120,6 +1315,20 @@ mod tests {
         assert!(!has_no_result);
         assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
     }
+
+    #[test]
+    fn parse_bundle_definitions_accepts_top_level_defs_only() {
+        let src = "(let inc (lambda x (+ x 1)))\n(let dec (lambda x (- x 1)))";
+        let defs = parse_bundle_definitions(src, "bundle.que").expect("bundle should parse");
+        assert_eq!(defs.len(), 2);
+    }
+
+    #[test]
+    fn parse_bundle_definitions_rejects_non_definition_form() {
+        let src = "(let inc (lambda x (+ x 1)))\n(inc 1)";
+        let err = parse_bundle_definitions(src, "bundle.que").expect_err("bundle should fail");
+        assert!(err.contains("must contain only top-level definitions"));
+    }
 }
 
 pub fn run_native_shell() -> Result<(), String> {
@@ -1131,6 +1340,20 @@ pub fn run_native_shell() -> Result<(), String> {
         .unwrap_or("queio");
     if matches!(args.get(1).map(String::as_str), Some("--help" | "-h")) {
         println!("{}", native_shell_help(bin_name));
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("--install" | "--bake")) {
+        run_library_install_via_io(
+            LibraryInstallMode::Install,
+            &args.iter().skip(2).cloned().collect::<Vec<_>>()
+        )?;
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("--uninstall")) {
+        run_library_install_via_io(
+            LibraryInstallMode::Uninstall,
+            &args.iter().skip(2).cloned().collect::<Vec<_>>()
+        )?;
         return Ok(());
     }
     let Some(file_path) = args.get(1) else {
@@ -1175,8 +1398,9 @@ pub fn run_native_shell() -> Result<(), String> {
 
     let std_ast = crate::baked::load_ast();
     let wrapped_ast = match &std_ast {
-        crate::parser::Expression::Apply(items) =>
-            match crate::parser::merge_std_and_program(&program, items[1..].to_vec()) {
+        crate::parser::Expression::Apply(items) => {
+            let lib_defs = items[1..].to_vec();
+            match crate::parser::merge_std_and_program(&program, lib_defs) {
                 Ok(expr) => expr,
                 Err(message) => {
                     if debug_mode.is_enabled() {
@@ -1196,6 +1420,7 @@ pub fn run_native_shell() -> Result<(), String> {
                     return Err(message);
                 }
             }
+        }
         _ => {
             return Err("failed to load standard library AST".to_string());
         }
