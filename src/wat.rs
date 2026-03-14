@@ -113,12 +113,7 @@ fn tail_call_mode_from_env() -> Result<TailCallMode, String> {
         "conservative" | "safe" | "default" => Ok(TailCallMode::Conservative),
         "aggressive" => Ok(TailCallMode::Aggressive),
         other =>
-            Err(
-                format!(
-                    "invalid QUE_TCO='{}'. expected one of: conservative, aggressive",
-                    other
-                )
-            ),
+            Err(format!("invalid QUE_TCO='{}'. expected one of: conservative, aggressive", other)),
     }
 }
 
@@ -5151,7 +5146,7 @@ fn compile_fast_cell_helper(
 ) -> Option<Result<String, String>> {
     match op {
         "box" | "int" | "float" | "bool" => Some(compile_fast_box_ctor(op, node, ctx)),
-        "set" | "=!" => Some(compile_fast_cell_set(op, node, ctx, false)),
+        "&alter!" | "set" | "=!" => Some(compile_fast_cell_set(op, node, ctx, false)),
         "true?" => Some(compile_fast_truthy(op, node, ctx, false)),
         "false?" => Some(compile_fast_truthy(op, node, ctx, true)),
         "+=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.add")),

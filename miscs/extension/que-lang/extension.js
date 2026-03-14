@@ -273,6 +273,17 @@ async function fetchQueHoverForText(text, position) {
   }
 }
 
+async function fetchQueCompletionsForText(text, position) {
+  if (!client) return [];
+  try {
+    const result = await client.sendRequest("que/completionsText", { text, position });
+    if (result && Array.isArray(result.items)) return result.items;
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
 function findQueHeredocBlockAtPosition(document, position) {
   const blocks = parseQueHeredocBlocks(document.getText());
   for (const block of blocks) {
@@ -473,6 +484,29 @@ async function fetchInferredSignature(document, symbol, position) {
   return undefined;
 }
 
+async function fetchInferredSignatureForText(text, symbol, position) {
+  if (!client) return undefined;
+  try {
+    const result = await client.sendRequest("que/getSignatureText", {
+      text,
+      symbol,
+      position: position
+        ? { line: position.line, character: position.character }
+        : null,
+    });
+    if (
+      result &&
+      typeof result.signature === "string" &&
+      result.signature.trim().length > 0
+    ) {
+      return result.signature.trim();
+    }
+  } catch {
+    // no-op
+  }
+  return undefined;
+}
+
 function registerQueSignatureHelp() {
   const triggerChars = makeSignatureTriggerChars();
   return vscode.languages.registerSignatureHelpProvider(
@@ -540,6 +574,139 @@ function registerQueSignatureHelp() {
     },
     ...triggerChars
   );
+}
+
+function lspCompletionKindToVscode(kind) {
+  if (typeof kind !== "number") return undefined;
+  return vscode.CompletionItemKind[kind] ? kind : undefined;
+}
+
+function completionItemFromLsp(item) {
+  if (!item || typeof item.label !== "string") return null;
+  const completion = new vscode.CompletionItem(
+    item.label,
+    lspCompletionKindToVscode(item.kind) || vscode.CompletionItemKind.Text
+  );
+  if (typeof item.detail === "string") completion.detail = item.detail;
+  if (typeof item.insertText === "string") {
+    completion.insertText = item.insertText;
+  }
+  return completion;
+}
+
+function registerShellQueCompletionProvider(context) {
+  const selector = [
+    { scheme: "file", language: "shellscript" },
+    { scheme: "file", language: "shell" },
+    { scheme: "file", language: "bash" },
+    { scheme: "file", language: "zsh" },
+    { scheme: "file", language: "sh" },
+  ];
+  const triggerChars = makeSignatureTriggerChars();
+  const provider = vscode.languages.registerCompletionItemProvider(
+    selector,
+    {
+      async provideCompletionItems(document, position) {
+        if (!isShellScriptDocument(document)) return null;
+        const located = findQueHeredocBlockAtPosition(document, position);
+        if (!located) return null;
+        const result = await fetchQueCompletionsForText(
+          located.block.text,
+          located.relativePosition
+        );
+        const mapped = result
+          .map((item) => completionItemFromLsp(item))
+          .filter((item) => item !== null);
+        return mapped;
+      },
+    },
+    ...triggerChars
+  );
+  context.subscriptions.push(provider);
+}
+
+function registerShellQueSignatureHelpProvider(context) {
+  const selector = [
+    { scheme: "file", language: "shellscript" },
+    { scheme: "file", language: "shell" },
+    { scheme: "file", language: "bash" },
+    { scheme: "file", language: "zsh" },
+    { scheme: "file", language: "sh" },
+  ];
+  const triggerChars = makeSignatureTriggerChars();
+  const provider = vscode.languages.registerSignatureHelpProvider(
+    selector,
+    {
+      async provideSignatureHelp(document, position) {
+        if (!isShellScriptDocument(document)) return null;
+        const located = findQueHeredocBlockAtPosition(document, position);
+        if (!located) return null;
+
+        const blockText = located.block.text;
+        const relativePosition = located.relativePosition;
+        const cursorOffset = document.offsetAt(position);
+        const blockStart = new vscode.Position(located.block.startLine, 0);
+        const blockOffset = document.offsetAt(blockStart);
+        const relativeOffset = Math.max(0, cursorOffset - blockOffset);
+        const windowSize = 8000;
+        const startOffset = Math.max(0, relativeOffset - windowSize);
+        const textBeforeCursor = blockText.slice(startOffset, relativeOffset);
+
+        const callStartInWindow = findCallStart(textBeforeCursor);
+        if (callStartInWindow === -1) return null;
+
+        const content = textBeforeCursor.slice(callStartInWindow + 1);
+        const { tokens, endsWithTopLevelSpace } = tokenizeTopLevel(content);
+        if (tokens.length === 0) return null;
+
+        const funcName = tokens[0];
+        const signature = await fetchInferredSignatureForText(
+          blockText,
+          funcName,
+          relativePosition
+        );
+        if (!signature) return null;
+
+        const typeSignature = signatureTypePart(signature);
+        const allParts = splitSignatureTopLevel(typeSignature);
+        const paramLabels = allParts.slice(0, -1);
+        if (paramLabels.length === 0) return null;
+
+        const fullLabel = signature.includes(":")
+          ? signature
+          : `${funcName}: ${typeSignature}`;
+        const signatureInfo = new vscode.SignatureInformation(fullLabel);
+
+        const colonIdx = fullLabel.indexOf(":");
+        let searchFrom = colonIdx === -1 ? 0 : colonIdx + 1;
+        signatureInfo.parameters = paramLabels.map((param) => {
+          const idx = fullLabel.indexOf(param, searchFrom);
+          if (idx === -1) return new vscode.ParameterInformation(param);
+          const start = idx;
+          const end = idx + param.length;
+          searchFrom = end;
+          return new vscode.ParameterInformation([start, end]);
+        });
+
+        const help = new vscode.SignatureHelp();
+        help.signatures = [signatureInfo];
+        help.activeSignature = 0;
+
+        const argsTyped = Math.max(0, tokens.length - 1);
+        let activeParam = endsWithTopLevelSpace
+          ? argsTyped
+          : Math.max(0, argsTyped - 1);
+        activeParam = Math.min(
+          activeParam,
+          Math.max(0, paramLabels.length - 1)
+        );
+        help.activeParameter = activeParam;
+        return help;
+      },
+    },
+    ...triggerChars
+  );
+  context.subscriptions.push(provider);
 }
 
 function executableName() {
@@ -655,6 +822,8 @@ async function activate(context) {
   const signatureProvider = registerQueSignatureHelp();
   registerShellHeredocDiagnostics(context);
   registerShellQueHoverProvider(context);
+  registerShellQueCompletionProvider(context);
+  registerShellQueSignatureHelpProvider(context);
 
   const restartCommand = vscode.commands.registerCommand(
     "que.restartLanguageServer",
