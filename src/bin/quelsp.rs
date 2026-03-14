@@ -103,12 +103,25 @@ struct GetSignatureResult {
 }
 
 #[derive(Debug, Deserialize)]
+struct GetSignatureTextParams {
+    text: String,
+    symbol: String,
+    position: Option<Position>,
+}
+
+#[derive(Debug, Deserialize)]
 struct AnalyzeTextParams {
     text: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct HoverTextParams {
+    text: String,
+    position: Position,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionsTextParams {
     text: String,
     position: Position,
 }
@@ -307,6 +320,15 @@ impl ServerState {
                 );
                 self.reply_ok(req.id, Some(GetSignatureResult { signature }))
             }
+            "que/getSignatureText" => {
+                let params: GetSignatureTextParams = parse_params(req.params)?;
+                let signature = self.signature_for_text(
+                    &params.text,
+                    &params.symbol,
+                    params.position
+                );
+                self.reply_ok(req.id, Some(GetSignatureResult { signature }))
+            }
             "que/analyzeText" => {
                 let params: AnalyzeTextParams = parse_params(req.params)?;
                 let diagnostics = self.analyze_text(&params.text);
@@ -316,6 +338,11 @@ impl ServerState {
                 let params: HoverTextParams = parse_params(req.params)?;
                 let hover = self.hover_for_text(&params.text, params.position);
                 self.reply_ok(req.id, hover)
+            }
+            "que/completionsText" => {
+                let params: CompletionsTextParams = parse_params(req.params)?;
+                let items = self.completion_items_for_text(&params.text, params.position);
+                self.reply_ok(req.id, Some(CompletionResponse::Array(items)))
             }
             _ => self.reply_ok::<Value>(req.id, None),
         }
@@ -546,7 +573,6 @@ impl ServerState {
     fn completion_items_for_document(&self, params: &CompletionParams) -> Vec<CompletionItem> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         let mut items = Vec::new();
 
         for keyword in [
@@ -577,24 +603,87 @@ impl ServerState {
         }
 
         if let Some(doc) = self.documents.get(uri) {
-            for (name, signature) in &doc.symbol_types {
+            self.extend_completion_items_for_analysis(doc, position, &mut items);
+        } else {
+            self.extend_global_fallback_completion_items(&mut items);
+        }
+
+        items.sort_by(|a, b| a.label.cmp(&b.label));
+        items.dedup_by(|a, b| a.label == b.label);
+        items
+    }
+
+    fn completion_items_for_text(&self, text: &str, position: Position) -> Vec<CompletionItem> {
+        let analysis = self.with_core(|core| {
+            analyze_document_text_safe(
+                text,
+                &core.std_defs,
+                &core.base_env,
+                core.base_next_id,
+                &core.global_signatures,
+                &core.global_effects,
+                &core.std_fallback_names
+            )
+        });
+        let mut items = Vec::new();
+        for keyword in [
+            "lambda",
+            "if",
+            "let",
+            "let*",
+            "mut",
+            "do",
+            "as",
+            "alter!",
+            "while",
+            "loop",
+            "vector",
+            "string",
+            "tuple",
+        ] {
+            let insert_text = match keyword {
+                "mut" | "alter!" => Some(format!("{} ", keyword)),
+                _ => None,
+            };
+            items.push(CompletionItem {
+                label: keyword.to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                insert_text,
+                ..CompletionItem::default()
+            });
+        }
+        self.extend_completion_items_for_analysis(&analysis, position, &mut items);
+
+        items.sort_by(|a, b| a.label.cmp(&b.label));
+        items.dedup_by(|a, b| a.label == b.label);
+        items
+    }
+
+    fn extend_completion_items_for_analysis(
+        &self,
+        doc: &DocAnalysis,
+        position: Position,
+        items: &mut Vec<CompletionItem>
+    ) {
+        let mut inferred_signatures: HashMap<String, String> = HashMap::new();
+
+        for (name, signature) in &doc.symbol_types {
+            if should_hide_completion_symbol(name) {
+                continue;
+            }
+            let should_override =
+                doc.user_bound_symbols.contains(name) || self.global_signature(name).is_none();
+            if should_override {
+                inferred_signatures.insert(name.clone(), signature.clone());
+            }
+        }
+
+        if let Some(form_signatures) = self.form_signatures_at(doc, position) {
+            for (name, signature) in form_signatures {
                 if should_hide_completion_symbol(name) {
                     continue;
                 }
-                let should_override =
-                    doc.user_bound_symbols.contains(name) || self.global_signature(name).is_none();
-                if should_override {
-                    inferred_signatures.insert(name.clone(), signature.clone());
-                }
-            }
-
-            if let Some(form_signatures) = self.form_signatures_at(doc, position) {
-                for (name, signature) in form_signatures {
-                    if should_hide_completion_symbol(name) {
-                        continue;
-                    }
-                    inferred_signatures.insert(name.clone(), signature.clone());
-                }
+                inferred_signatures.insert(name.clone(), signature.clone());
             }
         }
 
@@ -608,29 +697,29 @@ impl ServerState {
         }
 
         if inferred_signatures.is_empty() {
-            self.with_core(|core| {
-                for name in &core.std_fallback_names {
-                    if should_hide_completion_symbol(name) {
-                        continue;
-                    }
-                    let detail = core.global_signatures.get(name).cloned();
-                    let kind = detail
-                        .as_ref()
-                        .map(|sig| kind_for_signature(sig))
-                        .unwrap_or(CompletionItemKind::FUNCTION);
-                    items.push(CompletionItem {
-                        label: name.clone(),
-                        detail: detail.as_ref().map(|sig| normalize_signature(sig)),
-                        kind: Some(kind),
-                        ..CompletionItem::default()
-                    });
-                }
-            });
+            self.extend_global_fallback_completion_items(items);
         }
+    }
 
-        items.sort_by(|a, b| a.label.cmp(&b.label));
-        items.dedup_by(|a, b| a.label == b.label);
-        items
+    fn extend_global_fallback_completion_items(&self, items: &mut Vec<CompletionItem>) {
+        self.with_core(|core| {
+            for name in &core.std_fallback_names {
+                if should_hide_completion_symbol(name) {
+                    continue;
+                }
+                let detail = core.global_signatures.get(name).cloned();
+                let kind = detail
+                    .as_ref()
+                    .map(|sig| kind_for_signature(sig))
+                    .unwrap_or(CompletionItemKind::FUNCTION);
+                items.push(CompletionItem {
+                    label: name.clone(),
+                    detail: detail.as_ref().map(|sig| normalize_signature(sig)),
+                    kind: Some(kind),
+                    ..CompletionItem::default()
+                });
+            }
+        });
     }
 
     fn signature_for_symbol(
@@ -645,6 +734,27 @@ impl ServerState {
                 .map(|s| normalize_signature(&s));
         }
         self.global_signature(symbol).map(|s| normalize_signature(&s))
+    }
+
+    fn signature_for_text(
+        &self,
+        text: &str,
+        symbol: &str,
+        position: Option<Position>
+    ) -> Option<String> {
+        let analysis = self.with_core(|core| {
+            analyze_document_text_safe(
+                text,
+                &core.std_defs,
+                &core.base_env,
+                core.base_next_id,
+                &core.global_signatures,
+                &core.global_effects,
+                &core.std_fallback_names
+            )
+        });
+        self.resolve_signature_for_doc(&analysis, symbol, position)
+            .map(|s| normalize_signature(&s))
     }
 
     fn resolve_signature_for_doc(

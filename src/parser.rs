@@ -40,7 +40,11 @@ fn is_reserved_word(name: &str) -> bool {
             "take/first" |
             "drop/first" |
             "take/last" |
-            "drop/last"
+            "drop/last" |
+            "&mut" |
+            "&box" |
+            "&get" |
+            "&alter!"
     )
 }
 
@@ -741,7 +745,7 @@ fn desugar_with_counter(
                     "get" => Ok(accessor_transform(exprs)?),
                     "cdr" => Ok(cdr_transform(exprs)?),
                     "set!" => Ok(setter_transform(exprs)?),
-                    "variable" => Ok(variable_transform(exprs)),
+                    "&mut" | "variable" => Ok(variable_transform(exprs)),
                     "integer" => Ok(integer_transform(exprs)),
                     "floating" => Ok(float_transform(exprs)),
                     "boolean" => boolean_transform(exprs),

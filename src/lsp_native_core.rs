@@ -3,8 +3,9 @@ use crate::parser::{ self, Expression };
 use crate::types::{ create_builtin_environment, Type, TypeEnv };
 use std::collections::{ HashMap, HashSet };
 
-pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 5] = [
+pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 6] = [
     ("alter!", "T -> T -> ()"),
+    ("&alter!", "[T] -> T -> ()"),
     ("vector", "T... -> [T]"),
     ("string", "Char... -> [Char]"),
     ("tuple", "T... -> {T...}"),
@@ -122,9 +123,7 @@ pub fn build_base_environment(
         signatures.insert(name, normalize_signature(&signature));
     }
     for (name, signature) in LSP_SPECIAL_KEYWORD_SIGNATURES {
-        signatures
-            .entry(name.to_string())
-            .or_insert_with(|| normalize_signature(signature));
+        signatures.entry(name.to_string()).or_insert_with(|| normalize_signature(signature));
     }
 
     let std_effects = infer_std_effects(&env, next_id, std_defs);
@@ -277,11 +276,12 @@ pub fn collect_let_binding_effects(
                     let mut rhs_effect = rhs_node.effect;
                     if rhs_effect.is_pure() {
                         if let Expression::Word(alias_target) = &rhs_node.expr {
-                            if let Some(target_effect) = effects
-                                .get(alias_target)
-                                .copied()
-                                .or_else(|| fallback_effects.get(alias_target).copied())
-                                .or_else(|| known_symbol_effect(alias_target))
+                            if
+                                let Some(target_effect) = effects
+                                    .get(alias_target)
+                                    .copied()
+                                    .or_else(|| fallback_effects.get(alias_target).copied())
+                                    .or_else(|| known_symbol_effect(alias_target))
                             {
                                 rhs_effect = target_effect;
                             }
@@ -324,7 +324,7 @@ pub fn known_symbol_effect(symbol: &str) -> Option<EffectFlags> {
     {
         return Some(EffectFlags::IO);
     }
-    if matches!(symbol, "set!" | "alter!" | "pop!") {
+    if matches!(symbol, "set!" | "&alter!" | "alter!" | "pop!") {
         return Some(EffectFlags::MUTATE);
     }
     if symbol.ends_with('!') {
@@ -1145,14 +1145,22 @@ fn find_matching_list_end_byte(text: &str, open_idx: usize) -> Option<usize> {
 fn find_scope_range(text: &str, scope: &InferErrorScope) -> Option<CoreRange> {
     collect_scope_regions(text)
         .into_iter()
-        .find(|region| region.top_form_idx == scope.user_top_form && region.lambda_path == scope.lambda_path)
+        .find(
+            |region|
+                region.top_form_idx == scope.user_top_form &&
+                region.lambda_path == scope.lambda_path
+        )
         .map(|region| CoreRange {
             start: byte_offset_to_position(text, region.start),
             end: byte_offset_to_position(text, region.end),
         })
 }
 
-fn filter_ranges_to_scope(text: &str, ranges: &[CoreRange], scope: &InferErrorScope) -> Vec<CoreRange> {
+fn filter_ranges_to_scope(
+    text: &str,
+    ranges: &[CoreRange],
+    scope: &InferErrorScope
+) -> Vec<CoreRange> {
     let Some(scope_range) = find_scope_range(text, scope) else {
         return Vec::new();
     };
@@ -1333,14 +1341,7 @@ fn skip_token(text: &str, mut i: usize, limit: usize) -> usize {
     let bytes = text.as_bytes();
     while i < limit {
         let b = bytes[i];
-        if
-            b.is_ascii_whitespace() ||
-            b == b';' ||
-            b == b'(' ||
-            b == b')' ||
-            b == b'[' ||
-            b == b']'
-        {
+        if b.is_ascii_whitespace() || b == b';' || b == b'(' || b == b')' || b == b'[' || b == b']' {
             break;
         }
         i += 1;
@@ -1792,9 +1793,7 @@ pub fn suggest_undefined_variable_candidates<'a, I>(
             continue;
         }
 
-        let prefix_penalty = if
-            !missing_prefix.is_empty() && cand_lc.starts_with(&missing_prefix)
-        {
+        let prefix_penalty = if !missing_prefix.is_empty() && cand_lc.starts_with(&missing_prefix) {
             0
         } else {
             1
@@ -1804,12 +1803,17 @@ pub fn suggest_undefined_variable_candidates<'a, I>(
     }
 
     scored.sort_by(|a, b| {
-        a.0.cmp(&b.0)
+        a.0
+            .cmp(&b.0)
             .then_with(|| a.1.cmp(&b.1))
             .then_with(|| a.2.cmp(&b.2))
             .then_with(|| a.3.cmp(&b.3))
     });
-    scored.into_iter().take(limit).map(|(_, _, _, name)| name).collect()
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, _, _, name)| name)
+        .collect()
 }
 
 pub fn append_undefined_variable_suggestions<'a, I>(

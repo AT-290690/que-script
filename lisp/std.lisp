@@ -415,11 +415,16 @@ out)))
 (let std/vector/3d/char/count (lambda xs x (<| xs (std/vector/map (lambda ys (std/vector/2d/char/count ys x))) (std/vector/int/sum))))
 (let std/vector/3d/bool/count (lambda xs x (<| xs (std/vector/map (lambda ys (std/vector/2d/bool/count ys x))) (std/vector/int/sum))))
 
-(let std/vector/cons (lambda a b (cond (std/vector/empty? a) b (std/vector/empty? b) a (do 
+(let std/vector/cons (lambda a b (do 
+  (let lena (length a))
+  (let lenb (length b))
+  (cond (= lena 0) b (= lenb 0) a (do 
   (let out []) 
-  (loop 0 (length a) (lambda i (set! out (length out) (get a i)))) 
-  (loop 0 (length b) (lambda i (set! out (length out) (get b i)))) 
-  out))))
+  (mut i 0)
+  (while (< i lena) (do (set! out (length out) (get a i)) (alter! i (+ i 1))))
+  (alter! i 0)
+  (while (< i lenb) (do (set! out (length out) (get b i)) (alter! i (+ i 1))))
+  out)))))
 
 (let std/vector/cons! (lambda a b (if (and (std/vector/empty? a) (std/vector/empty? b)) a (do 
   (loop 0 (length b) (lambda i (set! a (length a) (get b i)))) 
@@ -1315,6 +1320,33 @@ q)))
         (alter! i (+ i 1))))
       (if result true false)))))))
 
+ (let std/vector/char/lexicographic (lambda a b eq? gt? (do
+    (mut i 0)
+    (let len-a (length a))
+    (let len-b (length b))
+    (let len (if (< len-a len-b) len-a len-b))
+    (mut out 0) ; 0 equal-so-far, 1 a>b, -1 a<b
+    (while (and (< i len) (= out 0)) (do
+      (let da (get a i))
+      (let db (get b i))
+      (if (not (eq? da db))
+        (alter! out (if (gt? da db) 1 -1))
+        nil)
+      (alter! i (+ i 1))))
+    (if (= out 0)
+      (if (= len-a len-b) 0 (if (> len-a len-b) 1 -1))
+      out))))
+
+(let std/vector/compare (lambda a b step done? initial (do
+    (mut state initial)
+    (mut i 0)
+    (let len-a (length a))
+    (let len-b (length b))
+    (let len (if (< len-a len-b) len-a len-b))
+    (while (and (< i len) (not (done? state))) (do
+      (alter! state (step state (get a i) (get b i) i))
+      (alter! i (+ i 1))))
+    { state len-a len-b })))
 
 (let std/vector/int/equal? (lambda a b (do
   (if (< (length a) (length b)) false
