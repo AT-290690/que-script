@@ -1,1 +1,9 @@
-./scripts/build-c.sh && ./scripts/build-io.sh && ./scripts/build-r.sh && ./scripts/build-wasm-c.sh && ./scripts/build-wat.sh && ./scripts/build-lib.sh && ./scripts/build-fusion-lib.sh && cp ./target/release/queio ./target/release/que
+#!/bin/bash
+set -euo pipefail
+
+./scripts/build-io.sh
+./scripts/build-wat.sh
+./scripts/build-lib.sh
+./scripts/build-lsp.sh
+
+cp ./target/release/queio ./target/release/que
