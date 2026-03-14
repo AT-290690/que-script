@@ -3742,7 +3742,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.int_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.add\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.add\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_int_add_overflow_check(lhs_local, rhs_local, res_local)
                     )
                 );
@@ -3753,7 +3753,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.int_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.sub\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.sub\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_int_sub_overflow_check(lhs_local, rhs_local, res_local)
                     )
                 );
@@ -3764,7 +3764,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.int_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.mul\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.mul\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_int_mul_overflow_check(lhs_local, rhs_local, res_local)
                     )
                 );
@@ -3775,7 +3775,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.div_zero_check {
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\n{}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.div_s",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.div_s",
                         emit_int_div_zero_check(rhs_local)
                     )
                 );
@@ -3786,7 +3786,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.div_zero_check {
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\n{}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.rem_s",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.rem_s",
                         emit_int_div_zero_check(rhs_local)
                     )
                 );
@@ -3821,7 +3821,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.float_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.add\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.add\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_float_overflow_or_nan_check(res_local)
                     )
                 );
@@ -3836,7 +3836,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.float_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.sub\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.sub\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_float_overflow_or_nan_check(res_local)
                     )
                 );
@@ -3851,7 +3851,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.float_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_float_overflow_or_nan_check(res_local)
                     )
                 );
@@ -3876,7 +3876,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                 };
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\n{div_zero_check}local.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.div\ni32.reinterpret_f32\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.div\ni32.reinterpret_f32\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
                     )
                 );
             }
@@ -3900,7 +3900,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                 };
                 return Ok(
                     format!(
-                        "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\n{div_zero_check}local.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.div\nf32.trunc\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.mul\nf32.sub\ni32.reinterpret_f32\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.div\nf32.trunc\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.mul\nf32.sub\ni32.reinterpret_f32\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
                     )
                 );
             }
