@@ -700,12 +700,21 @@ pub fn infer_error_ranges(
                 if !scoped.is_empty() {
                     return scoped;
                 }
-                if let Some(scope_range) = find_scope_range(text, scope_meta) {
-                    return vec![scope_range];
+                if ranges.len() == 1 {
+                    // Scope path can drift from original source ordering after desugaring
+                    // (for example |> rewrite). A unique snippet match is still trustworthy.
+                    return ranges;
+                }
+                if ranges.len() > 1 {
+                    // Ambiguous snippet match outside inferred scope: prefer whole-file fallback.
+                    return Vec::new();
                 }
             }
             return ranges;
         }
+        // The infer snippet could not be mapped back to source (often due to desugared shape
+        // mismatch). Avoid a misleading scope fallback and let callers use full-file fallback.
+        return Vec::new();
     }
 
     if let Some(symbol) = extract_symbol_from_error(message) {
@@ -716,8 +725,13 @@ pub fn infer_error_ranges(
                 if !scoped.is_empty() {
                     return scoped;
                 }
-                if let Some(scope_range) = find_scope_range(text, scope_meta) {
-                    return vec![scope_range];
+                if ranges.len() == 1 {
+                    // Unique symbol match is more precise than mismatched scope fallback.
+                    return ranges;
+                }
+                if ranges.len() > 1 {
+                    // Ambiguous symbol match outside inferred scope: prefer whole-file fallback.
+                    return Vec::new();
                 }
             }
             return ranges;
@@ -730,7 +744,8 @@ pub fn infer_error_ranges(
         }
     }
 
-    find_first_call_range(text).into_iter().collect()
+    // Ambiguous/unresolved location: let caller fallback to whole-file diagnostic range.
+    Vec::new()
 }
 
 pub fn infer_error_range(text: &str, message: &str) -> Option<CoreRange> {
@@ -1591,49 +1606,6 @@ fn match_call_prefix_at(text: &str, open_idx: usize, tokens: &[String]) -> bool 
         }
     }
     true
-}
-
-fn find_first_call_range(text: &str) -> Option<CoreRange> {
-    let bytes = text.as_bytes();
-    let mut i = 0usize;
-    let mut in_string = false;
-    let mut in_comment = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-        if in_comment {
-            if b == b'\n' {
-                in_comment = false;
-            }
-            i += 1;
-            continue;
-        }
-        if !in_string && b == b';' {
-            in_comment = true;
-            i += 1;
-            continue;
-        }
-        if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
-            in_string = !in_string;
-            i += 1;
-            continue;
-        }
-        if in_string {
-            i += 1;
-            continue;
-        }
-
-        if b == b'(' {
-            if let Some(close) = find_matching_paren_byte(text, i) {
-                return Some(CoreRange {
-                    start: byte_offset_to_position(text, i),
-                    end: byte_offset_to_position(text, close + 1),
-                });
-            }
-        }
-        i += 1;
-    }
-    None
 }
 
 fn find_symbol_ranges(text: &str, symbol: &str) -> Vec<CoreRange> {

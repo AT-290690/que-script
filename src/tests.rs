@@ -245,6 +245,18 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_lsp_infer_error_ranges_unresolved_returns_empty_for_whole_file_fallback() {
+        let text = "(map (lambda x x) [1 2 3])";
+        let message = "Cannot unify Int with Bool";
+        let ranges = crate::lsp_native_core::infer_error_ranges(text, message, None);
+        assert!(
+            ranges.is_empty(),
+            "expected unresolved location to return empty ranges, got: {:?}",
+            ranges
+        );
+    }
+
+    #[test]
     fn test_loop_while_desugars_to_do_body_with_trailing_nil() {
         let expr = crate::parser::build("(while false (+ 1 2))").expect("while should desugar");
         let lisp = expr.to_lisp();
@@ -2634,6 +2646,85 @@ Concequent and alternative must match types
         assert!(
             message.contains("Empty application"),
             "expected empty application diagnostic message, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_scope_mismatch_prefers_unique_snippet_location() {
+        let program =
+            "(let text (reduce (lambda acc file (cons acc (|> file read! (map lower)))) \"\" ARGV))\n\
+(let arrow (lambda xs (unless (empty? xs) (cons \" <- \" xs) \"\")))\n\
+(|> (range 0 25)\n\
+    (map (lambda i (+# (Int->Char i) 'a'))) ; generate alphabet\n\
+    (map (lambda ch { ch (count/char ch text) }))\n\
+    (sort (lambda { a na } { b nb } (if (= na nb) (<# a b) (> na nb))))\n\
+    (map (lambda { ch n } (cons [ch] \": \" (Integer->String n)\n\
+                                (arrow\n\
+                                    (cond\n\
+                                        (> n 9000) \"It's over Nine Thousaaaaaand!\"\n\
+                                        (> n 4000) \"You seem to like this letter\"\n\
+                                        (= n 999) \"I have 999 problems and this letter ain't one\"\n\
+                                        (or (= n 6) (= 7)) (if (= n 6) \"7\" \"6 7\")\n\
+                                        (= n 42) \"Meaning of life\"\n\
+                                        (= n 777) \"Lucky\"\n\
+                                        (= n 666) \"Devil\"\n\
+                                        (= n 1337) \"leet\"\n\
+                                        (= n 69) \";)\"\n\
+                                        \"\")))))\n\
+    (Vector->String nl))";
+
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
+        assert!(!items.is_empty(), "expected at least one diagnostic, got: {}", diagnostics_json);
+
+        let wrong_map_pos = (3u64, 10u64);
+        let expected_or_pos = (12u64, 10u64);
+        let mut hits_or = false;
+
+        for item in items {
+            let range = item.get("range").expect("diagnostic should include range");
+            let start = range.get("start").expect("range should include start");
+            let end = range.get("end").expect("range should include end");
+            let sl = start
+                .get("line")
+                .and_then(|v| v.as_u64())
+                .expect("start.line should be u64");
+            let sc = start
+                .get("character")
+                .and_then(|v| v.as_u64())
+                .expect("start.character should be u64");
+            let el = end
+                .get("line")
+                .and_then(|v| v.as_u64())
+                .expect("end.line should be u64");
+            let ec = end
+                .get("character")
+                .and_then(|v| v.as_u64())
+                .expect("end.character should be u64");
+
+            let contains = |line: u64, ch: u64| {
+                let after_start = line > sl || (line == sl && ch >= sc);
+                let before_end = line < el || (line == el && ch < ec);
+                after_start && before_end
+            };
+
+            assert!(
+                !contains(wrong_map_pos.0, wrong_map_pos.1),
+                "diagnostic should not include early map lambda site, got: {}",
+                diagnostics_json
+            );
+            if contains(expected_or_pos.0, expected_or_pos.1) {
+                hits_or = true;
+            }
+        }
+
+        assert!(
+            hits_or,
+            "expected diagnostic to cover the (or (= n 6) (= 7)) site, got: {}",
             diagnostics_json
         );
     }
