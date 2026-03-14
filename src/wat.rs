@@ -65,6 +65,17 @@ struct ArithmeticCheckConfig {
     div_zero_check: bool,
 }
 
+const DBG_GUARD_TRAP_INT_DIV_ZERO: i32 = 1;
+const DBG_GUARD_TRAP_FLOAT_DIV_ZERO: i32 = 2;
+const DBG_GUARD_TRAP_INT_OVERFLOW_ADD: i32 = 3;
+const DBG_GUARD_TRAP_INT_OVERFLOW_SUB: i32 = 4;
+const DBG_GUARD_TRAP_INT_OVERFLOW_MUL: i32 = 5;
+const DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN: i32 = 6;
+
+fn emit_guard_trap_wat(code: i32) -> String {
+    format!("i32.const {code}\nglobal.set $dbg_guard_trap_code\nunreachable")
+}
+
 fn parse_env_bool_like(name: &str, default: bool) -> bool {
     std::env
         ::var(name)
@@ -717,6 +728,9 @@ fn emit_vector_runtime(
   (global $free_small_128 (mut i32) (i32.const 0))
   ;; Runtime ARGV storage (vector pointer). Lazily initialized to [].
   (global $argv_ptr (mut i32) (i32.const 0))
+  ;; Debug-only guard trap code (0 means no guard trap).
+  (global $dbg_guard_trap_code (mut i32) (i32.const 0))
+  (export "dbg_guard_trap_code" (global $dbg_guard_trap_code))
   ;; __DBG_RC_GLOBALS__
 
   (func $alloc (param $n i32) (result i32)
@@ -3669,36 +3683,45 @@ fn emit_vector_runtime(
 
 fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     fn emit_int_div_zero_check(rhs_local: usize) -> String {
-        format!("local.get {rhs_local}\ni32.eqz\nif\n  unreachable\nend")
+        format!(
+            "local.get {rhs_local}\ni32.eqz\nif\n{}\nend",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_INT_DIV_ZERO)
+        )
     }
 
     fn emit_float_div_zero_check(rhs_local: usize) -> String {
         format!(
-            "local.get {rhs_local}\nf32.reinterpret_i32\nf32.const 0\nf32.eq\nif\n  unreachable\nend"
+            "local.get {rhs_local}\nf32.reinterpret_i32\nf32.const 0\nf32.eq\nif\n{}\nend",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_DIV_ZERO)
         )
     }
 
     fn emit_float_overflow_or_nan_check(result_local: usize) -> String {
         format!(
-            "local.get {result_local}\nf32.reinterpret_i32\nlocal.get {result_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n  unreachable\nend\nlocal.get {result_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n  unreachable\nend"
+            "local.get {result_local}\nf32.reinterpret_i32\nlocal.get {result_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n{}\nend\nlocal.get {result_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n{}\nend",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN),
+            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN)
         )
     }
 
     fn emit_int_add_overflow_check(lhs_local: usize, rhs_local: usize, res_local: usize) -> String {
         format!(
-            "local.get {lhs_local}\nlocal.get {res_local}\ni32.xor\nlocal.get {rhs_local}\nlocal.get {res_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend"
+            "local.get {lhs_local}\nlocal.get {res_local}\ni32.xor\nlocal.get {rhs_local}\nlocal.get {res_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n{}\nend",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_ADD)
         )
     }
 
     fn emit_int_sub_overflow_check(lhs_local: usize, rhs_local: usize, res_local: usize) -> String {
         format!(
-            "local.get {lhs_local}\nlocal.get {rhs_local}\ni32.xor\nlocal.get {lhs_local}\nlocal.get {res_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend"
+            "local.get {lhs_local}\nlocal.get {rhs_local}\ni32.xor\nlocal.get {lhs_local}\nlocal.get {res_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n{}\nend",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_SUB)
         )
     }
 
     fn emit_int_mul_overflow_check(lhs_local: usize, rhs_local: usize, res_local: usize) -> String {
         format!(
-            "local.get {rhs_local}\ni32.const 0\ni32.ne\nif\n  local.get {res_local}\n  local.get {rhs_local}\n  i32.div_s\n  local.get {lhs_local}\n  i32.ne\n  if\n    unreachable\n  end\nend"
+            "local.get {rhs_local}\ni32.const 0\ni32.ne\nif\n  local.get {res_local}\n  local.get {rhs_local}\n  i32.div_s\n  local.get {lhs_local}\n  i32.ne\n  if\n{}\n  end\nend",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_MUL)
         )
     }
 
@@ -4894,18 +4917,24 @@ fn compile_fast_cell_update_int_binary(
     let checks_wat = match wasm_op {
         "i32.add" if checks.int_overflow_check =>
             format!(
-                "local.get {old_local}\nlocal.get {value_local}\ni32.xor\nlocal.get {rhs_local}\nlocal.get {value_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend\n"
+                "local.get {old_local}\nlocal.get {value_local}\ni32.xor\nlocal.get {rhs_local}\nlocal.get {value_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n{}\nend\n",
+                emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_ADD)
             ),
         "i32.sub" if checks.int_overflow_check =>
             format!(
-                "local.get {old_local}\nlocal.get {rhs_local}\ni32.xor\nlocal.get {old_local}\nlocal.get {value_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend\n"
+                "local.get {old_local}\nlocal.get {rhs_local}\ni32.xor\nlocal.get {old_local}\nlocal.get {value_local}\ni32.xor\ni32.and\ni32.const 0\ni32.lt_s\nif\n{}\nend\n",
+                emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_SUB)
             ),
         "i32.mul" if checks.int_overflow_check =>
             format!(
-                "local.get {rhs_local}\ni32.const 0\ni32.ne\nif\n  local.get {value_local}\n  local.get {rhs_local}\n  i32.div_s\n  local.get {old_local}\n  i32.ne\n  if\n    unreachable\n  end\nend\n"
+                "local.get {rhs_local}\ni32.const 0\ni32.ne\nif\n  local.get {value_local}\n  local.get {rhs_local}\n  i32.div_s\n  local.get {old_local}\n  i32.ne\n  if\n{}\n  end\nend\n",
+                emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_MUL)
             ),
         "i32.div_s" if checks.div_zero_check =>
-            format!("local.get {rhs_local}\ni32.eqz\nif\n  unreachable\nend\n"),
+            format!(
+                "local.get {rhs_local}\ni32.eqz\nif\n{}\nend\n",
+                emit_guard_trap_wat(DBG_GUARD_TRAP_INT_DIV_ZERO)
+            ),
         _ => String::new(),
     };
     Ok(
@@ -4952,15 +4981,18 @@ fn compile_fast_cell_update_int_unary(
     let checks_wat = match op {
         "++" if checks.int_overflow_check =>
             format!(
-                "local.get {old_local}\ni32.const 2147483647\ni32.eq\nif\n  unreachable\nend\n"
+                "local.get {old_local}\ni32.const 2147483647\ni32.eq\nif\n{}\nend\n",
+                emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_ADD)
             ),
         "--" if checks.int_overflow_check =>
             format!(
-                "local.get {old_local}\ni32.const -2147483648\ni32.eq\nif\n  unreachable\nend\n"
+                "local.get {old_local}\ni32.const -2147483648\ni32.eq\nif\n{}\nend\n",
+                emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_SUB)
             ),
         "**" if checks.int_overflow_check =>
             format!(
-                "local.get {old_local}\ni32.const 0\ni32.ne\nif\n  local.get {value_local}\n  local.get {old_local}\n  i32.div_s\n  local.get {old_local}\n  i32.ne\n  if\n    unreachable\n  end\nend\n"
+                "local.get {old_local}\ni32.const 0\ni32.ne\nif\n  local.get {value_local}\n  local.get {old_local}\n  i32.div_s\n  local.get {old_local}\n  i32.ne\n  if\n{}\n  end\nend\n",
+                emit_guard_trap_wat(DBG_GUARD_TRAP_INT_OVERFLOW_MUL)
             ),
         _ => String::new(),
     };
@@ -5001,14 +5033,17 @@ fn compile_fast_cell_update_float_binary(
     let value_local = ctx.tmp_i32 + 3;
     let div_zero_check = if checks.div_zero_check && wasm_op == "f32.div" {
         format!(
-            "local.get {rhs_local}\nf32.reinterpret_i32\nf32.const 0\nf32.eq\nif\n  unreachable\nend\n"
+            "local.get {rhs_local}\nf32.reinterpret_i32\nf32.const 0\nf32.eq\nif\n{}\nend\n",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_DIV_ZERO)
         )
     } else {
         String::new()
     };
     let float_overflow_check = if checks.float_overflow_check {
         format!(
-            "local.get {value_local}\nf32.reinterpret_i32\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n  unreachable\nend\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n  unreachable\nend\n"
+            "local.get {value_local}\nf32.reinterpret_i32\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n{}\nend\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n{}\nend\n",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN),
+            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN)
         )
     } else {
         String::new()
@@ -5065,7 +5100,9 @@ fn compile_fast_cell_update_float_unary(
     };
     let float_overflow_check = if checks.float_overflow_check {
         format!(
-            "local.get {value_local}\nf32.reinterpret_i32\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n  unreachable\nend\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n  unreachable\nend\n"
+            "local.get {value_local}\nf32.reinterpret_i32\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n{}\nend\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n{}\nend\n",
+            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN),
+            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN)
         )
     } else {
         String::new()

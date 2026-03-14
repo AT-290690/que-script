@@ -287,6 +287,26 @@ fn debug_rc_snapshot<T>(instance: &wasmtime::Instance, store: &mut Store<T>) -> 
     )
 }
 
+fn debug_guard_trap_message<T>(
+    instance: &wasmtime::Instance,
+    store: &mut Store<T>
+) -> Option<String> {
+    let code = read_debug_global_i64(instance, store, "dbg_guard_trap_code").unwrap_or(0);
+    if code == 0 {
+        return None;
+    }
+    let msg = match code {
+        1 => "debug.guard_trap: integer divide/modulo by zero (QUE_DIV_ZERO_CHECK)",
+        2 => "debug.guard_trap: float divide by zero (QUE_DIV_ZERO_CHECK)",
+        3 => "debug.guard_trap: integer overflow on add/inc (QUE_INT_OVERFLOW_CHECK)",
+        4 => "debug.guard_trap: integer overflow on sub/dec (QUE_INT_OVERFLOW_CHECK)",
+        5 => "debug.guard_trap: integer overflow on mul/square (QUE_INT_OVERFLOW_CHECK)",
+        6 => "debug.guard_trap: float overflow or NaN/Inf (QUE_FLOAT_OVERFLOW_CHECK)",
+        _ => "debug.guard_trap: unknown guard trap",
+    };
+    Some(msg.to_string())
+}
+
 fn configured_engine() -> Result<Engine, String> {
     let mut config = Config::new();
     config.strategy(Strategy::Cranelift);
@@ -341,6 +361,10 @@ pub fn run_wat_text<T: 'static, F>(
         Ok(v) => v,
         Err(e) => {
             let mut msg = format!("call error: {:#}", e);
+            if let Some(guard_msg) = debug_guard_trap_message(&instance, &mut store) {
+                msg.push('\n');
+                msg.push_str(&guard_msg);
+            }
             if let Some(debug) = debug_rc_snapshot(&instance, &mut store) {
                 msg.push('\n');
                 msg.push_str(&debug);
@@ -377,6 +401,10 @@ pub fn run_wat_text_no_result<T: 'static, F>(
 
     if let Err(e) = main.call(&mut store, ()) {
         let mut msg = format!("call error: {:#}", e);
+        if let Some(guard_msg) = debug_guard_trap_message(&instance, &mut store) {
+            msg.push('\n');
+            msg.push_str(&guard_msg);
+        }
         if let Some(debug) = debug_rc_snapshot(&instance, &mut store) {
             msg.push('\n');
             msg.push_str(&debug);
