@@ -468,6 +468,7 @@ fn native_shell_learn() -> &'static str {
     \n\
     Pipe operators:\n\
     - `(|> x f g h)` means `(h (g (f x)))` (left-to-right flow with data last)\n\
+    - `(comp f g h)` builds a function equivalent to `(lambda x (h (g (f x))))`\n\
     \n\
     Mutation and effects:\n\
     - mut/alter! are for local primitive scalar mutation only (Int/Float/Bool/Char), same lambda scope.\n\

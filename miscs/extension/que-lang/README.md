@@ -2,6 +2,10 @@
 
 _Requres the LSP installed_
 
+Works in:
+- `.que` files
+- shell heredocs passed to `que --eval`, for example `<<'QUE' ... QUE`
+
 Types
 
 | Type  | Description                  | Example | Notes                               |
@@ -32,5 +36,5 @@ que --eval "$(cat <<'QUE'
     (let text (map lower (read! file)))
     text))
 QUE
-)" "./projects/rust-lisp/src/infer.rs" --allow read
+)" "./path/to/file.txt" --allow read
 ```

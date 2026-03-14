@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-APP_NAME="que"
+APP_NAME="quewat"
 BIN_URL="https://github.com/AT-290690/que-script/releases/latest/download/$APP_NAME"
 LIB_URL="https://github.com/AT-290690/que-script/releases/latest/download/que-lib.lisp"
 BIN_PATH="/usr/local/bin/$APP_NAME"
@@ -21,4 +21,4 @@ sudo mkdir -p "$LIB_DIR"
 sudo mv "/tmp/que-lib.lisp" "$LIB_PATH"
 echo "Installed library: $LIB_PATH"
 
-echo "Done (que + que-lib.lisp)."
+echo "Done (quewat + que-lib.lisp)."
