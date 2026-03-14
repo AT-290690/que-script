@@ -273,6 +273,48 @@ async function fetchQueHoverForText(text, position) {
   }
 }
 
+function offsetToPosition(text, offset) {
+  const clamped = Math.max(0, Math.min(offset, text.length));
+  let line = 0;
+  let character = 0;
+  for (let i = 0; i < clamped; i += 1) {
+    if (text[i] === "\n") {
+      line += 1;
+      character = 0;
+    } else {
+      character += 1;
+    }
+  }
+  return { line, character };
+}
+
+function extractSignatureFromHoverContents(contents, symbol) {
+  if (!contents) return undefined;
+  const parts = [];
+  if (typeof contents === "string") {
+    parts.push(contents);
+  } else if (Array.isArray(contents)) {
+    for (const part of contents) {
+      if (typeof part === "string") parts.push(part);
+      else if (part && typeof part.value === "string") parts.push(part.value);
+    }
+  } else if (typeof contents === "object" && typeof contents.value === "string") {
+    parts.push(contents.value);
+  }
+
+  for (const part of parts) {
+    const normalized = part.replace(/\r/g, "");
+    const codeFenceMatch = normalized.match(/```que\n([\s\S]*?)\n```/);
+    const body = codeFenceMatch ? codeFenceMatch[1] : normalized;
+    const line = body
+      .split("\n")
+      .map((x) => x.trim())
+      .find((x) => x.startsWith(`${symbol} : `) || x.startsWith(`${symbol}: `));
+    if (line) return line;
+  }
+  return undefined;
+}
+
 async function fetchQueCompletionsForText(text, position) {
   if (!client) return [];
   try {
@@ -484,7 +526,7 @@ async function fetchInferredSignature(document, symbol, position) {
   return undefined;
 }
 
-async function fetchInferredSignatureForText(text, symbol, position) {
+async function fetchInferredSignatureForText(text, symbol, position, symbolPosition) {
   if (!client) return undefined;
   try {
     const result = await client.sendRequest("que/getSignatureText", {
@@ -502,7 +544,19 @@ async function fetchInferredSignatureForText(text, symbol, position) {
       return result.signature.trim();
     }
   } catch {
-    // no-op
+    // Fall back to hoverText so shell signature help still works with older quelsp binaries.
+  }
+
+  const hoverPosition = symbolPosition || (() => {
+    const symbolIdx = text.indexOf(symbol);
+    return symbolIdx === -1 ? null : offsetToPosition(text, symbolIdx);
+  })();
+  if (hoverPosition) {
+    const hover = await fetchQueHoverForText(text, hoverPosition);
+    const hoverSignature = hover
+      ? extractSignatureFromHoverContents(hover.contents, symbol)
+      : undefined;
+    if (hoverSignature) return hoverSignature.trim();
   }
   return undefined;
 }
@@ -660,10 +714,16 @@ function registerShellQueSignatureHelpProvider(context) {
         if (tokens.length === 0) return null;
 
         const funcName = tokens[0];
+        const funcNameOffsetInWindow = callStartInWindow + 1 + content.indexOf(funcName);
+        const funcPosition = offsetToPosition(
+          blockText,
+          startOffset + Math.max(0, funcNameOffsetInWindow)
+        );
         const signature = await fetchInferredSignatureForText(
           blockText,
           funcName,
-          relativePosition
+          relativePosition,
+          funcPosition
         );
         if (!signature) return null;
 
