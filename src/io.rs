@@ -471,7 +471,8 @@ fn native_shell_learn() -> &'static str {
     \n\
     Mutation and effects:\n\
     - mut/alter! are for local primitive scalar mutation only (Int/Float/Bool/Char), same lambda scope.\n\
-    - Vector/state mutation uses set!, push!, pop!, pull!, set (boxed refs), etc.\n\
+    - &mut/&alter! are for shared mutation across lambda scopes via boxed references.\n\
+    - Vector/state mutation uses set!, push!, pop!.\n\
     - Functions with side effects (mutation or I/O) must end with !.\n\
     - If a function mutates args, the mutated arg must be the first arg.\n\
     - If mutating multiple values, pass them inside the first arg (typically a tuple).\n\

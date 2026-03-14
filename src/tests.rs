@@ -588,6 +588,34 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_alter_inline_rhs_matches_precompute_with_int_overflow_check() {
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
+        let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
+        let output = run_program_output_unlocked(
+            r#"(do
+                (let digits [1 2])
+                (mut num-inline 0)
+                (mut base-inline 10)
+                (mut i-inline 0)
+                (while (< i-inline 2) (do
+                  (alter! num-inline (+ num-inline (* base-inline (get digits i-inline))))
+                  (alter! base-inline (/ base-inline 10))
+                  (alter! i-inline (+ i-inline 1))))
+                (mut num-pre 0)
+                (mut base-pre 10)
+                (mut i-pre 0)
+                (while (< i-pre 2) (do
+                  (let term (* base-pre (get digits i-pre)))
+                  (alter! num-pre (+ num-pre term))
+                  (alter! base-pre (/ base-pre 10))
+                  (alter! i-pre (+ i-pre 1))))
+                [num-inline num-pre])"#
+        );
+        assert_eq!(output, "[12 12]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_int_div_zero_traps_with_debug_guards() {
         let err = run_program_error_with_debug_guards(r#"(do (let id (lambda x x)) (/ 1 (id 0)))"#);
         assert!(
@@ -2759,26 +2787,30 @@ Concequent and alternative must match types
 (let bool box)
 (let set-box! (lambda vrbl x (set! vrbl 0 x)))
 (let =! (lambda vrbl x (set! vrbl 0 x)))
+(let &alter! (lambda vrbl x (set! vrbl 0 x)))
+(let &mut! (lambda value [value]))
+(let &get (lambda vrbl (get vrbl 0)))
+
 (let boole-set! (lambda vrbl x (set! vrbl 0 (if x true false))))
 (let boole-eqv (lambda a b (=? (get a) (get b))))
 (let true? (lambda vrbl (if (get vrbl) true false)))
 (let false? (lambda vrbl (if (get vrbl) false true)))
-(let += (lambda vrbl n (=! vrbl (+ (get vrbl) n))))
-(let -= (lambda vrbl n (=! vrbl (- (get vrbl) n))))
-(let *= (lambda vrbl n (=! vrbl (* (get vrbl) n))))
-(let /= (lambda vrbl n (=! vrbl (/ (get vrbl) n))))
-(let ++ (lambda vrbl (=! vrbl (+ (get vrbl) 1))))
-(let -- (lambda vrbl (=! vrbl (- (get vrbl) 1))))
-(let ** (lambda vrbl (=! vrbl (* (get vrbl) (get vrbl)))))
+(let += (lambda vrbl n (&alter! vrbl (+ (get vrbl) n))))
+(let -= (lambda vrbl n (&alter! vrbl (- (get vrbl) n))))
+(let *= (lambda vrbl n (&alter! vrbl (* (get vrbl) n))))
+(let /= (lambda vrbl n (&alter! vrbl (/ (get vrbl) n))))
+(let ++ (lambda vrbl (&alter! vrbl (+ (get vrbl) 1))))
+(let -- (lambda vrbl (&alter! vrbl (- (get vrbl) 1))))
+(let ** (lambda vrbl (&alter! vrbl (* (get vrbl) (get vrbl)))))
 
 
-(let +=. (lambda vrbl n (=! vrbl (+. (get vrbl) n))))
-(let -=. (lambda vrbl n (=! vrbl (-. (get vrbl) n))))
-(let *=. (lambda vrbl n (=! vrbl (*. (get vrbl) n))))
-(let /=. (lambda vrbl n (=! vrbl (/. (get vrbl) n))))
-(let ++. (lambda vrbl (=! vrbl (+. (get vrbl) 1.0))))
-(let --. (lambda vrbl (=! vrbl (-. (get vrbl) 1.0))))
-(let **. (lambda vrbl (=! vrbl (*. (get vrbl) (get vrbl)))))
+(let +=. (lambda vrbl n (&alter! vrbl (+. (get vrbl) n))))
+(let -=. (lambda vrbl n (&alter! vrbl (-. (get vrbl) n))))
+(let *=. (lambda vrbl n (&alter! vrbl (*. (get vrbl) n))))
+(let /=. (lambda vrbl n (&alter! vrbl (/. (get vrbl) n))))
+(let ++. (lambda vrbl (&alter! vrbl (+. (get vrbl) 1.0))))
+(let --. (lambda vrbl (&alter! vrbl (-. (get vrbl) 1.0))))
+(let **. (lambda vrbl (&alter! vrbl (*. (get vrbl) (get vrbl)))))
 
     (let fn (lambda a b (do (let y [a b]) (set! y (length y) 10) y)))
     (let outer (lambda z (do (let g (fn 1 2)) (length g))))
@@ -3209,7 +3241,7 @@ image
         (let current (std/vector/last queue))
         (pop! queue)
         (if (= current destination)
-          (set found true)
+          (&alter! found true)
           (std/vector/for (get graph current) (lambda neighbor (do
             (if (= (get visited neighbor) 0)
               (do
@@ -3499,7 +3531,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (mut i 0)
     (while (< i (/ (length str) 2)) (do
       (if (not (=# (std/vector/stack/peek s) (std/vector/queue/peek q)))
-           (set p? false) 
+           (&alter! p? false) 
            (do 
                (std/vector/stack/pop! s)
                (std/vector/queue/dequeue! q)
@@ -3513,7 +3545,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"(let palindrome? (lambda str (do 
     (let p? [true])
-    (loop 0 (/ (length str) 2) (lambda i (if (not (=# (get str i) (get str (- (length str) i 1)))) (set p? false))))
+    (loop 0 (/ (length str) 2) (lambda i (if (not (=# (get str i) (get str (- (length str) i 1)))) (&alter! p? false))))
     (true? p?))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[true false]",
@@ -3552,9 +3584,9 @@ D:=,=,=,+,=,=,=,+,=,=")
     (integer j (- (length xs) 1))
     (while (<> (get i) (get j)) (do 
         (if (> (get xs (get i)) (get xs (get j))) (do 
-            (set max (std/int/max (* (- (get j) (get i)) (get xs (get j))) (get max)))
+            (&alter! max (std/int/max (* (- (get j) (get i)) (get xs (get j))) (get max)))
             (-- j)) (do
-            (set max (std/int/max (* (- (get j) (get i)) (get xs (get i))) (get max)))
+            (&alter! max (std/int/max (* (- (get j) (get i)) (get xs (get i))) (get max)))
             (++ i)))))
     (get max))))
 
@@ -3703,7 +3735,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (while (false? escaped?) (do
         (set! input (get index) (+ (get pointer) 1))
         (+= index (get pointer))
-        (if (std/vector/in-bounds? input (get index)) (set pointer (get input (get index))) (set escaped? true))
+        (if (std/vector/in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
         (++ steps)))
     (get steps))))
 
@@ -3716,7 +3748,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (while (false? escaped?) (do
         (set! input (get index) (+ (get pointer) (if (>= (get pointer) 3) -1 1)))
         (+= index (get pointer))
-        (if (std/vector/in-bounds? input (get index)) (set pointer (get input (get index))) (set escaped? true))
+        (if (std/vector/in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
         (++ steps)))
     (get steps))))
     
@@ -3818,7 +3850,7 @@ D:=,=,=,+,=,=,=,+,=,=")
         (let me (get cells 0 i))
         (let right (get cells 0 (+ i 1)))
         (set! nextgen i (rules left me right)))))
-    (set cells nextgen)
+    (&alter! cells nextgen)
     (++ generation)))
 
 
@@ -3892,18 +3924,18 @@ out
       (for (lambda [ D M . ]
           (if (= (get result) 0)
               (do
-                (set facing (turn (get facing) D))
+                (&alter! facing (turn (get facing) D))
                 (loop 0 M
                   (lambda .
                     (if (= (get result) 0)
                         (do
                           (let p (step (get y) (get x) (get facing)))
-                          (set y (get p 0))
-                          (set x (get p 1))
+                          (&alter! y (get p 0))
+                          (&alter! x (get p 1))
 
                           (let key (point->key (get y) (get x)))
                           (if (Table/has? key visited)
-                              (set result (+ (std/int/abs (get y))
+                              (&alter! result (+ (std/int/abs (get y))
                                              (std/int/abs (get x))))
                               (Table/set! visited key true))))))))) input)
 
@@ -4010,8 +4042,8 @@ b
   (loop 0 (length sword) (lambda j (do 
     (let segment (get sword j))
     (cond
-        (and (false? placed) (< num (get segment 1)) (= (get segment 0) -1)) (do (set! segment 0 num) (set placed true))
-        (and (false? placed) (> num (get segment 1)) (= (get segment 2) -1)) (do (set! segment 2 num) (set placed true))
+        (and (false? placed) (< num (get segment 1)) (= (get segment 0) -1)) (do (set! segment 0 num) (&alter! placed true))
+        (and (false? placed) (> num (get segment 1)) (= (get segment 2) -1)) (do (set! segment 2 num) (&alter! placed true))
         nil))))
     (if (false? placed) (push! sword [-1 num -1])))))
 sword)))
@@ -4124,7 +4156,7 @@ L82")
     (loop 0 (length inp) (lambda i 
       (loop i (length inp) (lambda j 
         (if (<> i j) 
-          (set M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))))
+          (&alter! M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))))
     (+= S (get M)))))) 
     (get S))))
 
@@ -4137,7 +4169,7 @@ L82")
       (while (and (not (empty? stack)) (<# (at stack -1) (get line i)) (> (+ (length stack) (- N i)) 12)) (pop! stack))
       (push! stack (get line i))
       (while (> (length stack) 12) (pop! stack)))))
-    (set S (BigInt/add (get S) (BigInt/new stack))))) parsed)
+    (&alter! S (BigInt/add (get S) (BigInt/new stack))))) parsed)
   (get S))))
 
 
@@ -4212,12 +4244,12 @@ L82")
   (loop 1 (length ranges) (lambda i (do 
     (let [ dlow dhigh . ] (get ranges i))
     (if (BigInt/gte? (get high) dlow) (do 
-      (set low (if (BigInt/lt? (get low) dlow) (get low) dlow))
-      (set high (if (BigInt/gt? (get high) dhigh) (get high) dhigh))) (do 
-      (set out (BigInt/add (get out) (BigInt/add (BigInt/sub (get high) (get low)) [ 1 ])))
-      (set low (get ranges i 0))
-      (set high (get ranges i 1)))))))
-  (set out (BigInt/add (get out) (BigInt/add (BigInt/sub (get high) (get low)) [ 1 ])))
+      (&alter! low (if (BigInt/lt? (get low) dlow) (get low) dlow))
+      (&alter! high (if (BigInt/gt? (get high) dhigh) (get high) dhigh))) (do 
+      (&alter! out (BigInt/add (get out) (BigInt/add (BigInt/sub (get high) (get low)) [ 1 ])))
+      (&alter! low (get ranges i 0))
+      (&alter! high (get ranges i 1)))))))
+  (&alter! out (BigInt/add (get out) (BigInt/add (BigInt/sub (get high) (get low)) [ 1 ])))
   (get out))))
 
 (let PARSED (parse INPUT))
@@ -4341,7 +4373,7 @@ L82")
         (=# c '^') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do 
           (set! (get data y) (- x 1) '|')
           (set! (get data y) (+ x 1) '|')
-          (set beam (BigInt/add (get beam) [ 1 ]))
+          (&alter! beam (BigInt/add (get beam) [ 1 ]))
           (set! timeline (- x 1) (BigInt/add (get timeline (- x 1)) (get timeline x)))
           (set! timeline (+ x 1) (BigInt/add (get timeline (+ x 1)) (get timeline x)))
           (set! timeline x [ 0 ])
@@ -4445,7 +4477,7 @@ L82")
   (integer answer 0)
   (for (lambda [ a b . ]
       (if (and (= (get answer) 0) (merge a b) (= (get components) 1))
-                (set answer (* (get (get input a) 0) (get (get input b) 0))))) edges)
+                (&alter! answer (* (get (get input a) 0) (get (get input b) 0))))) edges)
   (get answer))))
 
 [(part1 (parse INPUT)) (part2 (parse INPUT))]"#,
@@ -5174,12 +5206,12 @@ bbrgwb")
     ;  Then, the secret number becomes the result of that operation. 
     ; (If the secret number is 42 and you were to mix 15 into the secret number, 
     ; the secret number would become 37.)
-    (let mix (lambda value (do (set SECRET (^ value (get SECRET))) (get SECRET))))
+    (let mix (lambda value (do (&alter! SECRET (^ value (get SECRET))) (get SECRET))))
 
     ; To prune the secret number, 
     ; calculate the value of the secret number modulo 777216. 
     ; Then, the secret number becomes the result of that operation. 
-    (let prune (lambda value (do (set SECRET (emod value 777216)) (get SECRET))))
+    (let prune (lambda value (do (&alter! SECRET (emod value 777216)) (get SECRET))))
 
     (let random (lambda (|>
           (get SECRET)
@@ -5286,8 +5318,8 @@ bbrgwb")
 
         (let filtered (filter/i (lambda . j (<> j (get i))) word))
         (if (Set/has? filtered correct) (do 
-            (set out filtered)
-            (set loop? false)))
+            (&alter! out filtered)
+            (&alter! loop? false)))
 
         (if (> (get i) 0) (do 
           (let prev (get temp (- (get i) 1)))
@@ -5296,8 +5328,8 @@ bbrgwb")
           (set! temp (get i) prev)
 
           (if (Set/has? temp correct) (do 
-            (set out temp)
-            (set loop? false))
+            (&alter! out temp)
+            (&alter! loop? false))
             (do 
               (set! temp (- (get i) 1) prev)
               (set! temp (get i) next)))))
@@ -5308,8 +5340,8 @@ bbrgwb")
           (let t (get temp (get i)))
           (set! temp (get i) a)
           (if (Set/has? temp correct) (do
-              (set out temp)
-              (set loop? false))
+              (&alter! out temp)
+              (&alter! loop? false))
               (set! temp (get i) t))
           (++ k)))
 
@@ -5318,8 +5350,8 @@ bbrgwb")
           (let a (get abc (get j)))
           (let added (cons (slice 0 (get i) word) [a] (slice (get i) (length word) word)))
           (if (Set/has? added correct) (do
-              (set out added) 
-              (set loop? false)))
+              (&alter! out added) 
+              (&alter! loop? false)))
           (++ j)))
 
         (++ i)))
@@ -5516,9 +5548,9 @@ SECRET = SANTA")
 (if (> (get div) 0) (do
 (let digit (/ (get x) (get div)))
 (set! block (get msg-len) (+ 48 digit))
-(set x (mod (get x) (get div)))
-(set div (/ (get div) 10))
-(set msg-len (+ (get msg-len) 1)))
+(&alter! x (mod (get x) (get div)))
+(&alter! div (/ (get div) 10))
+(&alter! msg-len (+ (get msg-len) 1)))
 nil)))
 
 (set! block (get msg-len) 128)
@@ -5560,26 +5592,26 @@ nil)))
 (loop 0 64 (lambda i (do
 (if (< i 16)
 (do
-  (set f (| (& (get B) (get C)) (& (~ (get B)) (get D))))
-  (set g i))
+  (&alter! f (| (& (get B) (get C)) (& (~ (get B)) (get D))))
+  (&alter! g i))
 (if (< i 32)
 (do
-  (set f (| (& (get D) (get B)) (& (~ (get D)) (get C))))
-  (set g (mod (+ (* 5 i) 1) 16)))
+  (&alter! f (| (& (get D) (get B)) (& (~ (get D)) (get C))))
+  (&alter! g (mod (+ (* 5 i) 1) 16)))
 (if (< i 48)
 (do
-  (set f (^ (get B) (^ (get C) (get D))))
-  (set g (mod (+ (* 3 i) 5) 16)))
+  (&alter! f (^ (get B) (^ (get C) (get D))))
+  (&alter! g (mod (+ (* 3 i) 5) 16)))
 (do
-  (set f (^ (get C) (| (get B) (~ (get D)))))
-  (set g (mod (* 7 i) 16))))))
+  (&alter! f (^ (get C) (| (get B) (~ (get D)))))
+  (&alter! g (mod (* 7 i) 16))))))
 (let x4 (add32-4 (get A) (get f) (get K i) (get words (get g))))
 (let new-b (add32 (get B) (left-rotate x4 (shift-by i))))
 (let old-d (get D))
-(set D (get C))
-(set C (get B))
-(set B new-b)
-(set A old-d))))
+(&alter! D (get C))
+(&alter! C (get B))
+(&alter! B new-b)
+(&alter! A old-d))))
 
 (add32 a0 (get A)))))
 
@@ -5592,7 +5624,7 @@ nil)))
 (integer answer 0)
 (loop 1 500001 (lambda candidate
 (if (and (= (get answer) 0) (has-five-leading-zeroes! candidate))
-(set answer candidate)
+(&alter! answer candidate)
 nil)))
 (get answer)
 "#,

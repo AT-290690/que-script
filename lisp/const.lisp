@@ -70,3 +70,7 @@
 ; Public helpers (good default precision)
 (let sin (lambda x (const/float/sin/terms x 8)))
 (let cos (lambda x (const/float/cos/terms x 8)))
+
+(let &mut (lambda value [ value ]))
+(let &alter! (lambda vrbl x (set! vrbl 0 x)))
+(let &get (lambda vrbl (get vrbl 0)))

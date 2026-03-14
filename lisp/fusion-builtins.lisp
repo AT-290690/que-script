@@ -1,3 +1,17 @@
+(let &mut (lambda value [ value ]))
+(let &alter! (lambda vrbl x (set! vrbl 0 x)))
+(let &get (lambda vrbl (get vrbl 0)))
+
+(let infinity 2147483647)
+(let -infinity -2147483648)
+(let identity (lambda x x))
+(let Int 0)
+(let Float 0.0)
+(let Char 'a')
+(let Bool false)
+(let Nil nil)
+(let as (lambda . t t))
+
 (let map (lambda fn xs (if (= (length xs) 0) [] (do
     (let out [])
     (mut i 0)
