@@ -1883,17 +1883,8 @@ fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
         return Err("(apply) requires at least one function".into());
     }
 
-    // First item is the function being partially applied
     let func: Expression = exprs.remove(0);
-
-    Ok(
-        Expression::Apply(
-            vec![Expression::Word(format!("std/fn/apply/first/{}", exprs.len())), func]
-                .into_iter()
-                .chain(exprs)
-                .collect()
-        )
-    )
+    Ok(exprs.into_iter().fold(func, |acc, arg| Expression::Apply(vec![acc, arg])))
 }
 
 fn and_transform(mut exprs: Vec<Expression>) -> Expression {

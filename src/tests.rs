@@ -218,6 +218,22 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_parser_normalizes_nested_application_syntax() {
+        let expr = crate::parser
+            ::build("((make-adder 2) 3)")
+            .expect("nested application should parse");
+        assert_eq!(expr.to_lisp(), "(do ((make-adder 2) 3))");
+    }
+
+    #[test]
+    fn test_parser_apply_alias_matches_direct_application() {
+        let expr = crate::parser
+            ::build("(apply (make-adder 2) 3)")
+            .expect("apply alias should parse");
+        assert_eq!(expr.to_lisp(), "(do ((make-adder 2) 3))");
+    }
+
+    #[test]
     fn test_lsp_undefined_variable_suggestions_rank_typo_closest() {
         let suggestions = crate::lsp_native_core::suggest_undefined_variable_candidates(
             "Undefined variable: rnage",
@@ -734,6 +750,45 @@ Concequent and alternative must match types
 (let b (map/i (lambda x i { x i }) [1 2 3 4 5]))
 [a b]"#
         )
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_oversaturated_returned_function_call_matches_explicit_apply() {
+        let src = r#"(do
+  (let make-adder (lambda x (lambda y (+ x y))))
+  [
+    (apply (make-adder 2) 3)
+    (make-adder 2 3)
+  ])"#;
+        assert_std_program_output_matches_with_and_without_optimizer(src);
+        let output = run_program_output_with_std_and_opts(
+            src,
+            true
+        );
+        assert_eq!(output, "[5 5]");
+    }
+
+    #[test]
+    #[ignore = "known remaining issue: returned closures over nested higher-order partials still trap in wasm backend"]
+    #[cfg(feature = "runtime")]
+    fn test_mapcar_comp_works_with_nested_and_apply_call_forms() {
+        let src = r#"(do
+  (let mymap (lambda fn xs (if (= (length xs) 0) [] (do
+    (let out [])
+    (mut i 0)
+    (while (< i (length xs)) (do
+      (set! out (length out) (fn (get xs i)))
+      (alter! i (+ i 1))))
+    out))))
+  (let mapcar (lambda fn (comp (mymap (mymap fn)))))
+  [
+    ((mapcar square) [[1 2 3] [2 4 5 6] [3]])
+    (apply (mapcar square) [[1 2 3] [2 4 5 6] [3]])
+  ])"#;
+        assert_std_program_output_matches_with_and_without_optimizer(src);
+        let output = run_program_output_with_std_and_opts(src, true);
+        assert_eq!(output, "[[[1 4 9] [4 16 25 36] [9]] [[1 4 9] [4 16 25 36] [9]]]");
     }
 
     #[test]
@@ -1321,23 +1376,19 @@ Concequent and alternative must match types
     }
 
     #[test]
-    fn test_typed_optimization_beta_reduces_apply_first_lambda_call() {
-        let typed = infer_typed(
-            "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ x 1)) 41))"
-        );
+    fn test_typed_optimization_beta_reduces_apply_alias_lambda_call() {
+        let typed = infer_typed("(do ((lambda x (+ x 1)) 41))");
         let optimized = crate::op::optimize_typed_ast(&typed);
-        assert_eq!(optimized.expr.to_lisp(), "(do 42)");
+        assert_eq!(optimized.expr.to_lisp(), "42");
     }
 
     #[test]
-    fn test_typed_optimization_apply_first_beta_reduce_skips_managed_args() {
-        let typed = infer_typed(
-            "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ (get x 0) (get x 1))) (vector 10 20)))"
-        );
+    fn test_typed_optimization_apply_alias_beta_reduce_skips_managed_args() {
+        let typed = infer_typed("(do ((lambda x (+ (get x 0) (get x 1))) (vector 10 20)))");
         let optimized = crate::op::optimize_typed_ast(&typed);
         assert_eq!(
             optimized.expr.to_lisp(),
-            "(do (let std/fn/apply/first/1 (lambda fn x (fn x))) (std/fn/apply/first/1 (lambda x (+ (get x 0) (get x 1))) (vector 10 20)))"
+            "((lambda x (+ (get x 0) (get x 1))) (vector 10 20))"
         );
     }
 

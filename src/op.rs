@@ -3097,9 +3097,6 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
             return node;
         }
     };
-    if let Some(apply_fused) = fuse_apply_wrapper_call(&node, &items) {
-        return apply_fused;
-    }
     if let Some(beta_reduced) = beta_reduce_immediate_lambda_call(&node, &items) {
         return beta_reduced;
     }
@@ -3143,89 +3140,6 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
 
         _ => node,
     }
-}
-
-fn fuse_apply_wrapper_call(
-    node: &TypedExpression,
-    call_items: &[Expression]
-) -> Option<TypedExpression> {
-    let op = match call_items.first() {
-        Some(Expression::Word(w)) => w.as_str(),
-        _ => {
-            return None;
-        }
-    };
-    if !op.starts_with("std/fn/apply/") {
-        return None;
-    }
-    if node.children.len() != call_items.len() {
-        return None;
-    }
-
-    if op.starts_with("std/fn/apply/first/") {
-        if call_items.len() < 2 {
-            return None;
-        }
-        let callee = call_items.get(1)?.clone();
-        if !is_lambda_expr(&callee) {
-            return None;
-        }
-        let mut new_items = vec![callee];
-        new_items.extend(call_items.iter().skip(2).cloned());
-
-        let mut new_children = vec![node.children.get(1)?.clone()];
-        new_children.extend(node.children.iter().skip(2).cloned());
-        let rewritten = TypedExpression {
-            expr: Expression::Apply(new_items),
-            typ: node.typ.clone(),
-            effect: node.effect,
-            children: new_children,
-        };
-        return beta_reduce_immediate_lambda_call(&rewritten, match &rewritten.expr {
-            Expression::Apply(items) => items,
-            _ => {
-                return None;
-            }
-        });
-    }
-
-    // (std/fn/apply/N a b ... fn) => (fn a b ...)
-    if call_items.len() < 2 {
-        return None;
-    }
-    let callee = call_items.last()?.clone();
-    if !is_lambda_expr(&callee) {
-        return None;
-    }
-    let mut new_items = vec![callee];
-    new_items.extend(
-        call_items
-            .iter()
-            .skip(1)
-            .take(call_items.len() - 2)
-            .cloned()
-    );
-
-    let mut new_children = vec![node.children.last()?.clone()];
-    new_children.extend(
-        node.children
-            .iter()
-            .skip(1)
-            .take(node.children.len() - 2)
-            .cloned()
-    );
-    let rewritten = TypedExpression {
-        expr: Expression::Apply(new_items),
-        typ: node.typ.clone(),
-        effect: node.effect,
-        children: new_children,
-    };
-    beta_reduce_immediate_lambda_call(&rewritten, match &rewritten.expr {
-        Expression::Apply(items) => items,
-        _ => {
-            return None;
-        }
-    })
 }
 
 fn is_lambda_expr(expr: &Expression) -> bool {

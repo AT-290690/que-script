@@ -1,4 +1,4 @@
-
+(let Tuple/new (lambda a b (tuple a b)))
 (let Tuple/swap std/tuple/swap)
 (let Tuple/map std/tuple/map)
 (let Tuple/map/fst std/tuple/map/fst)
