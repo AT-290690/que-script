@@ -2,8 +2,6 @@
 
 **A pocket lisp that gives you safety without verbosity**
 
-_Only 470KB WASM module including the library which is 85KB itself_
-
 - **[Lisp](<https://en.wikipedia.org/wiki/Lisp_(programming_language)>)**
 - **[Stack-based bytecode Virtual Machine](https://en.wikipedia.org/wiki/Stack_machine)**
 - **[Standard library](https://en.wikipedia.org/wiki/Standard_library)**
@@ -31,10 +29,88 @@ Try it online at [playground](https://at-290690.github.io/rust-lisp/playground)
 
 Check out official website at [website](https://at-290690.github.io/rust-lisp/)
 
-Build
+## Install
+
+### Linux / macOS
+
+Using the installer scripts:
 
 ```bash
-./scripts/build.sh
+curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install-wat.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/lsp.sh | bash
+```
+
+Without the installer scripts:
+
+```bash
+curl -fsSL https://github.com/AT-290690/que-script/releases/latest/download/que -o /tmp/que
+chmod +x /tmp/que
+sudo mv /tmp/que /usr/local/bin/que
+
+curl -fsSL https://github.com/AT-290690/que-script/releases/latest/download/quewat -o /tmp/quewat
+chmod +x /tmp/quewat
+sudo mv /tmp/quewat /usr/local/bin/quewat
+
+curl -fsSL https://github.com/AT-290690/que-script/releases/latest/download/quelsp -o /tmp/quelsp
+chmod +x /tmp/quelsp
+sudo mv /tmp/quelsp /usr/local/bin/quelsp
+
+curl -fsSL https://github.com/AT-290690/que-script/releases/latest/download/que-lib.lisp -o /tmp/que-lib.lisp
+sudo mkdir -p /usr/local/share/que
+sudo mv /tmp/que-lib.lisp /usr/local/share/que/que-lib.lisp
+```
+
+### Windows
+
+Using the PowerShell installers:
+
+```powershell
+irm https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install-wat.ps1 | iex
+irm https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/lsp.ps1 | iex
+```
+
+This installs to:
+
+- `%LOCALAPPDATA%\Programs\Que\bin`
+- `%LOCALAPPDATA%\Programs\Que\share\que\que-lib.lisp`
+
+Without the installers:
+
+1. Create:
+   - `%LOCALAPPDATA%\Programs\Que\bin`
+   - `%LOCALAPPDATA%\Programs\Que\share\que`
+2. Download these release assets into those folders:
+   - `que.exe`
+   - `quewat.exe`
+   - `quelsp.exe`
+   - `que-lib.lisp`
+3. Add `%LOCALAPPDATA%\Programs\Que\bin` to your user `PATH`.
+4. For VS Code, set:
+
+```json
+"que.languageServer.path": "C:\\Users\\<you>\\AppData\\Local\\Programs\\Que\\bin\\quelsp.exe"
+```
+
+### Uninstall
+
+Linux / macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/uninstall.sh | bash
+```
+
+Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/uninstall.ps1 | iex
+```
+
+## Build
+
+```bash
+./scripts/build-all.sh
 ```
 
 Test
