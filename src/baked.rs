@@ -4,12 +4,31 @@ use std::fs;
 use std::path::{ Path, PathBuf };
 
 const ENV_LIB_PATH: &str = "QUE_LIB_PATH";
-const DEFAULT_LIB_PATH: &str = "/usr/local/share/que/que-lib.lisp";
 
 pub fn external_library_path() -> PathBuf {
     env::var(ENV_LIB_PATH)
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_LIB_PATH))
+        .unwrap_or_else(|_| default_external_library_path())
+}
+
+fn default_external_library_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_app_data) = env::var("LOCALAPPDATA") {
+            return PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("Que")
+                .join("share")
+                .join("que")
+                .join("que-lib.lisp");
+        }
+        return PathBuf::from("que-lib.lisp");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        PathBuf::from("/usr/local/share/que/que-lib.lisp")
+    }
 }
 
 fn parse_ast_source(source: &str, label: &str) -> Result<Expression, String> {
@@ -61,7 +80,7 @@ fn candidate_library_paths() -> Vec<PathBuf> {
             out.push(PathBuf::from(path));
         }
     }
-    out.push(PathBuf::from(DEFAULT_LIB_PATH));
+    out.push(default_external_library_path());
 
     if let Ok(exe) = env::current_exe() {
         if let Some(dir) = exe.parent() {
