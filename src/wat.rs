@@ -226,6 +226,22 @@ fn is_managed_local_type(t: &Type) -> bool {
     matches!(t, Type::List(_) | Type::Function(_, _) | Type::Var(_))
 }
 
+fn closure_store_op_for_type(t: &Type) -> &'static str {
+    match t {
+        Type::Function(_, _) => "closure_set_fun",
+        Type::List(_) | Type::Var(_) => "closure_set_ref",
+        _ => "closure_set",
+    }
+}
+
+fn closure_store_op_for_type_wat(t: &Type) -> &'static str {
+    match t {
+        Type::Function(_, _) => "$closure_set_fun",
+        Type::List(_) | Type::Var(_) => "$closure_set_ref",
+        _ => "$closure_set",
+    }
+}
+
 impl VecElemKind {
     fn suffix(self) -> &'static str {
         match self {
@@ -2623,7 +2639,7 @@ fn emit_vector_runtime(
                     &format!("        i32.const {}\n        i32.const 2\n        call $closure_new\n        local.set $clo\n", helper_id)
                 );
                 out.push_str(
-                    "        local.get $clo\n        i32.const 0\n        local.get $f\n        call $closure_set_ref\n        drop\n"
+                    "        local.get $clo\n        i32.const 0\n        local.get $f\n        call $closure_set_fun\n        drop\n"
                 );
                 out.push_str("        local.get $clo\n        i32.const 1\n        local.get $a\n");
                 if *first_param_is_ref {
@@ -2661,19 +2677,18 @@ fn emit_vector_runtime(
                 if ps.len() > 1 && ps.iter().all(is_i32ish_type) && is_i32ish_type(ret) {
                     let helper_name = format!("__partial_dyn_{}_1", ps.len());
                     if let Some(helper_id) = fn_ids.get(&helper_name) {
-                        let first_param_is_ref = ps.first().map(is_ref_type).unwrap_or(false);
+                        let first_param_store = ps
+                            .first()
+                            .map(closure_store_op_for_type)
+                            .unwrap_or("closure_set");
                         apply1_open_ends += 1;
                         out.push_str(
                             &format!(
-                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
+                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set_fun\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
                                 tag,
                                 helper_id,
                                 tag,
-                                if first_param_is_ref {
-                                    "closure_set_ref"
-                                } else {
-                                    "closure_set"
-                                }
+                                first_param_store
                             )
                         );
                     }
@@ -2689,19 +2704,19 @@ fn emit_vector_runtime(
                 if arity > 1 {
                     let helper_name = format!("__partial_dyn_{}_1", arity);
                     if let Some(helper_id) = fn_ids.get(&helper_name) {
-                        let first_param_is_ref = builtin_tag_first_param_is_ref(tag);
+                        let first_param_store = if builtin_tag_first_param_is_ref(tag) {
+                            "closure_set_ref"
+                        } else {
+                            "closure_set"
+                        };
                         apply1_open_ends += 1;
                         out.push_str(
                             &format!(
-                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
+                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set_fun\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
                                 tag,
                                 helper_id,
                                 tag,
-                                if first_param_is_ref {
-                                    "closure_set_ref"
-                                } else {
-                                    "closure_set"
-                                }
+                                first_param_store
                             )
                         );
                     }
@@ -5478,7 +5493,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             );
             out.push(
                 format!(
-                    "local.get {}\ni32.const 0\ncall ${}\ncall $closure_set_ref\ndrop",
+                    "local.get {}\ni32.const 0\ncall ${}\ncall $closure_set_fun\ndrop",
                     clo_local,
                     ident(op)
                 )
@@ -5496,31 +5511,33 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 };
                 let av = compile_expr(arg, &nested_ctx)?;
                 let idx = i + 1;
-                let is_ref = is_ref_type(&ret_params[i]);
+                let store_op = closure_store_op_for_type_wat(&ret_params[i]);
                 let is_lambda_literal =
                     matches!(
                     &arg.expr,
                     Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
                 );
-                if is_ref {
+                if store_op != "$closure_set" {
                     if is_lambda_literal {
                         out.push(
                             format!(
-                                "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall $closure_set_ref\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                                "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
                                 clo_local,
                                 idx,
                                 av,
                                 tmp_local,
+                                store_op,
                                 tmp_local
                             )
                         );
                     } else {
                         out.push(
                             format!(
-                                "local.get {}\ni32.const {}\n{}\ncall $closure_set_ref\ndrop",
+                                "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
                                 clo_local,
                                 idx,
-                                av
+                                av,
+                                store_op
                             )
                         );
                     }
@@ -5587,7 +5604,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             )
         );
         out.push(
-            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set\ndrop", clo_local, fn_ptr)
+            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set_fun\ndrop", clo_local, fn_ptr)
         );
         for (i, arg) in args.iter().enumerate() {
             let nested_ctx = Ctx {
@@ -5602,31 +5619,33 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             };
             let av = compile_expr(arg, &nested_ctx)?;
             let idx = i + 1;
-            let is_ref = is_ref_type(&params[i]);
+            let store_op = closure_store_op_for_type_wat(&params[i]);
             let is_lambda_literal =
                 matches!(
                 &arg.expr,
                 Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
             );
-            if is_ref {
+            if store_op != "$closure_set" {
                 if is_lambda_literal {
                     out.push(
                         format!(
-                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall $closure_set_ref\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
                             clo_local,
                             idx,
                             av,
                             tmp_local,
+                            store_op,
                             tmp_local
                         )
                     );
                 } else {
                     out.push(
                         format!(
-                            "local.get {}\ni32.const {}\n{}\ncall $closure_set_ref\ndrop",
+                            "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
                             clo_local,
                             idx,
-                            av
+                            av,
+                            store_op
                         )
                     );
                 }
@@ -5705,13 +5724,11 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                 clo_local
             )
         );
-        let head_is_ref = is_managed_function_value_expr(&f_node.expr, ctx);
         out.push(
             format!(
-                "local.get {}\ni32.const 0\n{}\ncall ${}\ndrop",
+                "local.get {}\ni32.const 0\n{}\ncall $closure_set_fun\ndrop",
                 clo_local,
-                f,
-                if head_is_ref { "closure_set_ref" } else { "closure_set" }
+                f
             )
         );
         for (i, arg) in args.iter().enumerate() {
@@ -5727,31 +5744,33 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
             };
             let av = compile_expr(arg, &nested_ctx)?;
             let idx = i + 1;
-            let is_ref = is_ref_type(&head_params[i]);
+            let store_op = closure_store_op_for_type_wat(&head_params[i]);
             let is_lambda_literal =
                 matches!(
                 &arg.expr,
                 Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
             );
-            if is_ref {
+            if store_op != "$closure_set" {
                 if is_lambda_literal {
                     out.push(
                         format!(
-                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall $closure_set_ref\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
                             clo_local,
                             idx,
                             av,
                             tmp_local,
+                            store_op,
                             tmp_local
                         )
                     );
                 } else {
                     out.push(
                         format!(
-                            "local.get {}\ni32.const {}\n{}\ncall $closure_set_ref\ndrop",
+                            "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
                             clo_local,
                             idx,
-                            av
+                            av,
+                            store_op
                         )
                     );
                 }
@@ -5788,30 +5807,6 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
     }
     out.push(format!("call $apply{}_i32", args.len()));
     Ok(out.join("\n"))
-}
-
-fn is_managed_function_value_expr(expr: &Expression, ctx: &Ctx<'_>) -> bool {
-    match expr {
-        Expression::Word(w) => {
-            if ctx.locals.contains_key(w) {
-                true
-            } else if w == "ARGV" {
-                true
-            } else if let Some((params, _)) = ctx.fn_sigs.get(w) {
-                params.is_empty()
-            } else {
-                false
-            }
-        }
-        Expression::Apply(items) => {
-            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
-                true
-            } else {
-                true
-            }
-        }
-        _ => true,
-    }
 }
 
 fn resolve_local_devirtualized_head(

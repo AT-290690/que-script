@@ -437,6 +437,8 @@ fn native_shell_learn() -> &'static str {
     \n\
     Core:\n\
     - Function call: (f a b)\n\
+    - Nested application works: ((f a) b)\n\
+    - (apply f a b) is an alias for nested application, so `(apply (f a) b)` matches `((f a) b)`.\n\
     - Everything is an expression; last expression is the return value.\n\
     - (let name value) creates immutable bindings.\n\
     - (do e1 e2 ... en) evaluates in order, returns en, and does NOT create a new scope.\n\
