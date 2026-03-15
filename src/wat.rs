@@ -1617,6 +1617,25 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
+  (func $closure_set_fun (param $ptr i32) (param $idx i32) (param $v i32) (result i32)
+    local.get $v
+    i32.const -2147483648
+    i32.and
+    i32.const -2147483648
+    i32.eq
+    if (result i32)
+      local.get $ptr
+      local.get $idx
+      local.get $v
+      call $closure_set_ref
+    else
+      local.get $ptr
+      local.get $idx
+      local.get $v
+      call $closure_set
+    end
+  )
+
   (func $closure_get (param $ptr i32) (param $idx i32) (result i32)
     (local $base i32)
     (local $n i32)
@@ -2646,7 +2665,7 @@ fn emit_vector_runtime(
                         apply1_open_ends += 1;
                         out.push_str(
                             &format!(
-                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set_ref\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
+                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
                                 tag,
                                 helper_id,
                                 tag,
@@ -2674,7 +2693,7 @@ fn emit_vector_runtime(
                         apply1_open_ends += 1;
                         out.push_str(
                             &format!(
-                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set_ref\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
+                                "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n      i32.const {}\n      i32.const 2\n      call $closure_new\n      local.set $clo\n      local.get $clo\n      i32.const 0\n      i32.const {}\n      call $closure_set\n      drop\n      local.get $clo\n      i32.const 1\n      local.get $a\n      call ${}\n      drop\n      local.get $clo\n    else\n",
                                 tag,
                                 helper_id,
                                 tag,
@@ -5520,13 +5539,17 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             return Ok(out.join("\n"));
         }
         if !ret_params.is_empty() && args.len() > ret_params.len() {
-            return Err(
-                format!(
-                    "Dynamic function application with extra args is not supported in wasm backend: expected {}, got {}",
-                    ret_params.len(),
-                    args.len()
-                )
-            );
+            let (initial_args, rest_args) = args.split_at(ret_params.len());
+            let mut out = vec![format!("call ${}", ident(op))];
+            for arg in initial_args {
+                out.push(compile_expr(arg, ctx)?);
+            }
+            out.push(format!("call $apply{}_i32", initial_args.len()));
+            for arg in rest_args {
+                out.push(compile_expr(arg, ctx)?);
+                out.push("call $apply1_i32".to_string());
+            }
+            return Ok(out.join("\n"));
         }
         let mut out = vec![format!("call ${}", ident(op))];
         for arg in args {
@@ -5564,7 +5587,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             )
         );
         out.push(
-            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set_ref\ndrop", clo_local, fn_ptr)
+            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set\ndrop", clo_local, fn_ptr)
         );
         for (i, arg) in args.iter().enumerate() {
             let nested_ctx = Ctx {
@@ -5621,6 +5644,19 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
         out.push(format!("local.get {}", clo_local));
         return Ok(out.join("\n"));
     }
+    if args.len() > params.len() && !unit_arity_elided {
+        let (initial_args, rest_args) = args.split_at(params.len());
+        let mut out = Vec::new();
+        for arg in initial_args {
+            out.push(compile_expr(arg, ctx)?);
+        }
+        out.push(format!("call ${}", ident(op)));
+        for arg in rest_args {
+            out.push(compile_expr(arg, ctx)?);
+            out.push("call $apply1_i32".to_string());
+        }
+        return Ok(out.join("\n"));
+    }
     if args.len() != params.len() && !unit_arity_elided {
         return Err(
             format!(
@@ -5669,8 +5705,14 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                 clo_local
             )
         );
+        let head_is_ref = is_managed_function_value_expr(&f_node.expr, ctx);
         out.push(
-            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set_ref\ndrop", clo_local, f)
+            format!(
+                "local.get {}\ni32.const 0\n{}\ncall ${}\ndrop",
+                clo_local,
+                f,
+                if head_is_ref { "closure_set_ref" } else { "closure_set" }
+            )
         );
         for (i, arg) in args.iter().enumerate() {
             let nested_ctx = Ctx {
@@ -5728,13 +5770,17 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
         return Ok(out.join("\n"));
     }
     if !head_params.is_empty() && args.len() > head_params.len() {
-        return Err(
-            format!(
-                "Dynamic function application with extra args is not supported in wasm backend: expected {}, got {}",
-                head_params.len(),
-                args.len()
-            )
-        );
+        let (initial_args, rest_args) = args.split_at(head_params.len());
+        let mut out = vec![f];
+        for arg in initial_args {
+            out.push(compile_expr(arg, ctx)?);
+        }
+        out.push(format!("call $apply{}_i32", initial_args.len()));
+        for arg in rest_args {
+            out.push(compile_expr(arg, ctx)?);
+            out.push("call $apply1_i32".to_string());
+        }
+        return Ok(out.join("\n"));
     }
     let mut out = vec![f];
     for arg in args {
@@ -5742,6 +5788,30 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
     }
     out.push(format!("call $apply{}_i32", args.len()));
     Ok(out.join("\n"))
+}
+
+fn is_managed_function_value_expr(expr: &Expression, ctx: &Ctx<'_>) -> bool {
+    match expr {
+        Expression::Word(w) => {
+            if ctx.locals.contains_key(w) {
+                true
+            } else if w == "ARGV" {
+                true
+            } else if let Some((params, _)) = ctx.fn_sigs.get(w) {
+                params.is_empty()
+            } else {
+                false
+            }
+        }
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+                true
+            } else {
+                true
+            }
+        }
+        _ => true,
+    }
 }
 
 fn resolve_local_devirtualized_head(
@@ -5788,33 +5858,42 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             )
         );
         for (i, cap) in def.captures.iter().enumerate() {
-            let (cap_v, is_ref_capture) = if let Some(local_idx) = ctx.locals.get(cap) {
+            let (cap_v, set_fn) = if let Some(local_idx) = ctx.locals.get(cap) {
+                let local_ty = ctx.local_types.get(cap);
                 (
                     format!("local.get {}", local_idx),
-                    ctx.local_types.get(cap).map(is_managed_local_type).unwrap_or(false),
+                    if matches!(local_ty, Some(Type::Function(_, _))) {
+                        "$closure_set_fun"
+                    } else if local_ty.map(is_managed_local_type).unwrap_or(false) {
+                        "$closure_set_ref"
+                    } else {
+                        "$closure_set"
+                    },
                 )
             } else if cap == "ARGV" {
-                ("call $__argv_get".to_string(), true)
+                ("call $__argv_get".to_string(), "$closure_set_ref")
             } else if let Some((ps, ret)) = ctx.fn_sigs.get(cap) {
                 if ps.is_empty() {
-                    (format!("call ${}", ident(cap)), is_managed_local_type(ret))
+                    (
+                        format!("call ${}", ident(cap)),
+                        if is_managed_local_type(ret) { "$closure_set_ref" } else { "$closure_set" },
+                    )
                 } else if let Some(id) = ctx.fn_ids.get(cap) {
                     // Function-valued global capture: store function pointer id.
-                    (format!("i32.const {}", id), true)
+                    (format!("i32.const {}", id), "$closure_set_fun")
                 } else if let Some(tag) = builtin_fn_tag(cap) {
                     // Builtin function captured as value.
-                    (format!("i32.const {}", tag), true)
+                    (format!("i32.const {}", tag), "$closure_set_fun")
                 } else {
                     return Err(
                         format!("Unsupported closure capture '{}' in wasm backend (no function id/tag)", cap)
                     );
                 }
             } else if let Some(tag) = builtin_fn_tag(cap) {
-                (format!("i32.const {}", tag), true)
+                (format!("i32.const {}", tag), "$closure_set_fun")
             } else {
                 return Err(format!("Unsupported closure capture '{}' in wasm backend", cap));
             };
-            let set_fn = if is_ref_capture { "$closure_set_ref" } else { "$closure_set" };
             out.push(
                 format!(
                     "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
@@ -5972,13 +6051,15 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 .get(1)
                                 .map(|n| compile_expr(n, ctx))
                                 .unwrap_or_else(|| Ok("i32.const 0".to_string())),
+                        op if builtin_fn_tag(op)
+                            .and_then(builtin_tag_arity)
+                            .map(|arity| node.children.len().saturating_sub(1) != arity)
+                            .unwrap_or(false) => compile_dynamic_call(node, ctx),
                         op if is_special_word(op) => emit_builtin(op, node, ctx),
                         _ => compile_call(node, op_full, ctx),
                     }
                 }
-                _ => {
-                    Err("Higher-order call heads are not yet supported in wasm backend".to_string())
-                }
+                _ => compile_dynamic_call(node, ctx),
             }
         }
     }

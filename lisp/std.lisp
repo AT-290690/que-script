@@ -125,19 +125,6 @@
 (let std/fn/apply/6 (lambda a b c d e f fn (fn a b c d e f)))
 
 
-(let std/fn/apply/first/0 (lambda fn (fn)))
-(let std/fn/apply/first/1 (lambda fn x (fn x)))
-(let std/fn/apply/first/2 (lambda fn x y (fn x y)))
-(let std/fn/apply/first/3 (lambda fn x y z (fn x y z)))
-(let std/fn/apply/first/4 (lambda fn a b c d (fn a b c d)))
-(let std/fn/apply/first/5 (lambda fn a b c d e (fn a b c d e)))
-(let std/fn/apply/first/6 (lambda fn a b c d e f (fn a b c d e f)))
-(let std/fn/apply/first/7 (lambda fn a b c d e f g (fn a b c d e f g)))
-(let std/fn/apply/first/8 (lambda fn a b c d e f g h (fn a b c d e f g h)))
-(let std/fn/apply/first/9 (lambda fn a b c d e f g h i (fn a b c d e f g h i)))
-(let std/fn/apply/first/10 (lambda fn a b c d e f g h i j (fn a b c d e f g h i j)))
-
-
 (let std/fn/combinator/1 (lambda a x (a x)))
 (let std/fn/combinator/2 (lambda a b x (a (b x))))
 (let std/fn/combinator/3 (lambda a b c x (a (b (c x)))))
