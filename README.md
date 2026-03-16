@@ -10,11 +10,6 @@
 - Everything is an **[Expression](<https://en.wikipedia.org/wiki/Expression_(computer_science)>)**
 - **[Syntactic sugar](https://en.wikipedia.org/wiki/Syntactic_sugar)** layer
 - **[Strongly typed](https://en.wikipedia.org/wiki/Strong_and_weak_typing)** using the **[Hindley-Milner](https://en.wikipedia.org/wiki/Hindley–Milner_type_system)** type system
-- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [JavaScript](https://en.wikipedia.org/wiki/JavaScript)
-- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [Python](<https://en.wikipedia.org/wiki/Python_(programming_language)>)
-- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [Rust](<https://en.wikipedia.org/wiki/Rust_(programming_language)>)
-- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [OCaml](https://en.wikipedia.org/wiki/OCaml)
-- **[Compiler](https://en.wikipedia.org/wiki/Compiler)** to [Kotlin](<https://en.wikipedia.org/wiki/Kotlin_(programming_language)>)
 - **[WASM](https://en.wikipedia.org/wiki/WebAssembly)** build for [online editor](https://at-290690.github.io/rust-lisp/playground)
 - It supports some cool features from **functional programming**
 
@@ -239,14 +234,6 @@ To what floor do the instructions take Santa?
 ; [0 0 3 3 3 -1 -1 -3 -3]
 ```
 
-**Disclaimer!**
-
-_This project is a work in progress and might contain bugs! Do NOT use it in production!_
-
-_APIs and behavior may change. New releases can break existing code._
-
-![logo](./footer.svg)
-
 Setup some env flags
 
 ```bash
@@ -258,3 +245,11 @@ Fallback to default ones
 ```bash
   unset QUE_WASM_OPT QUE_TCO QUE_DEVIRTUALIZE QUE_BOUNDS_CHECK QUE_DIV_ZERO_CHECK QUE_VEC_MIN_CAP QUE_VEC_GROWTH_NUM QUE_VEC_GROWTH_DEN
 ```
+
+**Disclaimer!**
+
+_This project is a work in progress and might contain bugs! Do NOT use it in production!_
+
+_APIs and behavior may change. New releases can break existing code._
+
+![logo](./footer.svg)
