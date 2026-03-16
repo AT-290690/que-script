@@ -276,10 +276,13 @@ pub fn lsp_completions(text: String) -> String {
             "if",
             "let",
             "let*",
+            "&mut",
+            "apply",
             "mut",
             "do",
             "as",
             "alter!",
+            "&alter!",
             "while",
             "loop",
             "vector",
@@ -374,8 +377,7 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             return "null".to_string();
         };
         let type_info = normalize_signature(&type_info);
-        let symbol_effect = analysis
-            .let_binding_effects
+        let symbol_effect = analysis.let_binding_effects
             .get(&symbol)
             .copied()
             .or_else(|| core.global_effects.get(&symbol).copied())
@@ -632,8 +634,7 @@ fn format_basic_debug_error_report(
     out.push(format!("debug.error: {}", message));
     out.push(format!("debug.scope_path: {}", format_scope_path(scope)));
     out.push(
-        "debug.location_explainer: location[i] ranges are in the original source file (not desugared), 1-based line:column; i=0 is the primary match."
-            .to_string()
+        "debug.location_explainer: location[i] ranges are in the original source file (not desugared), 1-based line:column; i=0 is the primary match.".to_string()
     );
 
     let ranges = infer_error_ranges(source_text, message, scope);

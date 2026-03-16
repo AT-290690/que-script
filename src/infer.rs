@@ -560,10 +560,12 @@ fn check_impure_binding_name(
         known_requires_bang
     )?;
     if requires_bang {
-        if let Some(offending_idx) = eval_function_binding_non_first_mutation_target(
-            item_expr,
-            known_requires_bang
-        ) {
+        if
+            let Some(offending_idx) = eval_function_binding_non_first_mutation_target(
+                item_expr,
+                known_requires_bang
+            )
+        {
             return Some(
                 format!(
                     "Impure function '{}' must mutate its first parameter (argument 1); found mutation target using argument {}\n{}",
@@ -653,13 +655,12 @@ fn target_non_first_param_index(
 ) -> Option<usize> {
     let mut uses_allowed_param = false;
     let mut first_non_first_param = None;
-    collect_target_param_usage(
-        expr,
-        scopes,
-        &mut uses_allowed_param,
-        &mut first_non_first_param
-    );
-    if uses_allowed_param { None } else { first_non_first_param }
+    collect_target_param_usage(expr, scopes, &mut uses_allowed_param, &mut first_non_first_param);
+    if uses_allowed_param {
+        None
+    } else {
+        first_non_first_param
+    }
 }
 
 fn expr_mutates_non_first_param(
@@ -681,11 +682,13 @@ fn expr_mutates_non_first_param(
                 Expression::Word(op) if op == "do" => {
                     scopes.push(HashMap::new());
                     for item in items.iter().skip(1) {
-                        if let Some(idx) = expr_mutates_non_first_param(
-                            item,
-                            known_requires_bang,
-                            scopes
-                        ) {
+                        if
+                            let Some(idx) = expr_mutates_non_first_param(
+                                item,
+                                known_requires_bang,
+                                scopes
+                            )
+                        {
                             scopes.pop();
                             return Some(idx);
                         }
@@ -708,7 +711,9 @@ fn expr_mutates_non_first_param(
                 Expression::Word(op) if op == "let" || op == "let*" || op == "mut" => {
                     items
                         .get(2)
-                        .and_then(|rhs| expr_mutates_non_first_param(rhs, known_requires_bang, scopes))
+                        .and_then(|rhs|
+                            expr_mutates_non_first_param(rhs, known_requires_bang, scopes)
+                        )
                 }
                 Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
                     if let Some(target) = items.get(1) {
@@ -717,11 +722,13 @@ fn expr_mutates_non_first_param(
                         }
                     }
                     for item in items.iter().skip(1) {
-                        if let Some(idx) = expr_mutates_non_first_param(
-                            item,
-                            known_requires_bang,
-                            scopes
-                        ) {
+                        if
+                            let Some(idx) = expr_mutates_non_first_param(
+                                item,
+                                known_requires_bang,
+                                scopes
+                            )
+                        {
                             return Some(idx);
                         }
                     }
@@ -729,11 +736,13 @@ fn expr_mutates_non_first_param(
                 }
                 _ => {
                     for item in items.iter().skip(1) {
-                        if let Some(idx) = expr_mutates_non_first_param(
-                            item,
-                            known_requires_bang,
-                            scopes
-                        ) {
+                        if
+                            let Some(idx) = expr_mutates_non_first_param(
+                                item,
+                                known_requires_bang,
+                                scopes
+                            )
+                        {
                             return Some(idx);
                         }
                     }
@@ -760,7 +769,10 @@ fn eval_function_binding_non_first_mutation_target(
     let Expression::Apply(lambda_items) = rhs else {
         return None;
     };
-    if lambda_items.len() < 2 || !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") {
+    if
+        lambda_items.len() < 2 ||
+        !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
+    {
         return None;
     }
     let Some(body) = lambda_items.last() else {
@@ -773,8 +785,7 @@ fn eval_function_binding_non_first_mutation_target(
             .iter()
             .skip(1)
             .take(lambda_items.len().saturating_sub(2))
-            .enumerate()
-        {
+            .enumerate() {
             if let Expression::Word(name) = param {
                 scope.insert(name.clone(), MutationBinding::Param(idx));
             }
@@ -859,22 +870,26 @@ pub fn collect_top_level_function_external_impurity(
                     let Some(let_node) = root.children.get(idx) else {
                         continue;
                     };
-                    if let Some((name, requires)) = eval_function_binding_requires_bang(
-                        &items[idx],
-                        let_node,
-                        &mut known_requires_bang
-                    ) {
+                    if
+                        let Some((name, requires)) = eval_function_binding_requires_bang(
+                            &items[idx],
+                            let_node,
+                            &mut known_requires_bang
+                        )
+                    {
                         out.insert(name, requires);
                     }
                 }
             }
             return;
         }
-        if let Some((name, requires)) = eval_function_binding_requires_bang(
-            &root.expr,
-            root,
-            &mut known_requires_bang
-        ) {
+        if
+            let Some((name, requires)) = eval_function_binding_requires_bang(
+                &root.expr,
+                root,
+                &mut known_requires_bang
+            )
+        {
             out.insert(name, requires);
         }
     }
@@ -1203,7 +1218,7 @@ impl InferenceContext {
 }
 
 fn mut_capture_error(name: &str) -> String {
-    format!("mut variable '{}' cannot be captured by lambda; use integer/floating/boolean cells for closure-shared mutation", name)
+    format!("mut variable '{}' cannot be captured by lambda; use &mut cells for closure-shared mutation", name)
 }
 
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
