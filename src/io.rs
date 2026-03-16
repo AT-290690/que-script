@@ -481,7 +481,7 @@ fn native_shell_learn() -> &'static str {
     - If mutating multiple values, pass them inside the first arg (typically a tuple).\n\
     \n\
     Built-ins:\n\
-    - set! pop! length get car cdr fst snd while\n\
+    - set! pop! length get car cdr cons fst snd while\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Float Float->Int true false nil\n\
     ARGV print! sleep! clear! list-dir! mkdir! read! delete! write! move!"

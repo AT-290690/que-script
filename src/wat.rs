@@ -160,6 +160,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         ">=." => Some(34),
         "Int->Float" => Some(35),
         "Float->Int" => Some(36),
+        "cons" => Some(37),
         _ => None,
     }
 }
@@ -192,7 +193,8 @@ fn builtin_tag_arity(tag: i32) -> Option<usize> {
         | 31
         | 32
         | 33
-        | 34 => Some(2),
+        | 34
+        | 37 => Some(2),
         21 => Some(3),
         18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 => Some(1),
         _ => None,
@@ -200,7 +202,7 @@ fn builtin_tag_arity(tag: i32) -> Option<usize> {
 }
 
 fn builtin_tag_first_param_is_ref(tag: i32) -> bool {
-    matches!(tag, 21)
+    matches!(tag, 21 | 37)
 }
 
 fn is_i32ish_type(t: &Type) -> bool {
@@ -411,6 +413,7 @@ fn is_special_word(w: &str) -> bool {
             "~" |
             "Int->Float" |
             "Float->Int" |
+            "cons" |
             "true" |
             "false" |
             "nil"
@@ -2323,6 +2326,76 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
+  (func $vec_concat_i32 (param $a i32) (param $b i32) (param $elem_ref i32) (result i32)
+    (local $len_a i32)
+    (local $len_b i32)
+    (local $out i32)
+    (local $i i32)
+    (local $v i32)
+    local.get $a
+    i32.load
+    local.set $len_a
+    local.get $b
+    i32.load
+    local.set $len_b
+    local.get $len_a
+    local.get $len_b
+    i32.add
+    local.get $elem_ref
+    call $vec_new_i32
+    local.set $out
+    local.get $out
+    i32.const 0
+    i32.store
+    i32.const 0
+    local.set $i
+    block $done_a
+      loop $copy_a
+        local.get $i
+        local.get $len_a
+        i32.ge_s
+        br_if $done_a
+        local.get $a
+        local.get $i
+        call $vec_get_i32
+        local.set $v
+        local.get $out
+        local.get $v
+        call $vec_push_i32
+        drop
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $copy_a
+      end
+    end
+    i32.const 0
+    local.set $i
+    block $done_b
+      loop $copy_b
+        local.get $i
+        local.get $len_b
+        i32.ge_s
+        br_if $done_b
+        local.get $b
+        local.get $i
+        call $vec_get_i32
+        local.set $v
+        local.get $out
+        local.get $v
+        call $vec_push_i32
+        drop
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $copy_b
+      end
+    end
+    local.get $out
+  )
+
   (func $vec_set_i32 (param $ptr i32) (param $idx i32) (param $v i32) (result i32)
     (local $len i32)
     (local $cap i32)
@@ -2697,7 +2770,7 @@ fn emit_vector_runtime(
         }
         let builtin_apply1_partial_tags = [
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30,
-            31, 32, 33, 34,
+            31, 32, 33, 34, 37,
         ];
         for tag in builtin_apply1_partial_tags {
             if let Some(arity) = builtin_tag_arity(tag) {
@@ -3122,7 +3195,20 @@ fn emit_vector_runtime(
                                                           f32.reinterpret_i32
                                                           f32.ge
                                                         else
-                                                          unreachable
+                                                          local.get $f
+                                                          i32.const 37
+                                                          i32.eq
+                                                          if (result i32)
+                                                            local.get $a
+                                                            local.get $b
+                                                            local.get $a
+                                                            i32.const 12
+                                                            i32.add
+                                                            i32.load
+                                                            call $vec_concat_i32
+                                                          else
+                                                            unreachable
+                                                          end
                                                         end
                                                       end
                                                     end
@@ -3953,6 +4039,14 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         }
         ">=." => {
             return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge"));
+        }
+        "cons" => {
+            let elem_ref = match node.typ.as_ref() {
+                Some(Type::List(inner)) if is_ref_type(inner) => 1,
+                Some(Type::List(_)) => 0,
+                _ => return Err("cons result must be a vector".to_string()),
+            };
+            return Ok(format!("{a}\n{b}\ni32.const {elem_ref}\ncall $vec_concat_i32"));
         }
         "let" | "let*" | "mut" | "while" => {
             return Err(format!("Unsupported return of builtin {}", op));

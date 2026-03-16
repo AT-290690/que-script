@@ -577,6 +577,27 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_cons_builtin_concatenates_vectors_without_std() {
+        let output = run_program_output(r#"(cons [ 1 2 3 ] [ 4 5 6 ])"#);
+        assert_eq!(output, "[1 2 3 4 5 6]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_cons_builtin_preferred_over_std_definition() {
+        let output = run_program_output_with_std_and_opts(r#"(cons [ 1 2 ] [ 3 4 ])"#, true);
+        assert_eq!(output, "[1 2 3 4]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_cons_builtin_works_as_higher_order_function_value() {
+        let output = run_program_output_with_std_and_opts(r#"(reduce cons [] [[1 2] [3] [4 5]])"#, true);
+        assert_eq!(output, "[1 2 3 4 5]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_vector_get_out_of_bounds_traps() {
         let err = run_program_error(
             r#"(do
