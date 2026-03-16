@@ -273,6 +273,22 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     }
     {
         let a: Type = fresh_var();
+        let cons_type = TypeScheme::new(
+            vec![a.var_id().unwrap()],
+            Type::Function(
+                Box::new(Type::List(Box::new(a.clone()))),
+                Box::new(
+                    Type::Function(
+                        Box::new(Type::List(Box::new(a.clone()))),
+                        Box::new(Type::List(Box::new(a)))
+                    )
+                )
+            )
+        );
+        let _ = env.insert("cons".to_string(), cons_type);
+    }
+    {
+        let a: Type = fresh_var();
         let _ = env.insert(
             "car".to_string(),
             TypeScheme::new(

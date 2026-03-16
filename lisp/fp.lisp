@@ -33,7 +33,6 @@
 (let reverse std/vector/reverse)
 
 (let slice (lambda start end xs (std/vector/slice xs start end)))
-(let cons std/vector/cons)
 (let range std/vector/int/range)
 (let range/int std/vector/int/range)
 (let range/float std/vector/float/range)
