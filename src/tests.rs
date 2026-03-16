@@ -112,11 +112,11 @@ Concequent and alternative must match types
             ),
             (
                 "(do (mut x 1) (let f (lambda y x)) (f 0))",
-                "mut variable 'x' cannot be captured by lambda; use integer/floating/boolean cells for closure-shared mutation",
+                "mut variable 'x' cannot be captured by lambda; use &mut cells for closure-shared mutation",
             ),
             (
                 "(do (mut x 1) (let f (lambda y (alter! x y))) (f 0))",
-                "mut variable 'x' cannot be captured by lambda; use integer/floating/boolean cells for closure-shared mutation",
+                "mut variable 'x' cannot be captured by lambda; use &mut cells for closure-shared mutation",
             ),
         ];
 
@@ -755,17 +755,15 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_oversaturated_returned_function_call_matches_explicit_apply() {
-        let src = r#"(do
+        let src =
+            r#"(do
   (let make-adder (lambda x (lambda y (+ x y))))
   [
     (apply (make-adder 2) 3)
     (make-adder 2 3)
   ])"#;
         assert_std_program_output_matches_with_and_without_optimizer(src);
-        let output = run_program_output_with_std_and_opts(
-            src,
-            true
-        );
+        let output = run_program_output_with_std_and_opts(src, true);
         assert_eq!(output, "[5 5]");
     }
 
@@ -773,7 +771,8 @@ Concequent and alternative must match types
     #[ignore = "known remaining issue: returned closures over nested higher-order partials still trap in wasm backend"]
     #[cfg(feature = "runtime")]
     fn test_mapcar_comp_works_with_nested_and_apply_call_forms() {
-        let src = r#"(do
+        let src =
+            r#"(do
   (let mymap (lambda fn xs (if (= (length xs) 0) [] (do
     (let out [])
     (mut i 0)
@@ -1386,10 +1385,7 @@ Concequent and alternative must match types
     fn test_typed_optimization_apply_alias_beta_reduce_skips_managed_args() {
         let typed = infer_typed("(do ((lambda x (+ (get x 0) (get x 1))) (vector 10 20)))");
         let optimized = crate::op::optimize_typed_ast(&typed);
-        assert_eq!(
-            optimized.expr.to_lisp(),
-            "((lambda x (+ (get x 0) (get x 1))) (vector 10 20))"
-        );
+        assert_eq!(optimized.expr.to_lisp(), "((lambda x (+ (get x 0) (get x 1))) (vector 10 20))");
     }
 
     #[test]
