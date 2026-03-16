@@ -74,3 +74,95 @@
 (let &box (lambda value [ value ]))
 (let &alter! (lambda vrbl x (set! vrbl 0 x)))
 (let &get (lambda vrbl (get vrbl 0)))
+
+
+; Mulberry32 implemented in Que with explicit 32-bit unsigned arithmetic.
+; Run:
+;   que scripts/mulberry32.que
+;   que scripts/mulberry32.que 1 5
+;
+; The generator is pure:
+;   const/int/mulberry32/raw  : Int -> { Int * Int }
+;   mulberry32/next : Int -> { Int * Float }
+;
+; The first tuple element is the next seed/state.
+
+(let const/int/byte-off (lambda x shift
+  (& (>> x shift) 255)))
+
+(let const/int/pack-u32 (lambda b0 b1 b2 b3
+  (| b0 (| (<< b1 8) (| (<< b2 16) (<< b3 24))))))
+
+(let const/int/u32/add (lambda a b (do
+  (let s0 (+ (const/int/byte-off a 0) (const/int/byte-off b 0)))
+  (let r0 (& s0 255))
+  (let c0 (>> s0 8))
+
+  (let s1 (+ (const/int/byte-off a 8) (const/int/byte-off b 8) c0))
+  (let r1 (& s1 255))
+  (let c1 (>> s1 8))
+
+  (let s2 (+ (const/int/byte-off a 16) (const/int/byte-off b 16) c1))
+  (let r2 (& s2 255))
+  (let c2 (>> s2 8))
+
+  (let s3 (+ (const/int/byte-off a 24) (const/int/byte-off b 24) c2))
+  (let r3 (& s3 255))
+
+  (const/int/pack-u32 r0 r1 r2 r3))))
+
+(let const/int/u32/urshift (lambda x n
+  (if (= n 0)
+      x
+      (& (>> x n) (- (<< 1 (- 32 n)) 1)))))
+
+(let const/int/u32/mul (lambda a b (do
+  (let a0 (const/int/byte-off a 0))
+  (let a1 (const/int/byte-off a 8))
+  (let a2 (const/int/byte-off a 16))
+  (let a3 (const/int/byte-off a 24))
+  (let b0 (const/int/byte-off b 0))
+  (let b1 (const/int/byte-off b 8))
+  (let b2 (const/int/byte-off b 16))
+  (let b3 (const/int/byte-off b 24))
+
+  (let s0 (* a0 b0))
+  (let r0 (& s0 255))
+  (let c0 (>> s0 8))
+
+  (let s1 (+ (* a0 b1) (* a1 b0) c0))
+  (let r1 (& s1 255))
+  (let c1 (>> s1 8))
+
+  (let s2 (+ (* a0 b2) (* a1 b1) (* a2 b0) c1))
+  (let r2 (& s2 255))
+  (let c2 (>> s2 8))
+
+  (let s3 (+ (* a0 b3) (* a1 b2) (* a2 b1) (* a3 b0) c2))
+  (let r3 (& s3 255))
+
+  (const/int/pack-u32 r0 r1 r2 r3))))
+
+(let const/float/u32 (lambda x
+  (/. (+. (Int->Float (const/int/byte-off x 0))
+          (*. 256.0 (Int->Float (const/int/byte-off x 8)))
+          (*. 65536.0 (Int->Float (const/int/byte-off x 16)))
+          (*. 16777216.0 (Int->Float (const/int/byte-off x 24))))
+      4294967296.0)))
+
+(let const/int/mulberry32/raw (lambda seed (do
+  (let next-seed (const/int/u32/add seed 1831565813))
+  (let z1 (const/int/u32/mul (^ next-seed (const/int/u32/urshift next-seed 15))
+                   (| next-seed 1)))
+  (let z2 (^ z1
+              (const/int/u32/add z1
+                       (const/int/u32/mul (^ z1 (const/int/u32/urshift z1 7))
+                                (| z1 61)))))
+  { next-seed (^ z2 (const/int/u32/urshift z2 14)) })))
+
+(let const/float/mulberry32/next (lambda seed (do
+  (let step (const/int/mulberry32/raw seed))
+  { (fst step) (const/float/u32 (snd step)) })))
+
+(let random/int const/int/mulberry32/raw)
+(let random/float const/float/mulberry32/next)
