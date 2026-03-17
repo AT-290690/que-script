@@ -810,23 +810,28 @@ fn build_direct_fused_loop(
         }
     }
     let suffix = name_state.next_suffix();
-    match sink {
+    let (hoisted_bindings, hoisted_ops, hoisted_sink) = hoist_fusion_callables(
+        ops_outer_to_inner,
+        sink,
+        &suffix
+    );
+    let fused = match hoisted_sink {
         FuseSink::Some { predicate, with_index } =>
-            build_some_every_loop(source, ops_outer_to_inner, predicate, with_index, true, &suffix),
+            build_some_every_loop(source, &hoisted_ops, predicate, with_index, true, &suffix),
         FuseSink::Every { predicate, with_index } =>
             build_some_every_loop(
                 source,
-                ops_outer_to_inner,
+                &hoisted_ops,
                 predicate,
                 with_index,
                 false,
                 &suffix
             ),
-        FuseSink::Collect => build_collect_loop(source, ops_outer_to_inner, &suffix),
+        FuseSink::Collect => build_collect_loop(source, &hoisted_ops, &suffix),
         FuseSink::Reduce { reduce_fn, init_expr, with_index } =>
             build_reduce_loop(
                 source,
-                ops_outer_to_inner,
+                &hoisted_ops,
                 reduce_fn,
                 init_expr,
                 with_index,
@@ -835,17 +840,30 @@ fn build_direct_fused_loop(
         FuseSink::ReduceUntil { reduce_fn, stop_fn, init_expr, with_index } =>
             build_reduce_until_loop(
                 source,
-                ops_outer_to_inner,
+                &hoisted_ops,
                 reduce_fn,
                 stop_fn,
                 init_expr,
                 with_index,
                 &suffix
             ),
-        FuseSink::Average { dec } => build_average_loop(source, ops_outer_to_inner, dec, &suffix),
-        FuseSink::Unzip => build_unzip_loop(source, ops_outer_to_inner, &suffix),
+        FuseSink::Average { dec } => build_average_loop(source, &hoisted_ops, dec, &suffix),
+        FuseSink::Unzip => build_unzip_loop(source, &hoisted_ops, &suffix),
         FuseSink::Find { predicate } =>
-            build_find_loop(source, ops_outer_to_inner, predicate, &suffix),
+            build_find_loop(source, &hoisted_ops, predicate, &suffix),
+    }?;
+    if hoisted_bindings.is_empty() {
+        Some(fused)
+    } else {
+        Some(
+            Expression::Apply(
+                vec![Expression::Word("do".to_string())]
+                    .into_iter()
+                    .chain(hoisted_bindings)
+                    .chain(std::iter::once(fused))
+                    .collect()
+            )
+        )
     }
 }
 
@@ -3032,6 +3050,11 @@ fn call_callable_expr(callable: &Expression, args: Vec<Expression>) -> Option<Ex
             }
             Some(out)
         }
+        Expression::Apply(items) => {
+            let mut out = items.clone();
+            out.extend(args);
+            Some(Expression::Apply(out))
+        }
         _ => None,
     }
 }
@@ -3081,10 +3104,145 @@ fn parse_zip_pair_expr(expr: &Expression) -> Option<(Expression, Expression)> {
 fn is_fusion_safe_callable(expr: &Expression) -> bool {
     match expr {
         Expression::Word(_) => true,
-        Expression::Apply(items) =>
-            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda"),
+        Expression::Apply(_) => true,
         _ => false,
     }
+}
+
+fn fusion_callable_needs_hoist(expr: &Expression) -> bool {
+    matches!(expr, Expression::Apply(items) if !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda"))
+}
+
+fn hoist_fusion_callable_expr(
+    expr: Expression,
+    suffix: &str,
+    counter: &mut usize,
+    hoisted_bindings: &mut Vec<Expression>
+) -> Expression {
+    if !fusion_callable_needs_hoist(&expr) {
+        return expr;
+    }
+    let name = fuse_tmp_name(&format!("__fuse_callable_{}", *counter), suffix);
+    *counter += 1;
+    hoisted_bindings.push(
+        Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(name.clone()),
+                expr
+            ]
+        )
+    );
+    Expression::Word(name)
+}
+
+fn hoist_fusion_callables(
+    ops_outer_to_inner: &[MapFilterOp],
+    sink: FuseSink,
+    suffix: &str
+) -> (Vec<Expression>, Vec<MapFilterOp>, FuseSink) {
+    let mut counter = 0usize;
+    let mut hoisted_bindings = Vec::new();
+    let hoisted_ops = ops_outer_to_inner
+        .iter()
+        .cloned()
+        .map(|op| match op {
+            MapFilterOp::Map { func, with_index } =>
+                MapFilterOp::Map {
+                    func: hoist_fusion_callable_expr(
+                        func,
+                        suffix,
+                        &mut counter,
+                        &mut hoisted_bindings
+                    ),
+                    with_index,
+                },
+            MapFilterOp::FlatMap { func } =>
+                MapFilterOp::FlatMap {
+                    func: hoist_fusion_callable_expr(
+                        func,
+                        suffix,
+                        &mut counter,
+                        &mut hoisted_bindings
+                    ),
+                },
+            MapFilterOp::Flat => MapFilterOp::Flat,
+            MapFilterOp::Filter { predicate, keep_when_true, with_index } =>
+                MapFilterOp::Filter {
+                    predicate: hoist_fusion_callable_expr(
+                        predicate,
+                        suffix,
+                        &mut counter,
+                        &mut hoisted_bindings
+                    ),
+                    keep_when_true,
+                    with_index,
+                },
+        })
+        .collect::<Vec<_>>();
+    let hoisted_sink = match sink {
+        FuseSink::Collect => FuseSink::Collect,
+        FuseSink::Reduce { reduce_fn, init_expr, with_index } =>
+            FuseSink::Reduce {
+                reduce_fn: hoist_fusion_callable_expr(
+                    reduce_fn,
+                    suffix,
+                    &mut counter,
+                    &mut hoisted_bindings
+                ),
+                init_expr,
+                with_index,
+            },
+        FuseSink::ReduceUntil { reduce_fn, stop_fn, init_expr, with_index } =>
+            FuseSink::ReduceUntil {
+                reduce_fn: hoist_fusion_callable_expr(
+                    reduce_fn,
+                    suffix,
+                    &mut counter,
+                    &mut hoisted_bindings
+                ),
+                stop_fn: hoist_fusion_callable_expr(
+                    stop_fn,
+                    suffix,
+                    &mut counter,
+                    &mut hoisted_bindings
+                ),
+                init_expr,
+                with_index,
+            },
+        FuseSink::Average { dec } => FuseSink::Average { dec },
+        FuseSink::Unzip => FuseSink::Unzip,
+        FuseSink::Some { predicate, with_index } =>
+            FuseSink::Some {
+                predicate: hoist_fusion_callable_expr(
+                    predicate,
+                    suffix,
+                    &mut counter,
+                    &mut hoisted_bindings
+                ),
+                with_index,
+            },
+        FuseSink::Every { predicate, with_index } =>
+            FuseSink::Every {
+                predicate: hoist_fusion_callable_expr(
+                    predicate,
+                    suffix,
+                    &mut counter,
+                    &mut hoisted_bindings
+                ),
+                with_index,
+            },
+        FuseSink::Find { predicate } =>
+            FuseSink::Find {
+                predicate: hoist_fusion_callable_expr(
+                    predicate,
+                    suffix,
+                    &mut counter,
+                    &mut hoisted_bindings
+                ),
+            },
+    };
+    (hoisted_bindings, hoisted_ops, hoisted_sink)
 }
 
 #[cfg(test)]
