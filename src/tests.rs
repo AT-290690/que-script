@@ -1581,6 +1581,36 @@ Concequent and alternative must match types
     }
 
     #[test]
+    #[cfg(feature = "runtime")]
+    fn test_typed_optimization_map_partial_application_fuses_by_hoisting_callable_once() {
+        let expr = crate::parser
+            ::parse("(map (add 1) (range 0 10))")
+            .expect("input should parse")
+            .remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(
+            fused_lisp.contains("(let __fuse_callable_0"),
+            "inline partial callable should be hoisted once before fused loop, got: {}",
+            fused_lisp
+        );
+        assert!(
+            fused_lisp.contains("(while (< __fuse_i __fuse_i_end)"),
+            "map partial application should still fuse to a direct loop, got: {}",
+            fused_lisp
+        );
+        assert!(
+            !fused_lisp.contains("(map (add 1)"),
+            "fused expression should not keep original map call, got: {}",
+            fused_lisp
+        );
+
+        assert_std_program_output_matches_with_and_without_optimizer(
+            "(|> (range 0 10) (map (add 1)))"
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_map_filter_filter_map_map_reduce_chain_fuses_to_single_reduce_loop() {
         let expr = crate::parser
             ::parse(

@@ -143,12 +143,12 @@
 
   (const/int/pack-u32 r0 r1 r2 r3))))
 
-(let const/dec/u32 (lambda x
-  (/. (+. (Int->Dec (const/int/byte-off x 0))
-          (*. 256.0 (Int->Dec (const/int/byte-off x 8)))
-          (*. 65536.0 (Int->Dec (const/int/byte-off x 16)))
-          (*. 16777216.0 (Int->Dec (const/int/byte-off x 24))))
-      4294967296.0)))
+(let const/dec/u32 (lambda x (do
+  (mut acc (Int->Dec (const/int/byte-off x 0)))
+  (alter! acc (+. (/. acc 256.0) (Int->Dec (const/int/byte-off x 8))))
+  (alter! acc (+. (/. acc 256.0) (Int->Dec (const/int/byte-off x 16))))
+  (alter! acc (+. (/. acc 256.0) (Int->Dec (const/int/byte-off x 24))))
+  (/. acc 256.0))))
 
 (let const/int/mulberry32/raw (lambda seed (do
   (let next-seed (const/int/u32/add seed 1831565813))
