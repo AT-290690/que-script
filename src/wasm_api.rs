@@ -513,7 +513,7 @@ fn extract_user_top_level_typed_forms<'a>(
 fn type_specificity_score(typ: &Type) -> i32 {
     match typ {
         Type::Var(_) => 0,
-        Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => 1,
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => 1,
         Type::List(inner) => 2 + type_specificity_score(inner),
         Type::Tuple(items) => 2 + items.iter().map(type_specificity_score).sum::<i32>(),
         Type::Function(a, b) => 3 + type_specificity_score(a) + type_specificity_score(b),

@@ -35,8 +35,8 @@
 (let sq std/char/single-quote)
 (let bt std/char/backtick)
 
-(let std/float/floor (lambda n (-. n (mod. n 1.0))))
-(let std/float/ceil (lambda n (do 
+(let std/dec/floor (lambda n (-. n (mod. n 1.0))))
+(let std/dec/ceil (lambda n (do 
     (let sign (if (>=. n 0.0) 1 -1))
     (let absn (if (>=. n 0.0) n (-. n)))
     (let frac (mod. absn 1.0))
@@ -104,11 +104,11 @@
 (let std/char/upper (lambda ch (if (and (>=# ch 'a') (<=# ch 'z')) (-# ch std/char/space) ch)))
 (let std/char/lower (lambda ch (if (and (>=# ch 'A') (<=# ch 'Z')) (+# ch std/char/space) ch)))
 
-(let std/float/safe? (lambda value (and (>=. value const/float/min-safe) (<=. value const/float/max-safe))))
-(let std/float/get-safe (lambda vrbl (if (std/float/safe? (get vrbl)) (get vrbl) Float)))
+(let std/dec/safe? (lambda value (and (>=. value const/dec/min-safe) (<=. value const/dec/max-safe))))
+(let std/dec/get-safe (lambda vrbl (if (std/dec/safe? (get vrbl)) (get vrbl) Dec)))
 
 (let int (lambda value (if (std/int/safe? value) [ value ] [ 0 ])))
-(let float (lambda value (if (std/float/safe? value) [ value ] [ 0.0 ])))
+(let dec (lambda value (if (std/dec/safe? value) [ value ] [ 0.0 ])))
 (let bool (lambda value [(=? value true)]))
 
 (let std/int/safe? (lambda value (and (>= value const/int/min-safe) (<= value const/int/max-safe))))
@@ -328,17 +328,17 @@ out)))
      out))) 
 
 
-(let std/vector/float/range (lambda start end (do
-     (let out [ (Int->Float start) ])
-     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) (Int->Float i))))
+(let std/vector/dec/range (lambda start end (do
+     (let out [ (Int->Dec start) ])
+     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) (Int->Dec i))))
      out))) 
     
- (let std/vector/float/ones (lambda n (do
+ (let std/vector/dec/ones (lambda n (do
      (let out [ 1.0 ])
      (loop 1 n (lambda i (set! out (length out) 1.0)))
      out))) 
 
- (let std/vector/float/zeroes (lambda n (do
+ (let std/vector/dec/zeroes (lambda n (do
      (let out [ 0.0 ])
      (loop 1 n (lambda i (set! out (length out) 0.0)))
      out)))
@@ -369,7 +369,7 @@ out)))
     matrix)))
 
 (let std/vector/2d/int/range std/vector/int/range)
-(let std/vector/2d/float/range std/vector/float/range)
+(let std/vector/2d/dec/range std/vector/dec/range)
 
 (let std/vector/char/blanks (lambda n (do
     (let out [ std/char/empty ])
@@ -377,18 +377,18 @@ out)))
     out))) 
 
 (let std/vector/int/all-equal? (lambda xs (do (let x (get xs 0)) (std/vector/every? xs (lambda y (= y x))))))
-(let std/vector/float/all-equal? (lambda xs (do (let x (get xs 0)) (std/vector/every? xs (lambda y (=. y x))))))
+(let std/vector/dec/all-equal? (lambda xs (do (let x (get xs 0)) (std/vector/every? xs (lambda y (=. y x))))))
 (let std/vector/char/all-equal? (lambda xs (do (let x (get xs 0)) (std/vector/every? xs (lambda y (=# y x))))))
 (let std/vector/bool/all-equal? (lambda xs (do (let x (get xs 0)) (std/vector/every? xs (lambda y (=? y x))))))
 
 (let all-equal/int? std/vector/int/all-equal?)
-(let all-equal/float? std/vector/float/all-equal?)
+(let all-equal/dec? std/vector/dec/all-equal?)
 (let all-equal/char? std/vector/char/all-equal?)
 (let all-equal/bool? std/vector/bool/all-equal?)
 
 (let std/vector/count-of (lambda xs fn? (length (std/vector/filter xs fn?))))
 (let std/vector/int/count (lambda xs item (std/vector/count-of xs (lambda x (= x item)))))
-(let std/vector/float/count (lambda xs item (std/vector/count-of xs (lambda x (=. x item)))))
+(let std/vector/dec/count (lambda xs item (std/vector/count-of xs (lambda x (=. x item)))))
 (let std/vector/char/count (lambda xs item (std/vector/count-of xs (lambda x (=# x item)))))
 (let std/vector/bool/count (lambda xs item (std/vector/count-of xs (lambda x (=? x item)))))
 
@@ -483,7 +483,7 @@ out)))
   ; so adding 1 and dividing it by
   (>> (+ N4 1) 1))))
 (let std/int/abs (lambda n (- (^ n (>> n 31)) (>> n 31))))
-(let std/float/abs (lambda n (if (<. n 0.0) (*. n -1.0) n)))
+(let std/dec/abs (lambda n (if (<. n 0.0) (*. n -1.0) n)))
 
 (let std/int/positive? (lambda x (> x 0)))
 (let std/int/negative? (lambda x (< x 0)))
@@ -495,25 +495,25 @@ out)))
 (let std/int/floor/div (lambda a b (/ a b)))
 (let std/int/ceil/div (lambda a b (/ (+ a b -1) b)))
 
-(let std/float/positive? (lambda x (>. x 0.)))
-(let std/float/negative? (lambda x (<. x 0.)))
-(let std/float/invert (lambda x (-. x)))
-(let std/float/zero? (lambda x (=. x 0.)))
-(let std/float/one? (lambda x (=. x 1.)))
-(let std/float/negative-one? (lambda x (=. x -1.)))
-(let std/float/divisible? (lambda a b (=. (mod. a b) 0.)))
+(let std/dec/positive? (lambda x (>. x 0.)))
+(let std/dec/negative? (lambda x (<. x 0.)))
+(let std/dec/invert (lambda x (-. x)))
+(let std/dec/zero? (lambda x (=. x 0.)))
+(let std/dec/one? (lambda x (=. x 1.)))
+(let std/dec/negative-one? (lambda x (=. x -1.)))
+(let std/dec/divisible? (lambda a b (=. (mod. a b) 0.)))
 
 
 (let std/int/square (lambda x (* x x)))
 (let std/int/even? (lambda x (= (mod x 2) 0)))
 (let std/int/odd? (lambda x (not (= (mod x 2) 0))))
-(let std/float/even? (lambda x (=. (mod. x 2.) 0.)))
-(let std/float/odd? (lambda x (not (=. (mod. x 2.) 0.))))
+(let std/dec/even? (lambda x (=. (mod. x 2.) 0.)))
+(let std/dec/odd? (lambda x (not (=. (mod. x 2.) 0.))))
 (let std/vector/int/sum (lambda xs (std/vector/reduce xs (lambda a b (+ a b)) 0)))
-(let std/vector/float/sum (lambda xs (std/vector/reduce xs (lambda a b (+. a b)) 0.0)))
+(let std/vector/dec/sum (lambda xs (std/vector/reduce xs (lambda a b (+. a b)) 0.0)))
 
 (let std/vector/int/product (lambda xs (std/vector/reduce xs (lambda a b (* a b)) 1)))
-(let std/vector/float/product (lambda xs (std/vector/reduce xs (lambda a b (*. a b)) 1.0)))
+(let std/vector/dec/product (lambda xs (std/vector/reduce xs (lambda a b (*. a b)) 1.0)))
 (let std/int/mul (lambda a b (* a b)))
 (let std/int/add (lambda a b (+ a b)))
 (let std/int/div (lambda a b (/ a b)))
@@ -527,29 +527,29 @@ out)))
 (let std/int/chebyshev-distance (lambda x1 y1 x2 y2 (std/int/max (std/int/abs (- x2 x1)) (std/int/abs (- y2 y1)))))
 (let std/int/max (lambda a b (if (> a b) a b)))
 (let std/int/min (lambda a b (if (< a b) a b)))
-(let std/float/max (lambda a b (if (>. a b) a b)))
-(let std/float/min (lambda a b (if (<. a b) a b)))
+(let std/dec/max (lambda a b (if (>. a b) a b)))
+(let std/dec/min (lambda a b (if (<. a b) a b)))
 (let std/vector/int/maximum (lambda xs (cond (std/vector/empty? xs) Int (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/max (get xs 0)))))
 (let std/vector/int/minimum (lambda xs (cond (std/vector/empty? xs) Int (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/int/min (get xs 0)))))
-(let std/vector/float/maximum (lambda xs (cond (std/vector/empty? xs) Float (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/float/max (get xs 0)))))
-(let std/vector/float/minimum (lambda xs (cond (std/vector/empty? xs) Float (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/float/min (get xs 0)))))
-(let std/float/average (lambda x y (/. (+. x y) 2.0)))
+(let std/vector/dec/maximum (lambda xs (cond (std/vector/empty? xs) Dec (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/dec/max (get xs 0)))))
+(let std/vector/dec/minimum (lambda xs (cond (std/vector/empty? xs) Dec (= (length xs) 1) (get xs 0) (std/vector/reduce xs std/dec/min (get xs 0)))))
+(let std/dec/average (lambda x y (/. (+. x y) 2.0)))
 (let std/int/average (lambda x y (/ (+ x y) 2)))
 (let std/vector/int/mean (lambda xs (/ (std/vector/int/sum xs) (length xs))))
-(let std/vector/float/mean (lambda xs (/. (std/vector/float/sum xs) (Int->Float (length xs)))))
+(let std/vector/dec/mean (lambda xs (/. (std/vector/dec/sum xs) (Int->Dec (length xs)))))
 (let std/vector/int/median (lambda xs (do
     (let len (length xs))
     (let half (/ len 2))
     (if (std/int/odd? len)
         (get xs half)
         (/ (+ (get xs (- half 1)) (get xs half)) 2)))))
-(let std/vector/float/median (lambda xs (do
-  (let len (Int->Float (length xs)))
+(let std/vector/dec/median (lambda xs (do
+  (let len (Int->Dec (length xs)))
   (let half (/. len 2.))
-  (let mid (Float->Int half))
-  (if (std/float/odd? len)
+  (let mid (Dec->Int half))
+  (if (std/dec/odd? len)
       (get xs mid)
-      (/. (+. (get xs (Float->Int (-. half 1.))) (get xs mid)) 2.)))))
+      (/. (+. (get xs (Dec->Int (-. half 1.))) (get xs mid)) 2.)))))
 (let std/int/normalize (lambda value min max (* (- value min) (/ (- max min)))))
 (let std/int/linear-interpolation (lambda a b n (+ (* (- 1 n) a) (* n b))))
 (let std/int/gauss-sum (lambda n (/ (* n (+ n 1)) 2)))
@@ -559,10 +559,10 @@ out)))
 (let std/int/between? (lambda v min max (and (> v min) (< v max))))
 (let std/int/overlap? (lambda v min max (and (>= v min) (<= v max))))
 
-(let std/float/clamp (lambda x limit (if (>. x limit) limit x)))
-(let std/float/clamp-range (lambda x start end (cond (>. x end) end (<. x start) start x)))
-(let std/float/between? (lambda v min max (and (>. v min) (<. v max))))
-(let std/float/overlap? (lambda v min max (and (>=. v min) (<=. v max))))
+(let std/dec/clamp (lambda x limit (if (>. x limit) limit x)))
+(let std/dec/clamp-range (lambda x start end (cond (>. x end) end (<. x start) start x)))
+(let std/dec/between? (lambda v min max (and (>. v min) (<. v max))))
+(let std/dec/overlap? (lambda v min max (and (>=. v min) (<=. v max))))
 
 (let std/int/sqrt (lambda n
   (do
@@ -597,12 +597,12 @@ out)))
 ; a helper for infix ^ power
 ; has to be data first
 (let iexpt std/int/expt)
-(let std/float/sqrt (lambda n
+(let std/dec/sqrt (lambda n
   (do
-    (floating low 0.)
-    (floating high n)
-    (floating mid 0.)
-    (floating i 0.)
+    (fixed low 0.)
+    (fixed high n)
+    (fixed mid 0.)
+    (fixed i 0.)
     ; Loop 100 times for high precision
     (while (<. (get i) 100.)
       (do
@@ -613,11 +613,11 @@ out)))
         (set i (+. (get i) 1.))))
     (get low))))
 
-(let std/float/expt (lambda base exp
+(let std/dec/expt (lambda base exp
   (do
-    (floating res 1.)
-    (floating b base)
-    (floating e exp)
+    (fixed res 1.)
+    (fixed b base)
+    (fixed e exp)
     
     ; 1. Handle the integer part of the exponent
     (while (>=. (get e) 1.)
@@ -631,25 +631,25 @@ out)))
     ; Refresh 'b' to original base and 'e' to the remaining fraction
     (set b base)
     (set e (-. exp (floor exp)))
-    (floating root (std/float/sqrt (get b)))
-    (floating frac 0.5)
+    (fixed root (std/dec/sqrt (get b)))
+    (fixed frac 0.5)
     
     ; Loop 22. times for precision (handles bits of the fraction)
-    (floating i 0.)
+    (fixed i 0.)
     (while (<. (get i) 22.)
       (do
         (if (>=. (get e) (get frac))
             (do 
               (set res (*. (get res) (get root)))
               (set e (-. (get e) (get frac)))))
-        (set root (std/float/sqrt (get root)))
+        (set root (std/dec/sqrt (get root)))
         (set frac (/. (get frac) 2.))
         (set i (+. (get i) 1.))))
     (get res))))
 
 
 (let std/int/delta (lambda a b (std/int/abs (- a b))))
-(let std/float/delta (lambda a b (std/float/abs (-. a b))))
+(let std/dec/delta (lambda a b (std/dec/abs (-. a b))))
 
 (let std/vector/map/adjacent (lambda xs fn (if (std/vector/empty? xs) [] (do 
   (do 
@@ -922,20 +922,20 @@ out)))
 (let std/convert/positive-or-negative-chars->integer (lambda x (<| x (std/convert/chars->positive-or-negative-digits) (std/convert/positive-or-negative-digits->integer))))
 (let std/convert/chars->integer std/convert/positive-or-negative-chars->integer)
 
-(let std/convert/chars->digits/float (lambda xs
+(let std/convert/chars->digits/dec (lambda xs
     (<| xs 
         (std/vector/reduce (lambda a ch (do 
               (if (=# ch '.') (push! a []) (push! (std/vector/at a -1) (std/convert/char->digit ch)))
                 a)) [[]]))))
 
 (let std/convert/chars->ufloat (lambda xs (do
-  (let parts (std/convert/chars->digits/float xs))
+  (let parts (std/convert/chars->digits/dec xs))
   (let pow (std/int/expt 10 (length (get parts 1))))
-  (/. (Int->Float (+ 
+  (/. (Int->Dec (+ 
     (* (std/convert/digits->integer (get parts 0)) pow)
-    (std/convert/digits->integer (get parts 1)))) (Int->Float pow)))))
+    (std/convert/digits->integer (get parts 1)))) (Int->Dec pow)))))
 
-(let std/convert/chars->float (lambda xs 
+(let std/convert/chars->dec (lambda xs 
   (if (=# (get xs 0) std/char/minus) (*. (std/convert/chars->ufloat (std/vector/slice xs 1 (length xs))) -1.0) (std/convert/chars->ufloat xs))))
 
 (let std/convert/int->char/alphabet
@@ -1077,15 +1077,15 @@ heap)))
 (let std/convert/integer->string (lambda x (std/convert/integer->string-base x 10)))
 (let std/convert/vector->set (lambda xs (std/vector/reduce xs (lambda s x (do (std/vector/hash/set/add! s x) s)) [ [] [] [] [] [] [] [] ])))
 
-(let std/integer/decimal-scaling 1000000)
-(let std/float/decimal-scaling 1000000.0)
+(let std/integer/dec-scaling 1000000)
+(let std/dec/dec-scaling 1000000.0)
 
-(let std/convert/float->string (lambda x (if (=. (std/float/floor x) x) (cons (std/convert/integer->string (Float->Int x)) ".0") (do 
+(let std/convert/dec->string (lambda x (if (=. (std/dec/floor x) x) (cons (std/convert/integer->string (Dec->Int x)) ".0") (do 
     (let flip (if (<. x 0.0) -1.0 1.0))
-    (let exponent (std/float/floor x))
+    (let exponent (std/dec/floor x))
     (let mantisa (-. x exponent))
-    (let left (std/convert/integer->string (Float->Int exponent)))
-    (let right (std/convert/integer->string (Float->Int (*. mantisa std/float/decimal-scaling flip))))
+    (let left (std/convert/integer->string (Dec->Int exponent)))
+    (let right (std/convert/integer->string (Dec->Int (*. mantisa std/dec/dec-scaling flip))))
     (let len (length right))
     (let* tail-call/while (lambda i 
         (if (=# (get right (- len i)) '0') (do 
@@ -1351,7 +1351,7 @@ q)))
         (alter! i (+ i 1))))
       (if result true false)))))))
 
-(let std/vector/float/equal? (lambda a b (do
+(let std/vector/dec/equal? (lambda a b (do
   (if (< (length a) (length b)) false
   (if (> (length a) (length b)) false
     (do
@@ -1795,7 +1795,7 @@ q)))
         (fact (- n 1) (* total n)))))
   (fact n 1))))
 
-(let std/float/factorial (lambda n (do 
+(let std/dec/factorial (lambda n (do 
   (let* fact (lambda n total
     (if (=. n 0.)
         total
@@ -1849,10 +1849,10 @@ q)))
 (let std/int/mod/option (lambda a b (if (= b 0) { false 0 } { true (mod a b) })))
 (let std/int/sqrt/option (lambda n (if (< n 0) { false 0 } { true (std/int/sqrt n)})) )
 
-(let std/float/div/option (lambda a b (if (=. b 0.) { false 0. } { true (/. a b) })))
-(let std/float/expt/option (lambda a b (if (<. a 0.) { false 0. } { true (std/float/expt a b) })))
-(let std/float/mod/option (lambda a b (if (=. b 0.) { false 0. } { true (mod. a b) })))
-(let std/float/sqrt/option (lambda n (if (<. n 0.) { false 0. } { true (std/float/sqrt n)})) )
+(let std/dec/div/option (lambda a b (if (=. b 0.) { false 0. } { true (/. a b) })))
+(let std/dec/expt/option (lambda a b (if (<. a 0.) { false 0. } { true (std/dec/expt a b) })))
+(let std/dec/mod/option (lambda a b (if (=. b 0.) { false 0. } { true (mod. a b) })))
+(let std/dec/sqrt/option (lambda n (if (<. n 0.) { false 0. } { true (std/dec/sqrt n)})) )
 
 (let std/true/option (lambda x { true x }))
 (let std/false/option (lambda x { false x }))

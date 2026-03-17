@@ -13,19 +13,19 @@
 (let Tuple/bool/eq? (lambda { a b } (=? a b)))
 (let Tuple/int/eq? (lambda { a b } (= a b)))
 (let Tuple/char/eq? (lambda { a b } (=# a b)))
-(let Tuple/float/eq? (lambda { a b } (=. a b)))
+(let Tuple/dec/eq? (lambda { a b } (=. a b)))
 
 (let Tuple/bool/not-eq? (lambda { a b } (not (=? a b))))
 (let Tuple/int/not-eq? (lambda { a b } (not (= a b))))
 (let Tuple/char/not-eq? (lambda { a b } (not (=# a b))))
-(let Tuple/float/not-eq? (lambda { a b } (not (=. a b))))
+(let Tuple/dec/not-eq? (lambda { a b } (not (=. a b))))
 
 (let Int->Alphabet std/convert/int->char/alphabet)
 
 (let Integer->Chars std/convert/integer->string)
 (let Integer->String std/convert/integer->string)
-(let Float->Chars std/convert/float->string)
-(let Float->String std/convert/float->string)
+(let Dec->Chars std/convert/dec->string)
+(let Dec->String std/convert/dec->string)
 
 (let String->Vector (lambda ch xs (std/convert/string->vector xs ch)))
 (let Vector->String (lambda ch xs (std/convert/vector->string xs ch)))
@@ -33,8 +33,8 @@
 (let Digits->Integer std/convert/digits->integer)
 (let Chars->Integer std/convert/chars->integer)
 (let String->Integer std/convert/chars->integer)
-(let String->Float std/convert/chars->float)
-(let Chars->Float std/convert/chars->float)
+(let String->Dec std/convert/chars->dec)
+(let Chars->Dec std/convert/chars->dec)
 (let Integer->Bits std/convert/integer->bits)
 
 (let Char->Digit std/convert/char->digit)
@@ -115,7 +115,7 @@
 (let Char/eq? (lambda a b (=# a b)))
 (let Int/eq? (lambda a b (= a b)))
 (let Bool/eq? (lambda a b (=? a b)))
-(let Float/eq? (lambda a b (=. a b)))
+(let Dec/eq? (lambda a b (=. a b)))
 
 ; data-last aliases mirroring Table/*
 (let Table/size std/vector/flat/length)

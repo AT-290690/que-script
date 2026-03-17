@@ -17,8 +17,56 @@ fn i32_at<T>(memory: &Memory, store: &Store<T>, addr: i32) -> Result<i32, String
     Ok(i32::from_le_bytes(bytes))
 }
 
-fn i32_to_f32(bits: i32) -> f32 {
-    f32::from_bits(bits as u32)
+fn decimal_scale_i64() -> i64 {
+    match
+        std::env
+            ::var("QUE_DECIMAL_SCALE")
+            .ok()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+    {
+        Some(scale) if scale > 0 && is_power_of_ten_i64(scale) && scale <= 1_000_000 => scale,
+        _ => 1_000,
+    }
+}
+
+fn decimal_scale_digits(scale: i64) -> usize {
+    let mut digits = 0usize;
+    let mut cur = scale;
+    while cur > 1 {
+        cur /= 10;
+        digits += 1;
+    }
+    digits
+}
+
+fn is_power_of_ten_i64(n: i64) -> bool {
+    if n < 1 {
+        return false;
+    }
+    let mut cur = n;
+    while cur % 10 == 0 {
+        cur /= 10;
+    }
+    cur == 1
+}
+
+fn i32_to_decimal_string(raw: i32) -> String {
+    let scale = decimal_scale_i64();
+    let digits = decimal_scale_digits(scale);
+    let raw64 = i64::from(raw);
+    let neg = raw64 < 0;
+    let abs = raw64.abs();
+    let whole = abs / scale;
+    let frac = abs % scale;
+    let sign = if neg { "-" } else { "" };
+    if frac == 0 {
+        return format!("{sign}{whole}");
+    }
+    let mut frac_str = format!("{:0width$}", frac, width = digits);
+    while frac_str.ends_with('0') {
+        frac_str.pop();
+    }
+    format!("{sign}{whole}.{frac_str}")
 }
 
 struct VecHeader {
@@ -131,8 +179,8 @@ pub fn decode_value<T>(
     if t == "Bool" {
         return Ok((ptr == 1).to_string());
     }
-    if t == "Float" {
-        return Ok(i32_to_f32(ptr).to_string());
+    if t == "Dec" {
+        return Ok(i32_to_decimal_string(ptr));
     }
     if t == "Char" {
         let ch = char::from_u32(ptr as u32).unwrap_or('?');
@@ -297,11 +345,11 @@ fn debug_guard_trap_message<T>(
     }
     let msg = match code {
         1 => "debug.guard_trap: integer divide/modulo by zero (QUE_DIV_ZERO_CHECK)",
-        2 => "debug.guard_trap: float divide by zero (QUE_DIV_ZERO_CHECK)",
+        2 => "debug.guard_trap: dec divide by zero (QUE_DIV_ZERO_CHECK)",
         3 => "debug.guard_trap: integer overflow on add/inc (QUE_INT_OVERFLOW_CHECK)",
         4 => "debug.guard_trap: integer overflow on sub/dec (QUE_INT_OVERFLOW_CHECK)",
         5 => "debug.guard_trap: integer overflow on mul/square (QUE_INT_OVERFLOW_CHECK)",
-        6 => "debug.guard_trap: float overflow or NaN/Inf (QUE_FLOAT_OVERFLOW_CHECK)",
+        6 => "debug.guard_trap: dec overflow or NaN/Inf (QUE_FLOAT_OVERFLOW_CHECK)",
         _ => "debug.guard_trap: unknown guard trap",
     };
     Some(msg.to_string())

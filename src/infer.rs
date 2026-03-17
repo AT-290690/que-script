@@ -180,8 +180,8 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             "cdr" |
             "fst" |
             "snd" |
-            "Int->Float" |
-            "Float->Int" |
+            "Int->Dec" |
+            "Dec->Int" |
             "as" |
             "char" |
             "vector" |
@@ -215,7 +215,7 @@ fn estimate_effect_immutable(
     local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>
 ) -> EffectFlags {
     match &node.expr {
-        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => EffectFlags::PURE,
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => EffectFlags::PURE,
         Expression::Apply(items) => {
             if items.is_empty() {
                 return EffectFlags::PURE;
@@ -338,7 +338,7 @@ fn annotate_effects_mut(
     local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>
 ) -> EffectFlags {
     let effect = match &node.expr {
-        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => EffectFlags::PURE,
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => EffectFlags::PURE,
         Expression::Apply(items) => {
             if items.is_empty() {
                 EffectFlags::PURE
@@ -612,7 +612,7 @@ fn collect_target_param_usage(
     first_non_first_param: &mut Option<usize>
 ) {
     match expr {
-        Expression::Int(_) | Expression::Float(_) => {}
+        Expression::Int(_) | Expression::Dec(_) => {}
         Expression::Word(name) => {
             if let Some(MutationBinding::Param(idx)) = resolve_mutation_binding(scopes, name) {
                 if idx == 0 {
@@ -669,7 +669,7 @@ fn expr_mutates_non_first_param(
     scopes: &mut Vec<HashMap<String, MutationBinding>>
 ) -> Option<usize> {
     match expr {
-        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => None,
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => None,
         Expression::Apply(items) => {
             if items.is_empty() {
                 return None;
@@ -936,7 +936,7 @@ fn expr_requires_bang(
     scopes: &mut Vec<HashMap<String, bool>>
 ) -> bool {
     match expr {
-        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => false,
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => false,
         Expression::Apply(items) => {
             if items.is_empty() {
                 return false;
@@ -1017,7 +1017,7 @@ fn expr_requires_bang(
 
 fn expr_uses_param_or_free_var(expr: &Expression, scopes: &[HashMap<String, bool>]) -> bool {
     match expr {
-        Expression::Int(_) | Expression::Float(_) => false,
+        Expression::Int(_) | Expression::Dec(_) => false,
         Expression::Word(name) => {
             if let Some(is_param) = resolve_binding_kind(scopes, name) { is_param } else { true }
         }
@@ -1224,7 +1224,7 @@ fn mut_capture_error(name: &str) -> String {
 fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     let inferred = match expr {
         Expression::Int(_) => Ok(Type::Int),
-        Expression::Float(_) => Ok(Type::Float),
+        Expression::Dec(_) => Ok(Type::Dec),
 
         Expression::Word(name) => {
             if ctx.is_mut_capture_in_lambda(name) {
@@ -1279,7 +1279,7 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
         Expression::Word(name) =>
             match name.as_str() {
                 "Int" => Ok(Type::Int),
-                "Float" => Ok(Type::Float),
+                "Dec" => Ok(Type::Dec),
                 "Bool" => Ok(Type::Bool),
                 "Char" => Ok(Type::Char),
                 _ => Ok(ctx.fresh_var()), // unknown type name
@@ -1430,7 +1430,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
 
         match (inner_expr, inner_hint) {
             | (Type::Int, Type::Int)
-            | (Type::Float, Type::Float)
+            | (Type::Dec, Type::Dec)
             | (Type::Int, Type::Bool)
             | (Type::Int, Type::Char)
             | (Type::Bool, Type::Int)
@@ -1610,7 +1610,7 @@ fn infer_while(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
 
 fn is_nonexpansive(expr: &Expression) -> bool {
     match expr {
-        Expression::Word(_) | Expression::Int(_) | Expression::Float(_) => true,
+        Expression::Word(_) | Expression::Int(_) | Expression::Dec(_) => true,
 
         Expression::Apply(list) if !list.is_empty() =>
             match &list[0] {

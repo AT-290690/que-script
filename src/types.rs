@@ -23,7 +23,7 @@ impl fmt::Display for TypeVar {
 pub enum Type {
     Var(TypeVar),
     Int,
-    Float,
+    Dec,
     Bool,
     Char,
     Function(Box<Type>, Box<Type>),
@@ -38,7 +38,7 @@ impl fmt::Display for Type {
             Type::Unit => write!(f, "()"),
             Type::Var(v) => write!(f, "{}", v),
             Type::Int => write!(f, "Int"),
-            Type::Float => write!(f, "Float"),
+            Type::Dec => write!(f, "Dec"),
             Type::Bool => write!(f, "Bool"),
             Type::Char => write!(f, "Char"),
             Type::Function(from, to) =>
@@ -159,7 +159,7 @@ impl Type {
     }
     pub fn substitute(&self, subst: &HashMap<u64, Type>) -> Type {
         match self {
-            Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => self.clone(),
+            Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => self.clone(),
             Type::Var(v) => {
                 if let Some(ty) = subst.get(&v.id) { ty.clone() } else { self.clone() }
             }
@@ -184,7 +184,7 @@ impl Type {
 
     fn collect_free_vars(&self, vars: &mut std::collections::HashSet<u64>) {
         match self {
-            Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => {}
+            Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => {}
             Type::Var(v) => {
                 vars.insert(v.id);
             }
@@ -369,8 +369,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         "+.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
             )
         )
     );
@@ -398,8 +398,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         "-.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
             )
         )
     );
@@ -428,8 +428,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         "*.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
             )
         )
     );
@@ -458,8 +458,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         "/.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
             )
         )
     );
@@ -495,8 +495,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         "mod.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Float)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
             )
         )
     );
@@ -516,8 +516,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         "=.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
             )
         )
     );
@@ -526,8 +526,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         ">.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
             )
         )
     );
@@ -536,8 +536,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         "<.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
             )
         )
     );
@@ -546,8 +546,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         ">=.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
             )
         )
     );
@@ -556,8 +556,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         "<=.".to_string(),
         TypeScheme::monotype(
             Type::Function(
-                Box::new(Type::Float),
-                Box::new(Type::Function(Box::new(Type::Float), Box::new(Type::Bool)))
+                Box::new(Type::Dec),
+                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
             )
         )
     );
@@ -823,13 +823,13 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     );
 
     let _ = env.insert(
-        "Int->Float".to_string(),
-        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Float)))
+        "Int->Dec".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Dec)))
     );
 
     let _ = env.insert(
-        "Float->Int".to_string(),
-        TypeScheme::monotype(Type::Function(Box::new(Type::Float), Box::new(Type::Int)))
+        "Dec->Int".to_string(),
+        TypeScheme::monotype(Type::Function(Box::new(Type::Dec), Box::new(Type::Int)))
     );
 
     let _ = env.insert(

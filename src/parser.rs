@@ -15,10 +15,10 @@ fn is_reserved_word(name: &str) -> bool {
             "reduce/until/i" |
             "sum" |
             "sum/int" |
-            "sum/float" |
+            "sum/dec" |
             "product" |
             "product/int" |
-            "product/float" |
+            "product/dec" |
             "some?" |
             "some/i?" |
             "every?" |
@@ -32,10 +32,10 @@ fn is_reserved_word(name: &str) -> bool {
             "char" |
             "mean" |
             "mean/int" |
-            "mean/float" |
+            "mean/dec" |
             "range" |
             "range/int" |
-            "range/float" |
+            "range/dec" |
             "slice" |
             "take/first" |
             "drop/first" |
@@ -601,8 +601,8 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
             let n: i32 = tok.parse().map_err(|e| format!("Bad integer '{}': {}", tok, e))?;
             Ok(Expression::Int(n))
         } else if is_float(tok) {
-            let n: f32 = tok.parse().map_err(|e| format!("Bad float '{}': {}", tok, e))?;
-            Ok(Expression::Float(n))
+            let n: f32 = tok.parse().map_err(|e| format!("Bad dec '{}': {}", tok, e))?;
+            Ok(Expression::Dec(n))
         } else {
             Ok(Expression::Word(tok.clone()))
         }
@@ -747,7 +747,7 @@ fn desugar_with_counter(
                     "set!" => Ok(setter_transform(exprs)?),
                     "&mut" | "variable" => Ok(variable_transform(exprs)),
                     "integer" => Ok(integer_transform(exprs)),
-                    "floating" => Ok(float_transform(exprs)),
+                    "fixed" => Ok(float_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
                     "loop" => Ok(loop_transform(exprs, binding_counter)?),
                     "while" => Ok(loop_while_transform(exprs)?),
@@ -1571,7 +1571,7 @@ fn float_transform(mut exprs: Vec<Expression>) -> Expression {
         vec![
             Expression::Word("let".to_string()),
             exprs[0].clone(),
-            Expression::Apply(vec![Expression::Word("float".to_string()), exprs[1].clone()])
+            Expression::Apply(vec![Expression::Word("dec".to_string()), exprs[1].clone()])
         ]
     )
 }
@@ -1665,7 +1665,7 @@ fn minusf_transform(mut exprs: Vec<Expression>) -> Expression {
         0 => Expression::Int(0),
         1 =>
             Expression::Apply(
-                vec![Expression::Word("*.".to_string()), exprs.remove(0), Expression::Float(-1.0)]
+                vec![Expression::Word("*.".to_string()), exprs.remove(0), Expression::Dec(-1.0)]
             ),
         _ => {
             let first = exprs.remove(0);
@@ -1697,7 +1697,7 @@ fn plusf_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Float(1.0),
+        0 => Expression::Dec(1.0),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -1937,7 +1937,7 @@ fn multf_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Float(1.0),
+        0 => Expression::Dec(1.0),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -1967,7 +1967,7 @@ fn divf_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Float(1.0),
+        0 => Expression::Dec(1.0),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2205,7 +2205,7 @@ macro_rules! s {
 #[derive(Debug, Clone)]
 pub enum Expression {
     Int(i32),
-    Float(f32),
+    Dec(f32),
     Word(String),
     Apply(Vec<Expression>),
 }
@@ -2214,7 +2214,7 @@ impl Expression {
     // pub fn to_rust(&self) -> String {
     //     match self {
     //         Expression::Int(n) => format!("Int({})", n),
-    //         Expression::Float(n) => format!("Float({:?})", n),
+    //         Expression::Dec(n) => format!("Dec({:?})", n),
     //         Expression::Word(w) => format!("Word(s!({:?}))", w),
     //         Expression::Apply(exprs) => {
     //             let inner: Vec<String> = exprs.iter().map(|e| e.to_rust()).collect();
@@ -2226,7 +2226,7 @@ impl Expression {
         match self {
             Expression::Word(w) => w.clone(),
             Expression::Int(a) => a.to_string(),
-            Expression::Float(a) => format!("{:?}", a),
+            Expression::Dec(a) => format!("{:?}", a),
             Expression::Apply(items) => {
                 if items.is_empty() {
                     return "()".to_string();

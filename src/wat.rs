@@ -70,7 +70,32 @@ const DBG_GUARD_TRAP_FLOAT_DIV_ZERO: i32 = 2;
 const DBG_GUARD_TRAP_INT_OVERFLOW_ADD: i32 = 3;
 const DBG_GUARD_TRAP_INT_OVERFLOW_SUB: i32 = 4;
 const DBG_GUARD_TRAP_INT_OVERFLOW_MUL: i32 = 5;
-const DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN: i32 = 6;
+fn decimal_scale_i32() -> i32 {
+    match
+        std::env
+            ::var("QUE_DECIMAL_SCALE")
+            .ok()
+            .and_then(|v| v.trim().parse::<i32>().ok())
+    {
+        Some(scale) if scale > 0 && is_power_of_ten_i32(scale) && scale <= 1_000_000 => scale,
+        _ => 1_000,
+    }
+}
+
+fn decimal_scale_i64() -> i64 {
+    decimal_scale_i32() as i64
+}
+
+fn is_power_of_ten_i32(n: i32) -> bool {
+    if n < 1 {
+        return false;
+    }
+    let mut cur = n;
+    while cur % 10 == 0 {
+        cur /= 10;
+    }
+    cur == 1
+}
 
 fn emit_guard_trap_wat(code: i32) -> String {
     format!("i32.const {code}\nglobal.set $dbg_guard_trap_code\nunreachable")
@@ -158,8 +183,8 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         ">." => Some(32),
         "<=." => Some(33),
         ">=." => Some(34),
-        "Int->Float" => Some(35),
-        "Float->Int" => Some(36),
+        "Int->Dec" => Some(35),
+        "Dec->Int" => Some(36),
         "cons" => Some(37),
         _ => None,
     }
@@ -209,7 +234,7 @@ fn is_i32ish_type(t: &Type) -> bool {
     matches!(
         t,
         Type::Int |
-            Type::Float |
+            Type::Dec |
             Type::Bool |
             Type::Char |
             Type::Unit |
@@ -304,7 +329,7 @@ fn cache_value_global(name: &str) -> String {
 
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
-        Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => Ok("i32"),
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => Ok("i32"),
         Type::List(_) | Type::Tuple(_) => Ok("i32"),
         Type::Var(_) => Ok("i32"),
         Type::Function(_, _) => Ok("i32"),
@@ -314,7 +339,7 @@ fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
 fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
     match typ {
         | Type::Int
-        | Type::Float
+        | Type::Dec
         | Type::Bool
         | Type::Char
         | Type::Unit
@@ -411,8 +436,8 @@ fn is_special_word(w: &str) -> bool {
             "<<" |
             ">>" |
             "~" |
-            "Int->Float" |
-            "Float->Int" |
+            "Int->Dec" |
+            "Dec->Int" |
             "cons" |
             "true" |
             "false" |
@@ -2396,6 +2421,52 @@ fn emit_vector_runtime(
     local.get $out
   )
 
+  (func $dec_mul (param $a i32) (param $b i32) (result i32)
+    local.get $a
+    i64.extend_i32_s
+    local.get $b
+    i64.extend_i32_s
+    i64.mul
+    i64.const __DECIMAL_SCALE__
+    i64.div_s
+    i32.wrap_i64
+  )
+
+  (func $dec_div (param $a i32) (param $b i32) (result i32)
+    local.get $a
+    i64.extend_i32_s
+    i64.const __DECIMAL_SCALE__
+    i64.mul
+    local.get $b
+    i64.extend_i32_s
+    i64.div_s
+    i32.wrap_i64
+  )
+
+  (func $dec_mod (param $a i32) (param $b i32) (result i32)
+    local.get $a
+    local.get $a
+    local.get $b
+    i32.div_s
+    local.get $b
+    i32.mul
+    i32.sub
+  )
+
+  (func $dec_from_int (param $a i32) (result i32)
+    local.get $a
+    i64.extend_i32_s
+    i64.const __DECIMAL_SCALE__
+    i64.mul
+    i32.wrap_i64
+  )
+
+  (func $dec_to_int (param $a i32) (result i32)
+    local.get $a
+    i32.const __DECIMAL_SCALE__
+    i32.div_s
+  )
+
   (func $vec_set_i32 (param $ptr i32) (param $idx i32) (param $v i32) (result i32)
     (local $len i32)
     (local $cap i32)
@@ -2846,16 +2917,14 @@ fn emit_vector_runtime(
         i32.eq
         if (result i32)
           local.get $a
-          f32.convert_i32_s
-          i32.reinterpret_f32
+          call $dec_from_int
         else
           local.get $f
           i32.const 36
           i32.eq
           if (result i32)
             local.get $a
-            f32.reinterpret_i32
-            i32.trunc_f32_s
+            call $dec_to_int
           else
         unreachable
           end
@@ -3088,112 +3157,80 @@ fn emit_vector_runtime(
                                       i32.eq
                                       if (result i32)
                                         local.get $a
-                                        f32.reinterpret_i32
                                         local.get $b
-                                        f32.reinterpret_i32
-                                        f32.add
-                                        i32.reinterpret_f32
+                                        i32.add
                                       else
                                         local.get $f
                                         i32.const 26
                                         i32.eq
                                         if (result i32)
                                           local.get $a
-                                          f32.reinterpret_i32
                                           local.get $b
-                                          f32.reinterpret_i32
-                                          f32.sub
-                                          i32.reinterpret_f32
+                                          i32.sub
                                         else
                                           local.get $f
                                           i32.const 27
                                           i32.eq
                                           if (result i32)
                                             local.get $a
-                                            f32.reinterpret_i32
                                             local.get $b
-                                            f32.reinterpret_i32
-                                            f32.mul
-                                            i32.reinterpret_f32
+                                            call $dec_mul
                                           else
                                             local.get $f
                                             i32.const 28
                                             i32.eq
                                             if (result i32)
                                               local.get $a
-                                              f32.reinterpret_i32
                                               local.get $b
-                                              f32.reinterpret_i32
-                                              f32.div
-                                              i32.reinterpret_f32
+                                              call $dec_div
                                             else
                                               local.get $f
                                               i32.const 29
                                               i32.eq
                                               if (result i32)
                                                 local.get $a
-                                                f32.reinterpret_i32
-                                                local.get $a
-                                                f32.reinterpret_i32
                                                 local.get $b
-                                                f32.reinterpret_i32
-                                                f32.div
-                                                f32.trunc
-                                                local.get $b
-                                                f32.reinterpret_i32
-                                                f32.mul
-                                                f32.sub
-                                                i32.reinterpret_f32
+                                                call $dec_mod
                                               else
                                                 local.get $f
                                                 i32.const 30
                                                 i32.eq
                                                 if (result i32)
                                                   local.get $a
-                                                  f32.reinterpret_i32
                                                   local.get $b
-                                                  f32.reinterpret_i32
-                                                  f32.eq
+                                                  i32.eq
                                                 else
                                                   local.get $f
                                                   i32.const 31
                                                   i32.eq
                                                   if (result i32)
                                                     local.get $a
-                                                    f32.reinterpret_i32
                                                     local.get $b
-                                                    f32.reinterpret_i32
-                                                    f32.lt
+                                                    i32.lt_s
                                                   else
                                                     local.get $f
                                                     i32.const 32
                                                     i32.eq
                                                     if (result i32)
                                                       local.get $a
-                                                      f32.reinterpret_i32
                                                       local.get $b
-                                                      f32.reinterpret_i32
-                                                      f32.gt
+                                                      i32.gt_s
                                                     else
                                                       local.get $f
                                                       i32.const 33
                                                       i32.eq
                                                       if (result i32)
                                                         local.get $a
-                                                        f32.reinterpret_i32
                                                         local.get $b
-                                                        f32.reinterpret_i32
-                                                        f32.le
+                                                        i32.le_s
                                                       else
                                                         local.get $f
                                                         i32.const 34
                                                         i32.eq
                                                         if (result i32)
                                                           local.get $a
-                                                          f32.reinterpret_i32
                                                           local.get $b
-                                                          f32.reinterpret_i32
-                                                          f32.ge
+                                                          i32.ge_s
                                                         else
                                                           local.get $f
                                                           i32.const 37
@@ -3358,6 +3395,7 @@ fn emit_vector_runtime(
     out = out.replace("__VEC_MIN_CAP__", &vec_min_cap.to_string());
     out = out.replace("__VEC_GROWTH_NUM__", &vec_growth_num.to_string());
     out = out.replace("__VEC_GROWTH_DEN__", &vec_growth_den.to_string());
+    out = out.replace("__DECIMAL_SCALE__", &decimal_scale_i64().to_string());
     out = out.replace(";; __VEC_GET_BOUNDS_CHECK__", if vec_bounds_check_enabled {
         r#"local.get $idx
     i32.const 0
@@ -3806,17 +3844,14 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
 
     fn emit_float_div_zero_check(rhs_local: usize) -> String {
         format!(
-            "local.get {rhs_local}\nf32.reinterpret_i32\nf32.const 0\nf32.eq\nif\n{}\nend",
+            "local.get {rhs_local}\ni32.eqz\nif\n{}\nend",
             emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_DIV_ZERO)
         )
     }
 
     fn emit_float_overflow_or_nan_check(result_local: usize) -> String {
-        format!(
-            "local.get {result_local}\nf32.reinterpret_i32\nlocal.get {result_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n{}\nend\nlocal.get {result_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n{}\nend",
-            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN),
-            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN)
-        )
+        let _ = result_local;
+        String::new()
     }
 
     fn emit_int_add_overflow_check(lhs_local: usize, rhs_local: usize, res_local: usize) -> String {
@@ -3936,46 +3971,34 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             if checks.float_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.add\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.add\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_float_overflow_or_nan_check(res_local)
                     )
                 );
             }
-            return Ok(
-                format!(
-                    "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.add\ni32.reinterpret_f32"
-                )
-            );
+            return Ok(format!("{a}\n{b}\ni32.add"));
         }
         "-." => {
             if checks.float_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.sub\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.sub\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_float_overflow_or_nan_check(res_local)
                     )
                 );
             }
-            return Ok(
-                format!(
-                    "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.sub\ni32.reinterpret_f32"
-                )
-            );
+            return Ok(format!("{a}\n{b}\ni32.sub"));
         }
         "*." => {
             if checks.float_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_mul\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
                         emit_float_overflow_or_nan_check(res_local)
                     )
                 );
             }
-            return Ok(
-                format!(
-                    "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32"
-                )
-            );
+            return Ok(format!("{a}\n{b}\ncall $dec_mul"));
         }
         "/." => {
             if checks.div_zero_check || checks.float_overflow_check {
@@ -3991,15 +4014,11 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                 };
                 return Ok(
                     format!(
-                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.div\ni32.reinterpret_f32\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_div\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
                     )
                 );
             }
-            return Ok(
-                format!(
-                    "{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.div\ni32.reinterpret_f32"
-                )
-            );
+            return Ok(format!("{a}\n{b}\ncall $dec_div"));
         }
         "mod." => {
             if checks.div_zero_check || checks.float_overflow_check {
@@ -4015,36 +4034,34 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                 };
                 return Ok(
                     format!(
-                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {lhs_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.div\nf32.trunc\nlocal.get {rhs_local}\nf32.reinterpret_i32\nf32.mul\nf32.sub\ni32.reinterpret_f32\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_mod\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
                     )
                 );
             }
-            return Ok(
-                format!(
-                    "{a}\nf32.reinterpret_i32\n{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.div\nf32.trunc\n{b}\nf32.reinterpret_i32\nf32.mul\nf32.sub\ni32.reinterpret_f32"
-                )
-            );
+            return Ok(format!("{a}\n{b}\ncall $dec_mod"));
         }
         "=." => {
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.eq"));
+            return Ok(format!("{a}\n{b}\ni32.eq"));
         }
         "<." => {
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.lt"));
+            return Ok(format!("{a}\n{b}\ni32.lt_s"));
         }
         ">." => {
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.gt"));
+            return Ok(format!("{a}\n{b}\ni32.gt_s"));
         }
         "<=." => {
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.le"));
+            return Ok(format!("{a}\n{b}\ni32.le_s"));
         }
         ">=." => {
-            return Ok(format!("{a}\nf32.reinterpret_i32\n{b}\nf32.reinterpret_i32\nf32.ge"));
+            return Ok(format!("{a}\n{b}\ni32.ge_s"));
         }
         "cons" => {
             let elem_ref = match node.typ.as_ref() {
                 Some(Type::List(inner)) if is_ref_type(inner) => 1,
                 Some(Type::List(_)) => 0,
-                _ => return Err("cons result must be a vector".to_string()),
+                _ => {
+                    return Err("cons result must be a vector".to_string());
+                }
             };
             return Ok(format!("{a}\n{b}\ni32.const {elem_ref}\ncall $vec_concat_i32"));
         }
@@ -4413,7 +4430,7 @@ fn is_borrowed_managed_rhs_with_env(
                 call_stack.pop();
                 return result;
             }
-            if matches!(op, "vector" | "tuple" | "lambda" | "box" | "int" | "float" | "bool") {
+            if matches!(op, "vector" | "tuple" | "lambda" | "box" | "int" | "dec" | "bool") {
                 // Fresh constructors return owned values.
                 return false;
             }
@@ -4445,7 +4462,7 @@ fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
                 }
                 return matches!(
                     op.as_str(),
-                    "lambda" | "vector" | "tuple" | "box" | "int" | "float" | "bool"
+                    "lambda" | "vector" | "tuple" | "box" | "int" | "dec" | "bool"
                 );
             }
             false
@@ -5129,8 +5146,7 @@ fn compile_fast_cell_update_int_unary(
 fn compile_fast_cell_update_float_binary(
     op: &str,
     node: &TypedExpression,
-    ctx: &Ctx<'_>,
-    wasm_op: &str
+    ctx: &Ctx<'_>
 ) -> Result<String, String> {
     let checks = arithmetic_check_config();
     if node.children.len() != 3 {
@@ -5154,26 +5170,31 @@ fn compile_fast_cell_update_float_binary(
     let old_local = ctx.tmp_i32 + 1;
     let rhs_local = ctx.tmp_i32 + 2;
     let value_local = ctx.tmp_i32 + 3;
-    let div_zero_check = if checks.div_zero_check && wasm_op == "f32.div" {
+    let div_zero_check = if checks.div_zero_check && op == "/=." {
         format!(
-            "local.get {rhs_local}\nf32.reinterpret_i32\nf32.const 0\nf32.eq\nif\n{}\nend\n",
+            "local.get {rhs_local}\ni32.eqz\nif\n{}\nend\n",
             emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_DIV_ZERO)
         )
     } else {
         String::new()
     };
     let float_overflow_check = if checks.float_overflow_check {
-        format!(
-            "local.get {value_local}\nf32.reinterpret_i32\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n{}\nend\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n{}\nend\n",
-            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN),
-            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN)
-        )
+        String::new()
     } else {
         String::new()
     };
+    let update_expr = match op {
+        "+=." => format!("local.get {old_local}\nlocal.get {rhs_local}\ni32.add"),
+        "-=." => format!("local.get {old_local}\nlocal.get {rhs_local}\ni32.sub"),
+        "*=." => format!("local.get {old_local}\nlocal.get {rhs_local}\ncall $dec_mul"),
+        "/=." => format!("local.get {old_local}\nlocal.get {rhs_local}\ncall $dec_div"),
+        _ => {
+            return Err(format!("Unsupported dec binary fast helper '{}'", op));
+        }
+    };
     Ok(
         format!(
-            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{rhs}\nlocal.set {rhs_local}\n{div_zero_check}local.get {old_local}\nf32.reinterpret_i32\nlocal.get {rhs_local}\nf32.reinterpret_i32\n{wasm_op}\ni32.reinterpret_f32\nlocal.set {value_local}\n{float_overflow_check}local.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
+            "{cell}\nlocal.tee {cell_local}\ni32.const 0\ncall $vec_get_i32\nlocal.set {old_local}\n{rhs}\nlocal.set {rhs_local}\n{div_zero_check}{update_expr}\nlocal.set {value_local}\n{float_overflow_check}local.get {cell_local}\ni32.const 0\nlocal.get {value_local}\ncall $vec_set_i32"
         )
     )
 }
@@ -5205,28 +5226,15 @@ fn compile_fast_cell_update_float_unary(
     let old_local = ctx.tmp_i32 + 1;
     let value_local = ctx.tmp_i32 + 2;
     let update_expr = match op {
-        "++." =>
-            format!(
-                "local.get {old_local}\nf32.reinterpret_i32\nf32.const 1\nf32.add\ni32.reinterpret_f32"
-            ),
-        "--." =>
-            format!(
-                "local.get {old_local}\nf32.reinterpret_i32\nf32.const 1\nf32.sub\ni32.reinterpret_f32"
-            ),
-        "**." =>
-            format!(
-                "local.get {old_local}\nf32.reinterpret_i32\nlocal.get {old_local}\nf32.reinterpret_i32\nf32.mul\ni32.reinterpret_f32"
-            ),
+        "++." => format!("local.get {old_local}\ni32.const __DECIMAL_SCALE__\ni32.add"),
+        "--." => format!("local.get {old_local}\ni32.const __DECIMAL_SCALE__\ni32.sub"),
+        "**." => format!("local.get {old_local}\nlocal.get {old_local}\ncall $dec_mul"),
         _ => {
-            return Err(format!("Unsupported float unary fast helper '{}'", op));
+            return Err(format!("Unsupported dec unary fast helper '{}'", op));
         }
     };
     let float_overflow_check = if checks.float_overflow_check {
-        format!(
-            "local.get {value_local}\nf32.reinterpret_i32\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.eq\ni32.eqz\nif\n{}\nend\nlocal.get {value_local}\nf32.reinterpret_i32\nf32.abs\nf32.const inf\nf32.eq\nif\n{}\nend\n",
-            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN),
-            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_OVERFLOW_OR_NAN)
-        )
+        String::new()
     } else {
         String::new()
     };
@@ -5273,7 +5281,7 @@ fn compile_fast_cell_helper(
     ctx: &Ctx<'_>
 ) -> Option<Result<String, String>> {
     match op {
-        "box" | "int" | "float" | "bool" => Some(compile_fast_box_ctor(op, node, ctx)),
+        "box" | "int" | "dec" | "bool" => Some(compile_fast_box_ctor(op, node, ctx)),
         "&alter!" | "set" | "=!" => Some(compile_fast_cell_set(op, node, ctx, false)),
         "true?" => Some(compile_fast_truthy(op, node, ctx, false)),
         "false?" => Some(compile_fast_truthy(op, node, ctx, true)),
@@ -5282,10 +5290,10 @@ fn compile_fast_cell_helper(
         "*=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.mul")),
         "/=" => Some(compile_fast_cell_update_int_binary(op, node, ctx, "i32.div_s")),
         "++" | "--" | "**" => Some(compile_fast_cell_update_int_unary(op, node, ctx)),
-        "+=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.add")),
-        "-=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.sub")),
-        "*=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.mul")),
-        "/=." => Some(compile_fast_cell_update_float_binary(op, node, ctx, "f32.div")),
+        "+=." => Some(compile_fast_cell_update_float_binary(op, node, ctx)),
+        "-=." => Some(compile_fast_cell_update_float_binary(op, node, ctx)),
+        "*=." => Some(compile_fast_cell_update_float_binary(op, node, ctx)),
+        "/=." => Some(compile_fast_cell_update_float_binary(op, node, ctx)),
         "++." | "--." | "**." => Some(compile_fast_cell_update_float_unary(op, node, ctx)),
         _ => None,
     }
@@ -5819,11 +5827,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
             )
         );
         out.push(
-            format!(
-                "local.get {}\ni32.const 0\n{}\ncall $closure_set_fun\ndrop",
-                clo_local,
-                f
-            )
+            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set_fun\ndrop", clo_local, f)
         );
         for (i, arg) in args.iter().enumerate() {
             let nested_ctx = Ctx {
@@ -5965,7 +5969,11 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                 if ps.is_empty() {
                     (
                         format!("call ${}", ident(cap)),
-                        if is_managed_local_type(ret) { "$closure_set_ref" } else { "$closure_set" },
+                        if is_managed_local_type(ret) {
+                            "$closure_set_ref"
+                        } else {
+                            "$closure_set"
+                        },
                     )
                 } else if let Some(id) = ctx.fn_ids.get(cap) {
                     // Function-valued global capture: store function pointer id.
@@ -6003,7 +6011,10 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
 fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     match &node.expr {
         Expression::Int(n) => Ok(format!("i32.const {}", n)),
-        Expression::Float(n) => Ok(format!("f32.const {:?}\ni32.reinterpret_f32", n)),
+        Expression::Dec(n) => {
+            let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
+            Ok(format!("i32.const {}", scaled as i32))
+        }
         Expression::Word(w) =>
             match w.as_str() {
                 "true" => Ok("i32.const 1".to_string()),
@@ -6117,33 +6128,35 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             // Bitwise NOT for i32.
                             Ok(format!("{a}\ni32.const -1\ni32.xor"))
                         }
-                        "Int->Float" => {
+                        "Int->Dec" => {
                             let a = compile_expr(
                                 node.children
                                     .get(1)
-                                    .ok_or_else(|| "Int->Float missing arg".to_string())?,
+                                    .ok_or_else(|| "Int->Dec missing arg".to_string())?,
                                 ctx
                             )?;
-                            Ok(format!("{a}\nf32.convert_i32_s\ni32.reinterpret_f32"))
+                            Ok(format!("{a}\ncall $dec_from_int"))
                         }
-                        "Float->Int" => {
+                        "Dec->Int" => {
                             let a = compile_expr(
                                 node.children
                                     .get(1)
-                                    .ok_or_else(|| "Float->Int missing arg".to_string())?,
+                                    .ok_or_else(|| "Dec->Int missing arg".to_string())?,
                                 ctx
                             )?;
-                            Ok(format!("{a}\nf32.reinterpret_i32\ni32.trunc_f32_s"))
+                            Ok(format!("{a}\ncall $dec_to_int"))
                         }
                         "as" | "char" =>
                             node.children
                                 .get(1)
                                 .map(|n| compile_expr(n, ctx))
                                 .unwrap_or_else(|| Ok("i32.const 0".to_string())),
-                        op if builtin_fn_tag(op)
-                            .and_then(builtin_tag_arity)
-                            .map(|arity| node.children.len().saturating_sub(1) != arity)
-                            .unwrap_or(false) => compile_dynamic_call(node, ctx),
+                        op if
+                            builtin_fn_tag(op)
+                                .and_then(builtin_tag_arity)
+                                .map(|arity| node.children.len().saturating_sub(1) != arity)
+                                .unwrap_or(false)
+                        => compile_dynamic_call(node, ctx),
                         op if is_special_word(op) => emit_builtin(op, node, ctx),
                         _ => compile_call(node, op_full, ctx),
                     }

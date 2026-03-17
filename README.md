@@ -246,6 +246,15 @@ Fallback to default ones
   unset QUE_WASM_OPT QUE_TCO QUE_DEVIRTUALIZE QUE_BOUNDS_CHECK QUE_DIV_ZERO_CHECK QUE_VEC_MIN_CAP QUE_VEC_GROWTH_NUM QUE_VEC_GROWTH_DEN
 ```
 
+Generating docs
+
+```bash
+ # with std
+  cargo run --no-default-features --features repo-tools --bin quelibdump -- --output ./example/dist/lib.json
+ # without std
+  cargo run --no-default-features --features repo-tools --bin quelibdump -- --split-std --output ./example/dist/lib.json
+```
+
 **Disclaimer!**
 
 _This project is a work in progress and might contain bugs! Do NOT use it in production!_

@@ -3,19 +3,20 @@
 _Requres the LSP installed_
 
 Works in:
+
 - `.que` files
 - shell heredocs passed to `que --eval`, for example `<<'QUE' ... QUE`
 
 Types
 
-| Type  | Description                  | Example | Notes                               |
-| ----- | ---------------------------- | ------- | ----------------------------------- |
-| Bool  | Logical truth value          | true    | Used in conditions and logical ops  |
-| Int   | 32-bit integer               | 42      | Arithmetic, indexing, counting      |
-| Float | 32-bit floating point number | 42.     | Arithmetic                          |
-| Char  | Single character             | 'a'     | Building blocks of strings          |
-| Unit  | No meaningful value          | ()      | Returned by effect-only expressions |
-| [T]   | Vector of T                  | [1 2 3] | Universal data structure            |
+| Type | Description               | Example | Notes                               |
+| ---- | ------------------------- | ------- | ----------------------------------- |
+| Bool | Logical truth value       | true    | Used in conditions and logical ops  |
+| Int  | 32-bit integer            | 42      | Arithmetic, indexing, counting      |
+| Dec  | 32-bit fixed point number | 42.     | Arithmetic                          |
+| Char | Single character          | 'a'     | Building blocks of strings          |
+| Unit | No meaningful value       | ()      | Returned by effect-only expressions |
+| [T]  | Vector of T               | [1 2 3] | Universal data structure            |
 
 Notes:
 • Unit represents the absence of a value (effects only)
