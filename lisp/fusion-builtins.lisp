@@ -7,7 +7,7 @@
 (let -infinity -2147483648)
 (let identity (lambda x x))
 (let Int 0)
-(let Float 0.0)
+(let Dec 0.0)
 (let Char 'a')
 (let Bool false)
 (let Nil nil)
@@ -97,7 +97,7 @@
           (alter! i (- i 1))))
         out)))))
 
-(let String->Float (lambda s
+(let String->Dec (lambda s
   (if (= (length s) 0)
       0.0
       (do
@@ -142,10 +142,10 @@
         (let ip int-part)
         (let fp frac-part)
         (let fb frac-base)
-        (let value (+. (Int->Float ip) (/. (Int->Float fp) (Int->Float fb))))
+        (let value (+. (Int->Dec ip) (/. (Int->Dec fp) (Int->Dec fb))))
         (if neg (-. 0.0 value) value)))))
 
-(let Float->String (lambda x (do
+(let Dec->String (lambda x (do
   (mut neg false)
   (mut v x)
   (if (<. v 0.0)
@@ -154,8 +154,8 @@
         (alter! v (-. 0.0 v)))
       nil)
 
-  (let whole (Float->Int v))
-  (let frac (-. v (Int->Float whole)))
+  (let whole (Dec->Int v))
+  (let frac (-. v (Int->Dec whole)))
 
   (let body [])
   (String/append! body (Int->String whole))
@@ -168,9 +168,9 @@
           (mut k 0)
           (while (< k 6) (do
             (alter! f (*. f 10.0))
-            (let d (Float->Int f))
+            (let d (Dec->Int f))
             (set! body (length body) (+# (Int->Char d) '0'))
-            (alter! f (-. f (Int->Float d)))
+            (alter! f (-. f (Int->Dec d)))
             (alter! k (+ k 1))))
 
           (mut end (- (length body) 1))
@@ -280,15 +280,15 @@
 
   (let sum (lambda xs (reduce (lambda a b (+ a b)) 0 xs)))
   (let sum/int (lambda xs (sum xs)))
-  (let sum/float (lambda xs (reduce (lambda a b (+. a b)) 0.0 xs)))
+  (let sum/dec (lambda xs (reduce (lambda a b (+. a b)) 0.0 xs)))
 
   (let product (lambda xs (reduce (lambda a b (* a b)) 1 xs)))
   (let product/int (lambda xs (product xs)))
-  (let product/float (lambda xs (reduce (lambda a b (*. a b)) 1.0 xs)))
+  (let product/dec (lambda xs (reduce (lambda a b (*. a b)) 1.0 xs)))
 
   (let mean (lambda xs (/ (sum/int xs) (length xs))))
   (let mean/int (lambda xs (mean xs)))
-  (let mean/float (lambda xs (/. (sum/float xs) (Int->Float (length xs)))))
+  (let mean/dec (lambda xs (/. (sum/dec xs) (Int->Dec (length xs)))))
 
   (let every? (lambda fn? xs (do
     (mut i 0)
@@ -331,11 +331,11 @@
       (alter! i (+ i 1))))
     out)))
   (let range (lambda start end (range/int start end)))
-  (let range/float (lambda start end (do
-    (let out [(Int->Float start)])
+  (let range/dec (lambda start end (do
+    (let out [(Int->Dec start)])
     (mut i (+ start 1))
     (while (< i (+ end 1)) (do
-      (set! out (length out) (Int->Float i))
+      (set! out (length out) (Int->Dec i))
       (alter! i (+ i 1))))
     out)))
 

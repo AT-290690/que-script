@@ -406,7 +406,7 @@ pub fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String
 fn type_specificity_score(typ: &Type) -> i32 {
     match typ {
         Type::Var(_) => 0,
-        Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit => 1,
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => 1,
         Type::List(inner) => 2 + type_specificity_score(inner),
         Type::Tuple(items) => 2 + items.iter().map(type_specificity_score).sum::<i32>(),
         Type::Function(a, b) => 3 + type_specificity_score(a) + type_specificity_score(b),
@@ -857,7 +857,7 @@ pub fn literal_type_at_position(text: &str, position: CorePosition) -> Option<(S
         let typ = if is_int_token(&token) {
             Some("Int")
         } else if is_float_token(&token) {
-            Some("Float")
+            Some("Dec")
         } else {
             None
         };

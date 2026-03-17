@@ -39,7 +39,7 @@ enum FuseSink {
         with_index: bool,
     },
     Average {
-        float: bool,
+        dec: bool,
     },
     Unzip,
     Some {
@@ -232,8 +232,7 @@ fn dead_code_eliminate_top_level_defs(node: &TypedExpression) -> TypedExpression
 }
 
 fn top_level_let_rhs_is_removable(do_node: &TypedExpression, idx: usize) -> bool {
-    do_node
-        .children
+    do_node.children
         .get(idx)
         .and_then(|let_node| let_node.children.get(2))
         .map(|rhs| {
@@ -476,12 +475,12 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 },
                 items.get(1)?.clone(),
             )),
-        // sum/float xs => reduce +. 0. xs
-        "sum/float" if items.len() == 2 =>
+        // sum/dec xs => reduce +. 0. xs
+        "sum/dec" if items.len() == 2 =>
             Some((
                 FuseSink::Reduce {
                     reduce_fn: Expression::Word("+.".to_string()),
-                    init_expr: Expression::Float(0.0),
+                    init_expr: Expression::Dec(0.0),
                     with_index: false,
                 },
                 items.get(1)?.clone(),
@@ -497,20 +496,20 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 items.get(1)?.clone(),
             )),
         // product xs => reduce *. 1. xs
-        "product/float" if items.len() == 2 =>
+        "product/dec" if items.len() == 2 =>
             Some((
                 FuseSink::Reduce {
                     reduce_fn: Expression::Word("*.".to_string()),
-                    init_expr: Expression::Float(1.0),
+                    init_expr: Expression::Dec(1.0),
                     with_index: false,
                 },
                 items.get(1)?.clone(),
             )),
         // mean aliases over vectors
         "mean" | "mean/int" if items.len() == 2 =>
-            Some((FuseSink::Average { float: false }, items.get(1)?.clone())),
-        "mean/float" if items.len() == 2 =>
-            Some((FuseSink::Average { float: true }, items.get(1)?.clone())),
+            Some((FuseSink::Average { dec: false }, items.get(1)?.clone())),
+        "mean/dec" if items.len() == 2 =>
+            Some((FuseSink::Average { dec: true }, items.get(1)?.clone())),
         // unzip xs => tuple of mapped first/second in one pass
         "unzip" if items.len() == 2 => Some((FuseSink::Unzip, items.get(1)?.clone())),
         // some? pred xs
@@ -690,7 +689,7 @@ fn parse_fuse_source(base_expr: Expression) -> FuseSource {
         }
         Expression::Apply(items) if
             items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "range/float")
+            matches!(items.first(), Some(Expression::Word(w)) if w == "range/dec")
         => {
             FuseSource::RangeFloat {
                 start: items[1].clone(),
@@ -843,8 +842,7 @@ fn build_direct_fused_loop(
                 with_index,
                 &suffix
             ),
-        FuseSink::Average { float } =>
-            build_average_loop(source, ops_outer_to_inner, float, &suffix),
+        FuseSink::Average { dec } => build_average_loop(source, ops_outer_to_inner, dec, &suffix),
         FuseSink::Unzip => build_unzip_loop(source, ops_outer_to_inner, &suffix),
         FuseSink::Find { predicate } =>
             build_find_loop(source, ops_outer_to_inner, predicate, &suffix),
@@ -916,8 +914,7 @@ fn build_non_flatten_chain_process<F>(
     setup_bindings: &mut Vec<Expression>,
     sink_builder: &F
 ) -> Option<Expression>
-where
-    F: Fn(Expression, Expression) -> Option<Expression>,
+    where F: Fn(Expression, Expression) -> Option<Expression>
 {
     let ops_inner_to_outer = ops_outer_to_inner.iter().rev().cloned().collect::<Vec<_>>();
     let mut filter_output_index_refs: Vec<Option<String>> = Vec::with_capacity(
@@ -961,8 +958,7 @@ fn build_non_flatten_chain_step<F>(
     filter_output_index_refs: &[Option<String>],
     sink_builder: &F
 ) -> Option<Expression>
-where
-    F: Fn(Expression, Expression) -> Option<Expression>,
+    where F: Fn(Expression, Expression) -> Option<Expression>
 {
     if idx >= ops_inner_to_outer.len() {
         return sink_builder(current_value, current_index);
@@ -1045,7 +1041,12 @@ where
             );
             Some(
                 Expression::Apply(
-                    vec![Expression::Word("if".to_string()), pass_cond, then_expr, no_op_unit_expr()]
+                    vec![
+                        Expression::Word("if".to_string()),
+                        pass_cond,
+                        then_expr,
+                        no_op_unit_expr()
+                    ]
                 )
             )
         }
@@ -1189,10 +1190,7 @@ fn build_reduce_loop(
                 ]
             );
             let reduced = if with_index {
-                call_callable_expr(
-                    &reduce_fn_for_sink,
-                    vec![acc_get.clone(), mapped, logical_i]
-                )?
+                call_callable_expr(&reduce_fn_for_sink, vec![acc_get.clone(), mapped, logical_i])?
             } else {
                 call_callable_expr(&reduce_fn_for_sink, vec![acc_get.clone(), mapped])?
             };
@@ -1288,7 +1286,7 @@ fn build_reduce_until_loop(
         idx_get.clone(),
         suffix,
         &mut setup_bindings,
-        &move |mapped: Expression, logical_i: Expression| {
+        &(move |mapped: Expression, logical_i: Expression| {
             let acc_get = Expression::Apply(
                 vec![
                     Expression::Word("get".to_string()),
@@ -1327,15 +1325,10 @@ fn build_reduce_until_loop(
             );
             Some(
                 Expression::Apply(
-                    vec![
-                        Expression::Word("if".to_string()),
-                        stop_value,
-                        set_placed_true,
-                        set_out
-                    ]
+                    vec![Expression::Word("if".to_string()), stop_value, set_placed_true, set_out]
                 )
             )
-        }
+        })
     )?;
     let idx_inc = Expression::Apply(
         vec![
@@ -1442,7 +1435,7 @@ fn build_reduce_until_loop(
 fn build_average_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
-    float: bool,
+    dec: bool,
     suffix: &str
 ) -> Option<Expression> {
     let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(
@@ -1467,7 +1460,7 @@ fn build_average_loop(
             ]
         );
         let next_sum = Expression::Apply(
-            vec![Expression::Word((if float { "+." } else { "+" }).to_string()), sum_get, mapped]
+            vec![Expression::Word((if dec { "+." } else { "+" }).to_string()), sum_get, mapped]
         );
         let set_sum = Expression::Apply(
             vec![
@@ -1526,8 +1519,8 @@ fn build_average_loop(
                 Expression::Word("let".to_string()),
                 Expression::Word(sum_name.clone()),
                 Expression::Apply(
-                    vec![Expression::Word("vector".to_string()), if float {
-                        Expression::Float(0.0)
+                    vec![Expression::Word("vector".to_string()), if dec {
+                        Expression::Dec(0.0)
                     } else {
                         Expression::Int(0)
                     }]
@@ -1561,12 +1554,12 @@ fn build_average_loop(
     let sum_get = Expression::Apply(
         vec![Expression::Word("get".to_string()), Expression::Word(sum_name), Expression::Int(0)]
     );
-    let mean_expr = if float {
+    let mean_expr = if dec {
         Expression::Apply(
             vec![
                 Expression::Word("/.".to_string()),
                 sum_get,
-                Expression::Apply(vec![Expression::Word("Int->Float".to_string()), count_get])
+                Expression::Apply(vec![Expression::Word("Int->Dec".to_string()), count_get])
             ]
         )
     } else {
@@ -1744,7 +1737,7 @@ fn build_some_every_loop(
         idx_get.clone(),
         suffix,
         &mut setup_bindings,
-        &move |mapped: Expression, logical_i: Expression| {
+        &(move |mapped: Expression, logical_i: Expression| {
             let pred_value = if with_index {
                 call_callable_expr(&predicate_for_sink, vec![mapped, logical_i])?
             } else {
@@ -1770,7 +1763,7 @@ fn build_some_every_loop(
                 )
             };
             Some(action)
-        }
+        })
     )?;
     let idx_inc = Expression::Apply(
         vec![
@@ -1888,7 +1881,7 @@ fn build_find_loop(
         idx_get.clone(),
         suffix,
         &mut setup_bindings,
-        &move |mapped: Expression, logical_i: Expression| {
+        &(move |mapped: Expression, logical_i: Expression| {
             let pred_value = call_callable_expr(&predicate_for_sink, vec![mapped])?;
             let set_found = Expression::Apply(
                 vec![
@@ -1900,10 +1893,15 @@ fn build_find_loop(
             );
             Some(
                 Expression::Apply(
-                    vec![Expression::Word("if".to_string()), pred_value, set_found, no_op_unit_expr()]
+                    vec![
+                        Expression::Word("if".to_string()),
+                        pred_value,
+                        set_found,
+                        no_op_unit_expr()
+                    ]
                 )
             )
-        }
+        })
     )?;
     let idx_inc = Expression::Apply(
         vec![
@@ -2041,7 +2039,9 @@ fn make_loop_source_bindings(
                     vec![
                         Expression::Word("let".to_string()),
                         Expression::Word(len_name.clone()),
-                        Expression::Apply(vec![Expression::Word("length".to_string()), left_word.clone()])
+                        Expression::Apply(
+                            vec![Expression::Word("length".to_string()), left_word.clone()]
+                        )
                     ]
                 )
             );
@@ -2052,10 +2052,18 @@ fn make_loop_source_bindings(
                     vec![
                         Expression::Word("tuple".to_string()),
                         Expression::Apply(
-                            vec![Expression::Word("get".to_string()), left_word.clone(), i_expr.clone()]
+                            vec![
+                                Expression::Word("get".to_string()),
+                                left_word.clone(),
+                                i_expr.clone()
+                            ]
                         ),
                         Expression::Apply(
-                            vec![Expression::Word("get".to_string()), right_word.clone(), i_expr.clone()]
+                            vec![
+                                Expression::Word("get".to_string()),
+                                right_word.clone(),
+                                i_expr.clone()
+                            ]
                         )
                     ]
                 )
@@ -2084,7 +2092,9 @@ fn make_loop_source_bindings(
             let end_expr = Expression::Apply(
                 vec![
                     Expression::Word("+".to_string()),
-                    Expression::Apply(vec![Expression::Word("-".to_string()), to_word, from_word.clone()]),
+                    Expression::Apply(
+                        vec![Expression::Word("-".to_string()), to_word, from_word.clone()]
+                    ),
                     Expression::Int(1)
                 ]
             );
@@ -2115,16 +2125,22 @@ fn make_loop_source_bindings(
             let end_expr = Expression::Apply(
                 vec![
                     Expression::Word("+".to_string()),
-                    Expression::Apply(vec![Expression::Word("-".to_string()), to_word, from_word.clone()]),
+                    Expression::Apply(
+                        vec![Expression::Word("-".to_string()), to_word, from_word.clone()]
+                    ),
                     Expression::Int(1)
                 ]
             );
             let value = Box::new(move |i_expr: &Expression| {
                 Expression::Apply(
                     vec![
-                        Expression::Word("Int->Float".to_string()),
+                        Expression::Word("Int->Dec".to_string()),
                         Expression::Apply(
-                            vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
+                            vec![
+                                Expression::Word("+".to_string()),
+                                from_word.clone(),
+                                i_expr.clone()
+                            ]
                         )
                     ]
                 )
@@ -2164,7 +2180,11 @@ fn make_loop_source_bindings(
                         Expression::Word("get".to_string()),
                         xs_word.clone(),
                         Expression::Apply(
-                            vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
+                            vec![
+                                Expression::Word("+".to_string()),
+                                from_word.clone(),
+                                i_expr.clone()
+                            ]
                         )
                     ]
                 )
@@ -2315,7 +2335,9 @@ fn make_short_circuit_source_bindings(
                     vec![
                         Expression::Word("let".to_string()),
                         Expression::Word(len_name.clone()),
-                        Expression::Apply(vec![Expression::Word("length".to_string()), left_word.clone()])
+                        Expression::Apply(
+                            vec![Expression::Word("length".to_string()), left_word.clone()]
+                        )
                     ]
                 )
             );
@@ -2348,10 +2370,18 @@ fn make_short_circuit_source_bindings(
                     vec![
                         Expression::Word("tuple".to_string()),
                         Expression::Apply(
-                            vec![Expression::Word("get".to_string()), left_word.clone(), i_expr.clone()]
+                            vec![
+                                Expression::Word("get".to_string()),
+                                left_word.clone(),
+                                i_expr.clone()
+                            ]
                         ),
                         Expression::Apply(
-                            vec![Expression::Word("get".to_string()), right_word.clone(), i_expr.clone()]
+                            vec![
+                                Expression::Word("get".to_string()),
+                                right_word.clone(),
+                                i_expr.clone()
+                            ]
                         )
                     ]
                 )
@@ -2366,11 +2396,7 @@ fn make_short_circuit_source_bindings(
             let mut setup = Vec::new();
             setup.push(
                 Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(from_name),
-                        start
-                    ]
+                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
                 )
             );
             setup.push(
@@ -2387,7 +2413,9 @@ fn make_short_circuit_source_bindings(
                     vec![
                         Expression::Word("let".to_string()),
                         Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
+                        Expression::Apply(
+                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
+                        )
                     ]
                 )
             );
@@ -2431,11 +2459,7 @@ fn make_short_circuit_source_bindings(
             let mut setup = Vec::new();
             setup.push(
                 Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(from_name),
-                        start
-                    ]
+                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
                 )
             );
             setup.push(
@@ -2452,7 +2476,9 @@ fn make_short_circuit_source_bindings(
                     vec![
                         Expression::Word("let".to_string()),
                         Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
+                        Expression::Apply(
+                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
+                        )
                     ]
                 )
             );
@@ -2484,9 +2510,13 @@ fn make_short_circuit_source_bindings(
             let value = Box::new(move |i_expr: &Expression| {
                 Expression::Apply(
                     vec![
-                        Expression::Word("Int->Float".to_string()),
+                        Expression::Word("Int->Dec".to_string()),
                         Expression::Apply(
-                            vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
+                            vec![
+                                Expression::Word("+".to_string()),
+                                from_word.clone(),
+                                i_expr.clone()
+                            ]
                         )
                     ]
                 )
@@ -2508,11 +2538,7 @@ fn make_short_circuit_source_bindings(
             );
             setup.push(
                 Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(from_name),
-                        start
-                    ]
+                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
                 )
             );
             setup.push(
@@ -2520,7 +2546,9 @@ fn make_short_circuit_source_bindings(
                     vec![
                         Expression::Word("let".to_string()),
                         Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
+                        Expression::Apply(
+                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
+                        )
                     ]
                 )
             );
@@ -3135,8 +3163,8 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         "<=." => fold_float_cmp(node, &items, |a, b| a <= b),
         ">=." => fold_float_cmp(node, &items, |a, b| a >= b),
 
-        "Int->Float" => fold_int_to_float(node, &items),
-        "Float->Int" => fold_float_to_int(node, &items),
+        "Int->Dec" => fold_int_to_float(node, &items),
+        "Dec->Int" => fold_float_to_int(node, &items),
 
         _ => node,
     }
@@ -3437,13 +3465,11 @@ fn fold_not(node: TypedExpression, items: &[Expression]) -> TypedExpression {
 }
 
 fn parse_env_bool_like(name: &str, default: bool) -> bool {
-    std::env::var(name)
+    std::env
+        ::var(name)
         .ok()
         .map(|v| {
-            !matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "0" | "false" | "off" | "no"
-            )
+            !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no")
         })
         .unwrap_or(default)
 }
@@ -3517,15 +3543,14 @@ fn fold_float_bin(
     ) else {
         return node;
     };
-    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", false) && (op == "/." || op == "mod.") && b == 0.0
-    {
+    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", false) && (op == "/." || op == "mod.") && b == 0.0 {
         return node;
     }
     let result = f(a, b);
     if parse_env_bool_like("QUE_FLOAT_OVERFLOW_CHECK", false) && !result.is_finite() {
         return node;
     }
-    make_folded_literal(&node, Expression::Float(result), Type::Float)
+    make_folded_literal(&node, Expression::Dec(quantize_float_literal(result)), Type::Dec)
 }
 
 fn fold_float_cmp(
@@ -3550,14 +3575,14 @@ fn fold_int_to_float(node: TypedExpression, items: &[Expression]) -> TypedExpres
     let Some(a) = items.get(1).and_then(int_literal) else {
         return node;
     };
-    make_folded_literal(&node, Expression::Float(a as f32), Type::Float)
+    make_folded_literal(&node, Expression::Dec(quantize_float_literal(a as f32)), Type::Dec)
 }
 
 fn fold_float_to_int(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     let Some(a) = items.get(1).and_then(float_literal) else {
         return node;
     };
-    make_folded_literal(&node, Expression::Int(a as i32), Type::Int)
+    make_folded_literal(&node, Expression::Int(a.trunc() as i32), Type::Int)
 }
 
 fn make_folded_literal(node: &TypedExpression, expr: Expression, typ: Type) -> TypedExpression {
@@ -3576,11 +3601,7 @@ fn make_do_pair(
 ) -> TypedExpression {
     TypedExpression {
         expr: Expression::Apply(
-            vec![
-                Expression::Word("do".to_string()),
-                first.expr.clone(),
-                second.expr.clone()
-            ]
+            vec![Expression::Word("do".to_string()), first.expr.clone(), second.expr.clone()]
         ),
         typ: second.typ.clone().or(parent.typ.clone()),
         effect: first.effect | second.effect,
@@ -3592,7 +3613,7 @@ fn make_do_pair(
                 children: Vec::new(),
             },
             first,
-            second,
+            second
         ],
     }
 }
@@ -3606,9 +3627,38 @@ fn int_literal(expr: &Expression) -> Option<i32> {
 
 fn float_literal(expr: &Expression) -> Option<f32> {
     match expr {
-        Expression::Float(v) => Some(*v),
+        Expression::Dec(v) => Some(quantize_float_literal(*v)),
         _ => None,
     }
+}
+
+fn quantize_float_literal(v: f32) -> f32 {
+    let scale = decimal_scale_f32();
+    (v * scale).round() / scale
+}
+
+fn decimal_scale_f32() -> f32 {
+    match
+        std::env
+            ::var("QUE_DECIMAL_SCALE")
+            .ok()
+            .and_then(|v| v.trim().parse::<i32>().ok())
+    {
+        Some(scale) if scale > 0 && is_power_of_ten_i32(scale) && scale <= 1_000_000 =>
+            scale as f32,
+        _ => 1000.0,
+    }
+}
+
+fn is_power_of_ten_i32(n: i32) -> bool {
+    if n < 1 {
+        return false;
+    }
+    let mut cur = n;
+    while cur % 10 == 0 {
+        cur /= 10;
+    }
+    cur == 1
 }
 
 fn bool_literal(expr: &Expression) -> Option<bool> {
@@ -3621,7 +3671,7 @@ fn bool_literal(expr: &Expression) -> Option<bool> {
 
 fn is_pure_literal_expr(expr: &Expression) -> bool {
     match expr {
-        Expression::Int(_) | Expression::Float(_) => true,
+        Expression::Int(_) | Expression::Dec(_) => true,
         Expression::Word(w) if w == "true" || w == "false" => true,
         _ => false,
     }
@@ -3644,45 +3694,50 @@ fn is_safe_pure_call_expr(expr: &Expression) -> bool {
     let Some(Expression::Word(op)) = items.first() else {
         return false;
     };
-    if !matches!(
-        op.as_str(),
-        "=" |
-            "=?" |
-            "=#" |
-            "=." |
-            "<" |
-            "<#" |
-            "<." |
-            ">" |
-            ">#" |
-            ">." |
-            "<=" |
-            "<=#" |
-            "<=." |
-            ">=" |
-            ">=#" |
-            ">=." |
-            "and" |
-            "or" |
-            "not" |
-            "~" |
-            "^" |
-            "|" |
-            "&" |
-            "<<" |
-            ">>" |
-            "length" |
-            "Int->Float" |
-            "Float->Int"
-    ) {
+    if
+        !matches!(
+            op.as_str(),
+            "=" |
+                "=?" |
+                "=#" |
+                "=." |
+                "<" |
+                "<#" |
+                "<." |
+                ">" |
+                ">#" |
+                ">." |
+                "<=" |
+                "<=#" |
+                "<=." |
+                ">=" |
+                ">=#" |
+                ">=." |
+                "and" |
+                "or" |
+                "not" |
+                "~" |
+                "^" |
+                "|" |
+                "&" |
+                "<<" |
+                ">>" |
+                "length" |
+                "Int->Dec" |
+                "Dec->Int"
+        )
+    {
         return false;
     }
 
-    items.iter().skip(1).all(|arg| {
-        is_pure_literal_expr(arg) ||
-            matches!(arg, Expression::Word(_)) ||
-            is_safe_pure_call_expr(arg)
-    })
+    items
+        .iter()
+        .skip(1)
+        .all(|arg| {
+            is_pure_literal_expr(arg) ||
+                matches!(arg, Expression::Word(_)) ||
+                is_safe_pure_call_expr(arg)
+        })
 }
 
 #[derive(Clone)]
@@ -3880,7 +3935,7 @@ fn substitute_word_with_expr(
                     .collect()
             ),
         Expression::Int(n) => Expression::Int(*n),
-        Expression::Float(n) => Expression::Float(*n),
+        Expression::Dec(n) => Expression::Dec(*n),
     }
 }
 
@@ -4053,7 +4108,7 @@ fn extract_inline_lambda_def(
 
 fn is_inline_safe_body(expr: &Expression) -> bool {
     match expr {
-        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => true,
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => true,
         Expression::Apply(items) => {
             if let Some(Expression::Word(head)) = items.first() {
                 if head == "let" || head == "let*" || head == "lambda" {
@@ -4067,7 +4122,7 @@ fn is_inline_safe_body(expr: &Expression) -> bool {
 
 fn inline_body_cost(expr: &Expression) -> usize {
     match expr {
-        Expression::Int(_) | Expression::Float(_) | Expression::Word(_) => 1,
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => 1,
         Expression::Apply(items) => 1 + items.iter().map(inline_body_cost).sum::<usize>(),
     }
 }
@@ -4275,7 +4330,7 @@ fn try_inline_call_no_temps(
 }
 
 fn is_atomic_inline_arg_expr(expr: &Expression) -> bool {
-    matches!(expr, Expression::Word(_) | Expression::Int(_) | Expression::Float(_))
+    matches!(expr, Expression::Word(_) | Expression::Int(_) | Expression::Dec(_))
 }
 
 fn can_no_temp_inline_arg(arg_expr: &Expression, arg_node: &TypedExpression, uses: usize) -> bool {
@@ -4293,7 +4348,7 @@ fn can_no_temp_inline_arg(arg_expr: &Expression, arg_node: &TypedExpression, use
 }
 
 fn is_no_temp_inline_scalar_type(typ: &Type) -> bool {
-    matches!(typ, Type::Int | Type::Float | Type::Bool | Type::Char | Type::Unit)
+    matches!(typ, Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit)
 }
 
 fn substitute_params_expr(expr: &Expression, subst: &HashMap<String, Expression>) -> Expression {
@@ -4311,7 +4366,7 @@ fn substitute_params_expr(expr: &Expression, subst: &HashMap<String, Expression>
                     .collect()
             ),
         Expression::Int(n) => Expression::Int(*n),
-        Expression::Float(n) => Expression::Float(*n),
+        Expression::Dec(n) => Expression::Dec(*n),
     }
 }
 

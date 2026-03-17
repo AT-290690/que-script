@@ -31,8 +31,8 @@ mod tests {
             ),
             ("(tuple 0 true)", "{Int * Bool}"),
             ("(vector (tuple 0 true) (tuple 1 false))", "[{Int * Bool}]"),
-            ("(+. 1.23 2.112)", "Float"),
-            ("(tuple (Int->Float 5) (Float->Int 5.2))", "{Float * Int}"),
+            ("(+. 1.23 2.112)", "Dec"),
+            ("(tuple (Int->Dec 5) (Dec->Int 5.2))", "{Dec * Int}"),
             (
                 r#"(do 
 (let xs (vector (vector (vector))))
@@ -96,7 +96,7 @@ Concequent and alternative must match types
                 "(vector (tuple 0 true) (tuple true 0))",
                 "Cannot unify Int with Bool\n(vector (tuple 0 true) (tuple true 0))",
             ),
-            ("(+ 1.23 2)", "Cannot unify Int with Float\n(+ 1.23 2)"),
+            ("(+ 1.23 2)", "Cannot unify Int with Dec\n(+ 1.23 2)"),
             (
                 r#"(do (let xs (vector (vector (vector))))
 (set! xs (length xs) (vector (vector true)))
@@ -592,7 +592,10 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_cons_builtin_works_as_higher_order_function_value() {
-        let output = run_program_output_with_std_and_opts(r#"(reduce cons [] [[1 2] [3] [4 5]])"#, true);
+        let output = run_program_output_with_std_and_opts(
+            r#"(reduce cons [] [[1 2] [3] [4 5]])"#,
+            true
+        );
         assert_eq!(output, "[1 2 3 4 5]");
     }
 
@@ -666,13 +669,47 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn test_float_div_zero_traps_with_debug_guards() {
         let err = run_program_error_with_debug_guards(
-            r#"(do (let f (lambda z (/. (Int->Float 1) z))) (f (Int->Float 0)))"#
+            r#"(do (let f (lambda z (/. (Int->Dec 1) z))) (f (Int->Dec 0)))"#
         );
         assert!(
             err.contains("unreachable"),
-            "expected unreachable trap for float divide-by-zero, got: {}",
+            "expected unreachable trap for dec divide-by-zero, got: {}",
             err
         );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_decimal_literal_scaling_and_basic_ops() {
+        let output = run_program_output(
+            r#"[ 3.14
+                3.1425
+                (+. 1.5 2.25)
+                (*. 1.5 2.25)
+                (/. 7.5 2.5) ]"#
+        );
+        assert_eq!(output, "[3.14 3.142 3.75 3.375 3]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_decimal_int_conversions() {
+        let output = run_program_output(
+            r#"(do
+                (let a (Dec->Int 3.99))
+                (let b (Int->Dec 7))
+                (tuple a b))"#
+        );
+        assert_eq!(output, "{ 3 7 }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_decimal_scale_env_changes_literal_quantization_and_display() {
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
+        let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "100");
+        let output = run_program_output_unlocked(r#"[ 3.141 3.146 (+. 1.11 2.22) ]"#);
+        assert_eq!(output, "[3.14 3.15 3.33]");
     }
 
     #[test]
@@ -1633,9 +1670,9 @@ Concequent and alternative must match types
             .remove(0);
         let float_expr = crate::parser
             ::parse(
-                "(mean/float (map (lambda x (+. x 1.0)) (filter (lambda x (>. x 2.0)) (range/float 1 10))))"
+                "(mean/dec (map (lambda x (+. x 1.0)) (filter (lambda x (>. x 2.0)) (range/dec 1 10))))"
             )
-            .expect("mean/float input should parse")
+            .expect("mean/dec input should parse")
             .remove(0);
         let avg_expr = crate::parser::parse("(avg 2 4)").expect("avg input should parse").remove(0);
 
@@ -1654,13 +1691,13 @@ Concequent and alternative must match types
             int_fused
         );
         assert!(
-            float_fused.contains("(/. (get __fuse_sum 0) (Int->Float (get __fuse_count 0)))"),
-            "mean/float should emit float division by Int->Float(count), got: {}",
+            float_fused.contains("(/. (get __fuse_sum 0) (Int->Dec (get __fuse_count 0)))"),
+            "mean/dec should emit dec division by Int->Dec(count), got: {}",
             float_fused
         );
         assert!(
-            !float_fused.contains("(mean/float "),
-            "mean/float call should be fused away, got: {}",
+            !float_fused.contains("(mean/dec "),
+            "mean/dec call should be fused away, got: {}",
             float_fused
         );
         assert_eq!(avg_fused, "(avg 2 4)", "avg should remain binary and unfused");
@@ -1827,7 +1864,7 @@ Concequent and alternative must match types
     #[test]
     fn test_typed_optimization_some_i_every_i_and_range_float_fuse() {
         let some_i = crate::parser
-            ::parse("(some/i? (lambda x i (> (+ x i) 10)) (range/float 1 6))")
+            ::parse("(some/i? (lambda x i (> (+ x i) 10)) (range/dec 1 6))")
             .expect("input should parse")
             .remove(0);
         let every_i = crate::parser
@@ -1854,8 +1891,8 @@ Concequent and alternative must match types
             fused_every
         );
         assert!(
-            fused_some.contains("(Int->Float"),
-            "range/float fusion should convert loop index to float value, got: {}",
+            fused_some.contains("(Int->Dec"),
+            "range/dec fusion should convert loop index to dec value, got: {}",
             fused_some
         );
     }
@@ -2476,7 +2513,7 @@ Concequent and alternative must match types
                 items.iter().any(|item| {
                     item.get("message")
                         .and_then(|v| v.as_str())
-                        .map(|msg| msg.contains("Cannot unify Int with Float"))
+                        .map(|msg| msg.contains("Cannot unify Int with Dec"))
                         .unwrap_or(false)
                 })
             })
@@ -2496,7 +2533,7 @@ Concequent and alternative must match types
 
         assert!(
             has_unify_message,
-            "expected diagnostics to include 'Cannot unify Int with Float', got: {}",
+            "expected diagnostics to include 'Cannot unify Int with Dec', got: {}",
             diagnostics_json
         );
         assert!(
@@ -2851,7 +2888,7 @@ Concequent and alternative must match types
             r#"
 (let box (lambda value [value]))
 (let int box)
-(let float box)
+(let dec box)
 (let bool box)
 (let set-box! (lambda vrbl x (set! vrbl 0 x)))
 (let =! (lambda vrbl x (set! vrbl 0 x)))
@@ -4570,23 +4607,23 @@ L82")
                 "[50]",
             ),
             (
-                "{  (std/vector/float/mean (range/float 1 10)) (Float->Int (std/vector/float/mean (range/float 1 10))) }",
+                "{  (std/vector/dec/mean (range/dec 1 10)) (Dec->Int (std/vector/dec/mean (range/dec 1 10))) }",
                 "{ 5.5 5 }",
             ),
             (
-                "{ (map Float->Int (range/float 1 10)) (map Int->Float (range/int 1 10)) }",
+                "{ (map Dec->Int (range/dec 1 10)) (map Int->Dec (range/int 1 10)) }",
                 "{ [1 2 3 4 5 6 7 8 9 10] [1 2 3 4 5 6 7 8 9 10] }",
             ),
             (
                 "(=? 
     (=
-        (Float->Int 
-        (sum/float (range/float 0 10)))
+        (Dec->Int 
+        (sum/dec (range/dec 0 10)))
         (sum/int (range/int 0 10)))
     (=.
-        (Int->Float 
+        (Int->Dec 
         (sum/int (range/int 0 10)))
-        (sum/float (range/float 0 10))))",
+        (sum/dec (range/dec 0 10))))",
                 "true",
             ),
             (

@@ -258,14 +258,9 @@ fn run() -> io::Result<()> {
     let cli = parse_cli().map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
     let std_ast = que::baked::load_ast();
-    let std_items = match &std_ast {
-        Expression::Apply(items) => items[1..].to_vec(),
-        _ => {
-            return Err(
-                io::Error::new(io::ErrorKind::InvalidData, "failed to load standard library AST")
-            );
-        }
-    };
+    let std_items = que::baked
+        ::ast_to_definitions(std_ast, "active library")
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     let defs = build_final_symbol_defs(cli.include_std)?;
 

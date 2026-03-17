@@ -414,20 +414,21 @@ fn native_shell_env_help(bin_name: &str) -> String {
            QUE_VEC_MIN_CAP    Minimum initial vector capacity (default: 2, range: 1..4096).\n\
            QUE_VEC_GROWTH_NUM Vector growth numerator (default: 2, range: 1..64).\n\
            QUE_VEC_GROWTH_DEN Vector growth denominator (default: 1, range: 1..64).\n\
+           QUE_DECIMAL_SCALE  Dec fixed-point scale (default: 1000). Must be a power of 10 up to 1000000.\n\
            QUE_DIV_ZERO_CHECK Division/modulo by zero trap check (default: off). Enable with 1|true|on|yes.\n\
            QUE_INT_OVERFLOW_CHECK   Integer overflow trap check for +,-,* and mut ops (default: off).\n\
-           QUE_FLOAT_OVERFLOW_CHECK Float NaN/Inf trap check for +.,-.,*.,/. and mut ops (default: off).\n\
+           QUE_FLOAT_OVERFLOW_CHECK Dec NaN/Inf trap check for +.,-.,*.,/. and mut ops (default: off).\n\
          \n\
          Example:\n\
-           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 {bin} script.que\n\
+           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 QUE_DECIMAL_SCALE=1000 {bin} script.que\n\
          \n\
          Setup some env flags:\n\
          \n\
-           export QUE_WASM_OPT=speed QUE_TCO=aggressive QUE_DEVIRTUALIZE=aggressive QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=2 QUE_VEC_GROWTH_DEN=1\n\
+           export QUE_WASM_OPT=speed QUE_TCO=aggressive QUE_DEVIRTUALIZE=aggressive QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=2 QUE_VEC_GROWTH_DEN=1 QUE_DECIMAL_SCALE=1000\n\
          \n\
          Fallback to default ones:\n\
          \n\
-           unset QUE_WASM_OPT QUE_TCO QUE_DEVIRTUALIZE QUE_BOUNDS_CHECK QUE_VEC_MIN_CAP QUE_VEC_GROWTH_NUM QUE_VEC_GROWTH_DEN",
+           unset QUE_WASM_OPT QUE_TCO QUE_DEVIRTUALIZE QUE_BOUNDS_CHECK QUE_VEC_MIN_CAP QUE_VEC_GROWTH_NUM QUE_VEC_GROWTH_DEN QUE_DECIMAL_SCALE",
         bin = bin_name
     )
 }
@@ -459,12 +460,12 @@ fn native_shell_learn() -> &'static str {
       - '.' skips/ignores rest; for vectors rest marker is last.\n\
     \n\
     Types:\n\
-    - Int, Float, Bool, Char\n\
+    - Int, Dec, Bool, Char\n\
     - Vector [T] (homogeneous)\n\
     - Tuple {A B}\n\
     - String is [Char]\n\
-    - Equality example: = (Int), =. (Float), =# (Char), =? (Bool)\n\
-    - Operator suffixes: '.' for Float, '#' for Char, '?' for Bool.\n\
+    - Equality example: = (Int), =. (Dec), =# (Char), =? (Bool)\n\
+    - Operator suffixes: '.' for Dec, '#' for Char, '?' for Bool.\n\
     - String literal uses double quotes, e.g. \"Hello World\".\n\
     - Char literal uses single quotes, e.g. 'a'.\n\
     \n\
@@ -473,7 +474,7 @@ fn native_shell_learn() -> &'static str {
     - `(comp f g h)` builds a function equivalent to `(lambda x (h (g (f x))))`\n\
     \n\
     Mutation and effects:\n\
-    - mut/alter! are for local primitive scalar mutation only (Int/Float/Bool/Char), same lambda scope.\n\
+    - mut/alter! are for local primitive scalar mutation only (Int/Dec/Bool/Char), same lambda scope.\n\
     - &mut/&alter! are for shared mutation across lambda scopes via boxed references.\n\
     - Vector/state mutation uses set!, push!, pop!.\n\
     - Functions with side effects (mutation or I/O) must end with !.\n\
@@ -483,7 +484,7 @@ fn native_shell_learn() -> &'static str {
     Built-ins:\n\
     - set! pop! length get car cdr cons fst snd while\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
-    and or not & | ^ >> << ~ Int->Float Float->Int true false nil\n\
+    and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! clear! list-dir! mkdir! read! delete! write! move!"
 }
 
@@ -1170,7 +1171,7 @@ fn typed_node_label(expr: &Expression) -> String {
     match expr {
         Expression::Word(name) => name.clone(),
         Expression::Int(v) => v.to_string(),
-        Expression::Float(v) => format!("{:?}", v),
+        Expression::Dec(v) => format!("{:?}", v),
         Expression::Apply(items) => {
             if items.is_empty() {
                 return "()".to_string();
