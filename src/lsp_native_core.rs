@@ -3,13 +3,21 @@ use crate::parser::{ self, Expression };
 use crate::types::{ create_builtin_environment, Type, TypeEnv };
 use std::collections::{ HashMap, HashSet };
 
-pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 6] = [
+pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 14] = [
     ("alter!", "T -> T -> ()"),
     ("&alter!", "[T] -> T -> ()"),
     ("vector", "T... -> [T]"),
     ("string", "Char... -> [Char]"),
     ("tuple", "T... -> {T...}"),
     ("loop", "Int -> Int -> (Int -> ()) -> ()"),
+    ("letmacro", "compile-time macro definition"),
+    ("quote", "compile-time syntax quote"),
+    ("qq", "compile-time quasiquote"),
+    ("uq", "compile-time unquote"),
+    ("uqs", "compile-time unquote-splice"),
+    ("gensym", "compile-time fresh symbol"),
+    ("macroexpand", "compile-time full macro expansion"),
+    ("macroexpand-1", "compile-time single-step macro expansion"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,7 +149,7 @@ pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<Strin
     for expr in std_defs {
         if let Expression::Apply(items) = expr {
             if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
-                if keyword == "let" || keyword == "let*" || keyword == "mut" {
+                if keyword == "let" || keyword == "let*" || keyword == "mut" || keyword == "letmacro" {
                     names.insert(name.clone());
                 }
             }
@@ -624,7 +632,7 @@ pub fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut Has
 fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
     if let Expression::Apply(items) = expr {
         if let Some(Expression::Word(head)) = items.first() {
-            if head == "let" || head == "let*" || head == "mut" {
+            if head == "let" || head == "let*" || head == "mut" || head == "letmacro" {
                 if let Some(Expression::Word(name)) = items.get(1) {
                     out.insert(name.clone());
                 }
@@ -643,7 +651,7 @@ fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
 fn collect_pattern_words(expr: &Expression, out: &mut HashSet<String>) {
     match expr {
         Expression::Word(word) => {
-            if word != "." {
+            if word != "." && word != "_" {
                 out.insert(word.clone());
             }
         }

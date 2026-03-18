@@ -117,7 +117,7 @@ fn load_embedded_wasm_library() -> Result<Expression, String> {
         include_str!("../lisp/fp.lisp"),
         include_str!("../lisp/ds.lisp")
     );
-    parser::build(&combined).map_err(|e| format!("Failed to parse embedded wasm library: {}", e))
+    parse_ast_source(&combined, "embedded wasm library")
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -130,7 +130,7 @@ fn load_embedded_test_library() -> Result<Expression, String> {
         include_str!("../lisp/fp.lisp"),
         include_str!("../lisp/ds.lisp")
     );
-    parser::build(&combined).map_err(|e| format!("Failed to parse embedded test library: {}", e))
+    parse_ast_source(&combined, "embedded test library")
 }
 
 pub fn load_ast() -> Expression {
