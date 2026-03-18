@@ -57,7 +57,9 @@ fn parse_output_path_from_argv(argv: &[String]) -> Result<PathBuf, String> {
 }
 
 fn parse_definitions_only(source: &str, label: &str) -> Result<Vec<Expression>, String> {
-    let root = que::parser::build(source).map_err(|e| format!("failed to parse '{}': {}", label, e))?;
+    let root = que::parser
+        ::build_library(source)
+        .map_err(|e| format!("failed to parse '{}': {}", label, e))?;
     let Expression::Apply(items) = root else {
         return Err(format!("'{}' did not parse as top-level do expression", label));
     };
@@ -96,7 +98,7 @@ fn parse_definitions_only(source: &str, label: &str) -> Result<Vec<Expression>, 
                 )
             );
         };
-        if kw != "let" && kw != "let*" && kw != "mut" {
+        if kw != "let" && kw != "let*" && kw != "letmacro" && kw != "mut" {
             return Err(
                 format!(
                     "'{}' must contain only top-level definitions; found '{}' at form {}",
@@ -122,7 +124,13 @@ fn load_defs_from_path(path: &str, require_que_ext: bool) -> Result<Vec<Expressi
 
 fn base_library_defs() -> Result<Vec<Expression>, String> {
     let mut defs = Vec::new();
-    for path in ["./lisp/const.lisp", "./lisp/std.lisp", "./lisp/fp.lisp", "./lisp/ds.lisp"] {
+    for path in [
+        "./lisp/const.lisp",
+        "./lisp/macros.lisp",
+        "./lisp/std.lisp",
+        "./lisp/fp.lisp",
+        "./lisp/ds.lisp",
+    ] {
         defs.extend(load_defs_from_path(path, false)?);
     }
     Ok(defs)
@@ -132,8 +140,8 @@ fn usage(bin_name: &str) -> String {
     format!(
         "Usage: {bin} [--bundle <helpers.que> [more.que ...]] [helpers.que ...] [--out <que-lib.lisp>]\n\
          \n\
-         Bakes std/fp/ds/const plus optional helper bundles into an external library file.\n\
-         Helper bundles must contain only top-level definitions (let/let*/mut).\n\
+         Bakes const/macros/std/fp/ds plus optional helper bundles into an external library file.\n\
+         Helper bundles must contain only top-level definitions (let/let*/letmacro/mut).\n\
          Rebuild/reinstall binaries (and restart LSP/editor) after baking.\n\
          After install, helper bundle source files may be removed.\n\
          \n\

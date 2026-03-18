@@ -234,6 +234,123 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_parser_expands_top_level_letmacro_before_desugar() {
+        let expr = crate::parser
+            ::build(
+                "(do
+                    (letmacro unless (lambda cond body (qq (if (not (uq cond)) (uq body) nil))))
+                    (unless false (+ 1 2)))"
+            )
+            .expect("letmacro program should build");
+        let built = expr.to_lisp();
+        assert!(
+            !built.contains("letmacro"),
+            "macro definitions should be compile-time only, got: {}",
+            built
+        );
+        assert!(
+            !built.contains("(unless "),
+            "macro call should be expanded away before desugar, got: {}",
+            built
+        );
+        assert!(
+            built.contains("(if (not false) (+ 1 2) nil)"),
+            "unless macro should expand into if/not form, got: {}",
+            built
+        );
+    }
+
+    #[test]
+    fn test_parser_macroexpand_and_macroexpand_1_render_expanded_source() {
+        let expr = crate::parser
+            ::build(
+                "(do
+                    (letmacro unless (lambda cond body (qq (if (not (uq cond)) (uq body) nil))))
+                    (letmacro when-not (lambda cond body (qq (unless (uq cond) (uq body)))))
+                    [(macroexpand-1 (when-not false (+ 1 2)))
+                     (macroexpand (when-not false (+ 1 2)))])"
+            )
+            .expect("macroexpand forms should build");
+        let built = expr.to_lisp();
+        assert!(
+            built.contains("(string 40 117 110 108 101 115 115"),
+            "macroexpand-1 should render one-step expansion as a string literal, got: {}",
+            built
+        );
+        assert!(
+            built.contains("(string 40 105 102 32 40 110 111 116"),
+            "macroexpand should render full expansion as a string literal, got: {}",
+            built
+        );
+    }
+
+    #[test]
+    fn test_parser_variadic_letmacro_supports_rest_param_and_splice() {
+        let expr = crate::parser
+            ::build(
+                "(do
+                    (letmacro when (lambda cond . body (qq (if (uq cond) (do (uqs body)) nil))))
+                    (when true (+ 1 2) (+ 3 4) nil))"
+            )
+            .expect("variadic letmacro should build");
+        let built = expr.to_lisp();
+        assert!(
+            built.contains("(if true (do (+ 1 2) (+ 3 4) nil) nil)"),
+            "variadic macro should splice rest body into do, got: {}",
+            built
+        );
+    }
+
+    #[test]
+    fn test_parser_multiclause_letmacro_dispatches_by_arity() {
+        let expr = crate::parser
+            ::build(
+                "(do
+                    (letmacro unless
+                      ((cond) (qq (if (uq cond) nil nil)))
+                      ((cond body) (qq (if (uq cond) nil (uq body))))
+                      ((cond then else) (qq (if (uq cond) (uq else) (uq then)))))
+                    [(unless false)
+                     (unless false (+ 1 2))
+                     (unless false (+ 1 2) 9)])"
+            )
+            .expect("multi-clause letmacro should build");
+        let built = expr.to_lisp();
+        assert!(
+            built.contains("(if false nil nil)"),
+            "one-arg clause should expand correctly, got: {}",
+            built
+        );
+        assert!(
+            built.contains("(if false nil (+ 1 2))"),
+            "two-arg clause should expand correctly, got: {}",
+            built
+        );
+        assert!(
+            built.contains("(if false 9 (+ 1 2))"),
+            "three-arg clause should expand correctly, got: {}",
+            built
+        );
+    }
+
+    #[test]
+    fn test_parser_macro_expansion_errors_include_call_context() {
+        let err = crate::parser
+            ::build("(do (letmacro two (lambda a b (qq (+ (uq a) (uq b))))) (two 1))")
+            .expect_err("macro arity mismatch should fail");
+        assert!(
+            err.contains("Macro 'two' expected one of [2] args"),
+            "error should include macro arity expectation, got: {}",
+            err
+        );
+        assert!(
+            err.contains("(two 1)"),
+            "error should include failing macro call, got: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_lsp_undefined_variable_suggestions_rank_typo_closest() {
         let suggestions = crate::lsp_native_core::suggest_undefined_variable_candidates(
             "Undefined variable: rnage",
@@ -587,6 +704,92 @@ Concequent and alternative must match types
     fn test_cons_builtin_preferred_over_std_definition() {
         let output = run_program_output_with_std_and_opts(r#"(cons [ 1 2 ] [ 3 4 ])"#, true);
         assert_eq!(output, "[1 2 3 4]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_letmacro_expands_and_runs_through_normal_pipeline() {
+        let output = run_program_output(
+            r#"(do
+                (letmacro inc1 (lambda x (qq (+ (uq x) 1))))
+                (inc1 41))"#
+        );
+        assert_eq!(output, "42");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_library_macros_expand_library_defs_and_user_program() {
+        let lib_ast = crate::parser
+            ::build_library(
+                r#"(do
+                    (letmacro inc1 (lambda x (qq (+ (uq x) 1))))
+                    (let add2 (lambda x (inc1 (inc1 x)))))"#
+            )
+            .expect("library source should parse without stripping macros");
+        let lib_defs = crate::baked
+            ::ast_to_definitions(lib_ast, "test library")
+            .expect("library defs should flatten");
+        let expr = crate::parser
+            ::merge_std_and_program("(inc1 (add2 40))", lib_defs)
+            .expect("library macro should expand in std defs and user program");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("expanded program should compile");
+        #[cfg(feature = "io")]
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
+        let argv: Vec<String> = Vec::new();
+        #[cfg(feature = "io")]
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
+        );
+        #[cfg(not(feature = "io"))]
+        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
+        assert_eq!(run_result.expect("program should run"), "43");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_macroexpand_and_variadic_when_macro_work() {
+        let expand_output = run_program_output(
+            r#"(do
+                (letmacro unless
+                    ((cond) (qq (if (uq cond) nil nil)))
+                    ((cond body) (qq (if (uq cond) nil (uq body))))
+                    ((cond then else) (qq (if (uq cond) (uq else) (uq then)))))
+                (letmacro when-not (lambda cond body (qq (unless (uq cond) (uq body)))))
+                [
+                    (macroexpand-1 (when-not false (+ 1 2)))
+                    (macroexpand (when-not false (+ 1 2)))
+                ])"#
+        );
+        assert_eq!(expand_output, "[(unless false (+ 1 2)) (if false nil (+ 1 2))]");
+
+        let when_output = run_program_output(
+            r#"(do
+                (letmacro when (lambda cond . body (qq (if (uq cond) (do (uqs body)) nil))))
+                (when true (+ 1 2) (+ 3 4) nil))"#
+        );
+        assert_eq!(when_output, "0");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_multiclause_unless_macro_expands_legacy_shapes_for_unit_bodies() {
+        let output = run_program_output(
+            r#"(do
+                (letmacro unless
+                    ((cond) (qq (if (uq cond) nil nil)))
+                    ((cond body) (qq (if (uq cond) nil (uq body))))
+                    ((cond then else) (qq (if (uq cond) (uq else) (uq then)))))
+                [(unless false)
+                 (unless false nil)
+                 (unless false nil nil)])"#
+        );
+        assert_eq!(output, "[0 0 0]");
     }
 
     #[test]

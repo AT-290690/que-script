@@ -459,6 +459,15 @@ fn native_shell_learn() -> &'static str {
       - vectors: [a b c]\n\
       - '.' skips/ignores rest; for vectors rest marker is last.\n\
     \n\
+    Macros:\n\
+    - Top-level only: (letmacro name ...)\n\
+    - Single-clause: (letmacro inc1 (lambda x (qq (+ (uq x) 1))))\n\
+    - Multi-clause by arity: (letmacro unless ((cond) ...) ((cond body) ...) ((cond then else) ...))\n\
+    - qq builds syntax, uq inserts one syntax value, uqs splices a rest syntax list into qq.\n\
+    - (macroexpand-1 expr) expands one macro layer and returns the expanded source as a string.\n\
+    - (macroexpand expr) fully expands recursively and returns the expanded source as a string.\n\
+    - Macros run at compile time before type inference; infer only sees the expanded result.\n\
+    \n\
     Types:\n\
     - Int, Dec, Bool, Char\n\
     - Vector [T] (homogeneous)\n\

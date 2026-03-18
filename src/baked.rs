@@ -32,7 +32,7 @@ fn default_external_library_path() -> PathBuf {
 }
 
 fn parse_ast_source(source: &str, label: &str) -> Result<Expression, String> {
-    parser::build(source).map_err(|e| format!("Failed to parse library '{}': {}", label, e))
+    parser::build_library(source).map_err(|e| format!("Failed to parse library '{}': {}", label, e))
 }
 
 pub fn ast_to_definitions(ast: Expression, label: &str) -> Result<Vec<Expression>, String> {
@@ -110,8 +110,9 @@ fn load_from_external_paths() -> Result<Option<Expression>, String> {
 #[cfg(target_arch = "wasm32")]
 fn load_embedded_wasm_library() -> Result<Expression, String> {
     let combined = format!(
-        "{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}",
         include_str!("../lisp/const.lisp"),
+        include_str!("../lisp/macros.lisp"),
         include_str!("../lisp/std.lisp"),
         include_str!("../lisp/fp.lisp"),
         include_str!("../lisp/ds.lisp")
@@ -122,8 +123,9 @@ fn load_embedded_wasm_library() -> Result<Expression, String> {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn load_embedded_test_library() -> Result<Expression, String> {
     let combined = format!(
-        "{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}",
         include_str!("../lisp/const.lisp"),
+        include_str!("../lisp/macros.lisp"),
         include_str!("../lisp/std.lisp"),
         include_str!("../lisp/fp.lisp"),
         include_str!("../lisp/ds.lisp")
