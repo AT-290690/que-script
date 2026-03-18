@@ -22,11 +22,11 @@ mod tests {
             ("nil", "()"),
             ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
             (
-                "(do (let fn! (lambda a b c d (do (set! a (length a) (if d (lambda x (> (+ c b) x)) (lambda . false))) nil))) fn!)",
+                "(do (let fn! (lambda a b c d (do (set! a (length a) (if d (lambda x (> (+ c b) x)) (lambda _ false))) nil))) fn!)",
                 "[Int -> Bool] -> Int -> Int -> Bool -> ()",
             ),
             (
-                "(do (let Int 0) (let as (lambda . t t)) (let xs (as (vector) (vector Int))) xs)",
+                "(do (let Int 0) (let as (lambda _ t t)) (let xs (as (vector) (vector Int))) xs)",
                 "[Int]",
             ),
             ("(tuple 0 true)", "{Int * Bool}"),
@@ -68,6 +68,25 @@ xs)"#,
                 panic!("No expressions found in parsed result for: {}", inp);
             }
         }
+    }
+
+    #[test]
+    fn test_type_inference_allows_repeated_discard_params() {
+        let exprs = crate::parser::parse("(lambda _ _ 0)").unwrap();
+        let expr = exprs.first().expect("lambda should parse");
+        let result = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .map(|(typ, _)| typ.to_string());
+        assert!(result.is_ok(), "discard params should infer successfully");
+        let typ = result.unwrap();
+        assert!(
+            typ.ends_with("-> Int"),
+            "discard-param lambda should still infer as a function, got {}",
+            typ
+        );
     }
 
     #[test]
@@ -334,6 +353,32 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_parser_vector_destructure_uses_explicit_dot_rest() {
+        let expr = crate::parser
+            ::build("(lambda [a b . rest] [a b rest])")
+            .expect("explicit vector rest pattern should build");
+        let built = expr.to_lisp();
+        assert!(
+            built.contains("(let rest (cdr"),
+            "vector rest should lower through cdr binding, got: {}",
+            built
+        );
+    }
+
+    #[test]
+    fn test_parser_vector_destructure_without_dot_no_longer_captures_implicit_rest() {
+        let expr = crate::parser
+            ::build("(lambda [a b c] [a b c])")
+            .expect("fixed-width vector pattern should build");
+        let built = expr.to_lisp();
+        assert!(
+            !built.contains("(let c (cdr"),
+            "last vector binding should not capture implicit rest anymore, got: {}",
+            built
+        );
+    }
+
+    #[test]
     fn test_parser_macro_expansion_errors_include_call_context() {
         let err = crate::parser
             ::build("(do (letmacro two (lambda a b (qq (+ (uq a) (uq b))))) (two 1))")
@@ -343,11 +388,7 @@ Concequent and alternative must match types
             "error should include macro arity expectation, got: {}",
             err
         );
-        assert!(
-            err.contains("(two 1)"),
-            "error should include failing macro call, got: {}",
-            err
-        );
+        assert!(err.contains("(two 1)"), "error should include failing macro call, got: {}", err);
     }
 
     #[test]
@@ -3823,7 +3864,7 @@ xs"#,
             ),
             ("(std/int/collinear? [[ 3 8 ] [ 5 10 ] [ 7 12 ]])", "true"),
             (
-                r#"(let fn (lambda [ a b c r ] (+ a b c (std/vector/int/product r))))
+                r#"(let fn (lambda [ a b c . r ] (+ a b c (std/vector/int/product r))))
 (fn [ 1 2 3 4 5 6 ])"#,
                 "126",
             ),
@@ -3851,7 +3892,7 @@ D:=,=,=,+,=,=,=,+,=,=")
     (std/vector/map std/vector/int/sum)
     (std/vector/map/i (lambda x i [i (+ x 100)]))
     (std/vector/sort! (lambda a b (> (get a 1) (get b 1))))
-    (std/vector/map (lambda [i .] (get letters i)))))))
+    (std/vector/map (lambda [i] (get letters i)))))))
 (<| input (parse) (part1!))"#,
                 "BDCA",
             ),
@@ -3978,9 +4019,9 @@ D:=,=,=,+,=,=,=,+,=,=")
    (<| xs
      (std/convert/string->vector std/char/space)
      (std/vector/filter std/vector/not-empty?)
-     (std/vector/filter/i (lambda . i (std/int/even? i)))
+     (std/vector/filter/i (lambda _ i (std/int/even? i)))
      (std/vector/map std/convert/chars->integer))))
- (std/vector/map (lambda [ a b c . ] (= (+ a b) c)))
+ (std/vector/map (lambda [ a b c ] (= (+ a b) c)))
  (std/vector/count-of (lambda x (eq x true))))"#,
                 "4",
             ),
@@ -4126,7 +4167,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[[a 1 b 2 c 3] [1 x 2 y]]",
             ),
             (
-                r#"(let fn (lambda [ a b . ] [ x y . ] (std/int/manhattan-distance a b x y)))
+                r#"(let fn (lambda [ a b ] [ x y ] (std/int/manhattan-distance a b x y)))
 (fn [ 1 2 ] [ 3 4 ])"#,
                 "4",
             ),
@@ -4216,10 +4257,10 @@ out
         (Vector/cons [std/char/comma])
         (String->Vector std/char/space)
         (map (lambda x (drop/last 1 x)))
-        (map (lambda [ D M ] [ (Char->Int D) (std/convert/chars->integer M) ])))))
-(let delta/pairs (lambda [ y x . ] (+ (abs y) (abs x))))
+        (map (lambda [ D . M ] [ (Char->Int D) (std/convert/chars->integer M) ])))))
+(let delta/pairs (lambda [ y x ] (+ (abs y) (abs x))))
 (let part1 (lambda input (|> input
-    (reduce (lambda [ y x a .] [ D M .] (do
+    (reduce (lambda [ y x a ] [ D M ] (do
                                 (let F (mod (+ a (if (=# (Int->Char D) 'R') 1 3)) 4))
                                 (cond 
                                     (= F 0) [y (+ x M) F]
@@ -4259,12 +4300,12 @@ out
 
       (integer result 0)
 
-      (for (lambda [ D M . ]
+      (for (lambda [ D M ]
           (if (= (get result) 0)
               (do
                 (&alter! facing (turn (get facing) D))
                 (loop 0 M
-                  (lambda .
+                  (lambda _
                     (if (= (get result) 0)
                         (do
                           (let p (step (get y) (get x) (get facing)))
@@ -4354,7 +4395,7 @@ b
                     { Rec/return [ { n acc } ] }
                     { Rec/push [ { (- n 1) (+ acc n) } ] })))))))
 
-            (let factorialVec! (lambda N (first (pull! (Rec [ 1 N ] (lambda [ acc n . ]
+            (let factorialVec! (lambda N (first (pull! (Rec [ 1 N ] (lambda [ acc n ]
                   (if (= n 0)
                       { Rec/return [ [ acc n ] ]}
                       { Rec/push [ [ (* acc n) (- n 1) ] ] })))))))
@@ -4372,7 +4413,7 @@ b
   (let tail (|> (cdr parts) (car) (String->Vector ',') (map Chars->Integer)))
   { head tail })))
 
-(let part1 (lambda { . nums } (do 
+(let part1 (lambda { _ nums } (do 
 (let sword [[-1 (get nums 0) -1]])
 (loop 1 (length nums) (lambda i (do
   (let num (get nums i))
@@ -4462,16 +4503,16 @@ L82")
 (let parse (lambda xs 
   (|> xs 
     (String->Vector nl)
-    (map (lambda [d r] 
+    (map (lambda [d . r] 
       [(if (=# d 'L') -1 1) (Chars->Integer r)])))))
 
 (let part1 (lambda xs 
-  (snd (reduce (lambda { dial counter } [d r .] (do 
+  (snd (reduce (lambda { dial counter } [d r] (do 
       (let res (emod (+ dial (* d r)) 100))
       { res (+ counter (Bool->Int (= res 0))) })) { 50 0 } xs))))
 
 (let part2 (lambda xs 
-  (snd (reduce (lambda { dial counter } [d r .] (do 
+  (snd (reduce (lambda { dial counter } [d r] (do 
       (let res (emod (+ dial (* d r)) 100))
       (let rng [dial])
       (loop 1 r (lambda i (push! rng (emod (+ (at rng -1) (* 1 d)) 100)))) 
@@ -4546,7 +4587,7 @@ L82")
         (neighborhood neighborhood/moore y x (lambda cell dir y x (+= ACC cell)) input)
         (if (< (get ACC) 4) (push! rem [ y x ])))))))))
         (if (empty? rem) total (do 
-        (for (lambda [y x .] (set! (get input y) x 0)) rem)
+        (for (lambda [y x] (set! (get input y) x 0)) rem)
         (rec (+ total (length rem))))))))
     (rec 0))))
 
@@ -4567,20 +4608,20 @@ L82")
 32")
 
 (let parse (lambda input (do 
-  (let [ p1 p2 . ] (String->Vector '*' input))
+  (let [ p1 p2 ] (String->Vector '*' input))
   (let A (drop/last 1 p1))
   (let B (drop/first 1 p2))
   { (map (lambda x (map BigInt/new (String->Vector '-' x))) (String->Vector nl A)) (map BigInt/new (String->Vector nl B)) })))
 
-(let part1 (lambda { ranges fruits } (length (filter (lambda fruit (some? (lambda [ low high . ] (and (BigInt/gte? fruit low) (BigInt/lte? fruit high))) ranges)) fruits))))
+(let part1 (lambda { ranges fruits } (length (filter (lambda fruit (some? (lambda [ low high ] (and (BigInt/gte? fruit low) (BigInt/lte? fruit high))) ranges)) fruits))))
 
-(let part2 (lambda { rng . } (do
-  (let ranges (sort (lambda [ a . ] [ b . ] (BigInt/lt? a b)) rng))
+(let part2 (lambda { rng _ } (do
+  (let ranges (sort (lambda [ a ] [ b  ] (BigInt/lt? a b)) rng))
   (variable low (get ranges 0 0))
   (variable high (get ranges 0 1))
   (variable out [ 0 ])
   (loop 1 (length ranges) (lambda i (do 
-    (let [ dlow dhigh . ] (get ranges i))
+    (let [ dlow dhigh ] (get ranges i))
     (if (BigInt/gte? (get high) dlow) (do 
       (&alter! low (if (BigInt/lt? (get low) dlow) (get low) dlow))
       (&alter! high (if (BigInt/gt? (get high) dhigh) (get high) dhigh))) (do 
@@ -4648,7 +4689,7 @@ L82")
   (while (Que/not-empty? queue) (do 
     (let current (Que/peek queue))
     (Que/deque! queue)
-    (let [ y x . ] current)
+    (let [ y x ] current)
     (let key (cons (Integer->String y) "-" (Integer->String x)))
     (if (and (std/vector/3d/in-bounds? input y x) (not (Set/has? key visited))) (do
         (Set/add! visited key)
@@ -4665,7 +4706,7 @@ L82")
   (while (Que/not-empty? queue) (do 
     (let current (Que/peek queue))
     (Que/deque! queue)
-    (let [ y x c . ] current)
+    (let [ y x c ] current)
     (if (std/vector/3d/in-bounds? input y x) (do
         (if (=# (get input y x) '^') (do 
             (Que/enque! queue [ y (+ x 1) c ])
@@ -4699,7 +4740,7 @@ L82")
 (let solution (lambda input (do
   (let data (map (lambda x (map identity x)) input))
   (variable beam [ 0 ])
-  (let timeline (map (lambda . [ 0 ]) (zeroes (length (get data 0)))))
+  (let timeline (map (lambda _ [ 0 ]) (zeroes (length (get data 0)))))
   (loop 0 (length data) (lambda y (do 
     (let line (get data y))
     (loop 0 (length line) (lambda x (do 
@@ -4745,7 +4786,7 @@ L82")
 862,61,35
 984,92,344
 425,690,689")
-(let distance/3d (lambda [ x1 y1 z1 . ] [ x2 y2 z2 . ] (+ (square (- x2 x1)) (square (- y2 y1)) (square (- z2 z1)))))
+(let distance/3d (lambda [ x1 y1 z1 ] [ x2 y2 z2 ] (+ (square (- x2 x1)) (square (- y2 y1)) (square (- z2 z1)))))
 (let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
 (let part1 (lambda input (do
   (let len (length input))
@@ -4753,12 +4794,12 @@ L82")
   (loop 0 len (lambda i (do 
     (loop i len (lambda j (if (<> i j) 
       (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) })))))))
-  (sort! dist (lambda { . d1 } { . d2 } (< d1 d2)))
+  (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2)))
   (let edges (map fst dist))
   (let parent (range 0 (- (length input) 1)))
   (let* root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
   (let merge (lambda a b (set! parent (root a) (root b))))
-  (for (lambda [ a b .] (merge a b)) (take/first 10 edges))
+  (for (lambda [ a b ] (merge a b)) (take/first 10 edges))
   (|> 
     (range 0 (- (length input) 1))
     (reduce (lambda a b (do 
@@ -4780,7 +4821,7 @@ L82")
       (push! dist { [i j] (distance/3d (get input i) (get input j)) })))))
 
   ; sort edges by distance
-  (sort! dist (lambda { . d1 } { . d2 } (< d1 d2))) 
+  (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2))) 
   (let edges (|> dist (map fst)))
 
   ; initialize union-find
@@ -4813,7 +4854,7 @@ L82")
 
   ; walk edges until all connected
   (integer answer 0)
-  (for (lambda [ a b . ]
+  (for (lambda [ a b ]
       (if (and (= (get answer) 0) (merge a b) (= (get components) 1))
                 (&alter! answer (* (get (get input a) 0) (get (get input b) 0))))) edges)
   (get answer))))
@@ -4833,8 +4874,8 @@ L82")
 (let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
 (let part1 (lambda input (do
   (let pairs (std/vector/unique-pairs input))
-  (let rect (lambda [ x1 y1 .] [ x2 y2 .] (* (+ 1 (abs (- x1 x2))) (+ 1 (abs (- y1 y2))))))
- (|> pairs (map (lambda [ a b .] (rect a b))) (maximum)))))
+  (let rect (lambda [ x1 y1 ] [ x2 y2 ] (* (+ 1 (abs (- x1 x2))) (+ 1 (abs (- y1 y2))))))
+ (|> pairs (map (lambda [ a b ] (rect a b))) (maximum)))))
 
 [(part1 (parse INPUT))]"#,
                 "[50]",
@@ -4914,10 +4955,10 @@ UUUUD")
             ),
             (
                 r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter digit? x))) (filter not-empty?) (map String->Integer)))))))
-(let part1 (lambda input (|> input (count (lambda [a b c .] (and (> (+ a b) c) (> (+ b c) a) (> (+ a c) b)))))))
+(let part1 (lambda input (|> input (count (lambda [a b c] (and (> (+ a b) c) (> (+ b c) a) (> (+ a c) b)))))))
 (let part2 (lambda input (|> input 
-  (reduce (lambda a [A B C .] (do 
-    (let [ pa pb pc . ] (at a -1))
+  (reduce (lambda a [A B C] (do 
+    (let [ pa pb pc ] (at a -1))
     (push! pa A)
     (push! pb B)
     (push! pc C)
@@ -5125,7 +5166,7 @@ bbrgwb")
     (std/true/option (* 4 5 x))
     (std/int/sqrt/option x)
   ] 
-  (lambda [ a b c . ] (+ a b c))
+  (lambda [ a b c ] (+ a b c))
   -1)
 ))
 
@@ -5307,9 +5348,9 @@ bbrgwb")
             ),
             (
                 r#"
-(let unpack (lambda { . { . { . { y x }}}} (+ y x)))
-(let unnest (lambda [[a b c .] [. d .]] [ a b c d ]))
-(let both (lambda { [ y x z . ] { a b } } (if (or a b) (* (+ y x) z) z)))
+(let unpack (lambda { _ { _ { _ { y x }}}} (+ y x)))
+(let unnest (lambda [[a b c ] [_ d]] [ a b c d ]))
+(let both (lambda { [ y x z ] { a b } } (if (or a b) (* (+ y x) z) z)))
 { (unnest [[ 1 2 3 ] [ 4 5 6 ]]) { (unpack { 1 { 2 { 3 { 4 5 }}}}) (both { [ 2 3 -1 ] { false true } }) } }"#,
                 "{ [1 2 3 5] { 9 -5 } }",
             ),
@@ -5323,7 +5364,7 @@ bbrgwb")
       (for (lambda t (set! counts t (+ 1 (get counts t)))) timers)
       counts)))
 ; [Int] -> [Int] ; length 9
-(let step (lambda [ c0 c1 c2 c3 c4 c5 c6 c7 c8 . ] [ c1 c2 c3 c4 c5 c6 (+ c7 c0) c8 c0 ]))
+(let step (lambda [ c0 c1 c2 c3 c4 c5 c6 c7 c8 ] [ c1 c2 c3 c4 c5 c6 (+ c7 c0) c8 c0 ]))
 ; Int -> [Int] -> [Int]
 (let simulate (lambda days state (do 
     (let* rec (lambda i acc
@@ -5360,8 +5401,8 @@ bbrgwb")
     (do
       (let parts (String->Vector ' ' line))
       (let id (parse-id (get parts 0)))
-      ; (let [ x y . ] (parse-coords (get parts 2)))
-      ; (let [ w h . ] (parse-size (get parts 3)))
+      ; (let [ x y ] (parse-coords (get parts 2)))
+      ; (let [ w h ] (parse-size (get parts 3)))
       (let coords (parse-coords (get parts 2)))
       (let size (parse-size (get parts 3)))
       
@@ -5373,7 +5414,7 @@ bbrgwb")
       { id { x { y { w h } } } })))
 ; {Int * {Int * Int * Int * Int}} -> [[Int]]
 (let claim->points
-  (lambda { . { x { y { w h } } } }
+  (lambda { _ { x { y { w h } } } }
     (flat
         (map (lambda i
             (map (lambda j [ i j ]) 
@@ -5382,7 +5423,7 @@ bbrgwb")
 
 ; [Int Int] -> [Char]
 (let point->key
-  (lambda [ x y . ]
+  (lambda [ x y ]
     (cons (Integer->String x) "," (Integer->String y))))
 
 ; [Char] -> Int
@@ -5477,16 +5518,16 @@ bbrgwb")
                 r#"
 (let fn (lambda { x y } (do 
   (let vec [ 1 2 3 ])
-  (let [ a b . ] vec)
+  (let [ a b ] vec)
       [ a b  x y ]
   )))
 (let { x { y z }} { 10 { [ 1 2 3 ] false} })
-(let def { true { [ 1 2 3 4 5 ] (lambda [ a b ] (+ (sum b) a)) } })
+(let def { true { [ 1 2 3 4 5 ] (lambda [ a . b ] (+ (sum b) a)) } })
 (let { a1 { b1 c1 } } def)
 { z  { (fn { 10 23 }) { a1 (c1 b1)} } }"#,
                 "{ false { [1 2 10 23] { true 15 } } }",
             ),
-            (r#"(let [ a b rest ] [ 1 2 3 4 5 6 ])
+            (r#"(let [ a b . rest ] [ 1 2 3 4 5 6 ])
 { a rest }"#, "{ 1 [3 4 5 6] }"),
             (
                 r#"(let rev (lambda xs (do 
@@ -5515,8 +5556,8 @@ bbrgwb")
   [(if (even? i) (do 
     (++ file-id)
     (let id (get file-id))
-    (Vector/new (lambda . id) ch))
-    (Vector/new (lambda . -1) ch))])) [])))
+    (Vector/new (lambda _ id) ch))
+    (Vector/new (lambda _ -1) ch))])) [])))
   (let blanks (reduce/i (lambda a x i (do (if (= x -1) (push! a i)) a)) [] disk))
   (let* fragment (lambda ind out (do 
     (let i (get blanks ind))
@@ -5718,7 +5759,7 @@ SECRET = SANTA")
                 (exclude empty?)))))
 
 (let ENV (reduce
-  (lambda a [ k v .] (do (Table/set! a k v) a))
+  (lambda a [ k v ] (do (Table/set! a k v) a))
   (buckets 32)
   (parse/env .env)))
 
@@ -5791,11 +5832,11 @@ SECRET = SANTA")
 
             (
                 r#"(let h (lambda payload (do
-(let [a b c .] payload)
+(let [a b c] payload)
 (let* step (lambda i [i i i]))
 (let final-state (step 1))
 (do
-(let [x y z .] final-state)
+(let [x y z] final-state)
 (+ a b x)
 ))))
 (h [1 2 3 4])"#,

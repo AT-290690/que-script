@@ -88,7 +88,7 @@ fn validate_reserved_words_in_binders(expr: &Expression) -> Result<(), String> {
 fn collect_pattern_words(expr: &Expression, acc: &mut HashSet<String>) {
     match expr {
         Expression::Word(w) => {
-            if w != "." {
+            if w != "_" {
                 acc.insert(w.clone());
             }
         }
@@ -635,26 +635,17 @@ fn parse_macro_param_list(
             if dot == "." {
                 if idx + 1 >= params_slice.len() {
                     return Err(
-                        format!(
-                            "letmacro '{}' has '.' without a trailing rest parameter",
-                            macro_name
-                        )
+                        format!("letmacro '{}' has '.' without a trailing rest parameter", macro_name)
                     );
                 }
                 let Expression::Word(rest_name) = &params_slice[idx + 1] else {
                     return Err(
-                        format!(
-                            "letmacro '{}' rest parameter must be a simple word",
-                            macro_name
-                        )
+                        format!("letmacro '{}' rest parameter must be a simple word", macro_name)
                     );
                 };
                 if idx + 2 != params_slice.len() {
                     return Err(
-                        format!(
-                            "letmacro '{}' rest parameter must be the last parameter",
-                            macro_name
-                        )
+                        format!("letmacro '{}' rest parameter must be the last parameter", macro_name)
                     );
                 }
                 rest_param = Some(rest_name.clone());
@@ -700,28 +691,17 @@ fn parse_macro_lambda(expr: &Expression, macro_name: &str) -> Result<MacroClause
 
 fn parse_macro_clause(expr: &Expression, macro_name: &str) -> Result<MacroClause, String> {
     let Expression::Apply(items) = expr else {
-        return Err(
-            format!(
-                "letmacro '{}' clause must look like ((params...) body)",
-                macro_name
-            )
-        );
+        return Err(format!("letmacro '{}' clause must look like ((params...) body)", macro_name));
     };
     if items.len() != 2 {
         return Err(
-            format!(
-                "letmacro '{}' clause must have exactly a parameter list and body",
-                macro_name
-            )
+            format!("letmacro '{}' clause must have exactly a parameter list and body", macro_name)
         );
     }
     let params_expr = &items[0];
     let Expression::Apply(param_items) = params_expr else {
         return Err(
-            format!(
-                "letmacro '{}' clause parameter list must be parenthesized",
-                macro_name
-            )
+            format!("letmacro '{}' clause parameter list must be parenthesized", macro_name)
         );
     };
     let (params, rest_param) = parse_macro_param_list(param_items, macro_name)?;
@@ -756,8 +736,11 @@ fn split_macro_definitions(
     for expr in exprs {
         if let Expression::Apply(items) = &expr {
             if items.len() >= 3 {
-                if let (Some(Expression::Word(kw)), Some(Expression::Word(name))) =
-                    (items.first(), items.get(1))
+                if
+                    let (Some(Expression::Word(kw)), Some(Expression::Word(name))) = (
+                        items.first(),
+                        items.get(1),
+                    )
                 {
                     if kw == "letmacro" {
                         let macro_def = parse_macro_definition(&items[2..], name)?;
@@ -901,23 +884,22 @@ fn expand_macro_call(
     gensym_counter: &mut usize
 ) -> Result<Expression, String> {
     let call_expr = Expression::Apply(
-        std::iter::once(Expression::Word(macro_name.to_string()))
+        std::iter
+            ::once(Expression::Word(macro_name.to_string()))
             .chain(args.iter().cloned())
             .collect()
     );
-    let selected_clause = macro_def
-        .clauses
+    let selected_clause = macro_def.clauses
         .iter()
-        .find(|clause|
+        .find(|clause| (
             if clause.rest_param.is_some() {
                 args.len() >= clause.params.len()
             } else {
                 args.len() == clause.params.len()
             }
-        )
+        ))
         .ok_or_else(|| {
-            let mut expected = macro_def
-                .clauses
+            let mut expected = macro_def.clauses
                 .iter()
                 .map(|clause| {
                     if clause.rest_param.is_some() {
@@ -1000,16 +982,25 @@ fn expand_macros_expr(
                     }
                     "macroexpand-1" => {
                         if items.len() != 2 {
-                            return Err("(macroexpand-1 ...) expects exactly one expression".to_string());
+                            return Err(
+                                "(macroexpand-1 ...) expects exactly one expression".to_string()
+                            );
                         }
                         let expanded = macroexpand_once_expr(&items[1], macros, gensym_counter)?;
                         return Ok(expression_to_string_literal_expr(&expanded));
                     }
                     "macroexpand" => {
                         if items.len() != 2 {
-                            return Err("(macroexpand ...) expects exactly one expression".to_string());
+                            return Err(
+                                "(macroexpand ...) expects exactly one expression".to_string()
+                            );
                         }
-                        let expanded = expand_macros_expr(&items[1], macros, gensym_counter, depth + 1)?;
+                        let expanded = expand_macros_expr(
+                            &items[1],
+                            macros,
+                            gensym_counter,
+                            depth + 1
+                        )?;
                         return Ok(expression_to_string_literal_expr(&expanded));
                     }
                     _ => {}
@@ -1223,7 +1214,7 @@ fn destructure_pattern(
 ) -> Result<(Vec<Expression>, Expression), String> {
     match pattern {
         Expression::Word(name) => {
-            if name == "." {
+            if name == "_" {
                 // skip
                 Ok((vec![], value_expr))
             } else {
@@ -1484,23 +1475,35 @@ fn destructure_vector_pattern(
                 if vector_kw == "vector" {
                     let mut bindings = vec![];
                     let mut element_index = 0;
+                    let mut rest_name = None;
+                    let mut elements_to_process = elements;
 
-                    let has_rest = if let Some(last_elem) = elements.last() {
-                        matches!(last_elem, Expression::Word(name) if name != ".")
-                    } else {
-                        false
-                    };
-
-                    let elements_to_process = if has_rest {
-                        &elements[..elements.len() - 1]
-                    } else {
-                        elements
-                    };
+                    if
+                        let Some(dot_idx) = elements
+                            .iter()
+                            .position(|elem| matches!(elem, Expression::Word(name) if name == "."))
+                    {
+                        if dot_idx + 2 != elements.len() {
+                            return Err(
+                                "Vector pattern rest must look like '[... . rest]' with '.' before the final binding".to_string()
+                            );
+                        }
+                        let Expression::Word(name) = &elements[dot_idx + 1] else {
+                            return Err(
+                                "Vector pattern rest binding must be a simple word".to_string()
+                            );
+                        };
+                        if name == "." {
+                            return Err("Vector pattern rest binding cannot be '.'".to_string());
+                        }
+                        rest_name = Some(name.clone());
+                        elements_to_process = &elements[..dot_idx];
+                    }
 
                     for elem in elements_to_process {
                         match elem {
                             Expression::Word(name) => {
-                                if name == "." {
+                                if name == "_" {
                                     // skip
                                     element_index += 1;
                                 } else {
@@ -1540,31 +1543,28 @@ fn destructure_vector_pattern(
                             }
                             _ => {
                                 return Err(
-                                    "Vector pattern element must be a word, '.', or nested pattern".to_string()
+                                    "Vector pattern element must be a word, '_', '.', or nested pattern".to_string()
                                 );
                             }
                         }
                     }
 
-                    // Handle rest if not skipped
-                    if has_rest {
-                        if let Expression::Word(rest_name) = elements.last().unwrap() {
-                            bindings.push(
-                                Expression::Apply(
-                                    vec![
-                                        Expression::Word("let".to_string()),
-                                        Expression::Word(rest_name.clone()),
-                                        Expression::Apply(
-                                            vec![
-                                                Expression::Word("cdr".to_string()),
-                                                Expression::Word(vector_var.clone()),
-                                                Expression::Int(element_index as i32)
-                                            ]
-                                        )
-                                    ]
-                                )
-                            );
-                        }
+                    if let Some(rest_name) = rest_name {
+                        bindings.push(
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("let".to_string()),
+                                    Expression::Word(rest_name),
+                                    Expression::Apply(
+                                        vec![
+                                            Expression::Word("cdr".to_string()),
+                                            Expression::Word(vector_var.clone()),
+                                            Expression::Int(element_index as i32)
+                                        ]
+                                    )
+                                ]
+                            )
+                        );
                     }
 
                     Ok(bindings)

@@ -457,7 +457,8 @@ fn native_shell_learn() -> &'static str {
     - Destructuring works in params:\n\
       - tuples: {a b}\n\
       - vectors: [a b c]\n\
-      - '.' skips/ignores rest; for vectors rest marker is last.\n\
+      - '_' skips/ignores a binding slot.\n\
+      - vectors use explicit rest: [a b c . rest]\n\
     \n\
     Macros:\n\
     - Top-level only: (letmacro name ...)\n\

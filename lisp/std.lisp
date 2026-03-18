@@ -169,7 +169,7 @@
 (let PSI/comb std/fn/combinator/psi)
 (let PHI/comb std/fn/combinator/phi)
 
-(let std/fn/const (lambda x . x))
+(let std/fn/const (lambda x _ x))
 (let std/fn/return 1)
 (let std/fn/push 2)
 (let std/fn/none 0)
@@ -199,7 +199,7 @@
 
 (let std/vector/empty? (lambda xs (= (length xs) 0)))
 (let std/vector/empty! (lambda xs (if (std/vector/empty? xs) xs (do 
-     (loop 0 (length xs) (lambda . (pop! xs)))
+     (loop 0 (length xs) (lambda _ (pop! xs)))
      xs))))
 (let std/vector/not-empty? (lambda xs (not (= (length xs) 0))))
 (let std/vector/in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
@@ -1552,7 +1552,7 @@ q)))
   (let b (std/vector/reverse b1))
   (let result (as [] [Int]))
   ; Initialize result array with zeros
-  (loop 0 (+ (length a) (length b)) (lambda . (std/vector/push! result 0)))
+  (loop 0 (+ (length a) (length b)) (lambda _ (std/vector/push! result 0)))
   (loop 0 (length a) (lambda i (do
     (integer carry 0)
     (let digit-a (get a i))
@@ -1723,7 +1723,7 @@ q)))
 
 (let std/int/big/pow (lambda a b (if (= b 0) [ 1 ] (do 
     (variable out a)
-    (loop 0 (- b 1) (lambda . (set out (std/int/big/mul (get out) a))))
+    (loop 0 (- b 1) (lambda _ (set out (std/int/big/mul (get out) a))))
     (get out)))))
 
 (let std/int/big/expt (lambda a b (if (and (= (length b) 1) (= (get b 0) 0)) [ 1 ] (do 
@@ -1774,12 +1774,12 @@ q)))
   out)))
 (let std/vector/replicate (lambda n x (do 
   (let out [])
-  (loop 0 n (lambda . (std/vector/push! out x)))
+  (loop 0 n (lambda _ (std/vector/push! out x)))
   out)))
 (let std/vector/int/extreme (lambda xs { (std/vector/int/minimum xs) (std/vector/int/maximum xs) }))
 (let std/tuple/map (lambda { a b } fn (fn a b)))
-(let std/tuple/map/fst (lambda { a . } fn (fn a)))
-(let std/tuple/map/snd (lambda { . b } fn (fn b)))
+(let std/tuple/map/fst (lambda { a _ } fn (fn a)))
+(let std/tuple/map/snd (lambda { _ b } fn (fn b)))
 (let std/tuple/swap (lambda { a b } { b a }))
 
 (let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
@@ -1866,7 +1866,7 @@ q)))
 (let std/tuple/int/mul (lambda { a b } (* a b)))
 (let std/tuple/int/div (lambda { a b } (* a b)))
 
-(let loop/repeat (lambda n fn (loop 0 n (lambda . (fn)))))
+(let loop/repeat (lambda n fn (loop 0 n (lambda _ (fn)))))
 (let loop/some-range? (lambda start end predicate? (do 
   (let* tail-call/loop/some-range? (lambda i out
                           (if (< i end)
@@ -2319,7 +2319,7 @@ q)))
 (let std/vector/char/damerau-levenshtein (lambda a b (do
   (let n (length a))
   (let m (length b))
-  (let matrix (Matrix/new (lambda . . 0) (+ n 1) (+ m 1) ))
+  (let matrix (Matrix/new (lambda _ _ 0) (+ n 1) (+ m 1) ))
 
   (mut i0 0)
   (while (<= i0 n) (do
