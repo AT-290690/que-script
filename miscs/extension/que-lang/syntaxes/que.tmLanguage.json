@@ -3,6 +3,7 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
+    { "include": "#macros" },
     { "include": "#keywords" },
     { "include": "#constants" },
     { "include": "#operators" },
@@ -27,11 +28,19 @@
         }
       ]
     },
+    "macros": {
+      "patterns": [
+        {
+          "name": "entity.name.function.macro.que",
+          "match": "\\b(letmacro|quote|qq|uq|uqs|gensym|macroexpand|macroexpand-1)\\b"
+        }
+      ]
+    },
     "keywords": {
       "patterns": [
         {
           "name": "keyword.control.que",
-          "match": "\\b(letmacro|macroexpand|qq|uq|uqs|cons|while|alter|mut|do|let|let\\*|loop|if|unless|cond|lambda|mod|length|as|get|at|set|pop|push|pull|swap|emod|not|and|or|identity|eq|integer|fixed|boolean|variable|que|string|chars|digits|vector|bigint|tuple|table|fst|snd|car|cdr|has|in-bounds|apply|eq|comp|matrix|shell|Vector|String|Matrix|BigInt|Tuple|Table|Set|Hash|Que|Integer|Floating|Boolean|Heap|map|filter|reduce|every|some|select|exclude|find|sum|product|slice|take|drop|range|flat)\\b"
+          "match": "\\b(unless|when|when-not|cond|cons|while|alter|mut|do|let|let\\*|loop|if|lambda|mod|length|as|get|at|set|pop|push|pull|swap|emod|not|and|or|identity|eq|integer|fixed|boolean|variable|que|string|chars|digits|vector|bigint|tuple|table|fst|snd|car|cdr|has|in-bounds|apply|eq|comp|matrix|shell|Vector|String|Matrix|BigInt|Tuple|Table|Set|Hash|Que|Integer|Floating|Boolean|Heap|map|filter|reduce|every|some|select|exclude|find|sum|product|slice|take|drop|range|flat)\\b"
         }
       ]
     },
