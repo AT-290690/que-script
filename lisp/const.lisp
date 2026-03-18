@@ -1,7 +1,7 @@
 (let *Id* [0])
 (let Id! (lambda (do 
-  (let id (get *Id*))
-  (++ *Id*)
+  (let id (&get *Id*))
+  (&alter! *Id* (+ (&get *Id*) 1))
   id)))
 (let const/int/max-safe 2147483647)
 (let const/int/min-safe -2147483648)
@@ -12,7 +12,7 @@
 (let -infinity -2147483648)
 (let Int 0)
 (let Dec 0.0)
-(let Char (get "a"))
+(let Char (&get "a"))
 (let Bool false)
 (let Nil nil)
 (let as (lambda . t t))

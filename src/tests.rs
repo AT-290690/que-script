@@ -393,9 +393,11 @@ Concequent and alternative must match types
 
     #[test]
     fn test_lsp_collects_letmacro_names_as_bound_symbols() {
-        let exprs = crate::lsp_native_core::parse_user_exprs_for_symbol_collection(
-            "(do (letmacro unless (lambda cond body (qq (if (not (uq cond)) (uq body) nil)))) (unless false 1))"
-        ).expect("macro program should parse for symbol collection");
+        let exprs = crate::lsp_native_core
+            ::parse_user_exprs_for_symbol_collection(
+                "(do (letmacro unless (lambda cond body (qq (if (not (uq cond)) (uq body) nil)))) (unless false 1))"
+            )
+            .expect("macro program should parse for symbol collection");
         let mut names = std::collections::HashSet::new();
         crate::lsp_native_core::collect_user_bound_symbols_from_exprs(&exprs, &mut names);
         assert!(
@@ -479,135 +481,6 @@ Concequent and alternative must match types
             )
             .expect("program should infer");
         assert_eq!(typ.to_string(), "Int");
-    }
-
-    #[test]
-    fn test_loop_range_desugars_to_loop_while_with_captured_bounds_and_callback() {
-        let expr = crate::parser
-            ::build("(loop 0 3 (lambda i (+ i 1)))")
-            .expect("loop range form should desugar");
-        let lisp = expr.to_lisp();
-        assert!(
-            !lisp.contains("(loop 0 3"),
-            "range loop should not remain as raw loop form, got: {}",
-            lisp
-        );
-        assert!(
-            lisp.contains("(while (< _loop_i_"),
-            "range loop should lower to while over temp counter, got: {}",
-            lisp
-        );
-        assert!(
-            lisp.contains("(let _loop_end_"),
-            "range loop should capture end expression once, got: {}",
-            lisp
-        );
-        assert!(
-            lisp.contains("(let _loop_cb_"),
-            "range loop should capture callback once, got: {}",
-            lisp
-        );
-    }
-
-    fn unwrap_single_form_do<'a>(
-        expr: &'a crate::parser::Expression
-    ) -> &'a crate::parser::Expression {
-        if let crate::parser::Expression::Apply(items) = expr {
-            if
-                matches!(items.first(), Some(crate::parser::Expression::Word(w)) if w == "do") &&
-                items.len() == 2
-            {
-                return &items[1];
-            }
-        }
-        expr
-    }
-
-    #[test]
-    fn test_loop_condition_lambda_desugars_to_while_with_invoked_lambda_and_unit_tail() {
-        let expr = crate::parser
-            ::build("(loop false (lambda (+ 1 2)))")
-            .expect("loop condition form should desugar");
-        let root = unwrap_single_form_do(&expr);
-
-        let crate::parser::Expression::Apply(while_items) = root else {
-            panic!("expected while apply, got {}", expr.to_lisp());
-        };
-        assert!(
-            matches!(while_items.first(), Some(crate::parser::Expression::Word(w)) if w == "while"),
-            "expected loop cond form to lower to while, got {}",
-            expr.to_lisp()
-        );
-        assert!(
-            matches!(while_items.get(1), Some(crate::parser::Expression::Word(w)) if w == "false"),
-            "expected preserved condition, got {}",
-            expr.to_lisp()
-        );
-
-        let Some(crate::parser::Expression::Apply(body_items)) = while_items.get(2) else {
-            panic!("expected while body apply, got {}", expr.to_lisp());
-        };
-        assert!(
-            matches!(body_items.first(), Some(crate::parser::Expression::Word(w)) if w == "do"),
-            "expected while body to be do block, got {}",
-            expr.to_lisp()
-        );
-        assert!(
-            matches!(body_items.last(), Some(crate::parser::Expression::Word(w)) if w == "nil"),
-            "expected while body to end with nil, got {}",
-            expr.to_lisp()
-        );
-
-        let Some(crate::parser::Expression::Apply(call_items)) = body_items.get(1) else {
-            panic!("expected do body to invoke callback expression, got {}", expr.to_lisp());
-        };
-        assert_eq!(
-            call_items.len(),
-            1,
-            "expected zero-arg callback invocation shape ((lambda ...)), got {}",
-            expr.to_lisp()
-        );
-        assert!(
-            matches!(call_items.first(), Some(crate::parser::Expression::Apply(lambda_items)) if matches!(lambda_items.first(), Some(crate::parser::Expression::Word(w)) if w == "lambda")),
-            "expected invoked lambda callback in cond loop body, got {}",
-            expr.to_lisp()
-        );
-    }
-
-    #[test]
-    fn test_loop_condition_named_callback_desugars_to_while_with_zero_arg_call() {
-        let expr = crate::parser
-            ::build("(loop false step)")
-            .expect("loop condition form with named callback should desugar");
-        let root = unwrap_single_form_do(&expr);
-
-        let crate::parser::Expression::Apply(while_items) = root else {
-            panic!("expected while apply, got {}", expr.to_lisp());
-        };
-        assert!(
-            matches!(while_items.first(), Some(crate::parser::Expression::Word(w)) if w == "while"),
-            "expected loop cond form to lower to while, got {}",
-            expr.to_lisp()
-        );
-
-        let Some(crate::parser::Expression::Apply(body_items)) = while_items.get(2) else {
-            panic!("expected while body apply, got {}", expr.to_lisp());
-        };
-        assert!(
-            matches!(body_items.first(), Some(crate::parser::Expression::Word(w)) if w == "do"),
-            "expected while body to be do block, got {}",
-            expr.to_lisp()
-        );
-        assert!(
-            matches!(body_items.last(), Some(crate::parser::Expression::Word(w)) if w == "nil"),
-            "expected while body to end with nil, got {}",
-            expr.to_lisp()
-        );
-        assert!(
-            matches!(body_items.get(1), Some(crate::parser::Expression::Apply(call_items)) if matches!(call_items.first(), Some(crate::parser::Expression::Word(w)) if w == "step")),
-            "expected named callback call shape (step), got {}",
-            expr.to_lisp()
-        );
     }
 
     #[cfg(feature = "runtime")]
@@ -749,12 +622,13 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_loop_range_runtime_produces_expected_sequence() {
-        let output = run_program_output(
+        let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let push! (lambda xs x (do (set! xs (length xs) x) xs)))
                 (let xs [])
                 (loop 0 10 (lambda i (push! xs i)))
-                xs)"#
+                xs)"#,
+            true
         );
         assert_eq!(output, "[0 1 2 3 4 5 6 7 8 9]");
     }
@@ -825,10 +699,7 @@ Concequent and alternative must match types
             ::ast_to_definitions(std_ast, "active library")
             .expect("embedded library should flatten to definitions");
         let expr = crate::parser
-            ::merge_std_and_program(
-                "(do (let out []) (when true (set! out 0 0)) out)",
-                lib_defs
-            )
+            ::merge_std_and_program("(do (let out []) (when true (set! out 0 0)) out)", lib_defs)
             .expect("user program should be able to use baked library macros");
         let rendered = expr.to_lisp();
         assert!(
@@ -931,10 +802,7 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_runtime_cond_macro_runs_through_baked_library() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(cond false 1 true 2 3)"#,
-            true
-        );
+        let output = run_program_output_with_std_and_opts(r#"(cond false 1 true 2 3)"#, true);
         assert_eq!(output, "2");
     }
 
@@ -1078,7 +946,7 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_regression_graph_build_two_calls_preserves_first_result() {
-        let output = run_program_output(
+        let output = run_program_output_with_std_and_opts(
             r#"(do
         (let std/vector/empty? (lambda xs (= (length xs) 0)))
             (let std/vector/for (lambda xs fn (do
@@ -1107,7 +975,8 @@ Concequent and alternative must match types
                   graph)))
 
                 [(valid-path 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2)
-                 (valid-path 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)])"#
+                 (valid-path 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)])"#,
+            true
         );
         assert_eq!(output, "[[[1 2] [0 2] [1 0]] [[1 2] [0] [0] [5 4] [5 3] [3 4]]]");
     }
@@ -1254,7 +1123,7 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_regression_loop_callback_discard_does_not_overrelease_borrowed_result() {
-        let output = run_program_output(
+        let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let push! (lambda xs x (do (set! xs (length xs) x) xs)))
                 (let sort-array-by-parity2 (lambda nums (do
@@ -1266,7 +1135,8 @@ Concequent and alternative must match types
                   out)))
                 [(sort-array-by-parity2 [4 2 5 7])
                  (sort-array-by-parity2 [2 3])
-                 (sort-array-by-parity2 [4 3])])"#
+                 (sort-array-by-parity2 [4 3])])"#,
+            true
         );
         assert_eq!(output, "[[4 2 5 7] [2 3] [4 3]]");
     }
@@ -1274,12 +1144,13 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_regression_std_vector_for_isolated_behavior() {
-        let output = run_program_output(
+        let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let std/vector/for (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i))))))
                 (let out [])
                 (std/vector/for [1 2 3 4] (lambda x (set! out (length out) (* x 2))))
-                out)"#
+                out)"#,
+            true
         );
         assert_eq!(output, "[2 4 6 8]");
     }
@@ -1287,7 +1158,7 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_regression_std_vector_3d_rotate_isolated_behavior() {
-        let output = run_program_output(
+        let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let std/vector/empty? (lambda xs (= (length xs) 0)))
                 (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) nil)))
@@ -1301,7 +1172,8 @@ Concequent and alternative must match types
                         (loop 0 H (lambda j 
                             (std/vector/push! (std/vector/at out -1) (get matrix j i)))))))
                     out))))
-                (std/vector/3d/rotate [[1 2 3] [4 5 6]]))"#
+                (std/vector/3d/rotate [[1 2 3] [4 5 6]]))"#,
+            true
         );
         assert_eq!(output, "[[1 4] [2 5] [3 6]]");
     }
@@ -1740,7 +1612,6 @@ Concequent and alternative must match types
                 "(do
                     (let update-set! (lambda vrbl x (set! vrbl 0 x)))
                     (let boolean-set! (lambda vrbl x (set! vrbl 0 x)))
-                    (let += (lambda vrbl n (set! vrbl 0 n)))
                     1)"
             )
             .expect("input should parse");
@@ -1751,9 +1622,32 @@ Concequent and alternative must match types
         );
         assert!(
             inferred.is_ok(),
-            "update-set and operator aliases should be exempt from ! suffix, got: {:?}",
+            "set aliases ending with ! should stay exempt from ! suffix, got: {:?}",
             inferred
         );
+    }
+
+    #[test]
+    fn test_runtime_reclaimed_operatorish_names_compile_as_normal_bindings() {
+        let program =
+            r#"(do
+  (let ++ (lambda x (+ x 1)))
+  (let -- (lambda x (- x 1)))
+  (let += (lambda a b (+ a b)))
+  (let -= (lambda a b (- a b)))
+  (let +=. (lambda a b (+. a b)))
+  (let *=. (lambda a b (*. a b)))
+  (let ++. (lambda x (+. x 1.0)))
+  (and
+    (= (++ 1) 2)
+    (= (-- 5) 4)
+    (= (+= 2 3) 5)
+    (= (-= 7 4) 3)
+    (= (Dec->Int (+=. 2.5 0.5)) 3)
+    (= (Dec->Int (*=. 1.5 2.0)) 3)
+    (= (Dec->Int (++. 3.0)) 4)))"#;
+        let output = run_program_output(program);
+        assert_eq!(output.trim(), "true");
     }
 
     #[test]
@@ -3001,7 +2895,7 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_diagnostics_scope_fallback_avoids_outer_loop_condition() {
         let program =
-            "(let fn (lambda x (get x)))\n\n(integer x 1)\n(while (< (get x) 10) (do\n    (match? (get x) \"10\")\n(++ x)))";
+            "(let fn (lambda x (get x)))\n\n(integer x 1)\n(while (< (get x) 10) (do\n (match? (get x) \"10\")\n(&alter! x (+ (&get x) 1))))";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
         let diagnostics: serde_json::Value = serde_json
             ::from_str(&diagnostics_json)
@@ -3061,7 +2955,7 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_diagnostics_scope_path_keeps_get_error_in_fn_only() {
         let program =
-            "(let fn (lambda x (get x 's')))\n\n(integer x 1)\n(while (< (get x) 10) (do\n    (match? (Integer->String (get x)) \"10\")\n(++ x)))";
+            "(let fn (lambda x (get x 's')))\n\n(integer x 1)\n(while (< (get x) 10) (do\n    (match? (Integer->String (get x)) \"10\")\n(&alter! x (+ (&get x) 1))))";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
         let diagnostics: serde_json::Value = serde_json
             ::from_str(&diagnostics_json)
@@ -3471,7 +3365,7 @@ Concequent and alternative must match types
       (mut i 0)
       (while (< i n) (do
         (let f (get fs i))
-        (+= acc (f 1))
+        (&alter! acc (+ (&get acc) (f 1)))
         (alter! i (+ i 1))))
       (get acc))))
     
@@ -3770,7 +3664,7 @@ image
             (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
                  (if (and (= (- cell (get matrix y x)) 1) (not (std/vector/hash/set/has? visited key))) (do
-                    (if (= cell 9) (do (++ score) nil) (do (std/vector/queue/enqueue! queue [ dy dx ]) nil))
+                    (if (= cell 9) (do (&alter! score  (+ (&get score) 1)) nil) (do (std/vector/queue/enqueue! queue [ dy dx ]) nil))
                     (std/vector/hash/set/add! visited key)
                     nil)))))))
 
@@ -3792,7 +3686,7 @@ image
             (let element (std/vector/queue/peek queue))
             (let y (std/vector/first element))
             (let x (std/vector/second element))  
-            (if (= (get matrix y x) 9) (+= score (snd (get (std/vector/hash/table/get visited root-key)))))
+            (if (= (get matrix y x) 9) (&alter! score (+ (&get score) (snd (get (std/vector/hash/table/get visited root-key))))))
             (std/vector/queue/dequeue! queue)
             (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
@@ -3888,16 +3782,16 @@ image
             ),
             (
                 r#"(let xs [1 2 0 4 3 0 5 0])
-
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (let solve! (lambda xs (do 
     (integer c 0)
     (let len (length xs))
     (std/vector/for xs (lambda x (if (<> x 0) (do 
         (set! xs (get c) x)
-        (++ c)))))
+        (&alter! c (+ (&get c) 1))))))
     (while (< (get c) len) (do 
         (set! xs (get c) 0)
-        (++ c)))
+        (&alter! c (+ (&get c) 1))))
     nil)))
 
 (solve! xs)
@@ -3911,14 +3805,14 @@ xs"#,
     (loop 0 n (lambda i (do 
         (integer temp 0)
         (loop i n (lambda j (do 
-            (+= temp (get xs j))
-            (+= out (get temp))))))))
+            (&alter! temp (+ (&get temp) (get xs j)))
+            (&alter! out (+ (&get out) (get temp)))))))))
     (get out))))
 
 (let expert-sub-array-sum (lambda xs (do 
     (let n (length xs))
     (integer out 0)
-    (loop 0 n (lambda i (+= out (* (get xs i) (+ i 1) (- n i)))))
+    (loop 0 n (lambda i (&alter! out (+ (&get out) (* (get xs i) (+ i 1) (- n i))))))
     (get out))))
 
 (let xs [1 4 5 3 2])
@@ -4069,9 +3963,9 @@ D:=,=,=,+,=,=,=,+,=,=")
     (while (<> (get i) (get j)) (do 
         (if (> (get xs (get i)) (get xs (get j))) (do 
             (&alter! max (std/int/max (* (- (get j) (get i)) (get xs (get j))) (get max)))
-            (-- j)) (do
+            (&alter! j (- (&get j) 1))) (do
             (&alter! max (std/int/max (* (- (get j) (get i)) (get xs (get i))) (get max)))
-            (++ i)))))
+            (&alter! i (+ (&get i) 1))))))
     (get max))))
 
 [
@@ -4208,7 +4102,7 @@ D:=,=,=,+,=,=,=,+,=,=")
 0
 1
 -3")
-
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (let parse (lambda input (<| input (std/convert/string->vector std/char/new-line) (std/vector/map std/convert/chars->integer))))
 (let part1 (lambda ip (do
     (let input (copy ip))
@@ -4218,9 +4112,9 @@ D:=,=,=,+,=,=,=,+,=,=")
     (boolean escaped? false)
     (while (false? escaped?) (do
         (set! input (get index) (+ (get pointer) 1))
-        (+= index (get pointer))
+        (&alter! index (+ (&get index) (get pointer)))
         (if (std/vector/in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
-        (++ steps)))
+        (&alter! steps (+ (&get steps) 1))))
     (get steps))))
 
 (let part2 (lambda ip (do 
@@ -4231,9 +4125,9 @@ D:=,=,=,+,=,=,=,+,=,=")
     (boolean escaped? false)
     (while (false? escaped?) (do
         (set! input (get index) (+ (get pointer) (if (>= (get pointer) 3) -1 1)))
-        (+= index (get pointer))
+        (&alter! index (+ (&get index) (get pointer)))
         (if (std/vector/in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
-        (++ steps)))
+        (&alter! steps (+ (&get steps) 1))))
     (get steps))))
     
 [(<| INPUT (parse) (part1)) (<| INPUT (parse) (part2))]"#,
@@ -4325,7 +4219,7 @@ D:=,=,=,+,=,=,=,+,=,=")
 (let rules (lambda a b c (do 
     (let index (std/convert/bits->integer [ a b c ]))
     (get ruleset (- 7 index)))))
-
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (while (< (get generation) (/ *RES* 2)) (do 
     (std/vector/push! out (get cells))
     (let nextgen (std/vector/copy (get cells)))
@@ -4335,7 +4229,7 @@ D:=,=,=,+,=,=,=,+,=,=")
         (let right (get cells 0 (+ i 1)))
         (set! nextgen i (rules left me right)))))
     (&alter! cells nextgen)
-    (++ generation)))
+    (&alter! generation (+ (&get generation) 1))))
 
 
 (<| out 
@@ -4641,7 +4535,7 @@ L82")
       (loop i (length inp) (lambda j 
         (if (<> i j) 
           (&alter! M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))))
-    (+= S (get M)))))) 
+    (&alter! S (+ (&get S) (get M))))))) 
     (get S))))
 
 (let part2 (lambda parsed (do
@@ -4672,15 +4566,15 @@ L82")
 @.@@@.@@@@
 .@@@@@@@@.
 @.@.@@@.@.")
-
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (let parse (lambda input (|> input (String->Vector nl) (map (lambda x (map (lambda x (if (=# x '@') 1 0)) x))))))
 (let part1 (lambda input (do
   (integer TOTAL 0)
   (loop 0 (length input) (lambda y (do 
     (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
       (integer SUM 0)
-      (neighborhood neighborhood/moore y x (lambda cell dir y x (+= SUM cell)) input)
-      (if (< (get SUM) 4) (++ TOTAL)))))))))
+      (neighborhood neighborhood/moore y x (lambda cell dir y x (&alter! SUM (+ (&get SUM) cell))) input)
+      (if (< (get SUM) 4) (&alter! TOTAL (+ (&get TOTAL) 1))))))))))
   (get TOTAL))))
 
   (let part2 (lambda input (do
@@ -4689,7 +4583,7 @@ L82")
         (loop 0 (length input) (lambda y (do 
         (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
         (integer ACC 0)
-        (neighborhood neighborhood/moore y x (lambda cell dir y x (+= ACC cell)) input)
+        (neighborhood neighborhood/moore y x (lambda cell dir y x (&alter! ACC (+ (&get ACC) cell))) input)
         (if (< (get ACC) 4) (push! rem [ y x ])))))))))
         (if (empty? rem) total (do 
         (for (lambda [y x] (set! (get input y) x 0)) rem)
@@ -4767,7 +4661,9 @@ L82")
                 "[4 2 7 7 5 5 6]",
             ),
             (
-                r#"(let INPUT 
+                r#"
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))                
+(let INPUT 
 ".......S.......
 ...............
 .......^.......
@@ -4799,7 +4695,7 @@ L82")
     (if (and (std/vector/3d/in-bounds? input y x) (not (Set/has? key visited))) (do
         (Set/add! visited key)
         (if (=# (get input y x) '^') (do 
-          (++ total)
+          (&alter! total (+ (&get total) 1))
           (Que/enque! queue [ y (+ x 1) ])
           (Que/enque! queue [ y (- x 1) ])) (Que/enque! queue [ (+ y 1) x ]))))))
   (get total))))
@@ -4817,7 +4713,7 @@ L82")
             (Que/enque! queue [ y (+ x 1) c ])
             (Que/enque! queue [ y (- x 1) c ])) 
             (Que/enque! queue [ (+ y 1) x c ])))
-        (+= total c))))
+        (&alter! total (+ (&get total) c)))))
   (get total))))
 (let PARSED (parse INPUT))
 [(part1 PARSED) (part2 PARSED)]"#,
@@ -4953,7 +4849,7 @@ L82")
                   (do
                     (set! parent rb ra)
                     (set! size ra (+ (get size ra) (get size rb)))))
-              (-- components)
+              (&alter! components (- (&get components) 1))
               true)
             false))))
 
@@ -5584,11 +5480,12 @@ bbrgwb")
             ),
             (
                 r#"; SRM 727: Problem 1 - MakeTwoConsecutive
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (let solve (lambda s (and (> (length s) 2) (do
   (let n (length s))
   (integer c 0)
-  (loop 0 (- n 1) (lambda i (if (=# (get s i) (get s (+ i 1))) (++ c))))
-  (loop 0 (- n 2) (lambda i (if (=# (get s i) (get s (+ i 2))) (++ c))))
+  (loop 0 (- n 1) (lambda i (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1)))))
+  (loop 0 (- n 2) (lambda i (if (=# (get s i) (get s (+ i 2))) (&alter! c (+ (&get c) 1)))))
   (> (get c) 0)))))
 
 [
@@ -5653,13 +5550,15 @@ bbrgwb")
             ),
 
             (
-                r#"(let INPUT "2333133121414131402")
+                r#"
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
+(let INPUT "2333133121414131402")
 (let parse (comp (map Char->Digit)))
 (let part1 (lambda input (do 
   (integer file-id -1)
   (let disk (|> input (reduce/i (lambda disk ch i (std/vector/concat! disk 
   [(if (even? i) (do 
-    (++ file-id)
+    (&alter! file-id (+ (&get file-id) 1))
     (let id (get file-id))
     (Vector/new (lambda _ id) ch))
     (Vector/new (lambda _ -1) ch))])) [])))
@@ -5781,7 +5680,9 @@ bbrgwb")
             ),
 
             (
-                r#"(let correct (Vector->Set ["spelling" "bat" "cat"]))
+                r#"
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
+(let correct (Vector->Set ["spelling" "bat" "cat"]))
 
 (let generate-abc (lambda (do 
   (let offset (Char->Int 'a'))
@@ -5827,7 +5728,7 @@ bbrgwb")
               (&alter! out temp)
               (&alter! loop? false))
               (set! temp (get i) t))
-          (++ k)))
+          (&alter! k (+ (&get k) 1))))
 
         (integer j 0)
         (while (and (true? loop?) (< (get j) (length abc))) (do
@@ -5836,9 +5737,9 @@ bbrgwb")
           (if (Set/has? added correct) (do
               (&alter! out added) 
               (&alter! loop? false)))
-          (++ j)))
+          (&alter! j (+ (&get j) 1))))
 
-        (++ i)))
+        (&alter! i (+ (&get i) 1))))
     (get out)))))
 (every? (lambda x (Set/has? x correct)) [
 
@@ -5874,12 +5775,15 @@ SECRET = SANTA")
             ),
 
             (
-                r#"(let solve (lambda s 
+                r#"
+  (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
+
+    (let solve (lambda s 
   (and (> (length s) 2) (do
     (let n (length s))
     (integer c 0)
-    (loop 0 (- n 1) (lambda i (if (=# (get s i) (get s (+ i 1))) (++ c))))
-    (loop 0 (- n 2) (lambda i (if (=# (get s i) (get s (+ i 2))) (++ c))))
+    (loop 0 (- n 1) (lambda i (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1)))))
+    (loop 0 (- n 2) (lambda i (if (=# (get s i) (get s (+ i 2))) (&alter! c (+ (&get c) 1)))))
     (> (get c) 0)))))
 
 (map solve ["BCAB" "BB" "A" "AABB" "BAB" "KEEP"])"#,

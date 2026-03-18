@@ -464,7 +464,11 @@ fn native_shell_learn() -> &'static str {
     - Top-level only: (letmacro name ...)\n\
     - Single-clause: (letmacro inc1 (lambda x (qq (+ (uq x) 1))))\n\
     - Multi-clause by arity: (letmacro unless ((cond) ...) ((cond body) ...) ((cond then else) ...))\n\
+    - Variadic params use '.' before the rest name: (lambda cond . body ...)\n\
+    - quote returns syntax as data; qq builds syntax conveniently.\n\
     - qq builds syntax, uq inserts one syntax value, uqs splices a rest syntax list into qq.\n\
+    - gensym returns a fresh syntax name for generated bindings.\n\
+    - Macro bodies can use compile-time do and let.\n\
     - (macroexpand-1 expr) expands one macro layer and returns the expanded source as a string.\n\
     - (macroexpand expr) fully expands recursively and returns the expanded source as a string.\n\
     - Macros run at compile time before type inference; infer only sees the expanded result.\n\
