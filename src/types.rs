@@ -121,7 +121,7 @@ impl TypeEnv {
 
     pub fn insert(&mut self, name: String, scheme: TypeScheme) -> Result<(), String> {
         let current = self.scopes.last_mut().unwrap();
-        if name != "." && current.contains_key(&name) {
+        if name != "_" && name != "." && current.contains_key(&name) {
             return Err(format!("Variable '{}' already defined in this scope", name));
         }
         current.insert(name, scheme);
