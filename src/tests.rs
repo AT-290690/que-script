@@ -379,6 +379,32 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_lsp_base_environment_includes_macro_keywords() {
+        let (_, _, signatures, _) = crate::lsp_native_core::build_base_environment(&[]);
+        let signature = signatures
+            .get("letmacro")
+            .expect("letmacro should be exposed as an LSP special keyword");
+        assert!(
+            signature.contains("compile-time macro definition"),
+            "unexpected letmacro signature: {}",
+            signature
+        );
+    }
+
+    #[test]
+    fn test_lsp_collects_letmacro_names_as_bound_symbols() {
+        let exprs = crate::lsp_native_core::parse_user_exprs_for_symbol_collection(
+            "(do (letmacro unless (lambda cond body (qq (if (not (uq cond)) (uq body) nil)))) (unless false 1))"
+        ).expect("macro program should parse for symbol collection");
+        let mut names = std::collections::HashSet::new();
+        crate::lsp_native_core::collect_user_bound_symbols_from_exprs(&exprs, &mut names);
+        assert!(
+            names.contains("unless"),
+            "letmacro-bound names should be visible to LSP symbol collection"
+        );
+    }
+
+    #[test]
     fn test_parser_macro_expansion_errors_include_call_context() {
         let err = crate::parser
             ::build("(do (letmacro two (lambda a b (qq (+ (uq a) (uq b))))) (two 1))")
@@ -793,6 +819,26 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_baked_embedded_library_preserves_macros_for_user_program_merge() {
+        let std_ast = crate::baked::load_ast();
+        let lib_defs = crate::baked
+            ::ast_to_definitions(std_ast, "active library")
+            .expect("embedded library should flatten to definitions");
+        let expr = crate::parser
+            ::merge_std_and_program(
+                "(do (let out []) (when true (set! out 0 0)) out)",
+                lib_defs
+            )
+            .expect("user program should be able to use baked library macros");
+        let rendered = expr.to_lisp();
+        assert!(
+            rendered.contains("(if true"),
+            "when macro should expand through baked embedded library path, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
     #[cfg(feature = "runtime")]
     fn test_runtime_macroexpand_and_variadic_when_macro_work() {
         let expand_output = run_program_output(
@@ -815,6 +861,23 @@ Concequent and alternative must match types
                 (when true (+ 1 2) (+ 3 4) nil))"#
         );
         assert_eq!(when_output, "0");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_letmacro_supports_compile_time_do_let_and_gensym() {
+        let output = run_program_output(
+            r#"(do
+                (letmacro with-temp
+                    (lambda expr body
+                        (do
+                            (let tmp (gensym))
+                            (qq (do
+                                    (let (uq tmp) (uq expr))
+                                    ((uq body) (uq tmp)))))))
+                (with-temp (+ 1 2) (lambda t (+ t 10))))"#
+        );
+        assert_eq!(output, "13");
     }
 
     #[test]

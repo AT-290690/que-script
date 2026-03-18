@@ -783,6 +783,15 @@ fn eval_macro_expr(
     bindings: &HashMap<String, Expression>,
     gensym_counter: &mut usize
 ) -> Result<Expression, String> {
+    let mut local_bindings = bindings.clone();
+    eval_macro_expr_in_env(expr, &mut local_bindings, gensym_counter)
+}
+
+fn eval_macro_expr_in_env(
+    expr: &Expression,
+    bindings: &mut HashMap<String, Expression>,
+    gensym_counter: &mut usize
+) -> Result<Expression, String> {
     match expr {
         Expression::Word(w) =>
             Ok(
@@ -798,6 +807,29 @@ fn eval_macro_expr(
                 return Ok(Expression::Apply(Vec::new()));
             }
             match items.first() {
+                Some(Expression::Word(head)) if head == "do" => {
+                    if items.len() < 2 {
+                        return Err("(do ...) requires at least one expression".to_string());
+                    }
+                    let mut last = None;
+                    for item in items.iter().skip(1) {
+                        last = Some(eval_macro_expr_in_env(item, bindings, gensym_counter)?);
+                    }
+                    Ok(last.expect("do body checked to be non-empty"))
+                }
+                Some(Expression::Word(head)) if head == "let" => {
+                    if items.len() != 3 {
+                        return Err("(let name value) expects exactly a name and value".to_string());
+                    }
+                    let Expression::Word(name) = &items[1] else {
+                        return Err(
+                            "compile-time let only supports simple word bindings for now".to_string()
+                        );
+                    };
+                    let value = eval_macro_expr_in_env(&items[2], bindings, gensym_counter)?;
+                    bindings.insert(name.clone(), value.clone());
+                    Ok(value)
+                }
                 Some(Expression::Word(head)) if head == "quote" => {
                     if items.len() != 2 {
                         return Err("(quote ...) expects exactly one expression".to_string());
@@ -823,7 +855,7 @@ fn eval_macro_expr(
                         Expression::Apply(
                             items
                                 .iter()
-                                .map(|it| eval_macro_expr(it, bindings, gensym_counter))
+                                .map(|it| eval_macro_expr_in_env(it, bindings, gensym_counter))
                                 .collect::<Result<Vec<_>, _>>()?
                         )
                     ),
@@ -891,13 +923,13 @@ fn expand_macro_call(
     );
     let selected_clause = macro_def.clauses
         .iter()
-        .find(|clause| (
+        .find(|clause| {
             if clause.rest_param.is_some() {
                 args.len() >= clause.params.len()
             } else {
                 args.len() == clause.params.len()
             }
-        ))
+        })
         .ok_or_else(|| {
             let mut expected = macro_def.clauses
                 .iter()
