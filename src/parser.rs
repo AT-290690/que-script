@@ -1,5 +1,7 @@
 use std::collections::{ HashMap, HashSet };
 
+const MAX_MACRO_EXPANSION_DEPTH: usize = 64;
+
 fn is_reserved_word(name: &str) -> bool {
     matches!(
         name,
@@ -608,6 +610,454 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+struct MacroClause {
+    params: Vec<String>,
+    rest_param: Option<String>,
+    body: Expression,
+}
+
+#[derive(Debug, Clone)]
+struct MacroDef {
+    clauses: Vec<MacroClause>,
+}
+
+fn parse_macro_param_list(
+    params_slice: &[Expression],
+    macro_name: &str
+) -> Result<(Vec<String>, Option<String>), String> {
+    let mut params = Vec::new();
+    let mut rest_param = None;
+    let mut idx = 0usize;
+    while idx < params_slice.len() {
+        if let Expression::Word(dot) = &params_slice[idx] {
+            if dot == "." {
+                if idx + 1 >= params_slice.len() {
+                    return Err(
+                        format!(
+                            "letmacro '{}' has '.' without a trailing rest parameter",
+                            macro_name
+                        )
+                    );
+                }
+                let Expression::Word(rest_name) = &params_slice[idx + 1] else {
+                    return Err(
+                        format!(
+                            "letmacro '{}' rest parameter must be a simple word",
+                            macro_name
+                        )
+                    );
+                };
+                if idx + 2 != params_slice.len() {
+                    return Err(
+                        format!(
+                            "letmacro '{}' rest parameter must be the last parameter",
+                            macro_name
+                        )
+                    );
+                }
+                rest_param = Some(rest_name.clone());
+                break;
+            }
+        }
+        let param = &params_slice[idx];
+        let Expression::Word(name) = param else {
+            return Err(
+                format!("letmacro '{}' only supports simple word parameters for now", macro_name)
+            );
+        };
+        params.push(name.clone());
+        idx += 1;
+    }
+    Ok((params, rest_param))
+}
+
+fn parse_macro_lambda(expr: &Expression, macro_name: &str) -> Result<MacroClause, String> {
+    let Expression::Apply(items) = expr else {
+        return Err(format!("letmacro '{}' must be bound to a lambda", macro_name));
+    };
+    if items.len() < 2 {
+        return Err(format!("letmacro '{}' must be bound to a lambda", macro_name));
+    }
+    let Some(Expression::Word(head)) = items.first() else {
+        return Err(format!("letmacro '{}' must be bound to a lambda", macro_name));
+    };
+    if head != "lambda" {
+        return Err(format!("letmacro '{}' must be bound to a lambda", macro_name));
+    }
+    if items.len() < 2 {
+        return Err(format!("letmacro '{}' lambda must have a body", macro_name));
+    }
+    let params_slice = &items[1..items.len() - 1];
+    let (params, rest_param) = parse_macro_param_list(params_slice, macro_name)?;
+    let body = items
+        .last()
+        .cloned()
+        .ok_or_else(|| { format!("letmacro '{}' lambda must have a body", macro_name) })?;
+    Ok(MacroClause { params, rest_param, body })
+}
+
+fn parse_macro_clause(expr: &Expression, macro_name: &str) -> Result<MacroClause, String> {
+    let Expression::Apply(items) = expr else {
+        return Err(
+            format!(
+                "letmacro '{}' clause must look like ((params...) body)",
+                macro_name
+            )
+        );
+    };
+    if items.len() != 2 {
+        return Err(
+            format!(
+                "letmacro '{}' clause must have exactly a parameter list and body",
+                macro_name
+            )
+        );
+    }
+    let params_expr = &items[0];
+    let Expression::Apply(param_items) = params_expr else {
+        return Err(
+            format!(
+                "letmacro '{}' clause parameter list must be parenthesized",
+                macro_name
+            )
+        );
+    };
+    let (params, rest_param) = parse_macro_param_list(param_items, macro_name)?;
+    Ok(MacroClause {
+        params,
+        rest_param,
+        body: items[1].clone(),
+    })
+}
+
+fn parse_macro_definition(exprs: &[Expression], macro_name: &str) -> Result<MacroDef, String> {
+    if exprs.is_empty() {
+        return Err(format!("letmacro '{}' requires a body", macro_name));
+    }
+    if exprs.len() == 1 {
+        return Ok(MacroDef {
+            clauses: vec![parse_macro_lambda(&exprs[0], macro_name)?],
+        });
+    }
+    let mut clauses = Vec::new();
+    for expr in exprs {
+        clauses.push(parse_macro_clause(expr, macro_name)?);
+    }
+    Ok(MacroDef { clauses })
+}
+
+fn split_macro_definitions(
+    exprs: Vec<Expression>,
+    macros: &mut HashMap<String, MacroDef>
+) -> Result<Vec<Expression>, String> {
+    let mut out = Vec::new();
+    for expr in exprs {
+        if let Expression::Apply(items) = &expr {
+            if items.len() >= 3 {
+                if let (Some(Expression::Word(kw)), Some(Expression::Word(name))) =
+                    (items.first(), items.get(1))
+                {
+                    if kw == "letmacro" {
+                        let macro_def = parse_macro_definition(&items[2..], name)?;
+                        macros.insert(name.clone(), macro_def);
+                        continue;
+                    }
+                }
+            }
+            if let [Expression::Word(kw), Expression::Word(name), _rhs] = &items[..] {
+                if kw == "letmacro" {
+                    let macro_def = parse_macro_definition(&items[2..], name)?;
+                    macros.insert(name.clone(), macro_def);
+                    continue;
+                }
+            }
+        }
+        out.push(expr);
+    }
+    Ok(out)
+}
+
+fn flatten_top_level_dos(exprs: Vec<Expression>) -> Vec<Expression> {
+    let mut out = Vec::new();
+    for expr in exprs {
+        match expr {
+            Expression::Apply(items) if
+                !items.is_empty() &&
+                matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+            => {
+                out.extend(flatten_top_level_dos(items.into_iter().skip(1).collect()));
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn eval_macro_expr(
+    expr: &Expression,
+    bindings: &HashMap<String, Expression>,
+    gensym_counter: &mut usize
+) -> Result<Expression, String> {
+    match expr {
+        Expression::Word(w) =>
+            Ok(
+                bindings
+                    .get(w)
+                    .cloned()
+                    .unwrap_or_else(|| Expression::Word(w.clone()))
+            ),
+        Expression::Int(n) => Ok(Expression::Int(*n)),
+        Expression::Dec(n) => Ok(Expression::Dec(*n)),
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return Ok(Expression::Apply(Vec::new()));
+            }
+            match items.first() {
+                Some(Expression::Word(head)) if head == "quote" => {
+                    if items.len() != 2 {
+                        return Err("(quote ...) expects exactly one expression".to_string());
+                    }
+                    Ok(items[1].clone())
+                }
+                Some(Expression::Word(head)) if head == "qq" => {
+                    if items.len() != 2 {
+                        return Err("(qq ...) expects exactly one expression".to_string());
+                    }
+                    quasiquote_macro_expr(&items[1], bindings, gensym_counter)
+                }
+                Some(Expression::Word(head)) if head == "gensym" => {
+                    if items.len() != 1 {
+                        return Err("(gensym) does not take arguments yet".to_string());
+                    }
+                    let name = format!("__macro_{}", *gensym_counter);
+                    *gensym_counter += 1;
+                    Ok(Expression::Word(name))
+                }
+                _ =>
+                    Ok(
+                        Expression::Apply(
+                            items
+                                .iter()
+                                .map(|it| eval_macro_expr(it, bindings, gensym_counter))
+                                .collect::<Result<Vec<_>, _>>()?
+                        )
+                    ),
+            }
+        }
+    }
+}
+
+fn quasiquote_macro_expr(
+    expr: &Expression,
+    bindings: &HashMap<String, Expression>,
+    gensym_counter: &mut usize
+) -> Result<Expression, String> {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "uq") {
+                if items.len() != 2 {
+                    return Err("(uq ...) expects exactly one expression".to_string());
+                }
+                return eval_macro_expr(&items[1], bindings, gensym_counter);
+            }
+            let mut out = Vec::new();
+            for it in items {
+                if let Expression::Apply(splice_items) = it {
+                    if matches!(splice_items.first(), Some(Expression::Word(w)) if w == "uqs") {
+                        if splice_items.len() != 2 {
+                            return Err("(uqs ...) expects exactly one expression".to_string());
+                        }
+                        let spliced = eval_macro_expr(&splice_items[1], bindings, gensym_counter)?;
+                        match spliced {
+                            Expression::Apply(parts) => {
+                                out.extend(parts);
+                                continue;
+                            }
+                            other => {
+                                return Err(
+                                    format!(
+                                        "(uqs ...) expected a syntax list to splice, got {}",
+                                        other.to_lisp()
+                                    )
+                                );
+                            }
+                        }
+                    }
+                }
+                out.push(quasiquote_macro_expr(it, bindings, gensym_counter)?);
+            }
+            Ok(Expression::Apply(out))
+        }
+        other => Ok(other.clone()),
+    }
+}
+
+fn expand_macro_call(
+    macro_name: &str,
+    macro_def: &MacroDef,
+    args: &[Expression],
+    gensym_counter: &mut usize
+) -> Result<Expression, String> {
+    let call_expr = Expression::Apply(
+        std::iter::once(Expression::Word(macro_name.to_string()))
+            .chain(args.iter().cloned())
+            .collect()
+    );
+    let selected_clause = macro_def
+        .clauses
+        .iter()
+        .find(|clause|
+            if clause.rest_param.is_some() {
+                args.len() >= clause.params.len()
+            } else {
+                args.len() == clause.params.len()
+            }
+        )
+        .ok_or_else(|| {
+            let mut expected = macro_def
+                .clauses
+                .iter()
+                .map(|clause| {
+                    if clause.rest_param.is_some() {
+                        format!("{}+", clause.params.len())
+                    } else {
+                        clause.params.len().to_string()
+                    }
+                })
+                .collect::<Vec<_>>();
+            expected.sort();
+            expected.dedup();
+            format!(
+                "Macro '{}' expected one of [{}] args, got {} in call {}",
+                macro_name,
+                expected.join(", "),
+                args.len(),
+                call_expr.to_lisp()
+            )
+        })?;
+    let mut bindings = selected_clause.params
+        .iter()
+        .cloned()
+        .zip(args.iter().cloned())
+        .collect::<HashMap<_, _>>();
+    if let Some(rest_name) = &selected_clause.rest_param {
+        bindings.insert(
+            rest_name.clone(),
+            Expression::Apply(args[selected_clause.params.len()..].to_vec())
+        );
+    }
+    eval_macro_expr(&selected_clause.body, &bindings, gensym_counter).map_err(|e|
+        format!("Macro '{}' expansion failed for call {}: {}", macro_name, call_expr.to_lisp(), e)
+    )
+}
+
+fn expression_to_string_literal_expr(expr: &Expression) -> Expression {
+    let rendered = expr.to_lisp();
+    let mut items = Vec::with_capacity(rendered.chars().count() + 1);
+    items.push(Expression::Word("string".to_string()));
+    for ch in rendered.chars() {
+        items.push(Expression::Int(ch as u32 as i32));
+    }
+    Expression::Apply(items)
+}
+
+fn macroexpand_once_expr(
+    expr: &Expression,
+    macros: &HashMap<String, MacroDef>,
+    gensym_counter: &mut usize
+) -> Result<Expression, String> {
+    let Expression::Apply(items) = expr else {
+        return Ok(expr.clone());
+    };
+    let Some(Expression::Word(head)) = items.first() else {
+        return Ok(expr.clone());
+    };
+    let Some(macro_def) = macros.get(head) else {
+        return Ok(expr.clone());
+    };
+    expand_macro_call(head, macro_def, &items[1..], gensym_counter)
+}
+
+fn expand_macros_expr(
+    expr: &Expression,
+    macros: &HashMap<String, MacroDef>,
+    gensym_counter: &mut usize,
+    depth: usize
+) -> Result<Expression, String> {
+    if depth > MAX_MACRO_EXPANSION_DEPTH {
+        return Err("Macro expansion exceeded maximum depth".to_string());
+    }
+    match expr {
+        Expression::Apply(items) if !items.is_empty() => {
+            if let Some(Expression::Word(head)) = items.first() {
+                match head.as_str() {
+                    "quote" | "qq" | "uq" | "uqs" | "gensym" => {
+                        return Err(
+                            format!("Compile-time form '{}' can only appear inside letmacro bodies", head)
+                        );
+                    }
+                    "macroexpand-1" => {
+                        if items.len() != 2 {
+                            return Err("(macroexpand-1 ...) expects exactly one expression".to_string());
+                        }
+                        let expanded = macroexpand_once_expr(&items[1], macros, gensym_counter)?;
+                        return Ok(expression_to_string_literal_expr(&expanded));
+                    }
+                    "macroexpand" => {
+                        if items.len() != 2 {
+                            return Err("(macroexpand ...) expects exactly one expression".to_string());
+                        }
+                        let expanded = expand_macros_expr(&items[1], macros, gensym_counter, depth + 1)?;
+                        return Ok(expression_to_string_literal_expr(&expanded));
+                    }
+                    _ => {}
+                }
+                if let Some(macro_def) = macros.get(head) {
+                    let expanded = expand_macro_call(head, macro_def, &items[1..], gensym_counter)?;
+                    return expand_macros_expr(&expanded, macros, gensym_counter, depth + 1);
+                }
+            }
+            Ok(
+                Expression::Apply(
+                    items
+                        .iter()
+                        .map(|item| expand_macros_expr(item, macros, gensym_counter, depth))
+                        .collect::<Result<Vec<_>, _>>()?
+                )
+            )
+        }
+        _ => Ok(expr.clone()),
+    }
+}
+
+fn expand_macros_in_program(
+    exprs: Vec<Expression>,
+    macros: &HashMap<String, MacroDef>
+) -> Result<Vec<Expression>, String> {
+    let mut gensym_counter = 0usize;
+    exprs
+        .iter()
+        .map(|expr| expand_macros_expr(expr, macros, &mut gensym_counter, 0))
+        .collect()
+}
+
+fn prepare_program_with_macros(
+    program_exprs: Vec<Expression>,
+    std_exprs: Vec<Expression>
+) -> Result<(Vec<Expression>, Vec<Expression>), String> {
+    let mut macros = HashMap::new();
+    let runtime_std = split_macro_definitions(std_exprs, &mut macros)?;
+    let runtime_program = split_macro_definitions(
+        flatten_top_level_dos(program_exprs),
+        &mut macros
+    )?;
+    let expanded_std = expand_macros_in_program(runtime_std, &macros)?;
+    let expanded_program = expand_macros_in_program(runtime_program, &macros)?;
+    Ok((expanded_program, expanded_std))
+}
+
 pub fn parse(src: &str) -> Result<Vec<Expression>, String> {
     if let Some(report) = delimiter_debug_report(src, DelimiterMode::ParenOnly) {
         return Err(report);
@@ -722,7 +1172,6 @@ fn desugar_with_counter(
                 }
             }
             let exprs = desugared_exprs;
-
             if let Expression::Word(ref name) = exprs[0] {
                 match name.as_str() {
                     "<|" => Ok(pipe_data_first_curry_transform(exprs)),
@@ -2241,13 +2690,27 @@ impl Expression {
     }
 }
 
+fn wrap_top_level_do(exprs: Vec<Expression>) -> Expression {
+    Expression::Apply(std::iter::once(Expression::Word("do".to_string())).chain(exprs).collect())
+}
+
 pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expression, String> {
     match preprocess(&program) {
         Ok(preprocessed) =>
             match parse(&preprocessed) {
                 Ok(exprs) => {
+                    let (exprs, std) = prepare_program_with_macros(exprs, std)?;
                     let mut desugared = Vec::new();
+                    let mut desugared_std = Vec::new();
                     let mut binding_counter = 0usize;
+                    for expr in std {
+                        match desugar_with_counter(expr, &mut binding_counter) {
+                            Ok(expr) => desugared_std.push(expr),
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        }
+                    }
                     for expr in exprs {
                         match desugar_with_counter(expr, &mut binding_counter) {
                             Ok(expr) => desugared.push(expr),
@@ -2281,17 +2744,13 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                         }
                     }
 
-                    let shaken_std = tree_shake(std, &used, &mut definitions);
+                    let shaken_std = tree_shake(desugared_std, &used, &mut definitions);
                     let top_level = transform_let_destructuring_in_do(
                         desugared.to_vec(),
                         &mut binding_counter
                     )?;
-                    let wrapped = Expression::Apply(
-                        std::iter
-                            ::once(Expression::Word("do".to_string()))
-                            .chain(shaken_std.into_iter())
-                            .chain(top_level)
-                            .collect()
+                    let wrapped = wrap_top_level_do(
+                        shaken_std.into_iter().chain(top_level).collect()
                     );
                     Ok(wrapped)
                 }
@@ -2308,6 +2767,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
 pub fn build(program: &str) -> Result<Expression, String> {
     let preprocessed = preprocess(program)?;
     let exprs = parse(&preprocessed)?;
+    let (exprs, _std) = prepare_program_with_macros(exprs, Vec::new())?;
 
     let mut desugared = Vec::new();
     let mut binding_counter = 0usize;
@@ -2316,9 +2776,11 @@ pub fn build(program: &str) -> Result<Expression, String> {
     }
 
     let top_level = transform_let_destructuring_in_do(desugared, &mut binding_counter)?;
-    Ok(
-        Expression::Apply(
-            std::iter::once(Expression::Word("do".to_string())).chain(top_level).collect()
-        )
-    )
+    Ok(wrap_top_level_do(top_level))
+}
+
+pub fn build_library(program: &str) -> Result<Expression, String> {
+    let preprocessed = preprocess(program)?;
+    let exprs = parse(&preprocessed)?;
+    Ok(wrap_top_level_do(flatten_top_level_dos(exprs)))
 }
