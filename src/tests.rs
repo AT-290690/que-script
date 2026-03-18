@@ -898,6 +898,48 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_runtime_not_equal_alias_macros_expand_from_baked_library() {
+        let output = run_program_output_with_std_and_opts(
+            r#"[(!= 1 2) (!= 2 2) (<> 3 4) (<> 5 5)]"#,
+            true
+        );
+        assert_eq!(output, "[true false true false]");
+    }
+
+    #[test]
+    fn test_baked_cond_macro_preserves_legacy_parser_expansion_shapes() {
+        let std_ast = crate::baked::load_ast();
+        let lib_defs = crate::baked
+            ::ast_to_definitions(std_ast, "active library")
+            .expect("embedded library should flatten to definitions");
+        let expr = crate::parser
+            ::merge_std_and_program("[(cond) (cond false 1 true 2 3)]", lib_defs)
+            .expect("cond macro should expand through baked library merge");
+        let rendered = expr.to_lisp();
+        assert!(
+            rendered.contains("(if false 1 (if true 2 3))"),
+            "cond macro should expand into nested ifs, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("(vector 0") || rendered.contains("[0 "),
+            "empty cond should expand to 0, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_cond_macro_runs_through_baked_library() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(cond false 1 true 2 3)"#,
+            true
+        );
+        assert_eq!(output, "2");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_cons_builtin_works_as_higher_order_function_value() {
         let output = run_program_output_with_std_and_opts(
             r#"(reduce cons [] [[1 2] [3] [4 5]])"#,

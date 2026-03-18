@@ -1199,9 +1199,7 @@ fn desugar_with_counter(
                 match name.as_str() {
                     "<|" => Ok(pipe_data_first_curry_transform(exprs)),
                     "|>" => Ok(pipe_curry_transform(exprs)),
-                    "cond" => Ok(cond_transform(exprs)),
                     "if" => Ok(if_transform(exprs)),
-                    "unless" => Ok(unless_transform(exprs)),
                     "-" => Ok(minus_transform(exprs)),
                     "-." => Ok(minusf_transform(exprs)),
                     "+" => Ok(plus_transform(exprs)),
@@ -1212,8 +1210,6 @@ fn desugar_with_counter(
                     "/." => Ok(divf_transform(exprs)),
                     "and" => Ok(and_transform(exprs)),
                     "or" => Ok(or_transform(exprs)),
-                    "!=" => Ok(not_equal_transform(exprs)),
-                    "<>" => Ok(not_equal_transform(exprs)),
                     "get" => Ok(accessor_transform(exprs)?),
                     "cdr" => Ok(cdr_transform(exprs)?),
                     "set!" => Ok(setter_transform(exprs)?),
@@ -2109,17 +2105,6 @@ fn boolean_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
         )
     )
 }
-fn not_equal_transform(mut exprs: Vec<Expression>) -> Expression {
-    exprs.remove(0);
-    Expression::Apply(
-        vec![
-            Expression::Word("not".to_string()),
-            Expression::Apply(
-                vec![Expression::Word("=".to_string()), exprs[0].clone(), exprs[1].clone()]
-            )
-        ]
-    )
-}
 fn minus_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
@@ -2459,34 +2444,6 @@ fn divf_transform(mut exprs: Vec<Expression>) -> Expression {
         }
     }
 }
-fn cond_transform(mut exprs: Vec<Expression>) -> Expression {
-    exprs.remove(0);
-
-    if exprs.is_empty() {
-        return Expression::Int(0);
-    }
-
-    let mut pairs = Vec::new();
-    // let mut default = Expression::Int(0);
-    let mut default = Expression::Word("nil".to_string());
-
-    if exprs.len() % 2 == 1 {
-        default = exprs.pop().unwrap();
-    }
-
-    for chunk in exprs.chunks(2) {
-        let test = chunk[0].clone();
-        let branch = chunk[1].clone();
-        pairs.push((test, branch));
-    }
-
-    let mut result = default;
-    for (test, branch) in pairs.into_iter().rev() {
-        result = Expression::Apply(vec![Expression::Word("if".to_string()), test, branch, result]);
-    }
-
-    result
-}
 fn if_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
     if exprs.len() == 0 {
@@ -2517,41 +2474,6 @@ fn if_transform(mut exprs: Vec<Expression>) -> Expression {
         } else {
             exprs[2].clone()
         }]
-    );
-}
-fn unless_transform(mut exprs: Vec<Expression>) -> Expression {
-    exprs.remove(0);
-    if exprs.len() == 0 {
-        return Expression::Apply(
-            vec![
-                Expression::Word("if".to_string()),
-                Expression::Word("nil".to_string()),
-                Expression::Word("nil".to_string()),
-                Expression::Word("nil".to_string())
-            ]
-        );
-    }
-    if exprs.len() == 1 {
-        return Expression::Apply(
-            vec![
-                Expression::Word("if".to_string()),
-                exprs[0].clone(),
-                Expression::Word("nil".to_string()),
-                Expression::Word("nil".to_string())
-            ]
-        );
-    }
-    return Expression::Apply(
-        vec![
-            Expression::Word("if".to_string()),
-            exprs[0].clone(),
-            if exprs.len() == 2 {
-                Expression::Word("nil".to_string())
-            } else {
-                exprs[2].clone()
-            },
-            exprs[1].clone()
-        ]
     );
 }
 fn pipe_data_first_curry_transform(mut exprs: Vec<Expression>) -> Expression {
