@@ -239,10 +239,10 @@
 (let split (lambda ys str (do
   (let xs (copy str))
   (loop 0 (length xs) (lambda i (if (and (=# (get xs i) (get ys 0)) (<= i (abs (- (length xs) (length ys))))) (do 
-    (boolean f? true)
+    (&mut f? true)
     (loop 1 (length ys) (lambda j (do 
-      (if (not (=# (get xs (+ i j)) (get ys j))) (set f? false)))))
-    (if (get f?) (do (set! xs i Char/start) (loop 1 (length ys) (lambda j (set! xs (+ i j) Char/nil)))))))))
+      (if (not (=# (get xs (+ i j)) (get ys j))) (&alter! f? false)))))
+    (if (&get f?) (do (set! xs i Char/start) (loop 1 (length ys) (lambda j (set! xs (+ i j) Char/nil)))))))))
   (|> xs (exclude (lambda x (=# Char/nil x))) (String->Vector Char/start)))))
 
 (let join (lambda str xs (do 
