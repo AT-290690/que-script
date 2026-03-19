@@ -50,7 +50,9 @@ fn parse_output_path_from_argv(argv: &[String]) -> Result<PathBuf, String> {
                 out = Some(PathBuf::from(&argv[i]));
                 i += 1;
             }
-            _ => i += 1,
+            _ => {
+                i += 1;
+            }
         }
     }
     Ok(out.unwrap_or_else(|| PathBuf::from("./dist/que-lib.lisp")))
@@ -98,7 +100,7 @@ fn parse_definitions_only(source: &str, label: &str) -> Result<Vec<Expression>, 
                 )
             );
         };
-        if kw != "let" && kw != "let*" && kw != "letmacro" && kw != "mut" {
+        if kw != "let" && kw != "letrec" && kw != "letmacro" && kw != "mut" {
             return Err(
                 format!(
                     "'{}' must contain only top-level definitions; found '{}' at form {}",
@@ -141,7 +143,7 @@ fn usage(bin_name: &str) -> String {
         "Usage: {bin} [--bundle <helpers.que> [more.que ...]] [helpers.que ...] [--out <que-lib.lisp>]\n\
          \n\
          Bakes const/macros/std/fp/ds plus optional helper bundles into an external library file.\n\
-         Helper bundles must contain only top-level definitions (let/let*/letmacro/mut).\n\
+         Helper bundles must contain only top-level definitions (let/letrec/letmacro/mut).\n\
          Rebuild/reinstall binaries (and restart LSP/editor) after baking.\n\
          After install, helper bundle source files may be removed.\n\
          \n\
@@ -160,7 +162,7 @@ fn run() -> io::Result<()> {
         .and_then(|p| Path::new(p).file_name())
         .and_then(|p| p.to_str())
         .unwrap_or("quebake");
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+    if args.iter().any(|arg| (arg == "--help" || arg == "-h")) {
         println!("{}", usage(bin_name));
         return Ok(());
     }
@@ -174,7 +176,11 @@ fn run() -> io::Result<()> {
 
     let mut defs = base_library_defs().map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     for path in &bundle_paths {
-        defs.extend(load_defs_from_path(path, true).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?);
+        defs.extend(
+            load_defs_from_path(path, true).map_err(|e|
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            )?
+        );
     }
 
     let wrapped = Expression::Apply(

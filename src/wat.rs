@@ -372,7 +372,7 @@ fn is_special_word(w: &str) -> bool {
         "do" |
             "let" |
             "mut" |
-            "let*" |
+            "letrec" |
             "lambda" |
             "if" |
             "vector" |
@@ -488,7 +488,7 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                                 let [Expression::Word(kw), Expression::Word(name), rhs] =
                                     &let_items[..]
                             {
-                                if kw == "let" || kw == "let*" || kw == "mut" {
+                                if kw == "let" || kw == "letrec" || kw == "mut" {
                                     collect_refs(rhs, bound, out);
                                     bound.insert(name.clone());
                                     continue;
@@ -499,7 +499,7 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     }
                     return;
                 }
-                if op == "let" || op == "let*" || op == "mut" {
+                if op == "let" || op == "letrec" || op == "mut" {
                     if let [_, Expression::Word(name), rhs] = &items[..] {
                         collect_refs(rhs, bound, out);
                         bound.insert(name.clone());
@@ -541,7 +541,7 @@ fn collect_lambda_nodes(node: &TypedExpression, out: &mut Vec<TypedExpression>) 
 fn collect_let_lambda_bindings(node: &TypedExpression, out: &mut HashMap<String, TypedExpression>) {
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
-            if kw == "let" || kw == "let*" {
+            if kw == "let" || kw == "letrec" {
                 if let Some(rhs) = node.children.get(2) {
                     match &rhs.expr {
                         Expression::Apply(xs) if
@@ -4065,7 +4065,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             };
             return Ok(format!("{a}\n{b}\ni32.const {elem_ref}\ncall $vec_concat_i32"));
         }
-        "let" | "let*" | "mut" | "while" => {
+        "let" | "letrec" | "mut" | "while" => {
             return Err(format!("Unsupported return of builtin {}", op));
         }
         _ => {
@@ -4324,7 +4324,7 @@ fn is_borrowed_managed_rhs_with_env(
                                 let [Expression::Word(kw), Expression::Word(name), _] =
                                     &let_items[..]
                             {
-                                if kw == "let" || kw == "let*" || kw == "mut" {
+                                if kw == "let" || kw == "letrec" || kw == "mut" {
                                     let rhs_borrowed = apply_child_at(node, i)
                                         .and_then(|let_node| let_node.children.get(2))
                                         .map(|rhs|
@@ -4499,7 +4499,7 @@ fn compile_do(
     for i in 1..items.len() - 1 {
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
-                if kw == "let" || kw == "let*" || kw == "mut" {
+                if kw == "let" || kw == "letrec" || kw == "mut" {
                     let val_node = child_at(i).and_then(|n| n.children.get(2));
                     let self_capture_idx = val_node.and_then(|n| {
                         if
@@ -5941,7 +5941,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
 fn collect_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
-            if kw == "let" || kw == "let*" || kw == "mut" {
+            if kw == "let" || kw == "letrec" || kw == "mut" {
                 if let Some(t) = node.children.get(2).and_then(|n| n.typ.as_ref()) {
                     if !out.iter().any(|(n, _)| n == name) {
                         out.push((name.clone(), t.clone()));
@@ -6694,7 +6694,7 @@ pub fn compile_program_to_wat_typed_with_opts(
             for i in 1..items.len() {
                 if let Expression::Apply(let_items) = &items[i] {
                     if let [Expression::Word(kw), Expression::Word(name), rhs] = &let_items[..] {
-                        if kw == "let" || kw == "let*" {
+                        if kw == "let" || kw == "letrec" {
                             if
                                 let Some(node) = child_at(i)
                                     .and_then(|n| n.children.get(2))

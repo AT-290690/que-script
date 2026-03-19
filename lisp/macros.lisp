@@ -75,6 +75,16 @@
                 (alter! (uq i) (+ (uq i) 1))
                 nil)))))))
 
+(letmacro let*
+  ((name value body)
+    (qq (block
+          (let (uq name) (uq value))
+          (uq body))))
+  ((name value . rest)
+    (qq (block
+          (let (uq name) (uq value))
+          (let* (uqs rest))))))
+
 (letmacro block
     (lambda . body
       (qq ((lambda

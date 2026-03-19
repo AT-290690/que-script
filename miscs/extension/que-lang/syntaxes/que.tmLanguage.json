@@ -40,7 +40,7 @@
       "patterns": [
         {
           "name": "keyword.control.que",
-          "match": "\\b(block|unless|when|when-not|cond|cons|while|alter|mut|do|let|let\\*|loop|if|lambda|mod|length|as|get|at|set|pop|push|pull|swap|emod|not|and|or|identity|eq|integer|fixed|boolean|variable|que|string|chars|digits|vector|bigint|tuple|table|fst|snd|car|cdr|has|in-bounds|apply|eq|comp|matrix|shell|Vector|String|Matrix|BigInt|Tuple|Table|Set|Hash|Que|Integer|Floating|Boolean|Heap|map|filter|reduce|every|some|select|exclude|find|sum|product|slice|take|drop|range|flat)\\b"
+          "match": "\\b(block|unless|when|when-not|cond|cons|while|alter|mut|do|letrec|let|let\\*|loop|if|lambda|mod|length|as|get|at|set|pop|push|pull|swap|emod|not|and|or|identity|eq|integer|fixed|boolean|variable|que|string|chars|digits|vector|bigint|tuple|table|fst|snd|car|cdr|has|in-bounds|apply|eq|comp|matrix|shell|Vector|String|Matrix|BigInt|Tuple|Table|Set|Hash|Que|Integer|Floating|Boolean|Heap|map|filter|reduce|every|some|select|exclude|find|sum|product|slice|take|drop|range|flat)\\b"
         }
       ]
     },

@@ -579,7 +579,7 @@ impl ServerState {
             "lambda",
             "if",
             "let",
-            "let*",
+            "letrec",
             "letmacro",
             "mut",
             "do",
@@ -638,7 +638,7 @@ impl ServerState {
             "lambda",
             "if",
             "let",
-            "let*",
+            "letrec",
             "letmacro",
             "mut",
             "do",
@@ -769,8 +769,7 @@ impl ServerState {
                 &core.std_fallback_names
             )
         });
-        self.resolve_signature_for_doc(&analysis, symbol, position)
-            .map(|s| normalize_signature(&s))
+        self.resolve_signature_for_doc(&analysis, symbol, position).map(|s| normalize_signature(&s))
     }
 
     fn resolve_signature_for_doc(
@@ -1124,8 +1123,15 @@ fn build_form_scoped_analyses(
         let mut let_binding_external_impure = HashMap::new();
         collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
         collect_let_binding_types(typed_user_forms[idx], &mut raw_let_bindings);
-        collect_let_binding_effects(typed_user_forms[idx], &mut let_binding_effects, global_effects);
-        collect_let_binding_external_impurity(typed_user_forms[idx], &mut let_binding_external_impure);
+        collect_let_binding_effects(
+            typed_user_forms[idx],
+            &mut let_binding_effects,
+            global_effects
+        );
+        collect_let_binding_external_impurity(
+            typed_user_forms[idx],
+            &mut let_binding_external_impure
+        );
         let symbol_types = raw_symbols
             .into_iter()
             .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
@@ -1420,7 +1426,7 @@ fn is_let_binding_name_at_position(text: &str, symbol_range: Range, symbol: &str
     ) else {
         return false;
     };
-    if head != "let" && head != "let*" && head != "mut" {
+    if head != "let" && head != "letrec" && head != "mut" {
         return false;
     }
 

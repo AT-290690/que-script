@@ -15,7 +15,7 @@
 (let Char (&get "a"))
 (let Bool false)
 (let Nil nil)
-(let as (lambda . t t))
+(let as (lambda _ t t))
 (let : (lambda t x (do [ t x ] x)))
 (let eq (lambda a b (cond 
           (and a b) true 

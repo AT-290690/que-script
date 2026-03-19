@@ -303,7 +303,7 @@ fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>
                 )
             );
         };
-        if kw != "let" && kw != "let*" && kw != "mut" {
+        if kw != "let" && kw != "letrec" && kw != "mut" {
             return Err(
                 format!(
                     "bundle '{}' must contain only top-level definitions; found '{}' at form {}",
@@ -453,7 +453,7 @@ fn native_shell_learn() -> &'static str {
     \n\
     Functions:\n\
     - (lambda a b body)\n\
-    - Recursive functions must use let*: (let* f (lambda ... (f ...)))\n\
+    - Recursive functions must use letrec: (letrec f (lambda ... (f ...)))\n\
     - Destructuring works in params:\n\
       - tuples: {a b}\n\
       - vectors: [a b c]\n\
@@ -512,7 +512,7 @@ fn binding_name_from_def(expr: &Expression) -> Option<String> {
     let Expression::Word(keyword) = &items[0] else {
         return None;
     };
-    if keyword != "let" && keyword != "let*" && keyword != "mut" {
+    if keyword != "let" && keyword != "letrec" && keyword != "mut" {
         return None;
     }
     let Expression::Word(name) = &items[1] else {

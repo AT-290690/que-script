@@ -753,6 +753,13 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_runtime_letstar_macro_supports_sequential_bindings_with_single_body_expr() {
+        let output = run_program_output_with_std_and_opts(r#"(let* a 1 b (+ a 2) (+ a b))"#, true);
+        assert_eq!(output, "4");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_runtime_multiclause_unless_macro_expands_legacy_shapes_for_unit_bodies() {
         let output = run_program_output(
             r#"(do
@@ -966,7 +973,7 @@ Concequent and alternative must match types
      (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) nil)))
 
                 (let valid-path (lambda n edges source destination (do
-                  (let graph (std/vector/map (std/vector/int/zeroes n) (lambda . [])))
+                  (let graph (std/vector/map (std/vector/int/zeroes n) (lambda _ [])))
                   (std/vector/for edges (lambda edge (do
                     (let u (get edge 0))
                     (let v (get edge 1))
@@ -1080,7 +1087,7 @@ Concequent and alternative must match types
         (let key (Integer->String b))
         (Table/set! a key i)
         { a out }))
-        (lambda { . out } . . (not-empty? out))
+        (lambda { _ out } _ _ (not-empty? out))
         { (Table/new) [] } )))))
 [
     (two-sum-test [ 2 7 11 15 ] 9)
@@ -3467,7 +3474,7 @@ Concequent and alternative must match types
                 r#"(let last-stone-weight (lambda stones (do
   (let max-cmp (lambda a b (> a b)))
   (let heap (std/convert/vector->heap stones max-cmp))
-  (let* tail-call/smash (lambda t
+  (letrec tail-call/smash (lambda t
     (if (> (length heap) 1)
       (do
         (let y (std/heap/peek heap))
@@ -3605,7 +3612,7 @@ image
                 r#"(let valid-path (lambda n edges source destination (do
   (if (= source destination) true
     (do
-      (let graph (std/vector/map (std/vector/int/zeroes n) (lambda . [])))
+      (let graph (std/vector/map (std/vector/int/zeroes n) (lambda _ [])))
       (std/vector/for edges (lambda edge (do
         (let u (get edge 0))
         (let v (get edge 1))
@@ -3934,7 +3941,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[true false]",
             ),
             (
-                r#"(let* rev! (lambda ys xs 
+                r#"(letrec rev! (lambda ys xs 
     (if (std/vector/empty? xs) 
          ys 
         (rev! (do (std/vector/push! ys (std/vector/at xs -1)) ys) (std/vector/drop/last xs 1)))))
@@ -3976,7 +3983,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             ),
             (
                 r#"
-(let* factorial (lambda n total
+(letrec factorial (lambda n total
     (if (= (get n 0) 0)
         total
         (factorial (std/int/big/sub n [ 1 ]) (std/int/big/mul total n)))))
@@ -3995,7 +4002,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[1 3 7 8 4 6 5 2 8 8 2 0]",
             ),
             (
-                r#"(let* fibonacci (lambda n 
+                r#"(letrec fibonacci (lambda n 
     (if (< n 2) n 
         (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
 
@@ -4055,7 +4062,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             ),
             (
                 r#"(let count-points (lambda rings (do
-  (let rods (std/vector/map (std/vector/int/zeroes 10) (lambda . [false false false]))) ; [R, G, B] for each rod
+  (let rods (std/vector/map (std/vector/int/zeroes 10) (lambda _ [false false false]))) ; [R, G, B] for each rod
   (let len (length rings))
   (loop 0 len (lambda i (do
     (if (std/int/even? i)
@@ -4173,7 +4180,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"
 (let N 9)
-(let matrix (<| (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda . 0))))))
+(let matrix (<| (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda _ 0))))))
 (let add-glider! (lambda matrix y x (do 
   (set! (get matrix (+ y 2)) (+ x 1) 1)
   (set! (get matrix (+ y 2)) (+ x 2) 1)
@@ -4351,8 +4358,8 @@ out
 (let part2 (lambda input (<| input
                             (std/vector/map
                               (lambda line (<| line
-                                (std/vector/map/i (lambda . i
-                                  (<| line (std/vector/filter/i (lambda . j (not (= i j))))))))))
+                                (std/vector/map/i (lambda _ i
+                                  (<| line (std/vector/filter/i (lambda _ j (not (= i j))))))))))
                             (std/vector/count-of (lambda x (std/int/positive? (part1 x)))))))
 
 (let PARSED (parse INPUT))
@@ -4379,7 +4386,7 @@ b
                 "{ [1 2 3] [true false true] }",
             ),
             (
-                r#"(let* rec (lambda { x y } { . b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
+                r#"(letrec rec (lambda { x y } { _ b } (if (< (+ x y) b) (rec {(+ x 2) (+ y 3)} { true b } ) { false (+ x y) })))
 (rec { 1 1 } { true 10 })"#,
                 "{ false 12 }",
             ),
@@ -4578,7 +4585,7 @@ L82")
   (get TOTAL))))
 
   (let part2 (lambda input (do
-    (let* rec (lambda total (do
+    (letrec rec (lambda total (do
         (let rem [])
         (loop 0 (length input) (lambda y (do 
         (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
@@ -4798,7 +4805,7 @@ L82")
   (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2)))
   (let edges (map fst dist))
   (let parent (range 0 (- (length input) 1)))
-  (let* root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
+  (letrec root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
   (let merge (lambda a b (set! parent (root a) (root b))))
   (for (lambda [ a b ] (merge a b)) (take/first 10 edges))
   (|> 
@@ -4831,7 +4838,7 @@ L82")
   (integer components len)
 
   ; root with path compression
-  (let* root (lambda i
+  (letrec root (lambda i
       (if (= (get parent i) i) i
           (do
             (set! parent i (root (get parent i)))
@@ -5008,7 +5015,7 @@ UUUUD")
         (do 
         (let m (length image))
         (let n (length (first image)))
-        (let* adj (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (get image r c) old)) (do 
+        (letrec adj (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (get image r c) old)) (do 
                     (set! image r c color)
                     (adj (+ r 1) c)
                     (adj (- r 1) c)
@@ -5025,14 +5032,14 @@ image
                 "[[2 2 2] [2 2 0] [2 0 1]]",
             ),
             (
-                r#"(let* fibonacci (lambda n
+                r#"(letrec fibonacci (lambda n
     (if (< n 2) n (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
 (fibonacci 10)"#,
                 "55",
             ),
             (
                 r#"(let memo [[] [] [] []])
-(let* fibonacci! (lambda n
+(letrec fibonacci! (lambda n
     (do 
     (let key (Integer->String n))
     (if (< n 2) n (if (Table/has? key memo) (snd (first (Table/get key memo))) (do 
@@ -5043,7 +5050,7 @@ image
                 "55",
             ),
             (
-                r#"(let* ackermann (lambda m n 
+                r#"(letrec ackermann (lambda m n 
     (cond 
         (and (< m 0) (< n 0)) -1 
         (= m 0) (+ n 1)
@@ -5094,7 +5101,7 @@ image
   (lambda rows prefer-most? (do
     (let width (length (get rows 0)))
 
-    (let* step
+    (letrec step
       (lambda idx remaining
         (if (or (= (length remaining) 1) (= idx width))
             remaining
@@ -5149,7 +5156,7 @@ bbrgwb")
 
 (let part1 (lambda { patterns-input towels } (do 
   (let patterns (reduce (lambda a b (do (Set/add! a b) a)) [[] [] [] [] [] [] [] [] []] patterns-input))
-  (let* dp? (lambda str (loop/some-range? 1 (length str) (lambda i (do 
+  (letrec dp? (lambda str (loop/some-range? 1 (length str) (lambda i (do 
     (let a (slice 0 i str))
     (let b (slice i (length str) str))
     (or (and (Set/has? a patterns) (Set/has? b patterns)) (and (dp? a) (dp? b))))))))
@@ -5220,7 +5227,7 @@ bbrgwb")
 (let first-winning-board
   (lambda numbers boards (do
     (let drawn (buckets 32))
-    (let* step
+    (letrec step
       (lambda i result
         (if (or
               (not (= (fst result) -1))
@@ -5368,7 +5375,7 @@ bbrgwb")
 (let step (lambda [ c0 c1 c2 c3 c4 c5 c6 c7 c8 ] [ c1 c2 c3 c4 c5 c6 (+ c7 c0) c8 c0 ]))
 ; Int -> [Int] -> [Int]
 (let simulate (lambda days state (do 
-    (let* rec (lambda i acc
+    (letrec rec (lambda i acc
         (if (= i days)
             acc
             (rec (+ i 1) (step acc)))))
@@ -5500,7 +5507,7 @@ bbrgwb")
             ),
             (
                 r#"(let max-water (lambda input (do 
-  (let* max-water-rec (lambda l r out 
+  (letrec max-water-rec (lambda l r out 
     (if (< l r) 
       (do 
         (let width (- r l))
@@ -5533,7 +5540,7 @@ bbrgwb")
 { a rest }"#, "{ 1 [3 4 5 6] }"),
             (
                 r#"(let rev (lambda xs (do 
-  (let* rec/rev (lambda xs out 
+  (letrec rec/rev (lambda xs out 
                   (if (empty? xs) out 
                       (rec/rev (cdr xs) (cons [(car xs)] out)))))
   (rec/rev xs []))))
@@ -5563,7 +5570,7 @@ bbrgwb")
     (Vector/new (lambda _ id) ch))
     (Vector/new (lambda _ -1) ch))])) [])))
   (let blanks (reduce/i (lambda a x i (do (if (= x -1) (push! a i)) a)) [] disk))
-  (let* fragment (lambda ind out (do 
+  (letrec fragment (lambda ind out (do 
     (let i (get blanks ind))
     (if (= (last disk) -1) (do (pop! disk) (fragment ind out))
       (if (not (<= (length disk) i)) (do 
@@ -5701,7 +5708,7 @@ bbrgwb")
 
     (while (and (true? loop?) (< (get i) (length word))) (do
 
-        (let filtered (filter/i (lambda . j (<> j (get i))) word))
+        (let filtered (filter/i (lambda _ j (<> j (get i))) word))
         (if (Set/has? filtered correct) (do 
             (&alter! out filtered)
             (&alter! loop? false)))
@@ -5799,7 +5806,7 @@ SECRET = SANTA")
     (let s (+ a b))
     (if (>= s m) (- s m) s))))
 
-(let* mul-mod/loop (lambda a b m acc
+(letrec mul-mod/loop (lambda a b m acc
     (if (= b 0)
         acc
         (mul-mod/loop
@@ -5812,7 +5819,7 @@ SECRET = SANTA")
 
 (let mul-mod (lambda a b m (mul-mod/loop a b m 0)))
 
-(let* pow-mod/loop (lambda base exp m acc
+(letrec pow-mod/loop (lambda base exp m acc
     (if (= exp 0)
         acc
         (pow-mod/loop
@@ -5842,7 +5849,7 @@ SECRET = SANTA")
             (
                 r#"(let h (lambda payload (do
 (let [a b c] payload)
-(let* step (lambda i [i i i]))
+(letrec step (lambda i [i i i]))
 (let final-state (step 1))
 (do
 (let [x y z] final-state)
