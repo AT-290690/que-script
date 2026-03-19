@@ -2,7 +2,7 @@ use que::parser::Expression;
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{ Path, PathBuf };
+use std::path::{Path, PathBuf};
 
 fn parse_bundle_paths_from_argv(argv: &[String]) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
@@ -59,56 +59,51 @@ fn parse_output_path_from_argv(argv: &[String]) -> Result<PathBuf, String> {
 }
 
 fn parse_definitions_only(source: &str, label: &str) -> Result<Vec<Expression>, String> {
-    let root = que::parser
-        ::build_library(source)
+    let root = que::parser::build_library(source)
         .map_err(|e| format!("failed to parse '{}': {}", label, e))?;
     let Expression::Apply(items) = root else {
-        return Err(format!("'{}' did not parse as top-level do expression", label));
+        return Err(format!(
+            "'{}' did not parse as top-level do expression",
+            label
+        ));
     };
     if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-        return Err(format!("'{}' did not parse as top-level do expression", label));
+        return Err(format!(
+            "'{}' did not parse as top-level do expression",
+            label
+        ));
     }
     let mut defs = Vec::new();
     for (idx, item) in items.iter().enumerate().skip(1) {
         let Expression::Apply(form) = item else {
-            return Err(
-                format!(
-                    "'{}' must contain only top-level definitions; found non-definition at form {}: {}",
-                    label,
-                    idx,
-                    item.to_lisp()
-                )
-            );
+            return Err(format!(
+                "'{}' must contain only top-level definitions; found non-definition at form {}: {}",
+                label,
+                idx,
+                item.to_lisp()
+            ));
         };
         if form.len() < 3 {
-            return Err(
-                format!(
-                    "'{}' must contain only top-level definitions; malformed form {}: {}",
-                    label,
-                    idx,
-                    item.to_lisp()
-                )
-            );
+            return Err(format!(
+                "'{}' must contain only top-level definitions; malformed form {}: {}",
+                label,
+                idx,
+                item.to_lisp()
+            ));
         }
         let Expression::Word(kw) = &form[0] else {
-            return Err(
-                format!(
-                    "'{}' must contain only top-level definitions; malformed form {}: {}",
-                    label,
-                    idx,
-                    item.to_lisp()
-                )
-            );
+            return Err(format!(
+                "'{}' must contain only top-level definitions; malformed form {}: {}",
+                label,
+                idx,
+                item.to_lisp()
+            ));
         };
         if kw != "let" && kw != "letrec" && kw != "letmacro" && kw != "mut" {
-            return Err(
-                format!(
-                    "'{}' must contain only top-level definitions; found '{}' at form {}",
-                    label,
-                    kw,
-                    idx
-                )
-            );
+            return Err(format!(
+                "'{}' must contain only top-level definitions; found '{}' at form {}",
+                label, kw, idx
+            ));
         }
         defs.push(item.clone());
     }
@@ -167,24 +162,24 @@ fn run() -> io::Result<()> {
         return Ok(());
     }
 
-    let bundle_paths = parse_bundle_paths_from_argv(&args[1..]).map_err(|e|
-        io::Error::new(io::ErrorKind::InvalidInput, e)
-    )?;
-    let output_path = parse_output_path_from_argv(&args[1..]).map_err(|e|
-        io::Error::new(io::ErrorKind::InvalidInput, e)
-    )?;
+    let bundle_paths = parse_bundle_paths_from_argv(&args[1..])
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let output_path = parse_output_path_from_argv(&args[1..])
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
-    let mut defs = base_library_defs().map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let mut defs =
+        base_library_defs().map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     for path in &bundle_paths {
         defs.extend(
-            load_defs_from_path(path, true).map_err(|e|
-                io::Error::new(io::ErrorKind::InvalidData, e)
-            )?
+            load_defs_from_path(path, true)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
         );
     }
 
     let wrapped = Expression::Apply(
-        std::iter::once(Expression::Word("do".to_string())).chain(defs).collect()
+        std::iter::once(Expression::Word("do".to_string()))
+            .chain(defs)
+            .collect(),
     );
 
     if let Some(parent) = output_path.parent() {

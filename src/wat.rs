@@ -4093,13 +4093,13 @@ fn is_borrowing_accessor_expr(node: &TypedExpression) -> bool {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() =>
             matches!(
-                &items[0],
-                Expression::Word(op)
-                    if op == "get"
-                        || op == "fst"
-                        || op == "snd"
-                        || op == "car"
-            ),
+            &items[0],
+            Expression::Word(op)
+                if op == "get"
+                    || op == "fst"
+                    || op == "snd"
+                    || op == "car"
+        ),
         _ => false,
     }
 }
@@ -4173,9 +4173,9 @@ fn resolve_callable_binding_from_arg(
                     return Some(CallableBinding::Lambda(arg.clone()));
                 }
                 if op == "as" || op == "char" {
-                    return apply_child_at(arg, 1).and_then(|inner|
+                    return apply_child_at(arg, 1).and_then(|inner| {
                         resolve_callable_binding_from_arg(inner, callable_env, lambda_bindings)
-                    );
+                    });
                 }
             }
             None
@@ -4199,7 +4199,7 @@ fn analyze_borrow_for_lambda_invocation(
     for (idx, param_name) in params.iter().enumerate() {
         let arg_node = apply_child_at(call_node, idx + 1);
         let arg_borrowed = arg_node
-            .map(|arg|
+            .map(|arg| {
                 is_borrowed_managed_rhs_with_env(
                     arg,
                     env,
@@ -4208,7 +4208,7 @@ fn analyze_borrow_for_lambda_invocation(
                     call_stack,
                     depth + 1
                 )
-            )
+            })
             .unwrap_or(false);
         lambda_env.insert(param_name.clone(), arg_borrowed);
 
@@ -4261,7 +4261,7 @@ fn is_borrowed_managed_rhs_with_env(
             };
             if op == "as" || op == "char" {
                 return apply_child_at(node, 1)
-                    .map(|n|
+                    .map(|n| {
                         is_borrowed_managed_rhs_with_env(
                             n,
                             env,
@@ -4270,12 +4270,12 @@ fn is_borrowed_managed_rhs_with_env(
                             call_stack,
                             depth + 1
                         )
-                    )
+                    })
                     .unwrap_or(false);
             }
             if is_borrowing_accessor_expr(node) {
                 return apply_child_at(node, 1)
-                    .map(|n|
+                    .map(|n| {
                         is_borrowed_managed_rhs_with_env(
                             n,
                             env,
@@ -4284,12 +4284,12 @@ fn is_borrowed_managed_rhs_with_env(
                             call_stack,
                             depth + 1
                         )
-                    )
+                    })
                     .unwrap_or(false);
             }
             if op == "if" {
                 let then_borrowed = apply_child_at(node, 2)
-                    .map(|n|
+                    .map(|n| {
                         is_borrowed_managed_rhs_with_env(
                             n,
                             env,
@@ -4298,10 +4298,10 @@ fn is_borrowed_managed_rhs_with_env(
                             call_stack,
                             depth + 1
                         )
-                    )
+                    })
                     .unwrap_or(false);
                 let else_borrowed = apply_child_at(node, 3)
-                    .map(|n|
+                    .map(|n| {
                         is_borrowed_managed_rhs_with_env(
                             n,
                             env,
@@ -4310,7 +4310,7 @@ fn is_borrowed_managed_rhs_with_env(
                             call_stack,
                             depth + 1
                         )
-                    )
+                    })
                     .unwrap_or(false);
                 return then_borrowed && else_borrowed;
             }
@@ -4327,7 +4327,7 @@ fn is_borrowed_managed_rhs_with_env(
                                 if kw == "let" || kw == "letrec" || kw == "mut" {
                                     let rhs_borrowed = apply_child_at(node, i)
                                         .and_then(|let_node| let_node.children.get(2))
-                                        .map(|rhs|
+                                        .map(|rhs| {
                                             is_borrowed_managed_rhs_with_env(
                                                 rhs,
                                                 &scoped_env,
@@ -4336,7 +4336,7 @@ fn is_borrowed_managed_rhs_with_env(
                                                 call_stack,
                                                 depth + 1
                                             )
-                                        )
+                                        })
                                         .unwrap_or(false);
                                     scoped_env.insert(name.clone(), rhs_borrowed);
                                     if
@@ -4366,7 +4366,7 @@ fn is_borrowed_managed_rhs_with_env(
                     }
                 }
                 return apply_child_at(node, items.len() - 1)
-                    .map(|last|
+                    .map(|last| {
                         is_borrowed_managed_rhs_with_env(
                             last,
                             &scoped_env,
@@ -4375,7 +4375,7 @@ fn is_borrowed_managed_rhs_with_env(
                             call_stack,
                             depth + 1
                         )
-                    )
+                    })
                     .unwrap_or(false);
             }
             if let Some(binding) = callable_env.get(op) {
@@ -5697,9 +5697,9 @@ fn resolve_local_devirtualized_head(
         return Ok(None);
     };
     Ok(
-        ctx.fn_ids
-            .iter()
-            .find_map(|(name, id)| if *id == target_id { Some(name.clone()) } else { None })
+        ctx.fn_ids.iter().find_map(|(name, id)| {
+            if *id == target_id { Some(name.clone()) } else { None }
+        })
     )
 }
 
@@ -5870,16 +5870,21 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "alter!" => compile_alter(node, ctx),
                         "pop!" => compile_pop(node, ctx),
                         "while" => compile_loop_while(node, ctx),
-                        "list-dir!" =>
-                            compile_host_unary_string_call(node, ctx, "list-dir!", "host_list_dir"),
-                        "read!" =>
-                            compile_host_unary_string_call(node, ctx, "read!", "host_read_file"),
-                        "mkdir!" =>
-                            compile_host_unary_string_call(node, ctx, "mkdir!", "host_mkdir_p"),
-                        "delete!" =>
-                            compile_host_unary_string_call(node, ctx, "delete!", "host_delete"),
-                        "print!" =>
-                            compile_host_unary_string_call(node, ctx, "print!", "host_print"),
+                        "list-dir!" => {
+                            compile_host_unary_string_call(node, ctx, "list-dir!", "host_list_dir")
+                        }
+                        "read!" => {
+                            compile_host_unary_string_call(node, ctx, "read!", "host_read_file")
+                        }
+                        "mkdir!" => {
+                            compile_host_unary_string_call(node, ctx, "mkdir!", "host_mkdir_p")
+                        }
+                        "delete!" => {
+                            compile_host_unary_string_call(node, ctx, "delete!", "host_delete")
+                        }
+                        "print!" => {
+                            compile_host_unary_string_call(node, ctx, "print!", "host_print")
+                        }
                         "sleep!" => compile_host_unary_int_call(node, ctx, "sleep!", "host_sleep"),
                         "clear!" => compile_host_unit_call(node, ctx, "clear!", "host_clear"),
                         "write!" => compile_host_write_call(node, ctx),
@@ -5927,7 +5932,9 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 .and_then(builtin_tag_arity)
                                 .map(|arity| node.children.len().saturating_sub(1) != arity)
                                 .unwrap_or(false)
-                        => compile_dynamic_call(node, ctx),
+                        => {
+                            compile_dynamic_call(node, ctx)
+                        }
                         op if is_special_word(op) => emit_builtin(op, node, ctx),
                         _ => compile_call(node, op_full, ctx),
                     }

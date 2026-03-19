@@ -14,8 +14,8 @@ use std::io::Write as _;
 use std::path::{ Path, PathBuf };
 use std::thread;
 use std::time::Duration;
-use wasmtime::{ Caller, Extern, Memory, TypedFunc };
 use wasmtime::Linker;
+use wasmtime::{ Caller, Extern, Memory, TypedFunc };
 use wasmtime_wasi::{ ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView };
 
 const VEC_LEN_OFFSET: i32 = 0;
@@ -358,10 +358,74 @@ fn take_install_output_path_from_argv(argv: &mut Vec<String>) -> Result<Option<S
     Ok(out_path)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EmitKind {
+    Source,
+    Wat,
+    Wasm,
+    Types,
+}
+
+#[derive(Debug)]
+struct EmitRequest {
+    kind: EmitKind,
+    out_path: Option<String>,
+}
+
+fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequest>, String> {
+    let mut kind = None;
+    if let Some(pos) = argv.iter().position(|arg| arg == "--emit") {
+        if pos + 1 >= argv.len() || argv[pos + 1].starts_with("--") {
+            return Err("--emit requires one of: source | wat | wasm | types".to_string());
+        }
+        let value = argv[pos + 1].clone();
+        kind = Some(match value.as_str() {
+            "source" => EmitKind::Source,
+            "wat" => EmitKind::Wat,
+            "wasm" => EmitKind::Wasm,
+            "types" => EmitKind::Types,
+            _ => {
+                return Err(format!("unknown --emit kind '{}'", value));
+            }
+        });
+        argv.drain(pos..=pos + 1);
+    } else if let Some(pos) = argv.iter().position(|arg| arg == "--emit-source") {
+        argv.remove(pos);
+        kind = Some(EmitKind::Source);
+    }
+
+    let Some(kind) = kind else {
+        return Ok(None);
+    };
+
+    let mut out_path: Option<String> = None;
+    let mut out = Vec::with_capacity(argv.len());
+    let mut i = 0usize;
+    while i < argv.len() {
+        if argv[i] == "--out" {
+            i += 1;
+            if i >= argv.len() || argv[i].starts_with("--") {
+                return Err("--out requires a path".to_string());
+            }
+            out_path = Some(argv[i].clone());
+            i += 1;
+            continue;
+        }
+        out.push(argv[i].clone());
+        i += 1;
+    }
+    *argv = out;
+    Ok(Some(EmitRequest { kind, out_path }))
+}
+
 fn native_shell_help(bin_name: &str) -> String {
     format!(
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
          or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
+         or:    {bin} <script.que> [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
+         or:    {bin} --eval <source> [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
+         or:    {bin} <script.que> [arg ...] --emit-source [--out <expanded.lisp>]\n\
+         or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
          or:    {bin} --learn\n\
@@ -373,6 +437,9 @@ fn native_shell_help(bin_name: &str) -> String {
            --learn        Print Que language quick reference.\n\
            --env          Print environment flags and tuning examples.\n\
            --eval, -e     Execute inline Que source without a script file.\n\
+           --emit         Output source, wat, wasm, or top-level types and exit.\n\
+           --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
+                         Use with --out <file> to write it instead of printing.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
                          QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
@@ -386,9 +453,13 @@ fn native_shell_help(bin_name: &str) -> String {
            - `--lib names [pattern]` lists available library names.\n\
            - `--lib types [pattern]` prints name and inferred type.\n\
            - `--lib source <name>` prints the exact symbol source.\n\
-           - Inline eval example: `{bin} --eval '(+ 1 2)'`.\n\
-           - Wildcards in pattern: `*` any sequence, `?` single char.\n\
-           - --debug, --no-result and --help can appear after the script path.\n\
+            - Inline eval example: `{bin} --eval '(+ 1 2)'`.\n\
+            - Wildcards in pattern: `*` any sequence, `?` single char.\n\
+           - `--emit source` prints merged/tree-shaken/desugared Lisp.\n\
+           - `--emit wat` prints WAT text.\n\
+           - `--emit wasm` prints raw wasm bytes unless you pass `--out`.\n\
+           - `--emit types` prints inferred top-level user-form types and final result type.\n\
+           - --debug, --no-result, --emit, --emit-source and --help can appear after the script path.\n\
            - `--install` writes/extends an external library file (used by all binaries).\n\
            - `--uninstall` removes the active external library file.\n\
            - Default output path: /usr/local/share/que/que-lib.lisp.\n\
@@ -439,6 +510,7 @@ fn native_shell_learn() -> &'static str {
     Core:\n\
     - Function call: (f a b)\n\
     - Nested application works: ((f a) b)\n\
+    - Function application is left-associated: (f a b c) means (((f a) b) c), so calling with fewer arguments returns a partially applied function.\n\
     - (apply f a b) is an alias for nested application, so `(apply (f a) b)` matches `((f a) b)`.\n\
     - Everything is an expression; last expression is the return value.\n\
     - (let name value) creates immutable bindings.\n\
@@ -519,6 +591,60 @@ fn binding_name_from_def(expr: &Expression) -> Option<String> {
         return None;
     };
     Some(name.clone())
+}
+
+fn emit_text_output(out_path: Option<&str>, text: &str) -> Result<(), String> {
+    if let Some(path) = out_path {
+        fs::write(path, text).map_err(|e| format!("failed to write '{}': {}", path, e))?;
+    } else {
+        println!("{}", text);
+    }
+    Ok(())
+}
+
+fn emit_bytes_output(out_path: Option<&str>, bytes: &[u8]) -> Result<(), String> {
+    if let Some(path) = out_path {
+        fs::write(path, bytes).map_err(|e| format!("failed to write '{}': {}", path, e))?;
+    } else {
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(bytes).map_err(|e| format!("failed to write stdout: {}", e))?;
+        stdout.flush().map_err(|e| format!("failed to flush stdout: {}", e))?;
+    }
+    Ok(())
+}
+
+fn format_top_level_type_lines(typed: &TypedExpression, user_form_count: usize) -> String {
+    let forms = user_form_nodes(typed, user_form_count);
+    let mut lines = Vec::new();
+
+    for (idx, form) in forms.iter().enumerate() {
+        if let Some(name) = binding_name_from_def(&form.expr) {
+            let binding_typ = form.children
+                .get(2)
+                .and_then(|child| child.typ.as_ref())
+                .or(form.typ.as_ref());
+            let rendered = binding_typ
+                .map(|typ| normalize_signature(&typ.to_string()))
+                .unwrap_or_else(|| "_".to_string());
+            lines.push(format!("{} : {}", name, rendered));
+        } else {
+            let rendered = form.typ
+                .as_ref()
+                .map(|typ| normalize_signature(&typ.to_string()))
+                .unwrap_or_else(|| "_".to_string());
+            lines.push(format!("form[{}] : {}", idx, rendered));
+        }
+    }
+
+    let result_type = forms
+        .last()
+        .and_then(|form| form.typ.as_ref())
+        .or(typed.typ.as_ref())
+        .map(|typ| normalize_signature(&typ.to_string()))
+        .unwrap_or_else(|| "_".to_string());
+    lines.push(format!("result : {}", result_type));
+
+    lines.join("\n")
 }
 
 fn active_library_definitions() -> Result<Vec<Expression>, String> {
@@ -693,7 +819,7 @@ fn run_library_install_via_io(mode: LibraryInstallMode, args: &[String]) -> Resu
     }
     fs
         ::write(&output, format!("{}\n", wrapped.to_lisp()))
-        .map_err(|e| format!("failed to write baked library '{}': {}", output.display(), e))?;
+        .map_err(|e| { format!("failed to write baked library '{}': {}", output.display(), e) })?;
     eprintln!("library installed to {}", output.display());
     Ok(())
 }
@@ -913,9 +1039,9 @@ pub fn host_read_file(
     let target = resolve_target_path(&caller, &path);
     let output = fs
         ::read_to_string(&target)
-        .map_err(|e|
+        .map_err(|e| {
             wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
-        )?;
+        })?;
     write_lisp_string(&mut caller, &output)
 }
 
@@ -965,9 +1091,9 @@ pub fn host_mkdir_p(
     let target = resolve_target_path(&caller, &path);
     fs
         ::create_dir_all(&target)
-        .map_err(|e|
+        .map_err(|e| {
             wasmtime::Error::msg(format!("failed to mkdir '{}': {}", target.display(), e))
-        )?;
+        })?;
     Ok(0)
 }
 
@@ -984,25 +1110,25 @@ pub fn host_delete(
     let target = resolve_target_path(&caller, &path);
     let meta = fs
         ::symlink_metadata(&target)
-        .map_err(|e|
+        .map_err(|e| {
             wasmtime::Error::msg(
                 format!("failed to inspect path '{}' for delete: {}", target.display(), e)
             )
-        )?;
+        })?;
     if meta.is_dir() {
         fs
             ::remove_dir_all(&target)
-            .map_err(|e|
+            .map_err(|e| {
                 wasmtime::Error::msg(
                     format!("failed to delete directory '{}': {}", target.display(), e)
                 )
-            )?;
+            })?;
     } else {
         fs
             ::remove_file(&target)
-            .map_err(|e|
+            .map_err(|e| {
                 wasmtime::Error::msg(format!("failed to delete file '{}': {}", target.display(), e))
-            )?;
+            })?;
     }
     Ok(0)
 }
@@ -1025,16 +1151,16 @@ pub fn host_move(
         if !parent.as_os_str().is_empty() {
             fs
                 ::create_dir_all(parent)
-                .map_err(|e|
+                .map_err(|e| {
                     wasmtime::Error::msg(
                         format!("failed to create destination dirs '{}': {}", parent.display(), e)
                     )
-                )?;
+                })?;
         }
     }
     fs
         ::rename(&src_path, &dst_path)
-        .map_err(|e|
+        .map_err(|e| {
             wasmtime::Error::msg(
                 format!(
                     "failed to move '{}' to '{}': {}",
@@ -1043,7 +1169,7 @@ pub fn host_move(
                     e
                 )
             )
-        )?;
+        })?;
 
     Ok(0)
 }
@@ -1357,13 +1483,15 @@ fn build_debug_error_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        DebugMode,
-        wildcard_match,
         parse_bundle_definitions,
         take_debug_mode_from_argv,
+        take_emit_request_from_argv,
         take_help_flag_from_argv,
         take_no_result_flag_from_argv,
         take_shell_policy_from_argv,
+        wildcard_match,
+        DebugMode,
+        EmitKind,
         ShellPermission,
         ShellPolicy,
     };
@@ -1528,6 +1656,40 @@ mod tests {
     }
 
     #[test]
+    fn take_emit_request_parses_kind_and_out_path() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "user-arg".to_string(),
+            "--emit".to_string(),
+            "wat".to_string(),
+            "--out".to_string(),
+            "out.wat".to_string()
+        ];
+        let request = take_emit_request_from_argv(&mut args).expect("emit should parse");
+        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
+        let request = request.expect("emit request should exist");
+        assert_eq!(request.kind, EmitKind::Wat);
+        assert_eq!(request.out_path.as_deref(), Some("out.wat"));
+    }
+
+    #[test]
+    fn take_emit_request_parses_legacy_emit_source_flag() {
+        let mut args = vec!["script.que".to_string(), "--emit-source".to_string()];
+        let request = take_emit_request_from_argv(&mut args).expect("legacy emit should parse");
+        assert_eq!(args, vec!["script.que".to_string()]);
+        let request = request.expect("emit request should exist");
+        assert_eq!(request.kind, EmitKind::Source);
+        assert_eq!(request.out_path, None);
+    }
+
+    #[test]
+    fn take_emit_request_rejects_missing_kind() {
+        let mut args = vec!["script.que".to_string(), "--emit".to_string()];
+        let err = take_emit_request_from_argv(&mut args).expect_err("missing kind should fail");
+        assert!(err.contains("--emit requires one of: source | wat | wasm | types"));
+    }
+
+    #[test]
     fn parse_bundle_definitions_accepts_top_level_defs_only() {
         let src = "(let inc (lambda x (+ x 1)))\n(let dec (lambda x (- x 1)))";
         let defs = parse_bundle_definitions(src, "bundle.que").expect("bundle should parse");
@@ -1624,6 +1786,7 @@ pub fn run_native_shell() -> Result<(), String> {
         return Ok(());
     }
     let suppress_result_output = take_no_result_flag_from_argv(&mut argv);
+    let emit_request = take_emit_request_from_argv(&mut argv)?;
     let debug_mode = crate::io::take_debug_mode_from_argv(&mut argv);
     if debug_mode.is_enabled() {
         enable_debug_runtime_guards();
@@ -1632,7 +1795,13 @@ pub fn run_native_shell() -> Result<(), String> {
         ::take_shell_policy_from_argv(&mut argv)
         .map_err(|e| format!("invalid shell policy: {}", e))?;
     let analysis_source = crate::lsp_native_core::strip_comment_bodies_preserve_newlines(&program);
-    let user_form_count = if debug_mode.is_enabled() {
+    let needs_user_form_count =
+        debug_mode.is_enabled() ||
+        matches!(
+            emit_request.as_ref().map(|req| req.kind),
+            Some(EmitKind::Types)
+        );
+    let user_form_count = if needs_user_form_count {
         crate::lsp_native_core
             ::parse_user_exprs_for_symbol_collection(&analysis_source)
             .as_ref()
@@ -1670,6 +1839,49 @@ pub fn run_native_shell() -> Result<(), String> {
         }
     };
 
+    if let Some(request) = emit_request.as_ref() {
+        match request.kind {
+            EmitKind::Source => {
+                emit_text_output(request.out_path.as_deref(), &wrapped_ast.to_lisp())?;
+                return Ok(());
+            }
+            EmitKind::Types => {
+                let (base_env, base_next_id) = crate::types::create_builtin_environment(
+                    crate::types::TypeEnv::new()
+                );
+                let inferred = crate::infer::infer_with_builtins_typed_lsp(
+                    &wrapped_ast,
+                    (base_env, base_next_id),
+                    user_form_count
+                );
+                let (_typ, typed_ast) = match inferred {
+                    Ok(ok) => ok,
+                    Err(InferErrorInfo { message, scope, partial_typed_ast }) => {
+                        if debug_mode.is_enabled() {
+                            return Err(
+                                build_debug_error_report(
+                                    debug_mode,
+                                    "type-inference",
+                                    &program,
+                                    &message,
+                                    scope.as_ref(),
+                                    user_desugared.as_ref(),
+                                    user_form_count,
+                                    partial_typed_ast.as_ref()
+                                )
+                            );
+                        }
+                        return Err(message);
+                    }
+                };
+                let rendered = format_top_level_type_lines(&typed_ast, user_form_count);
+                emit_text_output(request.out_path.as_deref(), &rendered)?;
+                return Ok(());
+            }
+            EmitKind::Wat | EmitKind::Wasm => {}
+        }
+    }
+
     let wat_src = if debug_mode.is_enabled() {
         let (base_env, base_next_id) = crate::types::create_builtin_environment(
             crate::types::TypeEnv::new()
@@ -1681,10 +1893,10 @@ pub fn run_native_shell() -> Result<(), String> {
         );
 
         match inferred {
-            Ok((_typ, typed_ast)) =>
+            Ok((_typ, typed_ast)) => {
                 crate::wat
                     ::compile_program_to_wat_typed(&typed_ast)
-                    .map_err(|message|
+                    .map_err(|message| {
                         build_debug_error_report(
                             debug_mode,
                             "wat-lowering",
@@ -1695,7 +1907,8 @@ pub fn run_native_shell() -> Result<(), String> {
                             user_form_count,
                             Some(&typed_ast)
                         )
-                    )?,
+                    })?
+            }
             Err(InferErrorInfo { message, scope, partial_typed_ast }) => {
                 return Err(
                     build_debug_error_report(
@@ -1714,17 +1927,35 @@ pub fn run_native_shell() -> Result<(), String> {
     } else {
         crate::wat::compile_program_to_wat(&wrapped_ast)?
     };
+
+    if let Some(request) = emit_request.as_ref() {
+        match request.kind {
+            EmitKind::Wat => {
+                emit_text_output(request.out_path.as_deref(), &wat_src)?;
+                return Ok(());
+            }
+            EmitKind::Wasm => {
+                let bytes = wat
+                    ::parse_str(&wat_src)
+                    .map_err(|e| format!("failed to encode wat as wasm: {}", e))?;
+                emit_bytes_output(request.out_path.as_deref(), &bytes)?;
+                return Ok(());
+            }
+            EmitKind::Source | EmitKind::Types => unreachable!("handled earlier"),
+        }
+    }
+
     let store_data = ShellStoreData::new_with_security(Some(script_cwd), shell_policy).map_err(|e|
         e.to_string()
     )?;
     if suppress_result_output {
-        crate::runtime::run_wat_text_no_result(&wat_src, store_data, &argv, |linker|
+        crate::runtime::run_wat_text_no_result(&wat_src, store_data, &argv, |linker| {
             add_shell_to_linker(linker).map_err(|e| e.to_string())
-        )?;
+        })?;
     } else {
-        let decoded = crate::runtime::run_wat_text(&wat_src, store_data, &argv, |linker|
+        let decoded = crate::runtime::run_wat_text(&wat_src, store_data, &argv, |linker| {
             add_shell_to_linker(linker).map_err(|e| e.to_string())
-        )?;
+        })?;
         println!("\x1b[32m{}\x1b[0m", decoded);
     }
 

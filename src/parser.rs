@@ -230,7 +230,9 @@ struct OpenDelimiter {
 
 fn delimiter_close_for_open(ch: char, mode: DelimiterMode) -> Option<char> {
     match mode {
-        DelimiterMode::ParenOnly => if ch == '(' { Some(')') } else { None }
+        DelimiterMode::ParenOnly => {
+            if ch == '(' { Some(')') } else { None }
+        }
         DelimiterMode::SourceDelimiters =>
             match ch {
                 '(' => Some(')'),
@@ -476,7 +478,12 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
             _ => {
                 if let Some(close) = delimiter_close_for_open(ch, mode) {
                     line_deltas[line - 1] += 1;
-                    stack.push(OpenDelimiter { open: ch, close, line, col });
+                    stack.push(OpenDelimiter {
+                        open: ch,
+                        close,
+                        line,
+                        col,
+                    });
                     col += 1;
                     continue;
                 }
@@ -685,8 +692,12 @@ fn parse_macro_lambda(expr: &Expression, macro_name: &str) -> Result<MacroClause
     let body = items
         .last()
         .cloned()
-        .ok_or_else(|| { format!("letmacro '{}' lambda must have a body", macro_name) })?;
-    Ok(MacroClause { params, rest_param, body })
+        .ok_or_else(|| format!("letmacro '{}' lambda must have a body", macro_name))?;
+    Ok(MacroClause {
+        params,
+        rest_param,
+        body,
+    })
 }
 
 fn parse_macro_clause(expr: &Expression, macro_name: &str) -> Result<MacroClause, String> {
@@ -962,9 +973,9 @@ fn expand_macro_call(
             Expression::Apply(args[selected_clause.params.len()..].to_vec())
         );
     }
-    eval_macro_expr(&selected_clause.body, &bindings, gensym_counter).map_err(|e|
+    eval_macro_expr(&selected_clause.body, &bindings, gensym_counter).map_err(|e| {
         format!("Macro '{}' expansion failed for call {}: {}", macro_name, call_expr.to_lisp(), e)
-    )
+    })
 }
 
 fn expression_to_string_literal_expr(expr: &Expression) -> Expression {
@@ -2037,8 +2048,8 @@ fn destructuring_kind(pattern: &Expression) -> Option<DestructuringKind> {
     match pattern {
         Expression::Apply(exprs) =>
             match exprs.as_slice() {
-                [Expression::Word(kw), ..] if kw == "tuple" => { Some(DestructuringKind::Tuple) }
-                [Expression::Word(kw), ..] if kw == "vector" => { Some(DestructuringKind::Vector) }
+                [Expression::Word(kw), ..] if kw == "tuple" => Some(DestructuringKind::Tuple),
+                [Expression::Word(kw), ..] if kw == "vector" => Some(DestructuringKind::Vector),
                 _ => None,
             }
         _ => None,
