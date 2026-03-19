@@ -74,3 +74,8 @@
                 ((uq loop-cb) (uq i))
                 (alter! (uq i) (+ (uq i) 1))
                 nil)))))))
+
+(letmacro block
+    (lambda . body
+      (qq ((lambda
+              (do (uqs body)))))))
