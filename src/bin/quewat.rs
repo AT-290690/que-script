@@ -14,7 +14,10 @@ fn main() {
         source.clone()
     } else {
         std::fs::read_to_string(first_arg).unwrap_or_else(|e| {
-            eprintln!("\x1b[31mException: failed to read '{}': {}\x1b[0m", first_arg, e);
+            eprintln!(
+                "\x1b[31mException: failed to read '{}': {}\x1b[0m",
+                first_arg, e
+            );
             std::process::exit(1);
         })
     };

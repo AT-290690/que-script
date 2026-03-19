@@ -1,4 +1,4 @@
-use crate::infer::{ EffectFlags, infer_with_builtins_typed, InferErrorScope, TypedExpression };
+use crate::infer::{ infer_with_builtins_typed, EffectFlags, InferErrorScope, TypedExpression };
 use crate::parser::{ self, Expression };
 use crate::types::{ create_builtin_environment, Type, TypeEnv };
 use std::collections::{ HashMap, HashSet };
@@ -1158,11 +1158,9 @@ fn find_matching_list_end_byte(text: &str, open_idx: usize) -> Option<usize> {
 fn find_scope_range(text: &str, scope: &InferErrorScope) -> Option<CoreRange> {
     collect_scope_regions(text)
         .into_iter()
-        .find(
-            |region|
-                region.top_form_idx == scope.user_top_form &&
-                region.lambda_path == scope.lambda_path
-        )
+        .find(|region| {
+            region.top_form_idx == scope.user_top_form && region.lambda_path == scope.lambda_path
+        })
         .map(|region| CoreRange {
             start: byte_offset_to_position(text, region.start),
             end: byte_offset_to_position(text, region.end),

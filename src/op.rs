@@ -506,10 +506,12 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
                 items.get(1)?.clone(),
             )),
         // mean aliases over vectors
-        "mean" | "mean/int" if items.len() == 2 =>
-            Some((FuseSink::Average { dec: false }, items.get(1)?.clone())),
-        "mean/dec" if items.len() == 2 =>
-            Some((FuseSink::Average { dec: true }, items.get(1)?.clone())),
+        "mean" | "mean/int" if items.len() == 2 => {
+            Some((FuseSink::Average { dec: false }, items.get(1)?.clone()))
+        }
+        "mean/dec" if items.len() == 2 => {
+            Some((FuseSink::Average { dec: true }, items.get(1)?.clone()))
+        }
         // unzip xs => tuple of mapped first/second in one pass
         "unzip" if items.len() == 2 => Some((FuseSink::Unzip, items.get(1)?.clone())),
         // some? pred xs
@@ -788,15 +790,19 @@ fn build_direct_fused_loop(
         .iter()
         .any(|op| matches!(op, MapFilterOp::Flat | MapFilterOp::FlatMap { .. }));
     if has_flatten {
-        let has_indexed_stage = ops_outer_to_inner
-            .iter()
-            .any(|op| {
-                matches!(
-                    op,
-                    MapFilterOp::Map { with_index: true, .. } |
-                        MapFilterOp::Filter { with_index: true, .. }
-                )
-            });
+        let has_indexed_stage = ops_outer_to_inner.iter().any(|op| {
+            matches!(
+                op,
+                MapFilterOp::Map {
+                    with_index: true,
+                    ..
+                } |
+                    MapFilterOp::Filter {
+                        with_index: true,
+                        ..
+                    }
+            )
+        });
         let unsupported_sink = match &sink {
             FuseSink::Collect => false,
             FuseSink::Reduce { with_index, .. } => *with_index,
@@ -3066,8 +3072,9 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
             is_fusion_safe_callable(reduce_fn) && is_fusion_safe_callable(stop_fn),
         FuseSink::Average { .. } => true,
         FuseSink::Unzip => true,
-        FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } =>
-            is_fusion_safe_callable(predicate),
+        FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } => {
+            is_fusion_safe_callable(predicate)
+        }
         FuseSink::Find { predicate } => is_fusion_safe_callable(predicate),
     }
 }
@@ -3248,13 +3255,14 @@ fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
 
 fn rebuild_expr_from_children(expr: &Expression, children: &[TypedExpression]) -> Expression {
     match expr {
-        Expression::Apply(items) if items.len() == children.len() =>
+        Expression::Apply(items) if items.len() == children.len() => {
             Expression::Apply(
                 children
                     .iter()
                     .map(|ch| ch.expr.clone())
                     .collect()
-            ),
+            )
+        }
         _ => expr.clone(),
     }
 }
@@ -3785,8 +3793,9 @@ fn decimal_scale_f32() -> f32 {
             .ok()
             .and_then(|v| v.trim().parse::<i32>().ok())
     {
-        Some(scale) if scale > 0 && is_power_of_ten_i32(scale) && scale <= 1_000_000 =>
-            scale as f32,
+        Some(scale) if scale > 0 && is_power_of_ten_i32(scale) && scale <= 1_000_000 => {
+            scale as f32
+        }
         _ => 1000.0,
     }
 }
@@ -4095,13 +4104,14 @@ fn substitute_word_with_typed(
         .collect::<Vec<_>>();
 
     let new_expr = match &node.expr {
-        Expression::Apply(items) if items.len() == new_children.len() =>
+        Expression::Apply(items) if items.len() == new_children.len() => {
             Expression::Apply(
                 new_children
                     .iter()
                     .map(|ch| ch.expr.clone())
                     .collect()
-            ),
+            )
+        }
         _ => substitute_word_with_expr(&node.expr, name, &replacement.expr),
     };
 
@@ -4527,13 +4537,14 @@ fn substitute_params_typed(
         .map(|ch| substitute_params_typed(ch, expr_subst, typed_subst))
         .collect::<Vec<_>>();
     let new_expr = match &node.expr {
-        Expression::Apply(items) if items.len() == new_children.len() =>
+        Expression::Apply(items) if items.len() == new_children.len() => {
             Expression::Apply(
                 new_children
                     .iter()
                     .map(|ch| ch.expr.clone())
                     .collect()
-            ),
+            )
+        }
         _ => substitute_params_expr(&node.expr, expr_subst),
     };
     TypedExpression {

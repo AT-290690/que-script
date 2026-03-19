@@ -1,20 +1,18 @@
 use std::collections::HashMap;
-use std::fs::{ self, File };
-use std::io::{ self, Write };
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::Path;
 
 use que::infer::infer_with_builtins_typed;
 use que::lsp_native_core::normalize_signature;
-use que::parser::{ self, Expression };
-use que::types::{ create_builtin_environment, TypeEnv };
+use que::parser::{self, Expression};
+use que::types::{create_builtin_environment, TypeEnv};
 use serde::Serialize;
 
 fn infer_std_symbol(name: &str, std_items: &[Expression]) -> Result<String, String> {
     let merged = parser::merge_std_and_program(name, std_items.to_vec())?;
-    let (typ, _typed) = infer_with_builtins_typed(
-        &merged,
-        create_builtin_environment(TypeEnv::new())
-    )?;
+    let (typ, _typed) =
+        infer_with_builtins_typed(&merged, create_builtin_environment(TypeEnv::new()))?;
     Ok(normalize_signature(&typ.to_string()))
 }
 
@@ -156,26 +154,20 @@ fn extract_top_level_forms(source: &str) -> io::Result<Vec<String>> {
             }
             ')' | ']' | '}' => {
                 let Some(open) = stack.pop() else {
-                    return Err(
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("Unexpected '{}' at byte {}", ch, idx)
-                        )
-                    );
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Unexpected '{}' at byte {}", ch, idx),
+                    ));
                 };
                 let expected = matching_close(open).unwrap();
                 if ch != expected {
-                    return Err(
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!(
-                                "Mismatched delimiter '{}' (expected '{}') at byte {}",
-                                ch,
-                                expected,
-                                idx
-                            )
-                        )
-                    );
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Mismatched delimiter '{}' (expected '{}') at byte {}",
+                            ch, expected, idx
+                        ),
+                    ));
                 }
                 if stack.is_empty() {
                     if let Some(s) = start.take() {
@@ -188,13 +180,22 @@ fn extract_top_level_forms(source: &str) -> io::Result<Vec<String>> {
     }
 
     if in_string {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Unclosed string literal"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Unclosed string literal",
+        ));
     }
     if in_char {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Unclosed char literal"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Unclosed char literal",
+        ));
     }
     if !stack.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Unclosed delimiter"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Unclosed delimiter",
+        ));
     }
     Ok(out)
 }
@@ -203,9 +204,8 @@ fn collect_defs_from_file(path: &str, is_std: bool) -> io::Result<Vec<SymbolDef>
     let text = fs::read_to_string(path)?;
     let mut out = Vec::new();
     for form in extract_top_level_forms(&text)? {
-        let built = parser
-            ::build(&form)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let built =
+            parser::build(&form).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         let exprs = match built {
             Expression::Apply(items) => items,
             other => vec![other],
@@ -228,7 +228,7 @@ fn build_final_symbol_defs(include_std: bool) -> io::Result<Vec<SymbolDef>> {
     let mut files = vec![
         ("./lisp/const.lisp", false),
         ("./lisp/fp.lisp", false),
-        ("./lisp/ds.lisp", false)
+        ("./lisp/ds.lisp", false),
     ];
     if include_std {
         files.insert(1, ("./lisp/macros.lisp", true));
@@ -271,8 +271,7 @@ fn run() -> io::Result<()> {
     let cli = parse_cli().map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
     let std_ast = que::baked::load_ast();
-    let std_items = que::baked
-        ::ast_to_definitions(std_ast, "active library")
+    let std_items = que::baked::ast_to_definitions(std_ast, "active library")
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
     let defs = build_final_symbol_defs(cli.include_std)?;
@@ -300,8 +299,7 @@ fn run() -> io::Result<()> {
             if cli.include_std {
                 flat.extend(std_items_dump);
             }
-            serde_json
-                ::to_writer_pretty(&mut file, &flat)
+            serde_json::to_writer_pretty(&mut file, &flat)
                 .map_err(|err| io::Error::other(err.to_string()))?;
         }
         OutputMode::SplitStd => {
@@ -313,8 +311,7 @@ fn run() -> io::Result<()> {
                     Vec::new()
                 },
             };
-            serde_json
-                ::to_writer_pretty(&mut file, &payload)
+            serde_json::to_writer_pretty(&mut file, &payload)
                 .map_err(|err| io::Error::other(err.to_string()))?;
         }
     }

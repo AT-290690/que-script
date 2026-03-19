@@ -1,6 +1,6 @@
+use crate::infer::apply_subst_map_to_type;
 use std::collections::HashMap;
 use std::fmt;
-use crate::infer::apply_subst_map_to_type;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeVar {

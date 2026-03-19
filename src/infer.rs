@@ -243,26 +243,20 @@ fn estimate_effect_immutable(
                     local_fn_scopes.pop();
                     effect
                 }
-                Expression::Word(op) if op == "if" => {
+                Expression::Word(op) if op == "if" =>
                     node.children
                         .iter()
                         .skip(1)
-                        .fold(
-                            EffectFlags::PURE,
-                            |acc, ch|
-                                acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
-                        )
-                }
-                Expression::Word(op) if op == "while" => {
+                        .fold(EffectFlags::PURE, |acc, ch| {
+                            acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
+                        }),
+                Expression::Word(op) if op == "while" =>
                     node.children
                         .iter()
                         .skip(1)
-                        .fold(
-                            EffectFlags::PURE,
-                            |acc, ch|
-                                acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
-                        )
-                }
+                        .fold(EffectFlags::PURE, |acc, ch| {
+                            acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
+                        }),
                 Expression::Word(op) if op == "do" => {
                     local_fn_scopes.push(HashMap::new());
                     let mut effect = EffectFlags::PURE;
@@ -289,12 +283,11 @@ fn estimate_effect_immutable(
                     local_fn_scopes.pop();
                     effect
                 }
-                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => {
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" =>
                     node.children
                         .get(2)
                         .map(|rhs| estimate_effect_immutable(rhs, top_fn_effects, local_fn_scopes))
-                        .unwrap_or(EffectFlags::PURE)
-                }
+                        .unwrap_or(EffectFlags::PURE),
                 Expression::Word(op) => {
                     let mut effect = EffectFlags::PURE;
                     for ch in node.children.iter().skip(1) {
@@ -708,13 +701,12 @@ fn expr_mutates_non_first_param(
                     scopes.pop();
                     None
                 }
-                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => {
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" =>
                     items
                         .get(2)
                         .and_then(|rhs|
                             expr_mutates_non_first_param(rhs, known_requires_bang, scopes)
-                        )
-                }
+                        ),
                 Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
                     if let Some(target) = items.get(1) {
                         if let Some(idx) = target_non_first_param_index(target, scopes) {
@@ -847,9 +839,10 @@ fn eval_function_binding_requires_bang(
         }
         _ =>
             match rhs {
-                Expression::Apply(rhs_items) =>
+                Expression::Apply(rhs_items) => {
                     matches!(rhs_items.first(), Some(Expression::Word(w)) if w == "lambda") &&
-                        lambda_requires_bang(rhs, known_requires_bang),
+                        lambda_requires_bang(rhs, known_requires_bang)
+                }
                 _ => false,
             }
     };
@@ -972,12 +965,11 @@ fn expr_requires_bang(
                     scopes.pop();
                     false
                 }
-                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => {
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" =>
                     items
                         .get(2)
                         .map(|rhs| expr_requires_bang(rhs, known_requires_bang, scopes))
-                        .unwrap_or(false)
-                }
+                        .unwrap_or(false),
                 Expression::Word(op) if is_io_op(op) => true,
                 Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
                     let Some(target) = items.get(1) else {

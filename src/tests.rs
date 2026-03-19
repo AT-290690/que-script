@@ -169,8 +169,9 @@ Concequent and alternative must match types
     fn test_merge_std_rejects_forbidden_fusion_name_shadowing() {
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
-            crate::parser::Expression::Apply(items) =>
-                crate::parser::merge_std_and_program("(let map 10)\nmap", items[1..].to_vec()),
+            crate::parser::Expression::Apply(items) => {
+                crate::parser::merge_std_and_program("(let map 10)\nmap", items[1..].to_vec())
+            }
             _ => panic!("std ast should be (do ...)"),
         };
         assert_eq!(
@@ -528,9 +529,9 @@ Concequent and alternative must match types
             .map_err(|e| e.to_string())
             .expect("io store should initialize");
         #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        );
+        });
         #[cfg(not(feature = "io"))]
         let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         run_result.expect("program should run without trap")
@@ -549,9 +550,9 @@ Concequent and alternative must match types
             .map_err(|e| e.to_string())
             .expect("io store should initialize");
         #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        );
+        });
         #[cfg(not(feature = "io"))]
         let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         run_result.expect_err("program should fail at runtime")
@@ -584,10 +585,11 @@ Concequent and alternative must match types
         let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
         let std_ast = crate::baked::load_ast();
         let expr = match std_ast {
-            crate::parser::Expression::Apply(items) =>
+            crate::parser::Expression::Apply(items) => {
                 crate::parser
                     ::merge_std_and_program(src, items[1..].to_vec())
-                    .expect("program + std should merge"),
+                    .expect("program + std should merge")
+            }
             _ => panic!("std ast should be (do ...)"),
         };
         let wat = crate::wat
@@ -600,9 +602,9 @@ Concequent and alternative must match types
             .map_err(|e| e.to_string())
             .expect("io store should initialize");
         #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        );
+        });
         #[cfg(not(feature = "io"))]
         let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         run_result.expect("program should run without trap")
@@ -684,9 +686,9 @@ Concequent and alternative must match types
             .expect("io store should initialize");
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        );
+        });
         #[cfg(not(feature = "io"))]
         let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         assert_eq!(run_result.expect("program should run"), "43");
@@ -2290,10 +2292,11 @@ Concequent and alternative must match types
         let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
-            crate::parser::Expression::Apply(items) =>
+            crate::parser::Expression::Apply(items) => {
                 crate::parser
                     ::merge_std_and_program(program, items[1..].to_vec())
-                    .expect("program should merge with std"),
+                    .expect("program should merge with std")
+            }
             _ => panic!("std ast should be (do ...)"),
         };
 
@@ -2331,10 +2334,11 @@ Concequent and alternative must match types
             "(do (let mymap (lambda fn xs (map square xs))) (|> (range 1 10) (filter even?) (mymap square) (map square) (reduce + 0)))";
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
-            crate::parser::Expression::Apply(items) =>
+            crate::parser::Expression::Apply(items) => {
                 crate::parser
                     ::merge_std_and_program(program, items[1..].to_vec())
-                    .expect("program should merge with std"),
+                    .expect("program should merge with std")
+            }
             _ => panic!("std ast should be (do ...)"),
         };
 
@@ -2389,10 +2393,11 @@ Concequent and alternative must match types
             "(do (let unused_dce_probe (lambda x (+ x 1))) (let used_dce_probe (lambda x (+ x 2))) (used_dce_probe 3))";
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
-            crate::parser::Expression::Apply(items) =>
+            crate::parser::Expression::Apply(items) => {
                 crate::parser
                     ::merge_std_and_program(program, items[1..].to_vec())
-                    .expect("program should merge with std"),
+                    .expect("program should merge with std")
+            }
             _ => panic!("std ast should be (do ...)"),
         };
 
@@ -2411,10 +2416,11 @@ Concequent and alternative must match types
         let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
-            crate::parser::Expression::Apply(items) =>
+            crate::parser::Expression::Apply(items) => {
                 crate::parser
                     ::merge_std_and_program(program, items[1..].to_vec())
-                    .expect("program should merge with std"),
+                    .expect("program should merge with std")
+            }
             _ => panic!("std ast should be (do ...)"),
         };
         let fused_wrapped = match &wrapped {
@@ -2474,10 +2480,11 @@ Concequent and alternative must match types
         let program = "(|> [ 1 2 3 4 5 ] (filter even?) (map square) (reduce + 0))";
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
-            crate::parser::Expression::Apply(items) =>
+            crate::parser::Expression::Apply(items) => {
                 crate::parser
                     ::merge_std_and_program(program, items[1..].to_vec())
-                    .expect("program should merge with std"),
+                    .expect("program should merge with std")
+            }
             _ => panic!("std ast should be (do ...)"),
         };
         let (_typ, typed) = crate::infer
@@ -2828,10 +2835,11 @@ Concequent and alternative must match types
         let program = "(let v [])\n(push! v v)";
         let std_ast = crate::baked::load_ast();
         let wrapped = match &std_ast {
-            crate::parser::Expression::Apply(items) =>
+            crate::parser::Expression::Apply(items) => {
                 crate::parser
                     ::merge_std_and_program(program, items[1..].to_vec())
-                    .expect("program should parse with std"),
+                    .expect("program should parse with std")
+            }
             _ => panic!("expected baked std ast to be an application"),
         };
 
@@ -3395,9 +3403,9 @@ Concequent and alternative must match types
             .map_err(|e| e.to_string())
             .unwrap();
         #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        );
+        });
         #[cfg(not(feature = "io"))]
         let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         assert_eq!(
@@ -3428,9 +3436,9 @@ Concequent and alternative must match types
             .map_err(|e| e.to_string())
             .unwrap();
         #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker|
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        );
+        });
         #[cfg(not(feature = "io"))]
         let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         assert_eq!(
@@ -6061,10 +6069,11 @@ nil)))
                                             &result,
                                             store_data,
                                             &argv,
-                                            |linker|
+                                            |linker| {
                                                 crate::io
                                                     ::add_shell_to_linker(linker)
                                                     .map_err(|e| e.to_string())
+                                            }
                                         );
                                         #[cfg(not(feature = "io"))]
                                         let run_result = crate::runtime::run_wat_text(
@@ -6074,8 +6083,9 @@ nil)))
                                             |_linker| Ok(())
                                         );
                                         match run_result {
-                                            Ok(res) =>
-                                                assert_eq!(format!("{}", res), *out, "Solution"),
+                                            Ok(res) => {
+                                                assert_eq!(format!("{}", res), *out, "Solution");
+                                            }
                                             Err(e) => {
                                                 println!("{:?}", inp);
                                                 panic!("Failed tests because {}", e);

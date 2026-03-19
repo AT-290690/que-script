@@ -1,7 +1,7 @@
 use crate::infer::{
-    EffectFlags,
     infer_with_builtins_typed,
     infer_with_builtins_typed_lsp,
+    EffectFlags,
     InferErrorScope,
     TypedExpression,
 };
@@ -392,9 +392,9 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             .or_else(|| native_core::known_symbol_effect(&symbol));
         let symbol_external_impure = analysis.let_binding_external_impure.get(&symbol).copied();
         let effect_summary = if type_info.contains("->") {
-            symbol_effect.and_then(|eff|
+            symbol_effect.and_then(|eff| {
                 native_core::format_effect_flags_for_symbol(&symbol, eff, symbol_external_impure)
-            )
+            })
         } else {
             None
         };
@@ -704,7 +704,7 @@ pub fn wat(program: String) -> *const u8 {
                     );
 
                     match infer_result {
-                        Ok((_typ, typed_ast)) =>
+                        Ok((_typ, typed_ast)) => {
                             match wat::compile_program_to_wat_typed(&typed_ast) {
                                 Ok(wat_src) => wat_src,
                                 Err(err) =>
@@ -718,6 +718,7 @@ pub fn wat(program: String) -> *const u8 {
                                         )
                                     ),
                             }
+                        }
                         Err(err) =>
                             format!(
                                 "3\n{}",

@@ -7,18 +7,21 @@ fn main() {
     let argv: Vec<String> = args.iter().skip(2).cloned().collect();
 
     let program = std::fs::read_to_string(file_path).unwrap_or_else(|e| {
-        eprintln!("\x1b[31mException: failed to read '{}': {}\x1b[0m", file_path, e);
+        eprintln!(
+            "\x1b[31mException: failed to read '{}': {}\x1b[0m",
+            file_path, e
+        );
         std::process::exit(1);
     });
 
     let std_ast = que::baked::load_ast();
     let wrapped_ast = match &std_ast {
-        que::parser::Expression::Apply(items) => que::parser
-            ::merge_std_and_program(&program, items[1..].to_vec())
-            .unwrap_or_else(|e| {
+        que::parser::Expression::Apply(items) => {
+            que::parser::merge_std_and_program(&program, items[1..].to_vec()).unwrap_or_else(|e| {
                 eprintln!("\x1b[31mException: {}\x1b[0m", e);
                 std::process::exit(1);
-            }),
+            })
+        }
         _ => {
             eprintln!("\x1b[31mException: failed to load standard library AST\x1b[0m");
             std::process::exit(1);
@@ -37,9 +40,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    let decoded = que::runtime
-        ::run_wat_text(&wat_src, (), &argv, |_linker| Ok(()))
-        .unwrap_or_else(|e| {
+    let decoded =
+        que::runtime::run_wat_text(&wat_src, (), &argv, |_linker| Ok(())).unwrap_or_else(|e| {
             eprintln!("\x1b[31mException: {}\x1b[0m", e);
             std::process::exit(1);
         });

@@ -66,9 +66,9 @@ pub fn ast_to_definitions(ast: Expression, label: &str) -> Result<Vec<Expression
 }
 
 pub fn load_ast_from_path(path: &Path) -> Result<Expression, String> {
-    let source = fs::read_to_string(path).map_err(|e|
-        format!("Failed to read library '{}': {}", path.display(), e)
-    )?;
+    let source = fs
+        ::read_to_string(path)
+        .map_err(|e| format!("Failed to read library '{}': {}", path.display(), e))?;
     parse_ast_source(&source, &path.display().to_string())
 }
 
@@ -100,8 +100,12 @@ fn load_from_external_paths() -> Result<Option<Expression>, String> {
             continue;
         }
         match load_ast_from_path(&path) {
-            Ok(ast) => return Ok(Some(ast)),
-            Err(err) => return Err(err),
+            Ok(ast) => {
+                return Ok(Some(ast));
+            }
+            Err(err) => {
+                return Err(err);
+            }
         }
     }
     Ok(None)
@@ -136,20 +140,24 @@ fn load_embedded_test_library() -> Result<Expression, String> {
 pub fn load_ast() -> Expression {
     #[cfg(target_arch = "wasm32")]
     {
-        return load_embedded_wasm_library()
-            .unwrap_or_else(|_| Expression::Apply(vec![Expression::Word("do".to_string())]));
+        return load_embedded_wasm_library().unwrap_or_else(|_|
+            Expression::Apply(vec![Expression::Word("do".to_string())])
+        );
     }
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
     {
-        return load_embedded_test_library()
-            .unwrap_or_else(|_| Expression::Apply(vec![Expression::Word("do".to_string())]));
+        return load_embedded_test_library().unwrap_or_else(|_|
+            Expression::Apply(vec![Expression::Word("do".to_string())])
+        );
     }
 
     #[cfg(all(not(test), not(target_arch = "wasm32")))]
     {
         match load_from_external_paths() {
-            Ok(Some(ast)) => return ast,
+            Ok(Some(ast)) => {
+                return ast;
+            }
             Ok(None) => {}
             Err(err) => panic!("{}", err),
         }
