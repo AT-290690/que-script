@@ -54,8 +54,12 @@ fn parse_cli() -> Result<Cli, String> {
     let mut args = std::env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--no-std" => include_std = false,
-            "--split-std" => output_mode = OutputMode::SplitStd,
+            "--no-std" => {
+                include_std = false;
+            }
+            "--split-std" => {
+                output_mode = OutputMode::SplitStd;
+            }
             "--output" => {
                 let Some(path) = args.next() else {
                     return Err("--output requires a path".to_string());
@@ -88,7 +92,7 @@ fn top_level_binding_name(expr: &Expression) -> Option<String> {
     let Expression::Word(keyword) = &list[0] else {
         return None;
     };
-    if keyword != "let" && keyword != "let*" && keyword != "mut" {
+    if keyword != "let" && keyword != "letrec" && keyword != "mut" {
         return None;
     }
     let Expression::Word(name) = &list[1] else {
@@ -135,9 +139,15 @@ fn extract_top_level_forms(source: &str) -> io::Result<Vec<String>> {
         }
 
         match ch {
-            ';' => in_comment = true,
-            '"' => in_string = true,
-            '\'' => in_char = true,
+            ';' => {
+                in_comment = true;
+            }
+            '"' => {
+                in_string = true;
+            }
+            '\'' => {
+                in_char = true;
+            }
             '(' | '[' | '{' => {
                 if stack.is_empty() && ch == '(' {
                     start = Some(idx);
@@ -193,7 +203,9 @@ fn collect_defs_from_file(path: &str, is_std: bool) -> io::Result<Vec<SymbolDef>
     let text = fs::read_to_string(path)?;
     let mut out = Vec::new();
     for form in extract_top_level_forms(&text)? {
-        let built = parser::build(&form).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let built = parser
+            ::build(&form)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         let exprs = match built {
             Expression::Apply(items) => items,
             other => vec![other],
@@ -216,7 +228,7 @@ fn build_final_symbol_defs(include_std: bool) -> io::Result<Vec<SymbolDef>> {
     let mut files = vec![
         ("./lisp/const.lisp", false),
         ("./lisp/fp.lisp", false),
-        ("./lisp/ds.lisp", false),
+        ("./lisp/ds.lisp", false)
     ];
     if include_std {
         files.insert(1, ("./lisp/macros.lisp", true));
@@ -295,7 +307,11 @@ fn run() -> io::Result<()> {
         OutputMode::SplitStd => {
             let payload = SplitDump {
                 non_std: non_std_items,
-                std: if cli.include_std { std_items_dump } else { Vec::new() },
+                std: if cli.include_std {
+                    std_items_dump
+                } else {
+                    Vec::new()
+                },
             };
             serde_json
                 ::to_writer_pretty(&mut file, &payload)

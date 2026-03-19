@@ -11,7 +11,7 @@
 (let Char 'a')
 (let Bool false)
 (let Nil nil)
-(let as (lambda . t t))
+(let as (lambda _ t t))
 (let cons (lambda a b (do 
   (let lena (length a))
   (let lenb (length b))

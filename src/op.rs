@@ -252,7 +252,7 @@ fn top_level_let_def(expr: &Expression) -> Option<(&String, &Expression)> {
     let [Expression::Word(kw), Expression::Word(name), rhs] = &items[..] else {
         return None;
     };
-    if kw == "let" || kw == "let*" {
+    if kw == "let" || kw == "letrec" {
         Some((name, rhs))
     } else {
         None
@@ -310,7 +310,7 @@ fn collect_unbound_words(
                     }
                     return;
                 }
-                if op == "let" || op == "let*" {
+                if op == "let" || op == "letrec" {
                     if let [_, bind, rhs] = &items[..] {
                         collect_unbound_words(rhs, bound, out);
                         collect_bound_pattern_words(bind, bound);
@@ -815,28 +815,14 @@ fn build_direct_fused_loop(
         sink,
         &suffix
     );
-    let fused = match hoisted_sink {
+    let fused = (match hoisted_sink {
         FuseSink::Some { predicate, with_index } =>
             build_some_every_loop(source, &hoisted_ops, predicate, with_index, true, &suffix),
         FuseSink::Every { predicate, with_index } =>
-            build_some_every_loop(
-                source,
-                &hoisted_ops,
-                predicate,
-                with_index,
-                false,
-                &suffix
-            ),
+            build_some_every_loop(source, &hoisted_ops, predicate, with_index, false, &suffix),
         FuseSink::Collect => build_collect_loop(source, &hoisted_ops, &suffix),
         FuseSink::Reduce { reduce_fn, init_expr, with_index } =>
-            build_reduce_loop(
-                source,
-                &hoisted_ops,
-                reduce_fn,
-                init_expr,
-                with_index,
-                &suffix
-            ),
+            build_reduce_loop(source, &hoisted_ops, reduce_fn, init_expr, with_index, &suffix),
         FuseSink::ReduceUntil { reduce_fn, stop_fn, init_expr, with_index } =>
             build_reduce_until_loop(
                 source,
@@ -849,9 +835,8 @@ fn build_direct_fused_loop(
             ),
         FuseSink::Average { dec } => build_average_loop(source, &hoisted_ops, dec, &suffix),
         FuseSink::Unzip => build_unzip_loop(source, &hoisted_ops, &suffix),
-        FuseSink::Find { predicate } =>
-            build_find_loop(source, &hoisted_ops, predicate, &suffix),
-    }?;
+        FuseSink::Find { predicate } => build_find_loop(source, &hoisted_ops, predicate, &suffix),
+    })?;
     if hoisted_bindings.is_empty() {
         Some(fused)
     } else {
@@ -3126,11 +3111,7 @@ fn hoist_fusion_callable_expr(
     *counter += 1;
     hoisted_bindings.push(
         Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(name.clone()),
-                expr
-            ]
+            vec![Expression::Word("let".to_string()), Expression::Word(name.clone()), expr]
         )
     );
     Expression::Word(name)
@@ -3146,38 +3127,40 @@ fn hoist_fusion_callables(
     let hoisted_ops = ops_outer_to_inner
         .iter()
         .cloned()
-        .map(|op| match op {
-            MapFilterOp::Map { func, with_index } =>
-                MapFilterOp::Map {
-                    func: hoist_fusion_callable_expr(
-                        func,
-                        suffix,
-                        &mut counter,
-                        &mut hoisted_bindings
-                    ),
-                    with_index,
-                },
-            MapFilterOp::FlatMap { func } =>
-                MapFilterOp::FlatMap {
-                    func: hoist_fusion_callable_expr(
-                        func,
-                        suffix,
-                        &mut counter,
-                        &mut hoisted_bindings
-                    ),
-                },
-            MapFilterOp::Flat => MapFilterOp::Flat,
-            MapFilterOp::Filter { predicate, keep_when_true, with_index } =>
-                MapFilterOp::Filter {
-                    predicate: hoist_fusion_callable_expr(
-                        predicate,
-                        suffix,
-                        &mut counter,
-                        &mut hoisted_bindings
-                    ),
-                    keep_when_true,
-                    with_index,
-                },
+        .map(|op| {
+            match op {
+                MapFilterOp::Map { func, with_index } =>
+                    MapFilterOp::Map {
+                        func: hoist_fusion_callable_expr(
+                            func,
+                            suffix,
+                            &mut counter,
+                            &mut hoisted_bindings
+                        ),
+                        with_index,
+                    },
+                MapFilterOp::FlatMap { func } =>
+                    MapFilterOp::FlatMap {
+                        func: hoist_fusion_callable_expr(
+                            func,
+                            suffix,
+                            &mut counter,
+                            &mut hoisted_bindings
+                        ),
+                    },
+                MapFilterOp::Flat => MapFilterOp::Flat,
+                MapFilterOp::Filter { predicate, keep_when_true, with_index } =>
+                    MapFilterOp::Filter {
+                        predicate: hoist_fusion_callable_expr(
+                            predicate,
+                            suffix,
+                            &mut counter,
+                            &mut hoisted_bindings
+                        ),
+                        keep_when_true,
+                        with_index,
+                    },
+            }
         })
         .collect::<Vec<_>>();
     let hoisted_sink = match sink {
@@ -4030,7 +4013,7 @@ fn eliminable_let_name(expr: &Expression) -> Option<(String, bool)> {
     let [Expression::Word(kw), Expression::Word(name), rhs] = &items[..] else {
         return None;
     };
-    if kw != "let" && kw != "let*" {
+    if kw != "let" && kw != "letrec" {
         None
     } else if name.starts_with("__inline_arg_") {
         // Inline temps are compiler-generated and safe to substitute in-place.
@@ -4222,7 +4205,7 @@ fn extract_inline_lambda_def(
     let (Expression::Word(kw), Expression::Word(name)) = (kw, name) else {
         return None;
     };
-    if kw != "let" && kw != "let*" {
+    if kw != "let" && kw != "letrec" {
         return None;
     }
     let Expression::Apply(lambda_items) = rhs else {
@@ -4269,7 +4252,7 @@ fn is_inline_safe_body(expr: &Expression) -> bool {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => true,
         Expression::Apply(items) => {
             if let Some(Expression::Word(head)) = items.first() {
-                if head == "let" || head == "let*" || head == "lambda" {
+                if head == "let" || head == "letrec" || head == "lambda" {
                     return false;
                 }
             }
@@ -4574,7 +4557,7 @@ fn try_inline_let_rhs(
         return None;
     }
     let kw = match items.first() {
-        Some(Expression::Word(w)) if w == "let" || w == "let*" => w.clone(),
+        Some(Expression::Word(w)) if w == "let" || w == "letrec" => w.clone(),
         _ => {
             return None;
         }

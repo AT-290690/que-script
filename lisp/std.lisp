@@ -985,7 +985,7 @@ out)))
 (let std/heap/greater? (lambda heap i j fn? (=? (fn? (get heap i) (get heap j)) true)))
 (let std/heap/sift-up! (lambda heap fn (do 
   (integer node (- (length heap) 1))
-  (let* tail-call/std/heap/sift-up! (lambda heap
+  (letrec tail-call/std/heap/sift-up! (lambda heap
     (if (and (> (get node) std/heap/top) (std/heap/greater? heap (get node) (std/node/parent (get node)) fn))
       (do 
         (std/vector/swap! heap (get node) (std/node/parent (get node)))
@@ -995,7 +995,7 @@ out)))
 
 (let std/heap/sift-down! (lambda heap fn (do
   (integer node std/heap/top)
-  (let* tail-call/std/heap/sift-down! (lambda heap
+  (letrec tail-call/std/heap/sift-down! (lambda heap
     (if (or 
           (and 
             (< (std/node/left (get node)) (length heap))
@@ -1045,7 +1045,7 @@ heap)))
     (if (= num 0) "0" (do 
         (let neg? (< num 0))
         (integer n (if neg? (* num -1) num))
-        (let* tail-call/while (lambda out
+        (letrec tail-call/while (lambda out
             (if (> (get n) 0) (do
                 (let x (mod (get n) base))
                 (std/vector/push! out x)
@@ -1066,7 +1066,7 @@ heap)))
     (let left (std/convert/integer->string (Dec->Int exponent)))
     (let right (std/convert/integer->string (Dec->Int (*. mantisa std/dec/dec-scaling flip))))
     (let len (length right))
-    (let* tail-call/while (lambda i 
+    (letrec tail-call/while (lambda i 
         (if (=# (get right (- len i)) '0') (do 
             (pop! right)
             (tail-call/while (+ i 1))) 
@@ -1115,7 +1115,7 @@ heap)))
         (> (length (get q 1)) 0) (do (pop! (get q 1)) q)
         q) q))))
 (let std/vector/deque/iter (lambda q fn (do
-  (let* tail-call/std/vector/deque/iter (lambda index bounds (do
+  (letrec tail-call/std/vector/deque/iter (lambda index bounds (do
       (fn (std/vector/deque/get q index))
       (if (< index bounds) (tail-call/std/vector/deque/iter (+ index 1) bounds) Int))))
     (tail-call/std/vector/deque/iter 0 (std/vector/deque/length q)))))
@@ -1123,11 +1123,11 @@ heap)))
   (let result (std/vector/deque/new))
   (let len (std/vector/deque/length q))
   (let half (/ len 2))
-  (let* tail-call/left/std/vector/deque/map (lambda index (do
+  (letrec tail-call/left/std/vector/deque/map (lambda index (do
     (std/vector/deque/add-to-left! result (fn (std/vector/deque/get q index)))
    (if (> index 0) (tail-call/left/std/vector/deque/map (- index 1)) Int))))
  (tail-call/left/std/vector/deque/map (- half 1))
-(let* tail-call/right/std/vector/deque/map (lambda index bounds (do
+(letrec tail-call/right/std/vector/deque/map (lambda index bounds (do
    (std/vector/deque/add-to-right! result (fn (std/vector/deque/get q index)))
    (if (< index bounds) (tail-call/right/std/vector/deque/map (+ index 1) bounds) Int))))
  (tail-call/right/std/vector/deque/map half (- len 1))
@@ -1136,18 +1136,18 @@ heap)))
 (let std/convert/vector->deque (lambda initial (do
  (let q (std/vector/deque/new))
  (let half (/ (length initial) 2))
- (let* tail-call/left/from/vector->deque (lambda index (do
+ (letrec tail-call/left/from/vector->deque (lambda index (do
     (std/vector/deque/add-to-left! q (get initial index))
    (if (> index 0) (tail-call/left/from/vector->deque (- index 1)) Int))))
  (tail-call/left/from/vector->deque (- half 1))
-(let* tail-call/right/from/vector->deque (lambda index bounds (do
+(letrec tail-call/right/from/vector->deque (lambda index bounds (do
    (std/vector/deque/add-to-right! q (get initial index))
    (if (< index bounds) (tail-call/right/from/vector->deque (+ index 1) bounds) Int))))
  (tail-call/right/from/vector->deque half (- (length initial) 1))
     q)))
 (let std/convert/deque->vector (lambda q (if (std/vector/deque/empty? q) [(get q 0 0)] (do
   (let out [])
-  (let* tail-call/from/deque->vector (lambda index bounds (do
+  (letrec tail-call/from/deque->vector (lambda index bounds (do
       (set! out (length out) (std/vector/deque/get q index))
       (if (< index bounds) (tail-call/from/deque->vector (+ index 1) bounds) Int))))
     (tail-call/from/deque->vector 0 (- (std/vector/deque/length q) 1))
@@ -1157,10 +1157,10 @@ heap)))
       (let initial (std/convert/deque->vector q))
       (std/vector/deque/empty! q)
       (let half (/ (length initial) 2))
-      (let* tail-call/left/std/vector/deque/balance! (lambda index (do
+      (letrec tail-call/left/std/vector/deque/balance! (lambda index (do
         (std/vector/deque/add-to-left! q (get initial index))
         (if (> index 0) (tail-call/left/std/vector/deque/balance! (- index 1)) Int))))
-      (let* tail-call/right/std/vector/deque/balance! (lambda index bounds (do
+      (letrec tail-call/right/std/vector/deque/balance! (lambda index bounds (do
         (std/vector/deque/add-to-right! q (get initial index))
         (if (< index bounds) (tail-call/right/std/vector/deque/balance! (+ index 1) bounds) Int))))
       (tail-call/right/std/vector/deque/balance! half (- (length initial) 1))
@@ -1188,7 +1188,7 @@ q)))
     f)))
 (let std/vector/deque/rotate-left! (lambda q n (do
   (let N (mod n (std/vector/deque/length q)))
-  (let* tail-call/std/vector/deque/rotate-left! (lambda index bounds (do
+  (letrec tail-call/std/vector/deque/rotate-left! (lambda index bounds (do
       (if (= (std/vector/deque/offset-left q) 0) (std/vector/deque/balance! q) q)
       (std/vector/deque/add-to-right! q (std/vector/deque/first q))
       (std/vector/deque/remove-from-left! q)
@@ -1196,7 +1196,7 @@ q)))
     (tail-call/std/vector/deque/rotate-left! 0 N) q)))
 (let std/vector/deque/rotate-right! (lambda q n (do
   (let N (mod n (std/vector/deque/length q)))
-  (let* tail-call/std/vector/deque/rotate-left! (lambda index bounds (do
+  (letrec tail-call/std/vector/deque/rotate-left! (lambda index bounds (do
       (if (= (std/vector/deque/offset-right q) 0) (std/vector/deque/balance! q) q)
       (std/vector/deque/add-to-left! q (std/vector/deque/last q))
       (std/vector/deque/remove-from-right! q)
@@ -1209,11 +1209,11 @@ q)))
   (let scl (std/vector/deque/new))
   (let slice-len (std/int/max (- end start) 0))
   (let half (/ slice-len 2))
-  (let* tail-call/left/std/vector/deque/slice (lambda index (do
+  (letrec tail-call/left/std/vector/deque/slice (lambda index (do
       (std/vector/deque/add-to-left! scl (std/vector/deque/get entity (+ start index)))
       (if (> index 0) (tail-call/left/std/vector/deque/slice (- index 1)) Int))))
   (tail-call/left/std/vector/deque/slice (- half 1))
-  (let* tail-call/right/std/vector/deque/slice (lambda index bounds (do
+  (letrec tail-call/right/std/vector/deque/slice (lambda index bounds (do
       (std/vector/deque/add-to-right! scl (std/vector/deque/get entity (+ start index)))
       (if (< index bounds) (tail-call/right/std/vector/deque/slice (+ index 1) bounds) Int))))
   (tail-call/right/std/vector/deque/slice half (- slice-len 1))
@@ -1365,7 +1365,7 @@ q)))
 (let std/convert/integer->bits (lambda num  
     (if (= num 0) [ 0 ] (do 
         (integer n num)
-        (let* tail-call/while (lambda out
+        (letrec tail-call/while (lambda out
             (if (> (get n) 0) (do
                 (std/vector/push! out (mod (get n) 2))
                 (set n (/ (get n) 2))
@@ -1390,7 +1390,7 @@ q)))
 ; (let std/convert/bits->integer (lambda bits (std/vector/reduce bits (lambda value bit (| (<< value 1) (& bit 1))) 0)))
 
 (let std/convert/bits->integer (lambda xs (do
-  (let* tail-call/bits->integer (lambda index out (if
+  (letrec tail-call/bits->integer (lambda index out (if
                               (= index (length xs)) out
                               (tail-call/bits->integer (+ index 1) (+ out (* (std/vector/at xs index) (std/int/expt 2 (- (length xs) index 1))))))))
   (tail-call/bits->integer 0 0))))
@@ -1400,10 +1400,10 @@ q)))
 (let std/vector/copy (lambda xs (std/vector/map xs identity)))
 
 (let std/int/reduce (lambda n fn acc (do 
-    (let* tail-call/fold-n (lambda i out (if (< i n) (tail-call/fold-n (+ i 1) (fn out i)) out)))
+    (letrec tail-call/fold-n (lambda i out (if (< i n) (tail-call/fold-n (+ i 1) (fn out i)) out)))
     (tail-call/fold-n 0 acc))))
 (let std/vector/2d/fill (lambda n fn (do 
-  (let* tail-call/std/vector/fill (lambda i xs (if (= i 0) xs (tail-call/std/vector/fill (- i 1) (std/vector/cons! xs (vector (fn i)))))))
+  (letrec tail-call/std/vector/fill (lambda i xs (if (= i 0) xs (tail-call/std/vector/fill (- i 1) (std/vector/cons! xs (vector (fn i)))))))
   (tail-call/std/vector/fill n []))))
 (let std/vector/3d/fill (lambda W H fn 
   (cond 
@@ -1717,7 +1717,7 @@ q)))
 (let std/convert/integer->digits-base (lambda num base  
     (if (= num 0) [ 0 ] (do 
         (integer n num)
-        (let* tail-call/while (lambda out
+        (letrec tail-call/while (lambda out
             (if (> (get n) 0) (do
                 (std/vector/push! out (mod (get n) base))
                 (set n (/ (get n) base))
@@ -1769,21 +1769,21 @@ q)))
 (let std/vector/enumerate (lambda xs (std/vector/tuple/zip { (std/vector/int/range 0 (- (length xs) 1)) xs })))
 
 (let std/int/factorial (lambda n (do 
-  (let* fact (lambda n total
+  (letrec fact (lambda n total
     (if (= n 0)
         total
         (fact (- n 1) (* total n)))))
   (fact n 1))))
 
 (let std/dec/factorial (lambda n (do 
-  (let* fact (lambda n total
+  (letrec fact (lambda n total
     (if (=. n 0.)
         total
         (fact (-. n 1.) (*. total n)))))
   (fact n 1.))))
 
 (let std/vector/permutations (lambda arr (do 
-  (let* permute (lambda arr (if (<= (length arr) 1)
+  (letrec permute (lambda arr (if (<= (length arr) 1)
         [arr]
         (do
           (let out [])
@@ -1802,7 +1802,7 @@ q)))
 
 (let std/vector/combinations (lambda xs (do
     (let out [])
-    (let* combinations (lambda arr size start temp
+    (letrec combinations (lambda arr size start temp
         (if (= (length temp) size)
             (set! out (length out) (std/vector/copy temp))
             (loop start (length arr) (lambda i (do
@@ -1814,7 +1814,7 @@ q)))
 
 (let std/vector/combinations/n (lambda xs n (do
     (let out [])
-    (let* combinations (lambda arr size start temp
+    (letrec combinations (lambda arr size start temp
         (if (= (length temp) size)
             (set! out (length out) (std/vector/copy temp))
             (loop start (length arr) (lambda i (do
@@ -1848,7 +1848,7 @@ q)))
 
 (let loop/repeat (lambda n fn (loop 0 n (lambda _ (fn)))))
 (let loop/some-range? (lambda start end predicate? (do 
-  (let* tail-call/loop/some-range? (lambda i out
+  (letrec tail-call/loop/some-range? (lambda i out
                           (if (< i end)
                                 (if (predicate? i) 
                                     true

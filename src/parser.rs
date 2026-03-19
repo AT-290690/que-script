@@ -55,7 +55,7 @@ fn validate_reserved_words_in_binders(expr: &Expression) -> Result<(), String> {
         Expression::Apply(list) if !list.is_empty() => {
             if let Expression::Word(op) = &list[0] {
                 match op.as_str() {
-                    "let" | "let*" | "mut" => {
+                    "let" | "letrec" | "mut" => {
                         if let Some(Expression::Word(name)) = list.get(1) {
                             if is_reserved_word(name) {
                                 return Err(format!("Variable '{}' is forbidden", name));
@@ -130,7 +130,7 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                                 let [Expression::Word(kw), Expression::Word(name), rhs] =
                                     &let_items[..]
                             {
-                                if kw == "let" || kw == "let*" {
+                                if kw == "let" || kw == "letrec" {
                                     collect_free_idents(rhs, bound, acc);
                                     bound.insert(name.clone());
                                     continue;
@@ -141,7 +141,7 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                     }
                     return;
                 }
-                if op == "let" || op == "let*" {
+                if op == "let" || op == "letrec" {
                     if let [_, Expression::Word(name), rhs] = &exprs[..] {
                         collect_free_idents(rhs, bound, acc);
                         bound.insert(name.clone());
@@ -2492,7 +2492,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                 let [Expression::Word(kw), Expression::Word(name), _rest @ ..] =
                                     &list[..]
                             {
-                                if kw == "let" || kw == "let*" || kw == "mut" {
+                                if kw == "let" || kw == "letrec" || kw == "mut" {
                                     if is_reserved_word(name) {
                                         return Err(format!("Variable '{}' is forbidden", name));
                                     }

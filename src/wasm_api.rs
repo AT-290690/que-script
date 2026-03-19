@@ -275,7 +275,7 @@ pub fn lsp_completions(text: String) -> String {
             "lambda",
             "if",
             "let",
-            "let*",
+            "letrec",
             "letmacro",
             "&mut",
             "apply",

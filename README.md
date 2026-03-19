@@ -154,7 +154,7 @@ cargo test
 Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner:
 
 ```lisp
-(let* factorial (lambda n total
+(letrec factorial (lambda n total
    (if (= n 0)
        total
        (factorial (- n 1) (* total n)))))
@@ -177,7 +177,7 @@ Unfortunately, we can't fit that number in 32 big integers.
 Instead we have to use **Big** integers (or numbers as a vectors with arbitrary precision):
 
 ```lisp
-(let* factorial (lambda n total
+(letrec factorial (lambda n total
         (if (= (get n 0) 0)
             total
             (factorial (BigInt/sub n [ 1 ]) (BigInt/mul total n)))))

@@ -191,7 +191,7 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             "if" |
             "while" |
             "let" |
-            "let*" |
+            "letrec" |
             "mut" |
             "do"
     )
@@ -274,7 +274,7 @@ fn estimate_effect_immutable(
                                     &form_items[..]
                             {
                                 if
-                                    (kw == "let" || kw == "let*") &&
+                                    (kw == "let" || kw == "letrec") &&
                                     matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
                                 {
                                     if let Some(rhs_node) = ch.children.get(2) {
@@ -289,7 +289,7 @@ fn estimate_effect_immutable(
                     local_fn_scopes.pop();
                     effect
                 }
-                Expression::Word(op) if op == "let" || op == "let*" || op == "mut" => {
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => {
                     node.children
                         .get(2)
                         .map(|rhs| estimate_effect_immutable(rhs, top_fn_effects, local_fn_scopes))
@@ -382,7 +382,7 @@ fn annotate_effects_mut(
                                         &form_items[..]
                                 {
                                     if
-                                        (kw == "let" || kw == "let*") &&
+                                        (kw == "let" || kw == "letrec") &&
                                         matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
                                     {
                                         if let Some(rhs_node) = node.children[idx].children.get(2) {
@@ -397,7 +397,7 @@ fn annotate_effects_mut(
                         local_fn_scopes.pop();
                         combined
                     }
-                    Some(Expression::Word(op)) if op == "let" || op == "let*" || op == "mut" => {
+                    Some(Expression::Word(op)) if op == "let" || op == "letrec" || op == "mut" => {
                         node.children
                             .get_mut(2)
                             .map(|rhs| annotate_effects_mut(rhs, top_fn_effects, local_fn_scopes))
@@ -457,7 +457,7 @@ fn collect_top_level_lambda_defs<'a>(
         let [Expression::Word(kw), Expression::Word(name), rhs] = &form_items[..] else {
             continue;
         };
-        if kw != "let" && kw != "let*" {
+        if kw != "let" && kw != "letrec" {
             continue;
         }
         if
@@ -697,7 +697,7 @@ fn expr_mutates_non_first_param(
                                 let [Expression::Word(kw), Expression::Word(name), _rhs] =
                                     &form_items[..]
                             {
-                                if kw == "let" || kw == "let*" || kw == "mut" {
+                                if kw == "let" || kw == "letrec" || kw == "mut" {
                                     if let Some(scope) = scopes.last_mut() {
                                         scope.insert(name.clone(), MutationBinding::Local);
                                     }
@@ -708,7 +708,7 @@ fn expr_mutates_non_first_param(
                     scopes.pop();
                     None
                 }
-                Expression::Word(op) if op == "let" || op == "let*" || op == "mut" => {
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => {
                     items
                         .get(2)
                         .and_then(|rhs|
@@ -763,7 +763,7 @@ fn eval_function_binding_non_first_mutation_target(
     let [Expression::Word(keyword), Expression::Word(_name), rhs] = &let_items[..] else {
         return None;
     };
-    if keyword != "let" && keyword != "let*" && keyword != "mut" {
+    if keyword != "let" && keyword != "letrec" && keyword != "mut" {
         return None;
     }
     let Expression::Apply(lambda_items) = rhs else {
@@ -827,7 +827,7 @@ fn eval_function_binding_requires_bang(
     let [Expression::Word(keyword), Expression::Word(name), rhs] = &let_items[..] else {
         return None;
     };
-    if keyword != "let" && keyword != "let*" {
+    if keyword != "let" && keyword != "letrec" {
         return None;
     }
 
@@ -961,7 +961,7 @@ fn expr_requires_bang(
                                 let [Expression::Word(kw), Expression::Word(name), _rhs] =
                                     &form_items[..]
                             {
-                                if kw == "let" || kw == "let*" || kw == "mut" {
+                                if kw == "let" || kw == "letrec" || kw == "mut" {
                                     if let Some(scope) = scopes.last_mut() {
                                         scope.insert(name.clone(), false);
                                     }
@@ -972,7 +972,7 @@ fn expr_requires_bang(
                     scopes.pop();
                     false
                 }
-                Expression::Word(op) if op == "let" || op == "let*" || op == "mut" => {
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => {
                     items
                         .get(2)
                         .map(|rhs| expr_requires_bang(rhs, known_requires_bang, scopes))
@@ -1250,7 +1250,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "while" => infer_while(&exprs, ctx),
                     "let" => infer_let(&exprs, ctx),
                     "mut" => infer_mut(&exprs, ctx),
-                    "let*" => infer_rec(&exprs, ctx),
+                    "letrec" => infer_rec(&exprs, ctx),
                     "alter!" => infer_alter(&exprs, ctx),
                     "do" => infer_do(expr, &exprs, ctx),
                     _ => infer_function_call(exprs, ctx),
@@ -1861,7 +1861,7 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         if is_nonexpansive(value_expr) {
             generalize(&ctx.env, solved_type);
         } else {
-            return Err("Only recursive functions allowed for let* optimization".to_string());
+            return Err("Only recursive functions allowed for letrec optimization".to_string());
         }
 
         Ok(Type::Unit)
