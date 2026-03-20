@@ -380,6 +380,23 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_parser_right_nests_tuple_literals_with_more_than_two_items() {
+        let expr = crate::parser::build("{1 2 3 4}").expect("tuple literal should build");
+        assert_eq!(expr.to_lisp(), "(do (tuple 1 (tuple 2 (tuple 3 4))))");
+    }
+
+    #[test]
+    fn test_runtime_tuple_destructure_accepts_flat_surface_sugar() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let unpack (lambda {a b c} {a {b c}}))
+                (unpack {1 2 3}))"#,
+            true
+        );
+        assert_eq!(output.trim(), "{ 1 { 2 3 } }");
+    }
+
+    #[test]
     fn test_lsp_base_environment_includes_macro_keywords() {
         let (_, _, signatures, _) = crate::lsp_native_core::build_base_environment(&[]);
         let signature = signatures

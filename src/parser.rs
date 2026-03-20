@@ -1077,6 +1077,37 @@ fn expand_macros_in_program(
         .collect()
 }
 
+fn normalize_tuple_arity_expr(expr: Expression) -> Expression {
+    match expr {
+        Expression::Apply(items) if !items.is_empty() => {
+            let normalized_items = items
+                .into_iter()
+                .map(normalize_tuple_arity_expr)
+                .collect::<Vec<_>>();
+            if let Some(Expression::Word(head)) = normalized_items.first() {
+                if head == "tuple" && normalized_items.len() > 3 {
+                    let elems = normalized_items[1..].to_vec();
+                    let mut nested = elems[elems.len() - 1].clone();
+                    for elem in elems[1..elems.len() - 1].iter().rev() {
+                        nested = Expression::Apply(
+                            vec![Expression::Word("tuple".to_string()), elem.clone(), nested]
+                        );
+                    }
+                    return Expression::Apply(
+                        vec![Expression::Word("tuple".to_string()), elems[0].clone(), nested]
+                    );
+                }
+            }
+            Expression::Apply(normalized_items)
+        }
+        other => other,
+    }
+}
+
+fn normalize_tuple_arity_program(exprs: Vec<Expression>) -> Vec<Expression> {
+    exprs.into_iter().map(normalize_tuple_arity_expr).collect()
+}
+
 fn prepare_program_with_macros(
     program_exprs: Vec<Expression>,
     std_exprs: Vec<Expression>
@@ -1089,7 +1120,10 @@ fn prepare_program_with_macros(
     )?;
     let expanded_std = expand_macros_in_program(runtime_std, &macros)?;
     let expanded_program = expand_macros_in_program(runtime_program, &macros)?;
-    Ok((expanded_program, expanded_std))
+    Ok((
+        normalize_tuple_arity_program(expanded_program),
+        normalize_tuple_arity_program(expanded_std),
+    ))
 }
 
 pub fn parse(src: &str) -> Result<Vec<Expression>, String> {
@@ -2551,5 +2585,5 @@ pub fn build(program: &str) -> Result<Expression, String> {
 pub fn build_library(program: &str) -> Result<Expression, String> {
     let preprocessed = preprocess(program)?;
     let exprs = parse(&preprocessed)?;
-    Ok(wrap_top_level_do(flatten_top_level_dos(exprs)))
+    Ok(wrap_top_level_do(normalize_tuple_arity_program(flatten_top_level_dos(exprs))))
 }
