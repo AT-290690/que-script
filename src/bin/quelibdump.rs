@@ -229,6 +229,7 @@ fn build_final_symbol_defs(include_std: bool) -> io::Result<Vec<SymbolDef>> {
         ("./lisp/const.lisp", false),
         ("./lisp/fp.lisp", false),
         ("./lisp/ds.lisp", false),
+        ("./lisp/csv.lisp", false),
     ];
     if include_std {
         files.insert(1, ("./lisp/macros.lisp", true));
