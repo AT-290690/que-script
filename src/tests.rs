@@ -762,6 +762,45 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_runtime_csv_helpers_and_with_csv_columns_macro_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let text (cons
+                    "Ids,User Names,User Ages,Active,Score" [nl]
+                    "1,Alice,30,true,1.5" [nl]
+                    "2,Bob,,false,"))
+                (with-csv-columns text [',']
+                    ids "Ids" csv/column/int 0
+                    user_names "User Names" csv/column/string ""
+                    user_ages "User Ages" csv/column/int 0
+                    active "Active" csv/column/bool false
+                    score "Score" csv/column/decimal 0.0
+                    [(sum ids)
+                     (sum user_ages)
+                     (if (get active 0) 1 0)
+                     (Dec->Int (get score 0))
+                     (length user_names)]))"#,
+            true
+        );
+        assert_eq!(output, "[3 30 1 1 2]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_cdr_tail_view_materializes_on_mutation_without_touching_source() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let xs [1 2 3 4 5])
+                (let ys (cdr xs 2))
+                (set! ys 0 99)
+                { xs ys })"#,
+            true
+        );
+        assert_eq!(output, "{ [1 2 3 4 5] [99 4 5] }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_runtime_multiclause_unless_macro_expands_legacy_shapes_for_unit_bodies() {
         let output = run_program_output(
             r#"(do

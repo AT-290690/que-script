@@ -23,7 +23,9 @@ const VEC_CAP_OFFSET: i32 = 4;
 const VEC_RC_OFFSET: i32 = 8;
 const VEC_ELEM_REF_OFFSET: i32 = 12;
 const VEC_DATA_PTR_OFFSET: i32 = 16;
-const VEC_HEADER_SIZE: i32 = 20;
+const VEC_MAGIC_OFFSET: i32 = 20;
+const VEC_HEADER_SIZE: i32 = 24;
+const VEC_MAGIC: i32 = 1_447_380_017;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShellPermission {
@@ -954,6 +956,7 @@ pub fn write_lisp_vector(
     write_i32(&memory, caller, header_ptr + VEC_RC_OFFSET, 1)?;
     write_i32(&memory, caller, header_ptr + VEC_ELEM_REF_OFFSET, 0)?;
     write_i32(&memory, caller, header_ptr + VEC_DATA_PTR_OFFSET, data_ptr)?;
+    write_i32(&memory, caller, header_ptr + VEC_MAGIC_OFFSET, VEC_MAGIC)?;
     Ok(header_ptr)
 }
 
