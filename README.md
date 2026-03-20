@@ -20,7 +20,7 @@
 - **[Type inference](https://en.wikipedia.org/wiki/Type_inference)**
 - **[Tail Call Optimization](https://en.wikipedia.org/wiki/Tail_call)**
 
-Try it online at [playground](https://at-290690.github.io/rust-lisp/playground)
+Try it online at [playground](https://at-290690.github.io/rust-lisp/editor)
 
 Check out official website at [website](https://at-290690.github.io/rust-lisp/)
 
