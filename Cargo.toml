@@ -44,6 +44,11 @@ name = "quelibdump"
 path = "src/bin/quelibdump.rs"
 required-features = ["repo-tools"]
 
+[[bin]]
+name = "que-trs"
+path = "src/bin/que_trs.rs"
+required-features = ["repo-tools"]
+
 [dependencies]
 wasm-bindgen = "0.2"
 flate2 = "1.1.9"
