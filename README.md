@@ -61,9 +61,9 @@ sudo mv /tmp/que-lib.lisp /usr/local/share/que/que-lib.lisp
 Using the PowerShell installers:
 
 ```powershell
-irm https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install.ps1 | iex
-irm https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install-wat.ps1 | iex
-irm https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/lsp.ps1 | iex
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install.ps1'))
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install-wat.ps1'))
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/lsp.ps1'))
 ```
 
 This installs to:
@@ -99,7 +99,7 @@ curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/mai
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/uninstall.ps1 | iex
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/uninstall.ps1'))
 ```
 
 ## Build

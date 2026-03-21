@@ -1,6 +1,16 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Enable-Tls12 {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = `
+            [Net.ServicePointManager]::SecurityProtocol -bor `
+            [Net.SecurityProtocolType]::Tls12
+    } catch {}
+}
+
+Enable-Tls12
+
 $ReleaseBase = "https://github.com/AT-290690/que-script/releases/latest/download"
 $InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Que"
 $BinDir = Join-Path $InstallRoot "bin"
