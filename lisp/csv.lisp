@@ -13,13 +13,13 @@
 (let csv/split-line (lambda cell-delim line
   (|> line
       (csv/trim-cr)
-      (String->Vector cell-delim)
+      (split cell-delim)
       (map csv/trim-cr))))
 
 (let csv/read/simple
   (lambda text cell-delim
     (do
-      (let raw-lines (String->Vector nl text))
+      (let raw-lines (split [nl] text))
       (let lines (filter not-empty? (map csv/trim-cr raw-lines)))
       (let header
         (if (empty? lines)
