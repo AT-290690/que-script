@@ -583,53 +583,53 @@ out)))
 (let iexpt std/int/expt)
 (let std/dec/sqrt (lambda n
   (do
-    (fixed low 0.)
-    (fixed high n)
-    (fixed mid 0.)
-    (fixed i 0.)
+    (&mut low 0.)
+    (&mut high n)
+    (&mut mid 0.)
+    (&mut i 0.)
     ; Loop 100 times for high precision
-    (while (<. (get i) 100.)
+    (while (<. (&get i) 100.)
       (do
-        (set mid (/. (+. (get low) (get high)) 2.))
-        (if (<=. (*. (get mid) (get mid)) n)
-            (set low (get mid))
-            (set high (get mid)))
-        (set i (+. (get i) 1.))))
-    (get low))))
+        (&alter! mid (/. (+. (&get low) (&get high)) 2.))
+        (if (<=. (*. (&get mid) (&get mid)) n)
+            (&alter! low (&get mid))
+            (&alter! high (&get mid)))
+        (&alter! i (+. (&get i) 1.))))
+    (&get low))))
 
 (let std/dec/expt (lambda base exp
   (do
-    (fixed res 1.)
-    (fixed b base)
-    (fixed e exp)
+    (&mut res 1.)
+    (&mut b base)
+    (&mut e exp)
     
     ; 1. Handle the integer part of the exponent
-    (while (>=. (get e) 1.)
+    (while (>=. (&get e) 1.)
       (do
-        (if (=. (mod. (floor (get e)) 2.) 1.)
-            (set res (*. (get res) (get b))))
-        (set b (*. (get b) (get b)))
-        (set e (/. (floor (get e)) 2.))))
+        (if (=. (mod. (floor (&get e)) 2.) 1.)
+            (&alter! res (*. (&get res) (&get b))))
+        (&alter! b (*. (&get b) (&get b)))
+        (&alter! e (/. (floor (&get e)) 2.))))
     
     ; 2. Handle the fractional part using square roots
     ; Refresh 'b' to original base and 'e' to the remaining fraction
-    (set b base)
-    (set e (-. exp (floor exp)))
-    (fixed root (std/dec/sqrt (get b)))
-    (fixed frac 0.5)
+    (&alter! b base)
+    (&alter! e (-. exp (floor exp)))
+    (&mut root (std/dec/sqrt (&get b)))
+    (&mut frac 0.5)
     
     ; Loop 22. times for precision (handles bits of the fraction)
-    (fixed i 0.)
-    (while (<. (get i) 22.)
+    (&mut i 0.)
+    (while (<. (&get i) 22.)
       (do
-        (if (>=. (get e) (get frac))
+        (if (>=. (&get e) (&get frac))
             (do 
-              (set res (*. (get res) (get root)))
-              (set e (-. (get e) (get frac)))))
-        (set root (std/dec/sqrt (get root)))
-        (set frac (/. (get frac) 2.))
-        (set i (+. (get i) 1.))))
-    (get res))))
+              (&alter! res (*. (&get res) (&get root)))
+              (&alter! e (-. (&get e) (&get frac)))))
+        (&alter! root (std/dec/sqrt (&get root)))
+        (&alter! frac (/. (&get frac) 2.))
+        (&alter! i (+. (&get i) 1.))))
+    (&get res))))
 
 
 (let std/int/delta (lambda a b (std/int/abs (- a b))))
@@ -1364,11 +1364,11 @@ q)))
 
 (let std/convert/integer->bits (lambda num  
     (if (= num 0) [ 0 ] (do 
-        (integer n num)
+        (&mut n num)
         (letrec tail-call/while (lambda out
-            (if (> (get n) 0) (do
+            (if (> (&get n) 0) (do
                 (std/vector/push! out (mod (get n) 2))
-                (set n (/ (get n) 2))
+                (&alter! n (/ (&get n) 2))
                 (tail-call/while out)) out)))
         (std/vector/reverse (tail-call/while []))))))
 
@@ -1642,13 +1642,13 @@ q)))
 
 (let std/int/big/div (lambda dividend divisor (do
   (let result [])
-  (let current [[]])
+  (&mut current [])
   (let len (length dividend))
   (&mut i 0)
   ; Main loop/ process each digit of the dividend
   (while (< (&get i) len) (do
     (let digit (get dividend (&get i)))
-    (set current (std/vector/int/remove-leading-zeroes (std/vector/cons (&get current) [ digit ])))
+    (&alter! current (std/vector/int/remove-leading-zeroes (std/vector/cons (&get current) [ digit ])))
     ; Find max digit q such that (divisor * q) <= current
     (&mut low 0)
     (&mut high 9)
