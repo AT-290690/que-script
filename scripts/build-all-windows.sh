@@ -1,7 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-TARGET="${1:-x86_64-pc-windows-msvc}"
+HOST_OS="$(uname -s)"
+DEFAULT_TARGET="x86_64-pc-windows-msvc"
+
+if [[ "${HOST_OS}" != "MINGW"* && "${HOST_OS}" != "MSYS"* && "${HOST_OS}" != "CYGWIN"* ]]; then
+  DEFAULT_TARGET="x86_64-pc-windows-gnu"
+fi
+
+TARGET="${1:-${DEFAULT_TARGET}}"
 OUT_DIR="./target/${TARGET}/release"
 
 cargo build --release --target "${TARGET}" --no-default-features --features io --bin queio

@@ -43,6 +43,7 @@
 (let sqrt/int std/int/sqrt)
 (let expt/dec (lambda b x (std/dec/expt x b)))
 (let sqrt/dec std/dec/sqrt)
+(let log std/dec/log)
 (let odd? std/int/odd?)
 (let even? std/int/even?)
 (let odd/int? std/int/odd?)
