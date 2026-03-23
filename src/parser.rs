@@ -1659,8 +1659,30 @@ fn lambda_destructure_transform(
     if exprs.len() < 2 {
         return Err("lambda expects at least a body".to_string());
     }
-    let args = &exprs[1..exprs.len() - 1];
-    let body = exprs.last().unwrap().clone();
+    let lambda_items = &exprs[1..];
+    let (args, body) = match lambda_items {
+        [Expression::Apply(param_items), body_forms @ ..] if
+            !body_forms.is_empty() &&
+            !matches!(param_items.first(), Some(Expression::Word(head)) if head == "vector" || head == "tuple")
+        => {
+            let body = if body_forms.len() == 1 {
+                body_forms[0].clone()
+            } else {
+                Expression::Apply(
+                    std::iter
+                        ::once(Expression::Word("do".to_string()))
+                        .chain(body_forms.iter().cloned())
+                        .collect()
+                )
+            };
+            (param_items.as_slice(), body)
+        }
+        _ => {
+            let args = &exprs[1..exprs.len() - 1];
+            let body = exprs.last().unwrap().clone();
+            (args, body)
+        }
+    };
 
     // look for destructuring patterns in args
     let mut new_bindings = vec![];

@@ -431,12 +431,14 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
          or:    {bin} --learn\n\
+         or:    {bin} --pre-prompt\n\
          or:    {bin} --env\n\
          or:    {bin} --uninstall [--out <que-lib.lisp>]\n\
          \n\
          Flags:\n\
            --help, -h     Show this help and exit.\n\
            --learn        Print Que language quick reference.\n\
+           --pre-prompt   Print a minimal Que primer for LLM/system prompts.\n\
            --env          Print environment flags and tuning examples.\n\
            --eval, -e     Execute inline Que source without a script file.\n\
            --emit         Output source, wat, wasm, or top-level types and exit.\n\
@@ -574,6 +576,64 @@ fn native_shell_learn() -> &'static str {
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! clear! list-dir! mkdir! read! delete! write! move!"
+}
+
+fn native_shell_pre_prompt() -> &'static str {
+    "Que is an expression-only functional Lisp.\n\
+    \n\
+    Use only this minimal subset unless told otherwise.\n\
+    \n\
+    Core:\n\
+    - Function call: (f a b)\n\
+    - Function application is left-associated: (f a b c) means (((f a) b) c)\n\
+    - Calling with fewer arguments returns a partially applied function.\n\
+    - Everything is an expression.\n\
+    - (let name value) creates an immutable binding.\n\
+    - (do e1 e2 ... en) evaluates in order and returns en.\n\
+    - nil is 0.\n\
+    \n\
+    Functions:\n\
+    - (lambda a b body)\n\
+    - The last item is the body; everything before it is a parameter.\n\
+    - Recursive functions use letrec: (letrec f (lambda x ... (f ...)))\n\
+    \n\
+    Control:\n\
+    - (if cond then else)\n\
+    - (while cond body)\n\
+    \n\
+    Data:\n\
+    - Integers: 1 2 -3\n\
+    - Booleans: true false\n\
+    - Vectors: (vector 1 2 3)\n\
+    - Tuples: (tuple a b)\n\
+    - Vectors are homogeneous.\n\
+    \n\
+    Built-in accessors:\n\
+    - (get xs i)\n\
+    - (length xs)\n\
+    - (fst pair)\n\
+    - (snd pair)\n\
+    - (car xs)\n\
+    - (cdr xs)\n\
+    - (cons a b)\n\
+    \n\
+    Arithmetic:\n\
+    - + - * / mod = < > <= >=\n\
+    - and or not\n\
+    \n\
+    Common examples:\n\
+    - (let square (lambda x (* x x)))\n\
+    - (square 5)\n\
+    - (if (> x 0) x (- x))\n\
+    - (get (vector 10 20 30) 1)\n\
+    - (tuple 1 true)\n\
+    \n\
+    Do not assume Python/JS/Clojure semantics.\n\
+    In particular:\n\
+    - vectors are homogeneous\n\
+    - tuples use (tuple ...)\n\
+    - lambda params are written without grouping\n\
+    - this prompt does not include decimals, strings, chars, macros, or destructuring"
 }
 
 fn binding_name_from_def(expr: &Expression) -> Option<String> {
@@ -1736,6 +1796,10 @@ pub fn run_native_shell() -> Result<(), String> {
     }
     if matches!(args.get(1).map(String::as_str), Some("--learn")) {
         println!("{}", native_shell_learn());
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("--pre-prompt")) {
+        println!("{}", native_shell_pre_prompt());
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("--env")) {

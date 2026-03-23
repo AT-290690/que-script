@@ -397,6 +397,48 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_lambda_grouped_params_multiple_body_forms_wrap_implicit_do() {
+        let expr = crate::parser
+            ::build("(lambda (x) (print! x) (+ x 1))")
+            .expect("grouped-param lambda with multiple body forms should build");
+        let lisp = expr.to_lisp();
+        assert!(
+            lisp.contains("(lambda x (do (print! x) (+ x 1)))"),
+            "expected implicit do-wrapped lambda body, got: {}",
+            lisp
+        );
+    }
+
+    #[test]
+    fn test_runtime_grouped_param_lambda_multiple_body_forms_execute_without_explicit_do() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let f! (lambda (x)
+                  (+ x 1)
+                  (+ x 2)))
+                (f! 4))"#,
+            true
+        );
+        assert_eq!(output.trim(), "6");
+    }
+
+    #[test]
+    fn test_runtime_std_dec_log_and_aliases_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                [
+                  (=. (log 1.0) 0.0)
+                  (and (>. (log 2.0) 0.68) (<. (log 2.0) 0.71))
+                  (and (>. (log 8.0) 2.07) (<. (log 8.0) 2.09))
+                  (fst (std/dec/log/option 2.0))
+                  (not (fst (std/dec/log/option 0.0)))
+                ])"#,
+            true
+        );
+        assert_eq!(output.trim(), "[true true true true true]");
+    }
+
+    #[test]
     fn test_lsp_base_environment_includes_macro_keywords() {
         let (_, _, signatures, _) = crate::lsp_native_core::build_base_environment(&[]);
         let signature = signatures

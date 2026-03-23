@@ -631,7 +631,6 @@ out)))
         (&alter! i (+. (&get i) 1.))))
     (&get res))))
 
-
 (let std/int/delta (lambda a b (std/int/abs (- a b))))
 (let std/dec/delta (lambda a b (std/dec/abs (-. a b))))
 
@@ -1831,6 +1830,7 @@ q)))
 
 (let std/dec/div/option (lambda a b (if (=. b 0.) { false 0. } { true (/. a b) })))
 (let std/dec/expt/option (lambda a b (if (<. a 0.) { false 0. } { true (std/dec/expt a b) })))
+(let std/dec/log/option (lambda x (if (<=. x 0.0) { false 0. } { true (std/dec/log x) })))
 (let std/dec/mod/option (lambda a b (if (=. b 0.) { false 0. } { true (mod. a b) })))
 (let std/dec/sqrt/option (lambda n (if (<. n 0.) { false 0. } { true (std/dec/sqrt n)})) )
 

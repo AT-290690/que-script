@@ -8,6 +8,7 @@
 (let const/dec/max-safe 2147483.647)
 (let const/dec/min-safe -2147483.648)
 (let const/dec/pi 3.142)
+(let const/dec/ln2 0.693)
 (let infinity 2147483647)
 (let -infinity -2147483648)
 (let Int 0)
@@ -166,3 +167,29 @@
 
 (let random/int const/int/mulberry32/raw)
 (let random/dec const/dec/mulberry32/next)
+
+(let std/dec/log (lambda x
+  (if (<=. x 0.0)
+      0.0
+      (do
+        (mut y x)
+        (mut shifts 0)
+        (while (>. y 2.0)
+          (do
+            (alter! y (/. y 2.0))
+            (alter! shifts (+ shifts 1))))
+        (while (<. y 1.0)
+          (do
+            (alter! y (*. y 2.0))
+            (alter! shifts (- shifts 1))))
+        (let z (/. (-. y 1.0) (+. y 1.0)))
+        (let z2 (*. z z))
+        (mut term z)
+        (mut sm z)
+        (mut n 1)
+        (while (< n 12)
+          (do
+            (alter! term (*. term z2))
+            (alter! sm (+. sm (/. term (Int->Dec (+ (* 2 n) 1)))))
+            (alter! n (+ n 1))))
+        (+. (*. 2.0 sm) (*. (Int->Dec shifts) const/dec/ln2))))))
