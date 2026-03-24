@@ -710,6 +710,81 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_runtime_inline_zip_map_pipeline_with_distinct_lambda_names_works() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let { candidate_id skill } {
+                  [123 123 123 234 234 234 345 345]
+                  ["Python" "Tableau" "PostgreSQL" "R" "PowerBI" "SQL Server" "Python" "Tableau"]
+                })
+                (|> (zip { candidate_id skill })
+                    (map (lambda { cid sk } { cid sk }))))"#,
+            true
+        );
+        assert_eq!(
+            output,
+            r#"[{ 123 Python } { 123 Tableau } { 123 PostgreSQL } { 234 R } { 234 PowerBI } { 234 SQL Server } { 345 Python } { 345 Tableau }]"#
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_inline_zip_map_pipeline_shadowing_regression() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let { candidate_id skill } {
+                  [123 123 123 234 234 234 345 345]
+                  ["Python" "Tableau" "PostgreSQL" "R" "PowerBI" "SQL Server" "Python" "Tableau"]
+                })
+                (|> (zip { candidate_id skill })
+                    (map (lambda { candidate_id skill } { candidate_id skill }))))"#,
+            true
+        );
+        assert_eq!(
+            output,
+            r#"[{ 123 Python } { 123 Tableau } { 123 PostgreSQL } { 234 R } { 234 PowerBI } { 234 SQL Server } { 345 Python } { 345 Tableau }]"#
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_nested_letrec_inside_lambda_survives_optimized_capture_analysis() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let INPUT "12
+14
+1969
+100756")
+                (let parse
+                    (lambda input (|> input (String->Vector nl) (map Chars->Integer))))
+                (let PARSED (parse INPUT))
+                (let part1
+                    (lambda input
+                        (|> input (map (lambda x (- (/ x 3) 2))) (sum))))
+                (let part2
+                    (lambda input
+                        (do
+                            (let retry
+                                (lambda x
+                                    (do
+                                        (letrec tail-call:retry!
+                                            (lambda x out
+                                                (do
+                                                    (let result (- (/ x 3) 2))
+                                                    (if (<= result 0)
+                                                        out
+                                                        (tail-call:retry! result
+                                                            (do (push! out result) out))))))
+                                        (tail-call:retry! x []))))
+                            (|> input (map retry) (map sum) (sum)))))
+                [(part1 PARSED) (part2 PARSED)])"#,
+            true
+        );
+        assert_eq!(output, "[34241 51316]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_runtime_letmacro_expands_and_runs_through_normal_pipeline() {
         let output = run_program_output(
             r#"(do
@@ -2111,7 +2186,7 @@ Concequent and alternative must match types
     }
 
     #[test]
-    fn test_typed_optimization_zip_map_filter_unzip_fuses_to_single_loop() {
+    fn test_typed_optimization_zip_map_filter_unzip_is_not_fused() {
         let expr = crate::parser
             ::parse(
                 "(unzip (filter (lambda t (> (fst t) 2))
@@ -2122,30 +2197,16 @@ Concequent and alternative must match types
             .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
+        assert!(fused_lisp.contains("(zip "), "zip fusion should be disabled, got: {}", fused_lisp);
         assert!(
-            fused_lisp.contains("(while (< __fuse_i __fuse_i_end)"),
-            "zip->map/filter->unzip should fuse to one loop, got: {}",
-            fused_lisp
-        );
-        assert!(
-            !fused_lisp.contains("(zip "),
-            "zip should be fused as a source, got: {}",
-            fused_lisp
-        );
-        assert!(
-            !fused_lisp.contains("(unzip "),
-            "unzip should be fused as a sink, got: {}",
-            fused_lisp
-        );
-        assert!(
-            fused_lisp.contains("(tuple __fuse_out_a __fuse_out_b)"),
-            "unzip fusion should return tuple of output vectors, got: {}",
+            fused_lisp.contains("(unzip "),
+            "unzip fusion should be disabled, got: {}",
             fused_lisp
         );
     }
 
     #[test]
-    fn test_typed_optimization_zip_pair_form_is_also_fused() {
+    fn test_typed_optimization_zip_pair_form_is_not_fused() {
         let expr = crate::parser
             ::parse(
                 "(unzip (map (lambda t t)
@@ -2156,18 +2217,28 @@ Concequent and alternative must match types
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
-            fused_lisp.contains("(while (< __fuse_i __fuse_i_end)"),
-            "zip(pair ..) source should fuse into one loop, got: {}",
+            fused_lisp.contains("(zip "),
+            "zip(pair ..) fusion should be disabled, got: {}",
             fused_lisp
         );
         assert!(
-            !fused_lisp.contains("(zip "),
-            "zip should be fused as source, got: {}",
+            fused_lisp.contains("(unzip "),
+            "unzip fusion should be disabled, got: {}",
             fused_lisp
         );
+    }
+
+    #[test]
+    fn test_typed_optimization_zip_map_collect_is_not_fused_inline() {
+        let expr = crate::parser
+            ::parse("(map (lambda t t) (zip (tuple (vector 1 2 3) (vector true false true))))")
+            .expect("input should parse")
+            .remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
         assert!(
-            !fused_lisp.contains("(unzip "),
-            "unzip should be fused as sink, got: {}",
+            fused_lisp.contains("(zip "),
+            "zip->map collect should not fuse inline until the zip-source collect bug is fixed, got: {}",
             fused_lisp
         );
     }
