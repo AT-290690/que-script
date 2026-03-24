@@ -396,6 +396,9 @@ fn fuse_terminal_over_map_filter_chain(
         return None;
     }
     let source = parse_fuse_source(base);
+    if matches!(source, FuseSource::Zip { .. }) || matches!(sink, FuseSink::Unzip) {
+        return None;
+    }
     build_direct_fused_loop(source, &ops, sink, name_state)
 }
 
@@ -412,6 +415,9 @@ fn fuse_map_filter_chain_to_collect(
         return None;
     }
     let source = parse_fuse_source(base);
+    if let FuseSource::Zip { .. } = &source {
+        return None;
+    }
     build_direct_fused_loop(source, &ops, FuseSink::Collect, name_state)
 }
 
@@ -3071,7 +3077,7 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
         FuseSink::ReduceUntil { reduce_fn, stop_fn, .. } =>
             is_fusion_safe_callable(reduce_fn) && is_fusion_safe_callable(stop_fn),
         FuseSink::Average { .. } => true,
-        FuseSink::Unzip => true,
+        FuseSink::Unzip => false,
         FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } => {
             is_fusion_safe_callable(predicate)
         }

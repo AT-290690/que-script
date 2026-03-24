@@ -489,7 +489,13 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                                     &let_items[..]
                             {
                                 if kw == "let" || kw == "letrec" || kw == "mut" {
-                                    collect_refs(rhs, bound, out);
+                                    if kw == "letrec" {
+                                        let mut scoped = bound.clone();
+                                        scoped.insert(name.clone());
+                                        collect_refs(rhs, &mut scoped, out);
+                                    } else {
+                                        collect_refs(rhs, bound, out);
+                                    }
                                     bound.insert(name.clone());
                                     continue;
                                 }
@@ -501,7 +507,13 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                 }
                 if op == "let" || op == "letrec" || op == "mut" {
                     if let [_, Expression::Word(name), rhs] = &items[..] {
-                        collect_refs(rhs, bound, out);
+                        if op == "letrec" {
+                            let mut scoped = bound.clone();
+                            scoped.insert(name.clone());
+                            collect_refs(rhs, &mut scoped, out);
+                        } else {
+                            collect_refs(rhs, bound, out);
+                        }
                         bound.insert(name.clone());
                         return;
                     }
@@ -540,6 +552,9 @@ fn collect_lambda_nodes(node: &TypedExpression, out: &mut Vec<TypedExpression>) 
 
 fn collect_let_lambda_bindings(node: &TypedExpression, out: &mut HashMap<String, TypedExpression>) {
     if let Expression::Apply(items) = &node.expr {
+        if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+            return;
+        }
         if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
             if kw == "let" || kw == "letrec" {
                 if let Some(rhs) = node.children.get(2) {
@@ -6206,6 +6221,9 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
 
 fn collect_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
     if let Expression::Apply(items) = &node.expr {
+        if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+            return;
+        }
         if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
             if kw == "let" || kw == "letrec" || kw == "mut" {
                 if let Some(t) = node.children.get(2).and_then(|n| n.typ.as_ref()) {
