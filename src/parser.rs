@@ -1108,6 +1108,70 @@ fn normalize_tuple_arity_program(exprs: Vec<Expression>) -> Vec<Expression> {
     exprs.into_iter().map(normalize_tuple_arity_expr).collect()
 }
 
+fn normalize_tuple_pattern_expr(expr: Expression) -> Result<Expression, String> {
+    match expr {
+        Expression::Apply(items) if !items.is_empty() => {
+            let head = items[0].clone();
+            let normalized_items = items
+                .into_iter()
+                .skip(1)
+                .map(normalize_tuple_pattern_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            if matches!(&head, Expression::Word(w) if w == "tuple") {
+                if normalized_items.is_empty() {
+                    return Err("Tuple pattern must have at least 1 element".to_string());
+                }
+                if normalized_items.iter().any(|e| matches!(e, Expression::Word(w) if w == ".")) {
+                    return Err(
+                        "Tuple pattern does not support '.'; use '_' to skip elements".to_string()
+                    );
+                }
+
+                let mut elems = normalized_items;
+                if elems.len() == 1 {
+                    elems.push(Expression::Word("_".to_string()));
+                }
+
+                let nested = if elems.len() == 2 {
+                    Expression::Apply(
+                        vec![Expression::Word("tuple".to_string()), elems[0].clone(), elems[1].clone()]
+                    )
+                } else {
+                    fn build_nested_tuple_pattern(elems: &[Expression]) -> Expression {
+                        if elems.len() == 2 {
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("tuple".to_string()),
+                                    elems[0].clone(),
+                                    elems[1].clone(),
+                                ]
+                            )
+                        } else {
+                            Expression::Apply(
+                                vec![
+                                    Expression::Word("tuple".to_string()),
+                                    elems[0].clone(),
+                                    build_nested_tuple_pattern(&elems[1..]),
+                                ]
+                            )
+                        }
+                    }
+                    build_nested_tuple_pattern(&elems)
+                };
+                Ok(nested)
+            } else {
+                Ok(
+                    Expression::Apply(
+                        std::iter::once(head).chain(normalized_items.into_iter()).collect()
+                    )
+                )
+            }
+        }
+        other => Ok(other),
+    }
+}
+
 fn prepare_program_with_macros(
     program_exprs: Vec<Expression>,
     std_exprs: Vec<Expression>
@@ -1284,6 +1348,19 @@ fn destructure_pattern(
     arg_index: usize,
     binding_counter: &mut usize
 ) -> Result<(Vec<Expression>, Expression), String> {
+    if let Expression::Apply(items) = pattern {
+        if matches!(items.first(), Some(Expression::Word(w)) if w == "tuple") {
+            let normalized = normalize_tuple_pattern_expr(pattern.clone())?;
+            if normalized.to_lisp() != pattern.to_lisp() {
+                return destructure_pattern(
+                    &normalized,
+                    value_expr,
+                    arg_index,
+                    binding_counter,
+                );
+            }
+        }
+    }
     match pattern {
         Expression::Word(name) => {
             if name == "_" {
@@ -1810,10 +1887,10 @@ fn normalize_loop_while_body_from_arg(body_arg: &Expression) -> Result<Expressio
 fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
     let len = exprs.len();
-    if len != 2 {
+    if len < 2 {
         return Err(
             format!(
-                "while expects exactly 2 arguments: condition and body expression, got {}\n{}",
+                "while expects at least 2 arguments: condition and body expression(s), got {}\n{}",
                 len,
                 exprs
                     .into_iter()
@@ -1825,7 +1902,14 @@ fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String
     }
 
     let condition = exprs[0].clone();
-    let raw_body = normalize_loop_while_body_from_arg(&exprs[1])?;
+    let raw_body = if len == 2 {
+        normalize_loop_while_body_from_arg(&exprs[1])?
+    } else {
+        let mut do_items = Vec::with_capacity(len);
+        do_items.push(Expression::Word("do".to_string()));
+        do_items.extend(exprs[1..].iter().cloned());
+        Expression::Apply(do_items)
+    };
     let body_with_unit = ensure_do_body_with_trailing_nil(raw_body);
     Ok(Expression::Apply(vec![Expression::Word("while".to_string()), condition, body_with_unit]))
 }

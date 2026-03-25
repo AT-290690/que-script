@@ -295,6 +295,10 @@ pub fn lsp_completions(text: String) -> String {
             "loop",
             "vector",
             "string",
+            "integers",
+            "bools",
+            "decimals",
+            "strings",
             "tuple",
         ] {
             items.push(JsonCompletionItem {

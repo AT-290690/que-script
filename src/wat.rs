@@ -377,6 +377,10 @@ fn is_special_word(w: &str) -> bool {
             "if" |
             "vector" |
             "string" |
+            "integers" |
+            "bools" |
+            "decimals" |
+            "strings" |
             "tuple" |
             "length" |
             "get" |
@@ -6111,7 +6115,8 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
                         "tuple" => compile_tuple(node, ctx),
-                        "vector" | "string" => compile_vector_literal(node, ctx),
+                        "vector" | "string" | "integers" | "bools" | "decimals" | "strings" =>
+                            compile_vector_literal(node, ctx),
                         "length" => {
                             let a = compile_expr(
                                 node.children
