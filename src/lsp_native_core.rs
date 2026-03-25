@@ -3,11 +3,15 @@ use crate::parser::{ self, Expression };
 use crate::types::{ create_builtin_environment, Type, TypeEnv };
 use std::collections::{ HashMap, HashSet };
 
-pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 14] = [
+pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 18] = [
     ("alter!", "T -> T -> ()"),
     ("&alter!", "[T] -> T -> ()"),
     ("vector", "T... -> [T]"),
     ("string", "Char... -> [Char]"),
+    ("integers", "Int... -> [Int]"),
+    ("bools", "Bool... -> [Bool]"),
+    ("decimals", "Dec... -> [Dec]"),
+    ("strings", "[Char]... -> [[Char]]"),
     ("tuple", "T... -> {T...}"),
     ("loop", "Int -> Int -> (Int -> ()) -> ()"),
     ("letmacro", "compile-time macro definition"),
@@ -890,12 +894,20 @@ pub fn format_literal_hover(text: &str, range: CoreRange, literal_type: &str) ->
     if literal_type == "[Char]" {
         if let Some((preview, len, truncated)) = preview_string_literal(text, range, 16) {
             let suffix = if truncated { "..." } else { "" };
-            return format!("\"{}{}\" : [Char] length : {}", preview, suffix, len);
+            return format!("[Char] length : {} preview : \"{}{}\"", len, preview, suffix);
         }
     }
 
-    let literal_text = text_for_range(text, range).unwrap_or_default();
-    format!("{} : {}", literal_text, literal_type)
+    match literal_type {
+        "Char" => "Char".to_string(),
+        "Int" => "Int".to_string(),
+        "Dec" => "Dec".to_string(),
+        "Bool" => "Bool".to_string(),
+        _ => {
+            let literal_text = text_for_range(text, range).unwrap_or_default();
+            format!("{} : {}", literal_text, literal_type)
+        }
+    }
 }
 
 fn preview_string_literal(

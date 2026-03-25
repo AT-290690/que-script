@@ -42,11 +42,12 @@ fn ident(name: &str) -> String {
     if s.is_empty() {
         s = "_".to_string();
     }
-    if s
-        .chars()
-        .next()
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(false)
+    if
+        s
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
     {
         s = format!("_{}", s);
     }
@@ -54,12 +55,54 @@ fn ident(name: &str) -> String {
         s = format!("u_{}", s);
     }
     let keywords = [
-        "and", "as", "assert", "begin", "class", "constraint", "do", "done", "downto",
-        "else", "end", "exception", "external", "false", "for", "fun", "function",
-        "functor", "if", "in", "include", "inherit", "initializer", "lazy", "let",
-        "match", "method", "module", "mutable", "new", "object", "of", "open", "or",
-        "private", "rec", "sig", "struct", "then", "to", "true", "try", "type", "val",
-        "virtual", "when", "while", "with",
+        "and",
+        "as",
+        "assert",
+        "begin",
+        "class",
+        "constraint",
+        "do",
+        "done",
+        "downto",
+        "else",
+        "end",
+        "exception",
+        "external",
+        "false",
+        "for",
+        "fun",
+        "function",
+        "functor",
+        "if",
+        "in",
+        "include",
+        "inherit",
+        "initializer",
+        "lazy",
+        "let",
+        "match",
+        "method",
+        "module",
+        "mutable",
+        "new",
+        "object",
+        "of",
+        "open",
+        "or",
+        "private",
+        "rec",
+        "sig",
+        "struct",
+        "then",
+        "to",
+        "true",
+        "try",
+        "type",
+        "val",
+        "virtual",
+        "when",
+        "while",
+        "with",
     ];
     if keywords.contains(&s.as_str()) {
         s = format!("{}_", s);
@@ -117,7 +160,9 @@ fn compile_call(children: &[TypedExpression], mut_vars: &HashSet<String>) -> Str
         let arg_src = compile_expr_inner(arg, mut_vars);
         let needs_wrap = {
             let t = arg_src.trim();
-            t.starts_with('-') && t.len() > 1 && t[1..].chars().all(|c| c.is_ascii_digit() || c == '.')
+            t.starts_with('-') &&
+                t.len() > 1 &&
+                t[1..].chars().all(|c| (c.is_ascii_digit() || c == '.'))
         };
         let arg_src = if needs_wrap { format!("({})", arg_src) } else { arg_src };
         out = format!("({} {})", out, arg_src);
@@ -128,7 +173,9 @@ fn compile_call(children: &[TypedExpression], mut_vars: &HashSet<String>) -> Str
 fn wrap_call_arg(arg_src: String) -> String {
     let t = arg_src.trim();
     let needs_wrap =
-        t.starts_with('-') && t.len() > 1 && t[1..].chars().all(|c| c.is_ascii_digit() || c == '.');
+        t.starts_with('-') &&
+        t.len() > 1 &&
+        t[1..].chars().all(|c| (c.is_ascii_digit() || c == '.'));
     if needs_wrap {
         format!("({})", arg_src)
     } else {
@@ -136,7 +183,11 @@ fn wrap_call_arg(arg_src: String) -> String {
     }
 }
 
-fn compile_do(items: &[Expression], children: &[TypedExpression], mut_vars: &HashSet<String>) -> String {
+fn compile_do(
+    items: &[Expression],
+    children: &[TypedExpression],
+    mut_vars: &HashSet<String>
+) -> String {
     if items.len() <= 1 {
         return "()".to_string();
     }
@@ -164,7 +215,9 @@ fn compile_do(items: &[Expression], children: &[TypedExpression], mut_vars: &Has
             }
         }
         if let Some(n) = children.get(i) {
-            bindings.push(format!("let __unused{} = {}", i, compile_expr_inner(n, &scoped_mut_vars)));
+            bindings.push(
+                format!("let __unused{} = {}", i, compile_expr_inner(n, &scoped_mut_vars))
+            );
         }
     }
     let last = children
@@ -182,206 +235,326 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
     match &node.expr {
         Expression::Int(n) => format!("{}", n),
         Expression::Dec(n) => format!("{:?}", n),
-        Expression::Word(w) => match w.as_str() {
-            "nil" => "0".to_string(),
-            "true" => "true".to_string(),
-            "false" => "false".to_string(),
-            "fst" => "fst".to_string(),
-            "snd" => "snd".to_string(),
-            _ => {
-                let rendered = ident(w);
-                if mut_vars.contains(w) {
-                    format!("(!{})", rendered)
-                } else {
-                    rendered
+        Expression::Word(w) =>
+            match w.as_str() {
+                "nil" => "0".to_string(),
+                "true" => "true".to_string(),
+                "false" => "false".to_string(),
+                "fst" => "fst".to_string(),
+                "snd" => "snd".to_string(),
+                _ => {
+                    let rendered = ident(w);
+                    if mut_vars.contains(w) {
+                        format!("(!{})", rendered)
+                    } else {
+                        rendered
+                    }
                 }
             }
-        },
         Expression::Apply(items) => {
             if items.is_empty() {
                 return "()".to_string();
             }
             match &items[0] {
-                Expression::Word(op) => match op.as_str() {
-                    "do" => compile_do(items, &node.children, mut_vars),
-                    "vector" | "string" => {
-                        let args = node.children[1..]
-                            .iter()
-                            .map(|n| compile_expr_inner(n, mut_vars))
-                            .collect::<Vec<_>>()
-                            .join("; ");
-                        format!("(vec_of_array [|{}|])", args)
-                    }
-                    "tuple" => {
-                        let args = node.children[1..]
-                            .iter()
-                            .map(|n| compile_expr_inner(n, mut_vars))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!("({})", args)
-                    }
-                    "cons" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "(vec_of_array [||])".to_string());
-                        let b = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "(vec_of_array [||])".to_string());
-                        format!("(vec_cons {} {})", a, b)
-                    }
-                    "length" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "(vec_of_array [||])".to_string());
-                        format!("(vec_length {})", a)
-                    }
-                    "get" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "(vec_of_array [||])".to_string());
-                        let i = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        if let Some(Type::Tuple(items)) = node.children.get(1).and_then(|n| n.typ.as_ref()) {
-                            if let Some(TypedExpression { expr: Expression::Int(idx), .. }) = node.children.get(2) {
-                                let idx = *idx as usize;
-                                if idx < items.len() {
-                                    let names = (0..items.len()).map(|n| format!("__t{}", n)).collect::<Vec<_>>();
-                                    return format!("(let ({}) = {} in {})", names.join(", "), a, names[idx]);
+                Expression::Word(op) =>
+                    match op.as_str() {
+                        "do" => compile_do(items, &node.children, mut_vars),
+                        "vector" | "string" | "integers" | "bools" | "decimals" | "strings" => {
+                            let args = node.children[1..]
+                                .iter()
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            format!("(vec_of_array [|{}|])", args)
+                        }
+                        "tuple" => {
+                            let args = node.children[1..]
+                                .iter()
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("({})", args)
+                        }
+                        "cons" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                            let b = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                            format!("(vec_cons {} {})", a, b)
+                        }
+                        "length" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                            format!("(vec_length {})", a)
+                        }
+                        "get" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                            let i = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            if
+                                let Some(Type::Tuple(items)) = node.children
+                                    .get(1)
+                                    .and_then(|n| n.typ.as_ref())
+                            {
+                                if
+                                    let Some(TypedExpression { expr: Expression::Int(idx), .. }) =
+                                        node.children.get(2)
+                                {
+                                    let idx = *idx as usize;
+                                    if idx < items.len() {
+                                        let names = (0..items.len())
+                                            .map(|n| format!("__t{}", n))
+                                            .collect::<Vec<_>>();
+                                        return format!(
+                                            "(let ({}) = {} in {})",
+                                            names.join(", "),
+                                            a,
+                                            names[idx]
+                                        );
+                                    }
                                 }
                             }
+                            format!("(vec_get {} {})", a, i)
                         }
-                        format!("(vec_get {} {})", a, i)
-                    }
-                    "car" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "(vec_of_array [||])".to_string());
-                        format!("(vec_get {} 0)", a)
-                    }
-                    "fst" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "()".to_string());
-                        format!("(fst {})", a)
-                    }
-                    "snd" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "()".to_string());
-                        format!("(snd {})", a)
-                    }
-                    "cdr" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "(vec_of_array [||])".to_string());
-                        let i = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "1".to_string());
-                        format!("(vec_rest {} {})", a, i)
-                    }
-                    "set!" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "(vec_of_array [||])".to_string());
-                        let i = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        let v = node.children.get(3).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        format!("(vec_set {} {} {}; 0)", a, i, v)
-                    }
-                    "pop!" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "(vec_of_array [||])".to_string());
-                        format!("(vec_pop {}; 0)", a)
-                    }
-                    "alter!" => {
-                        let name = match items.get(1) {
-                            Some(Expression::Word(n)) => ident(n),
-                            _ => "_tmp".to_string(),
-                        };
-                        let value = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        format!("({} := {}; 0)", name, value)
-                    }
-                    "if" => {
-                        let c = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "false".to_string());
-                        let mut t = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "()".to_string());
-                        let mut e = node.children.get(3).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "()".to_string());
-                        let t_ty = node.children.get(2).and_then(|n| n.typ.as_ref());
-                        let e_ty = node.children.get(3).and_then(|n| n.typ.as_ref());
-                        if let (Some(Type::Function(t_arg, t_ret)), Some(e_t)) = (t_ty, e_ty) {
-                            if matches!(**t_arg, Type::Unit) && **t_ret == *e_t {
-                                t = format!("({} ())", t);
-                            }
+                        "car" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                            format!("(vec_get {} 0)", a)
                         }
-                        if let (Some(t_t), Some(Type::Function(e_arg, e_ret))) = (t_ty, e_ty) {
-                            if matches!(**e_arg, Type::Unit) && **e_ret == *t_t {
-                                e = format!("({} ())", e);
-                            }
+                        "fst" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "()".to_string());
+                            format!("(fst {})", a)
                         }
-                        format!("(if {} then {} else {})", c, t, e)
-                    }
-                    "while" => {
-                        let c = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "false".to_string());
-                        let b = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "()".to_string());
-                        format!("(while {} do ignore ({}) done; 0)", c, b)
-                    }
-                    "lambda" => {
-                        let body_idx = items.len() - 1;
-                        let mut lambda_mut_vars = mut_vars.clone();
-                        let params = items[1..body_idx]
-                            .iter()
-                            .filter_map(|p| {
-                                if let Expression::Word(w) = p {
-                                    lambda_mut_vars.remove(w);
-                                    Some(ident(w))
-                                } else {
-                                    None
+                        "snd" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "()".to_string());
+                            format!("(snd {})", a)
+                        }
+                        "cdr" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                            let i = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "1".to_string());
+                            format!("(vec_rest {} {})", a, i)
+                        }
+                        "set!" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                            let i = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            let v = node.children
+                                .get(3)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            format!("(vec_set {} {} {}; 0)", a, i, v)
+                        }
+                        "pop!" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                            format!("(vec_pop {}; 0)", a)
+                        }
+                        "alter!" => {
+                            let name = match items.get(1) {
+                                Some(Expression::Word(n)) => ident(n),
+                                _ => "_tmp".to_string(),
+                            };
+                            let value = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            format!("({} := {}; 0)", name, value)
+                        }
+                        "if" => {
+                            let c = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "false".to_string());
+                            let mut t = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "()".to_string());
+                            let mut e = node.children
+                                .get(3)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "()".to_string());
+                            let t_ty = node.children.get(2).and_then(|n| n.typ.as_ref());
+                            let e_ty = node.children.get(3).and_then(|n| n.typ.as_ref());
+                            if let (Some(Type::Function(t_arg, t_ret)), Some(e_t)) = (t_ty, e_ty) {
+                                if matches!(**t_arg, Type::Unit) && **t_ret == *e_t {
+                                    t = format!("({} ())", t);
                                 }
-                            })
-                            .collect::<Vec<_>>();
-                        let body = node.children.get(body_idx).map(|n| compile_expr_inner(n, &lambda_mut_vars)).unwrap_or_else(|| "()".to_string());
-                        if params.is_empty() {
-                            format!("(fun () -> {})", body)
-                        } else {
-                            format!("(fun {} -> {})", params.join(" "), body)
+                            }
+                            if let (Some(t_t), Some(Type::Function(e_arg, e_ret))) = (t_ty, e_ty) {
+                                if matches!(**e_arg, Type::Unit) && **e_ret == *t_t {
+                                    e = format!("({} ())", e);
+                                }
+                            }
+                            format!("(if {} then {} else {})", c, t, e)
                         }
-                    }
-                    "let" | "letrec" | "mut" => {
-                        if items.len() == 3 {
-                            let name = if let Expression::Word(n) = &items[1] { ident(n) } else { "_tmp".to_string() };
-                            let value = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "()".to_string());
-                            if op == "mut" {
-                                format!("(let {} = ref {} in 0)", name, wrap_call_arg(value))
+                        "while" => {
+                            let c = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "false".to_string());
+                            let b = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "()".to_string());
+                            format!("(while {} do ignore ({}) done; 0)", c, b)
+                        }
+                        "lambda" => {
+                            let body_idx = items.len() - 1;
+                            let mut lambda_mut_vars = mut_vars.clone();
+                            let params = items[1..body_idx]
+                                .iter()
+                                .filter_map(|p| {
+                                    if let Expression::Word(w) = p {
+                                        lambda_mut_vars.remove(w);
+                                        Some(ident(w))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            let body = node.children
+                                .get(body_idx)
+                                .map(|n| compile_expr_inner(n, &lambda_mut_vars))
+                                .unwrap_or_else(|| "()".to_string());
+                            if params.is_empty() {
+                                format!("(fun () -> {})", body)
                             } else {
-                                let binder = if op == "letrec" { "let rec" } else { "let" };
-                                format!("({} {} = {} in 0)", binder, name, value)
+                                format!("(fun {} -> {})", params.join(" "), body)
                             }
-                        } else {
-                            "0".to_string()
                         }
-                    }
-                    "as" | "char" => node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "()".to_string()),
-                    "Int->Dec" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        format!("(float_of_int {})", wrap_call_arg(a))
-                    }
-                    "Dec->Int" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0.0".to_string());
-                        format!("(int_of_float {})", wrap_call_arg(a))
-                    }
-                    "~" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        format!("(lnot {})", wrap_call_arg(a))
-                    }
-                    "<<" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        let b = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        format!("({} lsl {})", a, b)
-                    }
-                    ">>" => {
-                        let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        let b = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                        format!("({} asr {})", a, b)
-                    }
-                    _ => {
-                        if let Some(opf) = op_call(op) {
-                            if node.children.len() == 2 {
-                                let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                                format!("({} {})", opf, a)
-                            } else if node.children.len() >= 3 {
-                                let a = node.children.get(1).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                                let b = node.children.get(2).map(|n| compile_expr_inner(n, mut_vars)).unwrap_or_else(|| "0".to_string());
-                                if opf == "mod_float" {
-                                    format!("({} {} {})", opf, a, b)
-                                } else if is_int_arith_op(op) {
-                                    format!("((auto_int ({})) {} (auto_int ({})))", a, opf, b)
+                        "let" | "letrec" | "mut" => {
+                            if items.len() == 3 {
+                                let name = if let Expression::Word(n) = &items[1] {
+                                    ident(n)
                                 } else {
-                                    format!("({} {} {})", a, opf, b)
+                                    "_tmp".to_string()
+                                };
+                                let value = node.children
+                                    .get(2)
+                                    .map(|n| compile_expr_inner(n, mut_vars))
+                                    .unwrap_or_else(|| "()".to_string());
+                                if op == "mut" {
+                                    format!("(let {} = ref {} in 0)", name, wrap_call_arg(value))
+                                } else {
+                                    let binder = if op == "letrec" { "let rec" } else { "let" };
+                                    format!("({} {} = {} in 0)", binder, name, value)
                                 }
                             } else {
-                                "()".to_string()
+                                "0".to_string()
                             }
-                        } else {
-                            compile_call(&node.children, mut_vars)
+                        }
+                        "as" | "char" =>
+                            node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "()".to_string()),
+                        "Int->Dec" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            format!("(float_of_int {})", wrap_call_arg(a))
+                        }
+                        "Dec->Int" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0.0".to_string());
+                            format!("(int_of_float {})", wrap_call_arg(a))
+                        }
+                        "~" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            format!("(lnot {})", wrap_call_arg(a))
+                        }
+                        "<<" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            let b = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            format!("({} lsl {})", a, b)
+                        }
+                        ">>" => {
+                            let a = node.children
+                                .get(1)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            let b = node.children
+                                .get(2)
+                                .map(|n| compile_expr_inner(n, mut_vars))
+                                .unwrap_or_else(|| "0".to_string());
+                            format!("({} asr {})", a, b)
+                        }
+                        _ => {
+                            if let Some(opf) = op_call(op) {
+                                if node.children.len() == 2 {
+                                    let a = node.children
+                                        .get(1)
+                                        .map(|n| compile_expr_inner(n, mut_vars))
+                                        .unwrap_or_else(|| "0".to_string());
+                                    format!("({} {})", opf, a)
+                                } else if node.children.len() >= 3 {
+                                    let a = node.children
+                                        .get(1)
+                                        .map(|n| compile_expr_inner(n, mut_vars))
+                                        .unwrap_or_else(|| "0".to_string());
+                                    let b = node.children
+                                        .get(2)
+                                        .map(|n| compile_expr_inner(n, mut_vars))
+                                        .unwrap_or_else(|| "0".to_string());
+                                    if opf == "mod_float" {
+                                        format!("({} {} {})", opf, a, b)
+                                    } else if is_int_arith_op(op) {
+                                        format!("((auto_int ({})) {} (auto_int ({})))", a, opf, b)
+                                    } else {
+                                        format!("({} {} {})", a, opf, b)
+                                    }
+                                } else {
+                                    "()".to_string()
+                                }
+                            } else {
+                                compile_call(&node.children, mut_vars)
+                            }
                         }
                     }
-                },
                 _ => compile_call(&node.children, mut_vars),
             }
         }
@@ -393,7 +566,7 @@ pub fn compile_expr(node: &TypedExpression) -> String {
 }
 
 const OCAML_PRELUDE: &str =
-r#"[@@@warning "-26-27"]
+    r#"[@@@warning "-26-27"]
 
 type 'a vec = { mutable data: 'a array }
 
@@ -503,12 +676,7 @@ fn show_fn_for_type(t: Option<&Type>) -> String {
 pub fn compile_program_to_ocaml_typed(typed_ast: &TypedExpression) -> String {
     let body = compile_expr(typed_ast);
     let show_fn = show_fn_for_type(typed_ast.typ.as_ref());
-    format!(
-        "{}\n\nlet result = log_last_with {} ({})\n",
-        OCAML_PRELUDE,
-        show_fn,
-        body
-    )
+    format!("{}\n\nlet result = log_last_with {} ({})\n", OCAML_PRELUDE, show_fn, body)
 }
 
 pub fn compile_program_to_ocaml(expr: &Expression) -> Result<String, String> {

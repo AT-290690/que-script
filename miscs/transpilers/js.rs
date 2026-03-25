@@ -162,7 +162,13 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             format!("let {} = ({})", name, val)
                         }
                         // vector literal - variadic: (vector a b c) -> [a, b, c]
-                        "vector" | "string" | "tuple" => {
+                        | "vector"
+                        | "string"
+                        | "integers"
+                        | "bools"
+                        | "decimals"
+                        | "strings"
+                        | "tuple" => {
                             let elems: Vec<String> = items[1..]
                                 .iter()
                                 .map(|e| compile_expr_to_js(e))

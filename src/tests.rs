@@ -397,6 +397,53 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_parser_tuple_destructure_single_element_skips_tail() {
+        let expr = crate::parser
+            ::build("(do (let {candidate_id} {[] 1}) candidate_id)")
+            .expect("single-element tuple pattern should build");
+        let built = expr.to_lisp();
+        assert!(
+            built.contains("(let candidate_id (fst"),
+            "expected single-element tuple pattern to bind fst and skip snd, got: {}",
+            built
+        );
+    }
+
+    #[test]
+    fn test_runtime_tuple_destructure_single_element_skips_tail() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let { candidate_id } { [] 1 })
+                candidate_id)"#,
+            true
+        );
+        assert_eq!(output.trim(), "[]");
+    }
+
+    #[test]
+    fn test_runtime_tuple_destructure_flat_pattern_keeps_right_nested_tail() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let { a b c } { 1 2 3 })
+                [a b c])"#,
+            true
+        );
+        assert_eq!(output.trim(), "[1 2 3]");
+    }
+
+    #[test]
+    fn test_runtime_specialized_literal_constructors_support_strings_and_ints() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let xs (strings "a" "b"))
+                (let ys (integers 1 2 3))
+                {xs ys})"#,
+            true
+        );
+        assert_eq!(output.trim(), "{ [a b] [1 2 3] }");
+    }
+
+    #[test]
     fn test_lambda_grouped_params_multiple_body_forms_wrap_implicit_do() {
         let expr = crate::parser
             ::build("(lambda (x) (print! x) (+ x 1))")
@@ -541,6 +588,19 @@ Concequent and alternative must match types
             )
             .expect("program should infer");
         assert_eq!(typ.to_string(), "Int");
+    }
+
+    #[test]
+    fn test_loop_while_multiple_body_forms_wrap_implicit_do() {
+        let expr = crate::parser
+            ::build("(while (< i 3) (alter! i (+ i 1)) (alter! acc (+ acc i)))")
+            .expect("while with multiple body forms should build");
+        let lisp = expr.to_lisp();
+        assert!(
+            lisp.contains("(while (< i 3) (do (alter! i (+ i 1)) (alter! acc (+ acc i)) nil))"),
+            "expected implicit do-wrapped while body, got: {}",
+            lisp
+        );
     }
 
     #[cfg(feature = "runtime")]
@@ -725,6 +785,22 @@ Concequent and alternative must match types
             output,
             r#"[{ 123 Python } { 123 Tableau } { 123 PostgreSQL } { 234 R } { 234 PowerBI } { 234 SQL Server } { 345 Python } { 345 Tableau }]"#
         );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_while_multiple_body_forms_execute_without_explicit_do() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (mut i 0)
+                (mut acc 0)
+                (while (< i 3)
+                  (alter! acc (+ acc i))
+                  (alter! i (+ i 1)))
+                acc)"#,
+            true
+        );
+        assert_eq!(output, "3");
     }
 
     #[test]
@@ -2886,7 +2962,22 @@ Concequent and alternative must match types
             .and_then(|v| v.as_str())
             .expect("hover response should include string contents");
 
-        assert_eq!(contents, "\"dsadas\" : [Char] length : 6");
+        assert_eq!(contents, "[Char] length : 6 preview : \"dsadas\"");
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_numeric_literal_shows_type_without_echo() {
+        let hover_json = crate::wasm_api::lsp_hover("123".to_string(), 0, 1);
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert_eq!(contents, "Int");
     }
 
     #[test]
@@ -5180,7 +5271,7 @@ UUUUD")
  (map box)
  (Table/count)
  (Table/entries)
- (sort (lambda { . a } { . b } (> a b)))
+ (sort (lambda { _ a } { _ b } (> a b)))
  (car)
  (fst))"#,
                 "e",
@@ -5486,7 +5577,7 @@ bbrgwb")
         (reverse (range b a)))))
 ; Segment -> [Point]
 (let Segment->Points
-  (lambda { Tag { { . { x1 y1 } } { . { x2 y2 } } } } 
+  (lambda { Tag { { _ { x1 y1 } } { _ { x2 y2 } } } } 
     (cond
         ; vertical
         (= x1 x2)
@@ -5826,7 +5917,7 @@ bbrgwb")
             (
                 r#"(let group-anagrams (comp 
     (map (lambda w { w (sort ># w)}))
-    (sort (lambda { . a } { . b } (String/gt? a b)))
+    (sort (lambda { _ a } { _ b } (String/gt? a b)))
     (reduce/i (lambda a b i (do 
       (let { bw bs } b)
       (let prev (last a))

@@ -186,6 +186,10 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             "char" |
             "vector" |
             "string" |
+            "integers" |
+            "bools" |
+            "decimals" |
+            "strings" |
             "tuple" |
             "lambda" |
             "if" |
@@ -1281,7 +1285,14 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
         Expression::Apply(items) if !items.is_empty() => {
             // A shorthand for [T] means (vector T)
             if let Expression::Word(t) = &items[0] {
-                if t == "vector" || t == "string" {
+                if
+                    t == "vector" ||
+                    t == "string" ||
+                    t == "integers" ||
+                    t == "bools" ||
+                    t == "decimals" ||
+                    t == "strings"
+                {
                     if items.len() == 2 {
                         let inner = parse_type_hint(&items[1], ctx)?;
                         return Ok(Type::List(Box::new(inner)));
@@ -2085,14 +2096,9 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                     ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
                 );
             }
-
             // Return the type of the vector (List of the first element type)
             return Ok(Type::List(Box::new(first)));
         } else if name == "string" {
-            let args = &exprs[1..];
-            if args.is_empty() {
-                return Ok(Type::List(Box::new(Type::Char))); // empty string
-            }
             // We will not check if elements in string are the same
             // They should be because string is not really used by the user
             // but by the parser when transforming double quotes
@@ -2145,6 +2151,51 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
 
             return Ok(Type::Char);
+        } else if name == "integers" {
+            let args = &exprs[1..];
+            for arg in args {
+                let elem_type = infer_expr(arg, ctx)?;
+                ctx.add_constraint(
+                    Type::Int,
+                    elem_type,
+                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
+                );
+            }
+            return Ok(Type::List(Box::new(Type::Int)));
+        } else if name == "strings" {
+            let args = &exprs[1..];
+            let string_type = Type::List(Box::new(Type::Char));
+            for arg in args {
+                let elem_type = infer_expr(arg, ctx)?;
+                ctx.add_constraint(
+                    string_type.clone(),
+                    elem_type,
+                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
+                );
+            }
+            return Ok(Type::List(Box::new(Type::List(Box::new(Type::Char)))));
+        } else if name == "bools" {
+            let args = &exprs[1..];
+            for arg in args {
+                let elem_type = infer_expr(arg, ctx)?;
+                ctx.add_constraint(
+                    Type::Bool,
+                    elem_type,
+                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
+                );
+            }
+            return Ok(Type::List(Box::new(Type::Bool)));
+        } else if name == "decimals" {
+            let args = &exprs[1..];
+            for arg in args {
+                let elem_type = infer_expr(arg, ctx)?;
+                ctx.add_constraint(
+                    Type::Dec,
+                    elem_type,
+                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
+                );
+            }
+            return Ok(Type::List(Box::new(Type::Dec)));
         } else if name == "tuple" {
             let args = &exprs[1..];
             if args.len() != 2 {
