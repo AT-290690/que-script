@@ -444,6 +444,24 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_runtime_std_split_handles_multi_char_delimiters_with_while_scan() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(split "--" "ab--cd--ef")"#,
+            true
+        );
+        assert_eq!(output.trim(), "[ab cd ef]");
+    }
+
+    #[test]
+    fn test_runtime_std_join_does_not_duplicate_last_item() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(join ", " (strings "Jill" "Tom" "Anthony"))"#,
+            true
+        );
+        assert_eq!(output.trim(), "Jill, Tom, Anthony");
+    }
+
+    #[test]
     fn test_lambda_grouped_params_multiple_body_forms_wrap_implicit_do() {
         let expr = crate::parser
             ::build("(lambda (x) (print! x) (+ x 1))")
@@ -993,6 +1011,19 @@ Concequent and alternative must match types
             true
         );
         assert_eq!(output, "[3 30 1 1 2]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_csv_write_simple_formats_header_and_rows_as_csv_text() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let headers ["odd" "even"])
+                (let rows [["1" "2"] ["3" "4"] ["5" "6"]])
+                (csv/write/simple headers rows ","))"#,
+            true
+        );
+        assert_eq!(output, "odd,even\n1,2\n3,4\n5,6");
     }
 
     #[test]

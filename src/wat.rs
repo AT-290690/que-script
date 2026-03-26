@@ -5030,6 +5030,115 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     Ok(out.join("\n"))
 }
 
+fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let Expression::Apply(items) = expr else {
+        return Err("strings expects string literal elements".to_string());
+    };
+    let Some(Expression::Word(head)) = items.first() else {
+        return Err("strings expects string literal elements".to_string());
+    };
+    if head != "string" {
+        return Err("strings expects string literal elements".to_string());
+    }
+
+    let mut out = Vec::new();
+    out.push(format!("i32.const 0\ni32.const 0\ncall $vec_new_i32\nlocal.set {}", ctx.tmp_i32));
+    for item in &items[1..] {
+        let nested_ctx = Ctx {
+            fn_sigs: ctx.fn_sigs,
+            fn_ids: ctx.fn_ids,
+            lambda_ids: ctx.lambda_ids,
+            closure_defs: ctx.closure_defs,
+            lambda_bindings: ctx.lambda_bindings,
+            locals: ctx.locals.clone(),
+            local_types: ctx.local_types.clone(),
+            tmp_i32: ctx.tmp_i32 + 1,
+        };
+        let v = match item {
+            Expression::Int(n) => format!("i32.const {}", n),
+            Expression::Word(w) if w == "true" => "i32.const 1".to_string(),
+            Expression::Word(w) if w == "false" || w == "nil" => "i32.const 0".to_string(),
+            Expression::Dec(n) => {
+                let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
+                format!("i32.const {}", scaled as i32)
+            }
+            Expression::Apply(_) => {
+                let fake_node = TypedExpression {
+                    expr: item.clone(),
+                    typ: None,
+                    effect: EffectFlags::PURE,
+                    children: Vec::new(),
+                };
+                compile_expr(&fake_node, &nested_ctx)?
+            }
+            _ => return Err("strings expects string literal elements".to_string()),
+        };
+        out.push(format!("local.get {}\n{}\ncall $vec_push_i32\ndrop", ctx.tmp_i32, v));
+    }
+    out.push(format!("local.get {}", ctx.tmp_i32));
+    Ok(out.join("\n"))
+}
+
+fn compile_trusted_typed_vector_literal(
+    op: &str,
+    node: &TypedExpression,
+    ctx: &Ctx<'_>
+) -> Result<String, String> {
+    let items = match &node.expr {
+        Expression::Apply(items) => items,
+        _ => return Err(format!("{} literal expected apply expression", op)),
+    };
+    let (elem_ref_flag, compile_item): (i32, fn(&Expression, &Ctx<'_>) -> Result<String, String>) =
+        match op {
+            "integers" => (
+                0,
+                |expr, _ctx| match expr {
+                    Expression::Int(n) => Ok(format!("i32.const {}", n)),
+                    _ => Err("integers expects integer literal elements".to_string()),
+                },
+            ),
+            "bools" => (
+                0,
+                |expr, _ctx| match expr {
+                    Expression::Word(w) if w == "true" => Ok("i32.const 1".to_string()),
+                    Expression::Word(w) if w == "false" => Ok("i32.const 0".to_string()),
+                    _ => Err("bools expects boolean literal elements".to_string()),
+                },
+            ),
+            "decimals" => (
+                0,
+                |expr, _ctx| match expr {
+                    Expression::Dec(n) => {
+                        let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
+                        Ok(format!("i32.const {}", scaled as i32))
+                    }
+                    _ => Err("decimals expects decimal literal elements".to_string()),
+                },
+            ),
+            "strings" => (1, compile_trusted_string_literal_expr),
+            _ => return Err(format!("Unsupported trusted typed vector literal '{}'", op)),
+        };
+
+    let mut out = Vec::new();
+    out.push(format!("i32.const 0\ni32.const {}\ncall $vec_new_i32\nlocal.set {}", elem_ref_flag, ctx.tmp_i32));
+    for item in &items[1..] {
+        let nested_ctx = Ctx {
+            fn_sigs: ctx.fn_sigs,
+            fn_ids: ctx.fn_ids,
+            lambda_ids: ctx.lambda_ids,
+            closure_defs: ctx.closure_defs,
+            lambda_bindings: ctx.lambda_bindings,
+            locals: ctx.locals.clone(),
+            local_types: ctx.local_types.clone(),
+            tmp_i32: ctx.tmp_i32 + 1,
+        };
+        let v = compile_item(item, &nested_ctx)?;
+        out.push(format!("local.get {}\n{}\ncall $vec_push_i32\ndrop", ctx.tmp_i32, v));
+    }
+    out.push(format!("local.get {}", ctx.tmp_i32));
+    Ok(out.join("\n"))
+}
+
 fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let a = compile_expr(
         node.children.get(1).ok_or_else(|| "tuple missing first element".to_string())?,
@@ -6115,8 +6224,9 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
                         "tuple" => compile_tuple(node, ctx),
-                        "vector" | "string" | "integers" | "bools" | "decimals" | "strings" =>
-                            compile_vector_literal(node, ctx),
+                        "vector" | "string" => compile_vector_literal(node, ctx),
+                        "integers" | "bools" | "decimals" | "strings" =>
+                            compile_trusted_typed_vector_literal(op_full, node, ctx),
                         "length" => {
                             let a = compile_expr(
                                 node.children

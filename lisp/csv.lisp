@@ -31,6 +31,23 @@
             (map (lambda line (csv/split-line cell-delim line)) (tail lines))))
       { header rows })))
 
+(let csv/write/row
+  (lambda row cell-delim
+    (join cell-delim row)))
+
+(let csv/write/simple
+  (lambda header rows cell-delim
+    (do
+      (let lines [])
+      (if (not-empty? header)
+          (push! lines (csv/write/row header cell-delim)))
+      (each rows (lambda row (push! lines (csv/write/row row cell-delim))))
+      (join [nl] lines))))
+
+(let csv/write/parsed
+  (lambda parsed cell-delim
+    (csv/write/simple (csv/header parsed) (csv/rows parsed) cell-delim)))
+
 (let csv/header-index
   (lambda header header-name
     (find (lambda cell (match? cell header-name)) header)))

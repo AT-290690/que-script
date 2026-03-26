@@ -2152,49 +2152,12 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
             return Ok(Type::Char);
         } else if name == "integers" {
-            let args = &exprs[1..];
-            for arg in args {
-                let elem_type = infer_expr(arg, ctx)?;
-                ctx.add_constraint(
-                    Type::Int,
-                    elem_type,
-                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
-                );
-            }
             return Ok(Type::List(Box::new(Type::Int)));
         } else if name == "strings" {
-            let args = &exprs[1..];
-            let string_type = Type::List(Box::new(Type::Char));
-            for arg in args {
-                let elem_type = infer_expr(arg, ctx)?;
-                ctx.add_constraint(
-                    string_type.clone(),
-                    elem_type,
-                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
-                );
-            }
             return Ok(Type::List(Box::new(Type::List(Box::new(Type::Char)))));
         } else if name == "bools" {
-            let args = &exprs[1..];
-            for arg in args {
-                let elem_type = infer_expr(arg, ctx)?;
-                ctx.add_constraint(
-                    Type::Bool,
-                    elem_type,
-                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
-                );
-            }
             return Ok(Type::List(Box::new(Type::Bool)));
         } else if name == "decimals" {
-            let args = &exprs[1..];
-            for arg in args {
-                let elem_type = infer_expr(arg, ctx)?;
-                ctx.add_constraint(
-                    Type::Dec,
-                    elem_type,
-                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
-                );
-            }
             return Ok(Type::List(Box::new(Type::Dec)));
         } else if name == "tuple" {
             let args = &exprs[1..];
