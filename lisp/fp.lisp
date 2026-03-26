@@ -238,22 +238,52 @@
 (let cond/dispatch (lambda fn? a b x (if (fn? x) a b)))
 ; experimental functions
 (let split (lambda ys str (do
-  (let xs (copy str))
-  (loop 0 (length xs) (lambda i (if (and (=# (get xs i) (get ys 0)) (<= i (abs (- (length xs) (length ys))))) (do 
-    (&mut f? true)
-    (loop 1 (length ys) (lambda j (do 
-      (if (not (=# (get xs (+ i j)) (get ys j))) (&alter! f? false)))))
-    (if (&get f?) (do (set! xs i Char/start) (loop 1 (length ys) (lambda j (set! xs (+ i j) Char/nil)))))))))
-  (|> xs (exclude (lambda x (=# Char/nil x))) (String->Vector Char/start)))))
+  (if (empty? ys)
+      [str]
+      (do
+        (let out [])
+        (mut i 0)
+        (mut start 0)
+        (let len-str (length str))
+        (let len-ys (length ys))
+        (while (< i len-str) (do
+          (mut matched? false)
+          (if (and (<= (+ i len-ys) len-str) (=# (get str i) (get ys 0)))
+              (do
+                (alter! matched? true)
+                (mut j 1)
+                (while (and matched? (< j len-ys)) (do
+                  (if (not (=# (get str (+ i j)) (get ys j))) (alter! matched? false))
+                  (alter! j (+ j 1))))))
+          (if matched?
+              (do
+                (push! out (slice start i str))
+                (alter! start (+ i len-ys))
+                (alter! i (+ i len-ys)))
+              (alter! i (+ i 1)))))
+        (push! out (slice start len-str str))
+        out)))))
 
-(let join (lambda str xs (do 
+(let join (lambda str xs (do
     (let out [])
-    (let lst (std/vector/last xs))
-    (for (lambda current (do 
-        (loop 0 (length current) (lambda i (push! out (get current i))))
-        (loop 0 (length str) (lambda i (push! out (get str i)))))) (std/vector/copy xs))
-    (loop 0 (length lst) (lambda i (push! out (get lst i))))
+    (mut i 0)
+    (let len-xs (length xs))
+    (while (< i len-xs) (do
+      (let current (get xs i))
+      (mut j 0)
+      (while (< j (length current)) (do
+        (push! out (get current j))
+        (alter! j (+ j 1))))
+      (if (< (+ i 1) len-xs)
+          (do
+            (mut k 0)
+            (while (< k (length str)) (do
+              (push! out (get str k))
+              (alter! k (+ k 1))))))
+      (alter! i (+ i 1))))
    out)))
+(let join/lines (lambda xs (join [nl] xs)))
+(let join/commas (lambda xs (join "," xs)))
 
 (let replace (lambda a b xs (|> xs (split a) (join b))))
 

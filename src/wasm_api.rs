@@ -27,19 +27,19 @@ struct TextRange {
     end: Position,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct JsonPosition {
     line: u32,
     character: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct JsonRange {
     start: JsonPosition,
     end: JsonPosition,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct JsonDiagnostic {
     message: String,
     severity: String,
@@ -59,12 +59,19 @@ struct JsonCompletionItem {
     kind: String,
 }
 
+#[derive(Clone)]
 struct DocAnalysis {
     diagnostics: Vec<JsonDiagnostic>,
     symbol_types: HashMap<String, String>,
     let_binding_effects: HashMap<String, EffectFlags>,
     let_binding_external_impure: HashMap<String, bool>,
     user_bound_symbols: HashSet<String>,
+}
+
+#[derive(Clone)]
+struct CachedDocAnalysis {
+    text: String,
+    analysis: DocAnalysis,
 }
 
 struct WasmLspCore {
@@ -78,6 +85,7 @@ struct WasmLspCore {
 
 thread_local! {
     static LSP_CORE: RefCell<Option<WasmLspCore>> = const { RefCell::new(None) };
+    static DOC_ANALYSIS_CACHE: RefCell<Option<CachedDocAnalysis>> = const { RefCell::new(None) };
     #[cfg(feature = "compiler")]
     static OUTPUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     #[cfg(feature = "compiler")]
@@ -243,10 +251,27 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
     }
 }
 
+fn analyze_document_text_cached(text: &str, core: &WasmLspCore) -> DocAnalysis {
+    DOC_ANALYSIS_CACHE.with(|cell| {
+        if let Some(cached) = cell.borrow().as_ref() {
+            if cached.text == text {
+                return cached.analysis.clone();
+            }
+        }
+
+        let analysis = analyze_document_text(text, core);
+        *cell.borrow_mut() = Some(CachedDocAnalysis {
+            text: text.to_string(),
+            analysis: analysis.clone(),
+        });
+        analysis
+    })
+}
+
 #[wasm_bindgen]
 pub fn lsp_diagnostics(text: String) -> String {
     with_lsp_core(|core| {
-        let analysis = analyze_document_text(&text, core);
+        let analysis = analyze_document_text_cached(&text, core);
         serde_json::to_string(&analysis.diagnostics).unwrap_or_else(|_| "[]".to_string())
     })
 }
@@ -254,7 +279,7 @@ pub fn lsp_diagnostics(text: String) -> String {
 #[wasm_bindgen]
 pub fn lsp_completions(text: String) -> String {
     with_lsp_core(|core| {
-        let analysis = analyze_document_text(&text, core);
+        let analysis = analyze_document_text_cached(&text, core);
         let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         for (name, signature) in &analysis.symbol_types {
             if should_hide_completion_symbol(name) {
@@ -350,7 +375,7 @@ pub fn lsp_completions(text: String) -> String {
 #[wasm_bindgen]
 pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
     with_lsp_core(|core| {
-        let analysis = analyze_document_text(&text, core);
+        let analysis = analyze_document_text_cached(&text, core);
         let position = Position { line, character };
 
         if let Some((literal_type, range)) = literal_type_at_position(&text, position) {
