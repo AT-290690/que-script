@@ -287,4 +287,188 @@
 
 (let replace (lambda a b xs (|> xs (split a) (join b))))
 
+(let graph/project-path
+  (lambda col path
+    (map (lambda i (get col i)) path)))
+
+(let graph/path->nodes
+  (lambda from-col to-col path
+    (if (empty? path)
+        []
+        (do
+          (let out [(get from-col (get path 0))])
+          (for (lambda i (push! out (get to-col i))) path)
+          out))))
+
+(let graph/rotate
+  (lambda start xs
+    (do
+      (let out [])
+      (mut i 0)
+      (let len (length xs))
+      (while (< i len) (do
+        (push! out (get xs (mod (+ start i) len)))
+        (alter! i (+ i 1))))
+      out)))
+
+(let graph/cycle/min-rotation
+  (lambda nodes
+    (if (<= (length nodes) 1)
+        0
+        (do
+          (let cycle-len (- (length nodes) 1))
+          (mut best 0)
+          (mut i 1)
+          (while (< i cycle-len) (do
+            (if (std/vector/char/lesser? (get nodes i) (get nodes best))
+                (alter! best i)
+                nil)
+            (alter! i (+ i 1))))
+          best))))
+
+(let graph/normalize-cycle
+  (lambda nodes
+    (if (<= (length nodes) 1)
+        nodes
+        (do
+          (let start (graph/cycle/min-rotation nodes))
+          (let core (graph/rotate start (slice 0 (- (length nodes) 1) nodes)))
+          (cons core [(get core 0)])))))
+
+(let graph/normalize-path
+  (lambda from-col to-col path
+    (if (empty? path)
+        []
+        (graph/rotate (graph/cycle/min-rotation (graph/path->nodes from-col to-col path)) path))))
+
+(let graph/cycle-key
+  (lambda from-col to-col path
+    (do
+      (let normalized-nodes (graph/normalize-cycle (graph/path->nodes from-col to-col path)))
+      (let normalized-path (graph/normalize-path from-col to-col path))
+      (cons (join "->" normalized-nodes)
+            "::"
+            (join "," (map Integer->String normalized-path))))))
+
+(let graph/outgoing-by
+  (lambda from-col rows
+    (reduce
+      (lambda (a i)
+        (do
+          (let from (get from-col i))
+          (if (Table/has? from a)
+              (push! (Table/get-unsafe from a) i)
+              (Table/set! a from [i]))
+          a))
+      (Table/new)
+      rows)))
+
+(let graph/simple-cycle?
+  (lambda from-col to-col path
+    (do
+      (let nodes (graph/path->nodes from-col to-col path))
+      (if (or (< (length nodes) 3)
+              (not (match? (get nodes 0) (last nodes))))
+          false
+          (do
+            (let seen (Set/new))
+            (mut i 0)
+            (mut ok true)
+            (let stop (- (length nodes) 1))
+            (while (and ok (< i stop)) (do
+              (let node (get nodes i))
+              (if (Set/has? node seen)
+                  (alter! ok false)
+                  (Set/add! seen node))
+              (alter! i (+ i 1))))
+            ok)))))
+
+(let graph/find-cycles
+  (lambda rows from-col to-col next-ok? cycle-ok?
+    (do
+      (let outgoing (graph/outgoing-by from-col rows))
+      (let seen (Set/new))
+      (let out [])
+      (let contains-node?
+        (lambda node nodes
+          (some? (lambda x (match? x node)) nodes)))
+      (letrec dfs
+        (lambda origin current visited path
+          (if (Table/has? current outgoing)
+              (for
+                (lambda next-i
+                  (do
+                    (let next-to (get to-col next-i))
+                    (if (next-ok? path next-i)
+                        (if (match? next-to origin)
+                            (do
+                              (let full-path (cons path [next-i]))
+                              (if (and (graph/simple-cycle? from-col to-col full-path)
+                                       (cycle-ok? full-path))
+                                  (do
+                                    (let key (graph/cycle-key from-col to-col full-path))
+                                    (if (not (Set/has? key seen))
+                                        (do
+                                          (Set/add! seen key)
+                                          (push! out full-path))
+                                        nil))
+                                  nil))
+                            (if (not (contains-node? next-to visited))
+                                (dfs origin
+                                     next-to
+                                     (cons visited [next-to])
+                                     (cons path [next-i]))
+                                nil))
+                        nil)))
+                (Table/get-unsafe current outgoing))
+              nil)))
+      (for
+        (lambda start-i
+          (dfs (get from-col start-i)
+               (get to-col start-i)
+               [(get from-col start-i) (get to-col start-i)]
+               [start-i]))
+        rows)
+      out)))
+
+(let graph/find-cycles/increasing-time
+  (lambda rows from-col to-col time-col min-length max-span-seconds
+    (graph/find-cycles
+      rows
+      from-col
+      to-col
+      (lambda (path next-i)
+        (> (get time-col next-i) (get time-col (at path -1))))
+      (lambda (path)
+        (and (>= (length path) min-length)
+             (<= (- (get time-col (at path -1))
+                    (get time-col (get path 0)))
+                 max-span-seconds))))))
+
+(let graph/has-cycle?
+  (lambda rows from-col to-col
+    (not
+      (empty?
+        (graph/find-cycles
+          rows
+          from-col
+          to-col
+          (lambda (path next-i) true)
+          (lambda (path) true))))))
+
+(let floyd/cycle?
+  (lambda next eq? start limit
+    (do
+      (&mut turtle start)
+      (&mut hare start)
+      (mut steps 0)
+      (mut found? false)
+      (while (and (not found?) (< steps limit))
+        (&alter! turtle (next (&get turtle)))
+        (&alter! hare (next (&get hare)))
+        (&alter! hare (next (&get hare)))
+        (alter! found? (eq? (&get hare) (&get turtle)))
+        (++ steps))
+      found?)))
+
 (let autocorrect (lambda dict word (std/vector/char/autocorrect word dict)))
