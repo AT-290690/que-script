@@ -180,3 +180,55 @@
 (let Vector->Heap (lambda fn xs (std/convert/vector->heap xs fn)))
 
 (let Matrix->String (comp (map (Vector->String sp)) (Vector->String nl)))
+
+(let Date/iso->Vector
+  (lambda ts
+    [
+      (String->Integer (slice 0 4 ts))
+      (String->Integer (slice 5 7 ts))
+      (String->Integer (slice 8 10 ts))
+    ]))
+
+(let Date/iso-z->Vector
+  (lambda ts
+    [
+      (String->Integer (slice 0 4 ts))
+      (String->Integer (slice 5 7 ts))
+      (String->Integer (slice 8 10 ts))
+      (String->Integer (slice 11 13 ts))
+      (String->Integer (slice 14 16 ts))
+      (String->Integer (slice 17 19 ts))
+    ]))
+
+(let Date/iso->Vector
+  (lambda ts
+    (if (= (length ts) 10)
+        [
+          (String->Integer (slice 0 4 ts))
+          (String->Integer (slice 5 7 ts))
+          (String->Integer (slice 8 10 ts))
+          0 0 0
+        ]
+        [
+          (String->Integer (slice 0 4 ts))
+          (String->Integer (slice 5 7 ts))
+          (String->Integer (slice 8 10 ts))
+          (String->Integer (slice 11 13 ts))
+          (String->Integer (slice 14 16 ts))
+          (String->Integer (slice 17 19 ts))
+        ])))
+
+(let Date/year (lambda dt (get dt 0)))
+(let Date/month (lambda dt (get dt 1)))
+(let Date/day (lambda dt (get dt 2)))
+(let Date/hour (lambda dt (get dt 3)))
+
+(let Date/ymd (lambda [a b c] [a b c]))
+(let Date/ymdh (lambda [a b c d] [a b c d]))
+
+(let Timestamp/iso-z->seconds
+  (lambda (ts)
+    (+ (* (- (String->Integer (slice 8 10 ts)) 1) 86400)
+        (* (String->Integer (slice 11 13 ts)) 3600)
+        (* (String->Integer (slice 14 16 ts)) 60)
+        (String->Integer (slice 17 19 ts)))))

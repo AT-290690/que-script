@@ -1028,6 +1028,104 @@ Concequent and alternative must match types
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_runtime_graph_find_cycles_returns_single_normalized_simple_cycle() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let from ["U002" "U003" "U001" "U004"])
+                (let to   ["U003" "U001" "U002" "U001"])
+                (let txs  ["T2" "T3" "T1" "T4"])
+                (let ts   [2 3 1 4])
+                (let cycles
+                  (graph/find-cycles
+                    [0 1 2 3]
+                    from
+                    to
+                    (lambda (path next-i)
+                      (> (get ts next-i) (get ts (at path -1))))
+                    (lambda (path)
+                      (>= (length path) 3))))
+                (cons
+                  (Integer->String (length cycles))
+                  "|"
+                  (join ">" (graph/path->nodes from to (get cycles 0)))
+                  "|"
+                  (join "," (graph/project-path txs (get cycles 0)))
+                  "|"
+                  (join ">" (graph/normalize-cycle ["U002" "U003" "U001" "U002"]))))"#,
+            true
+        );
+        assert_eq!(
+            output.trim(),
+            "1|U001>U002>U003>U001|T1,T2,T3|U001>U002>U003>U001"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_graph_find_cycles_increasing_time_supports_two_edge_cycle() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let from ["U005" "U006" "U005"])
+                (let to   ["U006" "U005" "U003"])
+                (let txs  ["T0007" "T0006" "T0018"])
+                (let ts   [20 10 30])
+                (let cycles
+                  (graph/find-cycles/increasing-time
+                    [0 1 2]
+                    from
+                    to
+                    ts
+                    2
+                    100))
+                (cons
+                  (Integer->String (length cycles))
+                  "|"
+                  (join ">" (graph/path->nodes from to (get cycles 0)))
+                  "|"
+                  (join "," (graph/project-path txs (get cycles 0)))))"#,
+            true
+        );
+        assert_eq!(output.trim(), "1|U006>U005>U006|T0006,T0007");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_graph_has_cycle_detects_presence_and_absence_of_directed_cycle() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let cyclic-from ["A" "B" "C"])
+                (let cyclic-to   ["B" "C" "A"])
+                (let acyclic-from ["A" "B" "C"])
+                (let acyclic-to   ["B" "C" "D"])
+                [
+                  (graph/has-cycle? [0 1 2] cyclic-from cyclic-to)
+                  (graph/has-cycle? [0 1 2] acyclic-from acyclic-to)
+                ])"#,
+            true
+        );
+        assert_eq!(output.trim(), "[true false]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_floyd_cycle_detects_link_cycle_by_custom_next_and_eq() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let ids [1 2 3 4])
+                (let refs [2 3 4 2])
+                (let joined (zip { ids refs }))
+                (floyd/cycle?
+                  (lambda pair (get joined (- (snd pair) 1)))
+                  (lambda (a b) (= (fst a) (fst b)))
+                  (get joined 0)
+                  (length joined)))"#,
+            true
+        );
+        assert_eq!(output.trim(), "true");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_runtime_cdr_tail_view_materializes_on_mutation_without_touching_source() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
