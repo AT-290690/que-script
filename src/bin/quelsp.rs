@@ -576,6 +576,10 @@ impl ServerState {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let mut items = Vec::new();
+        let prefix = self
+            .documents
+            .get(uri)
+            .and_then(|doc| native_core::symbol_prefix_at_position(&doc.text, to_core_position(position)));
 
         for keyword in [
             "lambda",
@@ -624,6 +628,9 @@ impl ServerState {
 
         items.sort_by(|a, b| a.label.cmp(&b.label));
         items.dedup_by(|a, b| a.label == b.label);
+        if let Some(prefix) = prefix {
+            items.retain(|item| completion_matches_prefix(&item.label, &prefix));
+        }
         items
     }
 
@@ -640,6 +647,7 @@ impl ServerState {
             )
         });
         let mut items = Vec::new();
+        let prefix = native_core::symbol_prefix_at_position(text, to_core_position(position));
         for keyword in [
             "lambda",
             "if",
@@ -682,6 +690,9 @@ impl ServerState {
 
         items.sort_by(|a, b| a.label.cmp(&b.label));
         items.dedup_by(|a, b| a.label == b.label);
+        if let Some(prefix) = prefix {
+            items.retain(|item| completion_matches_prefix(&item.label, &prefix));
+        }
         items
     }
 
@@ -718,6 +729,20 @@ impl ServerState {
                 label: name.clone(),
                 detail: Some(normalize_signature(signature)),
                 kind: Some(kind_for_signature(signature)),
+                ..CompletionItem::default()
+            });
+        }
+
+        for name in &doc.user_bound_symbols {
+            if should_hide_completion_symbol(name) {
+                continue;
+            }
+            if inferred_signatures.contains_key(name) {
+                continue;
+            }
+            items.push(CompletionItem {
+                label: name.clone(),
+                kind: Some(CompletionItemKind::VARIABLE),
                 ..CompletionItem::default()
             });
         }
@@ -1396,6 +1421,19 @@ fn kind_for_signature(signature: &str) -> CompletionItemKind {
     } else {
         CompletionItemKind::CONSTANT
     }
+}
+
+fn completion_matches_prefix(label: &str, prefix: &str) -> bool {
+    if prefix.is_empty() {
+        return true;
+    }
+    if label.starts_with(prefix) {
+        return true;
+    }
+    if prefix.contains('/') {
+        return false;
+    }
+    label.rsplit('/').next().map(|segment| segment.starts_with(prefix)).unwrap_or(false)
 }
 
 fn should_hide_completion_symbol(symbol: &str) -> bool {

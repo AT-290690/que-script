@@ -851,6 +851,38 @@ pub fn symbol_at_position(text: &str, position: CorePosition) -> Option<(String,
     Some((symbol, range))
 }
 
+pub fn symbol_prefix_at_position(text: &str, position: CorePosition) -> Option<String> {
+    let line_text = text.lines().nth(position.line as usize)?;
+    let chars: Vec<char> = line_text.chars().collect();
+    let cursor = (position.character as usize).min(chars.len());
+
+    if chars.is_empty() || cursor == 0 {
+        return None;
+    }
+
+    let idx = if is_symbol_char(chars[cursor - 1]) {
+        cursor - 1
+    } else {
+        return None;
+    };
+
+    let mut left = idx;
+    while left > 0 && is_symbol_char(chars[left - 1]) {
+        left -= 1;
+    }
+
+    if cursor <= left {
+        return None;
+    }
+
+    let prefix: String = chars[left..cursor].iter().collect();
+    if prefix.is_empty() {
+        None
+    } else {
+        Some(prefix)
+    }
+}
+
 pub fn literal_type_at_position(text: &str, position: CorePosition) -> Option<(String, CoreRange)> {
     let offset = position_to_byte_offset(text, position)?;
 

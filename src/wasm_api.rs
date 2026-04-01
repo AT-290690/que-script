@@ -278,8 +278,24 @@ pub fn lsp_diagnostics(text: String) -> String {
 
 #[wasm_bindgen]
 pub fn lsp_completions(text: String) -> String {
+    lsp_completions_with_prefix(text, None)
+}
+
+#[wasm_bindgen]
+pub fn lsp_completions_at(text: String, line: u32, character: u32) -> String {
+    lsp_completions_with_prefix(
+        text,
+        Some(native_core::CorePosition {
+            line,
+            character,
+        })
+    )
+}
+
+fn lsp_completions_with_prefix(text: String, position: Option<native_core::CorePosition>) -> String {
     with_lsp_core(|core| {
         let analysis = analyze_document_text_cached(&text, core);
+        let prefix = position.and_then(|pos| native_core::symbol_prefix_at_position(&text, pos));
         let mut inferred_signatures: HashMap<String, String> = HashMap::new();
         for (name, signature) in &analysis.symbol_types {
             if should_hide_completion_symbol(name) {
@@ -341,6 +357,20 @@ pub fn lsp_completions(text: String) -> String {
             });
         }
 
+        for name in &analysis.user_bound_symbols {
+            if should_hide_completion_symbol(name) {
+                continue;
+            }
+            if inferred_signatures.contains_key(name) {
+                continue;
+            }
+            items.push(JsonCompletionItem {
+                label: name.clone(),
+                detail: None,
+                kind: "symbol".to_string(),
+            });
+        }
+
         if inferred_signatures.is_empty() {
             for name in &core.std_fallback_names {
                 if should_hide_completion_symbol(name) {
@@ -367,6 +397,9 @@ pub fn lsp_completions(text: String) -> String {
 
         items.sort_by(|a, b| a.label.cmp(&b.label));
         items.dedup_by(|a, b| a.label == b.label);
+        if let Some(prefix) = prefix {
+            items.retain(|item| completion_matches_prefix(&item.label, &prefix));
+        }
 
         serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string())
     })
@@ -484,6 +517,19 @@ fn from_core_range(range: native_core::CoreRange) -> TextRange {
 
 fn should_hide_completion_symbol(symbol: &str) -> bool {
     symbol.starts_with('_')
+}
+
+fn completion_matches_prefix(label: &str, prefix: &str) -> bool {
+    if prefix.is_empty() {
+        return true;
+    }
+    if label.starts_with(prefix) {
+        return true;
+    }
+    if prefix.contains('/') {
+        return false;
+    }
+    label.rsplit('/').next().map(|segment| segment.starts_with(prefix)).unwrap_or(false)
 }
 
 fn is_standalone_symbol_expr_at_range(text: &str, range: TextRange, symbol: &str) -> bool {
