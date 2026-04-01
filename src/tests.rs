@@ -517,6 +517,18 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_lsp_symbol_prefix_at_position_keeps_namespace_slash() {
+        let prefix = crate::lsp_native_core::symbol_prefix_at_position(
+            "(let data/department_id 1)\ndata/",
+            crate::lsp_native_core::CorePosition {
+                line: 1,
+                character: 5,
+            },
+        );
+        assert_eq!(prefix.as_deref(), Some("data/"));
+    }
+
+    #[test]
     fn test_lsp_collects_letmacro_names_as_bound_symbols() {
         let exprs = crate::lsp_native_core
             ::parse_user_exprs_for_symbol_collection(
@@ -2888,6 +2900,30 @@ Concequent and alternative must match types
             .expect("hover response should include string contents");
 
         assert_eq!(contents, "map : ([Char] -> [Char]) -> [[Char]] -> [[Char]]");
+    }
+
+    #[test]
+    fn test_wasm_lsp_completions_at_matches_namespaced_prefix_with_slash() {
+        let completion_json = crate::wasm_api::lsp_completions_at(
+            "(let data/manager_id 1)\n(let data/department_id 2)\ndata/".to_string(),
+            2,
+            5,
+        );
+        let items: serde_json::Value = serde_json
+            ::from_str(&completion_json)
+            .expect("completion response should be valid JSON");
+        let labels: Vec<String> = items
+            .as_array()
+            .expect("completion response should be an array")
+            .iter()
+            .filter_map(|item| item.get("label").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .collect();
+
+        assert!(
+            labels.iter().any(|label| label == "data/department_id"),
+            "expected namespaced symbol after data/, got: {:?}",
+            labels
+        );
     }
 
     #[test]
