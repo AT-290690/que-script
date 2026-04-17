@@ -730,8 +730,7 @@ Concequent and alternative must match types
     }
 
     #[cfg(feature = "runtime")]
-    fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
-        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
+    fn compile_std_program_to_wat(src: &str, enable_optimizer: bool) -> String {
         let std_ast = crate::baked::load_ast();
         let expr = match std_ast {
             crate::parser::Expression::Apply(items) => {
@@ -741,9 +740,15 @@ Concequent and alternative must match types
             }
             _ => panic!("std ast should be (do ...)"),
         };
-        let wat = crate::wat
+        crate::wat
             ::compile_program_to_wat_with_opts(&expr, enable_optimizer)
-            .expect("program should compile");
+            .expect("program should compile")
+    }
+
+    #[cfg(feature = "runtime")]
+    fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
+        let wat = compile_std_program_to_wat(src, enable_optimizer);
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
         let store_data = crate::io::ShellStoreData
@@ -768,6 +773,104 @@ Concequent and alternative must match types
             output_no_opts,
             "optimizer output must match non-optimized output"
         );
+    }
+
+    #[cfg(feature = "runtime")]
+    fn run_compiled_wat_no_result(wat_src: &str) {
+        let wasm_bytes = wat::parse_str(wat_src).expect("wat should encode to wasm");
+        let config = {
+            let mut config = wasmtime::Config::new();
+            match std::env::var("QUE_WASM_OPT")
+                .unwrap_or_else(|_| "speed".to_string())
+                .as_str()
+            {
+                "none" => config.cranelift_opt_level(wasmtime::OptLevel::None),
+                "speed" => config.cranelift_opt_level(wasmtime::OptLevel::Speed),
+                "speed_and_size" => config.cranelift_opt_level(wasmtime::OptLevel::SpeedAndSize),
+                other => panic!("invalid QUE_WASM_OPT in benchmark: {}", other),
+            };
+            config.strategy(wasmtime::Strategy::Cranelift);
+            config
+        };
+        let engine = wasmtime::Engine::new(&config).expect("engine should initialize");
+        let module = wasmtime::Module::new(&engine, &wasm_bytes).expect("module should compile");
+        let mut linker = wasmtime::Linker::new(&engine);
+        #[cfg(feature = "io")]
+        crate::io::add_shell_to_linker(&mut linker).expect("io linker should install");
+
+        #[cfg(feature = "io")]
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
+        #[cfg(not(feature = "io"))]
+        let store_data = ();
+
+        let mut store = wasmtime::Store::new(&engine, store_data);
+        let instance = linker
+            .instantiate(&mut store, &module)
+            .expect("instance should instantiate");
+        let main = instance
+            .get_typed_func::<(), i32>(&mut store, "main")
+            .expect("main should exist");
+        main.call(&mut store, ()).expect("main should run");
+    }
+
+    #[cfg(feature = "runtime")]
+    fn benchmark_wat_execution_only(label: &str, wat_src: &str, iterations: usize) -> std::time::Duration {
+        use std::time::Instant;
+
+        assert!(iterations > 0, "benchmark iterations must be > 0");
+
+        // Warm the compiled path once before timing.
+        run_compiled_wat_no_result(wat_src);
+
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..iterations {
+            let start = Instant::now();
+            run_compiled_wat_no_result(wat_src);
+            let elapsed = start.elapsed();
+            if elapsed < best {
+                best = elapsed;
+            }
+        }
+
+        eprintln!("[bench] {} | exec_best={:?}", label, best);
+        best
+    }
+
+    #[cfg(feature = "runtime")]
+    fn benchmark_std_program(
+        label: &str,
+        src: &str,
+        iterations: usize
+    ) -> (std::time::Duration, std::time::Duration, String) {
+        assert!(iterations > 0, "benchmark iterations must be > 0");
+
+        let output_no_opts = run_program_output_with_std_and_opts(src, false);
+        let output_with_opts = run_program_output_with_std_and_opts(src, true);
+        assert_eq!(
+            output_with_opts,
+            output_no_opts,
+            "benchmark '{}' output mismatch between optimized and non-optimized runs",
+            label
+        );
+
+        let wat_no_opts = compile_std_program_to_wat(src, false);
+        let wat_with_opts = compile_std_program_to_wat(src, true);
+
+        let best_no_opts = benchmark_wat_execution_only(&format!("{} (no opts)", label), &wat_no_opts, iterations);
+        let best_with_opts = benchmark_wat_execution_only(&format!("{} (opts)", label), &wat_with_opts, iterations);
+
+        eprintln!(
+            "[bench] {} | exec_no_opts_best={:?} | exec_opts_best={:?} | speedup={:.2}x",
+            label,
+            best_no_opts,
+            best_with_opts,
+            best_no_opts.as_secs_f64() / best_with_opts.as_secs_f64()
+        );
+
+        (best_no_opts, best_with_opts, output_with_opts)
     }
 
     #[test]
@@ -796,6 +899,294 @@ Concequent and alternative must match types
     fn test_cons_builtin_preferred_over_std_definition() {
         let output = run_program_output_with_std_and_opts(r#"(cons [ 1 2 ] [ 3 4 ])"#, true);
         assert_eq!(output, "[1 2 3 4]");
+    }
+
+    #[test]
+    #[ignore = "manual benchmark"]
+    #[cfg(feature = "runtime")]
+    fn bench_runtime_map_filter_reduce_pipeline() {
+        let src = r#"(do
+            (let xs (range 1 20000))
+            (|> xs
+                (map (lambda x (+ x 1)))
+                (filter (lambda x (even? x)))
+                (reduce (lambda a x (+ a x)) 0)))"#;
+        let (_, _, output) = benchmark_std_program("map-filter-reduce", src, 3);
+        assert!(!output.is_empty(), "benchmark output should not be empty");
+    }
+
+    #[test]
+    #[ignore = "manual benchmark"]
+    #[cfg(feature = "runtime")]
+    fn bench_runtime_string_split_join_pipeline() {
+        let src = r#"(do
+            (let lines
+              (map
+                (lambda n (cons "row-" (Integer->String n) ",open,US"))
+                (range 1 2500)))
+            (let blob (join [nl] lines))
+            (|> blob
+                (split [nl])
+                (map (lambda row
+                       (|> row
+                           (split ",")
+                           (join "|"))))
+                length))"#;
+        let (_, _, output) = benchmark_std_program("string-split-join", src, 3);
+        assert_eq!(output, "2500");
+    }
+
+    #[test]
+    #[ignore = "manual benchmark"]
+    #[cfg(feature = "runtime")]
+    fn bench_runtime_table_grouping_workload() {
+        let src = r#"(do
+            (let ids (range 0 12000))
+            (let teams (map (lambda x (if (= (mod x 3) 0) "Blue" (if (= (mod x 3) 1) "Red" "Green"))) ids))
+            (Table/entries
+              (reduce/i (lambda (a team i)
+                          (let id (Integer->String (get ids i)))
+                            (if (Table/has? team a)
+                                (push! (Table/get-unsafe team a) id)
+                                (Table/set! a team [id]))
+                            a)
+                        (Table/new)
+                        teams)))"#;
+        let (_, _, output) = benchmark_std_program("table-grouping", src, 3);
+        assert!(output.contains("Blue"), "grouping benchmark should contain grouped keys");
+    }
+
+    #[test]
+    #[ignore = "manual benchmark"]
+    #[cfg(feature = "runtime")]
+    fn bench_runtime_graph_cycle_workload() {
+        let src = r#"(do
+            (let from (map (lambda x (cons "U" (Integer->String x))) (range 1 40)))
+            (let to (map (lambda x (cons "U" (Integer->String (+ 1 (mod x 39))))) (range 1 40)))
+            (let rows (range 0 (- (length from) 1)))
+            (graph/has-cycle? rows from to))"#;
+        let (_, _, output) = benchmark_std_program("graph-cycle", src, 3);
+        assert_eq!(output, "true");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_table_update_sets_initial_and_updates_existing_value() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let counts (Table/new))
+                (Table/update! counts "US" 1 (lambda n (+ n 1)))
+                (Table/update! counts "US" 1 (lambda n (+ n 1)))
+                (Table/get-unsafe "US" counts))"#,
+            true,
+        );
+        assert_eq!(output, "2");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_table_update_or_chooses_missing_and_present_branches() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let counts (Table/new))
+                (Table/update-or! counts "US" (lambda 10) (lambda n (+ n 1)))
+                (Table/update-or! counts "US" (lambda 10) (lambda n (+ n 1)))
+                (Table/get-unsafe "US" counts))"#,
+            true,
+        );
+        assert_eq!(output, "11");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_table_push_or_builds_grouped_vectors() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let groups (Table/new))
+                (Table/push-or! groups "blue" "A")
+                (Table/push-or! groups "blue" "B")
+                (Table/push-or! groups "red" "C")
+                { (Table/get-unsafe "blue" groups) (Table/get-unsafe "red" groups) })"#,
+            true,
+        );
+        assert_eq!(output, "{ [A B] [C] }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_new_add_and_sub_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let a (SignedBigInt/new "-25"))
+                (let b (SignedBigInt/new "7"))
+                { (SignedBigInt/add a b) (SignedBigInt/sub b (SignedBigInt/new "25")) })"#,
+            true,
+        );
+        assert_eq!(output, "{ { true [1 8] } { true [1 8] } }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_mul_and_zero_normalization_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let a (SignedBigInt/new "-25"))
+                (let b (SignedBigInt/new "-4"))
+                { (SignedBigInt/mul a b) (SignedBigInt/new "-0") })"#,
+            true,
+        );
+        assert_eq!(output, "{ { false [1 0 0] } { false [0] } }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_comparisons_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let a (SignedBigInt/new "-25"))
+                (let b (SignedBigInt/new "7"))
+                { (SignedBigInt/lt? a b) (SignedBigInt/gte? b a) (SignedBigInt/equal? (SignedBigInt/new "-0") SignedBigInt/zero) })"#,
+            true,
+        );
+        assert_eq!(output, "{ true { true true } }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_div_truncates_toward_zero() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                { (SignedBigInt/div (SignedBigInt/new "-7") (SignedBigInt/new "3"))
+                  (SignedBigInt/div (SignedBigInt/new "7") (SignedBigInt/new "-3"))
+                  (SignedBigInt/div (SignedBigInt/new "-7") (SignedBigInt/new "-3")) })"#,
+            true,
+        );
+        assert_eq!(output, "{ { true [2] } { { true [2] } { false [2] } } }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_to_string_formats_sign_and_zero() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                { (SignedBigInt/to-string (SignedBigInt/new "-25"))
+                  (SignedBigInt/to-string (SignedBigInt/new "7"))
+                  (SignedBigInt/to-string (SignedBigInt/new "-0")) })"#,
+            true,
+        );
+        assert_eq!(output, "{ -25 { 7 0 } }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_bigint_mod_returns_unsigned_remainder() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                { (BigInt/mod [7] [3])
+                  (BigInt/mod [2 5] [7]) })"#,
+            true,
+        );
+        assert_eq!(output, "{ [1] [4] }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_mod_matches_truncate_toward_zero_division() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                { (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "3")))
+                  (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "7") (SignedBigInt/new "-3")))
+                  (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "-3"))) })"#,
+            true,
+        );
+        assert_eq!(output, "{ -1 { 1 -1 } }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_floor_division_rounds_down() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                [ (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "-7") (SignedBigInt/new "3")))
+                  (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "-3")))
+                  (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "-7") (SignedBigInt/new "-3")))
+                  (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
+            true,
+        );
+        assert_eq!(output, "[-3 -3 2 2]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_ceil_division_rounds_up() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                [ (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "-7") (SignedBigInt/new "3")))
+                  (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "-3")))
+                  (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "-7") (SignedBigInt/new "-3")))
+                  (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
+            true,
+        );
+        assert_eq!(output, "[-2 -2 3 3]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_pow_handles_sign_and_zero_exponent() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                [ (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 5))
+                  (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 4))
+                  (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 0)) ])"#,
+            true,
+        );
+        assert_eq!(output, "[-32 16 1]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_expt_handles_bigint_exponents() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                [ (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [5]))
+                  (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [4]))
+                  (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [0])) ])"#,
+            true,
+        );
+        assert_eq!(output, "[-32 16 1]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_square_keeps_positive_result() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(SignedBigInt/to-string (SignedBigInt/square (SignedBigInt/new "-12")))"#,
+            true,
+        );
+        assert_eq!(output, "144");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_range_builds_ascending_sequence() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(map SignedBigInt/to-string (SignedBigInt/range (SignedBigInt/new "-2") (SignedBigInt/new "2")))"#,
+            true,
+        );
+        assert_eq!(output, "[-2 -1 0 1 2]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_signed_bigint_sum_and_product_fold_values() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let xs [ (SignedBigInt/new "-2") (SignedBigInt/new "3") (SignedBigInt/new "4") ])
+                [ (SignedBigInt/to-string (SignedBigInt/sum xs))
+                  (SignedBigInt/to-string (SignedBigInt/product xs)) ])"#,
+            true,
+        );
+        assert_eq!(output, "[5 -24]");
     }
 
     #[test]
