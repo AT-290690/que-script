@@ -226,6 +226,34 @@
   (std/vector/sort! out fn)
   out)))
 
+(let sort/bool/desc
+  (lambda xs
+    (do
+      (let out [])
+      (let trues (count (lambda x x) xs))
+      (mut i 0)
+      (while (< i trues)
+        (push! out true)
+        (++ i))
+      (while (< i (length xs))
+        (push! out false)
+        (++ i))
+      out)))
+
+(let sort/bool/asc
+  (lambda xs
+    (do
+      (let out [])
+      (let falses (count (lambda x (not x)) xs))
+      (mut i 0)
+      (while (< i falses)
+        (push! out false)
+        (++ i))
+      (while (< i (length xs))
+        (push! out true)
+        (++ i))
+      out)))
+
 (let neighborhood (lambda directions y x fn xs (std/vector/3d/adjacent xs directions y x fn)))
 (let neighborhood/moore std/vector/3d/moore-neighborhood)
 (let neighborhood/diagonal std/vector/3d/diagonal-neighborhood)

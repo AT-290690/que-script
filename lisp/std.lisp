@@ -318,23 +318,23 @@ out)))
      out))) 
     
  (let std/vector/dec/ones (lambda n (do
-     (let out [ 1.0 ])
-     (loop 1 n (lambda i (set! out (length out) 1.0)))
+     (let out [])
+     (loop 0 n (lambda i (set! out (length out) 1.0)))
      out))) 
 
  (let std/vector/dec/zeroes (lambda n (do
-     (let out [ 0.0 ])
-     (loop 1 n (lambda i (set! out (length out) 0.0)))
+     (let out [])
+     (loop 0 n (lambda i (set! out (length out) 0.0)))
      out)))
 
  (let std/vector/int/ones (lambda n (do
-     (let out [ 1 ])
-     (loop 1 n (lambda i (set! out (length out) 1)))
+     (let out [])
+     (loop 0 n (lambda i (set! out (length out) 1)))
      out))) 
 
  (let std/vector/int/zeroes (lambda n (do
-     (let out [ 0 ])
-     (loop 1 n (lambda i (set! out (length out) 0)))
+     (let out [])
+     (loop 0 n (lambda i (set! out (length out) 0)))
      out)))
 
 (let std/vector/3d/int/range (lambda s w h (do 
@@ -1669,6 +1669,8 @@ q)))
     (&alter! i (+ (&get i) 1))))
   (let out (std/vector/int/remove-leading-zeroes result))
   (if (std/vector/empty? out) [ 0 ] out))))
+(let std/int/big/mod (lambda a b
+  (std/int/big/sub a (std/int/big/mul b (std/int/big/div a b)))))
 (let std/int/big/square (lambda x (std/int/big/mul x x)))
 (let std/int/big/floor/div (lambda a b (std/int/big/div a b)))
 (let std/int/big/ceil/div (lambda a b (std/int/big/div 
@@ -1712,6 +1714,104 @@ q)))
       (&alter! out (std/int/big/mul (&get out) a))
       (&alter! exp (std/int/big/sub (&get exp) [ 1 ]))))
     (&get out)))))
+
+(let std/int/big/signed/zero { false [0] })
+(let std/int/big/signed/one { false [1] })
+(let std/int/big/signed/negative? fst)
+(let std/int/big/signed/digits snd)
+(let std/int/big/signed/abs snd)
+(let std/int/big/signed/zero? (lambda n (std/int/big/equal? (snd n) [0])))
+(let std/int/big/signed/normalize (lambda { neg digits } (do
+  (let mag (std/vector/int/remove-leading-zeroes digits))
+  (if (or (std/vector/empty? mag) (std/int/big/equal? mag [0]))
+      std/int/big/signed/zero
+      { neg mag }))))
+(let std/int/big/signed/new (lambda str
+  (if (and (> (length str) 0) (=# (get str 0) '-'))
+      (std/int/big/signed/normalize { true (std/int/big/new (std/vector/slice str 1 (length str))) })
+      (std/int/big/signed/normalize { false (std/int/big/new str) }))))
+(let std/int/big/signed/negate (lambda { neg digits }
+  (if (std/int/big/equal? digits [0])
+      std/int/big/signed/zero
+      { (not neg) digits })))
+(let std/int/big/signed/equal? (lambda a b
+  (and (=? (fst a) (fst b)) (std/int/big/equal? (snd a) (snd b)))))
+(let std/int/big/signed/lt? (lambda a b
+  (if (fst a)
+      (if (fst b)
+          (std/int/big/greater-than? (snd a) (snd b))
+          true)
+      (if (fst b)
+          false
+          (std/int/big/less-than? (snd a) (snd b))))))
+(let std/int/big/signed/lte? (lambda a b
+  (or (std/int/big/signed/equal? a b) (std/int/big/signed/lt? a b))))
+(let std/int/big/signed/gt? (lambda a b
+  (not (std/int/big/signed/lte? a b))))
+(let std/int/big/signed/gte? (lambda a b
+  (not (std/int/big/signed/lt? a b))))
+(let std/int/big/signed/add (lambda a b
+  (if (=? (fst a) (fst b))
+      (std/int/big/signed/normalize { (fst a) (std/int/big/add (snd a) (snd b)) })
+      (if (std/int/big/greater-than? (snd a) (snd b))
+          (std/int/big/signed/normalize { (fst a) (std/int/big/sub (snd a) (snd b)) })
+          (if (std/int/big/less-than? (snd a) (snd b))
+              (std/int/big/signed/normalize { (fst b) (std/int/big/sub (snd b) (snd a)) })
+              std/int/big/signed/zero)))))
+(let std/int/big/signed/sub (lambda a b
+  (std/int/big/signed/add a (std/int/big/signed/negate b))))
+(let std/int/big/signed/mul (lambda a b
+  (std/int/big/signed/normalize { (not (=? (fst a) (fst b))) (std/int/big/mul (snd a) (snd b)) })))
+(let std/int/big/signed/square (lambda x (std/int/big/signed/mul x x)))
+(let std/int/big/signed/pow (lambda a b
+  (if (= b 0)
+      std/int/big/signed/one
+      (std/int/big/signed/normalize {
+        (and (fst a) (= (mod b 2) 1))
+        (std/int/big/pow (snd a) b)
+      }))))
+(let std/int/big/signed/expt (lambda a b
+  (if (std/int/big/equal? b [0])
+      std/int/big/signed/one
+      (std/int/big/signed/normalize {
+        (and (fst a) (std/int/big/equal? (std/int/big/mod b [2]) [1]))
+        (std/int/big/expt (snd a) b)
+      }))))
+(let std/int/big/signed/div (lambda a b (do
+  (let q (std/int/big/div (snd a) (snd b)))
+  (std/int/big/signed/normalize { (not (=? (fst a) (fst b))) q }))))
+(let std/int/big/signed/mod (lambda a b
+  (std/int/big/signed/sub a (std/int/big/signed/mul b (std/int/big/signed/div a b)))))
+(let std/int/big/signed/floor/div (lambda a b (do
+  (let q (std/int/big/signed/div a b))
+  (let r (std/int/big/signed/mod a b))
+  (if (and (not (std/int/big/signed/zero? r)) (not (=? (fst a) (fst b))))
+      (std/int/big/signed/sub q std/int/big/signed/one)
+      q))))
+(let std/int/big/signed/ceil/div (lambda a b (do
+  (let q (std/int/big/signed/div a b))
+  (let r (std/int/big/signed/mod a b))
+  (if (and (not (std/int/big/signed/zero? r)) (=? (fst a) (fst b)))
+      (std/int/big/signed/add q std/int/big/signed/one)
+      q))))
+(let std/int/big/signed/to-string (lambda n
+  (if (fst n)
+      (cons "-" (std/convert/digits->chars (snd n)))
+      (std/convert/digits->chars (snd n)))))
+(let std/vector/int/big/signed/range (lambda start end
+  (if (std/int/big/signed/gt? start end)
+      []
+      (do
+        (let out [start])
+        (&mut current start)
+        (while (std/int/big/signed/lt? (&get current) end) (do
+          (&alter! current (std/int/big/signed/add (&get current) std/int/big/signed/one))
+          (set! out (length out) (&get current))))
+        out))))
+(let std/vector/int/big/signed/sum (lambda xs
+  (std/vector/reduce xs (lambda a b (std/int/big/signed/add a b)) std/int/big/signed/zero)))
+(let std/vector/int/big/signed/product (lambda xs
+  (std/vector/reduce xs (lambda a b (std/int/big/signed/mul a b)) std/int/big/signed/one)))
 
 (let std/convert/integer->digits-base (lambda num base  
     (if (= num 0) [ 0 ] (do 
@@ -2188,6 +2288,22 @@ q)))
         (let bucket (get table idx))
         (let index (std/vector/hash/table/find-index bucket key))
         (if (>= index 0) [ (get bucket index) ] [])))))
+
+(let std/vector/hash/table/update! (lambda table key init f (do
+  (if (std/vector/hash/table/has? table key)
+      (std/vector/hash/table/set! table key (f (snd (get (std/vector/hash/table/get table key) 0))))
+      (std/vector/hash/table/set! table key init))
+  nil)))
+(let std/vector/hash/table/update-or! (lambda table key missing present (do
+  (if (std/vector/hash/table/has? table key)
+      (std/vector/hash/table/set! table key (present (snd (get (std/vector/hash/table/get table key) 0))))
+      (std/vector/hash/table/set! table key (missing)))
+  nil)))
+(let std/vector/hash/table/push-or! (lambda table key value (do
+  (if (std/vector/hash/table/has? table key)
+      (do (push! (snd (get (std/vector/hash/table/get table key) 0)) value) nil)
+      (do (std/vector/hash/table/set! table key [value]) nil))
+  nil)))
 
 (let std/vector/hash/table/entries (lambda table (do
   (let out [])
