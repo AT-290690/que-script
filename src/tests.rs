@@ -90,6 +90,20 @@ xs)"#,
     }
 
     #[test]
+    fn test_type_inference_single_arg_variadic_desugar_produces_callable() {
+        let exprs = crate::parser::parse("(or false)").unwrap();
+        let expr = exprs.first().expect("expression should parse");
+        let result = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .map(|(typ, _)| typ.to_string());
+        assert!(result.is_ok(), "single-arg or should infer successfully");
+        assert_eq!(result.unwrap(), "Bool -> Bool");
+    }
+
+    #[test]
     fn test_type_inference_failure() {
         // Test cases that should result in type inference errors
         let test_cases = [
@@ -1816,6 +1830,20 @@ Concequent and alternative must match types
 (let b (map/i (lambda x i { x i }) [1 2 3 4 5]))
 [a b]"#
         )
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_pipe_can_use_single_arg_or_stage_as_partial() {
+        let output = run_program_output_with_std_and_opts(r#"(|> false not (or false))"#, true);
+        assert_eq!(output, "true");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_pipe_can_use_single_arg_plus_stage_as_partial() {
+        let output = run_program_output_with_std_and_opts(r#"(|> 10 (+ 1))"#, true);
+        assert_eq!(output, "11");
     }
 
     #[test]

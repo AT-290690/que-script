@@ -2094,6 +2094,7 @@ fn plus_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Int(1),
+        1 => right_partial_transform("+", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2110,6 +2111,7 @@ fn plusf_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Dec(1.0),
+        1 => right_partial_transform("+.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2126,6 +2128,7 @@ fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Apply(vec![Expression::Word("vector".to_string())]),
+        1 => right_partial_transform("cons", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2299,11 +2302,23 @@ fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     Ok(exprs.into_iter().fold(func, |acc, arg| Expression::Apply(vec![acc, arg])))
 }
 
+fn right_partial_transform(op: &str, first: Expression) -> Expression {
+    let arg = Expression::Word("_x".to_string());
+    Expression::Apply(
+        vec![
+            Expression::Word("lambda".to_string()),
+            arg.clone(),
+            Expression::Apply(vec![Expression::Word(op.to_string()), first, arg]),
+        ]
+    )
+}
+
 fn and_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
         0 => Expression::Int(1),
+        1 => right_partial_transform("and", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2320,6 +2335,7 @@ fn or_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Int(1),
+        1 => right_partial_transform("or", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2335,6 +2351,7 @@ fn mult_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Int(1),
+        1 => right_partial_transform("*", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2350,6 +2367,7 @@ fn multf_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Dec(1.0),
+        1 => right_partial_transform("*.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2365,6 +2383,7 @@ fn div_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Int(1),
+        1 => right_partial_transform("/", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2380,6 +2399,7 @@ fn divf_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Dec(1.0),
+        1 => right_partial_transform("/.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
             exprs
@@ -2450,7 +2470,10 @@ fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
 
     for stage in exprs.into_iter().skip(1) {
         match stage {
-            Expression::Apply(items) if !items.is_empty() => {
+            Expression::Apply(items)
+                if !items.is_empty() &&
+                    matches!(&items[0], Expression::Word(head) if head != "lambda") =>
+            {
                 let func = items[0].clone();
                 let mut args: Vec<Expression> = items[1..].to_vec();
                 args.push(inp);
