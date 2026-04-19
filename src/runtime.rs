@@ -358,7 +358,6 @@ fn debug_guard_trap_message<T>(
 fn configured_engine() -> Result<Engine, String> {
     let mut config = Config::new();
     config.strategy(Strategy::Cranelift);
-    config.parallel_compilation(true);
 
     let opt = std::env::var("QUE_WASM_OPT").unwrap_or_else(|_| "speed".to_string());
     let opt_level = match opt.trim().to_ascii_lowercase().as_str() {

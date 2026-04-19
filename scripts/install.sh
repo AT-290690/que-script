@@ -2,13 +2,41 @@
 set -euo pipefail
 
 APP_NAME="que"
-BIN_URL="https://github.com/AT-290690/que-script/releases/latest/download/$APP_NAME"
-LIB_URL="https://github.com/AT-290690/que-script/releases/latest/download/que-lib.lisp"
+RELEASE_BASE="https://github.com/AT-290690/que-script/releases/latest/download"
 BIN_PATH="/usr/local/bin/$APP_NAME"
 LIB_DIR="/usr/local/share/que"
 LIB_PATH="$LIB_DIR/que-lib.lisp"
 
+detect_target() {
+  local os arch
+  os="$(uname -s)"
+  arch="$(uname -m)"
+
+  case "${arch}" in
+    x86_64|amd64) arch="x86_64" ;;
+    arm64|aarch64) arch="aarch64" ;;
+    *)
+      echo "Unsupported architecture: ${arch}" >&2
+      exit 1
+      ;;
+  esac
+
+  case "${os}" in
+    Linux) echo "${arch}-unknown-linux-gnu" ;;
+    Darwin) echo "${arch}-apple-darwin" ;;
+    *)
+      echo "Unsupported operating system: ${os}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+TARGET="$(detect_target)"
+BIN_URL="${RELEASE_BASE}/${APP_NAME}-${TARGET}"
+LIB_URL="${RELEASE_BASE}/que-lib-${TARGET}.lisp"
+
 echo "Installing $APP_NAME..."
+echo "Resolved target: $TARGET"
 
 curl -fsSL "$BIN_URL" -o "/tmp/$APP_NAME"
 chmod +x "/tmp/$APP_NAME"
