@@ -15,6 +15,7 @@ $ReleaseBase = "https://github.com/AT-290690/que-script/releases/latest/download
 $InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Que"
 $BinDir = Join-Path $InstallRoot "bin"
 $ShareDir = Join-Path $InstallRoot "share\que"
+$WindowsTargets = @("x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc")
 
 function Ensure-UserPathContains([string]$PathEntry) {
     $current = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -33,6 +34,17 @@ function Ensure-UserPathContains([string]$PathEntry) {
     }
 }
 
+function Resolve-ReleaseAsset([string]$BaseName, [string]$Extension) {
+    foreach ($Target in $WindowsTargets) {
+        $Candidate = "$ReleaseBase/$BaseName-$Target$Extension"
+        try {
+            Invoke-WebRequest -Method Head -Uri $Candidate | Out-Null
+            return $Candidate
+        } catch {}
+    }
+    throw "Could not find a release asset for $BaseName using supported Windows targets."
+}
+
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ShareDir | Out-Null
 
@@ -40,10 +52,10 @@ $WatExe = Join-Path $BinDir "quewat.exe"
 $LibPath = Join-Path $ShareDir "que-lib.lisp"
 
 Write-Host "Installing quewat.exe..."
-Invoke-WebRequest -Uri "$ReleaseBase/quewat.exe" -OutFile $WatExe
+Invoke-WebRequest -Uri (Resolve-ReleaseAsset "quewat" ".exe") -OutFile $WatExe
 
 Write-Host "Installing que-lib.lisp..."
-Invoke-WebRequest -Uri "$ReleaseBase/que-lib.lisp" -OutFile $LibPath
+Invoke-WebRequest -Uri (Resolve-ReleaseAsset "que-lib" ".lisp") -OutFile $LibPath
 
 Ensure-UserPathContains $BinDir
 

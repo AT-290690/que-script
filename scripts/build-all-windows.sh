@@ -12,6 +12,8 @@ TARGET="${1:-${DEFAULT_TARGET}}"
 OUT_DIR="./target/${TARGET}/release"
 
 cargo build --release --target "${TARGET}" --no-default-features --features io --bin queio
+cargo build --release --target "${TARGET}" --no-default-features --features compiler --bin quec
+cargo build --release --target "${TARGET}" --no-default-features --features runtime --bin quer
 cargo build --release --target "${TARGET}" --bin quewat
 cargo build --release --target "${TARGET}" --features io --bin quelsp
 
@@ -23,6 +25,8 @@ cargo run --release --no-default-features --features repo-tools --bin quebake --
 
 printf 'Windows release artifacts written to %s\n' "${OUT_DIR}"
 printf '  %s\n' "${OUT_DIR}/que.exe"
+printf '  %s\n' "${OUT_DIR}/quec.exe"
+printf '  %s\n' "${OUT_DIR}/quer.exe"
 printf '  %s\n' "${OUT_DIR}/quewat.exe"
 printf '  %s\n' "${OUT_DIR}/quelsp.exe"
 printf '  %s\n' "${OUT_DIR}/que-lib.lisp"

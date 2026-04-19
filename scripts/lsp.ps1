@@ -14,6 +14,7 @@ Enable-Tls12
 $ReleaseBase = "https://github.com/AT-290690/que-script/releases/latest/download"
 $InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Que"
 $BinDir = Join-Path $InstallRoot "bin"
+$WindowsTargets = @("x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc")
 
 function Ensure-UserPathContains([string]$PathEntry) {
     $current = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -32,12 +33,23 @@ function Ensure-UserPathContains([string]$PathEntry) {
     }
 }
 
+function Resolve-ReleaseAsset([string]$BaseName, [string]$Extension) {
+    foreach ($Target in $WindowsTargets) {
+        $Candidate = "$ReleaseBase/$BaseName-$Target$Extension"
+        try {
+            Invoke-WebRequest -Method Head -Uri $Candidate | Out-Null
+            return $Candidate
+        } catch {}
+    }
+    throw "Could not find a release asset for $BaseName using supported Windows targets."
+}
+
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
 $LspExe = Join-Path $BinDir "quelsp.exe"
 
 Write-Host "Installing quelsp.exe..."
-Invoke-WebRequest -Uri "$ReleaseBase/quelsp.exe" -OutFile $LspExe
+Invoke-WebRequest -Uri (Resolve-ReleaseAsset "quelsp" ".exe") -OutFile $LspExe
 
 Ensure-UserPathContains $BinDir
 
