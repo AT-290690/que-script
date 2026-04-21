@@ -3232,6 +3232,50 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_direct_local_capturing_lambda_call_does_not_allocate_closure() {
+        let program = "(let run (lambda n (do (let y (length ARGV)) (let f (lambda x (+ x y))) (f n)))) (run 41)";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) => {
+                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std")
+            }
+            _ => panic!("std ast should be (do ...)"),
+        };
+
+        let wat =
+            crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
+        let run_start = wat.find("(func $v_run").expect("run function should exist");
+        let run_end = wat[run_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| run_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let run_wat = &wat[run_start..run_end];
+
+        if std::env::var("QUE_DEVIRTUALIZE")
+            .map(|v| v.eq_ignore_ascii_case("off") || v == "0" || v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false)
+        {
+            assert!(
+                run_wat.contains("call $closure_new"),
+                "devirtualization off should keep safe closure allocation path, got:\n{}",
+                run_wat
+            );
+        } else {
+            assert!(
+                !run_wat.contains("call $closure_new"),
+                "direct local capturing lambda call should not allocate closure, got:\n{}",
+                run_wat
+            );
+            assert!(
+                !run_wat.contains("call $apply1_i32"),
+                "direct local capturing lambda call should not dynamically apply, got:\n{}",
+                run_wat
+            );
+        }
+    }
+
+    #[test]
     fn test_wat_pipeline_with_wrapper_barrier_still_segment_fuses() {
         let program =
             "(do (let mymap (lambda fn xs (map square xs))) (|> (range 1 10) (filter even?) (mymap square) (map square) (reduce + 0)))";
