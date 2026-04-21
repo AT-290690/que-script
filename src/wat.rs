@@ -4753,6 +4753,81 @@ fn should_release_set_rhs(node: &TypedExpression) -> bool {
     is_fresh_owned_managed_expr(node)
 }
 
+fn local_lambda_binding_needs_runtime_value(name: &str, following_items: &[Expression]) -> bool {
+    for expr in following_items {
+        if let Expression::Apply(items) = expr {
+            if let [Expression::Word(kw), Expression::Word(bound_name), _] = &items[..] {
+                if (kw == "let" || kw == "letrec" || kw == "mut") && bound_name == name {
+                    return false;
+                }
+            }
+        }
+        if expr_uses_name_as_value(name, expr, false) {
+            return true;
+        }
+    }
+    false
+}
+
+fn items_bind_name(name: &str, items: &[Expression]) -> bool {
+    items.iter().any(|expr| {
+        matches!(
+            expr,
+            Expression::Apply(xs)
+                if matches!(
+                    &xs[..],
+                    [Expression::Word(kw), Expression::Word(bound_name), _]
+                        if (kw == "let" || kw == "letrec" || kw == "mut") && bound_name == name
+                )
+        )
+    })
+}
+
+fn expr_uses_name_as_value(name: &str, expr: &Expression, inside_lambda: bool) -> bool {
+    match expr {
+        Expression::Word(w) => w == name,
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return false;
+            }
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+                let mut bound = HashSet::new();
+                if items.len() >= 2 {
+                    for p in &items[1..items.len() - 1] {
+                        collect_pattern_words(p, &mut bound);
+                    }
+                    if bound.contains(name) {
+                        return false;
+                    }
+                    return items
+                        .last()
+                        .map(|body| expr_uses_name_as_value(name, body, true))
+                        .unwrap_or(false);
+                }
+                return false;
+            }
+            if let [Expression::Word(kw), Expression::Word(bound_name), rhs] = &items[..] {
+                if kw == "let" || kw == "letrec" || kw == "mut" {
+                    return expr_uses_name_as_value(name, rhs, inside_lambda)
+                        || (bound_name != name
+                            && items[2..]
+                                .iter()
+                                .any(|item| expr_uses_name_as_value(name, item, inside_lambda)));
+                }
+            }
+            if !inside_lambda && matches!(items.first(), Some(Expression::Word(w)) if w == name) {
+                return items[1..]
+                    .iter()
+                    .any(|item| expr_uses_name_as_value(name, item, inside_lambda));
+            }
+            items
+                .iter()
+                .any(|item| expr_uses_name_as_value(name, item, inside_lambda))
+        }
+        _ => false,
+    }
+}
+
 fn compile_do(
     items: &[Expression],
     node: &TypedExpression,
@@ -4797,6 +4872,21 @@ fn compile_do(
                             None
                         }
                     });
+                    let can_elide_lambda_value =
+                        devirtualize_mode_from_env()? != DevirtualizeMode::Off
+                        && self_capture_idx.is_none()
+                        && !items_bind_name(name, &items[1..i])
+                        && val_node
+                            .map(|n| {
+                                matches!(
+                                    &n.expr,
+                                    Expression::Apply(xs)
+                                        if kw != "mut"
+                                            && matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+                                )
+                            })
+                            .unwrap_or(false)
+                        && !local_lambda_binding_needs_runtime_value(name, &items[i + 1..]);
                     if let Some(n) = val_node {
                         match &n.expr {
                             Expression::Apply(xs)
@@ -4815,6 +4905,9 @@ fn compile_do(
                             }
                             _ => {}
                         }
+                    }
+                    if can_elide_lambda_value {
+                        continue;
                     }
                     let value = val_node
                         .ok_or_else(|| format!("Missing let value for {}", name))
@@ -6100,6 +6193,80 @@ fn resolve_local_devirtualized_head(
     }))
 }
 
+fn compile_capture_value(cap: &str, ctx: &Ctx<'_>) -> Result<(String, &'static str), String> {
+    if let Some(local_idx) = ctx.locals.get(cap) {
+        let local_ty = ctx.local_types.get(cap);
+        Ok((
+            format!("local.get {}", local_idx),
+            if matches!(local_ty, Some(Type::Function(_, _))) {
+                "$closure_set_fun"
+            } else if local_ty.map(is_managed_local_type).unwrap_or(false) {
+                "$closure_set_ref"
+            } else {
+                "$closure_set"
+            },
+        ))
+    } else if cap == "ARGV" {
+        Ok(("call $__argv_get".to_string(), "$closure_set_ref"))
+    } else if let Some((ps, ret)) = ctx.fn_sigs.get(cap) {
+        if ps.is_empty() {
+            Ok((
+                format!("call ${}", ident(cap)),
+                if is_managed_local_type(ret) {
+                    "$closure_set_ref"
+                } else {
+                    "$closure_set"
+                },
+            ))
+        } else if let Some(id) = ctx.fn_ids.get(cap) {
+            Ok((format!("i32.const {}", id), "$closure_set_fun"))
+        } else if let Some(tag) = builtin_fn_tag(cap) {
+            Ok((format!("i32.const {}", tag), "$closure_set_fun"))
+        } else {
+            Err(format!(
+                "Unsupported closure capture '{}' in wasm backend (no function id/tag)",
+                cap
+            ))
+        }
+    } else if let Some(tag) = builtin_fn_tag(cap) {
+        Ok((format!("i32.const {}", tag), "$closure_set_fun"))
+    } else {
+        Err(format!("Unsupported closure capture '{}' in wasm backend", cap))
+    }
+}
+
+fn compile_direct_local_closure_call(
+    node: &TypedExpression,
+    local_head: &str,
+    ctx: &Ctx<'_>,
+) -> Result<Option<String>, String> {
+    let mode = devirtualize_mode_from_env()?;
+    if mode == DevirtualizeMode::Off {
+        return Ok(None);
+    }
+    let Some(lambda_node) = ctx.lambda_bindings.get(local_head) else {
+        return Ok(None);
+    };
+    let key = lambda_node.expr.to_lisp();
+    let Some(def) = ctx.closure_defs.get(&key) else {
+        return Ok(None);
+    };
+    let args = &node.children[1..];
+    if args.len() != def.user_arity {
+        return Ok(None);
+    }
+
+    let mut out = Vec::new();
+    for cap in &def.captures {
+        out.push(compile_capture_value(cap, ctx)?.0);
+    }
+    for arg in args {
+        out.push(compile_expr(arg, ctx)?);
+    }
+    out.push(format!("call ${}", ident(&def.name)));
+    Ok(Some(out.join("\n")))
+}
+
 fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let key = node.expr.to_lisp();
     if let Some(id) = ctx.lambda_ids.get(&key) {
@@ -6118,50 +6285,7 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             clo_local
         ));
         for (i, cap) in def.captures.iter().enumerate() {
-            let (cap_v, set_fn) = if let Some(local_idx) = ctx.locals.get(cap) {
-                let local_ty = ctx.local_types.get(cap);
-                (
-                    format!("local.get {}", local_idx),
-                    if matches!(local_ty, Some(Type::Function(_, _))) {
-                        "$closure_set_fun"
-                    } else if local_ty.map(is_managed_local_type).unwrap_or(false) {
-                        "$closure_set_ref"
-                    } else {
-                        "$closure_set"
-                    },
-                )
-            } else if cap == "ARGV" {
-                ("call $__argv_get".to_string(), "$closure_set_ref")
-            } else if let Some((ps, ret)) = ctx.fn_sigs.get(cap) {
-                if ps.is_empty() {
-                    (
-                        format!("call ${}", ident(cap)),
-                        if is_managed_local_type(ret) {
-                            "$closure_set_ref"
-                        } else {
-                            "$closure_set"
-                        },
-                    )
-                } else if let Some(id) = ctx.fn_ids.get(cap) {
-                    // Function-valued global capture: store function pointer id.
-                    (format!("i32.const {}", id), "$closure_set_fun")
-                } else if let Some(tag) = builtin_fn_tag(cap) {
-                    // Builtin function captured as value.
-                    (format!("i32.const {}", tag), "$closure_set_fun")
-                } else {
-                    return Err(format!(
-                        "Unsupported closure capture '{}' in wasm backend (no function id/tag)",
-                        cap
-                    ));
-                }
-            } else if let Some(tag) = builtin_fn_tag(cap) {
-                (format!("i32.const {}", tag), "$closure_set_fun")
-            } else {
-                return Err(format!(
-                    "Unsupported closure capture '{}' in wasm backend",
-                    cap
-                ));
-            };
+            let (cap_v, set_fn) = compile_capture_value(cap, ctx)?;
             out.push(format!(
                 "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
                 clo_local, i, cap_v, set_fn
@@ -6224,6 +6348,10 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 resolve_local_devirtualized_head(op_full, ctx)?
                             {
                                 compile_call(node, &target_name, ctx)
+                            } else if let Some(call) =
+                                compile_direct_local_closure_call(node, op_full, ctx)?
+                            {
+                                Ok(call)
                             } else {
                                 compile_dynamic_call(node, ctx)
                             }
