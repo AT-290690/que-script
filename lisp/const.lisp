@@ -193,3 +193,54 @@
             (alter! sm (+. sm (/. term (Int->Dec (+ (* 2 n) 1)))))
             (alter! n (+ n 1))))
         (+. (*. 2.0 sm) (*. (Int->Dec shifts) const/dec/ln2))))))
+
+  (let Payload/get (lambda (i) (if (> (length ARGV) i) (get ARGV i) "")))
+
+  (let Meta/token->Pair
+    (lambda (token)
+        (let key [])
+        (let value [])
+        (mut seen? false)
+        (mut i 0)
+        (while (< i (length token))
+            (let ch (get token i))
+            (if (and (not seen?) (=# ch '='))
+                (alter! seen? true)
+                (if seen?
+                    (push! value ch)
+                    (push! key ch)))
+            (++ i))
+        { key value }))
+
+  (let Meta/parse
+    (lambda (text)
+        (let out [])
+        (for
+          (lambda (token)
+            (if (not-empty? token)
+                (push! out (Meta/token->Pair token))))
+          (split " " text))
+        out))
+
+  (let Meta/table
+    (lambda (text)
+      (reduce
+        (lambda (acc pair)
+            (Table/set! acc (fst pair) (snd pair))
+            acc)
+        (Table/new)
+        (Meta/parse text))))
+
+  (let Meta/has?
+    (lambda (table key)
+      (Table/has? key table)))
+
+  (let Meta/get
+    (lambda (table key)
+      (if (Table/has? key table)
+          (Table/get-unsafe key table)
+          "")))
+
+  (let Meta/get/text
+    (lambda (text key)
+      (Meta/get (Meta/table text) key)))
