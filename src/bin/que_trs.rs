@@ -1,7 +1,7 @@
-#[path = "../../miscs/transpilers/js.rs"]
-mod js_transpiler;
 #[path = "../../miscs/transpilers/clojure.rs"]
 mod clojure_transpiler;
+#[path = "../../miscs/transpilers/js.rs"]
+mod js_transpiler;
 #[path = "../../miscs/transpilers/ocaml.rs"]
 mod ocaml_transpiler;
 
@@ -68,7 +68,8 @@ fn main() -> Result<(), String> {
 
     let target = target.ok_or_else(|| format!("missing target flag\n{}", usage()))?;
     let src = src.ok_or_else(|| format!("missing --s <source.que>\n{}", usage()))?;
-    let program = fs::read_to_string(&src).map_err(|e| format!("failed to read '{}': {}", src, e))?;
+    let program =
+        fs::read_to_string(&src).map_err(|e| format!("failed to read '{}': {}", src, e))?;
 
     let std_ast = que::baked::load_ast();
     let lib_defs = que::baked::ast_to_definitions(std_ast, "active library")?;

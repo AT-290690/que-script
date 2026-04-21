@@ -1,7 +1,7 @@
-use crate::infer::{ EffectFlags, TypedExpression };
+use crate::infer::{EffectFlags, TypedExpression};
 use crate::parser::Expression;
 use crate::types::Type;
-use std::collections::{ HashMap, HashSet };
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 struct TopDef {
@@ -71,11 +71,9 @@ const DBG_GUARD_TRAP_INT_OVERFLOW_ADD: i32 = 3;
 const DBG_GUARD_TRAP_INT_OVERFLOW_SUB: i32 = 4;
 const DBG_GUARD_TRAP_INT_OVERFLOW_MUL: i32 = 5;
 fn decimal_scale_i32() -> i32 {
-    match
-        std::env
-            ::var("QUE_DECIMAL_SCALE")
-            .ok()
-            .and_then(|v| v.trim().parse::<i32>().ok())
+    match std::env::var("QUE_DECIMAL_SCALE")
+        .ok()
+        .and_then(|v| v.trim().parse::<i32>().ok())
     {
         Some(scale) if scale > 0 && is_power_of_ten_i32(scale) && scale <= 1_000_000 => scale,
         _ => 1_000,
@@ -102,11 +100,13 @@ fn emit_guard_trap_wat(code: i32) -> String {
 }
 
 fn parse_env_bool_like(name: &str, default: bool) -> bool {
-    std::env
-        ::var(name)
+    std::env::var(name)
         .ok()
         .map(|v| {
-            !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no")
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off" | "no"
+            )
         })
         .unwrap_or(default)
 }
@@ -125,10 +125,10 @@ fn devirtualize_mode_from_env() -> Result<DevirtualizeMode, String> {
         "off" => Ok(DevirtualizeMode::Off),
         "known-heads" | "known_heads" | "known" => Ok(DevirtualizeMode::KnownHeads),
         "aggressive" => Ok(DevirtualizeMode::Aggressive),
-        other =>
-            Err(
-                format!("invalid QUE_DEVIRTUALIZE='{}'. expected one of: off, known-heads, aggressive", other)
-            ),
+        other => Err(format!(
+            "invalid QUE_DEVIRTUALIZE='{}'. expected one of: off, known-heads, aggressive",
+            other
+        )),
     }
 }
 
@@ -137,8 +137,10 @@ fn tail_call_mode_from_env() -> Result<TailCallMode, String> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "conservative" | "safe" | "default" => Ok(TailCallMode::Conservative),
         "aggressive" => Ok(TailCallMode::Aggressive),
-        other =>
-            Err(format!("invalid QUE_TCO='{}'. expected one of: conservative, aggressive", other)),
+        other => Err(format!(
+            "invalid QUE_TCO='{}'. expected one of: conservative, aggressive",
+            other
+        )),
     }
 }
 
@@ -192,34 +194,8 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
 
 fn builtin_tag_arity(tag: i32) -> Option<usize> {
     match tag {
-        | 1
-        | 2
-        | 3
-        | 4
-        | 5
-        | 6
-        | 7
-        | 8
-        | 9
-        | 10
-        | 11
-        | 12
-        | 13
-        | 14
-        | 15
-        | 16
-        | 17
-        | 25
-        | 26
-        | 27
-        | 28
-        | 29
-        | 30
-        | 31
-        | 32
-        | 33
-        | 34
-        | 37 => Some(2),
+        1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 25 | 26
+        | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 37 => Some(2),
         21 => Some(3),
         18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 => Some(1),
         _ => None,
@@ -233,15 +209,15 @@ fn builtin_tag_first_param_is_ref(tag: i32) -> bool {
 fn is_i32ish_type(t: &Type) -> bool {
     matches!(
         t,
-        Type::Int |
-            Type::Dec |
-            Type::Bool |
-            Type::Char |
-            Type::Unit |
-            Type::List(_) |
-            Type::Tuple(_) |
-            Type::Var(_) |
-            Type::Function(_, _)
+        Type::Int
+            | Type::Dec
+            | Type::Bool
+            | Type::Char
+            | Type::Unit
+            | Type::List(_)
+            | Type::Tuple(_)
+            | Type::Var(_)
+            | Type::Function(_, _)
     )
 }
 
@@ -307,12 +283,10 @@ fn ident(name: &str) -> String {
     if s.is_empty() {
         s.push_str("_ignored");
     }
-    if
-        s
-            .chars()
-            .next()
-            .map(|c| c.is_ascii_digit())
-            .unwrap_or(false)
+    if s.chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
     {
         s = format!("_{}", s);
     }
@@ -338,7 +312,7 @@ fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
 
 fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
     match typ {
-        | Type::Int
+        Type::Int
         | Type::Dec
         | Type::Bool
         | Type::Char
@@ -369,83 +343,82 @@ fn function_parts(typ: &Type) -> (Vec<Type>, Type) {
 fn is_special_word(w: &str) -> bool {
     matches!(
         w,
-        "do" |
-            "let" |
-            "mut" |
-            "letrec" |
-            "lambda" |
-            "if" |
-            "vector" |
-            "string" |
-            "integers" |
-            "bools" |
-            "decimals" |
-            "strings" |
-            "tuple" |
-            "length" |
-            "get" |
-            "car" |
-            "cdr" |
-            "fst" |
-            "snd" |
-            "set!" |
-            "alter!" |
-            "pop!" |
-            "while" |
-            "read!" |
-            "write!" |
-            "delete!" |
-            "move!" |
-            "list-dir!" |
-            "mkdir!" |
-            "print!" |
-            "sleep!" |
-            "clear!" |
-            "+" |
-            "+#" |
-            "+." |
-            "-" |
-            "-#" |
-            "-." |
-            "*" |
-            "*#" |
-            "*." |
-            "/" |
-            "/#" |
-            "/." |
-            "mod" |
-            "mod." |
-            "=" |
-            "=?" |
-            "=#" |
-            "=." |
-            "<" |
-            "<#" |
-            "<." |
-            ">" |
-            ">#" |
-            ">." |
-            "<=" |
-            "<=#" |
-            "<=." |
-            ">=" |
-            ">=#" |
-            ">=." |
-            "and" |
-            "or" |
-            "not" |
-            "^" |
-            "|" |
-            "&" |
-            "<<" |
-            ">>" |
-            "~" |
-            "Int->Dec" |
-            "Dec->Int" |
-            "cons" |
-            "true" |
-            "false" |
-            "nil"
+        "do" | "let"
+            | "mut"
+            | "letrec"
+            | "lambda"
+            | "if"
+            | "vector"
+            | "string"
+            | "integers"
+            | "bools"
+            | "decimals"
+            | "strings"
+            | "tuple"
+            | "length"
+            | "get"
+            | "car"
+            | "cdr"
+            | "fst"
+            | "snd"
+            | "set!"
+            | "alter!"
+            | "pop!"
+            | "while"
+            | "read!"
+            | "write!"
+            | "delete!"
+            | "move!"
+            | "list-dir!"
+            | "mkdir!"
+            | "print!"
+            | "sleep!"
+            | "clear!"
+            | "+"
+            | "+#"
+            | "+."
+            | "-"
+            | "-#"
+            | "-."
+            | "*"
+            | "*#"
+            | "*."
+            | "/"
+            | "/#"
+            | "/."
+            | "mod"
+            | "mod."
+            | "="
+            | "=?"
+            | "=#"
+            | "=."
+            | "<"
+            | "<#"
+            | "<."
+            | ">"
+            | ">#"
+            | ">."
+            | "<="
+            | "<=#"
+            | "<=."
+            | ">="
+            | ">=#"
+            | ">=."
+            | "and"
+            | "or"
+            | "not"
+            | "^"
+            | "|"
+            | "&"
+            | "<<"
+            | ">>"
+            | "~"
+            | "Int->Dec"
+            | "Dec->Int"
+            | "cons"
+            | "true"
+            | "false"
+            | "nil"
     )
 }
 
@@ -488,9 +461,8 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                 if op == "do" {
                     for it in &items[1..] {
                         if let Expression::Apply(let_items) = it {
-                            if
-                                let [Expression::Word(kw), Expression::Word(name), rhs] =
-                                    &let_items[..]
+                            if let [Expression::Word(kw), Expression::Word(name), rhs] =
+                                &let_items[..]
                             {
                                 if kw == "let" || kw == "letrec" || kw == "mut" {
                                     if kw == "letrec" {
@@ -563,9 +535,8 @@ fn collect_let_lambda_bindings(node: &TypedExpression, out: &mut HashMap<String,
             if kw == "let" || kw == "letrec" {
                 if let Some(rhs) = node.children.get(2) {
                     match &rhs.expr {
-                        Expression::Apply(xs) if
-                            matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-                        => {
+                        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda") =>
+                        {
                             out.insert(name.clone(), rhs.clone());
                         }
                         Expression::Word(alias) => {
@@ -607,7 +578,7 @@ fn lambda_is_hoistable(node: &TypedExpression, _top_defs: &HashMap<String, TopDe
 
 fn lambda_capture_names(
     node: &TypedExpression,
-    _top_defs: &HashMap<String, TopDef>
+    _top_defs: &HashMap<String, TopDef>,
 ) -> Vec<String> {
     let items = match &node.expr {
         Expression::Apply(xs) => xs,
@@ -633,10 +604,10 @@ fn lambda_capture_names(
 
 fn lambda_syntax_arity(expr: &Expression) -> usize {
     match expr {
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") &&
-            items.len() >= 2
-        => {
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
+                && items.len() >= 2 =>
+        {
             items.len().saturating_sub(2)
         }
         _ => 0,
@@ -648,10 +619,7 @@ fn collect_apply_arities_from_code(code: &str, out: &mut HashSet<usize>) {
     let mut rest = code;
     while let Some(pos) = rest.find(needle) {
         let after = &rest[pos + needle.len()..];
-        let digit_count = after
-            .bytes()
-            .take_while(|b| b.is_ascii_digit())
-            .count();
+        let digit_count = after.bytes().take_while(|b| b.is_ascii_digit()).count();
         if digit_count > 0 {
             let digits = &after[..digit_count];
             if after[digit_count..].starts_with("_i32") {
@@ -668,7 +636,7 @@ fn emit_high_arity_apply_i32(
     arity: usize,
     fn_ids: &HashMap<String, i32>,
     fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
-    closure_defs: &HashMap<String, ClosureDef>
+    closure_defs: &HashMap<String, ClosureDef>,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!("  (func $apply{}_i32 (param $f i32)", arity));
@@ -682,10 +650,9 @@ fn emit_high_arity_apply_i32(
         .filter_map(|def| {
             let fid = *fn_ids.get(&def.name)?;
             let (ps, ret) = fn_sigs.get(&def.name)?;
-            if
-                def.user_arity != arity ||
-                !is_i32ish_type(ret) ||
-                ps.len() != def.captures.len() + arity
+            if def.user_arity != arity
+                || !is_i32ish_type(ret)
+                || ps.len() != def.captures.len() + arity
             {
                 return None;
             }
@@ -705,9 +672,10 @@ fn emit_high_arity_apply_i32(
                 &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
             );
             for i in 0..*cap_len {
-                out.push_str(
-                    &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
-                );
+                out.push_str(&format!(
+                    "        local.get $f\n        i32.const {}\n        call $closure_get\n",
+                    i
+                ));
             }
             for i in 0..arity {
                 out.push_str(&format!("        local.get $a{}\n", i));
@@ -727,9 +695,10 @@ fn emit_high_arity_apply_i32(
         if let Some((ps, ret)) = fn_sigs.get(name) {
             if ps.len() == arity && ps.iter().all(is_i32ish_type) && is_i32ish_type(ret) {
                 direct_cases += 1;
-                out.push_str(
-                    &format!("    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n", tag)
-                );
+                out.push_str(&format!(
+                    "    local.get $f\n    i32.const {}\n    i32.eq\n    if (result i32)\n",
+                    tag
+                ));
                 for i in 0..arity {
                     out.push_str(&format!("      local.get $a{}\n", i));
                 }
@@ -753,11 +722,10 @@ fn emit_vector_runtime(
     fn_ids: &HashMap<String, i32>,
     fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
     closure_defs: &HashMap<String, ClosureDef>,
-    apply_arities: &HashSet<usize>
+    apply_arities: &HashSet<usize>,
 ) -> String {
     fn parse_env_i32(name: &str, default: i32, min: i32, max: i32) -> i32 {
-        std::env
-            ::var(name)
+        std::env::var(name)
             .ok()
             .and_then(|v| v.trim().parse::<i32>().ok())
             .map(|v| v.clamp(min, max))
@@ -2976,7 +2944,7 @@ fn emit_vector_runtime(
       end
     end
   )
-"#
+"#,
     );
     out.push_str(
         r#"
@@ -2987,7 +2955,7 @@ fn emit_vector_runtime(
   (export "rc_retain" (func $rc_retain))
   (export "rc_release" (func $rc_release))
   ;; __DBG_RC_EXPORTS__
-"#
+"#,
     );
     if apply_arities.contains(&0) {
         out.push_str(&emit_high_arity_apply_i32(0, fn_ids, fn_sigs, closure_defs));
@@ -3001,10 +2969,7 @@ fn emit_vector_runtime(
             .filter_map(|def| {
                 let fid = *fn_ids.get(&def.name)?;
                 let (ps, ret) = fn_sigs.get(&def.name)?;
-                if
-                    def.user_arity != 1 ||
-                    !is_i32ish_type(ret) ||
-                    ps.len() != def.captures.len() + 1
+                if def.user_arity != 1 || !is_i32ish_type(ret) || ps.len() != def.captures.len() + 1
                 {
                     return None;
                 }
@@ -3030,10 +2995,8 @@ fn emit_vector_runtime(
                 }
                 let helper_name = format!("__partial_dyn_{}_1", def.user_arity);
                 let helper_id = *fn_ids.get(&helper_name)?;
-                let first_param_is_ref = ps
-                    .get(def.captures.len())
-                    .map(is_ref_type)
-                    .unwrap_or(false);
+                let first_param_is_ref =
+                    ps.get(def.captures.len()).map(is_ref_type).unwrap_or(false);
                 Some((fid, helper_id, first_param_is_ref))
             })
             .collect::<Vec<_>>();
@@ -3046,11 +3009,15 @@ fn emit_vector_runtime(
                     &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
                 );
                 for i in 0..*cap_len {
-                    out.push_str(
-                        &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
-                    );
+                    out.push_str(&format!(
+                        "        local.get $f\n        i32.const {}\n        call $closure_get\n",
+                        i
+                    ));
                 }
-                out.push_str(&format!("        local.get $a\n        call ${}\n", ident(name)));
+                out.push_str(&format!(
+                    "        local.get $a\n        call ${}\n",
+                    ident(name)
+                ));
                 out.push_str("      else\n");
             }
             for (fid, helper_id, first_param_is_ref) in &apply1_partial_closures {
@@ -3213,7 +3180,7 @@ fn emit_vector_runtime(
     end
     end
     end
-    "#
+    "#,
         );
         for _ in 0..apply1_open_ends {
             out.push_str("    end\n");
@@ -3225,17 +3192,14 @@ fn emit_vector_runtime(
     }
     if apply_arities.contains(&2) {
         out.push_str(
-            "  (func $apply2_i32 (param $f i32) (param $a i32) (param $b i32) (result i32)\n"
+            "  (func $apply2_i32 (param $f i32) (param $a i32) (param $b i32) (result i32)\n",
         );
         let apply2_closures = closure_defs
             .values()
             .filter_map(|def| {
                 let fid = *fn_ids.get(&def.name)?;
                 let (ps, ret) = fn_sigs.get(&def.name)?;
-                if
-                    def.user_arity != 2 ||
-                    !is_i32ish_type(ret) ||
-                    ps.len() != def.captures.len() + 2
+                if def.user_arity != 2 || !is_i32ish_type(ret) || ps.len() != def.captures.len() + 2
                 {
                     return None;
                 }
@@ -3254,16 +3218,15 @@ fn emit_vector_runtime(
                     &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
                 );
                 for i in 0..*cap_len {
-                    out.push_str(
-                        &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
-                    );
+                    out.push_str(&format!(
+                        "        local.get $f\n        i32.const {}\n        call $closure_get\n",
+                        i
+                    ));
                 }
-                out.push_str(
-                    &format!(
-                        "        local.get $a\n        local.get $b\n        call ${}\n",
-                        ident(name)
-                    )
-                );
+                out.push_str(&format!(
+                    "        local.get $a\n        local.get $b\n        call ${}\n",
+                    ident(name)
+                ));
                 out.push_str("      else\n");
             }
             out.push_str("        unreachable\n");
@@ -3275,11 +3238,10 @@ fn emit_vector_runtime(
         let mut apply2_open_ends = 0usize;
         for (name, tag) in fn_ids {
             if let Some((ps, ret)) = fn_sigs.get(name) {
-                if
-                    ps.len() == 2 &&
-                    is_i32ish_type(&ps[0]) &&
-                    is_i32ish_type(&ps[1]) &&
-                    is_i32ish_type(ret)
+                if ps.len() == 2
+                    && is_i32ish_type(&ps[0])
+                    && is_i32ish_type(&ps[1])
+                    && is_i32ish_type(ret)
                 {
                     apply2_open_ends += 1;
                     out.push_str(
@@ -3535,7 +3497,7 @@ fn emit_vector_runtime(
                                         end
                                       end
                                     end
-    "#
+    "#,
         );
         for _ in 0..apply2_open_ends {
             out.push_str("                                    end\n");
@@ -3561,7 +3523,7 @@ fn emit_vector_runtime(
         end
       end
     end
-  "#
+  "#,
         );
         out.push_str("  )\n");
     }
@@ -3575,10 +3537,7 @@ fn emit_vector_runtime(
             .filter_map(|def| {
                 let fid = *fn_ids.get(&def.name)?;
                 let (ps, ret) = fn_sigs.get(&def.name)?;
-                if
-                    def.user_arity != 3 ||
-                    !is_i32ish_type(ret) ||
-                    ps.len() != def.captures.len() + 3
+                if def.user_arity != 3 || !is_i32ish_type(ret) || ps.len() != def.captures.len() + 3
                 {
                     return None;
                 }
@@ -3597,9 +3556,10 @@ fn emit_vector_runtime(
                     &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
                 );
                 for i in 0..*cap_len {
-                    out.push_str(
-                        &format!("        local.get $f\n        i32.const {}\n        call $closure_get\n", i)
-                    );
+                    out.push_str(&format!(
+                        "        local.get $f\n        i32.const {}\n        call $closure_get\n",
+                        i
+                    ));
                 }
                 out.push_str(
                     &format!(
@@ -3620,12 +3580,11 @@ fn emit_vector_runtime(
         );
         for (name, tag) in fn_ids {
             if let Some((ps, ret)) = fn_sigs.get(name) {
-                if
-                    ps.len() == 3 &&
-                    is_i32ish_type(&ps[0]) &&
-                    is_i32ish_type(&ps[1]) &&
-                    is_i32ish_type(&ps[2]) &&
-                    is_i32ish_type(ret)
+                if ps.len() == 3
+                    && is_i32ish_type(&ps[0])
+                    && is_i32ish_type(&ps[1])
+                    && is_i32ish_type(&ps[2])
+                    && is_i32ish_type(ret)
                 {
                     out.push_str(
                         &format!(
@@ -3642,12 +3601,11 @@ fn emit_vector_runtime(
         );
         for (name, _tag) in fn_ids {
             if let Some((ps, ret)) = fn_sigs.get(name) {
-                if
-                    ps.len() == 3 &&
-                    is_i32ish_type(&ps[0]) &&
-                    is_i32ish_type(&ps[1]) &&
-                    is_i32ish_type(&ps[2]) &&
-                    is_i32ish_type(ret)
+                if ps.len() == 3
+                    && is_i32ish_type(&ps[0])
+                    && is_i32ish_type(&ps[1])
+                    && is_i32ish_type(&ps[2])
+                    && is_i32ish_type(ret)
                 {
                     out.push_str("    end\n");
                 }
@@ -3667,15 +3625,22 @@ fn emit_vector_runtime(
         .collect::<Vec<_>>();
     extra_apply_arities.sort_unstable();
     for arity in extra_apply_arities {
-        out.push_str(&emit_high_arity_apply_i32(arity, fn_ids, fn_sigs, closure_defs));
+        out.push_str(&emit_high_arity_apply_i32(
+            arity,
+            fn_ids,
+            fn_sigs,
+            closure_defs,
+        ));
     }
     let debug_rc_enabled = cfg!(feature = "debug-rc");
     out = out.replace("__VEC_MIN_CAP__", &vec_min_cap.to_string());
     out = out.replace("__VEC_GROWTH_NUM__", &vec_growth_num.to_string());
     out = out.replace("__VEC_GROWTH_DEN__", &vec_growth_den.to_string());
     out = out.replace("__DECIMAL_SCALE__", &decimal_scale_i64().to_string());
-    out = out.replace(";; __VEC_GET_BOUNDS_CHECK__", if vec_bounds_check_enabled {
-        r#"local.get $idx
+    out = out.replace(
+        ";; __VEC_GET_BOUNDS_CHECK__",
+        if vec_bounds_check_enabled {
+            r#"local.get $idx
     i32.const 0
     i32.lt_s
     if
@@ -3690,9 +3655,10 @@ fn emit_vector_runtime(
     if
       unreachable
     end"#
-    } else {
-        ""
-    });
+        } else {
+            ""
+        },
+    );
 
     let replacements = [
         (
@@ -3865,7 +3831,10 @@ fn emit_vector_runtime(
                 ""
             },
         ),
-        (";; __DBG_RC_RELEASE_VEC_DEC__", if debug_rc_enabled { "" } else { "" }),
+        (
+            ";; __DBG_RC_RELEASE_VEC_DEC__",
+            if debug_rc_enabled { "" } else { "" },
+        ),
         (
             ";; __DBG_RC_RELEASE_VEC_RC_HIST__",
             if debug_rc_enabled {
@@ -4157,11 +4126,13 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     let lhs_local = ctx.tmp_i32;
     let rhs_local = ctx.tmp_i32 + 1;
     let res_local = ctx.tmp_i32 + 2;
-    let a = node.children
+    let a = node
+        .children
         .get(1)
         .ok_or_else(|| format!("Missing lhs for {}", op))
         .and_then(|n| compile_expr(n, ctx))?;
-    let b = node.children
+    let b = node
+        .children
         .get(2)
         .ok_or_else(|| format!("Missing rhs for {}", op))
         .and_then(|n| compile_expr(n, ctx))?;
@@ -4227,18 +4198,14 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         "<=" | "<=#" => "i32.le_s",
         ">=" | ">=#" => "i32.ge_s",
         "and" => {
-            return Ok(
-                format!(
-                    "{a}\n(if (result i32)\n  (then\n    {b}\n  )\n  (else\n    i32.const 0\n  )\n)"
-                )
-            );
+            return Ok(format!(
+                "{a}\n(if (result i32)\n  (then\n    {b}\n  )\n  (else\n    i32.const 0\n  )\n)"
+            ));
         }
         "or" => {
-            return Ok(
-                format!(
-                    "{a}\n(if (result i32)\n  (then\n    i32.const 1\n  )\n  (else\n    {b}\n  )\n)"
-                )
-            );
+            return Ok(format!(
+                "{a}\n(if (result i32)\n  (then\n    i32.const 1\n  )\n  (else\n    {b}\n  )\n)"
+            ));
         }
         "^" => "i32.xor",
         "|" => "i32.or",
@@ -4341,7 +4308,9 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                     return Err("cons result must be a vector".to_string());
                 }
             };
-            return Ok(format!("{a}\n{b}\ni32.const {elem_ref}\ncall $vec_concat_i32"));
+            return Ok(format!(
+                "{a}\n{b}\ni32.const {elem_ref}\ncall $vec_concat_i32"
+            ));
         }
         "let" | "letrec" | "mut" | "while" => {
             return Err(format!("Unsupported return of builtin {}", op));
@@ -4355,22 +4324,36 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
 
 fn compile_if(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let cond = compile_expr(
-        node.children.get(1).ok_or_else(|| "if missing condition".to_string())?,
-        ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| "if missing condition".to_string())?,
+        ctx,
     )?;
-    let t = compile_expr(node.children.get(2).ok_or_else(|| "if missing then".to_string())?, ctx)?;
-    let e = compile_expr(node.children.get(3).ok_or_else(|| "if missing else".to_string())?, ctx)?;
-    let result_ty = node.typ
+    let t = compile_expr(
+        node.children
+            .get(2)
+            .ok_or_else(|| "if missing then".to_string())?,
+        ctx,
+    )?;
+    let e = compile_expr(
+        node.children
+            .get(3)
+            .ok_or_else(|| "if missing else".to_string())?,
+        ctx,
+    )?;
+    let result_ty = node
+        .typ
         .as_ref()
         .ok_or_else(|| "if missing type".to_string())
         .and_then(wasm_val_type)?;
-    Ok(format!("{cond}\n(if (result {result_ty})\n  (then\n    {t}\n  )\n  (else\n    {e}\n  )\n)"))
+    Ok(format!(
+        "{cond}\n(if (result {result_ty})\n  (then\n    {t}\n  )\n  (else\n    {e}\n  )\n)"
+    ))
 }
 
 fn is_borrowing_accessor_expr(node: &TypedExpression) -> bool {
     match &node.expr {
-        Expression::Apply(items) if !items.is_empty() =>
-            matches!(
+        Expression::Apply(items) if !items.is_empty() => matches!(
             &items[0],
             Expression::Word(op)
                 if op == "get"
@@ -4397,7 +4380,11 @@ fn apply_child_at<'a>(node: &'a TypedExpression, item_idx: usize) -> Option<&'a 
             return None;
         }
     };
-    let child_offset = if node.children.len() + 1 == items.len() { 1 } else { 0 };
+    let child_offset = if node.children.len() + 1 == items.len() {
+        1
+    } else {
+        0
+    };
     if item_idx < child_offset {
         None
     } else {
@@ -4406,7 +4393,7 @@ fn apply_child_at<'a>(node: &'a TypedExpression, item_idx: usize) -> Option<&'a 
 }
 
 fn lambda_params_and_body<'a>(
-    lambda_node: &'a TypedExpression
+    lambda_node: &'a TypedExpression,
 ) -> Option<(Vec<String>, &'a TypedExpression)> {
     let items = match &lambda_node.expr {
         Expression::Apply(items) => items,
@@ -4433,7 +4420,7 @@ fn lambda_params_and_body<'a>(
 fn resolve_callable_binding_from_arg(
     arg: &TypedExpression,
     callable_env: &HashMap<String, CallableBinding>,
-    lambda_bindings: &HashMap<String, TypedExpression>
+    lambda_bindings: &HashMap<String, TypedExpression>,
 ) -> Option<CallableBinding> {
     match &arg.expr {
         Expression::Word(name) => {
@@ -4469,7 +4456,7 @@ fn analyze_borrow_for_lambda_invocation(
     callable_env: &HashMap<String, CallableBinding>,
     lambda_bindings: &HashMap<String, TypedExpression>,
     call_stack: &mut Vec<String>,
-    depth: usize
+    depth: usize,
 ) -> Option<bool> {
     let (params, body) = lambda_params_and_body(lambda_node)?;
     let mut lambda_env: HashMap<String, bool> = HashMap::new();
@@ -4484,35 +4471,29 @@ fn analyze_borrow_for_lambda_invocation(
                     callable_env,
                     lambda_bindings,
                     call_stack,
-                    depth + 1
+                    depth + 1,
                 )
             })
             .unwrap_or(false);
         lambda_env.insert(param_name.clone(), arg_borrowed);
 
         if let Some(arg_node) = arg_node {
-            if
-                let Some(callable_binding) = resolve_callable_binding_from_arg(
-                    arg_node,
-                    callable_env,
-                    lambda_bindings
-                )
+            if let Some(callable_binding) =
+                resolve_callable_binding_from_arg(arg_node, callable_env, lambda_bindings)
             {
                 lambda_callable_env.insert(param_name.clone(), callable_binding);
             }
         }
     }
 
-    Some(
-        is_borrowed_managed_rhs_with_env(
-            body,
-            &lambda_env,
-            &lambda_callable_env,
-            lambda_bindings,
-            call_stack,
-            depth + 1
-        )
-    )
+    Some(is_borrowed_managed_rhs_with_env(
+        body,
+        &lambda_env,
+        &lambda_callable_env,
+        lambda_bindings,
+        call_stack,
+        depth + 1,
+    ))
 }
 
 fn is_borrowed_managed_rhs_with_env(
@@ -4521,7 +4502,7 @@ fn is_borrowed_managed_rhs_with_env(
     callable_env: &HashMap<String, CallableBinding>,
     lambda_bindings: &HashMap<String, TypedExpression>,
     call_stack: &mut Vec<String>,
-    depth: usize
+    depth: usize,
 ) -> bool {
     if depth > MAX_BORROW_ANALYSIS_DEPTH {
         // Conservative fallback: keep values alive rather than risk releasing
@@ -4546,7 +4527,7 @@ fn is_borrowed_managed_rhs_with_env(
                             callable_env,
                             lambda_bindings,
                             call_stack,
-                            depth + 1
+                            depth + 1,
                         )
                     })
                     .unwrap_or(false);
@@ -4560,7 +4541,7 @@ fn is_borrowed_managed_rhs_with_env(
                             callable_env,
                             lambda_bindings,
                             call_stack,
-                            depth + 1
+                            depth + 1,
                         )
                     })
                     .unwrap_or(false);
@@ -4574,7 +4555,7 @@ fn is_borrowed_managed_rhs_with_env(
                             callable_env,
                             lambda_bindings,
                             call_stack,
-                            depth + 1
+                            depth + 1,
                         )
                     })
                     .unwrap_or(false);
@@ -4586,7 +4567,7 @@ fn is_borrowed_managed_rhs_with_env(
                             callable_env,
                             lambda_bindings,
                             call_stack,
-                            depth + 1
+                            depth + 1,
                         )
                     })
                     .unwrap_or(false);
@@ -4598,9 +4579,8 @@ fn is_borrowed_managed_rhs_with_env(
                 if items.len() > 1 {
                     for i in 1..items.len() - 1 {
                         if let Expression::Apply(let_items) = &items[i] {
-                            if
-                                let [Expression::Word(kw), Expression::Word(name), _] =
-                                    &let_items[..]
+                            if let [Expression::Word(kw), Expression::Word(name), _] =
+                                &let_items[..]
                             {
                                 if kw == "let" || kw == "letrec" || kw == "mut" {
                                     let rhs_borrowed = apply_child_at(node, i)
@@ -4612,28 +4592,23 @@ fn is_borrowed_managed_rhs_with_env(
                                                 &scoped_callable_env,
                                                 lambda_bindings,
                                                 call_stack,
-                                                depth + 1
+                                                depth + 1,
                                             )
                                         })
                                         .unwrap_or(false);
                                     scoped_env.insert(name.clone(), rhs_borrowed);
-                                    if
-                                        let Some(rhs_node) = apply_child_at(node, i).and_then(|n|
-                                            n.children.get(2)
-                                        )
+                                    if let Some(rhs_node) =
+                                        apply_child_at(node, i).and_then(|n| n.children.get(2))
                                     {
-                                        if
-                                            let Some(callable_binding) =
-                                                resolve_callable_binding_from_arg(
-                                                    rhs_node,
-                                                    &scoped_callable_env,
-                                                    lambda_bindings
-                                                )
+                                        if let Some(callable_binding) =
+                                            resolve_callable_binding_from_arg(
+                                                rhs_node,
+                                                &scoped_callable_env,
+                                                lambda_bindings,
+                                            )
                                         {
-                                            scoped_callable_env.insert(
-                                                name.clone(),
-                                                callable_binding
-                                            );
+                                            scoped_callable_env
+                                                .insert(name.clone(), callable_binding);
                                         } else {
                                             scoped_callable_env.remove(name);
                                         }
@@ -4651,7 +4626,7 @@ fn is_borrowed_managed_rhs_with_env(
                             &scoped_callable_env,
                             lambda_bindings,
                             call_stack,
-                            depth + 1
+                            depth + 1,
                         )
                     })
                     .unwrap_or(false);
@@ -4671,8 +4646,9 @@ fn is_borrowed_managed_rhs_with_env(
                                 callable_env,
                                 lambda_bindings,
                                 call_stack,
-                                depth + 1
-                            ).unwrap_or(false);
+                                depth + 1,
+                            )
+                            .unwrap_or(false);
                             call_stack.pop();
                             return result;
                         }
@@ -4685,8 +4661,9 @@ fn is_borrowed_managed_rhs_with_env(
                             callable_env,
                             lambda_bindings,
                             call_stack,
-                            depth + 1
-                        ).unwrap_or(false);
+                            depth + 1,
+                        )
+                        .unwrap_or(false);
                     }
                 }
             }
@@ -4703,12 +4680,16 @@ fn is_borrowed_managed_rhs_with_env(
                     callable_env,
                     lambda_bindings,
                     call_stack,
-                    depth + 1
-                ).unwrap_or(false);
+                    depth + 1,
+                )
+                .unwrap_or(false);
                 call_stack.pop();
                 return result;
             }
-            if matches!(op, "vector" | "tuple" | "lambda" | "box" | "int" | "dec" | "bool") {
+            if matches!(
+                op,
+                "vector" | "tuple" | "lambda" | "box" | "int" | "dec" | "bool"
+            ) {
                 // Fresh constructors return owned values.
                 return false;
             }
@@ -4723,12 +4704,19 @@ fn is_borrowed_managed_rhs_with_env(
 
 fn is_borrowed_managed_rhs_expr(
     node: &TypedExpression,
-    lambda_bindings: &HashMap<String, TypedExpression>
+    lambda_bindings: &HashMap<String, TypedExpression>,
 ) -> bool {
     let env = HashMap::new();
     let callable_env = HashMap::new();
     let mut call_stack = Vec::new();
-    is_borrowed_managed_rhs_with_env(node, &env, &callable_env, lambda_bindings, &mut call_stack, 0)
+    is_borrowed_managed_rhs_with_env(
+        node,
+        &env,
+        &callable_env,
+        lambda_bindings,
+        &mut call_stack,
+        0,
+    )
 }
 
 fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
@@ -4736,7 +4724,11 @@ fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
         Expression::Apply(items) if !items.is_empty() => {
             if let Expression::Word(op) = &items[0] {
                 if op == "as" || op == "char" {
-                    return node.children.get(1).map(is_fresh_owned_managed_expr).unwrap_or(false);
+                    return node
+                        .children
+                        .get(1)
+                        .map(is_fresh_owned_managed_expr)
+                        .unwrap_or(false);
                 }
                 return matches!(
                     op.as_str(),
@@ -4750,7 +4742,12 @@ fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
 }
 
 fn should_release_set_rhs(node: &TypedExpression) -> bool {
-    if !node.typ.as_ref().map(is_managed_local_type).unwrap_or(false) {
+    if !node
+        .typ
+        .as_ref()
+        .map(is_managed_local_type)
+        .unwrap_or(false)
+    {
         return false;
     }
     is_fresh_owned_managed_expr(node)
@@ -4759,14 +4756,22 @@ fn should_release_set_rhs(node: &TypedExpression) -> bool {
 fn compile_do(
     items: &[Expression],
     node: &TypedExpression,
-    ctx: &Ctx<'_>
+    ctx: &Ctx<'_>,
 ) -> Result<String, String> {
     if items.len() <= 1 {
         return Ok("i32.const 0".to_string());
     }
-    let child_offset = if node.children.len() + 1 == items.len() { 1 } else { 0 };
+    let child_offset = if node.children.len() + 1 == items.len() {
+        1
+    } else {
+        0
+    };
     let child_at = |item_idx: usize| -> Option<&TypedExpression> {
-        if item_idx < child_offset { None } else { node.children.get(item_idx - child_offset) }
+        if item_idx < child_offset {
+            None
+        } else {
+            node.children.get(item_idx - child_offset)
+        }
     };
     // Name-based local maps lose shadowed bindings, which can make alias checks
     // miss live refs and incorrectly release them. Be conservative: compare a
@@ -4794,18 +4799,15 @@ fn compile_do(
                     });
                     if let Some(n) = val_node {
                         match &n.expr {
-                            Expression::Apply(xs) if
-                                kw != "mut" &&
-                                matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-                            => {
+                            Expression::Apply(xs)
+                                if kw != "mut"
+                                    && matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda") =>
+                            {
                                 scoped_lambda_bindings.insert(name.clone(), n.clone());
                             }
                             Expression::Word(alias) => {
                                 if kw != "mut" {
-                                    if
-                                        let Some(target) = scoped_lambda_bindings
-                                            .get(alias)
-                                            .cloned()
+                                    if let Some(target) = scoped_lambda_bindings.get(alias).cloned()
                                     {
                                         scoped_lambda_bindings.insert(name.clone(), target);
                                     }
@@ -4836,7 +4838,8 @@ fn compile_do(
                             }
                         })?;
                     if let Some(local_idx) = ctx.locals.get(name) {
-                        let managed_local = ctx.local_types
+                        let managed_local = ctx
+                            .local_types
                             .get(name)
                             .map(is_managed_local_type)
                             .unwrap_or(false);
@@ -4847,34 +4850,26 @@ fn compile_do(
                             let tmp_owned = ctx.tmp_i32 + 2;
                             format!(
                                 "{value}\nlocal.tee {}\ncall $rc_retain\ndrop\nlocal.get {}",
-                                tmp_owned,
-                                tmp_owned
+                                tmp_owned, tmp_owned
                             )
                         } else {
                             value
                         };
                         if managed_local {
-                            parts.push(
-                                format!(
-                                    "{value}\nlocal.get {}\ncall $rc_release\ndrop\nlocal.set {}",
-                                    local_idx,
-                                    local_idx
-                                )
-                            );
+                            parts.push(format!(
+                                "{value}\nlocal.get {}\ncall $rc_release\ndrop\nlocal.set {}",
+                                local_idx, local_idx
+                            ));
                         } else {
                             parts.push(format!("{value}\nlocal.set {}", local_idx));
                         }
                         if let Some(cap_idx) = self_capture_idx {
                             // Recursive local lambda: fill self-capture after binding is assigned.
                             // Use non-ref capture to avoid RC self-cycles.
-                            parts.push(
-                                format!(
-                                    "local.get {}\ni32.const {}\nlocal.get {}\ncall $closure_set\ndrop",
-                                    local_idx,
-                                    cap_idx,
-                                    local_idx
-                                )
-                            );
+                            parts.push(format!(
+                                "local.get {}\ni32.const {}\nlocal.get {}\ncall $closure_set\ndrop",
+                                local_idx, cap_idx, local_idx
+                            ));
                         }
                     } else {
                         return Err(format!("Unknown local '{}'", name));
@@ -4976,15 +4971,13 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         _ => 0,
     };
     let mut out = Vec::new();
-    out.push(
-        format!(
-            "i32.const {}\ni32.const {}\ncall $vec_new_{}\nlocal.set {}",
-            0,
-            elem_ref_flag,
-            elem_kind.suffix(),
-            ctx.tmp_i32
-        )
-    );
+    out.push(format!(
+        "i32.const {}\ni32.const {}\ncall $vec_new_{}\nlocal.set {}",
+        0,
+        elem_ref_flag,
+        elem_kind.suffix(),
+        ctx.tmp_i32
+    ));
     for a in args {
         let nested_ctx = Ctx {
             fn_sigs: ctx.fn_sigs,
@@ -4997,8 +4990,7 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
-        let is_lambda_literal =
-            matches!(
+        let is_lambda_literal = matches!(
             &a.expr,
             Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
         );
@@ -5016,14 +5008,12 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                 )
             );
         } else {
-            out.push(
-                format!(
-                    "local.get {}\n{}\ncall $vec_push_{}\ndrop",
-                    ctx.tmp_i32,
-                    v,
-                    elem_kind.suffix()
-                )
-            );
+            out.push(format!(
+                "local.get {}\n{}\ncall $vec_push_{}\ndrop",
+                ctx.tmp_i32,
+                v,
+                elem_kind.suffix()
+            ));
         }
     }
     out.push(format!("local.get {}", ctx.tmp_i32));
@@ -5042,7 +5032,10 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
     }
 
     let mut out = Vec::new();
-    out.push(format!("i32.const 0\ni32.const 0\ncall $vec_new_i32\nlocal.set {}", ctx.tmp_i32));
+    out.push(format!(
+        "i32.const 0\ni32.const 0\ncall $vec_new_i32\nlocal.set {}",
+        ctx.tmp_i32
+    ));
     for item in &items[1..] {
         let nested_ctx = Ctx {
             fn_sigs: ctx.fn_sigs,
@@ -5073,7 +5066,10 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             }
             _ => return Err("strings expects string literal elements".to_string()),
         };
-        out.push(format!("local.get {}\n{}\ncall $vec_push_i32\ndrop", ctx.tmp_i32, v));
+        out.push(format!(
+            "local.get {}\n{}\ncall $vec_push_i32\ndrop",
+            ctx.tmp_i32, v
+        ));
     }
     out.push(format!("local.get {}", ctx.tmp_i32));
     Ok(out.join("\n"))
@@ -5082,7 +5078,7 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
 fn compile_trusted_typed_vector_literal(
     op: &str,
     node: &TypedExpression,
-    ctx: &Ctx<'_>
+    ctx: &Ctx<'_>,
 ) -> Result<String, String> {
     let items = match &node.expr {
         Expression::Apply(items) => items,
@@ -5090,37 +5086,31 @@ fn compile_trusted_typed_vector_literal(
     };
     let (elem_ref_flag, compile_item): (i32, fn(&Expression, &Ctx<'_>) -> Result<String, String>) =
         match op {
-            "integers" => (
-                0,
-                |expr, _ctx| match expr {
-                    Expression::Int(n) => Ok(format!("i32.const {}", n)),
-                    _ => Err("integers expects integer literal elements".to_string()),
-                },
-            ),
-            "bools" => (
-                0,
-                |expr, _ctx| match expr {
-                    Expression::Word(w) if w == "true" => Ok("i32.const 1".to_string()),
-                    Expression::Word(w) if w == "false" => Ok("i32.const 0".to_string()),
-                    _ => Err("bools expects boolean literal elements".to_string()),
-                },
-            ),
-            "decimals" => (
-                0,
-                |expr, _ctx| match expr {
-                    Expression::Dec(n) => {
-                        let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
-                        Ok(format!("i32.const {}", scaled as i32))
-                    }
-                    _ => Err("decimals expects decimal literal elements".to_string()),
-                },
-            ),
+            "integers" => (0, |expr, _ctx| match expr {
+                Expression::Int(n) => Ok(format!("i32.const {}", n)),
+                _ => Err("integers expects integer literal elements".to_string()),
+            }),
+            "bools" => (0, |expr, _ctx| match expr {
+                Expression::Word(w) if w == "true" => Ok("i32.const 1".to_string()),
+                Expression::Word(w) if w == "false" => Ok("i32.const 0".to_string()),
+                _ => Err("bools expects boolean literal elements".to_string()),
+            }),
+            "decimals" => (0, |expr, _ctx| match expr {
+                Expression::Dec(n) => {
+                    let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
+                    Ok(format!("i32.const {}", scaled as i32))
+                }
+                _ => Err("decimals expects decimal literal elements".to_string()),
+            }),
             "strings" => (1, compile_trusted_string_literal_expr),
             _ => return Err(format!("Unsupported trusted typed vector literal '{}'", op)),
         };
 
     let mut out = Vec::new();
-    out.push(format!("i32.const 0\ni32.const {}\ncall $vec_new_i32\nlocal.set {}", elem_ref_flag, ctx.tmp_i32));
+    out.push(format!(
+        "i32.const 0\ni32.const {}\ncall $vec_new_i32\nlocal.set {}",
+        elem_ref_flag, ctx.tmp_i32
+    ));
     for item in &items[1..] {
         let nested_ctx = Ctx {
             fn_sigs: ctx.fn_sigs,
@@ -5133,7 +5123,10 @@ fn compile_trusted_typed_vector_literal(
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_item(item, &nested_ctx)?;
-        out.push(format!("local.get {}\n{}\ncall $vec_push_i32\ndrop", ctx.tmp_i32, v));
+        out.push(format!(
+            "local.get {}\n{}\ncall $vec_push_i32\ndrop",
+            ctx.tmp_i32, v
+        ));
     }
     out.push(format!("local.get {}", ctx.tmp_i32));
     Ok(out.join("\n"))
@@ -5141,40 +5134,52 @@ fn compile_trusted_typed_vector_literal(
 
 fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let a = compile_expr(
-        node.children.get(1).ok_or_else(|| "tuple missing first element".to_string())?,
-        ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| "tuple missing first element".to_string())?,
+        ctx,
     )?;
     let b = compile_expr(
-        node.children.get(2).ok_or_else(|| "tuple missing second element".to_string())?,
-        ctx
+        node.children
+            .get(2)
+            .ok_or_else(|| "tuple missing second element".to_string())?,
+        ctx,
     )?;
     Ok(format!("{a}\n{b}\ncall $tuple_new"))
 }
 
 fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let p = compile_expr(
-        node.children.get(1).ok_or_else(|| "fst missing tuple arg".to_string())?,
-        ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| "fst missing tuple arg".to_string())?,
+        ctx,
     )?;
     Ok(format!("{p}\ncall $tuple_fst"))
 }
 
 fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let p = compile_expr(
-        node.children.get(1).ok_or_else(|| "snd missing tuple arg".to_string())?,
-        ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| "snd missing tuple arg".to_string())?,
+        ctx,
     )?;
     Ok(format!("{p}\ncall $tuple_snd"))
 }
 
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs = compile_expr(
-        node.children.get(1).ok_or_else(|| "get missing vector".to_string())?,
-        ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| "get missing vector".to_string())?,
+        ctx,
     )?;
     let idx = compile_expr(
-        node.children.get(2).ok_or_else(|| "get missing index".to_string())?,
-        ctx
+        node.children
+            .get(2)
+            .ok_or_else(|| "get missing index".to_string())?,
+        ctx,
     )?;
     let elem = match node.typ.as_ref() {
         Some(t) => vec_elem_kind_from_type(t)?,
@@ -5186,15 +5191,24 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
 }
 
 fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let xs_node = node.children.get(1).ok_or_else(|| "set! missing vector".to_string())?;
+    let xs_node = node
+        .children
+        .get(1)
+        .ok_or_else(|| "set! missing vector".to_string())?;
     let xs = compile_expr(xs_node, ctx)?;
     let idx = compile_expr(
-        node.children.get(2).ok_or_else(|| "set! missing index".to_string())?,
-        ctx
+        node.children
+            .get(2)
+            .ok_or_else(|| "set! missing index".to_string())?,
+        ctx,
     )?;
-    let val_node = node.children.get(3).ok_or_else(|| "set! missing value".to_string())?;
+    let val_node = node
+        .children
+        .get(3)
+        .ok_or_else(|| "set! missing value".to_string())?;
     let v = compile_expr(val_node, ctx)?;
-    let elem = val_node.typ
+    let elem = val_node
+        .typ
         .as_ref()
         .ok_or_else(|| "set! value missing type".to_string())
         .and_then(vec_elem_kind_from_type)?;
@@ -5203,7 +5217,11 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     let managed_slots = managed_local_slots(ctx);
     let target_tmp = ctx.tmp_i32 + 3;
     let target_keep = ctx.tmp_i32 + 4;
-    let target_prefix = if release_target { format!("{xs}\nlocal.tee {target_tmp}") } else { xs };
+    let target_prefix = if release_target {
+        format!("{xs}\nlocal.tee {target_tmp}")
+    } else {
+        xs
+    };
     let target_release = if release_target {
         emit_release_managed_temp_if_not_local_alias(target_tmp, target_keep, &managed_slots)
     } else {
@@ -5212,34 +5230,30 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     if release_rhs {
         let tmp_val = ctx.tmp_i32 + 1;
         let keep_tmp = ctx.tmp_i32 + 2;
-        let release = emit_release_managed_temp_if_not_local_alias(
-            tmp_val,
-            keep_tmp,
-            &managed_slots
-        );
+        let release =
+            emit_release_managed_temp_if_not_local_alias(tmp_val, keep_tmp, &managed_slots);
         let mut tail = Vec::new();
         tail.push(release);
         if !target_release.is_empty() {
             tail.push(target_release);
         }
-        Ok(
-            format!(
-                "{target_prefix}\n{idx}\n{v}\nlocal.tee {tmp_val}\ncall $vec_set_{}\n{}",
-                elem.suffix(),
-                tail.join("\n")
-            )
-        )
+        Ok(format!(
+            "{target_prefix}\n{idx}\n{v}\nlocal.tee {tmp_val}\ncall $vec_set_{}\n{}",
+            elem.suffix(),
+            tail.join("\n")
+        ))
     } else {
         if target_release.is_empty() {
-            Ok(format!("{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}", elem.suffix()))
+            Ok(format!(
+                "{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}",
+                elem.suffix()
+            ))
         } else {
-            Ok(
-                format!(
-                    "{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}\n{}",
-                    elem.suffix(),
-                    target_release
-                )
-            )
+            Ok(format!(
+                "{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}\n{}",
+                elem.suffix(),
+                target_release
+            ))
         }
     }
 }
@@ -5261,26 +5275,34 @@ fn compile_alter(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
             return Err("alter! invalid form".to_string());
         }
     };
-    let local_idx = *ctx.locals
+    let local_idx = *ctx
+        .locals
         .get(&target_name)
         .ok_or_else(|| format!("alter! unknown local '{}'", target_name))?;
     let value = compile_expr(
-        node.children.get(2).ok_or_else(|| "alter! missing value".to_string())?,
-        ctx
+        node.children
+            .get(2)
+            .ok_or_else(|| "alter! missing value".to_string())?,
+        ctx,
     )?;
     Ok(format!("{value}\nlocal.set {local_idx}\ni32.const 0"))
 }
 
 fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs = compile_expr(
-        node.children.get(1).ok_or_else(|| "pop! missing vector".to_string())?,
-        ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| "pop! missing vector".to_string())?,
+        ctx,
     )?;
     Ok(format!("{xs}\ncall $vec_pop_i32"))
 }
 
 fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let xs_node = node.children.get(1).ok_or_else(|| "cdr missing vector".to_string())?;
+    let xs_node = node
+        .children
+        .get(1)
+        .ok_or_else(|| "cdr missing vector".to_string())?;
     let xs = compile_expr(xs_node, ctx)?;
     let start = if let Some(n) = node.children.get(2) {
         compile_expr(n, ctx)?
@@ -5301,10 +5323,15 @@ fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
 
 fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let cond = compile_expr(
-        node.children.get(1).ok_or_else(|| "while missing condition".to_string())?,
-        ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| "while missing condition".to_string())?,
+        ctx,
     )?;
-    let body_node = node.children.get(2).ok_or_else(|| "while missing body".to_string())?;
+    let body_node = node
+        .children
+        .get(2)
+        .ok_or_else(|| "while missing body".to_string())?;
     let body_and_drop = format!("{}\ndrop", compile_expr(body_node, ctx)?);
 
     Ok(
@@ -5317,9 +5344,10 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
 fn compile_fast_box_ctor(
     op: &str,
     node: &TypedExpression,
-    ctx: &Ctx<'_>
+    ctx: &Ctx<'_>,
 ) -> Result<String, String> {
-    let value_node = node.children
+    let value_node = node
+        .children
         .get(1)
         .ok_or_else(|| format!("{} requires exactly 1 argument", op))?;
     if node.children.len() != 2 {
@@ -5336,9 +5364,12 @@ fn compile_fast_box_ctor(
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let value = compile_expr(value_node, &nested_ctx)?;
-    let value_is_managed = value_node.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
-    let is_lambda_literal =
-        matches!(
+    let value_is_managed = value_node
+        .typ
+        .as_ref()
+        .map(is_managed_local_type)
+        .unwrap_or(false);
+    let is_lambda_literal = matches!(
         &value_node.expr,
         Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
     );
@@ -5370,13 +5401,19 @@ fn compile_fast_cell_set(
     op: &str,
     node: &TypedExpression,
     ctx: &Ctx<'_>,
-    normalize_bool: bool
+    normalize_bool: bool,
 ) -> Result<String, String> {
     if node.children.len() != 3 {
         return Err(format!("{} requires exactly 2 arguments", op));
     }
-    let cell_node = node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?;
-    let value_node = node.children.get(2).ok_or_else(|| format!("{} missing value", op))?;
+    let cell_node = node
+        .children
+        .get(1)
+        .ok_or_else(|| format!("{} missing cell", op))?;
+    let value_node = node
+        .children
+        .get(2)
+        .ok_or_else(|| format!("{} missing value", op))?;
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
@@ -5400,16 +5437,16 @@ fn compile_fast_cell_set(
     if release_rhs {
         let tmp_val = ctx.tmp_i32 + 1;
         let keep_tmp = ctx.tmp_i32 + 2;
-        let release = emit_release_managed_temp_if_not_local_alias(
-            tmp_val,
-            keep_tmp,
-            &managed_slots
-        );
-        Ok(
-            format!("{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\n{}", release)
-        )
+        let release =
+            emit_release_managed_temp_if_not_local_alias(tmp_val, keep_tmp, &managed_slots);
+        Ok(format!(
+            "{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\n{}",
+            release
+        ))
     } else {
-        Ok(format!("{cell_prefix}\ni32.const 0\n{value}\ncall $vec_set_i32"))
+        Ok(format!(
+            "{cell_prefix}\ni32.const 0\n{value}\ncall $vec_set_i32"
+        ))
     }
 }
 
@@ -5417,7 +5454,7 @@ fn compile_fast_truthy(
     op: &str,
     node: &TypedExpression,
     ctx: &Ctx<'_>,
-    negate: bool
+    negate: bool,
 ) -> Result<String, String> {
     if node.children.len() != 2 {
         return Err(format!("{} requires exactly 1 argument", op));
@@ -5433,20 +5470,24 @@ fn compile_fast_truthy(
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(
-        node.children.get(1).ok_or_else(|| format!("{} missing cell", op))?,
-        &nested_ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| format!("{} missing cell", op))?,
+        &nested_ctx,
     )?;
     if negate {
         Ok(format!("{cell}\ni32.const 0\ncall $vec_get_i32\ni32.eqz"))
     } else {
-        Ok(format!("{cell}\ni32.const 0\ncall $vec_get_i32\ni32.const 0\ni32.ne"))
+        Ok(format!(
+            "{cell}\ni32.const 0\ncall $vec_get_i32\ni32.const 0\ni32.ne"
+        ))
     }
 }
 
 fn compile_fast_cell_helper(
     op: &str,
     node: &TypedExpression,
-    ctx: &Ctx<'_>
+    ctx: &Ctx<'_>,
 ) -> Option<Result<String, String>> {
     match op {
         "box" | "int" | "dec" | "bool" => Some(compile_fast_box_ctor(op, node, ctx)),
@@ -5467,7 +5508,7 @@ fn managed_local_slots(ctx: &Ctx<'_>) -> Vec<usize> {
 fn emit_release_managed_temp_if_not_local_alias(
     tmp_val: usize,
     tmp_keep: usize,
-    managed_local_slots: &[usize]
+    managed_local_slots: &[usize],
 ) -> String {
     let debug_rc = cfg!(feature = "debug-rc");
     if managed_local_slots.is_empty() {
@@ -5481,14 +5522,10 @@ fn emit_release_managed_temp_if_not_local_alias(
     let mut out = Vec::new();
     out.push(format!("i32.const 0\nlocal.set {}", tmp_keep));
     for slot in managed_local_slots {
-        out.push(
-            format!(
-                "local.get {}\nlocal.get {}\ni32.eq\nif\n  i32.const 1\n  local.set {}\nend",
-                tmp_val,
-                slot,
-                tmp_keep
-            )
-        );
+        out.push(format!(
+            "local.get {}\nlocal.get {}\ni32.eq\nif\n  i32.const 1\n  local.set {}\nend",
+            tmp_val, slot, tmp_keep
+        ));
     }
     if debug_rc {
         out.push(
@@ -5501,13 +5538,10 @@ fn emit_release_managed_temp_if_not_local_alias(
             )
         );
     } else {
-        out.push(
-            format!(
-                "local.get {}\ni32.eqz\nif\n  local.get {}\n  call $rc_release\n  drop\nend",
-                tmp_keep,
-                tmp_val
-            )
-        );
+        out.push(format!(
+            "local.get {}\ni32.eqz\nif\n  local.get {}\n  call $rc_release\n  drop\nend",
+            tmp_keep, tmp_val
+        ));
     }
     out.join("\n")
 }
@@ -5517,7 +5551,7 @@ fn compile_host_unary_string_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
     op_name: &str,
-    host_symbol: &str
+    host_symbol: &str,
 ) -> Result<String, String> {
     if node.children.len() != 2 {
         return Err(format!("{op_name} expects exactly one [Char] argument"));
@@ -5533,8 +5567,10 @@ fn compile_host_unary_string_call(
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let arg = compile_expr(
-        node.children.get(1).ok_or_else(|| format!("{op_name} missing argument"))?,
-        &nested_ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| format!("{op_name} missing argument"))?,
+        &nested_ctx,
     )?;
     let arg_tmp = ctx.tmp_i32;
     let keep_tmp = ctx.tmp_i32 + 1;
@@ -5553,14 +5589,16 @@ fn compile_host_unary_int_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
     op_name: &str,
-    host_symbol: &str
+    host_symbol: &str,
 ) -> Result<String, String> {
     if node.children.len() != 2 {
         return Err(format!("{op_name} expects exactly one Int argument"));
     }
     let arg = compile_expr(
-        node.children.get(1).ok_or_else(|| format!("{op_name} missing argument"))?,
-        ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| format!("{op_name} missing argument"))?,
+        ctx,
     )?;
     Ok(format!("{arg}\ncall ${host_symbol}"))
 }
@@ -5570,7 +5608,7 @@ fn compile_host_unit_call(
     node: &TypedExpression,
     _ctx: &Ctx<'_>,
     op_name: &str,
-    host_symbol: &str
+    host_symbol: &str,
 ) -> Result<String, String> {
     if node.children.len() != 1 {
         return Err(format!("{op_name} expects no arguments"));
@@ -5594,28 +5632,26 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let path = compile_expr(
-        node.children.get(1).ok_or_else(|| "write! missing path".to_string())?,
-        &nested_ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| "write! missing path".to_string())?,
+        &nested_ctx,
     )?;
     let data = compile_expr(
-        node.children.get(2).ok_or_else(|| "write! missing content".to_string())?,
-        &nested_ctx
+        node.children
+            .get(2)
+            .ok_or_else(|| "write! missing content".to_string())?,
+        &nested_ctx,
     )?;
     let path_tmp = ctx.tmp_i32;
     let data_tmp = ctx.tmp_i32 + 1;
     let keep_tmp = ctx.tmp_i32 + 2;
     let ret_tmp = ctx.tmp_i32 + 3;
     let managed_slots = managed_local_slots(ctx);
-    let release_path = emit_release_managed_temp_if_not_local_alias(
-        path_tmp,
-        keep_tmp,
-        &managed_slots
-    );
-    let release_data = emit_release_managed_temp_if_not_local_alias(
-        data_tmp,
-        keep_tmp,
-        &managed_slots
-    );
+    let release_path =
+        emit_release_managed_temp_if_not_local_alias(path_tmp, keep_tmp, &managed_slots);
+    let release_data =
+        emit_release_managed_temp_if_not_local_alias(data_tmp, keep_tmp, &managed_slots);
     Ok(
         format!(
             "{path}\nlocal.set {path_tmp}\n{data}\nlocal.set {data_tmp}\nlocal.get {path_tmp}\nlocal.get {data_tmp}\ncall $host_write_file\nlocal.set {ret_tmp}\n{release_path}\n{release_data}\nlocal.get {ret_tmp}"
@@ -5628,7 +5664,7 @@ fn compile_host_binary_string_call(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
     op_name: &str,
-    host_symbol: &str
+    host_symbol: &str,
 ) -> Result<String, String> {
     if node.children.len() != 3 {
         return Err(format!("{op_name} expects exactly two [Char] arguments"));
@@ -5644,28 +5680,26 @@ fn compile_host_binary_string_call(
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let left = compile_expr(
-        node.children.get(1).ok_or_else(|| format!("{op_name} missing first argument"))?,
-        &nested_ctx
+        node.children
+            .get(1)
+            .ok_or_else(|| format!("{op_name} missing first argument"))?,
+        &nested_ctx,
     )?;
     let right = compile_expr(
-        node.children.get(2).ok_or_else(|| format!("{op_name} missing second argument"))?,
-        &nested_ctx
+        node.children
+            .get(2)
+            .ok_or_else(|| format!("{op_name} missing second argument"))?,
+        &nested_ctx,
     )?;
     let left_tmp = ctx.tmp_i32;
     let right_tmp = ctx.tmp_i32 + 1;
     let keep_tmp = ctx.tmp_i32 + 2;
     let ret_tmp = ctx.tmp_i32 + 3;
     let managed_slots = managed_local_slots(ctx);
-    let release_left = emit_release_managed_temp_if_not_local_alias(
-        left_tmp,
-        keep_tmp,
-        &managed_slots
-    );
-    let release_right = emit_release_managed_temp_if_not_local_alias(
-        right_tmp,
-        keep_tmp,
-        &managed_slots
-    );
+    let release_left =
+        emit_release_managed_temp_if_not_local_alias(left_tmp, keep_tmp, &managed_slots);
+    let release_right =
+        emit_release_managed_temp_if_not_local_alias(right_tmp, keep_tmp, &managed_slots);
     Ok(
         format!(
             "{left}\nlocal.set {left_tmp}\n{right}\nlocal.set {right_tmp}\nlocal.get {left_tmp}\nlocal.get {right_tmp}\ncall ${host_symbol}\nlocal.set {ret_tmp}\n{release_left}\n{release_right}\nlocal.get {ret_tmp}"
@@ -5678,7 +5712,7 @@ fn compile_host_unary_string_call(
     _node: &TypedExpression,
     _ctx: &Ctx<'_>,
     op_name: &str,
-    _host_symbol: &str
+    _host_symbol: &str,
 ) -> Result<String, String> {
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
@@ -5688,7 +5722,7 @@ fn compile_host_unary_int_call(
     _node: &TypedExpression,
     _ctx: &Ctx<'_>,
     op_name: &str,
-    _host_symbol: &str
+    _host_symbol: &str,
 ) -> Result<String, String> {
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
@@ -5698,7 +5732,7 @@ fn compile_host_unit_call(
     _node: &TypedExpression,
     _ctx: &Ctx<'_>,
     op_name: &str,
-    _host_symbol: &str
+    _host_symbol: &str,
 ) -> Result<String, String> {
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
@@ -5713,7 +5747,7 @@ fn compile_host_binary_string_call(
     _node: &TypedExpression,
     _ctx: &Ctx<'_>,
     op_name: &str,
-    _host_symbol: &str
+    _host_symbol: &str,
 ) -> Result<String, String> {
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
@@ -5737,27 +5771,24 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             let total = ret_params.len();
             let provided = args.len();
             let helper_name = format!("__partial_dyn_{}_{}", total, provided);
-            let helper_id = *ctx.fn_ids
+            let helper_id = *ctx
+                .fn_ids
                 .get(&helper_name)
                 .ok_or_else(|| format!("Missing dynamic partial helper '{}'", helper_name))?;
             let clo_local = ctx.tmp_i32;
             let tmp_local = ctx.tmp_i32 + 1;
             let mut out = Vec::new();
-            out.push(
-                format!(
-                    "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
-                    helper_id,
-                    1 + provided,
-                    clo_local
-                )
-            );
-            out.push(
-                format!(
-                    "local.get {}\ni32.const 0\ncall ${}\ncall $closure_set_fun\ndrop",
-                    clo_local,
-                    ident(op)
-                )
-            );
+            out.push(format!(
+                "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
+                helper_id,
+                1 + provided,
+                clo_local
+            ));
+            out.push(format!(
+                "local.get {}\ni32.const 0\ncall ${}\ncall $closure_set_fun\ndrop",
+                clo_local,
+                ident(op)
+            ));
             for (i, arg) in args.iter().enumerate() {
                 let nested_ctx = Ctx {
                     fn_sigs: ctx.fn_sigs,
@@ -5772,8 +5803,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 let av = compile_expr(arg, &nested_ctx)?;
                 let idx = i + 1;
                 let store_op = closure_store_op_for_type_wat(&ret_params[i]);
-                let is_lambda_literal =
-                    matches!(
+                let is_lambda_literal = matches!(
                     &arg.expr,
                     Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
                 );
@@ -5791,25 +5821,16 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                             )
                         );
                     } else {
-                        out.push(
-                            format!(
-                                "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
-                                clo_local,
-                                idx,
-                                av,
-                                store_op
-                            )
-                        );
+                        out.push(format!(
+                            "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
+                            clo_local, idx, av, store_op
+                        ));
                     }
                 } else {
-                    out.push(
-                        format!(
-                            "local.get {}\ni32.const {}\n{}\ncall $closure_set\ndrop",
-                            clo_local,
-                            idx,
-                            av
-                        )
-                    );
+                    out.push(format!(
+                        "local.get {}\ni32.const {}\n{}\ncall $closure_set\ndrop",
+                        clo_local, idx, av
+                    ));
                 }
             }
             out.push(format!("local.get {}", clo_local));
@@ -5840,7 +5861,8 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
         let total = params.len();
         let provided = args.len();
         let helper_name = format!("__partial_dyn_{}_{}", total, provided);
-        let helper_id = *ctx.fn_ids
+        let helper_id = *ctx
+            .fn_ids
             .get(&helper_name)
             .ok_or_else(|| format!("Missing dynamic partial helper '{}'", helper_name))?;
         let fn_ptr = if let Some(fid) = ctx.fn_ids.get(op) {
@@ -5848,24 +5870,24 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
         } else if let Some(tag) = builtin_fn_tag(op) {
             format!("i32.const {}", tag)
         } else {
-            return Err(
-                format!("Partial application requires function id/tag for '{}', but none was found", op)
-            );
+            return Err(format!(
+                "Partial application requires function id/tag for '{}', but none was found",
+                op
+            ));
         };
         let clo_local = ctx.tmp_i32;
         let tmp_local = ctx.tmp_i32 + 1;
         let mut out = Vec::new();
-        out.push(
-            format!(
-                "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
-                helper_id,
-                1 + provided,
-                clo_local
-            )
-        );
-        out.push(
-            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set_fun\ndrop", clo_local, fn_ptr)
-        );
+        out.push(format!(
+            "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
+            helper_id,
+            1 + provided,
+            clo_local
+        ));
+        out.push(format!(
+            "local.get {}\ni32.const 0\n{}\ncall $closure_set_fun\ndrop",
+            clo_local, fn_ptr
+        ));
         for (i, arg) in args.iter().enumerate() {
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
@@ -5880,8 +5902,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             let av = compile_expr(arg, &nested_ctx)?;
             let idx = i + 1;
             let store_op = closure_store_op_for_type_wat(&params[i]);
-            let is_lambda_literal =
-                matches!(
+            let is_lambda_literal = matches!(
                 &arg.expr,
                 Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
             );
@@ -5899,25 +5920,16 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                         )
                     );
                 } else {
-                    out.push(
-                        format!(
-                            "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
-                            clo_local,
-                            idx,
-                            av,
-                            store_op
-                        )
-                    );
+                    out.push(format!(
+                        "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
+                        clo_local, idx, av, store_op
+                    ));
                 }
             } else {
-                out.push(
-                    format!(
-                        "local.get {}\ni32.const {}\n{}\ncall $closure_set\ndrop",
-                        clo_local,
-                        idx,
-                        av
-                    )
-                );
+                out.push(format!(
+                    "local.get {}\ni32.const {}\n{}\ncall $closure_set\ndrop",
+                    clo_local, idx, av
+                ));
             }
         }
         out.push(format!("local.get {}", clo_local));
@@ -5957,10 +5969,16 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
 }
 
 fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let f_node = node.children.first().ok_or_else(|| "call missing function".to_string())?;
+    let f_node = node
+        .children
+        .first()
+        .ok_or_else(|| "call missing function".to_string())?;
     let f = compile_expr(f_node, ctx)?;
     let args = &node.children[1..];
-    let head_ty = f_node.typ.as_ref().ok_or_else(|| "dynamic call head missing type".to_string())?;
+    let head_ty = f_node
+        .typ
+        .as_ref()
+        .ok_or_else(|| "dynamic call head missing type".to_string())?;
     let (head_params, _head_ret) = function_parts(head_ty);
     if args.is_empty() {
         // Zero-arg invocation of a function value (e.g. local thunk).
@@ -5970,23 +5988,23 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
         let total = head_params.len();
         let provided = args.len();
         let helper_name = format!("__partial_dyn_{}_{}", total, provided);
-        let helper_id = *ctx.fn_ids
+        let helper_id = *ctx
+            .fn_ids
             .get(&helper_name)
             .ok_or_else(|| format!("Missing dynamic partial helper '{}'", helper_name))?;
         let clo_local = ctx.tmp_i32;
         let tmp_local = ctx.tmp_i32 + 1;
         let mut out = Vec::new();
-        out.push(
-            format!(
-                "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
-                helper_id,
-                1 + provided,
-                clo_local
-            )
-        );
-        out.push(
-            format!("local.get {}\ni32.const 0\n{}\ncall $closure_set_fun\ndrop", clo_local, f)
-        );
+        out.push(format!(
+            "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
+            helper_id,
+            1 + provided,
+            clo_local
+        ));
+        out.push(format!(
+            "local.get {}\ni32.const 0\n{}\ncall $closure_set_fun\ndrop",
+            clo_local, f
+        ));
         for (i, arg) in args.iter().enumerate() {
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
@@ -6001,8 +6019,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
             let av = compile_expr(arg, &nested_ctx)?;
             let idx = i + 1;
             let store_op = closure_store_op_for_type_wat(&head_params[i]);
-            let is_lambda_literal =
-                matches!(
+            let is_lambda_literal = matches!(
                 &arg.expr,
                 Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
             );
@@ -6020,25 +6037,16 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                         )
                     );
                 } else {
-                    out.push(
-                        format!(
-                            "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
-                            clo_local,
-                            idx,
-                            av,
-                            store_op
-                        )
-                    );
+                    out.push(format!(
+                        "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
+                        clo_local, idx, av, store_op
+                    ));
                 }
             } else {
-                out.push(
-                    format!(
-                        "local.get {}\ni32.const {}\n{}\ncall $closure_set\ndrop",
-                        clo_local,
-                        idx,
-                        av
-                    )
-                );
+                out.push(format!(
+                    "local.get {}\ni32.const {}\n{}\ncall $closure_set\ndrop",
+                    clo_local, idx, av
+                ));
             }
         }
         out.push(format!("local.get {}", clo_local));
@@ -6067,7 +6075,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
 
 fn resolve_local_devirtualized_head(
     local_head: &str,
-    ctx: &Ctx<'_>
+    ctx: &Ctx<'_>,
 ) -> Result<Option<String>, String> {
     let mode = devirtualize_mode_from_env()?;
     if mode == DevirtualizeMode::Off {
@@ -6083,11 +6091,13 @@ fn resolve_local_devirtualized_head(
     let Some(target_id) = ctx.lambda_ids.get(&key).copied() else {
         return Ok(None);
     };
-    Ok(
-        ctx.fn_ids.iter().find_map(|(name, id)| {
-            if *id == target_id { Some(name.clone()) } else { None }
-        })
-    )
+    Ok(ctx.fn_ids.iter().find_map(|(name, id)| {
+        if *id == target_id {
+            Some(name.clone())
+        } else {
+            None
+        }
+    }))
 }
 
 fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -6095,19 +6105,18 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     if let Some(id) = ctx.lambda_ids.get(&key) {
         Ok(format!("i32.const {}", id))
     } else if let Some(def) = ctx.closure_defs.get(&key) {
-        let fn_id = ctx.fn_ids
+        let fn_id = ctx
+            .fn_ids
             .get(&def.name)
             .ok_or_else(|| format!("Missing function id for closure '{}'", def.name))?;
         let clo_local = ctx.tmp_i32;
         let mut out = Vec::new();
-        out.push(
-            format!(
-                "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
-                fn_id,
-                def.captures.len(),
-                clo_local
-            )
-        );
+        out.push(format!(
+            "i32.const {}\ni32.const {}\ncall $closure_new\nlocal.set {}",
+            fn_id,
+            def.captures.len(),
+            clo_local
+        ));
         for (i, cap) in def.captures.iter().enumerate() {
             let (cap_v, set_fn) = if let Some(local_idx) = ctx.locals.get(cap) {
                 let local_ty = ctx.local_types.get(cap);
@@ -6140,29 +6149,31 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
                     // Builtin function captured as value.
                     (format!("i32.const {}", tag), "$closure_set_fun")
                 } else {
-                    return Err(
-                        format!("Unsupported closure capture '{}' in wasm backend (no function id/tag)", cap)
-                    );
+                    return Err(format!(
+                        "Unsupported closure capture '{}' in wasm backend (no function id/tag)",
+                        cap
+                    ));
                 }
             } else if let Some(tag) = builtin_fn_tag(cap) {
                 (format!("i32.const {}", tag), "$closure_set_fun")
             } else {
-                return Err(format!("Unsupported closure capture '{}' in wasm backend", cap));
+                return Err(format!(
+                    "Unsupported closure capture '{}' in wasm backend",
+                    cap
+                ));
             };
-            out.push(
-                format!(
-                    "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
-                    clo_local,
-                    i,
-                    cap_v,
-                    set_fn
-                )
-            );
+            out.push(format!(
+                "local.get {}\ni32.const {}\n{}\ncall {}\ndrop",
+                clo_local, i, cap_v, set_fn
+            ));
         }
         out.push(format!("local.get {}", clo_local));
         Ok(out.join("\n"))
     } else {
-        Err(format!("Unsupported lambda literal in wasm backend (missing lowering id): {}", key))
+        Err(format!(
+            "Unsupported lambda literal in wasm backend (missing lowering id): {}",
+            key
+        ))
     }
 }
 
@@ -6173,33 +6184,33 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
             let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
             Ok(format!("i32.const {}", scaled as i32))
         }
-        Expression::Word(w) =>
-            match w.as_str() {
-                "true" => Ok("i32.const 1".to_string()),
-                "false" => Ok("i32.const 0".to_string()),
-                "nil" => Ok("i32.const 0".to_string()),
-                _ => {
-                    if let Some(local_idx) = ctx.locals.get(w) {
-                        Ok(format!("local.get {}", local_idx))
-                    } else if w == "ARGV" {
-                        Ok("call $__argv_get".to_string())
-                    } else if let Some((params, _ret)) = ctx.fn_sigs.get(w) {
-                        if params.is_empty() {
-                            Ok(format!("call ${}", ident(w)))
-                        } else if let Some(id) = ctx.fn_ids.get(w) {
-                            Ok(format!("i32.const {}", id))
-                        } else {
-                            Err(
-                                format!("Unsupported function-valued word in wasm backend: '{}'", w)
-                            )
-                        }
-                    } else if let Some(tag) = builtin_fn_tag(w) {
-                        Ok(format!("i32.const {}", tag))
+        Expression::Word(w) => match w.as_str() {
+            "true" => Ok("i32.const 1".to_string()),
+            "false" => Ok("i32.const 0".to_string()),
+            "nil" => Ok("i32.const 0".to_string()),
+            _ => {
+                if let Some(local_idx) = ctx.locals.get(w) {
+                    Ok(format!("local.get {}", local_idx))
+                } else if w == "ARGV" {
+                    Ok("call $__argv_get".to_string())
+                } else if let Some((params, _ret)) = ctx.fn_sigs.get(w) {
+                    if params.is_empty() {
+                        Ok(format!("call ${}", ident(w)))
+                    } else if let Some(id) = ctx.fn_ids.get(w) {
+                        Ok(format!("i32.const {}", id))
                     } else {
-                        Err(format!("Unsupported free word in wasm backend: '{}'", w))
+                        Err(format!(
+                            "Unsupported function-valued word in wasm backend: '{}'",
+                            w
+                        ))
                     }
+                } else if let Some(tag) = builtin_fn_tag(w) {
+                    Ok(format!("i32.const {}", tag))
+                } else {
+                    Err(format!("Unsupported free word in wasm backend: '{}'", w))
                 }
             }
+        },
         Expression::Apply(items) => {
             if items.is_empty() {
                 return Ok("i32.const 0".to_string());
@@ -6209,11 +6220,8 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                     let op_full = op.as_str();
                     match op_full {
                         _ if ctx.locals.contains_key(op_full) => {
-                            if
-                                let Some(target_name) = resolve_local_devirtualized_head(
-                                    op_full,
-                                    ctx
-                                )?
+                            if let Some(target_name) =
+                                resolve_local_devirtualized_head(op_full, ctx)?
                             {
                                 compile_call(node, &target_name, ctx)
                             } else {
@@ -6225,14 +6233,15 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "if" => compile_if(node, ctx),
                         "tuple" => compile_tuple(node, ctx),
                         "vector" | "string" => compile_vector_literal(node, ctx),
-                        "integers" | "bools" | "decimals" | "strings" =>
-                            compile_trusted_typed_vector_literal(op_full, node, ctx),
+                        "integers" | "bools" | "decimals" | "strings" => {
+                            compile_trusted_typed_vector_literal(op_full, node, ctx)
+                        }
                         "length" => {
                             let a = compile_expr(
                                 node.children
                                     .get(1)
                                     .ok_or_else(|| "length missing arg".to_string())?,
-                                ctx
+                                ctx,
                             )?;
                             Ok(format!("{a}\ncall $vec_len"))
                         }
@@ -6244,7 +6253,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 node.children
                                     .get(1)
                                     .ok_or_else(|| "car missing vector".to_string())?,
-                                ctx
+                                ctx,
                             )?;
                             let elem = match node.typ.as_ref() {
                                 Some(t) => vec_elem_kind_from_type(t)?,
@@ -6252,7 +6261,10 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                     return Err("car missing return type".to_string());
                                 }
                             };
-                            Ok(format!("{xs}\ni32.const 0\ncall $vec_get_{}", elem.suffix()))
+                            Ok(format!(
+                                "{xs}\ni32.const 0\ncall $vec_get_{}",
+                                elem.suffix()
+                            ))
                         }
                         "cdr" => compile_cdr(node, ctx),
                         "set!" => compile_set(node, ctx),
@@ -6280,15 +6292,19 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "move!" => compile_host_binary_string_call(node, ctx, "move!", "host_move"),
                         "not" => {
                             let a = compile_expr(
-                                node.children.get(1).ok_or_else(|| "not missing arg".to_string())?,
-                                ctx
+                                node.children
+                                    .get(1)
+                                    .ok_or_else(|| "not missing arg".to_string())?,
+                                ctx,
                             )?;
                             Ok(format!("{a}\ni32.eqz"))
                         }
                         "~" => {
                             let a = compile_expr(
-                                node.children.get(1).ok_or_else(|| "~ missing arg".to_string())?,
-                                ctx
+                                node.children
+                                    .get(1)
+                                    .ok_or_else(|| "~ missing arg".to_string())?,
+                                ctx,
                             )?;
                             // Bitwise NOT for i32.
                             Ok(format!("{a}\ni32.const -1\ni32.xor"))
@@ -6298,7 +6314,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 node.children
                                     .get(1)
                                     .ok_or_else(|| "Int->Dec missing arg".to_string())?,
-                                ctx
+                                ctx,
                             )?;
                             Ok(format!("{a}\ncall $dec_from_int"))
                         }
@@ -6307,21 +6323,20 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 node.children
                                     .get(1)
                                     .ok_or_else(|| "Dec->Int missing arg".to_string())?,
-                                ctx
+                                ctx,
                             )?;
                             Ok(format!("{a}\ncall $dec_to_int"))
                         }
-                        "as" | "char" =>
-                            node.children
-                                .get(1)
-                                .map(|n| compile_expr(n, ctx))
-                                .unwrap_or_else(|| Ok("i32.const 0".to_string())),
-                        op if
-                            builtin_fn_tag(op)
-                                .and_then(builtin_tag_arity)
-                                .map(|arity| node.children.len().saturating_sub(1) != arity)
-                                .unwrap_or(false)
-                        => {
+                        "as" | "char" => node
+                            .children
+                            .get(1)
+                            .map(|n| compile_expr(n, ctx))
+                            .unwrap_or_else(|| Ok("i32.const 0".to_string())),
+                        op if builtin_fn_tag(op)
+                            .and_then(builtin_tag_arity)
+                            .map(|arity| node.children.len().saturating_sub(1) != arity)
+                            .unwrap_or(false) =>
+                        {
                             compile_dynamic_call(node, ctx)
                         }
                         op if is_special_word(op) => emit_builtin(op, node, ctx),
@@ -6358,15 +6373,15 @@ fn typed_expr_uses_host_io(node: &TypedExpression) -> bool {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() => {
             let uses_here = if let Some(Expression::Word(op)) = items.first() {
-                op == "read!" ||
-                    op == "write!" ||
-                    op == "list-dir!" ||
-                    op == "mkdir!" ||
-                    op == "delete!" ||
-                    op == "move!" ||
-                    op == "print!" ||
-                    op == "sleep!" ||
-                    op == "clear!"
+                op == "read!"
+                    || op == "write!"
+                    || op == "list-dir!"
+                    || op == "mkdir!"
+                    || op == "delete!"
+                    || op == "move!"
+                    || op == "print!"
+                    || op == "sleep!"
+                    || op == "clear!"
             } else {
                 false
             };
@@ -6379,7 +6394,7 @@ fn typed_expr_uses_host_io(node: &TypedExpression) -> bool {
 fn collect_call_specializations(
     node: &TypedExpression,
     top_def_names: &HashSet<String>,
-    out: &mut HashMap<String, (Vec<Type>, Type)>
+    out: &mut HashMap<String, (Vec<Type>, Type)>,
 ) {
     if let Expression::Apply(items) = &node.expr {
         if let Some(Expression::Word(name)) = items.first() {
@@ -6406,7 +6421,7 @@ fn collect_call_specializations(
 fn collect_dynamic_partial_specs(
     node: &TypedExpression,
     top_def_names: &HashSet<String>,
-    out: &mut HashSet<(usize, usize)>
+    out: &mut HashSet<(usize, usize)>,
 ) {
     if let Expression::Apply(items) = &node.expr {
         if !items.is_empty() && node.children.len() >= 2 {
@@ -6461,24 +6476,16 @@ fn collect_type_subst(pattern: &Type, concrete: &Type, out: &mut HashMap<u64, Ty
 
 fn apply_type_subst(t: &Type, subst: &HashMap<u64, Type>) -> Type {
     match t {
-        Type::Var(v) =>
-            subst
-                .get(&v.id)
-                .cloned()
-                .unwrap_or_else(|| Type::Var(v.clone())),
+        Type::Var(v) => subst
+            .get(&v.id)
+            .cloned()
+            .unwrap_or_else(|| Type::Var(v.clone())),
         Type::List(a) => Type::List(Box::new(apply_type_subst(a, subst))),
-        Type::Tuple(xs) =>
-            Type::Tuple(
-                xs
-                    .iter()
-                    .map(|x| apply_type_subst(x, subst))
-                    .collect()
-            ),
-        Type::Function(a, b) =>
-            Type::Function(
-                Box::new(apply_type_subst(a, subst)),
-                Box::new(apply_type_subst(b, subst))
-            ),
+        Type::Tuple(xs) => Type::Tuple(xs.iter().map(|x| apply_type_subst(x, subst)).collect()),
+        Type::Function(a, b) => Type::Function(
+            Box::new(apply_type_subst(a, subst)),
+            Box::new(apply_type_subst(b, subst)),
+        ),
         _ => t.clone(),
     }
 }
@@ -6488,7 +6495,8 @@ fn specialize_typed_expr(node: &TypedExpression, subst: &HashMap<u64, Type>) -> 
         expr: node.expr.clone(),
         typ: node.typ.as_ref().map(|t| apply_type_subst(t, subst)),
         effect: node.effect,
-        children: node.children
+        children: node
+            .children
             .iter()
             .map(|c| specialize_typed_expr(c, subst))
             .collect(),
@@ -6507,53 +6515,54 @@ fn compile_tail_expr(
     node: &TypedExpression,
     ctx: &Ctx<'_>,
     self_name: &str,
-    arity: usize
+    arity: usize,
 ) -> Result<Option<String>, String> {
     match &node.expr {
-        Expression::Apply(items) if !items.is_empty() =>
-            match &items[0] {
-                Expression::Word(op) if op == self_name => {
-                    let args = &node.children[1..];
-                    if args.len() != arity {
-                        return Ok(None);
-                    }
-                    let mut out = Vec::new();
-                    for a in args {
-                        out.push(compile_expr(a, ctx)?);
-                    }
-                    out.push(format!("return_call ${}", ident(self_name)));
-                    Ok(Some(out.join("\n")))
+        Expression::Apply(items) if !items.is_empty() => match &items[0] {
+            Expression::Word(op) if op == self_name => {
+                let args = &node.children[1..];
+                if args.len() != arity {
+                    return Ok(None);
                 }
-                Expression::Word(op) if op == "if" => {
-                    let cond_node = node.children
-                        .get(1)
-                        .ok_or_else(|| "if missing condition".to_string())?;
-                    let then_node = node.children
-                        .get(2)
-                        .ok_or_else(|| "if missing then".to_string())?;
-                    let else_node = node.children
-                        .get(3)
-                        .ok_or_else(|| "if missing else".to_string())?;
-                    let cond = compile_expr(cond_node, ctx)?;
-                    let result_ty = node.typ
-                        .as_ref()
-                        .ok_or_else(|| "if missing type".to_string())
-                        .and_then(wasm_val_type)?;
-                    let then_code = if
-                        let Some(tc) = compile_tail_expr(then_node, ctx, self_name, arity)?
-                    {
+                let mut out = Vec::new();
+                for a in args {
+                    out.push(compile_expr(a, ctx)?);
+                }
+                out.push(format!("return_call ${}", ident(self_name)));
+                Ok(Some(out.join("\n")))
+            }
+            Expression::Word(op) if op == "if" => {
+                let cond_node = node
+                    .children
+                    .get(1)
+                    .ok_or_else(|| "if missing condition".to_string())?;
+                let then_node = node
+                    .children
+                    .get(2)
+                    .ok_or_else(|| "if missing then".to_string())?;
+                let else_node = node
+                    .children
+                    .get(3)
+                    .ok_or_else(|| "if missing else".to_string())?;
+                let cond = compile_expr(cond_node, ctx)?;
+                let result_ty = node
+                    .typ
+                    .as_ref()
+                    .ok_or_else(|| "if missing type".to_string())
+                    .and_then(wasm_val_type)?;
+                let then_code =
+                    if let Some(tc) = compile_tail_expr(then_node, ctx, self_name, arity)? {
                         tc
                     } else {
                         compile_expr(then_node, ctx)?
                     };
-                    let else_code = if
-                        let Some(tc) = compile_tail_expr(else_node, ctx, self_name, arity)?
-                    {
+                let else_code =
+                    if let Some(tc) = compile_tail_expr(else_node, ctx, self_name, arity)? {
                         tc
                     } else {
                         compile_expr(else_node, ctx)?
                     };
-                    Ok(
+                Ok(
                         Some(
                             format!(
                                 "{cond}\n(if (result {result_ty})\n  (then\n{}\n  )\n  (else\n{}\n  )\n)\nreturn",
@@ -6562,9 +6571,9 @@ fn compile_tail_expr(
                             )
                         )
                     )
-                }
-                _ => Ok(None),
             }
+            _ => Ok(None),
+        },
         _ => Ok(None),
     }
 }
@@ -6578,7 +6587,7 @@ fn compile_lambda_func(
     lambda_ids: &HashMap<String, i32>,
     closure_defs: &HashMap<String, ClosureDef>,
     lambda_bindings: &HashMap<String, TypedExpression>,
-    tail_call_mode: TailCallMode
+    tail_call_mode: TailCallMode,
 ) -> Result<String, String> {
     let items = match lambda_expr {
         Expression::Apply(xs) => xs,
@@ -6590,7 +6599,8 @@ fn compile_lambda_func(
         return Err(format!("lambda '{}' missing body", name));
     }
     let body_idx = items.len() - 1;
-    let body_node_raw = lambda_node.children
+    let body_node_raw = lambda_node
+        .children
         .get(body_idx)
         .ok_or_else(|| format!("Missing typed body for '{}'", name))?;
     let sig = fn_sigs.get(name).cloned();
@@ -6598,14 +6608,12 @@ fn compile_lambda_func(
     for (i, p) in items[1..body_idx].iter().enumerate() {
         if let Expression::Word(w) = p {
             let ty = if let Some((ps, _ret)) = &sig {
-                ps
-                    .get(i)
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!("Missing specialized param type for '{}' arg {}", name, i)
-                    })?
+                ps.get(i).cloned().ok_or_else(|| {
+                    format!("Missing specialized param type for '{}' arg {}", name, i)
+                })?
             } else {
-                lambda_node.typ
+                lambda_node
+                    .typ
                     .as_ref()
                     .map(function_parts)
                     .and_then(|(ps, _)| ps.get(i).cloned())
@@ -6619,7 +6627,8 @@ fn compile_lambda_func(
     let ret_ty = if let Some((_ps, ret)) = sig {
         ret
     } else {
-        lambda_node.typ
+        lambda_node
+            .typ
             .as_ref()
             .map(function_parts)
             .map(|(_, ret)| ret)
@@ -6677,9 +6686,8 @@ fn compile_lambda_func(
         local_types,
         tmp_i32,
     };
-    let body_code = compile_expr(body_node, &ctx).map_err(|e|
-        format!("in lambda '{}': {}", name, e)
-    )?;
+    let body_code =
+        compile_expr(body_node, &ctx).map_err(|e| format!("in lambda '{}': {}", name, e))?;
     let ret_is_ref = is_managed_local_type(&ret_ty);
     let mut ref_slots: Vec<usize> = Vec::new();
     for (i, (_n, t)) in local_defs.iter().enumerate() {
@@ -6720,7 +6728,12 @@ fn compile_lambda_func(
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
     let scratch_slot = params.len() + local_defs.len();
-    out.push_str(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot));
+    out.push_str(&emit_release_unique_refs(
+        &ref_slots,
+        ret_slot,
+        ret_is_ref,
+        scratch_slot,
+    ));
     out.push_str(&format!("    local.get {}\n", ret_slot));
     out.push_str("  )\n");
     Ok(out)
@@ -6734,7 +6747,7 @@ fn compile_closure_func(
     fn_ids: &HashMap<String, i32>,
     lambda_ids: &HashMap<String, i32>,
     closure_defs: &HashMap<String, ClosureDef>,
-    lambda_bindings: &HashMap<String, TypedExpression>
+    lambda_bindings: &HashMap<String, TypedExpression>,
 ) -> Result<String, String> {
     let items = match &lambda_node.expr {
         Expression::Apply(xs) => xs,
@@ -6746,7 +6759,8 @@ fn compile_closure_func(
         return Err(format!("Closure '{}' missing body", name));
     }
     let body_idx = items.len() - 1;
-    let body_node = lambda_node.children
+    let body_node = lambda_node
+        .children
         .get(body_idx)
         .ok_or_else(|| format!("Missing typed body for closure '{}'", name))?;
     let (all_ps, ret_ty) = fn_sigs
@@ -6814,9 +6828,8 @@ fn compile_closure_func(
         local_types,
         tmp_i32,
     };
-    let body_code = compile_expr(body_node, &ctx).map_err(|e|
-        format!("in closure '{}': {}", name, e)
-    )?;
+    let body_code =
+        compile_expr(body_node, &ctx).map_err(|e| format!("in closure '{}': {}", name, e))?;
     let ret_is_ref = is_managed_local_type(&ret_ty);
     let mut ref_slots: Vec<usize> = Vec::new();
     for (i, (_n, t)) in local_defs.iter().enumerate() {
@@ -6842,7 +6855,12 @@ fn compile_closure_func(
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
     let scratch_slot = params.len() + local_defs.len();
-    out.push_str(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot));
+    out.push_str(&emit_release_unique_refs(
+        &ref_slots,
+        ret_slot,
+        ret_is_ref,
+        scratch_slot,
+    ));
     out.push_str(&format!("    local.get {}\n", ret_slot));
     out.push_str("  )\n");
     Ok(out)
@@ -6852,7 +6870,7 @@ fn emit_release_unique_refs(
     ref_slots: &[usize],
     ret_slot: usize,
     ret_is_ref: bool,
-    scratch_slot: usize
+    scratch_slot: usize,
 ) -> String {
     let mut out = String::new();
     for (i, slot) in ref_slots.iter().enumerate() {
@@ -6896,9 +6914,10 @@ fn compile_value_func(
     fn_ids: &HashMap<String, i32>,
     lambda_ids: &HashMap<String, i32>,
     closure_defs: &HashMap<String, ClosureDef>,
-    lambda_bindings: &HashMap<String, TypedExpression>
+    lambda_bindings: &HashMap<String, TypedExpression>,
 ) -> Result<String, String> {
-    let ret_ty = value_node.typ
+    let ret_ty = value_node
+        .typ
         .as_ref()
         .ok_or_else(|| format!("Missing value type for '{}'", name))?;
 
@@ -6930,20 +6949,27 @@ fn compile_value_func(
         local_types,
         tmp_i32,
     };
-    let body_code = compile_expr(value_node, &ctx).map_err(|e|
-        format!("in value '{}': {}", name, e)
-    )?;
+    let body_code =
+        compile_expr(value_node, &ctx).map_err(|e| format!("in value '{}': {}", name, e))?;
     let ret_is_ref = is_managed_local_type(ret_ty);
     let ref_slots: Vec<usize> = local_defs
         .iter()
         .enumerate()
         .filter_map(|(i, (_n, t))| {
-            if is_managed_local_type(t) { Some(i) } else { None }
+            if is_managed_local_type(t) {
+                Some(i)
+            } else {
+                None
+            }
         })
         .collect();
 
     let mut out = String::new();
-    out.push_str(&format!("  (func ${} (result {})\n", ident(name), wasm_val_type(ret_ty)?));
+    out.push_str(&format!(
+        "  (func ${} (result {})\n",
+        ident(name),
+        wasm_val_type(ret_ty)?
+    ));
     for (_n, t) in &local_defs {
         out.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
@@ -6968,9 +6994,10 @@ fn compile_value_func(
     out.push_str("    else\n");
     out.push_str(&format!("      {}\n", body_code.replace('\n', "\n      ")));
     out.push_str(&format!("      local.set {}\n", ret_slot));
-    out.push_str(
-        &indent_block(&emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot), 6)
-    );
+    out.push_str(&indent_block(
+        &emit_release_unique_refs(&ref_slots, ret_slot, ret_is_ref, scratch_slot),
+        6,
+    ));
     out.push('\n');
     if ret_is_ref {
         // Keep one root reference in the global cache while returning one to caller.
@@ -6989,7 +7016,11 @@ fn compile_value_func(
 }
 
 fn compile_value_func_fn_ptr(name: &str, fn_id: i32) -> String {
-    format!("  (func ${} (result i32)\n    i32.const {}\n  )\n", ident(name), fn_id)
+    format!(
+        "  (func ${} (result i32)\n    i32.const {}\n  )\n",
+        ident(name),
+        fn_id
+    )
 }
 
 fn compile_partial_helper_func(
@@ -6998,7 +7029,7 @@ fn compile_partial_helper_func(
     fn_ids: &HashMap<String, i32>,
     lambda_ids: &HashMap<String, i32>,
     closure_defs: &HashMap<String, ClosureDef>,
-    lambda_bindings: &HashMap<String, TypedExpression>
+    lambda_bindings: &HashMap<String, TypedExpression>,
 ) -> Result<String, String> {
     let mut locals = HashMap::new();
     for i in 0..h.remaining_params.len() {
@@ -7063,7 +7094,7 @@ fn compile_dynamic_partial_helper_func(h: &DynamicPartialHelper) -> String {
 
 pub fn compile_program_to_wat_typed_with_opts(
     typed_ast: &TypedExpression,
-    enable_optimizer: bool
+    enable_optimizer: bool,
 ) -> Result<String, String> {
     // Validate devirtualization mode early so invalid env values fail deterministically.
     let _ = devirtualize_mode_from_env()?;
@@ -7076,10 +7107,13 @@ pub fn compile_program_to_wat_typed_with_opts(
     let typed_ast = optimized_typed_ast.as_ref().unwrap_or(typed_ast);
 
     let (top_defs, main_expr, main_node) = match &typed_ast.expr {
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
-        => {
-            let child_offset = if typed_ast.children.len() + 1 == items.len() { 1 } else { 0 };
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
+        {
+            let child_offset = if typed_ast.children.len() + 1 == items.len() {
+                1
+            } else {
+                0
+            };
             let child_at = |item_idx: usize| -> Option<&TypedExpression> {
                 if item_idx < child_offset {
                     None
@@ -7094,15 +7128,15 @@ pub fn compile_program_to_wat_typed_with_opts(
                 if let Expression::Apply(let_items) = &items[i] {
                     if let [Expression::Word(kw), Expression::Word(name), rhs] = &let_items[..] {
                         if kw == "let" || kw == "letrec" {
-                            if
-                                let Some(node) = child_at(i)
-                                    .and_then(|n| n.children.get(2))
-                                    .cloned()
+                            if let Some(node) = child_at(i).and_then(|n| n.children.get(2)).cloned()
                             {
-                                defs.insert(name.clone(), TopDef {
-                                    expr: rhs.clone(),
-                                    node,
-                                });
+                                defs.insert(
+                                    name.clone(),
+                                    TopDef {
+                                        expr: rhs.clone(),
+                                        node,
+                                    },
+                                );
                                 // Top-level bindings are canonicalized as defs and referenced by name.
                                 // Do not also keep duplicate let expressions in main.
                                 continue;
@@ -7111,11 +7145,9 @@ pub fn compile_program_to_wat_typed_with_opts(
                     }
                 }
                 main_items_expr.push(items[i].clone());
-                let node = child_at(i)
-                    .cloned()
-                    .ok_or_else(|| {
-                        "Missing typed top-level expression while building wasm main".to_string()
-                    })?;
+                let node = child_at(i).cloned().ok_or_else(|| {
+                    "Missing typed top-level expression while building wasm main".to_string()
+                })?;
                 main_items_nodes.push(node);
             }
             if main_items_nodes.is_empty() {
@@ -7191,14 +7223,15 @@ pub fn compile_program_to_wat_typed_with_opts(
     let mut call_specs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
     collect_call_specializations(typed_ast, &top_def_names, &mut call_specs);
     for (name, def) in &top_defs {
-        let is_lambda_def =
-            matches!(
+        let is_lambda_def = matches!(
             &def.expr,
             Expression::Apply(items)
                 if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
         );
         let (ps, ret) = if is_lambda_def {
-            let t = def.node.typ
+            let t = def
+                .node
+                .typ
                 .as_ref()
                 .ok_or_else(|| format!("Missing type for def '{}'", name))?;
             let (mut decl_ps, decl_ret) = function_parts(t);
@@ -7210,7 +7243,9 @@ pub fn compile_program_to_wat_typed_with_opts(
             }
             (decl_ps, decl_ret)
         } else {
-            let t = def.node.typ
+            let t = def
+                .node
+                .typ
                 .as_ref()
                 .ok_or_else(|| format!("Missing type for def '{}'", name))?;
             (Vec::new(), t.clone())
@@ -7272,12 +7307,15 @@ pub fn compile_program_to_wat_typed_with_opts(
                 let mut all_ps = vec![Type::Int; captures.len()];
                 all_ps.extend(ps.clone());
                 fn_sigs.insert(name.clone(), (all_ps, ret));
-                closure_defs.insert(key.clone(), ClosureDef {
-                    key,
-                    name,
-                    captures,
-                    user_arity: ps.len(),
-                });
+                closure_defs.insert(
+                    key.clone(),
+                    ClosureDef {
+                        key,
+                        name,
+                        captures,
+                        user_arity: ps.len(),
+                    },
+                );
             }
         }
     }
@@ -7290,8 +7328,8 @@ pub fn compile_program_to_wat_typed_with_opts(
         }
     }
     for tag in [
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30, 31, 32,
-        33, 34,
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30, 31,
+        32, 33, 34,
     ] {
         if let Some(arity) = builtin_tag_arity(tag) {
             if arity > 1 {
@@ -7316,14 +7354,19 @@ pub fn compile_program_to_wat_typed_with_opts(
         helper_params.extend(std::iter::repeat(Type::Int).take(total));
         fn_sigs.insert(name.clone(), (helper_params, Type::Int));
         let cap_count = 1 + provided;
-        let captures = (0..cap_count).map(|i| format!("__cap{}", i)).collect::<Vec<_>>();
+        let captures = (0..cap_count)
+            .map(|i| format!("__cap{}", i))
+            .collect::<Vec<_>>();
         let key = format!("__partial_dyn_key_{}_{}", total, provided);
-        closure_defs.insert(key.clone(), ClosureDef {
-            key,
-            name: name.clone(),
-            captures,
-            user_arity: total - provided,
-        });
+        closure_defs.insert(
+            key.clone(),
+            ClosureDef {
+                key,
+                name: name.clone(),
+                captures,
+                user_arity: total - provided,
+            },
+        );
         dynamic_partial_helpers.push(DynamicPartialHelper {
             name,
             total_arity: total,
@@ -7403,7 +7446,8 @@ pub fn compile_program_to_wat_typed_with_opts(
             lambda_ids.insert(key.clone(), *id);
         }
     }
-    let main_ret_ty = main_node.typ
+    let main_ret_ty = main_node
+        .typ
         .as_ref()
         .ok_or_else(|| "Missing main expression type".to_string())?;
     let mut emitted_funcs: Vec<String> = Vec::new();
@@ -7414,50 +7458,43 @@ pub fn compile_program_to_wat_typed_with_opts(
             continue;
         }
         match &def.expr {
-            Expression::Apply(items) if
-                matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
-            => {
-                emitted_funcs.push(
-                    compile_lambda_func(
-                        name,
-                        &def.expr,
-                        &def.node,
-                        &fn_sigs,
-                        &fn_ids,
-                        &lambda_ids,
-                        &closure_defs,
-                        &lambda_bindings,
-                        tail_call_mode
-                    )?
-                );
+            Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") =>
+            {
+                emitted_funcs.push(compile_lambda_func(
+                    name,
+                    &def.expr,
+                    &def.node,
+                    &fn_sigs,
+                    &fn_ids,
+                    &lambda_ids,
+                    &closure_defs,
+                    &lambda_bindings,
+                    tail_call_mode,
+                )?);
             }
             _ => {
                 cached_value_defs.push(name.clone());
-                emitted_funcs.push(
-                    compile_value_func(
-                        name,
-                        &def.node,
-                        &fn_sigs,
-                        &fn_ids,
-                        &lambda_ids,
-                        &closure_defs,
-                        &lambda_bindings
-                    )?
-                );
+                emitted_funcs.push(compile_value_func(
+                    name,
+                    &def.node,
+                    &fn_sigs,
+                    &fn_ids,
+                    &lambda_ids,
+                    &closure_defs,
+                    &lambda_bindings,
+                )?);
             }
         }
     }
     for h in &partial_helpers {
-        emitted_funcs.push(
-            compile_partial_helper_func(
-                h,
-                &fn_sigs,
-                &fn_ids,
-                &lambda_ids,
-                &closure_defs,
-                &lambda_bindings
-            )?
-        );
+        emitted_funcs.push(compile_partial_helper_func(
+            h,
+            &fn_sigs,
+            &fn_ids,
+            &lambda_ids,
+            &closure_defs,
+            &lambda_bindings,
+        )?);
     }
     for h in &dynamic_partial_helpers {
         emitted_funcs.push(compile_dynamic_partial_helper_func(h));
@@ -7476,35 +7513,31 @@ pub fn compile_program_to_wat_typed_with_opts(
             if !emitted_hoisted_lambda_names.insert(name.clone()) {
                 continue;
             }
-            emitted_funcs.push(
-                compile_lambda_func(
-                    name,
-                    &node.expr,
-                    node,
-                    &fn_sigs,
-                    &fn_ids,
-                    &lambda_ids,
-                    &closure_defs,
-                    &lambda_bindings,
-                    tail_call_mode
-                )?
-            );
+            emitted_funcs.push(compile_lambda_func(
+                name,
+                &node.expr,
+                node,
+                &fn_sigs,
+                &fn_ids,
+                &lambda_ids,
+                &closure_defs,
+                &lambda_bindings,
+                tail_call_mode,
+            )?);
         }
     }
     for def in closure_defs.values() {
         if let Some(node) = lambda_nodes.iter().find(|n| n.expr.to_lisp() == def.key) {
-            emitted_funcs.push(
-                compile_closure_func(
-                    &def.name,
-                    node,
-                    &def.captures,
-                    &fn_sigs,
-                    &fn_ids,
-                    &lambda_ids,
-                    &closure_defs,
-                    &lambda_bindings
-                )?
-            );
+            emitted_funcs.push(compile_closure_func(
+                &def.name,
+                node,
+                &def.captures,
+                &fn_sigs,
+                &fn_ids,
+                &lambda_ids,
+                &closure_defs,
+                &lambda_bindings,
+            )?);
         }
     }
 
@@ -7547,7 +7580,9 @@ pub fn compile_program_to_wat_typed_with_opts(
 
     let mut main_func = String::new();
     main_func.push_str(&format!("  ;; Type: {}\n", main_ret_ty));
-    main_func.push_str(&format!("  (func (export \"main\") (result {main_wasm_ty})\n"));
+    main_func.push_str(&format!(
+        "  (func (export \"main\") (result {main_wasm_ty})\n"
+    ));
     for (_n, t) in &main_local_defs {
         main_func.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
@@ -7562,34 +7597,43 @@ pub fn compile_program_to_wat_typed_with_opts(
     wat.push_str("(module\n");
     if _needs_host_io {
         wat.push_str(
-            "  (import \"host\" \"list_dir\" (func $host_list_dir (param i32) (result i32)))\n"
+            "  (import \"host\" \"list_dir\" (func $host_list_dir (param i32) (result i32)))\n",
         );
         wat.push_str(
-            "  (import \"host\" \"read_file\" (func $host_read_file (param i32) (result i32)))\n"
+            "  (import \"host\" \"read_file\" (func $host_read_file (param i32) (result i32)))\n",
         );
         wat.push_str(
             "  (import \"host\" \"write_file\" (func $host_write_file (param i32 i32) (result i32)))\n"
         );
         wat.push_str(
-            "  (import \"host\" \"mkdir_p\" (func $host_mkdir_p (param i32) (result i32)))\n"
+            "  (import \"host\" \"mkdir_p\" (func $host_mkdir_p (param i32) (result i32)))\n",
         );
         wat.push_str(
-            "  (import \"host\" \"delete\" (func $host_delete (param i32) (result i32)))\n"
+            "  (import \"host\" \"delete\" (func $host_delete (param i32) (result i32)))\n",
         );
         wat.push_str(
-            "  (import \"host\" \"move\" (func $host_move (param i32 i32) (result i32)))\n"
+            "  (import \"host\" \"move\" (func $host_move (param i32 i32) (result i32)))\n",
         );
         wat.push_str("  (import \"host\" \"print\" (func $host_print (param i32) (result i32)))\n");
         wat.push_str("  (import \"host\" \"sleep\" (func $host_sleep (param i32) (result i32)))\n");
         wat.push_str("  (import \"host\" \"clear\" (func $host_clear (result i32)))\n");
     }
     for name in &cached_value_defs {
-        wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_init_global(name)));
-        wat.push_str(
-            &format!("  (global ${} (mut i32) (i32.const 0))\n", cache_value_global(name))
-        );
+        wat.push_str(&format!(
+            "  (global ${} (mut i32) (i32.const 0))\n",
+            cache_init_global(name)
+        ));
+        wat.push_str(&format!(
+            "  (global ${} (mut i32) (i32.const 0))\n",
+            cache_value_global(name)
+        ));
     }
-    wat.push_str(&emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs, &apply_arities));
+    wat.push_str(&emit_vector_runtime(
+        &fn_ids,
+        &fn_sigs,
+        &closure_defs,
+        &apply_arities,
+    ));
     for func in emitted_funcs {
         wat.push_str(&func);
     }
@@ -7605,11 +7649,11 @@ pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<Strin
 
 pub fn compile_program_to_wat_with_opts(
     expr: &Expression,
-    enable_optimizer: bool
+    enable_optimizer: bool,
 ) -> Result<String, String> {
     let (_typ, typed_ast) = crate::infer::infer_with_builtins_typed(
         expr,
-        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
     )?;
     compile_program_to_wat_typed_with_opts(&typed_ast, enable_optimizer)
 }

@@ -1,7 +1,7 @@
 use crate::parser::Expression;
-use crate::types::{ generalize, Type, TypeEnv, TypeScheme, TypeVar };
-use std::collections::{ HashMap, HashSet, VecDeque };
-use std::ops::{ BitOr, BitOrAssign };
+use crate::types::{generalize, Type, TypeEnv, TypeScheme, TypeVar};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::{BitOr, BitOrAssign};
 
 #[derive(Clone, Debug)]
 pub enum TypeErrorVariant {
@@ -78,14 +78,13 @@ fn expression_id(expr: &Expression) -> usize {
 
 fn build_typed_expression(
     expr: &Expression,
-    solved_expr_types: &HashMap<usize, Type>
+    solved_expr_types: &HashMap<usize, Type>,
 ) -> TypedExpression {
     let children = match expr {
-        Expression::Apply(items) =>
-            items
-                .iter()
-                .map(|item| build_typed_expression(item, solved_expr_types))
-                .collect(),
+        Expression::Apply(items) => items
+            .iter()
+            .map(|item| build_typed_expression(item, solved_expr_types))
+            .collect(),
         _ => Vec::new(),
     };
 
@@ -100,15 +99,15 @@ fn build_typed_expression(
 fn is_io_op(op: &str) -> bool {
     matches!(
         op,
-        "read!" |
-            "write!" |
-            "list-dir!" |
-            "mkdir!" |
-            "delete!" |
-            "move!" |
-            "print!" |
-            "sleep!" |
-            "clear!"
+        "read!"
+            | "write!"
+            | "list-dir!"
+            | "mkdir!"
+            | "delete!"
+            | "move!"
+            | "print!"
+            | "sleep!"
+            | "clear!"
     )
 }
 
@@ -135,75 +134,74 @@ fn is_bang_contract_op(op: &str, known_requires_bang: &HashMap<String, bool>) ->
 fn is_intrinsic_pure_op(op: &str) -> bool {
     matches!(
         op,
-        "+" |
-            "+#" |
-            "+." |
-            "-" |
-            "-#" |
-            "-." |
-            "*" |
-            "*#" |
-            "*." |
-            "/" |
-            "/#" |
-            "/." |
-            "mod" |
-            "mod." |
-            "=" |
-            "=?" |
-            "=#" |
-            "=." |
-            "<" |
-            "<#" |
-            "<." |
-            ">" |
-            ">#" |
-            ">." |
-            "<=" |
-            "<=#" |
-            "<=." |
-            ">=" |
-            ">=#" |
-            ">=." |
-            "and" |
-            "or" |
-            "not" |
-            "~" |
-            "^" |
-            "|" |
-            "&" |
-            "<<" |
-            ">>" |
-            "length" |
-            "get" |
-            "car" |
-            "cdr" |
-            "fst" |
-            "snd" |
-            "Int->Dec" |
-            "Dec->Int" |
-            "as" |
-            "char" |
-            "vector" |
-            "string" |
-            "integers" |
-            "bools" |
-            "decimals" |
-            "strings" |
-            "tuple" |
-            "lambda" |
-            "if" |
-            "while" |
-            "let" |
-            "letrec" |
-            "mut" |
-            "do"
+        "+" | "+#"
+            | "+."
+            | "-"
+            | "-#"
+            | "-."
+            | "*"
+            | "*#"
+            | "*."
+            | "/"
+            | "/#"
+            | "/."
+            | "mod"
+            | "mod."
+            | "="
+            | "=?"
+            | "=#"
+            | "=."
+            | "<"
+            | "<#"
+            | "<."
+            | ">"
+            | ">#"
+            | ">."
+            | "<="
+            | "<=#"
+            | "<=."
+            | ">="
+            | ">=#"
+            | ">=."
+            | "and"
+            | "or"
+            | "not"
+            | "~"
+            | "^"
+            | "|"
+            | "&"
+            | "<<"
+            | ">>"
+            | "length"
+            | "get"
+            | "car"
+            | "cdr"
+            | "fst"
+            | "snd"
+            | "Int->Dec"
+            | "Dec->Int"
+            | "as"
+            | "char"
+            | "vector"
+            | "string"
+            | "integers"
+            | "bools"
+            | "decimals"
+            | "strings"
+            | "tuple"
+            | "lambda"
+            | "if"
+            | "while"
+            | "let"
+            | "letrec"
+            | "mut"
+            | "do"
     )
 }
 
 fn local_lookup_fn_effect(
     local_fn_scopes: &[HashMap<String, EffectFlags>],
-    name: &str
+    name: &str,
 ) -> Option<EffectFlags> {
     for scope in local_fn_scopes.iter().rev() {
         if let Some(effect) = scope.get(name) {
@@ -216,7 +214,7 @@ fn local_lookup_fn_effect(
 fn estimate_effect_immutable(
     node: &TypedExpression,
     top_fn_effects: &HashMap<String, EffectFlags>,
-    local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>
+    local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>,
 ) -> EffectFlags {
     match &node.expr {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => EffectFlags::PURE,
@@ -242,38 +240,36 @@ fn estimate_effect_immutable(
                     let effect = estimate_effect_immutable(
                         &node.children[body_idx],
                         top_fn_effects,
-                        local_fn_scopes
+                        local_fn_scopes,
                     );
                     local_fn_scopes.pop();
                     effect
                 }
-                Expression::Word(op) if op == "if" =>
-                    node.children
-                        .iter()
-                        .skip(1)
-                        .fold(EffectFlags::PURE, |acc, ch| {
-                            acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
-                        }),
-                Expression::Word(op) if op == "while" =>
-                    node.children
-                        .iter()
-                        .skip(1)
-                        .fold(EffectFlags::PURE, |acc, ch| {
-                            acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
-                        }),
+                Expression::Word(op) if op == "if" => node
+                    .children
+                    .iter()
+                    .skip(1)
+                    .fold(EffectFlags::PURE, |acc, ch| {
+                        acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
+                    }),
+                Expression::Word(op) if op == "while" => node
+                    .children
+                    .iter()
+                    .skip(1)
+                    .fold(EffectFlags::PURE, |acc, ch| {
+                        acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
+                    }),
                 Expression::Word(op) if op == "do" => {
                     local_fn_scopes.push(HashMap::new());
                     let mut effect = EffectFlags::PURE;
                     for (idx, ch) in node.children.iter().enumerate().skip(1) {
                         effect |= estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes);
                         if let Some(Expression::Apply(form_items)) = items.get(idx) {
-                            if
-                                let [Expression::Word(kw), Expression::Word(name), rhs] =
-                                    &form_items[..]
+                            if let [Expression::Word(kw), Expression::Word(name), rhs] =
+                                &form_items[..]
                             {
-                                if
-                                    (kw == "let" || kw == "letrec") &&
-                                    matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
+                                if (kw == "let" || kw == "letrec")
+                                    && matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
                                 {
                                     if let Some(rhs_node) = ch.children.get(2) {
                                         if let Some(scope) = local_fn_scopes.last_mut() {
@@ -287,11 +283,11 @@ fn estimate_effect_immutable(
                     local_fn_scopes.pop();
                     effect
                 }
-                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" =>
-                    node.children
-                        .get(2)
-                        .map(|rhs| estimate_effect_immutable(rhs, top_fn_effects, local_fn_scopes))
-                        .unwrap_or(EffectFlags::PURE),
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => node
+                    .children
+                    .get(2)
+                    .map(|rhs| estimate_effect_immutable(rhs, top_fn_effects, local_fn_scopes))
+                    .unwrap_or(EffectFlags::PURE),
                 Expression::Word(op) => {
                     let mut effect = EffectFlags::PURE;
                     for ch in node.children.iter().skip(1) {
@@ -314,11 +310,8 @@ fn estimate_effect_immutable(
                 }
                 _ => {
                     let mut effect = EffectFlags::UNKNOWN_CALL;
-                    effect |= estimate_effect_immutable(
-                        head_child,
-                        top_fn_effects,
-                        local_fn_scopes
-                    );
+                    effect |=
+                        estimate_effect_immutable(head_child, top_fn_effects, local_fn_scopes);
                     for ch in node.children.iter().skip(1) {
                         effect |= estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes);
                     }
@@ -332,7 +325,7 @@ fn estimate_effect_immutable(
 fn annotate_effects_mut(
     node: &mut TypedExpression,
     top_fn_effects: &HashMap<String, EffectFlags>,
-    local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>
+    local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>,
 ) -> EffectFlags {
     let effect = match &node.expr {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => EffectFlags::PURE,
@@ -350,7 +343,7 @@ fn annotate_effects_mut(
                             let body_effect = annotate_effects_mut(
                                 &mut node.children[body_idx],
                                 top_fn_effects,
-                                local_fn_scopes
+                                local_fn_scopes,
                             );
                             local_fn_scopes.pop();
                             body_effect
@@ -370,17 +363,15 @@ fn annotate_effects_mut(
                             let child_effect = annotate_effects_mut(
                                 &mut node.children[idx],
                                 top_fn_effects,
-                                local_fn_scopes
+                                local_fn_scopes,
                             );
                             combined |= child_effect;
                             if let Some(Expression::Apply(form_items)) = items.get(idx) {
-                                if
-                                    let [Expression::Word(kw), Expression::Word(name), rhs] =
-                                        &form_items[..]
+                                if let [Expression::Word(kw), Expression::Word(name), rhs] =
+                                    &form_items[..]
                                 {
-                                    if
-                                        (kw == "let" || kw == "letrec") &&
-                                        matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
+                                    if (kw == "let" || kw == "letrec")
+                                        && matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
                                     {
                                         if let Some(rhs_node) = node.children[idx].children.get(2) {
                                             if let Some(scope) = local_fn_scopes.last_mut() {
@@ -410,8 +401,8 @@ fn annotate_effects_mut(
                             combined |= EffectFlags::IO;
                         } else if is_mutating_op(op) {
                             combined |= EffectFlags::MUTATE;
-                        } else if
-                            let Some(local_effect) = local_lookup_fn_effect(local_fn_scopes, op)
+                        } else if let Some(local_effect) =
+                            local_lookup_fn_effect(local_fn_scopes, op)
                         {
                             combined |= local_effect;
                         } else if let Some(top_effect) = top_fn_effects.get(op) {
@@ -438,7 +429,7 @@ fn annotate_effects_mut(
 }
 
 fn collect_top_level_lambda_defs<'a>(
-    node: &'a TypedExpression
+    node: &'a TypedExpression,
 ) -> HashMap<String, &'a TypedExpression> {
     let mut defs = HashMap::new();
     let Expression::Apply(items) = &node.expr else {
@@ -457,8 +448,7 @@ fn collect_top_level_lambda_defs<'a>(
         if kw != "let" && kw != "letrec" {
             continue;
         }
-        if
-            !matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
+        if !matches!(rhs, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
         {
             continue;
         }
@@ -520,24 +510,15 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                 let Some(let_node) = root.children.get(idx) else {
                     continue;
                 };
-                if
-                    let Some(message) = check_impure_binding_name(
-                        &items[idx],
-                        let_node,
-                        &mut known_requires_bang
-                    )
+                if let Some(message) =
+                    check_impure_binding_name(&items[idx], let_node, &mut known_requires_bang)
                 {
                     return Err(message);
                 }
             }
             return Ok(());
         }
-        if
-            let Some(message) = check_impure_binding_name(
-                &root.expr,
-                root,
-                &mut known_requires_bang
-            )
+        if let Some(message) = check_impure_binding_name(&root.expr, root, &mut known_requires_bang)
         {
             return Err(message);
         }
@@ -549,19 +530,13 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
 fn check_impure_binding_name(
     item_expr: &Expression,
     let_node: &TypedExpression,
-    known_requires_bang: &mut HashMap<String, bool>
+    known_requires_bang: &mut HashMap<String, bool>,
 ) -> Option<String> {
-    let (name, requires_bang) = eval_function_binding_requires_bang(
-        item_expr,
-        let_node,
-        known_requires_bang
-    )?;
+    let (name, requires_bang) =
+        eval_function_binding_requires_bang(item_expr, let_node, known_requires_bang)?;
     if requires_bang {
-        if
-            let Some(offending_idx) = eval_function_binding_non_first_mutation_target(
-                item_expr,
-                known_requires_bang
-            )
+        if let Some(offending_idx) =
+            eval_function_binding_non_first_mutation_target(item_expr, known_requires_bang)
         {
             return Some(
                 format!(
@@ -573,15 +548,18 @@ fn check_impure_binding_name(
             );
         }
     }
-    if
-        !requires_bang ||
-        is_impure_bang_exception_name(&name) ||
-        name.ends_with('!') ||
-        name.starts_with('_')
+    if !requires_bang
+        || is_impure_bang_exception_name(&name)
+        || name.ends_with('!')
+        || name.starts_with('_')
     {
         return None;
     }
-    Some(format!("Impure function '{}' must end with '!'\n{}", name, item_expr.to_lisp()))
+    Some(format!(
+        "Impure function '{}' must end with '!'\n{}",
+        name,
+        item_expr.to_lisp()
+    ))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -592,7 +570,7 @@ enum MutationBinding {
 
 fn resolve_mutation_binding(
     scopes: &[HashMap<String, MutationBinding>],
-    name: &str
+    name: &str,
 ) -> Option<MutationBinding> {
     for scope in scopes.iter().rev() {
         if let Some(binding) = scope.get(name) {
@@ -606,7 +584,7 @@ fn collect_target_param_usage(
     expr: &Expression,
     scopes: &[HashMap<String, MutationBinding>],
     uses_allowed_param: &mut bool,
-    first_non_first_param: &mut Option<usize>
+    first_non_first_param: &mut Option<usize>,
 ) {
     match expr {
         Expression::Int(_) | Expression::Dec(_) => {}
@@ -629,7 +607,7 @@ fn collect_target_param_usage(
                         item,
                         scopes,
                         uses_allowed_param,
-                        first_non_first_param
+                        first_non_first_param,
                     );
                 }
             } else {
@@ -638,7 +616,7 @@ fn collect_target_param_usage(
                         item,
                         scopes,
                         uses_allowed_param,
-                        first_non_first_param
+                        first_non_first_param,
                     );
                 }
             }
@@ -648,11 +626,16 @@ fn collect_target_param_usage(
 
 fn target_non_first_param_index(
     expr: &Expression,
-    scopes: &[HashMap<String, MutationBinding>]
+    scopes: &[HashMap<String, MutationBinding>],
 ) -> Option<usize> {
     let mut uses_allowed_param = false;
     let mut first_non_first_param = None;
-    collect_target_param_usage(expr, scopes, &mut uses_allowed_param, &mut first_non_first_param);
+    collect_target_param_usage(
+        expr,
+        scopes,
+        &mut uses_allowed_param,
+        &mut first_non_first_param,
+    );
     if uses_allowed_param {
         None
     } else {
@@ -663,7 +646,7 @@ fn target_non_first_param_index(
 fn expr_mutates_non_first_param(
     expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
-    scopes: &mut Vec<HashMap<String, MutationBinding>>
+    scopes: &mut Vec<HashMap<String, MutationBinding>>,
 ) -> Option<usize> {
     match expr {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => None,
@@ -679,20 +662,15 @@ fn expr_mutates_non_first_param(
                 Expression::Word(op) if op == "do" => {
                     scopes.push(HashMap::new());
                     for item in items.iter().skip(1) {
-                        if
-                            let Some(idx) = expr_mutates_non_first_param(
-                                item,
-                                known_requires_bang,
-                                scopes
-                            )
+                        if let Some(idx) =
+                            expr_mutates_non_first_param(item, known_requires_bang, scopes)
                         {
                             scopes.pop();
                             return Some(idx);
                         }
                         if let Expression::Apply(form_items) = item {
-                            if
-                                let [Expression::Word(kw), Expression::Word(name), _rhs] =
-                                    &form_items[..]
+                            if let [Expression::Word(kw), Expression::Word(name), _rhs] =
+                                &form_items[..]
                             {
                                 if kw == "let" || kw == "letrec" || kw == "mut" {
                                     if let Some(scope) = scopes.last_mut() {
@@ -705,12 +683,9 @@ fn expr_mutates_non_first_param(
                     scopes.pop();
                     None
                 }
-                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" =>
-                    items
-                        .get(2)
-                        .and_then(|rhs|
-                            expr_mutates_non_first_param(rhs, known_requires_bang, scopes)
-                        ),
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => items
+                    .get(2)
+                    .and_then(|rhs| expr_mutates_non_first_param(rhs, known_requires_bang, scopes)),
                 Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
                     if let Some(target) = items.get(1) {
                         if let Some(idx) = target_non_first_param_index(target, scopes) {
@@ -718,12 +693,8 @@ fn expr_mutates_non_first_param(
                         }
                     }
                     for item in items.iter().skip(1) {
-                        if
-                            let Some(idx) = expr_mutates_non_first_param(
-                                item,
-                                known_requires_bang,
-                                scopes
-                            )
+                        if let Some(idx) =
+                            expr_mutates_non_first_param(item, known_requires_bang, scopes)
                         {
                             return Some(idx);
                         }
@@ -732,12 +703,8 @@ fn expr_mutates_non_first_param(
                 }
                 _ => {
                     for item in items.iter().skip(1) {
-                        if
-                            let Some(idx) = expr_mutates_non_first_param(
-                                item,
-                                known_requires_bang,
-                                scopes
-                            )
+                        if let Some(idx) =
+                            expr_mutates_non_first_param(item, known_requires_bang, scopes)
                         {
                             return Some(idx);
                         }
@@ -751,7 +718,7 @@ fn expr_mutates_non_first_param(
 
 fn eval_function_binding_non_first_mutation_target(
     item_expr: &Expression,
-    known_requires_bang: &HashMap<String, bool>
+    known_requires_bang: &HashMap<String, bool>,
 ) -> Option<usize> {
     let Expression::Apply(let_items) = item_expr else {
         return None;
@@ -765,9 +732,8 @@ fn eval_function_binding_non_first_mutation_target(
     let Expression::Apply(lambda_items) = rhs else {
         return None;
     };
-    if
-        lambda_items.len() < 2 ||
-        !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
+    if lambda_items.len() < 2
+        || !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
     {
         return None;
     }
@@ -781,7 +747,8 @@ fn eval_function_binding_non_first_mutation_target(
             .iter()
             .skip(1)
             .take(lambda_items.len().saturating_sub(2))
-            .enumerate() {
+            .enumerate()
+        {
             if let Expression::Word(name) = param {
                 scope.insert(name.clone(), MutationBinding::Param(idx));
             }
@@ -793,29 +760,29 @@ fn eval_function_binding_non_first_mutation_target(
 fn is_impure_bang_exception_name(name: &str) -> bool {
     matches!(
         name,
-        "set" |
-            "Id" |
-            "+=" |
-            "-=" |
-            "*=" |
-            "/=" |
-            "++" |
-            "--" |
-            "**" |
-            "+=." |
-            "-=." |
-            "*=." |
-            "/=." |
-            "++." |
-            "--." |
-            "**."
+        "set"
+            | "Id"
+            | "+="
+            | "-="
+            | "*="
+            | "/="
+            | "++"
+            | "--"
+            | "**"
+            | "+=."
+            | "-=."
+            | "*=."
+            | "/=."
+            | "++."
+            | "--."
+            | "**."
     )
 }
 
 fn eval_function_binding_requires_bang(
     item_expr: &Expression,
     let_node: &TypedExpression,
-    known_requires_bang: &mut HashMap<String, bool>
+    known_requires_bang: &mut HashMap<String, bool>,
 ) -> Option<(String, bool)> {
     let Expression::Apply(let_items) = item_expr else {
         return None;
@@ -838,17 +805,19 @@ fn eval_function_binding_requires_bang(
             if alias_target.contains('/') {
                 false
             } else {
-                known_requires_bang.get(alias_target).copied().unwrap_or(false)
+                known_requires_bang
+                    .get(alias_target)
+                    .copied()
+                    .unwrap_or(false)
             }
         }
-        _ =>
-            match rhs {
-                Expression::Apply(rhs_items) => {
-                    matches!(rhs_items.first(), Some(Expression::Word(w)) if w == "lambda") &&
-                        lambda_requires_bang(rhs, known_requires_bang)
-                }
-                _ => false,
+        _ => match rhs {
+            Expression::Apply(rhs_items) => {
+                matches!(rhs_items.first(), Some(Expression::Word(w)) if w == "lambda")
+                    && lambda_requires_bang(rhs, known_requires_bang)
             }
+            _ => false,
+        },
     };
 
     known_requires_bang.insert(name.clone(), requires_bang);
@@ -857,7 +826,7 @@ fn eval_function_binding_requires_bang(
 
 pub fn collect_top_level_function_external_impurity(
     root: &TypedExpression,
-    out: &mut HashMap<String, bool>
+    out: &mut HashMap<String, bool>,
 ) {
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
     if let Expression::Apply(items) = &root.expr {
@@ -867,25 +836,19 @@ pub fn collect_top_level_function_external_impurity(
                     let Some(let_node) = root.children.get(idx) else {
                         continue;
                     };
-                    if
-                        let Some((name, requires)) = eval_function_binding_requires_bang(
-                            &items[idx],
-                            let_node,
-                            &mut known_requires_bang
-                        )
-                    {
+                    if let Some((name, requires)) = eval_function_binding_requires_bang(
+                        &items[idx],
+                        let_node,
+                        &mut known_requires_bang,
+                    ) {
                         out.insert(name, requires);
                     }
                 }
             }
             return;
         }
-        if
-            let Some((name, requires)) = eval_function_binding_requires_bang(
-                &root.expr,
-                root,
-                &mut known_requires_bang
-            )
+        if let Some((name, requires)) =
+            eval_function_binding_requires_bang(&root.expr, root, &mut known_requires_bang)
         {
             out.insert(name, requires);
         }
@@ -894,7 +857,7 @@ pub fn collect_top_level_function_external_impurity(
 
 fn lambda_requires_bang(
     lambda_expr: &Expression,
-    known_requires_bang: &HashMap<String, bool>
+    known_requires_bang: &HashMap<String, bool>,
 ) -> bool {
     let Expression::Apply(items) = lambda_expr else {
         return false;
@@ -930,7 +893,7 @@ fn resolve_binding_kind(scopes: &[HashMap<String, bool>], name: &str) -> Option<
 fn expr_requires_bang(
     expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
-    scopes: &mut Vec<HashMap<String, bool>>
+    scopes: &mut Vec<HashMap<String, bool>>,
 ) -> bool {
     match expr {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => false,
@@ -954,9 +917,8 @@ fn expr_requires_bang(
                             return true;
                         }
                         if let Expression::Apply(form_items) = item {
-                            if
-                                let [Expression::Word(kw), Expression::Word(name), _rhs] =
-                                    &form_items[..]
+                            if let [Expression::Word(kw), Expression::Word(name), _rhs] =
+                                &form_items[..]
                             {
                                 if kw == "let" || kw == "letrec" || kw == "mut" {
                                     if let Some(scope) = scopes.last_mut() {
@@ -969,11 +931,10 @@ fn expr_requires_bang(
                     scopes.pop();
                     false
                 }
-                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" =>
-                    items
-                        .get(2)
-                        .map(|rhs| expr_requires_bang(rhs, known_requires_bang, scopes))
-                        .unwrap_or(false),
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => items
+                    .get(2)
+                    .map(|rhs| expr_requires_bang(rhs, known_requires_bang, scopes))
+                    .unwrap_or(false),
                 Expression::Word(op) if is_io_op(op) => true,
                 Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
                     let Some(target) = items.get(1) else {
@@ -1015,7 +976,11 @@ fn expr_uses_param_or_free_var(expr: &Expression, scopes: &[HashMap<String, bool
     match expr {
         Expression::Int(_) | Expression::Dec(_) => false,
         Expression::Word(name) => {
-            if let Some(is_param) = resolve_binding_kind(scopes, name) { is_param } else { true }
+            if let Some(is_param) = resolve_binding_kind(scopes, name) {
+                is_param
+            } else {
+                true
+            }
         }
         Expression::Apply(items) => {
             if items.is_empty() {
@@ -1030,14 +995,17 @@ fn expr_uses_param_or_free_var(expr: &Expression, scopes: &[HashMap<String, bool
                     .skip(1)
                     .any(|item| expr_uses_param_or_free_var(item, scopes))
             } else {
-                items.iter().any(|item| expr_uses_param_or_free_var(item, scopes))
+                items
+                    .iter()
+                    .any(|item| expr_uses_param_or_free_var(item, scopes))
             }
         }
     }
 }
 
 fn src_to_pretty(src: &TypeError) -> String {
-    let joined = src.expr
+    let joined = src
+        .expr
         .iter()
         .map(|e| e.to_lisp())
         .collect::<Vec<_>>()
@@ -1047,7 +1015,10 @@ fn src_to_pretty(src: &TypeError) -> String {
         TypeErrorVariant::Call => format!("({})", joined),
         TypeErrorVariant::IfCond => format!("Condition must be Bool\n(if {})", joined),
         TypeErrorVariant::IfBody => {
-            format!("Concequent and alternative must match types\n(if {})", joined)
+            format!(
+                "Concequent and alternative must match types\n(if {})",
+                joined
+            )
         }
         TypeErrorVariant::Source => joined,
     }
@@ -1105,10 +1076,11 @@ impl InferenceContext {
     }
 
     pub fn current_error_scope(&self) -> Option<InferErrorScope> {
-        self.current_user_top_form.map(|user_top_form| InferErrorScope {
-            user_top_form,
-            lambda_path: self.scope_lambda_path.clone(),
-        })
+        self.current_user_top_form
+            .map(|user_top_form| InferErrorScope {
+                user_top_form,
+                lambda_path: self.scope_lambda_path.clone(),
+            })
     }
 
     pub fn type_error(&self, variant: TypeErrorVariant, expr: Vec<Expression>) -> TypeError {
@@ -1178,7 +1150,8 @@ impl InferenceContext {
     pub fn is_mut_binding(&self, name: &str) -> bool {
         for (scope_idx, scope) in self.env.scopes.iter().enumerate().rev() {
             if scope.contains_key(name) {
-                return self.mut_scopes
+                return self
+                    .mut_scopes
                     .get(scope_idx)
                     .map(|mut_scope| mut_scope.contains(name))
                     .unwrap_or(false);
@@ -1272,26 +1245,24 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 
 fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     match expr {
-        Expression::Word(name) =>
-            match name.as_str() {
-                "Int" => Ok(Type::Int),
-                "Dec" => Ok(Type::Dec),
-                "Bool" => Ok(Type::Bool),
-                "Char" => Ok(Type::Char),
-                _ => Ok(ctx.fresh_var()), // unknown type name
-            }
+        Expression::Word(name) => match name.as_str() {
+            "Int" => Ok(Type::Int),
+            "Dec" => Ok(Type::Dec),
+            "Bool" => Ok(Type::Bool),
+            "Char" => Ok(Type::Char),
+            _ => Ok(ctx.fresh_var()), // unknown type name
+        },
 
         // Handles list-like hints like [Int], [[Char]], etc.
         Expression::Apply(items) if !items.is_empty() => {
             // A shorthand for [T] means (vector T)
             if let Expression::Word(t) = &items[0] {
-                if
-                    t == "vector" ||
-                    t == "string" ||
-                    t == "integers" ||
-                    t == "bools" ||
-                    t == "decimals" ||
-                    t == "strings"
+                if t == "vector"
+                    || t == "string"
+                    || t == "integers"
+                    || t == "bools"
+                    || t == "decimals"
+                    || t == "strings"
                 {
                     if items.len() == 2 {
                         let inner = parse_type_hint(&items[1], ctx)?;
@@ -1299,9 +1270,10 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     }
                 } else if t == "tuple" {
                     if items.len() < 2 {
-                        return Err(
-                            format!("Tuple type must have at least one element: {}", expr.to_lisp())
-                        );
+                        return Err(format!(
+                            "Tuple type must have at least one element: {}",
+                            expr.to_lisp()
+                        ));
                     }
                     let mut elems = Vec::new();
                     for elem_expr in &items[1..] {
@@ -1351,18 +1323,15 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     match (&expr_type, &type_hint) {
         (Type::Tuple(expr_elems), Type::Tuple(hint_elems)) => {
             if expr_elems.len() != hint_elems.len() {
-                return Err(
-                    format!(
-                        "Tuple length mismatch in as: {} vs {}\n(as {})",
-                        expr_elems.len(),
-                        hint_elems.len(),
-                        args
-                            .iter()
-                            .map(|e| e.to_lisp())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    )
-                );
+                return Err(format!(
+                    "Tuple length mismatch in as: {} vs {}\n(as {})",
+                    expr_elems.len(),
+                    hint_elems.len(),
+                    args.iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ));
             }
 
             // Create constraints for each element
@@ -1370,23 +1339,20 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
                 ctx.add_constraint(
                     e.clone(),
                     h.clone(),
-                    ctx.type_error(TypeErrorVariant::Source, args.to_vec())
+                    ctx.type_error(TypeErrorVariant::Source, args.to_vec()),
                 );
             }
 
             return Ok(type_hint);
         }
         (Type::Tuple(_), _) | (_, Type::Tuple(_)) => {
-            return Err(
-                format!(
-                    "Cannot cast between tuple and non-tuple types\n(as {})",
-                    args
-                        .iter()
-                        .map(|e| e.to_lisp())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-            );
+            return Err(format!(
+                "Cannot cast between tuple and non-tuple types\n(as {})",
+                args.iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
         }
         _ => {}
     }
@@ -1399,31 +1365,25 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
 
     // If expr_type is a type variable, allow up to (≤) right-side arity
     if is_expr_var && expr_arity > hint_arity {
-        return Err(
-            format!(
-                "Type variable in as cannot represent deeper nesting: {} vs {}",
-                expr_type,
-                type_hint
-            )
-        );
+        return Err(format!(
+            "Type variable in as cannot represent deeper nesting: {} vs {}",
+            expr_type, type_hint
+        ));
     }
 
     // Check arity mismatch for lists/functions
     if !is_expr_var && expr_arity != hint_arity {
-        return Err(
-            format!(
-                "Type arity mismatch in as: left has arity {}, right has arity {} ({} vs {})\n(as {})",
-                expr_arity,
-                hint_arity,
-                expr_type,
-                type_hint,
-                args
-                    .iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        );
+        return Err(format!(
+            "Type arity mismatch in as: left has arity {}, right has arity {} ({} vs {})\n(as {})",
+            expr_arity,
+            hint_arity,
+            expr_type,
+            type_hint,
+            args.iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
 
     // Array element restriction)
@@ -1432,7 +1392,7 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         let inner_hint = inner_type(&type_hint);
 
         match (inner_expr, inner_hint) {
-            | (Type::Int, Type::Int)
+            (Type::Int, Type::Int)
             | (Type::Dec, Type::Dec)
             | (Type::Int, Type::Bool)
             | (Type::Int, Type::Char)
@@ -1445,18 +1405,15 @@ pub fn infer_as(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
             | (Type::Var(_), _)
             | (_, Type::Var(_)) => (),
             _ => {
-                return Err(
-                    format!(
-                        "Invalid array cast in as: cannot cast {} to {}\n(as {})",
-                        expr_type,
-                        type_hint,
-                        args
-                            .iter()
-                            .map(|e| e.to_lisp())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    )
-                );
+                return Err(format!(
+                    "Invalid array cast in as: cannot cast {} to {}\n(as {})",
+                    expr_type,
+                    type_hint,
+                    args.iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ));
             }
         }
     }
@@ -1487,16 +1444,14 @@ fn infer_lambda_inner(exprs: &[Expression], ctx: &mut InferenceContext) -> Resul
         if let Expression::Word(name) = &args[i] {
             param_names.push(name.clone());
         } else {
-            return Err(
-                format!(
-                    "Lambda parameters must be variable names\n({})",
-                    exprs
-                        .iter()
-                        .map(|e| e.to_lisp())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-            );
+            return Err(format!(
+                "Lambda parameters must be variable names\n({})",
+                exprs
+                    .iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
         }
     }
 
@@ -1556,7 +1511,7 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
     ctx.add_constraint(
         cond_type.clone(),
         Type::Bool,
-        ctx.type_error(TypeErrorVariant::IfCond, args.to_vec())
+        ctx.type_error(TypeErrorVariant::IfCond, args.to_vec()),
     );
     // Infer then and else types
     let then_type = infer_expr(then_expr, ctx)?;
@@ -1566,7 +1521,7 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
     ctx.add_constraint(
         then_type.clone(),
         else_type,
-        ctx.type_error(TypeErrorVariant::IfBody, args.to_vec())
+        ctx.type_error(TypeErrorVariant::IfBody, args.to_vec()),
     );
 
     Ok(then_type)
@@ -1575,26 +1530,24 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
 fn infer_while(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err(
+        return Err(format!(
+            "while expects exactly 2 arguments: condition and body\n{}",
             format!(
-                "while expects exactly 2 arguments: condition and body\n{}",
-                format!(
-                    "({})",
-                    exprs
-                        .iter()
-                        .map(|e| e.to_lisp())
-                        .collect::<Vec<String>>()
-                        .join(" ")
-                )
+                "({})",
+                exprs
+                    .iter()
+                    .map(|e| e.to_lisp())
+                    .collect::<Vec<String>>()
+                    .join(" ")
             )
-        );
+        ));
     }
 
     let cond_type = infer_expr(&args[0], ctx)?;
     ctx.add_constraint(
         cond_type,
         Type::Bool,
-        ctx.type_error(TypeErrorVariant::Source, vec![args[0].clone()])
+        ctx.type_error(TypeErrorVariant::Source, vec![args[0].clone()]),
     );
 
     // while body is lexical: declarations inside it should not leak into surrounding scope.
@@ -1605,7 +1558,7 @@ fn infer_while(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     ctx.add_constraint(
         body_type,
         Type::Unit,
-        ctx.type_error(TypeErrorVariant::Source, vec![args[1].clone()])
+        ctx.type_error(TypeErrorVariant::Source, vec![args[1].clone()]),
     );
 
     Ok(Type::Unit)
@@ -1615,14 +1568,13 @@ fn is_nonexpansive(expr: &Expression) -> bool {
     match expr {
         Expression::Word(_) | Expression::Int(_) | Expression::Dec(_) => true,
 
-        Expression::Apply(list) if !list.is_empty() =>
-            match &list[0] {
-                Expression::Word(name) if name == "lambda" => true,
-                // This is commented out because it will otherwise cause a bug with mutaiton (set!) inference
-                // and keep the vector polymorphic for empty nested vectors [[]]
-                // Expression::Word(name) if name == "vector" => !list[1..].is_empty(),
-                _ => false,
-            }
+        Expression::Apply(list) if !list.is_empty() => match &list[0] {
+            Expression::Word(name) if name == "lambda" => true,
+            // This is commented out because it will otherwise cause a bug with mutaiton (set!) inference
+            // and keep the vector polymorphic for empty nested vectors [[]]
+            // Expression::Word(name) if name == "vector" => !list[1..].is_empty(),
+            _ => false,
+        },
 
         _ => false,
     }
@@ -1645,17 +1597,16 @@ impl Unifier {
     fn find_var(&mut self, id: u64) -> Type {
         match self.binds.get(&id).cloned() {
             None => Type::Var(TypeVar::new(id)),
-            Some(ty) =>
-                match ty {
-                    Type::Var(ref v) if v.id != id => {
-                        // path compress
-                        let rep = self.find_var(v.id);
-                        // store the rep
-                        self.binds.insert(id, rep.clone());
-                        rep
-                    }
-                    other => other,
+            Some(ty) => match ty {
+                Type::Var(ref v) if v.id != id => {
+                    // path compress
+                    let rep = self.find_var(v.id);
+                    // store the rep
+                    self.binds.insert(id, rep.clone());
+                    rep
                 }
+                other => other,
+            },
         }
     }
 
@@ -1673,13 +1624,7 @@ impl Unifier {
             Type::Function(a, b) => {
                 Type::Function(Box::new(self.apply(a)), Box::new(self.apply(b)))
             }
-            Type::Tuple(items) =>
-                Type::Tuple(
-                    items
-                        .iter()
-                        .map(|t| self.apply(t))
-                        .collect()
-                ),
+            Type::Tuple(items) => Type::Tuple(items.iter().map(|t| self.apply(t)).collect()),
             other => other.clone(),
         }
     }
@@ -1737,7 +1682,7 @@ impl Unifier {
 
 /// Solve constraints: each constraint carries a TypeError (source) so we can produce a helpful message.
 pub fn solve_constraints_list(
-    constraints: &Vec<(Type, Type, TypeError)>
+    constraints: &Vec<(Type, Type, TypeError)>,
 ) -> Result<HashMap<u64, Type>, SolveError> {
     let mut unifier = Unifier::new();
     let mut work: VecDeque<(Type, Type, TypeError)> = VecDeque::new();
@@ -1778,7 +1723,7 @@ pub fn solve_constraints_list(
                                 a_items.len(),
                                 b_items.len()
                             ),
-                            &src
+                            &src,
                         ),
                         scope: src.scope.clone(),
                     });
@@ -1802,40 +1747,35 @@ pub fn solve_constraints_list(
 
 pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
     match ty {
-        Type::Var(var) =>
-            match subst.get(&var.id) {
-                Some(t) => apply_subst_map_to_type(subst, t),
-                None => Type::Var(var.clone()),
-            }
+        Type::Var(var) => match subst.get(&var.id) {
+            Some(t) => apply_subst_map_to_type(subst, t),
+            None => Type::Var(var.clone()),
+        },
         Type::List(inner) => Type::List(Box::new(apply_subst_map_to_type(subst, inner))),
-        Type::Function(a, b) =>
-            Type::Function(
-                Box::new(apply_subst_map_to_type(subst, a)),
-                Box::new(apply_subst_map_to_type(subst, b))
-            ),
-        Type::Tuple(items) =>
-            Type::Tuple(
-                items
-                    .iter()
-                    .map(|it| apply_subst_map_to_type(subst, it))
-                    .collect()
-            ),
+        Type::Function(a, b) => Type::Function(
+            Box::new(apply_subst_map_to_type(subst, a)),
+            Box::new(apply_subst_map_to_type(subst, b)),
+        ),
+        Type::Tuple(items) => Type::Tuple(
+            items
+                .iter()
+                .map(|it| apply_subst_map_to_type(subst, it))
+                .collect(),
+        ),
         other => other.clone(),
     }
 }
 fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err(
-            format!(
-                "Let requires exactly 2 arguments: variable and value\n({})",
-                exprs
-                    .iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        );
+        return Err(format!(
+            "Let requires exactly 2 arguments: variable and value\n({})",
+            exprs
+                .iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
 
     let var_expr = &args[0];
@@ -1847,7 +1787,8 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         // assign a fresh monotype placeholder
         let tv = ctx.fresh_var();
 
-        ctx.env.insert(name.clone(), TypeScheme::monotype(tv.clone()))?;
+        ctx.env
+            .insert(name.clone(), TypeScheme::monotype(tv.clone()))?;
 
         let value_type = infer_expr(value_expr, ctx)?;
 
@@ -1876,16 +1817,14 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err(
-            format!(
-                "Let requires exactly 2 arguments: variable and value\n({})",
-                exprs
-                    .iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        );
+        return Err(format!(
+            "Let requires exactly 2 arguments: variable and value\n({})",
+            exprs
+                .iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
 
     let var_expr = &args[0];
@@ -1894,7 +1833,8 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
 
-        let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
+        let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
+            .constraints
             .iter()
             .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
             .collect();
@@ -1924,16 +1864,14 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err(
-            format!(
-                "mut requires exactly 2 arguments: variable and value\n({})",
-                exprs
-                    .iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        );
+        return Err(format!(
+            "mut requires exactly 2 arguments: variable and value\n({})",
+            exprs
+                .iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
 
     let var_expr = &args[0];
@@ -1942,7 +1880,8 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
 
-        let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
+        let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
+            .constraints
             .iter()
             .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
             .collect();
@@ -1968,7 +1907,8 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
             return Err("mut cannot bind Unit values".to_string());
         }
         // Mutable bindings are monomorphic by design.
-        ctx.env.insert(var_name.clone(), TypeScheme::monotype(solved_type))?;
+        ctx.env
+            .insert(var_name.clone(), TypeScheme::monotype(solved_type))?;
         ctx.mark_mut_binding(var_name.clone());
         Ok(Type::Unit)
     } else {
@@ -1979,16 +1919,14 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 fn infer_alter(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
-        return Err(
-            format!(
-                "alter! requires exactly 2 arguments: variable and value\n({})",
-                exprs
-                    .iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        );
+        return Err(format!(
+            "alter! requires exactly 2 arguments: variable and value\n({})",
+            exprs
+                .iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
 
     let var_expr = &args[0];
@@ -2010,7 +1948,10 @@ fn infer_alter(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     };
 
     if !ctx.is_mut_binding(var_name) {
-        return Err(format!("alter! can only update mutable variables: {}", var_name));
+        return Err(format!(
+            "alter! can only update mutable variables: {}",
+            var_name
+        ));
     }
 
     let var_type = ctx.instantiate(&var_scheme);
@@ -2018,7 +1959,7 @@ fn infer_alter(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     ctx.add_constraint(
         var_type,
         value_type,
-        ctx.type_error(TypeErrorVariant::Source, args.to_vec())
+        ctx.type_error(TypeErrorVariant::Source, args.to_vec()),
     );
     Ok(Type::Unit)
 }
@@ -2027,7 +1968,7 @@ fn infer_alter(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
 fn infer_do(
     expr: &Expression,
     exprs: &[Expression],
-    ctx: &mut InferenceContext
+    ctx: &mut InferenceContext,
 ) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.is_empty() {
@@ -2093,7 +2034,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.add_constraint(
                     first.clone(),
                     t.clone(),
-                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
+                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec()),
                 );
             }
             // Return the type of the vector (List of the first element type)
@@ -2141,7 +2082,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                         ctx.add_constraint(
                             Type::Char,
                             valid_type,
-                            ctx.type_error(TypeErrorVariant::Vector, args.to_vec())
+                            ctx.type_error(TypeErrorVariant::Vector, args.to_vec()),
                         );
                     }
                     Err(e) => {
@@ -2162,16 +2103,14 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
         } else if name == "tuple" {
             let args = &exprs[1..];
             if args.len() != 2 {
-                return Err(
-                    format!(
-                        "Tuples can only store 2 values but got ({})",
-                        exprs
-                            .iter()
-                            .map(|e| e.to_lisp())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    )
-                );
+                return Err(format!(
+                    "Tuples can only store 2 values but got ({})",
+                    exprs
+                        .iter()
+                        .map(|e| e.to_lisp())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ));
             }
             let mut elem_types = Vec::new();
             for arg in args {
@@ -2205,25 +2144,23 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.add_constraint(
                     Type::Var(tv.clone()),
                     func_ty,
-                    ctx.type_error(TypeErrorVariant::Source, exprs.to_vec())
+                    ctx.type_error(TypeErrorVariant::Source, exprs.to_vec()),
                 );
                 return Ok(ret_ty);
             }
             _ => {
-                return Err(
+                return Err(format!(
+                    "Cannot apply non-function type: {}\n{}",
+                    func_type,
                     format!(
-                        "Cannot apply non-function type: {}\n{}",
-                        func_type,
-                        format!(
-                            "({})",
-                            exprs
-                                .into_iter()
-                                .map(|e| e.to_lisp())
-                                .collect::<Vec<String>>()
-                                .join(" ")
-                        )
+                        "({})",
+                        exprs
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" ")
                     )
-                );
+                ));
             }
         }
     }
@@ -2234,7 +2171,7 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.add_constraint(
                     *param_ty.clone(),
                     arg_type,
-                    ctx.type_error(TypeErrorVariant::Call, exprs.to_vec())
+                    ctx.type_error(TypeErrorVariant::Call, exprs.to_vec()),
                 );
                 func_type = *ret_ty;
             }
@@ -2242,34 +2179,30 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 // If it's a type variable, assume it's a function type
                 {
                     let ret_ty = ctx.fresh_var();
-                    let func_ty = Type::Function(
-                        Box::new(arg_type.clone()),
-                        Box::new(ret_ty.clone())
-                    );
+                    let func_ty =
+                        Type::Function(Box::new(arg_type.clone()), Box::new(ret_ty.clone()));
                     // Constrain tv = (arg -> ret)
                     ctx.add_constraint(
                         Type::Var(tv.clone()),
                         func_ty,
-                        ctx.type_error(TypeErrorVariant::Source, vec![arg.clone()])
+                        ctx.type_error(TypeErrorVariant::Source, vec![arg.clone()]),
                     );
                     func_type = ret_ty;
                 }
             }
             _ => {
-                return Err(
+                return Err(format!(
+                    "Cannot apply non-function type: {}\n{}",
+                    func_type,
                     format!(
-                        "Cannot apply non-function type: {}\n{}",
-                        func_type,
-                        format!(
-                            "({})",
-                            exprs
-                                .into_iter()
-                                .map(|e| e.to_lisp())
-                                .collect::<Vec<String>>()
-                                .join(" ")
-                        )
+                        "({})",
+                        exprs
+                            .into_iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" ")
                     )
-                );
+                ));
             }
         }
     }
@@ -2304,7 +2237,7 @@ fn infer_call_arg(arg: &Expression, ctx: &mut InferenceContext) -> Result<Type, 
 fn infer_with_builtins_typed_internal(
     expr: &Expression,
     (env, init_id): (TypeEnv, u64),
-    user_form_count_for_scope: Option<usize>
+    user_form_count_for_scope: Option<usize>,
 ) -> Result<(Type, TypedExpression), InferErrorInfo> {
     let mut ctx = InferenceContext {
         env,
@@ -2336,7 +2269,8 @@ fn infer_with_builtins_typed_internal(
         }
     };
 
-    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx.constraints
+    let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
+        .constraints
         .iter()
         .map(|(a, b, src)| (a.clone(), b.clone(), src.clone()))
         .collect();
@@ -2357,7 +2291,8 @@ fn infer_with_builtins_typed_internal(
     let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
     ctx.env.apply_substitution_map(&subst_map);
 
-    let solved_expr_types: HashMap<usize, Type> = ctx.expr_types
+    let solved_expr_types: HashMap<usize, Type> = ctx
+        .expr_types
         .iter()
         .map(|(id, typ)| (*id, apply_subst_map_to_type(&subst_map, typ)))
         .collect();
@@ -2376,7 +2311,7 @@ fn infer_with_builtins_typed_internal(
 
 pub fn infer_with_builtins_typed(
     expr: &Expression,
-    (env, init_id): (TypeEnv, u64)
+    (env, init_id): (TypeEnv, u64),
 ) -> Result<(Type, TypedExpression), String> {
     infer_with_builtins_typed_internal(expr, (env, init_id), None).map_err(|e| e.message)
 }
@@ -2384,7 +2319,7 @@ pub fn infer_with_builtins_typed(
 pub fn infer_with_builtins_typed_lsp(
     expr: &Expression,
     (env, init_id): (TypeEnv, u64),
-    user_form_count: usize
+    user_form_count: usize,
 ) -> Result<(Type, TypedExpression), InferErrorInfo> {
     infer_with_builtins_typed_internal(expr, (env, init_id), Some(user_form_count))
 }

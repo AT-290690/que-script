@@ -1,7 +1,7 @@
-use crate::infer::{ infer_with_builtins_typed, EffectFlags, InferErrorScope, TypedExpression };
-use crate::parser::{ self, Expression };
-use crate::types::{ create_builtin_environment, Type, TypeEnv };
-use std::collections::{ HashMap, HashSet };
+use crate::infer::{infer_with_builtins_typed, EffectFlags, InferErrorScope, TypedExpression};
+use crate::parser::{self, Expression};
+use crate::types::{create_builtin_environment, Type, TypeEnv};
+use std::collections::{HashMap, HashSet};
 
 pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 18] = [
     ("alter!", "T -> T -> ()"),
@@ -118,8 +118,13 @@ pub fn strip_type_var_numbers(input: &str) -> String {
 }
 
 pub fn build_base_environment(
-    std_defs: &[Expression]
-) -> (TypeEnv, u64, HashMap<String, String>, HashMap<String, EffectFlags>) {
+    std_defs: &[Expression],
+) -> (
+    TypeEnv,
+    u64,
+    HashMap<String, String>,
+    HashMap<String, EffectFlags>,
+) {
     let (env, next_id) = create_builtin_environment(TypeEnv::new());
 
     let mut signatures = HashMap::new();
@@ -135,7 +140,9 @@ pub fn build_base_environment(
         signatures.insert(name, normalize_signature(&signature));
     }
     for (name, signature) in LSP_SPECIAL_KEYWORD_SIGNATURES {
-        signatures.entry(name.to_string()).or_insert_with(|| normalize_signature(signature));
+        signatures
+            .entry(name.to_string())
+            .or_insert_with(|| normalize_signature(signature));
     }
 
     let std_effects = infer_std_effects(&env, next_id, std_defs);
@@ -153,11 +160,10 @@ pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<Strin
     for expr in std_defs {
         if let Expression::Apply(items) = expr {
             if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
-                if
-                    keyword == "let" ||
-                    keyword == "letrec" ||
-                    keyword == "mut" ||
-                    keyword == "letmacro"
+                if keyword == "let"
+                    || keyword == "letrec"
+                    || keyword == "mut"
+                    || keyword == "letmacro"
                 {
                     names.insert(name.clone());
                 }
@@ -170,7 +176,7 @@ pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<Strin
 pub fn infer_std_signatures(
     base_env: &TypeEnv,
     base_next_id: u64,
-    std_defs: &[Expression]
+    std_defs: &[Expression],
 ) -> HashMap<String, String> {
     let mut raw_signatures: HashMap<String, Type> = HashMap::new();
     if std_defs.is_empty() {
@@ -178,17 +184,13 @@ pub fn infer_std_signatures(
     }
 
     let std_program = Expression::Apply(
-        std::iter
-            ::once(Expression::Word("do".to_string()))
+        std::iter::once(Expression::Word("do".to_string()))
             .chain(std_defs.iter().cloned())
-            .collect()
+            .collect(),
     );
 
-    if
-        let Ok((_typ, typed)) = infer_with_builtins_typed(&std_program, (
-            base_env.clone(),
-            base_next_id,
-        ))
+    if let Ok((_typ, typed)) =
+        infer_with_builtins_typed(&std_program, (base_env.clone(), base_next_id))
     {
         collect_let_binding_types(&typed, &mut raw_signatures);
     }
@@ -202,25 +204,21 @@ pub fn infer_std_signatures(
 pub fn infer_std_effects(
     base_env: &TypeEnv,
     base_next_id: u64,
-    std_defs: &[Expression]
+    std_defs: &[Expression],
 ) -> HashMap<String, EffectFlags> {
     if std_defs.is_empty() {
         return HashMap::new();
     }
 
     let std_program = Expression::Apply(
-        std::iter
-            ::once(Expression::Word("do".to_string()))
+        std::iter::once(Expression::Word("do".to_string()))
             .chain(std_defs.iter().cloned())
-            .collect()
+            .collect(),
     );
 
     let mut effects: HashMap<String, EffectFlags> = HashMap::new();
-    if
-        let Ok((_typ, typed)) = infer_with_builtins_typed(&std_program, (
-            base_env.clone(),
-            base_next_id,
-        ))
+    if let Ok((_typ, typed)) =
+        infer_with_builtins_typed(&std_program, (base_env.clone(), base_next_id))
     {
         collect_let_binding_effects(&typed, &mut effects, &HashMap::new());
         let mut fallback = effects.clone();
@@ -284,7 +282,7 @@ fn should_replace_effect(existing: EffectFlags, candidate: EffectFlags) -> bool 
 pub fn collect_let_binding_effects(
     node: &TypedExpression,
     effects: &mut HashMap<String, EffectFlags>,
-    fallback_effects: &HashMap<String, EffectFlags>
+    fallback_effects: &HashMap<String, EffectFlags>,
 ) {
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
@@ -293,12 +291,11 @@ pub fn collect_let_binding_effects(
                     let mut rhs_effect = rhs_node.effect;
                     if rhs_effect.is_pure() {
                         if let Expression::Word(alias_target) = &rhs_node.expr {
-                            if
-                                let Some(target_effect) = effects
-                                    .get(alias_target)
-                                    .copied()
-                                    .or_else(|| fallback_effects.get(alias_target).copied())
-                                    .or_else(|| known_symbol_effect(alias_target))
+                            if let Some(target_effect) = effects
+                                .get(alias_target)
+                                .copied()
+                                .or_else(|| fallback_effects.get(alias_target).copied())
+                                .or_else(|| known_symbol_effect(alias_target))
                             {
                                 rhs_effect = target_effect;
                             }
@@ -325,20 +322,18 @@ pub fn collect_let_binding_effects(
 }
 
 pub fn known_symbol_effect(symbol: &str) -> Option<EffectFlags> {
-    if
-        matches!(
-            symbol,
-            "read!" |
-                "write!" |
-                "list-dir!" |
-                "mkdir!" |
-                "delete!" |
-                "move!" |
-                "print!" |
-                "sleep!" |
-                "clear!"
-        )
-    {
+    if matches!(
+        symbol,
+        "read!"
+            | "write!"
+            | "list-dir!"
+            | "mkdir!"
+            | "delete!"
+            | "move!"
+            | "print!"
+            | "sleep!"
+            | "clear!"
+    ) {
         return Some(EffectFlags::IO);
     }
     if matches!(symbol, "set!" | "&alter!" | "alter!" | "pop!") {
@@ -374,7 +369,7 @@ pub fn format_effect_flags(effect: EffectFlags) -> Option<String> {
 pub fn format_effect_flags_for_symbol(
     symbol: &str,
     effect: EffectFlags,
-    externally_impure: Option<bool>
+    externally_impure: Option<bool>,
 ) -> Option<String> {
     if effect.is_pure() {
         return None;
@@ -698,7 +693,7 @@ pub fn is_standalone_symbol_expr_at_range(text: &str, range: CoreRange, symbol: 
 pub fn infer_error_ranges(
     text: &str,
     message: &str,
-    scope: Option<&InferErrorScope>
+    scope: Option<&InferErrorScope>,
 ) -> Vec<CoreRange> {
     if message.contains("Char should be of length 1") {
         if let Some(range) = find_invalid_char_literal_range(text) {
@@ -926,7 +921,10 @@ pub fn format_literal_hover(text: &str, range: CoreRange, literal_type: &str) ->
     if literal_type == "[Char]" {
         if let Some((preview, len, truncated)) = preview_string_literal(text, range, 16) {
             let suffix = if truncated { "..." } else { "" };
-            return format!("[Char] length : {} preview : \"{}{}\"", len, preview, suffix);
+            return format!(
+                "[Char] length : {} preview : \"{}{}\"",
+                len, preview, suffix
+            );
         }
     }
 
@@ -945,7 +943,7 @@ pub fn format_literal_hover(text: &str, range: CoreRange, literal_type: &str) ->
 fn preview_string_literal(
     text: &str,
     range: CoreRange,
-    max_chars: usize
+    max_chars: usize,
 ) -> Option<(String, usize, bool)> {
     let start = position_to_byte_offset(text, range.start)?;
     let end = position_to_byte_offset(text, range.end)?;
@@ -1216,7 +1214,7 @@ fn find_scope_range(text: &str, scope: &InferErrorScope) -> Option<CoreRange> {
 fn filter_ranges_to_scope(
     text: &str,
     ranges: &[CoreRange],
-    scope: &InferErrorScope
+    scope: &InferErrorScope,
 ) -> Vec<CoreRange> {
     let Some(scope_range) = find_scope_range(text, scope) else {
         return Vec::new();
@@ -1272,7 +1270,7 @@ fn collect_lambda_scope_regions(
     node: &ListNode,
     top_form_idx: usize,
     parent_path: &[usize],
-    out: &mut Vec<ScopeRegion>
+    out: &mut Vec<ScopeRegion>,
 ) {
     let mut next_lambda_idx = 0usize;
     collect_lambda_descendants(node, top_form_idx, parent_path, &mut next_lambda_idx, out);
@@ -1283,7 +1281,7 @@ fn collect_lambda_descendants(
     top_form_idx: usize,
     parent_path: &[usize],
     next_lambda_idx: &mut usize,
-    out: &mut Vec<ScopeRegion>
+    out: &mut Vec<ScopeRegion>,
 ) {
     for child in &node.children {
         if child.head.as_deref() == Some("lambda") {
@@ -1398,7 +1396,8 @@ fn skip_token(text: &str, mut i: usize, limit: usize) -> usize {
     let bytes = text.as_bytes();
     while i < limit {
         let b = bytes[i];
-        if b.is_ascii_whitespace() || b == b';' || b == b'(' || b == b')' || b == b'[' || b == b']' {
+        if b.is_ascii_whitespace() || b == b';' || b == b'(' || b == b')' || b == b'[' || b == b']'
+        {
             break;
         }
         i += 1;
@@ -1599,7 +1598,11 @@ fn find_call_prefix_ranges(text: &str, snippet: &str) -> Vec<CoreRange> {
 
 fn extract_call_prefix_tokens(snippet: &str, max_tokens: usize) -> Vec<String> {
     let trimmed = snippet.trim();
-    let inner = if let Some(stripped) = trimmed.strip_prefix('(') { stripped } else { trimmed };
+    let inner = if let Some(stripped) = trimmed.strip_prefix('(') {
+        stripped
+    } else {
+        trimmed
+    };
     let mut tokens = Vec::new();
     let mut cur = String::new();
     let mut depth = 0usize;
@@ -1807,17 +1810,20 @@ fn damerau_levenshtein_distance(a: &str, b: &str) -> usize {
 
     for i in 1..=n {
         for j in 1..=m {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             let deletion = dp[i - 1][j] + 1;
             let insertion = dp[i][j - 1] + 1;
             let substitution = dp[i - 1][j - 1] + cost;
             let mut best = deletion.min(insertion).min(substitution);
 
-            if
-                i > 1 &&
-                j > 1 &&
-                a_chars[i - 1] == b_chars[j - 2] &&
-                a_chars[i - 2] == b_chars[j - 1]
+            if i > 1
+                && j > 1
+                && a_chars[i - 1] == b_chars[j - 2]
+                && a_chars[i - 2] == b_chars[j - 1]
             {
                 best = best.min(dp[i - 2][j - 2] + 1);
             }
@@ -1841,9 +1847,10 @@ fn max_typo_distance_for_len(len: usize) -> usize {
 pub fn suggest_undefined_variable_candidates<'a, I>(
     message: &str,
     candidates: I,
-    limit: usize
+    limit: usize,
 ) -> Vec<String>
-    where I: IntoIterator<Item = &'a str>
+where
+    I: IntoIterator<Item = &'a str>,
 {
     let Some(missing) = extract_undefined_variable_name(message) else {
         return Vec::new();
@@ -1887,8 +1894,7 @@ pub fn suggest_undefined_variable_candidates<'a, I>(
     }
 
     scored.sort_by(|a, b| {
-        a.0
-            .cmp(&b.0)
+        a.0.cmp(&b.0)
             .then_with(|| a.1.cmp(&b.1))
             .then_with(|| a.2.cmp(&b.2))
             .then_with(|| a.3.cmp(&b.3))
@@ -1903,9 +1909,10 @@ pub fn suggest_undefined_variable_candidates<'a, I>(
 pub fn append_undefined_variable_suggestions<'a, I>(
     message: &str,
     candidates: I,
-    limit: usize
+    limit: usize,
 ) -> String
-    where I: IntoIterator<Item = &'a str>
+where
+    I: IntoIterator<Item = &'a str>,
 {
     if extract_undefined_variable_name(message).is_none() || message.contains("Did you mean:") {
         return message.to_string();
@@ -1916,12 +1923,19 @@ pub fn append_undefined_variable_suggestions<'a, I>(
         return message.to_string();
     }
 
-    format!("{}\nDid you mean: {}", message.trim_end(), suggestions.join(", "))
+    format!(
+        "{}\nDid you mean: {}",
+        message.trim_end(),
+        suggestions.join(", ")
+    )
 }
 
 fn is_ident_char(ch: char) -> bool {
-    ch.is_alphanumeric() ||
-        matches!(ch, '_' | '-' | '/' | '?' | '!' | '*' | '+' | '<' | '>' | '=' | '.')
+    ch.is_alphanumeric()
+        || matches!(
+            ch,
+            '_' | '-' | '/' | '?' | '!' | '*' | '+' | '<' | '>' | '=' | '.'
+        )
 }
 
 pub fn find_matching_paren_byte(text: &str, open_idx: usize) -> Option<usize> {
@@ -2126,10 +2140,7 @@ fn is_float_token(token: &str) -> bool {
         return false;
     }
     let slice = &bytes[start..];
-    let dot_count = slice
-        .iter()
-        .filter(|&&b| b == b'.')
-        .count();
+    let dot_count = slice.iter().filter(|&&b| b == b'.').count();
     if dot_count != 1 {
         return false;
     }
@@ -2137,15 +2148,12 @@ fn is_float_token(token: &str) -> bool {
     if !slice.iter().all(|b| (b.is_ascii_digit() || *b == b'.')) {
         return false;
     }
-    let dot_idx = slice
-        .iter()
-        .position(|&b| b == b'.')
-        .unwrap_or(0);
+    let dot_idx = slice.iter().position(|&b| b == b'.').unwrap_or(0);
     let left = &slice[..dot_idx];
     let right = &slice[dot_idx + 1..];
-    (!left.is_empty() || !right.is_empty()) &&
-        left.iter().all(|b| b.is_ascii_digit()) &&
-        right.iter().all(|b| b.is_ascii_digit())
+    (!left.is_empty() || !right.is_empty())
+        && left.iter().all(|b| b.is_ascii_digit())
+        && right.iter().all(|b| b.is_ascii_digit())
 }
 
 fn is_symbol_char(ch: char) -> bool {

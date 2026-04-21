@@ -1,49 +1,27 @@
-use lsp_server::{ Connection, Message, Notification, Request, RequestId, Response };
+use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::Notification as LspNotification;
 use lsp_types::notification::{
-    DidChangeTextDocument,
-    DidCloseTextDocument,
-    DidOpenTextDocument,
-    PublishDiagnostics,
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, PublishDiagnostics,
 };
 use lsp_types::request::Request as LspRequest;
-use lsp_types::request::{ Completion, HoverRequest };
+use lsp_types::request::{Completion, HoverRequest};
 use lsp_types::{
-    CompletionItem,
-    CompletionItemKind,
-    CompletionOptions,
-    CompletionParams,
-    CompletionResponse,
-    Diagnostic,
-    DiagnosticSeverity,
-    DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams,
-    Hover,
-    HoverContents,
-    HoverParams,
-    HoverProviderCapability,
-    InitializeParams,
-    MarkupContent,
-    MarkupKind,
-    Position,
-    PublishDiagnosticsParams,
-    Range,
-    ServerCapabilities,
-    TextDocumentSyncCapability,
-    TextDocumentSyncKind,
-    Uri,
+    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
+    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, MarkupContent, MarkupKind, Position, PublishDiagnosticsParams, Range,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
-use que::infer::{ infer_with_builtins_typed_lsp, EffectFlags, InferErrorScope, TypedExpression };
+use que::infer::{infer_with_builtins_typed_lsp, EffectFlags, InferErrorScope, TypedExpression};
 use que::lsp_native_core as native_core;
 use que::parser::Expression;
-use que::types::{ Type, TypeEnv };
-use serde::{ Deserialize, Serialize };
+use que::types::{Type, TypeEnv};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::{ HashMap, HashSet };
-use std::panic::{ catch_unwind, AssertUnwindSafe };
-use std::time::{ Duration, Instant };
+use std::collections::{HashMap, HashSet};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::time::{Duration, Instant};
 
 const ANALYSIS_DELAY_MS: u64 = 500;
 
@@ -141,30 +119,28 @@ fn run() -> Result<(), String> {
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         completion_provider: Some(CompletionOptions {
             resolve_provider: Some(false),
-            trigger_characters: Some(
-                vec![
-                    "/".to_string(),
-                    "!".to_string(),
-                    "?".to_string(),
-                    "-".to_string(),
-                    "+".to_string(),
-                    "*".to_string(),
-                    ".".to_string()
-                ]
-            ),
+            trigger_characters: Some(vec![
+                "/".to_string(),
+                "!".to_string(),
+                "?".to_string(),
+                "-".to_string(),
+                "+".to_string(),
+                "*".to_string(),
+                ".".to_string(),
+            ]),
             ..CompletionOptions::default()
         }),
         ..ServerCapabilities::default()
     };
 
-    let init_value = serde_json
-        ::to_value(server_capabilities)
+    let init_value = serde_json::to_value(server_capabilities)
         .map_err(|e| format!("serialize server capabilities: {}", e))?;
-    let _init_params: InitializeParams = serde_json
-        ::from_value(
-            connection.initialize(init_value).map_err(|e| format!("initialize failed: {}", e))?
-        )
-        .map_err(|e| format!("parse initialize params: {}", e))?;
+    let _init_params: InitializeParams = serde_json::from_value(
+        connection
+            .initialize(init_value)
+            .map_err(|e| format!("initialize failed: {}", e))?,
+    )
+    .map_err(|e| format!("parse initialize params: {}", e))?;
 
     let mut state = ServerState {
         connection,
@@ -200,15 +176,16 @@ fn run() -> Result<(), String> {
         }
     }
 
-    io_threads.join().map_err(|e| format!("failed to join io threads: {}", e))?;
+    io_threads
+        .join()
+        .map_err(|e| format!("failed to join io threads: {}", e))?;
     Ok(())
 }
 
 fn build_lsp_core() -> LspCore {
     let std_defs = load_std_definitions();
-    let (base_env, base_next_id, global_signatures, global_effects) = build_base_environment(
-        &std_defs
-    );
+    let (base_env, base_next_id, global_signatures, global_effects) =
+        build_base_environment(&std_defs);
     let std_fallback_names = collect_std_top_level_let_names(&std_defs)
         .into_iter()
         .filter(|name| !name.starts_with("std/"))
@@ -227,10 +204,10 @@ impl ServerState {
     fn handle_message(&mut self, msg: Message) -> Result<bool, String> {
         match msg {
             Message::Request(req) => {
-                if
-                    self.connection
-                        .handle_shutdown(&req)
-                        .map_err(|e| format!("shutdown handling failed: {}", e))?
+                if self
+                    .connection
+                    .handle_shutdown(&req)
+                    .map_err(|e| format!("shutdown handling failed: {}", e))?
                 {
                     return Ok(true);
                 }
@@ -265,10 +242,15 @@ impl ServerState {
 
     fn flush_due_changes(&mut self) -> Result<(), String> {
         let now = Instant::now();
-        let due_uris: Vec<Uri> = self.pending_changes
+        let due_uris: Vec<Uri> = self
+            .pending_changes
             .iter()
             .filter_map(|(uri, change)| {
-                if change.due_at <= now { Some(uri.clone()) } else { None }
+                if change.due_at <= now {
+                    Some(uri.clone())
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -284,7 +266,7 @@ impl ServerState {
                     core.base_next_id,
                     &core.global_signatures,
                     &core.global_effects,
-                    &core.std_fallback_names
+                    &core.std_fallback_names,
                 )
             });
             self.publish_diagnostics(uri.clone(), Some(change.version), &analysis.diagnostics)?;
@@ -315,20 +297,14 @@ impl ServerState {
             }
             "que/getSignature" => {
                 let params: GetSignatureParams = parse_params(req.params)?;
-                let signature = self.signature_for_symbol(
-                    &params.uri,
-                    &params.symbol,
-                    params.position
-                );
+                let signature =
+                    self.signature_for_symbol(&params.uri, &params.symbol, params.position);
                 self.reply_ok(req.id, Some(GetSignatureResult { signature }))
             }
             "que/getSignatureText" => {
                 let params: GetSignatureTextParams = parse_params(req.params)?;
-                let signature = self.signature_for_text(
-                    &params.text,
-                    &params.symbol,
-                    params.position
-                );
+                let signature =
+                    self.signature_for_text(&params.text, &params.symbol, params.position);
                 self.reply_ok(req.id, Some(GetSignatureResult { signature }))
             }
             "que/analyzeText" => {
@@ -364,13 +340,13 @@ impl ServerState {
                         core.base_next_id,
                         &core.global_signatures,
                         &core.global_effects,
-                        &core.std_fallback_names
+                        &core.std_fallback_names,
                     )
                 });
                 self.publish_diagnostics(
                     uri.clone(),
                     Some(params.text_document.version),
-                    &analysis.diagnostics
+                    &analysis.diagnostics,
                 )?;
                 self.documents.insert(uri, analysis);
                 Ok(())
@@ -385,22 +361,28 @@ impl ServerState {
                 if let Some(doc) = self.documents.get_mut(&uri) {
                     doc.text = last_change.text.clone();
                 } else {
-                    self.documents.insert(uri.clone(), DocAnalysis {
-                        text: last_change.text.clone(),
-                        diagnostics: Vec::new(),
-                        symbol_types: HashMap::new(),
-                        let_binding_types: HashMap::new(),
-                        let_binding_effects: HashMap::new(),
-                        let_binding_external_impure: HashMap::new(),
-                        user_bound_symbols: HashSet::new(),
-                        form_scoped_symbols: Vec::new(),
-                    });
+                    self.documents.insert(
+                        uri.clone(),
+                        DocAnalysis {
+                            text: last_change.text.clone(),
+                            diagnostics: Vec::new(),
+                            symbol_types: HashMap::new(),
+                            let_binding_types: HashMap::new(),
+                            let_binding_effects: HashMap::new(),
+                            let_binding_external_impure: HashMap::new(),
+                            user_bound_symbols: HashSet::new(),
+                            form_scoped_symbols: Vec::new(),
+                        },
+                    );
                 }
-                self.pending_changes.insert(uri, PendingChange {
-                    version: params.text_document.version,
-                    text: last_change.text.clone(),
-                    due_at: Instant::now() + Duration::from_millis(ANALYSIS_DELAY_MS),
-                });
+                self.pending_changes.insert(
+                    uri,
+                    PendingChange {
+                        version: params.text_document.version,
+                        text: last_change.text.clone(),
+                        due_at: Instant::now() + Duration::from_millis(ANALYSIS_DELAY_MS),
+                    },
+                );
                 Ok(())
             }
             DidCloseTextDocument::METHOD => {
@@ -418,7 +400,7 @@ impl ServerState {
         &self,
         uri: Uri,
         version: Option<i32>,
-        diagnostics: &[Diagnostic]
+        diagnostics: &[Diagnostic],
     ) -> Result<(), String> {
         let params = PublishDiagnosticsParams {
             uri,
@@ -426,7 +408,8 @@ impl ServerState {
             diagnostics: diagnostics.to_vec(),
         };
         let notif = Notification::new(PublishDiagnostics::METHOD.to_string(), params);
-        self.connection.sender
+        self.connection
+            .sender
             .send(Message::Notification(notif))
             .map_err(|e| format!("send diagnostics failed: {}", e))
     }
@@ -434,13 +417,13 @@ impl ServerState {
     fn reply_ok<T: serde::Serialize>(
         &self,
         id: RequestId,
-        result: Option<T>
+        result: Option<T>,
     ) -> Result<(), String> {
-        let value = serde_json
-            ::to_value(result)
+        let value = serde_json::to_value(result)
             .map_err(|e| format!("serialize response payload failed: {}", e))?;
         let response = Response::new_ok(id, value);
-        self.connection.sender
+        self.connection
+            .sender
             .send(Message::Response(response))
             .map_err(|e| format!("send response failed: {}", e))
     }
@@ -461,7 +444,7 @@ impl ServerState {
                 core.base_next_id,
                 &core.global_signatures,
                 &core.global_effects,
-                &core.std_fallback_names
+                &core.std_fallback_names,
             )
         });
         self.hover_for_analyzed_doc(&analysis, position)
@@ -505,14 +488,17 @@ impl ServerState {
                     native_core::format_effect_flags_for_symbol(
                         &symbol,
                         eff,
-                        declaration_external_impure
+                        declaration_external_impure,
                     )
                 })
             } else {
                 None
             };
             let value = if let Some(effect) = effect_text {
-                format!("```que\n{} : {}\n```\n`effects: {}`", symbol, declaration_type, effect)
+                format!(
+                    "```que\n{} : {}\n```\n`effects: {}`",
+                    symbol, declaration_type, effect
+                )
             } else {
                 format!("```que\n{} : {}\n```", symbol, declaration_type)
             };
@@ -558,7 +544,10 @@ impl ServerState {
             None
         };
         let value = if let Some(effect) = effect_text {
-            format!("```que\n{} : {}\n```\n`effects: {}`", symbol, type_info, effect)
+            format!(
+                "```que\n{} : {}\n```\n`effects: {}`",
+                symbol, type_info, effect
+            )
         } else {
             format!("```que\n{} : {}\n```", symbol, type_info)
         };
@@ -576,10 +565,9 @@ impl ServerState {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let mut items = Vec::new();
-        let prefix = self
-            .documents
-            .get(uri)
-            .and_then(|doc| native_core::symbol_prefix_at_position(&doc.text, to_core_position(position)));
+        let prefix = self.documents.get(uri).and_then(|doc| {
+            native_core::symbol_prefix_at_position(&doc.text, to_core_position(position))
+        });
 
         for keyword in [
             "lambda",
@@ -643,7 +631,7 @@ impl ServerState {
                 core.base_next_id,
                 &core.global_signatures,
                 &core.global_effects,
-                &core.std_fallback_names
+                &core.std_fallback_names,
             )
         });
         let mut items = Vec::new();
@@ -700,7 +688,7 @@ impl ServerState {
         &self,
         doc: &DocAnalysis,
         position: Position,
-        items: &mut Vec<CompletionItem>
+        items: &mut Vec<CompletionItem>,
     ) {
         let mut inferred_signatures: HashMap<String, String> = HashMap::new();
 
@@ -777,21 +765,22 @@ impl ServerState {
         &self,
         uri: &Uri,
         symbol: &str,
-        position: Option<Position>
+        position: Option<Position>,
     ) -> Option<String> {
         if let Some(doc) = self.documents.get(uri) {
             return self
                 .resolve_signature_for_doc(doc, symbol, position)
                 .map(|s| normalize_signature(&s));
         }
-        self.global_signature(symbol).map(|s| normalize_signature(&s))
+        self.global_signature(symbol)
+            .map(|s| normalize_signature(&s))
     }
 
     fn signature_for_text(
         &self,
         text: &str,
         symbol: &str,
-        position: Option<Position>
+        position: Option<Position>,
     ) -> Option<String> {
         let analysis = self.with_core(|core| {
             analyze_document_text_safe(
@@ -801,17 +790,18 @@ impl ServerState {
                 core.base_next_id,
                 &core.global_signatures,
                 &core.global_effects,
-                &core.std_fallback_names
+                &core.std_fallback_names,
             )
         });
-        self.resolve_signature_for_doc(&analysis, symbol, position).map(|s| normalize_signature(&s))
+        self.resolve_signature_for_doc(&analysis, symbol, position)
+            .map(|s| normalize_signature(&s))
     }
 
     fn resolve_signature_for_doc(
         &self,
         doc: &DocAnalysis,
         symbol: &str,
-        position: Option<Position>
+        position: Option<Position>,
     ) -> Option<String> {
         let scoped_sig = position
             .and_then(|pos| self.form_signatures_at(doc, pos))
@@ -840,15 +830,16 @@ impl ServerState {
                 core.base_next_id,
                 &core.global_signatures,
                 &core.global_effects,
-                &core.std_fallback_names
+                &core.std_fallback_names,
             )
-        }).diagnostics
+        })
+        .diagnostics
     }
 
     fn form_signatures_at<'a>(
         &'a self,
         doc: &'a DocAnalysis,
-        position: Position
+        position: Position,
     ) -> Option<&'a HashMap<String, String>> {
         doc.form_scoped_symbols
             .iter()
@@ -859,7 +850,7 @@ impl ServerState {
     fn form_let_signatures_at<'a>(
         &'a self,
         doc: &'a DocAnalysis,
-        position: Position
+        position: Position,
     ) -> Option<&'a HashMap<String, String>> {
         doc.form_scoped_symbols
             .iter()
@@ -870,7 +861,7 @@ impl ServerState {
     fn form_let_effects_at<'a>(
         &'a self,
         doc: &'a DocAnalysis,
-        position: Position
+        position: Position,
     ) -> Option<&'a HashMap<String, EffectFlags>> {
         doc.form_scoped_symbols
             .iter()
@@ -881,7 +872,7 @@ impl ServerState {
     fn form_let_external_impurity_at<'a>(
         &'a self,
         doc: &'a DocAnalysis,
-        position: Position
+        position: Position,
     ) -> Option<&'a HashMap<String, bool>> {
         doc.form_scoped_symbols
             .iter()
@@ -913,7 +904,10 @@ fn to_core_range(range: Range) -> native_core::CoreRange {
 }
 
 fn from_core_range(range: native_core::CoreRange) -> Range {
-    Range::new(from_core_position(range.start), from_core_position(range.end))
+    Range::new(
+        from_core_position(range.start),
+        from_core_position(range.end),
+    )
 }
 
 fn normalize_signature(signature: &str) -> String {
@@ -925,8 +919,13 @@ fn strip_type_var_numbers(input: &str) -> String {
 }
 
 fn build_base_environment(
-    std_defs: &[Expression]
-) -> (TypeEnv, u64, HashMap<String, String>, HashMap<String, EffectFlags>) {
+    std_defs: &[Expression],
+) -> (
+    TypeEnv,
+    u64,
+    HashMap<String, String>,
+    HashMap<String, EffectFlags>,
+) {
     native_core::build_base_environment(std_defs)
 }
 
@@ -945,7 +944,7 @@ fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<St
 fn collect_let_binding_effects(
     node: &TypedExpression,
     effects: &mut HashMap<String, EffectFlags>,
-    fallback_effects: &HashMap<String, EffectFlags>
+    fallback_effects: &HashMap<String, EffectFlags>,
 ) {
     native_core::collect_let_binding_effects(node, effects, fallback_effects)
 }
@@ -961,7 +960,7 @@ fn analyze_document_text(
     base_next_id: u64,
     global_signatures: &HashMap<String, String>,
     global_effects: &HashMap<String, EffectFlags>,
-    std_fallback_names: &HashSet<String>
+    std_fallback_names: &HashSet<String>,
 ) -> DocAnalysis {
     if text.trim().is_empty() {
         return DocAnalysis {
@@ -1016,8 +1015,7 @@ fn analyze_document_text(
         }
     };
 
-    match
-        infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count)
+    match infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count)
     {
         Ok((_typ, typed)) => {
             for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
@@ -1026,12 +1024,8 @@ fn analyze_document_text(
                 collect_let_binding_effects(form, &mut let_binding_effects, global_effects);
                 collect_let_binding_external_impurity(form, &mut let_binding_external_impure);
             }
-            form_scoped_symbols = build_form_scoped_analyses(
-                text,
-                user_form_count,
-                &typed,
-                global_effects
-            );
+            form_scoped_symbols =
+                build_form_scoped_analyses(text, user_form_count, &typed, global_effects);
         }
         Err(err) => {
             let mut candidate_symbols = user_bound_symbols.clone();
@@ -1042,11 +1036,13 @@ fn analyze_document_text(
             let message_with_suggestions = native_core::append_undefined_variable_suggestions(
                 &err.message,
                 candidate_symbols.iter().map(|s| s.as_str()),
-                3
+                3,
             );
-            diagnostics.extend(
-                make_error_diagnostic(text, message_with_suggestions, err.scope.as_ref())
-            );
+            diagnostics.extend(make_error_diagnostic(
+                text,
+                message_with_suggestions,
+                err.scope.as_ref(),
+            ));
         }
     }
 
@@ -1086,23 +1082,19 @@ fn analyze_document_text_safe(
     base_next_id: u64,
     global_signatures: &HashMap<String, String>,
     global_effects: &HashMap<String, EffectFlags>,
-    std_fallback_names: &HashSet<String>
+    std_fallback_names: &HashSet<String>,
 ) -> DocAnalysis {
-    match
-        catch_unwind(
-            AssertUnwindSafe(|| {
-                analyze_document_text(
-                    text,
-                    std_defs,
-                    base_env,
-                    base_next_id,
-                    global_signatures,
-                    global_effects,
-                    std_fallback_names
-                )
-            })
+    match catch_unwind(AssertUnwindSafe(|| {
+        analyze_document_text(
+            text,
+            std_defs,
+            base_env,
+            base_next_id,
+            global_signatures,
+            global_effects,
+            std_fallback_names,
         )
-    {
+    })) {
         Ok(analysis) => analysis,
         Err(payload) => {
             let message = format!(
@@ -1137,7 +1129,7 @@ fn build_form_scoped_analyses(
     text: &str,
     user_form_count: usize,
     typed_program: &TypedExpression,
-    global_effects: &HashMap<String, EffectFlags>
+    global_effects: &HashMap<String, EffectFlags>,
 ) -> Vec<FormScopedAnalysis> {
     if user_form_count == 0 {
         return Vec::new();
@@ -1161,11 +1153,11 @@ fn build_form_scoped_analyses(
         collect_let_binding_effects(
             typed_user_forms[idx],
             &mut let_binding_effects,
-            global_effects
+            global_effects,
         );
         collect_let_binding_external_impurity(
             typed_user_forms[idx],
-            &mut let_binding_external_impure
+            &mut let_binding_external_impure,
         );
         let symbol_types = raw_symbols
             .into_iter()
@@ -1189,7 +1181,7 @@ fn build_form_scoped_analyses(
 
 fn extract_user_top_level_typed_forms<'a>(
     typed_program: &'a TypedExpression,
-    user_form_count: usize
+    user_form_count: usize,
 ) -> Vec<&'a TypedExpression> {
     if let Expression::Apply(_) = &typed_program.expr {
         if typed_program.children.len() <= 1 {
@@ -1234,12 +1226,10 @@ fn top_level_form_ranges(text: &str) -> Vec<Range> {
                 let end = find_matching_list_end_byte(text, i)
                     .map(|idx| idx + 1)
                     .unwrap_or(text.len());
-                ranges.push(
-                    Range::new(
-                        byte_offset_to_position(text, start),
-                        byte_offset_to_position(text, end)
-                    )
-                );
+                ranges.push(Range::new(
+                    byte_offset_to_position(text, start),
+                    byte_offset_to_position(text, end),
+                ));
                 i = end;
             }
             b'"' => {
@@ -1251,24 +1241,20 @@ fn top_level_form_ranges(text: &str) -> Vec<Range> {
                     }
                     i += 1;
                 }
-                ranges.push(
-                    Range::new(
-                        byte_offset_to_position(text, start),
-                        byte_offset_to_position(text, i)
-                    )
-                );
+                ranges.push(Range::new(
+                    byte_offset_to_position(text, start),
+                    byte_offset_to_position(text, i),
+                ));
             }
             _ => {
                 i += 1;
                 while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b';' {
                     i += 1;
                 }
-                ranges.push(
-                    Range::new(
-                        byte_offset_to_position(text, start),
-                        byte_offset_to_position(text, i)
-                    )
-                );
+                ranges.push(Range::new(
+                    byte_offset_to_position(text, start),
+                    byte_offset_to_position(text, i),
+                ));
             }
         }
     }
@@ -1355,7 +1341,7 @@ fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String, Ty
 fn make_error_diagnostic(
     text: &str,
     message: String,
-    scope: Option<&InferErrorScope>
+    scope: Option<&InferErrorScope>,
 ) -> Vec<Diagnostic> {
     let normalized_message = strip_type_var_numbers(&message);
     let inferred_ranges = infer_error_ranges(text, &message, scope);
@@ -1365,7 +1351,11 @@ fn make_error_diagnostic(
         normalized_message
     };
 
-    let ranges = if inferred_ranges.is_empty() { vec![full_range(text)] } else { inferred_ranges };
+    let ranges = if inferred_ranges.is_empty() {
+        vec![full_range(text)]
+    } else {
+        inferred_ranges
+    };
 
     ranges
         .into_iter()
@@ -1384,7 +1374,10 @@ fn diagnostic_summary_without_snippet(message: &str) -> String {
 }
 
 fn infer_error_ranges(text: &str, message: &str, scope: Option<&InferErrorScope>) -> Vec<Range> {
-    native_core::infer_error_ranges(text, message, scope).into_iter().map(from_core_range).collect()
+    native_core::infer_error_ranges(text, message, scope)
+        .into_iter()
+        .map(from_core_range)
+        .collect()
 }
 
 fn find_matching_paren_byte(text: &str, open_idx: usize) -> Option<usize> {
@@ -1433,7 +1426,11 @@ fn completion_matches_prefix(label: &str, prefix: &str) -> bool {
     if prefix.contains('/') {
         return false;
     }
-    label.rsplit('/').next().map(|segment| segment.starts_with(prefix)).unwrap_or(false)
+    label
+        .rsplit('/')
+        .next()
+        .map(|segment| segment.starts_with(prefix))
+        .unwrap_or(false)
 }
 
 fn should_hide_completion_symbol(symbol: &str) -> bool {
@@ -1441,8 +1438,7 @@ fn should_hide_completion_symbol(symbol: &str) -> bool {
 }
 
 fn symbol_at_position(text: &str, position: Position) -> Option<(String, Range)> {
-    native_core
-        ::symbol_at_position(text, to_core_position(position))
+    native_core::symbol_at_position(text, to_core_position(position))
         .map(|(symbol, range)| (symbol, from_core_range(range)))
 }
 
@@ -1467,22 +1463,18 @@ fn is_let_binding_name_at_position(text: &str, symbol_range: Range, symbol: &str
         return false;
     }
 
-    let Some((head, _head_start, _head_end, after_head)) = read_top_level_atom_token_in_list(
-        text,
-        open + 1,
-        close
-    ) else {
+    let Some((head, _head_start, _head_end, after_head)) =
+        read_top_level_atom_token_in_list(text, open + 1, close)
+    else {
         return false;
     };
     if head != "let" && head != "letrec" && head != "mut" {
         return false;
     }
 
-    let Some((name, name_start, name_end, _)) = read_top_level_atom_token_in_list(
-        text,
-        after_head,
-        close
-    ) else {
+    let Some((name, name_start, name_end, _)) =
+        read_top_level_atom_token_in_list(text, after_head, close)
+    else {
         return false;
     };
 
@@ -1545,7 +1537,7 @@ fn find_enclosing_open_paren_before(text: &str, target: usize) -> Option<usize> 
 fn read_top_level_atom_token_in_list(
     text: &str,
     mut i: usize,
-    list_close: usize
+    list_close: usize,
 ) -> Option<(String, usize, usize, usize)> {
     let bytes = text.as_bytes();
     i = skip_ws_and_comments(text, i, list_close);
@@ -1593,8 +1585,7 @@ fn skip_ws_and_comments(text: &str, mut i: usize, end: usize) -> usize {
 }
 
 fn literal_type_at_position(text: &str, position: Position) -> Option<(String, Range)> {
-    native_core
-        ::literal_type_at_position(text, to_core_position(position))
+    native_core::literal_type_at_position(text, to_core_position(position))
         .map(|(literal_type, range)| (literal_type, from_core_range(range)))
 }
 

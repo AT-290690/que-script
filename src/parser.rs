@@ -1,52 +1,52 @@
-use std::collections::{ HashMap, HashSet };
+use std::collections::{HashMap, HashSet};
 
 const MAX_MACRO_EXPANSION_DEPTH: usize = 64;
 
 fn is_reserved_word(name: &str) -> bool {
     matches!(
         name,
-        "map" |
-            "map/i" |
-            "filter" |
-            "filter/i" |
-            "select" |
-            "exclude" |
-            "reduce" |
-            "reduce/i" |
-            "reduce/until" |
-            "reduce/until/i" |
-            "sum" |
-            "sum/int" |
-            "sum/dec" |
-            "product" |
-            "product/int" |
-            "product/dec" |
-            "some?" |
-            "some/i?" |
-            "every?" |
-            "every/i?" |
-            "find" |
-            "zip" |
-            "unzip" |
-            "flat" |
-            "flat-map" |
-            "window" |
-            "char" |
-            "mean" |
-            "mean/int" |
-            "mean/dec" |
-            "range" |
-            "range/int" |
-            "range/dec" |
-            "slice" |
-            "take/first" |
-            "drop/first" |
-            "take/last" |
-            "drop/last" |
-            "&mut" |
-            "&box" |
-            "&get" |
-            "&alter!"
+        "map"
+            | "map/i"
+            | "filter"
+            | "filter/i"
+            | "select"
+            | "exclude"
+            | "reduce"
+            | "reduce/i"
+            | "reduce/until"
+            | "reduce/until/i"
+            | "sum"
+            | "sum/int"
+            | "sum/dec"
+            | "product"
+            | "product/int"
+            | "product/dec"
+            | "some?"
+            | "some/i?"
+            | "every?"
+            | "every/i?"
+            | "find"
+            | "zip"
+            | "unzip"
+            | "flat"
+            | "flat-map"
+            | "window"
+            | "char"
+            | "mean"
+            | "mean/int"
+            | "mean/dec"
+            | "range"
+            | "range/int"
+            | "range/dec"
+            | "slice"
+            | "take/first"
+            | "drop/first"
+            | "take/last"
+            | "drop/last"
+            | "&mut"
+            | "&box"
+            | "&get"
+            | "&alter!"
     )
 }
 
@@ -126,9 +126,8 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                 if op == "do" {
                     for it in &exprs[1..] {
                         if let Expression::Apply(let_items) = it {
-                            if
-                                let [Expression::Word(kw), Expression::Word(name), rhs] =
-                                    &let_items[..]
+                            if let [Expression::Word(kw), Expression::Word(name), rhs] =
+                                &let_items[..]
                             {
                                 if kw == "let" || kw == "letrec" {
                                     collect_free_idents(rhs, bound, acc);
@@ -160,7 +159,7 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
 fn tree_shake(
     std_defs: Vec<Expression>,
     used: &HashSet<String>,
-    visited: &mut HashSet<String>
+    visited: &mut HashSet<String>,
 ) -> Vec<Expression> {
     let mut index = HashMap::new();
 
@@ -181,7 +180,7 @@ fn tree_shake(
         name: &str,
         index: &HashMap<String, Expression>,
         kept: &mut Vec<Expression>,
-        visited: &mut HashSet<String>
+        visited: &mut HashSet<String>,
     ) {
         if !visited.insert(name.to_string()) {
             return;
@@ -231,15 +230,18 @@ struct OpenDelimiter {
 fn delimiter_close_for_open(ch: char, mode: DelimiterMode) -> Option<char> {
     match mode {
         DelimiterMode::ParenOnly => {
-            if ch == '(' { Some(')') } else { None }
-        }
-        DelimiterMode::SourceDelimiters =>
-            match ch {
-                '(' => Some(')'),
-                '[' => Some(']'),
-                '{' => Some('}'),
-                _ => None,
+            if ch == '(' {
+                Some(')')
+            } else {
+                None
             }
+        }
+        DelimiterMode::SourceDelimiters => match ch {
+            '(' => Some(')'),
+            '[' => Some(']'),
+            '{' => Some('}'),
+            _ => None,
+        },
     }
 }
 
@@ -263,16 +265,10 @@ fn push_open_stack_lines(out: &mut Vec<String>, stack: &[OpenDelimiter]) {
     }
 
     for (idx, item) in stack.iter().rev().take(8).enumerate() {
-        out.push(
-            format!(
-                "parse.open_stack[{}]: '{}' opened at {}:{} expects '{}'",
-                idx,
-                item.open,
-                item.line,
-                item.col,
-                item.close
-            )
-        );
+        out.push(format!(
+            "parse.open_stack[{}]: '{}' opened at {}:{} expects '{}'",
+            idx, item.open, item.line, item.col, item.close
+        ));
     }
     if stack.len() > 8 {
         out.push(format!("parse.open_stack_more: {}", stack.len() - 8));
@@ -283,7 +279,7 @@ fn push_balance_window_lines(
     out: &mut Vec<String>,
     source_lines: &[&str],
     line_deltas: &[i32],
-    focus_line: usize
+    focus_line: usize,
 ) {
     if line_deltas.is_empty() {
         return;
@@ -306,15 +302,13 @@ fn push_balance_window_lines(
     for line in start..=end {
         let idx = line - 1;
         let src = source_lines.get(idx).copied().unwrap_or("");
-        out.push(
-            format!(
-                "parse.line_balance[{}]: delta={:+} cumulative={:+} | {}",
-                line,
-                line_deltas[idx],
-                cumulative[idx],
-                src.trim_end()
-            )
-        );
+        out.push(format!(
+            "parse.line_balance[{}]: delta={:+} cumulative={:+} | {}",
+            line,
+            line_deltas[idx],
+            cumulative[idx],
+            src.trim_end()
+        ));
     }
     if let Some(line) = first_underflow {
         out.push(format!("parse.first_underflow_line: {}", line));
@@ -327,43 +321,34 @@ fn delimiter_report_unexpected_closer(
     stack: &[OpenDelimiter],
     found: char,
     line: usize,
-    col: usize
+    col: usize,
 ) -> String {
     let mut out = Vec::new();
     out.push("parse.delimiter_error: unexpected_closer".to_string());
     out.push(format!("parse.found: '{}' at {}:{}", found, line, col));
     if let Some(top) = stack.last().copied() {
-        out.push(
-            format!(
-                "parse.expected: '{}' to close '{}' opened at {}:{}",
-                top.close,
-                top.open,
-                top.line,
-                top.col
-            )
-        );
-        out.push(
-            format!(
-                "parse.fix_hint[0]: Replace '{}' with '{}' at {}:{}.",
-                found,
-                top.close,
-                line,
-                col
-            )
-        );
-        out.push(
-            format!(
-                "parse.fix_hint[1]: Or insert '{}' before {}:{} and keep '{}'.",
-                top.close,
-                line,
-                col,
-                found
-            )
-        );
+        out.push(format!(
+            "parse.expected: '{}' to close '{}' opened at {}:{}",
+            top.close, top.open, top.line, top.col
+        ));
+        out.push(format!(
+            "parse.fix_hint[0]: Replace '{}' with '{}' at {}:{}.",
+            found, top.close, line, col
+        ));
+        out.push(format!(
+            "parse.fix_hint[1]: Or insert '{}' before {}:{} and keep '{}'.",
+            top.close, line, col, found
+        ));
     } else {
         out.push("parse.expected: <no opener in scope>".to_string());
-        out.push(format!("parse.fix_hint[0]: Remove '{}' at {}:{}.", found, line, col));
-        out.push(format!("parse.fix_hint[1]: Or add matching opener before {}:{}.", line, col));
+        out.push(format!(
+            "parse.fix_hint[0]: Remove '{}' at {}:{}.",
+            found, line, col
+        ));
+        out.push(format!(
+            "parse.fix_hint[1]: Or add matching opener before {}:{}.",
+            line, col
+        ));
     }
     push_open_stack_lines(&mut out, stack);
     push_balance_window_lines(&mut out, source_lines, line_deltas, line);
@@ -374,13 +359,19 @@ fn delimiter_report_unclosed_opener(
     source_lines: &[&str],
     line_deltas: &[i32],
     stack: &[OpenDelimiter],
-    opener: OpenDelimiter
+    opener: OpenDelimiter,
 ) -> String {
     let mut out = Vec::new();
     out.push("parse.delimiter_error: unclosed_opener".to_string());
-    out.push(format!("parse.unclosed: '{}' opened at {}:{}", opener.open, opener.line, opener.col));
+    out.push(format!(
+        "parse.unclosed: '{}' opened at {}:{}",
+        opener.open, opener.line, opener.col
+    ));
     out.push(format!("parse.expected_before_eof: '{}'", opener.close));
-    out.push(format!("parse.fix_hint[0]: Add '{}' before end of file.", opener.close));
+    out.push(format!(
+        "parse.fix_hint[0]: Add '{}' before end of file.",
+        opener.close
+    ));
     push_open_stack_lines(&mut out, stack);
     push_balance_window_lines(&mut out, source_lines, line_deltas, opener.line);
     out.join("\n")
@@ -391,11 +382,14 @@ fn delimiter_report_unclosed_literal(
     line_deltas: &[i32],
     kind: &str,
     line: usize,
-    col: usize
+    col: usize,
 ) -> String {
     let mut out = Vec::new();
     out.push(format!("parse.delimiter_error: unclosed_{}", kind));
-    out.push(format!("parse.unclosed_{}: opened at {}:{}", kind, line, col));
+    out.push(format!(
+        "parse.unclosed_{}: opened at {}:{}",
+        kind, line, col
+    ));
     let closer = if kind == "string_literal" { "\"" } else { "'" };
     out.push(format!("parse.fix_hint[0]: Add closing {}.", closer));
     push_balance_window_lines(&mut out, source_lines, line_deltas, line);
@@ -491,28 +485,24 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
                 if is_delimiter_close(ch, mode) {
                     line_deltas[line - 1] -= 1;
                     let Some(top) = stack.last().copied() else {
-                        return Some(
-                            delimiter_report_unexpected_closer(
-                                &source_lines,
-                                &line_deltas,
-                                &stack,
-                                ch,
-                                line,
-                                col
-                            )
-                        );
+                        return Some(delimiter_report_unexpected_closer(
+                            &source_lines,
+                            &line_deltas,
+                            &stack,
+                            ch,
+                            line,
+                            col,
+                        ));
                     };
                     if ch != top.close {
-                        return Some(
-                            delimiter_report_unexpected_closer(
-                                &source_lines,
-                                &line_deltas,
-                                &stack,
-                                ch,
-                                line,
-                                col
-                            )
-                        );
+                        return Some(delimiter_report_unexpected_closer(
+                            &source_lines,
+                            &line_deltas,
+                            &stack,
+                            ch,
+                            line,
+                            col,
+                        ));
                     }
                     stack.pop();
                     col += 1;
@@ -525,30 +515,31 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
     }
 
     if let Some((sline, scol)) = in_string_start {
-        return Some(
-            delimiter_report_unclosed_literal(
-                &source_lines,
-                &line_deltas,
-                "string_literal",
-                sline,
-                scol
-            )
-        );
+        return Some(delimiter_report_unclosed_literal(
+            &source_lines,
+            &line_deltas,
+            "string_literal",
+            sline,
+            scol,
+        ));
     }
     if let Some((sline, scol)) = in_char_start {
-        return Some(
-            delimiter_report_unclosed_literal(
-                &source_lines,
-                &line_deltas,
-                "char_literal",
-                sline,
-                scol
-            )
-        );
+        return Some(delimiter_report_unclosed_literal(
+            &source_lines,
+            &line_deltas,
+            "char_literal",
+            sline,
+            scol,
+        ));
     }
 
     if let Some(opener) = stack.last().copied() {
-        return Some(delimiter_report_unclosed_opener(&source_lines, &line_deltas, &stack, opener));
+        return Some(delimiter_report_unclosed_opener(
+            &source_lines,
+            &line_deltas,
+            &stack,
+            opener,
+        ));
     }
 
     None
@@ -607,10 +598,14 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
     } else {
         *i += 1;
         if is_integer(tok) {
-            let n: i32 = tok.parse().map_err(|e| format!("Bad integer '{}': {}", tok, e))?;
+            let n: i32 = tok
+                .parse()
+                .map_err(|e| format!("Bad integer '{}': {}", tok, e))?;
             Ok(Expression::Int(n))
         } else if is_float(tok) {
-            let n: f32 = tok.parse().map_err(|e| format!("Bad dec '{}': {}", tok, e))?;
+            let n: f32 = tok
+                .parse()
+                .map_err(|e| format!("Bad dec '{}': {}", tok, e))?;
             Ok(Expression::Dec(n))
         } else {
             Ok(Expression::Word(tok.clone()))
@@ -632,7 +627,7 @@ struct MacroDef {
 
 fn parse_macro_param_list(
     params_slice: &[Expression],
-    macro_name: &str
+    macro_name: &str,
 ) -> Result<(Vec<String>, Option<String>), String> {
     let mut params = Vec::new();
     let mut rest_param = None;
@@ -641,19 +636,22 @@ fn parse_macro_param_list(
         if let Expression::Word(dot) = &params_slice[idx] {
             if dot == "." {
                 if idx + 1 >= params_slice.len() {
-                    return Err(
-                        format!("letmacro '{}' has '.' without a trailing rest parameter", macro_name)
-                    );
+                    return Err(format!(
+                        "letmacro '{}' has '.' without a trailing rest parameter",
+                        macro_name
+                    ));
                 }
                 let Expression::Word(rest_name) = &params_slice[idx + 1] else {
-                    return Err(
-                        format!("letmacro '{}' rest parameter must be a simple word", macro_name)
-                    );
+                    return Err(format!(
+                        "letmacro '{}' rest parameter must be a simple word",
+                        macro_name
+                    ));
                 };
                 if idx + 2 != params_slice.len() {
-                    return Err(
-                        format!("letmacro '{}' rest parameter must be the last parameter", macro_name)
-                    );
+                    return Err(format!(
+                        "letmacro '{}' rest parameter must be the last parameter",
+                        macro_name
+                    ));
                 }
                 rest_param = Some(rest_name.clone());
                 break;
@@ -661,9 +659,10 @@ fn parse_macro_param_list(
         }
         let param = &params_slice[idx];
         let Expression::Word(name) = param else {
-            return Err(
-                format!("letmacro '{}' only supports simple word parameters for now", macro_name)
-            );
+            return Err(format!(
+                "letmacro '{}' only supports simple word parameters for now",
+                macro_name
+            ));
         };
         params.push(name.clone());
         idx += 1;
@@ -673,16 +672,28 @@ fn parse_macro_param_list(
 
 fn parse_macro_lambda(expr: &Expression, macro_name: &str) -> Result<MacroClause, String> {
     let Expression::Apply(items) = expr else {
-        return Err(format!("letmacro '{}' must be bound to a lambda", macro_name));
+        return Err(format!(
+            "letmacro '{}' must be bound to a lambda",
+            macro_name
+        ));
     };
     if items.len() < 2 {
-        return Err(format!("letmacro '{}' must be bound to a lambda", macro_name));
+        return Err(format!(
+            "letmacro '{}' must be bound to a lambda",
+            macro_name
+        ));
     }
     let Some(Expression::Word(head)) = items.first() else {
-        return Err(format!("letmacro '{}' must be bound to a lambda", macro_name));
+        return Err(format!(
+            "letmacro '{}' must be bound to a lambda",
+            macro_name
+        ));
     };
     if head != "lambda" {
-        return Err(format!("letmacro '{}' must be bound to a lambda", macro_name));
+        return Err(format!(
+            "letmacro '{}' must be bound to a lambda",
+            macro_name
+        ));
     }
     if items.len() < 2 {
         return Err(format!("letmacro '{}' lambda must have a body", macro_name));
@@ -702,18 +713,23 @@ fn parse_macro_lambda(expr: &Expression, macro_name: &str) -> Result<MacroClause
 
 fn parse_macro_clause(expr: &Expression, macro_name: &str) -> Result<MacroClause, String> {
     let Expression::Apply(items) = expr else {
-        return Err(format!("letmacro '{}' clause must look like ((params...) body)", macro_name));
+        return Err(format!(
+            "letmacro '{}' clause must look like ((params...) body)",
+            macro_name
+        ));
     };
     if items.len() != 2 {
-        return Err(
-            format!("letmacro '{}' clause must have exactly a parameter list and body", macro_name)
-        );
+        return Err(format!(
+            "letmacro '{}' clause must have exactly a parameter list and body",
+            macro_name
+        ));
     }
     let params_expr = &items[0];
     let Expression::Apply(param_items) = params_expr else {
-        return Err(
-            format!("letmacro '{}' clause parameter list must be parenthesized", macro_name)
-        );
+        return Err(format!(
+            "letmacro '{}' clause parameter list must be parenthesized",
+            macro_name
+        ));
     };
     let (params, rest_param) = parse_macro_param_list(param_items, macro_name)?;
     Ok(MacroClause {
@@ -741,17 +757,14 @@ fn parse_macro_definition(exprs: &[Expression], macro_name: &str) -> Result<Macr
 
 fn split_macro_definitions(
     exprs: Vec<Expression>,
-    macros: &mut HashMap<String, MacroDef>
+    macros: &mut HashMap<String, MacroDef>,
 ) -> Result<Vec<Expression>, String> {
     let mut out = Vec::new();
     for expr in exprs {
         if let Expression::Apply(items) = &expr {
             if items.len() >= 3 {
-                if
-                    let (Some(Expression::Word(kw)), Some(Expression::Word(name))) = (
-                        items.first(),
-                        items.get(1),
-                    )
+                if let (Some(Expression::Word(kw)), Some(Expression::Word(name))) =
+                    (items.first(), items.get(1))
                 {
                     if kw == "letmacro" {
                         let macro_def = parse_macro_definition(&items[2..], name)?;
@@ -777,10 +790,10 @@ fn flatten_top_level_dos(exprs: Vec<Expression>) -> Vec<Expression> {
     let mut out = Vec::new();
     for expr in exprs {
         match expr {
-            Expression::Apply(items) if
-                !items.is_empty() &&
-                matches!(items.first(), Some(Expression::Word(w)) if w == "do")
-            => {
+            Expression::Apply(items)
+                if !items.is_empty()
+                    && matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
+            {
                 out.extend(flatten_top_level_dos(items.into_iter().skip(1).collect()));
             }
             other => out.push(other),
@@ -792,7 +805,7 @@ fn flatten_top_level_dos(exprs: Vec<Expression>) -> Vec<Expression> {
 fn eval_macro_expr(
     expr: &Expression,
     bindings: &HashMap<String, Expression>,
-    gensym_counter: &mut usize
+    gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     let mut local_bindings = bindings.clone();
     eval_macro_expr_in_env(expr, &mut local_bindings, gensym_counter)
@@ -801,16 +814,13 @@ fn eval_macro_expr(
 fn eval_macro_expr_in_env(
     expr: &Expression,
     bindings: &mut HashMap<String, Expression>,
-    gensym_counter: &mut usize
+    gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     match expr {
-        Expression::Word(w) =>
-            Ok(
-                bindings
-                    .get(w)
-                    .cloned()
-                    .unwrap_or_else(|| Expression::Word(w.clone()))
-            ),
+        Expression::Word(w) => Ok(bindings
+            .get(w)
+            .cloned()
+            .unwrap_or_else(|| Expression::Word(w.clone()))),
         Expression::Int(n) => Ok(Expression::Int(*n)),
         Expression::Dec(n) => Ok(Expression::Dec(*n)),
         Expression::Apply(items) => {
@@ -834,7 +844,8 @@ fn eval_macro_expr_in_env(
                     }
                     let Expression::Word(name) = &items[1] else {
                         return Err(
-                            "compile-time let only supports simple word bindings for now".to_string()
+                            "compile-time let only supports simple word bindings for now"
+                                .to_string(),
                         );
                     };
                     let value = eval_macro_expr_in_env(&items[2], bindings, gensym_counter)?;
@@ -861,15 +872,12 @@ fn eval_macro_expr_in_env(
                     *gensym_counter += 1;
                     Ok(Expression::Word(name))
                 }
-                _ =>
-                    Ok(
-                        Expression::Apply(
-                            items
-                                .iter()
-                                .map(|it| eval_macro_expr_in_env(it, bindings, gensym_counter))
-                                .collect::<Result<Vec<_>, _>>()?
-                        )
-                    ),
+                _ => Ok(Expression::Apply(
+                    items
+                        .iter()
+                        .map(|it| eval_macro_expr_in_env(it, bindings, gensym_counter))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
             }
         }
     }
@@ -878,7 +886,7 @@ fn eval_macro_expr_in_env(
 fn quasiquote_macro_expr(
     expr: &Expression,
     bindings: &HashMap<String, Expression>,
-    gensym_counter: &mut usize
+    gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     match expr {
         Expression::Apply(items) => {
@@ -902,12 +910,10 @@ fn quasiquote_macro_expr(
                                 continue;
                             }
                             other => {
-                                return Err(
-                                    format!(
-                                        "(uqs ...) expected a syntax list to splice, got {}",
-                                        other.to_lisp()
-                                    )
-                                );
+                                return Err(format!(
+                                    "(uqs ...) expected a syntax list to splice, got {}",
+                                    other.to_lisp()
+                                ));
                             }
                         }
                     }
@@ -924,15 +930,15 @@ fn expand_macro_call(
     macro_name: &str,
     macro_def: &MacroDef,
     args: &[Expression],
-    gensym_counter: &mut usize
+    gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     let call_expr = Expression::Apply(
-        std::iter
-            ::once(Expression::Word(macro_name.to_string()))
+        std::iter::once(Expression::Word(macro_name.to_string()))
             .chain(args.iter().cloned())
-            .collect()
+            .collect(),
     );
-    let selected_clause = macro_def.clauses
+    let selected_clause = macro_def
+        .clauses
         .iter()
         .find(|clause| {
             if clause.rest_param.is_some() {
@@ -942,7 +948,8 @@ fn expand_macro_call(
             }
         })
         .ok_or_else(|| {
-            let mut expected = macro_def.clauses
+            let mut expected = macro_def
+                .clauses
                 .iter()
                 .map(|clause| {
                     if clause.rest_param.is_some() {
@@ -962,7 +969,8 @@ fn expand_macro_call(
                 call_expr.to_lisp()
             )
         })?;
-    let mut bindings = selected_clause.params
+    let mut bindings = selected_clause
+        .params
         .iter()
         .cloned()
         .zip(args.iter().cloned())
@@ -970,11 +978,16 @@ fn expand_macro_call(
     if let Some(rest_name) = &selected_clause.rest_param {
         bindings.insert(
             rest_name.clone(),
-            Expression::Apply(args[selected_clause.params.len()..].to_vec())
+            Expression::Apply(args[selected_clause.params.len()..].to_vec()),
         );
     }
     eval_macro_expr(&selected_clause.body, &bindings, gensym_counter).map_err(|e| {
-        format!("Macro '{}' expansion failed for call {}: {}", macro_name, call_expr.to_lisp(), e)
+        format!(
+            "Macro '{}' expansion failed for call {}: {}",
+            macro_name,
+            call_expr.to_lisp(),
+            e
+        )
     })
 }
 
@@ -991,7 +1004,7 @@ fn expression_to_string_literal_expr(expr: &Expression) -> Expression {
 fn macroexpand_once_expr(
     expr: &Expression,
     macros: &HashMap<String, MacroDef>,
-    gensym_counter: &mut usize
+    gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     let Expression::Apply(items) = expr else {
         return Ok(expr.clone());
@@ -1009,7 +1022,7 @@ fn expand_macros_expr(
     expr: &Expression,
     macros: &HashMap<String, MacroDef>,
     gensym_counter: &mut usize,
-    depth: usize
+    depth: usize,
 ) -> Result<Expression, String> {
     if depth > MAX_MACRO_EXPANSION_DEPTH {
         return Err("Macro expansion exceeded maximum depth".to_string());
@@ -1019,9 +1032,10 @@ fn expand_macros_expr(
             if let Some(Expression::Word(head)) = items.first() {
                 match head.as_str() {
                     "quote" | "qq" | "uq" | "uqs" | "gensym" => {
-                        return Err(
-                            format!("Compile-time form '{}' can only appear inside letmacro bodies", head)
-                        );
+                        return Err(format!(
+                            "Compile-time form '{}' can only appear inside letmacro bodies",
+                            head
+                        ));
                     }
                     "macroexpand-1" => {
                         if items.len() != 2 {
@@ -1038,12 +1052,8 @@ fn expand_macros_expr(
                                 "(macroexpand ...) expects exactly one expression".to_string()
                             );
                         }
-                        let expanded = expand_macros_expr(
-                            &items[1],
-                            macros,
-                            gensym_counter,
-                            depth + 1
-                        )?;
+                        let expanded =
+                            expand_macros_expr(&items[1], macros, gensym_counter, depth + 1)?;
                         return Ok(expression_to_string_literal_expr(&expanded));
                     }
                     _ => {}
@@ -1053,14 +1063,12 @@ fn expand_macros_expr(
                     return expand_macros_expr(&expanded, macros, gensym_counter, depth + 1);
                 }
             }
-            Ok(
-                Expression::Apply(
-                    items
-                        .iter()
-                        .map(|item| expand_macros_expr(item, macros, gensym_counter, depth))
-                        .collect::<Result<Vec<_>, _>>()?
-                )
-            )
+            Ok(Expression::Apply(
+                items
+                    .iter()
+                    .map(|item| expand_macros_expr(item, macros, gensym_counter, depth))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ))
         }
         _ => Ok(expr.clone()),
     }
@@ -1068,7 +1076,7 @@ fn expand_macros_expr(
 
 fn expand_macros_in_program(
     exprs: Vec<Expression>,
-    macros: &HashMap<String, MacroDef>
+    macros: &HashMap<String, MacroDef>,
 ) -> Result<Vec<Expression>, String> {
     let mut gensym_counter = 0usize;
     exprs
@@ -1089,13 +1097,17 @@ fn normalize_tuple_arity_expr(expr: Expression) -> Expression {
                     let elems = normalized_items[1..].to_vec();
                     let mut nested = elems[elems.len() - 1].clone();
                     for elem in elems[1..elems.len() - 1].iter().rev() {
-                        nested = Expression::Apply(
-                            vec![Expression::Word("tuple".to_string()), elem.clone(), nested]
-                        );
+                        nested = Expression::Apply(vec![
+                            Expression::Word("tuple".to_string()),
+                            elem.clone(),
+                            nested,
+                        ]);
                     }
-                    return Expression::Apply(
-                        vec![Expression::Word("tuple".to_string()), elems[0].clone(), nested]
-                    );
+                    return Expression::Apply(vec![
+                        Expression::Word("tuple".to_string()),
+                        elems[0].clone(),
+                        nested,
+                    ]);
                 }
             }
             Expression::Apply(normalized_items)
@@ -1122,9 +1134,12 @@ fn normalize_tuple_pattern_expr(expr: Expression) -> Result<Expression, String> 
                 if normalized_items.is_empty() {
                     return Err("Tuple pattern must have at least 1 element".to_string());
                 }
-                if normalized_items.iter().any(|e| matches!(e, Expression::Word(w) if w == ".")) {
+                if normalized_items
+                    .iter()
+                    .any(|e| matches!(e, Expression::Word(w) if w == "."))
+                {
                     return Err(
-                        "Tuple pattern does not support '.'; use '_' to skip elements".to_string()
+                        "Tuple pattern does not support '.'; use '_' to skip elements".to_string(),
                     );
                 }
 
@@ -1134,38 +1149,36 @@ fn normalize_tuple_pattern_expr(expr: Expression) -> Result<Expression, String> 
                 }
 
                 let nested = if elems.len() == 2 {
-                    Expression::Apply(
-                        vec![Expression::Word("tuple".to_string()), elems[0].clone(), elems[1].clone()]
-                    )
+                    Expression::Apply(vec![
+                        Expression::Word("tuple".to_string()),
+                        elems[0].clone(),
+                        elems[1].clone(),
+                    ])
                 } else {
                     fn build_nested_tuple_pattern(elems: &[Expression]) -> Expression {
                         if elems.len() == 2 {
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("tuple".to_string()),
-                                    elems[0].clone(),
-                                    elems[1].clone(),
-                                ]
-                            )
+                            Expression::Apply(vec![
+                                Expression::Word("tuple".to_string()),
+                                elems[0].clone(),
+                                elems[1].clone(),
+                            ])
                         } else {
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("tuple".to_string()),
-                                    elems[0].clone(),
-                                    build_nested_tuple_pattern(&elems[1..]),
-                                ]
-                            )
+                            Expression::Apply(vec![
+                                Expression::Word("tuple".to_string()),
+                                elems[0].clone(),
+                                build_nested_tuple_pattern(&elems[1..]),
+                            ])
                         }
                     }
                     build_nested_tuple_pattern(&elems)
                 };
                 Ok(nested)
             } else {
-                Ok(
-                    Expression::Apply(
-                        std::iter::once(head).chain(normalized_items.into_iter()).collect()
-                    )
-                )
+                Ok(Expression::Apply(
+                    std::iter::once(head)
+                        .chain(normalized_items.into_iter())
+                        .collect(),
+                ))
             }
         }
         other => Ok(other),
@@ -1174,14 +1187,12 @@ fn normalize_tuple_pattern_expr(expr: Expression) -> Result<Expression, String> 
 
 fn prepare_program_with_macros(
     program_exprs: Vec<Expression>,
-    std_exprs: Vec<Expression>
+    std_exprs: Vec<Expression>,
 ) -> Result<(Vec<Expression>, Vec<Expression>), String> {
     let mut macros = HashMap::new();
     let runtime_std = split_macro_definitions(std_exprs, &mut macros)?;
-    let runtime_program = split_macro_definitions(
-        flatten_top_level_dos(program_exprs),
-        &mut macros
-    )?;
+    let runtime_program =
+        split_macro_definitions(flatten_top_level_dos(program_exprs), &mut macros)?;
     let expanded_std = expand_macros_in_program(runtime_std, &macros)?;
     let expanded_program = expand_macros_in_program(runtime_program, &macros)?;
     Ok((
@@ -1202,7 +1213,10 @@ pub fn parse(src: &str) -> Result<Vec<Expression>, String> {
         match parse_expr(&tokens, &mut i) {
             Ok(expr) => exprs.push(expr),
             Err(e) => {
-                return Err(format!("Error parsing expression at token index {}: {}", i, e));
+                return Err(format!(
+                    "Error parsing expression at token index {}: {}",
+                    i, e
+                ));
             }
         }
     }
@@ -1290,7 +1304,7 @@ fn next_destructure_temp(prefix: &str, arg_index: usize, binding_counter: &mut u
 
 fn desugar_with_counter(
     expr: Expression,
-    binding_counter: &mut usize
+    binding_counter: &mut usize,
 ) -> Result<Expression, String> {
     match expr {
         Expression::Apply(exprs) if !exprs.is_empty() => {
@@ -1346,18 +1360,13 @@ fn destructure_pattern(
     pattern: &Expression,
     value_expr: Expression,
     arg_index: usize,
-    binding_counter: &mut usize
+    binding_counter: &mut usize,
 ) -> Result<(Vec<Expression>, Expression), String> {
     if let Expression::Apply(items) = pattern {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "tuple") {
             let normalized = normalize_tuple_pattern_expr(pattern.clone())?;
             if normalized.to_lisp() != pattern.to_lisp() {
-                return destructure_pattern(
-                    &normalized,
-                    value_expr,
-                    arg_index,
-                    binding_counter,
-                );
+                return destructure_pattern(&normalized, value_expr, arg_index, binding_counter);
             }
         }
     }
@@ -1368,15 +1377,11 @@ fn destructure_pattern(
                 Ok((vec![], value_expr))
             } else {
                 Ok((
-                    vec![
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("let".to_string()),
-                                Expression::Word(name.clone()),
-                                value_expr.clone()
-                            ]
-                        )
-                    ],
+                    vec![Expression::Apply(vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(name.clone()),
+                        value_expr.clone(),
+                    ])],
                     Expression::Word(name.clone()),
                 ))
             }
@@ -1393,21 +1398,17 @@ fn destructure_pattern(
                     let temp_var = next_destructure_temp("temp_vec", arg_index, binding_counter);
 
                     let mut bindings = vec![];
-                    bindings.push(
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("let".to_string()),
-                                Expression::Word(temp_var.clone()),
-                                value_expr
-                            ]
-                        )
-                    );
+                    bindings.push(Expression::Apply(vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(temp_var.clone()),
+                        value_expr,
+                    ]));
 
                     let vector_bindings = destructure_vector_pattern(
                         pattern,
                         temp_var.clone(),
                         arg_index,
-                        binding_counter
+                        binding_counter,
                     )?;
                     bindings.extend(vector_bindings);
 
@@ -1415,50 +1416,40 @@ fn destructure_pattern(
                 } else if vector_kw == "tuple" {
                     // (tuple a b)
                     if elements.len() != 2 {
-                        return Err(
-                            format!(
-                                "Tuple pattern must have exactly 2 elements, got {}",
-                                elements.len()
-                            )
-                        );
+                        return Err(format!(
+                            "Tuple pattern must have exactly 2 elements, got {}",
+                            elements.len()
+                        ));
                     }
 
                     let mut bindings = vec![];
                     let temp_var = next_destructure_temp("temp_tuple", arg_index, binding_counter);
 
-                    bindings.push(
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("let".to_string()),
-                                Expression::Word(temp_var.clone()),
-                                value_expr
-                            ]
-                        )
-                    );
+                    bindings.push(Expression::Apply(vec![
+                        Expression::Word("let".to_string()),
+                        Expression::Word(temp_var.clone()),
+                        value_expr,
+                    ]));
 
                     let (fst_bindings, _fst_expr) = destructure_pattern(
                         &elements[0],
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("fst".to_string()),
-                                Expression::Word(temp_var.clone())
-                            ]
-                        ),
+                        Expression::Apply(vec![
+                            Expression::Word("fst".to_string()),
+                            Expression::Word(temp_var.clone()),
+                        ]),
                         arg_index,
-                        binding_counter
+                        binding_counter,
                     )?;
                     bindings.extend(fst_bindings);
 
                     let (snd_bindings, _) = destructure_pattern(
                         &elements[1],
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("snd".to_string()),
-                                Expression::Word(temp_var.clone())
-                            ]
-                        ),
+                        Expression::Apply(vec![
+                            Expression::Word("snd".to_string()),
+                            Expression::Word(temp_var.clone()),
+                        ]),
                         arg_index,
-                        binding_counter
+                        binding_counter,
                     )?;
                     bindings.extend(snd_bindings);
 
@@ -1473,64 +1464,50 @@ fn destructure_pattern(
                                     let temp_var = next_destructure_temp(
                                         "temp_tuple",
                                         arg_index,
-                                        binding_counter
+                                        binding_counter,
                                     );
 
-                                    bindings.push(
-                                        Expression::Apply(
-                                            vec![
-                                                Expression::Word("let".to_string()),
-                                                Expression::Word(temp_var.clone()),
-                                                value_expr.clone()
-                                            ]
-                                        )
-                                    );
+                                    bindings.push(Expression::Apply(vec![
+                                        Expression::Word("let".to_string()),
+                                        Expression::Word(temp_var.clone()),
+                                        value_expr.clone(),
+                                    ]));
 
                                     // Get the inner tuple from snd
                                     let inner_tuple_var = next_destructure_temp(
                                         "temp_tuple",
                                         arg_index,
-                                        binding_counter
+                                        binding_counter,
                                     );
-                                    bindings.push(
-                                        Expression::Apply(
-                                            vec![
-                                                Expression::Word("let".to_string()),
-                                                Expression::Word(inner_tuple_var.clone()),
-                                                Expression::Apply(
-                                                    vec![
-                                                        Expression::Word("snd".to_string()),
-                                                        Expression::Word(temp_var.clone())
-                                                    ]
-                                                )
-                                            ]
-                                        )
-                                    );
+                                    bindings.push(Expression::Apply(vec![
+                                        Expression::Word("let".to_string()),
+                                        Expression::Word(inner_tuple_var.clone()),
+                                        Expression::Apply(vec![
+                                            Expression::Word("snd".to_string()),
+                                            Expression::Word(temp_var.clone()),
+                                        ]),
+                                    ]));
 
                                     if inner_exprs.len() >= 3 {
                                         let (fst_bindings, _) = destructure_pattern(
                                             &inner_exprs[1],
-                                            Expression::Apply(
-                                                vec![
-                                                    Expression::Word("fst".to_string()),
-                                                    Expression::Word(inner_tuple_var.clone())
-                                                ]
-                                            ),
+                                            Expression::Apply(vec![
+                                                Expression::Word("fst".to_string()),
+                                                Expression::Word(inner_tuple_var.clone()),
+                                            ]),
                                             arg_index,
-                                            binding_counter
+                                            binding_counter,
                                         )?;
                                         bindings.extend(fst_bindings);
 
                                         let (snd_bindings, _) = destructure_pattern(
                                             &inner_exprs[2],
-                                            Expression::Apply(
-                                                vec![
-                                                    Expression::Word("snd".to_string()),
-                                                    Expression::Word(inner_tuple_var.clone())
-                                                ]
-                                            ),
+                                            Expression::Apply(vec![
+                                                Expression::Word("snd".to_string()),
+                                                Expression::Word(inner_tuple_var.clone()),
+                                            ]),
                                             arg_index,
-                                            binding_counter
+                                            binding_counter,
                                         )?;
                                         bindings.extend(snd_bindings);
                                     }
@@ -1544,55 +1521,40 @@ fn destructure_pattern(
                             }
                         } else if elements.len() == 2 {
                             let mut bindings = vec![];
-                            let temp_var = next_destructure_temp(
-                                "temp_tuple",
-                                arg_index,
-                                binding_counter
-                            );
+                            let temp_var =
+                                next_destructure_temp("temp_tuple", arg_index, binding_counter);
 
-                            bindings.push(
-                                Expression::Apply(
-                                    vec![
-                                        Expression::Word("let".to_string()),
-                                        Expression::Word(temp_var.clone()),
-                                        value_expr
-                                    ]
-                                )
-                            );
+                            bindings.push(Expression::Apply(vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(temp_var.clone()),
+                                value_expr,
+                            ]));
 
                             let (fst_bindings, _) = destructure_pattern(
                                 &elements[0],
-                                Expression::Apply(
-                                    vec![
-                                        Expression::Word("fst".to_string()),
-                                        Expression::Apply(
-                                            vec![
-                                                Expression::Word("snd".to_string()),
-                                                Expression::Word(temp_var.clone())
-                                            ]
-                                        )
-                                    ]
-                                ),
+                                Expression::Apply(vec![
+                                    Expression::Word("fst".to_string()),
+                                    Expression::Apply(vec![
+                                        Expression::Word("snd".to_string()),
+                                        Expression::Word(temp_var.clone()),
+                                    ]),
+                                ]),
                                 arg_index,
-                                binding_counter
+                                binding_counter,
                             )?;
                             bindings.extend(fst_bindings);
 
                             let (snd_bindings, _) = destructure_pattern(
                                 &elements[1],
-                                Expression::Apply(
-                                    vec![
+                                Expression::Apply(vec![
+                                    Expression::Word("snd".to_string()),
+                                    Expression::Apply(vec![
                                         Expression::Word("snd".to_string()),
-                                        Expression::Apply(
-                                            vec![
-                                                Expression::Word("snd".to_string()),
-                                                Expression::Word(temp_var.clone())
-                                            ]
-                                        )
-                                    ]
-                                ),
+                                        Expression::Word(temp_var.clone()),
+                                    ]),
+                                ]),
                                 arg_index,
-                                binding_counter
+                                binding_counter,
                             )?;
                             bindings.extend(snd_bindings);
 
@@ -1616,7 +1578,7 @@ fn destructure_vector_pattern(
     pattern: &Expression,
     vector_var: String,
     arg_index: usize,
-    binding_counter: &mut usize
+    binding_counter: &mut usize,
 ) -> Result<Vec<Expression>, String> {
     match pattern {
         Expression::Apply(vector_exprs) => {
@@ -1627,10 +1589,9 @@ fn destructure_vector_pattern(
                     let mut rest_name = None;
                     let mut elements_to_process = elements;
 
-                    if
-                        let Some(dot_idx) = elements
-                            .iter()
-                            .position(|elem| matches!(elem, Expression::Word(name) if name == "."))
+                    if let Some(dot_idx) = elements
+                        .iter()
+                        .position(|elem| matches!(elem, Expression::Word(name) if name == "."))
                     {
                         if dot_idx + 2 != elements.len() {
                             return Err(
@@ -1658,15 +1619,13 @@ fn destructure_vector_pattern(
                                 } else {
                                     let (elem_bindings, _) = destructure_pattern(
                                         elem,
-                                        Expression::Apply(
-                                            vec![
-                                                Expression::Word("get".to_string()),
-                                                Expression::Word(vector_var.clone()),
-                                                Expression::Int(element_index as i32)
-                                            ]
-                                        ),
+                                        Expression::Apply(vec![
+                                            Expression::Word("get".to_string()),
+                                            Expression::Word(vector_var.clone()),
+                                            Expression::Int(element_index as i32),
+                                        ]),
                                         arg_index,
-                                        binding_counter
+                                        binding_counter,
                                     )?;
                                     bindings.extend(elem_bindings);
                                     element_index += 1;
@@ -1677,15 +1636,13 @@ fn destructure_vector_pattern(
                                 // Recursively destructure nested pattern
                                 let (elem_bindings, _) = destructure_pattern(
                                     elem,
-                                    Expression::Apply(
-                                        vec![
-                                            Expression::Word("get".to_string()),
-                                            Expression::Word(vector_var.clone()),
-                                            Expression::Int(element_index as i32)
-                                        ]
-                                    ),
+                                    Expression::Apply(vec![
+                                        Expression::Word("get".to_string()),
+                                        Expression::Word(vector_var.clone()),
+                                        Expression::Int(element_index as i32),
+                                    ]),
                                     arg_index,
-                                    binding_counter
+                                    binding_counter,
                                 )?;
                                 bindings.extend(elem_bindings);
                                 element_index += 1;
@@ -1699,21 +1656,15 @@ fn destructure_vector_pattern(
                     }
 
                     if let Some(rest_name) = rest_name {
-                        bindings.push(
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("let".to_string()),
-                                    Expression::Word(rest_name),
-                                    Expression::Apply(
-                                        vec![
-                                            Expression::Word("cdr".to_string()),
-                                            Expression::Word(vector_var.clone()),
-                                            Expression::Int(element_index as i32)
-                                        ]
-                                    )
-                                ]
-                            )
-                        );
+                        bindings.push(Expression::Apply(vec![
+                            Expression::Word("let".to_string()),
+                            Expression::Word(rest_name),
+                            Expression::Apply(vec![
+                                Expression::Word("cdr".to_string()),
+                                Expression::Word(vector_var.clone()),
+                                Expression::Int(element_index as i32),
+                            ]),
+                        ]));
                     }
 
                     Ok(bindings)
@@ -1730,7 +1681,7 @@ fn destructure_vector_pattern(
 
 fn lambda_destructure_transform(
     exprs: Vec<Expression>,
-    binding_counter: &mut usize
+    binding_counter: &mut usize,
 ) -> Result<Expression, String> {
     // Check if valid body
     if exprs.len() < 2 {
@@ -1738,18 +1689,17 @@ fn lambda_destructure_transform(
     }
     let lambda_items = &exprs[1..];
     let (args, body) = match lambda_items {
-        [Expression::Apply(param_items), body_forms @ ..] if
-            !body_forms.is_empty() &&
-            !matches!(param_items.first(), Some(Expression::Word(head)) if head == "vector" || head == "tuple")
-        => {
+        [Expression::Apply(param_items), body_forms @ ..]
+            if !body_forms.is_empty()
+                && !matches!(param_items.first(), Some(Expression::Word(head)) if head == "vector" || head == "tuple") =>
+        {
             let body = if body_forms.len() == 1 {
                 body_forms[0].clone()
             } else {
                 Expression::Apply(
-                    std::iter
-                        ::once(Expression::Word("do".to_string()))
+                    std::iter::once(Expression::Word("do".to_string()))
                         .chain(body_forms.iter().cloned())
-                        .collect()
+                        .collect(),
                 )
             };
             (param_items.as_slice(), body)
@@ -1780,7 +1730,7 @@ fn lambda_destructure_transform(
                                 arg,
                                 temp_arg_name.clone(),
                                 j,
-                                binding_counter
+                                binding_counter,
                             )?;
                             new_bindings.extend(bindings);
                             new_args.push(Expression::Word(temp_arg_name));
@@ -1797,7 +1747,7 @@ fn lambda_destructure_transform(
                                 arg,
                                 Expression::Word(temp_arg_name.clone()),
                                 j,
-                                binding_counter
+                                binding_counter,
                             )?;
                             new_bindings.extend(bindings);
                             new_args.push(Expression::Word(temp_arg_name));
@@ -1819,10 +1769,9 @@ fn lambda_destructure_transform(
         let mut do_exprs = new_bindings;
         do_exprs.push(body);
         Expression::Apply(
-            std::iter
-                ::once(Expression::Word("do".to_string()))
+            std::iter::once(Expression::Word("do".to_string()))
                 .chain(do_exprs.into_iter())
-                .collect()
+                .collect(),
         )
     } else {
         body
@@ -1837,16 +1786,16 @@ fn lambda_destructure_transform(
 
 fn ensure_do_body_with_trailing_nil(body_expr: Expression) -> Expression {
     match body_expr {
-        Expression::Apply(mut body_items) if
-            matches!(body_items.first(), Some(Expression::Word(head)) if head == "do")
-        => {
+        Expression::Apply(mut body_items) if matches!(body_items.first(), Some(Expression::Word(head)) if head == "do") =>
+        {
             body_items.push(Expression::Word("nil".to_string()));
             Expression::Apply(body_items)
         }
-        other =>
-            Expression::Apply(
-                vec![Expression::Word("do".to_string()), other, Expression::Word("nil".to_string())]
-            ),
+        other => Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            other,
+            Expression::Word("nil".to_string()),
+        ]),
     }
 }
 
@@ -1856,23 +1805,19 @@ fn normalize_loop_while_body_from_arg(body_arg: &Expression) -> Result<Expressio
             if let Expression::Word(head) = &items[0] {
                 if head == "lambda" {
                     if items.len() < 2 {
-                        return Err(
-                            format!(
-                                "loop condition form lambda missing body\n{}",
-                                body_arg.to_lisp()
-                            )
-                        );
+                        return Err(format!(
+                            "loop condition form lambda missing body\n{}",
+                            body_arg.to_lisp()
+                        ));
                     }
                     let params = &items[1..items.len() - 1];
                     let param_count = params.len();
                     if param_count != 0 {
-                        return Err(
-                            format!(
-                                "loop condition form expects lambda with 0 parameters, found {}\n{}",
-                                param_count,
-                                body_arg.to_lisp()
-                            )
-                        );
+                        return Err(format!(
+                            "loop condition form expects lambda with 0 parameters, found {}\n{}",
+                            param_count,
+                            body_arg.to_lisp()
+                        ));
                     }
                     return Ok(Expression::Apply(vec![body_arg.clone()]));
                 }
@@ -1888,17 +1833,15 @@ fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String
     exprs.remove(0);
     let len = exprs.len();
     if len < 2 {
-        return Err(
-            format!(
-                "while expects at least 2 arguments: condition and body expression(s), got {}\n{}",
-                len,
-                exprs
-                    .into_iter()
-                    .map(|e| e.to_lisp())
-                    .collect::<Vec<String>>()
-                    .join(" ")
-            )
-        );
+        return Err(format!(
+            "while expects at least 2 arguments: condition and body expression(s), got {}\n{}",
+            len,
+            exprs
+                .into_iter()
+                .map(|e| e.to_lisp())
+                .collect::<Vec<String>>()
+                .join(" ")
+        ));
     }
 
     let condition = exprs[0].clone();
@@ -1911,7 +1854,11 @@ fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String
         Expression::Apply(do_items)
     };
     let body_with_unit = ensure_do_body_with_trailing_nil(raw_body);
-    Ok(Expression::Apply(vec![Expression::Word("while".to_string()), condition, body_with_unit]))
+    Ok(Expression::Apply(vec![
+        Expression::Word("while".to_string()),
+        condition,
+        body_with_unit,
+    ]))
 }
 
 fn cdr_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
@@ -1923,11 +1870,17 @@ fn cdr_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     }
     let first = iter.next().unwrap();
     if len == 1 {
-        return Ok(
-            Expression::Apply(vec![Expression::Word("cdr".to_string()), first, Expression::Int(1)])
-        );
+        return Ok(Expression::Apply(vec![
+            Expression::Word("cdr".to_string()),
+            first,
+            Expression::Int(1),
+        ]));
     }
-    Ok(Expression::Apply(vec![Expression::Word("cdr".to_string()), first, iter.next().unwrap()]))
+    Ok(Expression::Apply(vec![
+        Expression::Word("cdr".to_string()),
+        first,
+        iter.next().unwrap(),
+    ]))
 }
 
 fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
@@ -1939,9 +1892,11 @@ fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> 
     }
     let first = iter.next().unwrap();
     if len == 1 {
-        return Ok(
-            Expression::Apply(vec![Expression::Word("get".to_string()), first, Expression::Int(0)])
-        );
+        return Ok(Expression::Apply(vec![
+            Expression::Word("get".to_string()),
+            first,
+            Expression::Int(0),
+        ]));
     }
     let mut acc = first;
     for e in iter {
@@ -1966,107 +1921,99 @@ fn setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     for e in iter {
         acc = Expression::Apply(vec![Expression::Word("get".to_string()), acc, e]);
     }
-    Ok(Expression::Apply(vec![Expression::Word("set!".to_string()), acc, set_idx, last]))
+    Ok(Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        acc,
+        set_idx,
+        last,
+    ]))
 }
 fn variable_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
-    Expression::Apply(
-        vec![
-            Expression::Word("let".to_string()),
-            exprs[0].clone(),
-            Expression::Apply(vec![Expression::Word("box".to_string()), exprs[1].clone()])
-        ]
-    )
+    Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        exprs[0].clone(),
+        Expression::Apply(vec![Expression::Word("box".to_string()), exprs[1].clone()]),
+    ])
 }
 fn integer_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
-    Expression::Apply(
-        vec![
-            Expression::Word("let".to_string()),
-            exprs[0].clone(),
-            Expression::Apply(vec![Expression::Word("int".to_string()), exprs[1].clone()])
-        ]
-    )
+    Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        exprs[0].clone(),
+        Expression::Apply(vec![Expression::Word("int".to_string()), exprs[1].clone()]),
+    ])
 }
 fn float_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
-    Expression::Apply(
-        vec![
-            Expression::Word("let".to_string()),
-            exprs[0].clone(),
-            Expression::Apply(vec![Expression::Word("dec".to_string()), exprs[1].clone()])
-        ]
-    )
+    Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        exprs[0].clone(),
+        Expression::Apply(vec![Expression::Word("dec".to_string()), exprs[1].clone()]),
+    ])
 }
 fn boolean_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
     match &exprs[1] {
         Expression::Word(x) => {
             if x != "true" && x != "false" {
-                return Err(
-                    format!("Booleans variables only be assigned to true or false but got: {}", x)
-                );
+                return Err(format!(
+                    "Booleans variables only be assigned to true or false but got: {}",
+                    x
+                ));
             }
         }
-        Expression::Apply(x) =>
-            match &x[0] {
-                Expression::Word(y) => {
-                    if
-                        y != "=" &&
-                        y != ">" &&
-                        y != "<" &&
-                        y != "<=" &&
-                        y != ">=" &&
-                        y != "not" &&
-                        y != "or" &&
-                        y != "and"
-                    {
-                        return Err(
+        Expression::Apply(x) => match &x[0] {
+            Expression::Word(y) => {
+                if y != "="
+                    && y != ">"
+                    && y != "<"
+                    && y != "<="
+                    && y != ">="
+                    && y != "not"
+                    && y != "or"
+                    && y != "and"
+                {
+                    return Err(
                             format!("Booleans variables only be assigned to results of boolean expressions but got: {}", y)
                         );
-                    }
-                }
-                _ => {
-                    return Err(
-                        format!(
-                            "Booleans variables only be assigned to true or false but got: {:?}",
-                            x[0]
-                        )
-                    );
                 }
             }
+            _ => {
+                return Err(format!(
+                    "Booleans variables only be assigned to true or false but got: {:?}",
+                    x[0]
+                ));
+            }
+        },
         x => {
-            return Err(
-                format!("Booleans variables only be assigned to true or false but got : {:?}", x)
-            );
+            return Err(format!(
+                "Booleans variables only be assigned to true or false but got : {:?}",
+                x
+            ));
         }
     }
-    Ok(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                exprs[0].clone(),
-                Expression::Apply(vec![Expression::Word("bool".to_string()), exprs[1].clone()])
-            ]
-        )
-    )
+    Ok(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        exprs[0].clone(),
+        Expression::Apply(vec![Expression::Word("bool".to_string()), exprs[1].clone()]),
+    ]))
 }
 fn minus_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
         0 => Expression::Int(0),
-        1 =>
-            Expression::Apply(
-                vec![Expression::Word("*".to_string()), exprs.remove(0), Expression::Int(-1)]
-            ),
+        1 => Expression::Apply(vec![
+            Expression::Word("*".to_string()),
+            exprs.remove(0),
+            Expression::Int(-1),
+        ]),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("-".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("-".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2075,17 +2022,16 @@ fn minusf_transform(mut exprs: Vec<Expression>) -> Expression {
 
     match exprs.len() {
         0 => Expression::Int(0),
-        1 =>
-            Expression::Apply(
-                vec![Expression::Word("*.".to_string()), exprs.remove(0), Expression::Dec(-1.0)]
-            ),
+        1 => Expression::Apply(vec![
+            Expression::Word("*.".to_string()),
+            exprs.remove(0),
+            Expression::Dec(-1.0),
+        ]),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("-.".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("-.".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2097,11 +2043,9 @@ fn plus_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("+", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("+".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("+".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2114,11 +2058,9 @@ fn plusf_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("+.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("+.".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("+.".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2131,11 +2073,9 @@ fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("cons", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("cons".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("cons".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2189,18 +2129,17 @@ enum DestructuringKind {
 }
 fn destructuring_kind(pattern: &Expression) -> Option<DestructuringKind> {
     match pattern {
-        Expression::Apply(exprs) =>
-            match exprs.as_slice() {
-                [Expression::Word(kw), ..] if kw == "tuple" => Some(DestructuringKind::Tuple),
-                [Expression::Word(kw), ..] if kw == "vector" => Some(DestructuringKind::Vector),
-                _ => None,
-            }
+        Expression::Apply(exprs) => match exprs.as_slice() {
+            [Expression::Word(kw), ..] if kw == "tuple" => Some(DestructuringKind::Tuple),
+            [Expression::Word(kw), ..] if kw == "vector" => Some(DestructuringKind::Vector),
+            _ => None,
+        },
         _ => None,
     }
 }
 fn transform_let_destructuring_in_do(
     exprs: Vec<Expression>,
-    binding_counter: &mut usize
+    binding_counter: &mut usize,
 ) -> Result<Vec<Expression>, String> {
     let mut new_exprs = Vec::new();
 
@@ -2221,16 +2160,14 @@ fn transform_let_destructuring_in_do(
                             let temp_var = next_destructure_temp(
                                 &format!("let_temp_{}", prefix),
                                 10000,
-                                binding_counter
+                                binding_counter,
                             );
 
-                            let temp_binding = Expression::Apply(
-                                vec![
-                                    Expression::Word(kw.clone()),
-                                    Expression::Word(temp_var.clone()),
-                                    value_expr.clone()
-                                ]
-                            );
+                            let temp_binding = Expression::Apply(vec![
+                                Expression::Word(kw.clone()),
+                                Expression::Word(temp_var.clone()),
+                                value_expr.clone(),
+                            ]);
 
                             // We use a high arg_index to avoid clashes with lambda's _args prefix
                             // Nested temp variables will be _temp_10000_X which won't conflict
@@ -2238,7 +2175,7 @@ fn transform_let_destructuring_in_do(
                                 pattern,
                                 Expression::Word(temp_var),
                                 10000, // Use high index to avoid conflicts with lambda's small indices
-                                binding_counter
+                                binding_counter,
                             )?;
 
                             // Add temp binding first, then destructured bindings
@@ -2264,18 +2201,16 @@ fn transform_let_destructuring_in_do(
 
 fn transform_do(
     mut exprs: Vec<Expression>,
-    binding_counter: &mut usize
+    binding_counter: &mut usize,
 ) -> Result<Expression, String> {
     exprs.remove(0);
     let exprs_with_destructured_lets = transform_let_destructuring_in_do(exprs, binding_counter)?;
-    Ok(
-        Expression::Apply(
-            vec![Expression::Word("do".to_string())]
-                .into_iter()
-                .chain(exprs_with_destructured_lets)
-                .collect()
-        )
-    )
+    Ok(Expression::Apply(
+        vec![Expression::Word("do".to_string())]
+            .into_iter()
+            .chain(exprs_with_destructured_lets)
+            .collect(),
+    ))
 }
 fn combinator_transform_rev(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
@@ -2285,9 +2220,15 @@ fn combinator_transform_rev(mut exprs: Vec<Expression>) -> Result<Expression, St
     // generate fresh parameter
     let arg = Expression::Word("_x".to_string());
     // Build nested application: fns applied right-to-left
-    let body = exprs.into_iter().fold(arg.clone(), |acc, func| Expression::Apply(vec![func, acc]));
+    let body = exprs
+        .into_iter()
+        .fold(arg.clone(), |acc, func| Expression::Apply(vec![func, acc]));
 
-    Ok(normalize_apply(Expression::Apply(vec![Expression::Word("lambda".to_string()), arg, body])))
+    Ok(normalize_apply(Expression::Apply(vec![
+        Expression::Word("lambda".to_string()),
+        arg,
+        body,
+    ])))
 }
 
 fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
@@ -2299,18 +2240,18 @@ fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     }
 
     let func: Expression = exprs.remove(0);
-    Ok(exprs.into_iter().fold(func, |acc, arg| Expression::Apply(vec![acc, arg])))
+    Ok(exprs
+        .into_iter()
+        .fold(func, |acc, arg| Expression::Apply(vec![acc, arg])))
 }
 
 fn right_partial_transform(op: &str, first: Expression) -> Expression {
     let arg = Expression::Word("_x".to_string());
-    Expression::Apply(
-        vec![
-            Expression::Word("lambda".to_string()),
-            arg.clone(),
-            Expression::Apply(vec![Expression::Word(op.to_string()), first, arg]),
-        ]
-    )
+    Expression::Apply(vec![
+        Expression::Word("lambda".to_string()),
+        arg.clone(),
+        Expression::Apply(vec![Expression::Word(op.to_string()), first, arg]),
+    ])
 }
 
 fn and_transform(mut exprs: Vec<Expression>) -> Expression {
@@ -2321,11 +2262,9 @@ fn and_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("and", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("and".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("and".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2338,11 +2277,9 @@ fn or_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("or", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("or".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("or".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2354,11 +2291,9 @@ fn mult_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("*", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("*".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("*".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2370,11 +2305,9 @@ fn multf_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("*.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("*.".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("*.".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2386,11 +2319,9 @@ fn div_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("/", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("/".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("/".to_string()), acc, next])
+            })
         }
     }
 }
@@ -2402,45 +2333,40 @@ fn divf_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => right_partial_transform("/.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
-            exprs
-                .into_iter()
-                .fold(first, |acc, next| {
-                    Expression::Apply(vec![Expression::Word("/.".to_string()), acc, next])
-                })
+            exprs.into_iter().fold(first, |acc, next| {
+                Expression::Apply(vec![Expression::Word("/.".to_string()), acc, next])
+            })
         }
     }
 }
 fn if_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
     if exprs.len() == 0 {
-        return Expression::Apply(
-            vec![
-                Expression::Word("if".to_string()),
-                Expression::Word("nil".to_string()),
-                Expression::Word("nil".to_string()),
-                Expression::Word("nil".to_string())
-            ]
-        );
+        return Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+        ]);
     }
     if exprs.len() == 1 {
-        return Expression::Apply(
-            vec![
-                Expression::Word("if".to_string()),
-                exprs[0].clone(),
-                Expression::Word("nil".to_string()),
-                Expression::Word("nil".to_string())
-            ]
-        );
+        return Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            exprs[0].clone(),
+            Expression::Word("nil".to_string()),
+            Expression::Word("nil".to_string()),
+        ]);
     }
-    return Expression::Apply(
-        vec![Expression::Word("if".to_string()), exprs[0].clone(), exprs[1].clone(), if
-            exprs.len() == 2
-        {
+    return Expression::Apply(vec![
+        Expression::Word("if".to_string()),
+        exprs[0].clone(),
+        exprs[1].clone(),
+        if exprs.len() == 2 {
             Expression::Word("nil".to_string())
         } else {
             exprs[2].clone()
-        }]
-    );
+        },
+    ]);
 }
 fn pipe_data_first_curry_transform(mut exprs: Vec<Expression>) -> Expression {
     let mut inp = exprs.remove(1); // piped value
@@ -2471,8 +2397,8 @@ fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
     for stage in exprs.into_iter().skip(1) {
         match stage {
             Expression::Apply(items)
-                if !items.is_empty() &&
-                    matches!(&items[0], Expression::Word(head) if head != "lambda") =>
+                if !items.is_empty()
+                    && matches!(&items[0], Expression::Word(head) if head != "lambda") =>
             {
                 let func = items[0].clone();
                 let mut args: Vec<Expression> = items[1..].to_vec();
@@ -2516,7 +2442,11 @@ fn is_float(s: &str) -> bool {
         return false;
     }
 
-    let trimmed = if let Some(stripped) = s.strip_prefix('-') { stripped } else { s };
+    let trimmed = if let Some(stripped) = s.strip_prefix('-') {
+        stripped
+    } else {
+        s
+    };
 
     if !trimmed.contains('.') {
         return false;
@@ -2559,7 +2489,11 @@ fn is_integer(s: &str) -> bool {
     if !s.chars().any(|c| c.is_ascii_digit()) {
         return false;
     }
-    let trimmed = if let Some(stripped) = s.strip_prefix('-') { stripped } else { s };
+    let trimmed = if let Some(stripped) = s.strip_prefix('-') {
+        stripped
+    } else {
+        s
+    };
     for c in trimmed.chars() {
         if !c.is_ascii_digit() {
             return false;
@@ -2603,10 +2537,7 @@ impl Expression {
                 if items.is_empty() {
                     return "()".to_string();
                 }
-                let parts: Vec<String> = items
-                    .iter()
-                    .map(|e| e.to_lisp())
-                    .collect();
+                let parts: Vec<String> = items.iter().map(|e| e.to_lisp()).collect();
                 format!("({})", parts.join(" "))
             }
         }
@@ -2614,82 +2545,82 @@ impl Expression {
 }
 
 fn wrap_top_level_do(exprs: Vec<Expression>) -> Expression {
-    Expression::Apply(std::iter::once(Expression::Word("do".to_string())).chain(exprs).collect())
+    Expression::Apply(
+        std::iter::once(Expression::Word("do".to_string()))
+            .chain(exprs)
+            .collect(),
+    )
 }
 
 fn wrap_runtime_top_level_do(exprs: Vec<Expression>) -> Expression {
     if exprs.is_empty() {
-        return Expression::Apply(
-            vec![Expression::Word("do".to_string()), Expression::Word("nil".to_string())]
-        );
+        return Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            Expression::Word("nil".to_string()),
+        ]);
     }
     wrap_top_level_do(exprs)
 }
 
 pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expression, String> {
     match preprocess(&program) {
-        Ok(preprocessed) =>
-            match parse(&preprocessed) {
-                Ok(exprs) => {
-                    let (exprs, std) = prepare_program_with_macros(exprs, std)?;
-                    let mut desugared = Vec::new();
-                    let mut desugared_std = Vec::new();
-                    let mut binding_counter = 0usize;
-                    for expr in std {
-                        match desugar_with_counter(expr, &mut binding_counter) {
-                            Ok(expr) => desugared_std.push(expr),
-                            Err(e) => {
-                                return Err(e);
-                            }
+        Ok(preprocessed) => match parse(&preprocessed) {
+            Ok(exprs) => {
+                let (exprs, std) = prepare_program_with_macros(exprs, std)?;
+                let mut desugared = Vec::new();
+                let mut desugared_std = Vec::new();
+                let mut binding_counter = 0usize;
+                for expr in std {
+                    match desugar_with_counter(expr, &mut binding_counter) {
+                        Ok(expr) => desugared_std.push(expr),
+                        Err(e) => {
+                            return Err(e);
                         }
                     }
-                    for expr in exprs {
-                        match desugar_with_counter(expr, &mut binding_counter) {
-                            Ok(expr) => desugared.push(expr),
-                            Err(e) => {
-                                return Err(e);
-                            }
+                }
+                for expr in exprs {
+                    match desugar_with_counter(expr, &mut binding_counter) {
+                        Ok(expr) => desugared.push(expr),
+                        Err(e) => {
+                            return Err(e);
                         }
                     }
-                    for expr in &desugared {
-                        validate_reserved_words_in_binders(expr)?;
-                    }
-                    let mut used: HashSet<String> = HashSet::new();
-                    for e in &desugared {
-                        let mut scoped = HashSet::new();
-                        collect_free_idents(e, &mut scoped, &mut used);
-                    }
-                    let mut definitions: HashSet<String> = HashSet::new();
-                    for expr in &desugared {
-                        if let Expression::Apply(list) = expr {
-                            if
-                                let [Expression::Word(kw), Expression::Word(name), _rest @ ..] =
-                                    &list[..]
-                            {
-                                if kw == "let" || kw == "letrec" || kw == "mut" {
-                                    if is_reserved_word(name) {
-                                        return Err(format!("Variable '{}' is forbidden", name));
-                                    }
-                                    definitions.insert(name.to_string());
+                }
+                for expr in &desugared {
+                    validate_reserved_words_in_binders(expr)?;
+                }
+                let mut used: HashSet<String> = HashSet::new();
+                for e in &desugared {
+                    let mut scoped = HashSet::new();
+                    collect_free_idents(e, &mut scoped, &mut used);
+                }
+                let mut definitions: HashSet<String> = HashSet::new();
+                for expr in &desugared {
+                    if let Expression::Apply(list) = expr {
+                        if let [Expression::Word(kw), Expression::Word(name), _rest @ ..] =
+                            &list[..]
+                        {
+                            if kw == "let" || kw == "letrec" || kw == "mut" {
+                                if is_reserved_word(name) {
+                                    return Err(format!("Variable '{}' is forbidden", name));
                                 }
+                                definitions.insert(name.to_string());
                             }
                         }
                     }
+                }
 
-                    let shaken_std = tree_shake(desugared_std, &used, &mut definitions);
-                    let top_level = transform_let_destructuring_in_do(
-                        desugared.to_vec(),
-                        &mut binding_counter
-                    )?;
-                    let wrapped = wrap_runtime_top_level_do(
-                        shaken_std.into_iter().chain(top_level).collect()
-                    );
-                    Ok(wrapped)
-                }
-                Err(e) => {
-                    return Err(e);
-                }
+                let shaken_std = tree_shake(desugared_std, &used, &mut definitions);
+                let top_level =
+                    transform_let_destructuring_in_do(desugared.to_vec(), &mut binding_counter)?;
+                let wrapped =
+                    wrap_runtime_top_level_do(shaken_std.into_iter().chain(top_level).collect());
+                Ok(wrapped)
             }
+            Err(e) => {
+                return Err(e);
+            }
+        },
         Err(e) => {
             return Err(e);
         }
@@ -2714,5 +2645,7 @@ pub fn build(program: &str) -> Result<Expression, String> {
 pub fn build_library(program: &str) -> Result<Expression, String> {
     let preprocessed = preprocess(program)?;
     let exprs = parse(&preprocessed)?;
-    Ok(wrap_top_level_do(normalize_tuple_arity_program(flatten_top_level_dos(exprs))))
+    Ok(wrap_top_level_do(normalize_tuple_arity_program(
+        flatten_top_level_dos(exprs),
+    )))
 }

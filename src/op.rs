@@ -868,18 +868,15 @@ fn fuse_tmp_name(base: &str, suffix: &str) -> String {
     if suffix.is_empty() { base.to_string() } else { format!("{}{}", base, suffix) }
 }
 
-fn build_while_range_call(
+fn build_while_range_body(
     start_expr: Expression,
     end_expr: Expression,
     i_name: &str,
-    process_name: &str
+    step_body: Expression
 ) -> Expression {
     let i_word = Expression::Word(i_name.to_string());
     let end_name = format!("{}_end", i_name);
     let end_word = Expression::Word(end_name.clone());
-    let process_call = Expression::Apply(
-        vec![Expression::Word(process_name.to_string()), i_word.clone()]
-    );
     let inc_i = Expression::Apply(
         vec![
             Expression::Word("alter!".to_string()),
@@ -892,7 +889,7 @@ fn build_while_range_call(
     let body = Expression::Apply(
         vec![
             Expression::Word("do".to_string()),
-            process_call,
+            step_body,
             inc_i,
             Expression::Word("nil".to_string())
         ]
@@ -1080,7 +1077,6 @@ fn build_collect_loop(
     )?;
 
     let out_name = fuse_tmp_name("__fuse_out", suffix);
-    let process_name = fuse_tmp_name("__fuse_process", suffix);
     let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
@@ -1128,10 +1124,6 @@ fn build_collect_loop(
             &sink_builder
         )?
     };
-    let process_lambda = Expression::Apply(
-        vec![Expression::Word("lambda".to_string()), Expression::Word(i_name.clone()), process_body]
-    );
-
     setup_bindings.push(
         Expression::Apply(
             vec![
@@ -1141,16 +1133,7 @@ fn build_collect_loop(
             ]
         )
     );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(process_name.clone()),
-                process_lambda
-            ]
-        )
-    );
-    setup_bindings.push(build_while_range_call(start_expr, end_expr, &i_name, &process_name));
+    setup_bindings.push(build_while_range_body(start_expr, end_expr, &i_name, process_body));
     setup_bindings.push(Expression::Word(out_name));
 
     let mut do_items = vec![Expression::Word("do".to_string())];
@@ -1172,7 +1155,6 @@ fn build_reduce_loop(
     )?;
 
     let out_name = fuse_tmp_name("__fuse_out", suffix);
-    let process_name = fuse_tmp_name("__fuse_process", suffix);
     let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
@@ -1229,10 +1211,6 @@ fn build_reduce_loop(
             &sink_builder
         )?
     };
-    let process_lambda = Expression::Apply(
-        vec![Expression::Word("lambda".to_string()), Expression::Word(i_name.clone()), process_body]
-    );
-
     setup_bindings.push(
         Expression::Apply(
             vec![
@@ -1242,16 +1220,7 @@ fn build_reduce_loop(
             ]
         )
     );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(process_name.clone()),
-                process_lambda
-            ]
-        )
-    );
-    setup_bindings.push(build_while_range_call(start_expr, end_expr, &i_name, &process_name));
+    setup_bindings.push(build_while_range_body(start_expr, end_expr, &i_name, process_body));
     setup_bindings.push(
         Expression::Apply(
             vec![
@@ -1281,7 +1250,6 @@ fn build_reduce_until_loop(
 
     let out_name = fuse_tmp_name("__fuse_out", suffix);
     let placed_name = fuse_tmp_name("__fuse_placed", suffix);
-    let process_name = fuse_tmp_name("__fuse_process", suffix);
 
     let idx_get = Expression::Apply(
         vec![
@@ -1365,12 +1333,7 @@ fn build_reduce_until_loop(
             )
         ]
     );
-    let process_lambda = Expression::Apply(
-        vec![
-            Expression::Word("lambda".to_string()),
-            Expression::Apply(vec![Expression::Word("do".to_string()), step_action, idx_inc])
-        ]
-    );
+    let step_body = Expression::Apply(vec![Expression::Word("do".to_string()), step_action, idx_inc]);
 
     let continue_cond = Expression::Apply(
         vec![
@@ -1417,18 +1380,9 @@ fn build_reduce_until_loop(
     setup_bindings.push(
         Expression::Apply(
             vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(process_name.clone()),
-                process_lambda
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
                 Expression::Word("while".to_string()),
                 continue_cond,
-                Expression::Apply(vec![Expression::Word(process_name)])
+                step_body
             ]
         )
     );
@@ -1460,7 +1414,6 @@ fn build_average_loop(
 
     let sum_name = fuse_tmp_name("__fuse_sum", suffix);
     let count_name = fuse_tmp_name("__fuse_count", suffix);
-    let process_name = fuse_tmp_name("__fuse_process", suffix);
     let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
@@ -1524,10 +1477,6 @@ fn build_average_loop(
         &mut setup_bindings,
         &sink_builder
     )?;
-    let process_lambda = Expression::Apply(
-        vec![Expression::Word("lambda".to_string()), Expression::Word(i_name.clone()), process_body]
-    );
-
     setup_bindings.push(
         Expression::Apply(
             vec![
@@ -1552,16 +1501,7 @@ fn build_average_loop(
             ]
         )
     );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(process_name.clone()),
-                process_lambda
-            ]
-        )
-    );
-    setup_bindings.push(build_while_range_call(start_expr, end_expr, &i_name, &process_name));
+    setup_bindings.push(build_while_range_body(start_expr, end_expr, &i_name, process_body));
 
     let count_get = Expression::Apply(
         vec![Expression::Word("get".to_string()), Expression::Word(count_name), Expression::Int(0)]
@@ -1599,7 +1539,6 @@ fn build_unzip_loop(
 
     let out_a_name = fuse_tmp_name("__fuse_out_a", suffix);
     let out_b_name = fuse_tmp_name("__fuse_out_b", suffix);
-    let process_name = fuse_tmp_name("__fuse_process", suffix);
     let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
@@ -1651,10 +1590,6 @@ fn build_unzip_loop(
         &mut setup_bindings,
         &sink_builder
     )?;
-    let process_lambda = Expression::Apply(
-        vec![Expression::Word("lambda".to_string()), Expression::Word(i_name.clone()), process_body]
-    );
-
     setup_bindings.push(
         Expression::Apply(
             vec![
@@ -1673,16 +1608,7 @@ fn build_unzip_loop(
             ]
         )
     );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(process_name.clone()),
-                process_lambda
-            ]
-        )
-    );
-    setup_bindings.push(build_while_range_call(start_expr, end_expr, &i_name, &process_name));
+    setup_bindings.push(build_while_range_body(start_expr, end_expr, &i_name, process_body));
     setup_bindings.push(
         Expression::Apply(
             vec![
@@ -1710,7 +1636,6 @@ fn build_some_every_loop(
         make_short_circuit_source_bindings(source, suffix)?;
 
     let flag_name = fuse_tmp_name("__fuse_flag", suffix);
-    let process_name = fuse_tmp_name("__fuse_process", suffix);
     let idx_get = Expression::Apply(
         vec![
             Expression::Word("get".to_string()),
@@ -1800,12 +1725,7 @@ fn build_some_every_loop(
             )
         ]
     );
-    let process_lambda = Expression::Apply(
-        vec![
-            Expression::Word("lambda".to_string()),
-            Expression::Apply(vec![Expression::Word("do".to_string()), step_action, idx_inc])
-        ]
-    );
+    let step_body = Expression::Apply(vec![Expression::Word("do".to_string()), step_action, idx_inc]);
 
     let continue_cond = if is_some {
         Expression::Apply(
@@ -1838,18 +1758,9 @@ fn build_some_every_loop(
     setup_bindings.push(
         Expression::Apply(
             vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(process_name.clone()),
-                process_lambda
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
                 Expression::Word("while".to_string()),
                 continue_cond,
-                Expression::Apply(vec![Expression::Word(process_name)])
+                step_body
             ]
         )
     );
@@ -1878,7 +1789,6 @@ fn build_find_loop(
         make_short_circuit_source_bindings(source, suffix)?;
 
     let out_name = fuse_tmp_name("__fuse_out", suffix);
-    let process_name = fuse_tmp_name("__fuse_process", suffix);
 
     let idx_get = Expression::Apply(
         vec![
@@ -1938,12 +1848,7 @@ fn build_find_loop(
             )
         ]
     );
-    let process_lambda = Expression::Apply(
-        vec![
-            Expression::Word("lambda".to_string()),
-            Expression::Apply(vec![Expression::Word("do".to_string()), guarded_step, idx_inc])
-        ]
-    );
+    let step_body = Expression::Apply(vec![Expression::Word("do".to_string()), guarded_step, idx_inc]);
 
     let continue_cond = Expression::Apply(
         vec![
@@ -1977,18 +1882,9 @@ fn build_find_loop(
     setup_bindings.push(
         Expression::Apply(
             vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(process_name.clone()),
-                process_lambda
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
                 Expression::Word("while".to_string()),
                 continue_cond,
-                Expression::Apply(vec![Expression::Word(process_name)])
+                step_body
             ]
         )
     );
@@ -2814,7 +2710,6 @@ fn build_collect_step_with_flatten(
                 _ => unreachable!(),
             };
             let xs_name = next_flatten_tmp_name("__fuse_flat_xs", suffix, flat_tmp_counter);
-            let proc_name = next_flatten_tmp_name("__fuse_flat_process", suffix, flat_tmp_counter);
             let i_name = next_flatten_tmp_name("__fuse_flat_i", suffix, flat_tmp_counter);
             let i_word = Expression::Word(i_name.clone());
             let item_expr = Expression::Apply(
@@ -2844,20 +2739,7 @@ fn build_collect_step_with_flatten(
                                 list_expr
                             ]
                         ),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("let".to_string()),
-                                Expression::Word(proc_name.clone()),
-                                Expression::Apply(
-                                    vec![
-                                        Expression::Word("lambda".to_string()),
-                                        Expression::Word(i_name.clone()),
-                                        process_body
-                                    ]
-                                )
-                            ]
-                        ),
-                        build_while_range_call(
+                        build_while_range_body(
                             Expression::Int(0),
                             Expression::Apply(
                                 vec![
@@ -2866,7 +2748,7 @@ fn build_collect_step_with_flatten(
                                 ]
                             ),
                             &i_name,
-                            &proc_name
+                            process_body
                         )
                     ]
                 )
@@ -2958,7 +2840,6 @@ fn build_reduce_step_with_flatten(
                 _ => unreachable!(),
             };
             let xs_name = next_flatten_tmp_name("__fuse_flat_xs", suffix, flat_tmp_counter);
-            let proc_name = next_flatten_tmp_name("__fuse_flat_process", suffix, flat_tmp_counter);
             let i_name = next_flatten_tmp_name("__fuse_flat_i", suffix, flat_tmp_counter);
             let i_word = Expression::Word(i_name.clone());
             let item_expr = Expression::Apply(
@@ -2989,20 +2870,7 @@ fn build_reduce_step_with_flatten(
                                 list_expr
                             ]
                         ),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("let".to_string()),
-                                Expression::Word(proc_name.clone()),
-                                Expression::Apply(
-                                    vec![
-                                        Expression::Word("lambda".to_string()),
-                                        Expression::Word(i_name.clone()),
-                                        process_body
-                                    ]
-                                )
-                            ]
-                        ),
-                        build_while_range_call(
+                        build_while_range_body(
                             Expression::Int(0),
                             Expression::Apply(
                                 vec![
@@ -3011,7 +2879,7 @@ fn build_reduce_step_with_flatten(
                                 ]
                             ),
                             &i_name,
-                            &proc_name
+                            process_body
                         )
                     ]
                 )
