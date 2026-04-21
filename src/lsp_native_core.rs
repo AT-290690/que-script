@@ -1113,14 +1113,11 @@ fn top_level_form_byte_ranges(text: &str) -> Vec<(usize, usize)> {
                 i = end;
             }
             b'"' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
-                        i += 1;
-                        break;
-                    }
-                    i += 1;
-                }
+                i = skip_string_literal(text, i, bytes.len());
+                ranges.push((start, i));
+            }
+            b'\'' => {
+                i = skip_char_literal(text, i, bytes.len());
                 ranges.push((start, i));
             }
             _ => {
@@ -1173,6 +1170,11 @@ fn find_matching_list_end_byte(text: &str, open_idx: usize) -> Option<usize> {
 
         if in_string {
             i += 1;
+            continue;
+        }
+
+        if b == b'\'' {
+            i = skip_char_literal(text, i, bytes.len());
             continue;
         }
 
@@ -1516,6 +1518,11 @@ fn find_snippet_ranges(text: &str, snippet: &str) -> Vec<CoreRange> {
             continue;
         }
 
+        if b == b'\'' {
+            i = skip_char_literal(text, i, bytes.len());
+            continue;
+        }
+
         if &bytes[i..i + needle.len()] == needle {
             let start = i;
             let end = i + needle.len();
@@ -1566,6 +1573,11 @@ fn find_call_prefix_ranges(text: &str, snippet: &str) -> Vec<CoreRange> {
                 continue;
             }
 
+            if bytes[i] == b'\'' {
+                i = skip_char_literal(text, i, bytes.len());
+                continue;
+            }
+
             if bytes[i] == b'(' && match_call_prefix_at(text, i, prefix_tokens) {
                 if let Some(close) = find_matching_paren_byte(text, i) {
                     out.push(CoreRange {
@@ -1592,7 +1604,15 @@ fn extract_call_prefix_tokens(snippet: &str, max_tokens: usize) -> Vec<String> {
     let mut cur = String::new();
     let mut depth = 0usize;
     let mut in_string = false;
+    let mut in_char = false;
     for ch in inner.chars() {
+        if in_char {
+            cur.push(ch);
+            if ch == '\'' {
+                in_char = false;
+            }
+            continue;
+        }
         if in_string {
             cur.push(ch);
             if ch == '"' {
@@ -1603,6 +1623,10 @@ fn extract_call_prefix_tokens(snippet: &str, max_tokens: usize) -> Vec<String> {
         match ch {
             '"' => {
                 in_string = true;
+                cur.push(ch);
+            }
+            '\'' => {
+                in_char = true;
                 cur.push(ch);
             }
             '(' | '[' | '{' => {
@@ -1699,6 +1723,11 @@ fn find_symbol_ranges(text: &str, symbol: &str) -> Vec<CoreRange> {
         }
         if in_string {
             i += 1;
+            continue;
+        }
+
+        if b == b'\'' {
+            i = skip_char_literal(text, i, bytes.len());
             continue;
         }
 
@@ -1927,6 +1956,11 @@ pub fn find_matching_paren_byte(text: &str, open_idx: usize) -> Option<usize> {
         }
         if in_string {
             i += 1;
+            continue;
+        }
+
+        if b == b'\'' {
+            i = skip_char_literal(text, i, bytes.len());
             continue;
         }
 

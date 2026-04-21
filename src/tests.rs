@@ -3752,6 +3752,29 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_lsp_top_level_ranges_ignore_parens_inside_char_literals() {
+        let program =
+            "(let solve (lambda input (- (count/char '(' input) (count/char ')' input))))\n(solve \"())\")\n";
+        let ranges = crate::lsp_native_core::top_level_form_ranges(program);
+        assert_eq!(ranges.len(), 2, "expected two top-level forms, got: {:?}", ranges);
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_char_literals_with_parens_do_not_crash() {
+        let program =
+            "(let solve (lambda input (- (count/char '(' input) (count/char ')' input))))\n(solve \"())\")\n";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+        assert!(
+            diagnostics.is_array(),
+            "expected diagnostics array, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_diagnostics_scope_fallback_avoids_outer_loop_condition() {
         let program =
             "(let fn (lambda x (get x)))\n\n(integer x 1)\n(while (< (get x) 10) (do\n (match? (get x) \"10\")\n(&alter! x (+ (&get x) 1))))";
