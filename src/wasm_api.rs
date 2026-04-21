@@ -1,18 +1,15 @@
 use crate::infer::{
-    infer_with_builtins_typed,
-    infer_with_builtins_typed_lsp,
-    EffectFlags,
-    InferErrorScope,
+    infer_with_builtins_typed, infer_with_builtins_typed_lsp, EffectFlags, InferErrorScope,
     TypedExpression,
 };
 use crate::lsp_native_core as native_core;
-use crate::parser::{ self, Expression };
-use crate::types::{ Type, TypeEnv };
+use crate::parser::{self, Expression};
+use crate::types::{Type, TypeEnv};
 #[cfg(feature = "compiler")]
 use crate::wat;
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::{ HashMap, HashSet };
+use std::collections::{HashMap, HashSet};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 #[derive(Clone, Copy)]
@@ -104,9 +101,8 @@ fn with_lsp_core<R>(f: impl FnOnce(&WasmLspCore) -> R) -> R {
 
 fn build_lsp_core() -> WasmLspCore {
     let std_defs = load_std_definitions();
-    let (base_env, base_next_id, global_signatures, global_effects) = build_base_environment(
-        &std_defs
-    );
+    let (base_env, base_next_id, global_signatures, global_effects) =
+        build_base_environment(&std_defs);
     let std_fallback_names = collect_std_top_level_let_names(&std_defs)
         .into_iter()
         .filter(|name| !name.starts_with("std/"))
@@ -131,16 +127,19 @@ fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<String> {
 
 fn infer_standalone_std_symbol_signature(core: &WasmLspCore, symbol: &str) -> Option<String> {
     let program = parser::merge_std_and_program(symbol, core.std_defs.clone()).ok()?;
-    let (typ, _typed) = infer_with_builtins_typed(&program, (
-        core.base_env.clone(),
-        core.base_next_id,
-    )).ok()?;
+    let (typ, _typed) =
+        infer_with_builtins_typed(&program, (core.base_env.clone(), core.base_next_id)).ok()?;
     Some(normalize_signature(&typ.to_string()))
 }
 
 fn build_base_environment(
-    std_defs: &[Expression]
-) -> (TypeEnv, u64, HashMap<String, String>, HashMap<String, EffectFlags>) {
+    std_defs: &[Expression],
+) -> (
+    TypeEnv,
+    u64,
+    HashMap<String, String>,
+    HashMap<String, EffectFlags>,
+) {
     native_core::build_base_environment(std_defs)
 }
 
@@ -192,13 +191,11 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         }
     };
 
-    match
-        infer_with_builtins_typed_lsp(
-            &program,
-            (core.base_env.clone(), core.base_next_id),
-            user_form_count
-        )
-    {
+    match infer_with_builtins_typed_lsp(
+        &program,
+        (core.base_env.clone(), core.base_next_id),
+        user_form_count,
+    ) {
         Ok((_typ, typed)) => {
             for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
                 collect_symbol_types(form, &mut symbol_types_raw);
@@ -216,11 +213,13 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             let message_with_suggestions = native_core::append_undefined_variable_suggestions(
                 &err.message,
                 candidate_symbols.iter().map(|s| s.as_str()),
-                3
+                3,
             );
-            diagnostics.extend(
-                make_error_diagnostic(text, message_with_suggestions, err.scope.as_ref())
-            );
+            diagnostics.extend(make_error_diagnostic(
+                text,
+                message_with_suggestions,
+                err.scope.as_ref(),
+            ));
         }
     }
 
@@ -283,16 +282,13 @@ pub fn lsp_completions(text: String) -> String {
 
 #[wasm_bindgen]
 pub fn lsp_completions_at(text: String, line: u32, character: u32) -> String {
-    lsp_completions_with_prefix(
-        text,
-        Some(native_core::CorePosition {
-            line,
-            character,
-        })
-    )
+    lsp_completions_with_prefix(text, Some(native_core::CorePosition { line, character }))
 }
 
-fn lsp_completions_with_prefix(text: String, position: Option<native_core::CorePosition>) -> String {
+fn lsp_completions_with_prefix(
+    text: String,
+    position: Option<native_core::CorePosition>,
+) -> String {
     with_lsp_core(|core| {
         let analysis = analyze_document_text_cached(&text, core);
         let prefix = position.and_then(|pos| native_core::symbol_prefix_at_position(&text, pos));
@@ -349,7 +345,11 @@ fn lsp_completions_with_prefix(text: String, position: Option<native_core::CoreP
             });
         }
         for (label, detail) in &inferred_signatures {
-            let kind = if detail.contains("->") { "function" } else { "constant" };
+            let kind = if detail.contains("->") {
+                "function"
+            } else {
+                "constant"
+            };
             items.push(JsonCompletionItem {
                 label: label.clone(),
                 detail: Some(normalize_signature(detail)),
@@ -377,12 +377,7 @@ fn lsp_completions_with_prefix(text: String, position: Option<native_core::CoreP
                     continue;
                 }
                 let detail = core.global_signatures.get(name).cloned();
-                let kind = if
-                    detail
-                        .as_ref()
-                        .map(|s| s.contains("->"))
-                        .unwrap_or(true)
-                {
+                let kind = if detail.as_ref().map(|s| s.contains("->")).unwrap_or(true) {
                     "function"
                 } else {
                     "constant"
@@ -447,7 +442,8 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             return "null".to_string();
         };
         let type_info = normalize_signature(&type_info);
-        let symbol_effect = analysis.let_binding_effects
+        let symbol_effect = analysis
+            .let_binding_effects
             .get(&symbol)
             .copied()
             .or_else(|| core.global_effects.get(&symbol).copied())
@@ -529,7 +525,11 @@ fn completion_matches_prefix(label: &str, prefix: &str) -> bool {
     if prefix.contains('/') {
         return false;
     }
-    label.rsplit('/').next().map(|segment| segment.starts_with(prefix)).unwrap_or(false)
+    label
+        .rsplit('/')
+        .next()
+        .map(|segment| segment.starts_with(prefix))
+        .unwrap_or(false)
 }
 
 fn is_standalone_symbol_expr_at_range(text: &str, range: TextRange, symbol: &str) -> bool {
@@ -541,7 +541,10 @@ fn parse_user_exprs_for_symbol_collection(text: &str) -> Option<Vec<Expression>>
 }
 
 fn top_level_form_ranges(text: &str) -> Vec<TextRange> {
-    native_core::top_level_form_ranges(text).into_iter().map(from_core_range).collect()
+    native_core::top_level_form_ranges(text)
+        .into_iter()
+        .map(from_core_range)
+        .collect()
 }
 
 fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
@@ -563,7 +566,7 @@ fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<St
 fn collect_let_binding_effects(
     node: &TypedExpression,
     effects: &mut HashMap<String, EffectFlags>,
-    fallback_effects: &HashMap<String, EffectFlags>
+    fallback_effects: &HashMap<String, EffectFlags>,
 ) {
     native_core::collect_let_binding_effects(node, effects, fallback_effects)
 }
@@ -578,7 +581,7 @@ fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String, Ty
 
 fn extract_user_top_level_typed_forms<'a>(
     typed_program: &'a TypedExpression,
-    user_form_count: usize
+    user_form_count: usize,
 ) -> Vec<&'a TypedExpression> {
     if let Expression::Apply(_) = &typed_program.expr {
         if typed_program.children.len() <= 1 {
@@ -623,7 +626,7 @@ fn strip_type_var_numbers(input: &str) -> String {
 fn make_error_diagnostic(
     text: &str,
     message: String,
-    scope: Option<&InferErrorScope>
+    scope: Option<&InferErrorScope>,
 ) -> Vec<JsonDiagnostic> {
     let normalized_message = strip_type_var_numbers(&message);
     let inferred_ranges = infer_error_ranges(text, &message, scope);
@@ -633,7 +636,11 @@ fn make_error_diagnostic(
         normalized_message
     };
 
-    let ranges = if inferred_ranges.is_empty() { vec![full_range(text)] } else { inferred_ranges };
+    let ranges = if inferred_ranges.is_empty() {
+        vec![full_range(text)]
+    } else {
+        inferred_ranges
+    };
 
     ranges
         .into_iter()
@@ -651,9 +658,12 @@ fn diagnostic_summary_without_snippet(message: &str) -> String {
 fn infer_error_ranges(
     text: &str,
     message: &str,
-    scope: Option<&InferErrorScope>
+    scope: Option<&InferErrorScope>,
 ) -> Vec<TextRange> {
-    native_core::infer_error_ranges(text, message, scope).into_iter().map(from_core_range).collect()
+    native_core::infer_error_ranges(text, message, scope)
+        .into_iter()
+        .map(from_core_range)
+        .collect()
 }
 
 fn full_range(text: &str) -> TextRange {
@@ -661,14 +671,12 @@ fn full_range(text: &str) -> TextRange {
 }
 
 fn symbol_at_position(text: &str, position: Position) -> Option<(String, TextRange)> {
-    native_core
-        ::symbol_at_position(text, to_core_position(position))
+    native_core::symbol_at_position(text, to_core_position(position))
         .map(|(symbol, range)| (symbol, from_core_range(range)))
 }
 
 fn literal_type_at_position(text: &str, position: Position) -> Option<(String, TextRange)> {
-    native_core
-        ::literal_type_at_position(text, to_core_position(position))
+    native_core::literal_type_at_position(text, to_core_position(position))
         .map(|(literal_type, range)| (literal_type, from_core_range(range)))
 }
 
@@ -699,7 +707,10 @@ fn format_scope_path(scope: Option<&InferErrorScope>) -> String {
                     .collect::<Vec<String>>()
                     .join(" -> ")
             };
-            format!("top_form={} lambda_path={}", meta.user_top_form, lambda_path)
+            format!(
+                "top_form={} lambda_path={}",
+                meta.user_top_form, lambda_path
+            )
         }
         None => "<none>".to_string(),
     }
@@ -710,7 +721,7 @@ fn format_basic_debug_error_report(
     phase: &str,
     source_text: &str,
     message: &str,
-    scope: Option<&InferErrorScope>
+    scope: Option<&InferErrorScope>,
 ) -> String {
     let mut out = Vec::new();
     out.push(format!("debug.phase: {}", phase));
@@ -725,16 +736,14 @@ fn format_basic_debug_error_report(
         out.push("location: <unresolved>".to_string());
     } else {
         for (idx, range) in ranges.iter().copied().take(8).enumerate() {
-            out.push(
-                format!(
-                    "location[{}]: {}:{} -> {}:{}",
-                    idx,
-                    range.start.line + 1,
-                    range.start.character + 1,
-                    range.end.line + 1,
-                    range.end.character + 1
-                )
-            );
+            out.push(format!(
+                "location[{}]: {}:{} -> {}:{}",
+                idx,
+                range.start.line + 1,
+                range.start.character + 1,
+                range.end.line + 1,
+                range.end.character + 1
+            ));
             if let Some(line) = source_text.lines().nth(range.start.line as usize) {
                 out.push(format!("location_line[{}]: {}", idx, line.trim_end()));
             }
@@ -775,42 +784,39 @@ pub fn wat(program: String) -> *const u8 {
                     let infer_result = infer_with_builtins_typed_lsp(
                         &wrapped_ast,
                         crate::types::create_builtin_environment(TypeEnv::new()),
-                        user_form_count
+                        user_form_count,
                     );
 
                     match infer_result {
                         Ok((_typ, typed_ast)) => {
                             match wat::compile_program_to_wat_typed(&typed_ast) {
                                 Ok(wat_src) => wat_src,
-                                Err(err) =>
-                                    format!(
-                                        "3\n{}",
-                                        format_basic_debug_error_report(
-                                            "wat-lowering",
-                                            &program,
-                                            &err,
-                                            None
-                                        )
-                                    ),
+                                Err(err) => format!(
+                                    "3\n{}",
+                                    format_basic_debug_error_report(
+                                        "wat-lowering",
+                                        &program,
+                                        &err,
+                                        None
+                                    )
+                                ),
                             }
                         }
-                        Err(err) =>
-                            format!(
-                                "3\n{}",
-                                format_basic_debug_error_report(
-                                    "type-inference",
-                                    &program,
-                                    &err.message,
-                                    err.scope.as_ref()
-                                )
-                            ),
+                        Err(err) => format!(
+                            "3\n{}",
+                            format_basic_debug_error_report(
+                                "type-inference",
+                                &program,
+                                &err.message,
+                                err.scope.as_ref()
+                            )
+                        ),
                     }
                 }
-                Err(err) =>
-                    format!(
-                        "2\n{}",
-                        format_basic_debug_error_report("parse+desugar", &program, &err, None)
-                    ),
+                Err(err) => format!(
+                    "2\n{}",
+                    format_basic_debug_error_report("parse+desugar", &program, &err, None)
+                ),
             }
         } else {
             "1\nNo expressions...".to_string()

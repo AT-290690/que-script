@@ -41,11 +41,10 @@ impl fmt::Display for Type {
             Type::Dec => write!(f, "Dec"),
             Type::Bool => write!(f, "Bool"),
             Type::Char => write!(f, "Char"),
-            Type::Function(from, to) =>
-                match **from {
-                    Type::Function(_, _) => write!(f, "({}) -> {}", from, to),
-                    _ => write!(f, "{} -> {}", from, to),
-                }
+            Type::Function(from, to) => match **from {
+                Type::Function(_, _) => write!(f, "({}) -> {}", from, to),
+                _ => write!(f, "{} -> {}", from, to),
+            },
             Type::List(inner) => write!(f, "[{}]", inner),
             Type::Tuple(items) => {
                 let inner = items
@@ -90,10 +89,7 @@ impl fmt::Display for TypeScheme {
         if self.vars.is_empty() {
             write!(f, "{}", self.typ)
         } else {
-            let var_names: Vec<String> = self.vars
-                .iter()
-                .map(|v| format!("{}", v))
-                .collect();
+            let var_names: Vec<String> = self.vars.iter().map(|v| format!("{}", v)).collect();
             write!(f, "T{}. {}", var_names.join(" "), self.typ)
         }
     }
@@ -155,24 +151,33 @@ impl TypeEnv {
 
 impl Type {
     pub fn var_id(&self) -> Option<u64> {
-        if let Type::Var(v) = self { Some(v.id) } else { None }
+        if let Type::Var(v) = self {
+            Some(v.id)
+        } else {
+            None
+        }
     }
     pub fn substitute(&self, subst: &HashMap<u64, Type>) -> Type {
         match self {
             Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => self.clone(),
             Type::Var(v) => {
-                if let Some(ty) = subst.get(&v.id) { ty.clone() } else { self.clone() }
+                if let Some(ty) = subst.get(&v.id) {
+                    ty.clone()
+                } else {
+                    self.clone()
+                }
             }
-            Type::Function(from, to) =>
-                Type::Function(Box::new(from.substitute(subst)), Box::new(to.substitute(subst))),
+            Type::Function(from, to) => Type::Function(
+                Box::new(from.substitute(subst)),
+                Box::new(to.substitute(subst)),
+            ),
             Type::List(inner) => Type::List(Box::new(inner.substitute(subst))),
-            Type::Tuple(items) =>
-                Type::Tuple(
-                    items
-                        .iter()
-                        .map(|t| apply_subst_map_to_type(subst, t))
-                        .collect()
-                ),
+            Type::Tuple(items) => Type::Tuple(
+                items
+                    .iter()
+                    .map(|t| apply_subst_map_to_type(subst, t))
+                    .collect(),
+            ),
         }
     }
 
@@ -228,14 +233,12 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
                 vec![a.var_id().unwrap()],
                 Type::Function(
                     Box::new(Type::List(Box::new(a.clone()))),
-                    Box::new(
-                        Type::Function(
-                            Box::new(Type::Int),
-                            Box::new(Type::Function(Box::new(a), Box::new(Type::Unit)))
-                        )
-                    )
-                )
-            )
+                    Box::new(Type::Function(
+                        Box::new(Type::Int),
+                        Box::new(Type::Function(Box::new(a), Box::new(Type::Unit))),
+                    )),
+                ),
+            ),
         );
     }
     {
@@ -244,8 +247,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             "pop!".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
-                Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Unit))
-            )
+                Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Unit)),
+            ),
         );
     }
     {
@@ -254,8 +257,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             "length".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
-                Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Int))
-            )
+                Type::Function(Box::new(Type::List(Box::new(a))), Box::new(Type::Int)),
+            ),
         );
     }
     {
@@ -266,9 +269,9 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
                 vec![a.var_id().unwrap()],
                 Type::Function(
                     Box::new(Type::List(Box::new(a.clone()))),
-                    Box::new(Type::Function(Box::new(Type::Int), Box::new(a)))
-                )
-            )
+                    Box::new(Type::Function(Box::new(Type::Int), Box::new(a))),
+                ),
+            ),
         );
     }
     {
@@ -277,13 +280,11 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             vec![a.var_id().unwrap()],
             Type::Function(
                 Box::new(Type::List(Box::new(a.clone()))),
-                Box::new(
-                    Type::Function(
-                        Box::new(Type::List(Box::new(a.clone()))),
-                        Box::new(Type::List(Box::new(a)))
-                    )
-                )
-            )
+                Box::new(Type::Function(
+                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::List(Box::new(a))),
+                )),
+            ),
         );
         let _ = env.insert("cons".to_string(), cons_type);
     }
@@ -293,8 +294,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             "car".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
-                Type::Function(Box::new(Type::List(Box::new(a.clone()))), Box::new(a))
-            )
+                Type::Function(Box::new(Type::List(Box::new(a.clone()))), Box::new(a)),
+            ),
         );
     }
 
@@ -306,14 +307,12 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
                 vec![a.var_id().unwrap()],
                 Type::Function(
                     Box::new(Type::List(Box::new(a.clone()))),
-                    Box::new(
-                        Type::Function(
-                            Box::new(Type::Int),
-                            Box::new(Type::List(Box::new(a.clone())))
-                        )
-                    )
-                )
-            )
+                    Box::new(Type::Function(
+                        Box::new(Type::Int),
+                        Box::new(Type::List(Box::new(a.clone()))),
+                    )),
+                ),
+            ),
         );
     }
     {
@@ -325,9 +324,9 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
                 vec![a.var_id().unwrap(), b.var_id().unwrap()],
                 Type::Function(
                     Box::new(Type::Tuple(vec![a.clone(), b.clone()])),
-                    Box::new(a.clone())
-                )
-            )
+                    Box::new(a.clone()),
+                ),
+            ),
         );
     }
 
@@ -340,226 +339,182 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
                 vec![a.var_id().unwrap(), b.var_id().unwrap()],
                 Type::Function(
                     Box::new(Type::Tuple(vec![a.clone(), b.clone()])),
-                    Box::new(b.clone())
-                )
-            )
+                    Box::new(b.clone()),
+                ),
+            ),
         );
     }
     {
         let _ = env.insert(
             "while".to_string(),
-            TypeScheme::monotype(
-                Type::Function(
-                    Box::new(Type::Bool),
-                    Box::new(Type::Function(Box::new(Type::Unit), Box::new(Type::Unit)))
-                )
-            )
+            TypeScheme::monotype(Type::Function(
+                Box::new(Type::Bool),
+                Box::new(Type::Function(Box::new(Type::Unit), Box::new(Type::Unit))),
+            )),
         );
     }
     let _ = env.insert(
         "+".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
     let _ = env.insert(
         "+.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec))),
+        )),
     );
     let _ = env.insert(
         "+#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
     );
 
     let _ = env.insert(
         "-".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
 
     let _ = env.insert(
         "-.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec))),
+        )),
     );
 
     let _ = env.insert(
         "-#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
     );
 
     let _ = env.insert(
         "*".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
 
     let _ = env.insert(
         "*.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec))),
+        )),
     );
 
     let _ = env.insert(
         "*#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
     );
 
     let _ = env.insert(
         "/".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
 
     let _ = env.insert(
         "/.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec))),
+        )),
     );
 
     let _ = env.insert(
         "/#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Char))),
+        )),
     );
     let _ = env.insert(
         "/.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
     let _ = env.insert(
         "mod".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
     let _ = env.insert(
         "mod.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec))),
+        )),
     );
 
     // Comparison operations
     let _ = env.insert(
         "=".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "=.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         ">.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "<.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         ">=.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "<=.".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Dec),
-                Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Dec),
+            Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert("true".to_string(), TypeScheme::monotype(Type::Bool));
@@ -567,274 +522,231 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     let _ = env.insert("nil".to_string(), TypeScheme::monotype(Type::Unit));
     let _ = env.insert(
         "ARGV".to_string(),
-        TypeScheme::monotype(Type::List(Box::new(Type::List(Box::new(Type::Char)))))
+        TypeScheme::monotype(Type::List(Box::new(Type::List(Box::new(Type::Char))))),
     );
 
     #[cfg(feature = "io")]
     {
         let _ = env.insert(
             "print!".to_string(),
-            TypeScheme::monotype(
-                Type::Function(Box::new(Type::List(Box::new(Type::Char))), Box::new(Type::Unit))
-            )
+            TypeScheme::monotype(Type::Function(
+                Box::new(Type::List(Box::new(Type::Char))),
+                Box::new(Type::Unit),
+            )),
         );
         let _ = env.insert(
             "sleep!".to_string(),
-            TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Unit)))
+            TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Unit))),
         );
         let _ = env.insert(
             "clear!".to_string(),
-            TypeScheme::monotype(Type::Function(Box::new(Type::Unit), Box::new(Type::Unit)))
+            TypeScheme::monotype(Type::Function(Box::new(Type::Unit), Box::new(Type::Unit))),
         );
         let _ = env.insert(
             "list-dir!".to_string(),
-            TypeScheme::monotype(
-                Type::Function(
-                    Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(Type::List(Box::new(Type::Char)))
-                )
-            )
+            TypeScheme::monotype(Type::Function(
+                Box::new(Type::List(Box::new(Type::Char))),
+                Box::new(Type::List(Box::new(Type::Char))),
+            )),
         );
         let _ = env.insert(
             "mkdir!".to_string(),
-            TypeScheme::monotype(
-                Type::Function(Box::new(Type::List(Box::new(Type::Char))), Box::new(Type::Unit))
-            )
+            TypeScheme::monotype(Type::Function(
+                Box::new(Type::List(Box::new(Type::Char))),
+                Box::new(Type::Unit),
+            )),
         );
         let _ = env.insert(
             "read!".to_string(),
-            TypeScheme::monotype(
-                Type::Function(
-                    Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(Type::List(Box::new(Type::Char)))
-                )
-            )
+            TypeScheme::monotype(Type::Function(
+                Box::new(Type::List(Box::new(Type::Char))),
+                Box::new(Type::List(Box::new(Type::Char))),
+            )),
         );
         let _ = env.insert(
             "delete!".to_string(),
-            TypeScheme::monotype(
-                Type::Function(Box::new(Type::List(Box::new(Type::Char))), Box::new(Type::Unit))
-            )
+            TypeScheme::monotype(Type::Function(
+                Box::new(Type::List(Box::new(Type::Char))),
+                Box::new(Type::Unit),
+            )),
         );
         let _ = env.insert(
             "write!".to_string(),
-            TypeScheme::monotype(
-                Type::Function(
+            TypeScheme::monotype(Type::Function(
+                Box::new(Type::List(Box::new(Type::Char))),
+                Box::new(Type::Function(
                     Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(
-                        Type::Function(
-                            Box::new(Type::List(Box::new(Type::Char))),
-                            Box::new(Type::Unit)
-                        )
-                    )
-                )
-            )
+                    Box::new(Type::Unit),
+                )),
+            )),
         );
         let _ = env.insert(
             "move!".to_string(),
-            TypeScheme::monotype(
-                Type::Function(
+            TypeScheme::monotype(Type::Function(
+                Box::new(Type::List(Box::new(Type::Char))),
+                Box::new(Type::Function(
                     Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(
-                        Type::Function(
-                            Box::new(Type::List(Box::new(Type::Char))),
-                            Box::new(Type::Unit)
-                        )
-                    )
-                )
-            )
+                    Box::new(Type::Unit),
+                )),
+            )),
         );
     }
     let _ = env.insert(
         "=?".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Bool),
-                Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "=#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "<".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "<#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         ">".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         ">#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "<=".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "<=#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         ">=".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         ">=#".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Char),
-                Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Char),
+            Box::new(Type::Function(Box::new(Type::Char), Box::new(Type::Bool))),
+        )),
     );
 
     // Logical operations
     let _ = env.insert(
         "and".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Bool),
-                Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "or".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Bool),
-                Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Bool),
+            Box::new(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
+        )),
     );
 
     let _ = env.insert(
         "not".to_string(),
-        TypeScheme::monotype(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool)))
+        TypeScheme::monotype(Type::Function(Box::new(Type::Bool), Box::new(Type::Bool))),
     );
 
     // Bitwise operations
     let _ = env.insert(
         "&".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
 
     let _ = env.insert(
         "|".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
 
     let _ = env.insert(
         "^".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
 
     let _ = env.insert(
         ">>".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
 
     let _ = env.insert(
         "<<".to_string(),
-        TypeScheme::monotype(
-            Type::Function(
-                Box::new(Type::Int),
-                Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
-            )
-        )
+        TypeScheme::monotype(Type::Function(
+            Box::new(Type::Int),
+            Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
+        )),
     );
 
     let _ = env.insert(
         "Int->Dec".to_string(),
-        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Dec)))
+        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Dec))),
     );
 
     let _ = env.insert(
         "Dec->Int".to_string(),
-        TypeScheme::monotype(Type::Function(Box::new(Type::Dec), Box::new(Type::Int)))
+        TypeScheme::monotype(Type::Function(Box::new(Type::Dec), Box::new(Type::Int))),
     );
 
     let _ = env.insert(
         "~".to_string(),
-        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Int)))
+        TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
     );
 
     (env, fresh_id) // return env with built-ins and also return next fresh ID

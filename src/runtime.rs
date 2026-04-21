@@ -1,4 +1,4 @@
-use wasmtime::{ Config, Engine, Linker, Memory, Module as WasmModule, OptLevel, Store, Strategy };
+use wasmtime::{Config, Engine, Linker, Memory, Module as WasmModule, OptLevel, Store, Strategy};
 use wat as wat_crate;
 
 fn extract_type_from_wat(src: &str) -> Option<String> {
@@ -18,11 +18,9 @@ fn i32_at<T>(memory: &Memory, store: &Store<T>, addr: i32) -> Result<i32, String
 }
 
 fn decimal_scale_i64() -> i64 {
-    match
-        std::env
-            ::var("QUE_DECIMAL_SCALE")
-            .ok()
-            .and_then(|v| v.trim().parse::<i64>().ok())
+    match std::env::var("QUE_DECIMAL_SCALE")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
     {
         Some(scale) if scale > 0 && is_power_of_ten_i64(scale) && scale <= 1_000_000 => scale,
         _ => 1_000,
@@ -84,7 +82,7 @@ fn read_vec<T>(memory: &Memory, store: &Store<T>, vec_ptr: i32) -> Result<VecHea
 fn read_vec_items<T>(
     memory: &Memory,
     store: &Store<T>,
-    hdr: &VecHeader
+    hdr: &VecHeader,
 ) -> Result<Vec<i32>, String> {
     if hdr.len < 0 {
         return Err(format!("negative vector length: {}", hdr.len));
@@ -172,7 +170,7 @@ pub fn decode_value<T>(
     ptr: i32,
     typ: &str,
     memory: &Memory,
-    store: &Store<T>
+    store: &Store<T>,
 ) -> Result<String, String> {
     let t = typ.trim();
 
@@ -211,10 +209,7 @@ pub fn decode_value<T>(
         let raw_items = read_tuple(memory, store, ptr)?;
         let mut decoded = Vec::with_capacity(raw_items.len());
         for (i, item_ptr) in raw_items.into_iter().enumerate() {
-            let typ = parts
-                .get(i)
-                .map(|s| s.as_str())
-                .unwrap_or("Int");
+            let typ = parts.get(i).map(|s| s.as_str()).unwrap_or("Int");
             decoded.push(decode_value(item_ptr, typ, memory, store)?);
         }
         return Ok(format!("{{ {} }}", decoded.join(" ")));
@@ -226,12 +221,14 @@ pub fn decode_value<T>(
 fn set_argv_strings<T>(
     store: &mut Store<T>,
     instance: &wasmtime::Instance,
-    argv: &[String]
+    argv: &[String],
 ) -> wasmtime::Result<()> {
     let make_vec = instance.get_typed_func::<i32, i32>(&mut *store, "make_vec")?;
     let vec_push = instance.get_typed_func::<(i32, i32), i32>(&mut *store, "vec_push")?;
     let set_argv = instance.get_typed_func::<i32, i32>(&mut *store, "set_argv")?;
-    let release = instance.get_typed_func::<i32, i32>(&mut *store, "release").ok();
+    let release = instance
+        .get_typed_func::<i32, i32>(&mut *store, "release")
+        .ok();
 
     let vec_ptr = make_vec.call(&mut *store, 1)?;
     for raw in argv {
@@ -256,7 +253,7 @@ fn set_argv_strings<T>(
 fn read_debug_global_i64<T>(
     instance: &wasmtime::Instance,
     store: &mut Store<T>,
-    name: &str
+    name: &str,
 ) -> Option<i64> {
     let g = instance.get_global(&mut *store, name)?;
     match g.get(&mut *store) {
@@ -279,54 +276,34 @@ fn debug_rc_snapshot<T>(instance: &wasmtime::Instance, store: &mut Store<T>) -> 
     let elem_ref_0 = read_debug_global_i64(instance, store, "dbg_vec_set_elem_ref_0").unwrap_or(0);
     let elem_ref_1 = read_debug_global_i64(instance, store, "dbg_vec_set_elem_ref_1").unwrap_or(0);
     let rel_vec_gt0 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_gt0").unwrap_or(0);
-    let rel_vec_free = read_debug_global_i64(instance, store, "dbg_rc_release_vec_free").unwrap_or(
-        0
-    );
+    let rel_vec_free =
+        read_debug_global_i64(instance, store, "dbg_rc_release_vec_free").unwrap_or(0);
     let set_append = read_debug_global_i64(instance, store, "dbg_vec_set_append_path").unwrap_or(0);
-    let set_replace = read_debug_global_i64(instance, store, "dbg_vec_set_replace_path").unwrap_or(
-        0
-    );
-    let rel_rc_eq1 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_eq_1").unwrap_or(
-        0
-    );
-    let rel_rc_ge2 = read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_ge_2").unwrap_or(
-        0
-    );
+    let set_replace =
+        read_debug_global_i64(instance, store, "dbg_vec_set_replace_path").unwrap_or(0);
+    let rel_rc_eq1 =
+        read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_eq_1").unwrap_or(0);
+    let rel_rc_ge2 =
+        read_debug_global_i64(instance, store, "dbg_rc_release_vec_rc_ge_2").unwrap_or(0);
     let old_rc_eq1 = read_debug_global_i64(instance, store, "dbg_vec_set_old_rc_eq_1").unwrap_or(0);
     let old_rc_ge2 = read_debug_global_i64(instance, store, "dbg_vec_set_old_rc_ge_2").unwrap_or(0);
-    let old_not_vec = read_debug_global_i64(instance, store, "dbg_vec_set_old_not_vec").unwrap_or(
-        0
-    );
+    let old_not_vec =
+        read_debug_global_i64(instance, store, "dbg_vec_set_old_not_vec").unwrap_or(0);
     let tmp_rel_exec = read_debug_global_i64(instance, store, "dbg_tmp_release_exec").unwrap_or(0);
     let tmp_rel_skip = read_debug_global_i64(instance, store, "dbg_tmp_release_skip").unwrap_or(0);
     let v_rc_eq1 = read_debug_global_i64(instance, store, "dbg_vec_set_v_rc_eq_1").unwrap_or(0);
     let v_rc_ge2 = read_debug_global_i64(instance, store, "dbg_vec_set_v_rc_ge_2").unwrap_or(0);
     let v_not_vec = read_debug_global_i64(instance, store, "dbg_vec_set_v_not_vec").unwrap_or(0);
-    let tmp_post_eq1 = read_debug_global_i64(
-        instance,
-        store,
-        "dbg_tmp_release_post_rc_eq_1"
-    ).unwrap_or(0);
-    let tmp_post_other = read_debug_global_i64(
-        instance,
-        store,
-        "dbg_tmp_release_post_rc_other"
-    ).unwrap_or(0);
-    let tmp_post_not_vec = read_debug_global_i64(
-        instance,
-        store,
-        "dbg_tmp_release_post_not_vec"
-    ).unwrap_or(0);
-    let rel_reject_not_vec = read_debug_global_i64(
-        instance,
-        store,
-        "dbg_rc_release_reject_not_vec"
-    ).unwrap_or(0);
-    let rel_take_vec = read_debug_global_i64(
-        instance,
-        store,
-        "dbg_rc_release_take_vec_path"
-    ).unwrap_or(0);
+    let tmp_post_eq1 =
+        read_debug_global_i64(instance, store, "dbg_tmp_release_post_rc_eq_1").unwrap_or(0);
+    let tmp_post_other =
+        read_debug_global_i64(instance, store, "dbg_tmp_release_post_rc_other").unwrap_or(0);
+    let tmp_post_not_vec =
+        read_debug_global_i64(instance, store, "dbg_tmp_release_post_not_vec").unwrap_or(0);
+    let rel_reject_not_vec =
+        read_debug_global_i64(instance, store, "dbg_rc_release_reject_not_vec").unwrap_or(0);
+    let rel_take_vec =
+        read_debug_global_i64(instance, store, "dbg_rc_release_take_vec_path").unwrap_or(0);
 
     Some(
         format!(
@@ -337,7 +314,7 @@ fn debug_rc_snapshot<T>(instance: &wasmtime::Instance, store: &mut Store<T>) -> 
 
 fn debug_guard_trap_message<T>(
     instance: &wasmtime::Instance,
-    store: &mut Store<T>
+    store: &mut Store<T>,
 ) -> Option<String> {
     let code = read_debug_global_i64(instance, store, "dbg_guard_trap_code").unwrap_or(0);
     if code == 0 {
@@ -365,9 +342,10 @@ fn configured_engine() -> Result<Engine, String> {
         "speed" => OptLevel::Speed,
         "speed_and_size" | "speed-size" | "size" => OptLevel::SpeedAndSize,
         other => {
-            return Err(
-                format!("invalid QUE_WASM_OPT='{}'. expected one of: none, speed, speed_and_size", other)
-            );
+            return Err(format!(
+                "invalid QUE_WASM_OPT='{}'. expected one of: none, speed, speed_and_size",
+                other
+            ));
         }
     };
     config.cranelift_opt_level(opt_level);
@@ -379,14 +357,16 @@ pub fn run_wat_text<T: 'static, F>(
     wat_src: &str,
     store_data: T,
     argv: &[String],
-    link_imports: F
+    link_imports: F,
 ) -> Result<String, String>
-    where F: FnOnce(&mut Linker<T>) -> Result<(), String>
+where
+    F: FnOnce(&mut Linker<T>) -> Result<(), String>,
 {
     let typ = extract_type_from_wat(wat_src).unwrap_or_else(|| "Int".to_string());
     let wasm_bytes = wat_crate::parse_str(wat_src).map_err(|e| e.to_string())?;
     let engine = configured_engine()?;
-    let module = WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
+    let module =
+        WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
     let mut linker = Linker::new(&engine);
     link_imports(&mut linker)?;
     let mut store = Store::new(&engine, store_data);
@@ -426,13 +406,15 @@ pub fn run_wat_text_no_result<T: 'static, F>(
     wat_src: &str,
     store_data: T,
     argv: &[String],
-    link_imports: F
+    link_imports: F,
 ) -> Result<(), String>
-    where F: FnOnce(&mut Linker<T>) -> Result<(), String>
+where
+    F: FnOnce(&mut Linker<T>) -> Result<(), String>,
 {
     let wasm_bytes = wat_crate::parse_str(wat_src).map_err(|e| e.to_string())?;
     let engine = configured_engine()?;
-    let module = WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
+    let module =
+        WasmModule::new(&engine, &wasm_bytes).map_err(|e| format!("module error: {}", e))?;
     let mut linker = Linker::new(&engine);
     link_imports(&mut linker)?;
     let mut store = Store::new(&engine, store_data);
