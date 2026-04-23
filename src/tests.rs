@@ -2305,6 +2305,20 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_scalar_replaces_local_tuple_projections() {
+        let typed = infer_typed("(do (let p (tuple 10 32)) (+ (fst p) (snd p)))");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "42");
+    }
+
+    #[test]
+    fn test_typed_optimization_keeps_tuple_when_used_as_value() {
+        let typed = infer_typed("(do (let p (tuple 10 32)) p)");
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(do (let p (tuple 10 32)) p)");
+    }
+
+    #[test]
     fn test_infer_impure_function_requires_bang_suffix() {
         let exprs =
             crate::parser::parse("(let fn (lambda xs (set! xs 0 1)))").expect("input should parse");
@@ -2907,7 +2921,7 @@ Concequent and alternative must match types
     }
 
     #[test]
-    fn test_typed_optimization_zip_map_collect_is_not_fused_inline() {
+    fn test_typed_optimization_zip_map_identity_collect_is_not_fused() {
         let expr = crate::parser::parse(
             "(map (lambda t t) (zip (tuple (vector 1 2 3) (vector true false true))))",
         )
@@ -2917,8 +2931,49 @@ Concequent and alternative must match types
 
         assert!(
             fused_lisp.contains("(zip "),
-            "zip->map collect should not fuse inline until the zip-source collect bug is fixed, got: {}",
+            "zip->map identity still needs row tuple values, so it should not fuse, got: {}",
             fused_lisp
+        );
+    }
+
+    #[test]
+    fn test_wat_zip_map_destructuring_lambda_avoids_row_tuple_allocation() {
+        let program = "(|> (zip { [1 2 3] [10 20 30] }) (map (lambda { a b } (+ a b))))";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) => {
+                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std")
+            }
+            _ => panic!("std ast should be (do ...)"),
+        };
+
+        let wat =
+            crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $v_zip"),
+            "zip should be fused away, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $v_map"),
+            "map should be fused away, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $tuple_new"),
+            "destructuring zip map should avoid row tuple allocation, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.contains("call $vec_get_i32") && main_wat.contains("i32.add"),
+            "fused loop should read both vectors and add values, got:\n{}",
+            main_wat
         );
     }
 

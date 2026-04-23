@@ -415,7 +415,7 @@ fn fuse_map_filter_chain_to_collect(
         return None;
     }
     let source = parse_fuse_source(base);
-    if let FuseSource::Zip { .. } = &source {
+    if matches!(source, FuseSource::Zip { .. }) && !zip_collect_fusion_is_supported(&ops) {
         return None;
     }
     build_direct_fused_loop(source, &ops, FuseSink::Collect, name_state)
@@ -2906,7 +2906,7 @@ fn call_callable_expr(callable: &Expression, args: Vec<Expression>) -> Option<Ex
             if params.len() != args.len() {
                 return None;
             }
-            let mut out = items.last()?.clone();
+            let mut out = alpha_rename_lambda_local_bindings(items.last()?, "__fuse_lambda");
             for (p, arg) in params.iter().zip(args.iter()) {
                 let Expression::Word(name) = p else {
                     return None;
@@ -2921,6 +2921,96 @@ fn call_callable_expr(callable: &Expression, args: Vec<Expression>) -> Option<Ex
             Some(Expression::Apply(out))
         }
         _ => None,
+    }
+}
+
+fn alpha_rename_lambda_local_bindings(expr: &Expression, prefix: &str) -> Expression {
+    let mut counter = 0usize;
+    alpha_rename_local_bindings_expr(expr, &mut HashMap::new(), &mut counter, prefix)
+}
+
+fn alpha_rename_local_bindings_expr(
+    expr: &Expression,
+    env: &mut HashMap<String, String>,
+    counter: &mut usize,
+    prefix: &str
+) -> Expression {
+    match expr {
+        Expression::Word(w) =>
+            env
+                .get(w)
+                .cloned()
+                .map(Expression::Word)
+                .unwrap_or_else(|| Expression::Word(w.clone())),
+        Expression::Apply(items) if
+            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
+        => {
+            if items.len() < 2 {
+                return Expression::Apply(items.clone());
+            }
+            let mut scoped = env.clone();
+            for p in &items[1..items.len() - 1] {
+                let mut bound = HashSet::new();
+                collect_bound_pattern_words(p, &mut bound);
+                for name in bound {
+                    scoped.remove(&name);
+                }
+            }
+            let mut out = items[..items.len() - 1].to_vec();
+            if let Some(body) = items.last() {
+                out.push(alpha_rename_local_bindings_expr(body, &mut scoped, counter, prefix));
+            }
+            Expression::Apply(out)
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") => {
+            let mut out = Vec::with_capacity(items.len());
+            if let Some(head) = items.first() {
+                out.push(head.clone());
+            }
+            for item in &items[1..] {
+                out.push(alpha_rename_local_bindings_expr(item, env, counter, prefix));
+            }
+            Expression::Apply(out)
+        }
+        Expression::Apply(items) if items.len() == 3 => {
+            if let [Expression::Word(kw), Expression::Word(name), rhs] = &items[..] {
+                if kw == "let" || kw == "letrec" || kw == "mut" {
+                    let fresh = format!("{}_{}_{}", prefix, name.replace('/', "_"), *counter);
+                    *counter += 1;
+                    let rewritten_rhs = if kw == "letrec" {
+                        let mut rhs_env = env.clone();
+                        rhs_env.insert(name.clone(), fresh.clone());
+                        alpha_rename_local_bindings_expr(rhs, &mut rhs_env, counter, prefix)
+                    } else {
+                        alpha_rename_local_bindings_expr(rhs, env, counter, prefix)
+                    };
+                    env.insert(name.clone(), fresh.clone());
+                    return Expression::Apply(vec![
+                        Expression::Word(kw.clone()),
+                        Expression::Word(fresh),
+                        rewritten_rhs,
+                    ]);
+                }
+            }
+            Expression::Apply(
+                items
+                    .iter()
+                    .map(|item| alpha_rename_local_bindings_expr(item, env, counter, prefix))
+                    .collect()
+            )
+        }
+        Expression::Apply(items) =>
+            Expression::Apply(
+                items
+                    .iter()
+                    .map(|item| {
+                        let mut scoped = env.clone();
+                        alpha_rename_local_bindings_expr(item, &mut scoped, counter, prefix)
+                    })
+                    .collect()
+            ),
+        Expression::Int(n) => Expression::Int(*n),
+        Expression::Dec(n) => Expression::Dec(*n),
     }
 }
 
@@ -2950,6 +3040,69 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
             is_fusion_safe_callable(predicate)
         }
         FuseSink::Find { predicate } => is_fusion_safe_callable(predicate),
+    }
+}
+
+fn zip_collect_fusion_is_supported(ops: &[MapFilterOp]) -> bool {
+    let [
+        MapFilterOp::Map {
+            func,
+            with_index: false,
+        },
+    ] = ops
+    else {
+        return false;
+    };
+    zip_map_lambda_can_avoid_row_tuple(func)
+}
+
+fn zip_map_lambda_can_avoid_row_tuple(func: &Expression) -> bool {
+    let Expression::Apply(items) = func else {
+        return false;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") || items.len() < 3 {
+        return false;
+    }
+    let Some(body) = items.last() else {
+        return false;
+    };
+    if expression_materializes_tuple(body) {
+        return false;
+    }
+    items[1..items.len() - 1].iter().all(|param| {
+        let Expression::Word(name) = param else {
+            return false;
+        };
+        !expression_returns_word(body, name)
+    })
+}
+
+fn expression_materializes_tuple(expr: &Expression) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "tuple" || w == "pair") {
+                return true;
+            }
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+                return items
+                    .last()
+                    .map(expression_materializes_tuple)
+                    .unwrap_or(false);
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn expression_returns_word(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Word(w) => w == name,
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
+            items.last()
+                .map(|last| expression_returns_word(last, name))
+                .unwrap_or(false),
+        _ => false,
     }
 }
 
@@ -3270,6 +3423,10 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     let (inlined_items, inlined_children) = inline_do_simple_calls(
         &normalized_do,
         &mut inline_state
+    );
+    let (inlined_items, inlined_children) = eliminate_tuple_projection_lets(
+        inlined_items,
+        inlined_children
     );
     let (inlined_items, inlined_children) = eliminate_single_use_let_bindings(
         inlined_items,
@@ -3887,6 +4044,238 @@ fn eliminate_single_use_let_bindings(
         }
     }
     (items, children)
+}
+
+fn eliminate_tuple_projection_lets(
+    mut items: Vec<Expression>,
+    mut children: Vec<TypedExpression>
+) -> (Vec<Expression>, Vec<TypedExpression>) {
+    if items.len() != children.len() || items.len() <= 2 {
+        return (items, children);
+    }
+
+    for _ in 0..MAX_INLINE_FIXPOINT_PASSES {
+        let mut changed = false;
+        let mut i = 1usize;
+        while i + 1 < items.len() {
+            let Some((name, fst_typed, snd_typed)) = tuple_projection_let(&items[i], &children[i])
+                else {
+                    i += 1;
+                    continue;
+            };
+            let end = find_shadowing_binding(&items, i + 1, &name).unwrap_or(items.len());
+            if find_shadowing_binding(&items, 1, "fst").is_some_and(|idx| idx < end)
+                || find_shadowing_binding(&items, 1, "snd").is_some_and(|idx| idx < end)
+            {
+                i += 1;
+                continue;
+            }
+            let mut projection_uses = 0usize;
+            let mut valid = true;
+            for item in &items[i + 1..end] {
+                match count_tuple_projection_uses(item, &name) {
+                    Some(n) => projection_uses += n,
+                    None => {
+                        valid = false;
+                        break;
+                    }
+                }
+            }
+            if !valid || projection_uses == 0 {
+                i += 1;
+                continue;
+            }
+
+            for j in i + 1..end {
+                items[j] = replace_tuple_projection_expr(
+                    &items[j],
+                    &name,
+                    &fst_typed.expr,
+                    &snd_typed.expr
+                );
+                children[j] = replace_tuple_projection_typed(
+                    &children[j],
+                    &name,
+                    &fst_typed,
+                    &snd_typed
+                );
+            }
+            items.remove(i);
+            children.remove(i);
+            changed = true;
+            break;
+        }
+        if !changed {
+            break;
+        }
+    }
+    (items, children)
+}
+
+fn tuple_projection_let(
+    expr: &Expression,
+    node: &TypedExpression
+) -> Option<(String, TypedExpression, TypedExpression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), rhs] = &items[..] else {
+        return None;
+    };
+    if kw != "let" && kw != "letrec" {
+        return None;
+    }
+    if parse_zip_pair_expr(rhs).is_none() {
+        return None;
+    }
+    let rhs_typed = node.children.get(2)?;
+    let fst_typed = rhs_typed.children.get(1)?.clone();
+    let snd_typed = rhs_typed.children.get(2)?.clone();
+    Some((name.clone(), fst_typed, snd_typed))
+}
+
+fn find_shadowing_binding(items: &[Expression], from: usize, name: &str) -> Option<usize> {
+    items.iter().enumerate().skip(from).find_map(|(idx, expr)| {
+        let Expression::Apply(xs) = expr else {
+            return None;
+        };
+        match &xs[..] {
+            [Expression::Word(kw), Expression::Word(bound), _]
+                if (kw == "let" || kw == "letrec" || kw == "mut") && bound == name =>
+            {
+                Some(idx)
+            }
+            _ => None,
+        }
+    })
+}
+
+fn count_tuple_projection_uses(expr: &Expression, name: &str) -> Option<usize> {
+    match expr {
+        Expression::Word(w) => {
+            if w == name { None } else { Some(0) }
+        }
+        Expression::Apply(items) => {
+            if is_direct_tuple_projection(items, name).is_some() {
+                return Some(1);
+            }
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+                let mut bound = HashSet::new();
+                if items.len() >= 2 {
+                    for p in &items[1..items.len() - 1] {
+                        collect_bound_pattern_words(p, &mut bound);
+                    }
+                    if bound.contains(name) {
+                        return Some(0);
+                    }
+                }
+                let uses = items
+                    .last()
+                    .map(|body| count_tuple_projection_uses(body, name))
+                    .unwrap_or(Some(0))?;
+                return if uses == 0 { Some(0) } else { None };
+            }
+            let mut total = 0usize;
+            for item in items {
+                total += count_tuple_projection_uses(item, name)?;
+            }
+            Some(total)
+        }
+        _ => Some(0),
+    }
+}
+
+fn is_direct_tuple_projection(items: &[Expression], name: &str) -> Option<bool> {
+    match items {
+        [Expression::Word(op), Expression::Word(arg)]
+            if (op == "fst" || op == "snd") && arg == name =>
+        {
+            Some(op == "fst")
+        }
+        _ => None,
+    }
+}
+
+fn replace_tuple_projection_expr(
+    expr: &Expression,
+    name: &str,
+    fst_expr: &Expression,
+    snd_expr: &Expression
+) -> Expression {
+    match expr {
+        Expression::Apply(items) => {
+            if let Some(op) = is_direct_tuple_projection(items, name) {
+                return if op { fst_expr.clone() } else { snd_expr.clone() };
+            }
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+                let mut bound = HashSet::new();
+                if items.len() >= 2 {
+                    for p in &items[1..items.len() - 1] {
+                        collect_bound_pattern_words(p, &mut bound);
+                    }
+                    if bound.contains(name) {
+                        return Expression::Apply(items.clone());
+                    }
+                }
+            }
+            Expression::Apply(
+                items
+                    .iter()
+                    .map(|item| replace_tuple_projection_expr(item, name, fst_expr, snd_expr))
+                    .collect()
+            )
+        }
+        Expression::Word(w) => Expression::Word(w.clone()),
+        Expression::Int(n) => Expression::Int(*n),
+        Expression::Dec(n) => Expression::Dec(*n),
+    }
+}
+
+fn replace_tuple_projection_typed(
+    node: &TypedExpression,
+    name: &str,
+    fst_typed: &TypedExpression,
+    snd_typed: &TypedExpression
+) -> TypedExpression {
+    if let Expression::Apply(items) = &node.expr {
+        if let Some(op) = is_direct_tuple_projection(items, name) {
+            return if op { fst_typed.clone() } else { snd_typed.clone() };
+        }
+        if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+            let mut bound = HashSet::new();
+            if items.len() >= 2 {
+                for p in &items[1..items.len() - 1] {
+                    collect_bound_pattern_words(p, &mut bound);
+                }
+                if bound.contains(name) {
+                    return node.clone();
+                }
+            }
+        }
+    }
+
+    let new_children = node.children
+        .iter()
+        .map(|ch| replace_tuple_projection_typed(ch, name, fst_typed, snd_typed))
+        .collect::<Vec<_>>();
+    let new_expr = match &node.expr {
+        Expression::Apply(items) if items.len() == new_children.len() => {
+            Expression::Apply(
+                new_children
+                    .iter()
+                    .map(|ch| ch.expr.clone())
+                    .collect()
+            )
+        }
+        _ => replace_tuple_projection_expr(&node.expr, name, &fst_typed.expr, &snd_typed.expr),
+    };
+
+    TypedExpression {
+        expr: new_expr,
+        typ: node.typ.clone(),
+        effect: node.effect,
+        children: new_children,
+    }
 }
 
 fn eliminable_let_name(expr: &Expression) -> Option<(String, bool)> {
