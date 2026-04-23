@@ -4220,6 +4220,90 @@ Concequent and alternative must match types
             wat
         );
     }
+
+    #[test]
+    fn test_wat_rejects_push_of_closure_into_captured_vector() {
+        let program = r#"(do
+(let xs [])
+(let f (lambda () (length xs)))
+(push! xs f)
+0)"#;
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) => {
+                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std")
+            }
+            _ => panic!("std ast should be (do ...)"),
+        };
+        let err = crate::wat::compile_program_to_wat(&wrapped)
+            .expect_err("cycle-forming push! should fail at compile time");
+        assert!(
+            err.contains("compile-time RC cycle check") && err.contains("push!"),
+            "expected RC cycle compile error for push!, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_wat_rejects_set_of_inline_closure_into_captured_vector() {
+        let expr = crate::parser::build(
+            r#"(do
+(let xs [(lambda () 0)])
+(set! xs 0 (lambda () (length xs)))
+0)"#,
+        )
+        .expect("program should build");
+        let err = crate::wat::compile_program_to_wat(&expr)
+            .expect_err("cycle-forming set! should fail at compile time");
+        assert!(
+            err.contains("compile-time RC cycle check") && err.contains("set!"),
+            "expected RC cycle compile error for set!, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_wat_allows_closure_capturing_vector_when_not_stored_back_into_it() {
+        let expr = crate::parser::build(
+            r#"(do
+(let xs [1 2 3])
+((lambda () (length xs))))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        assert!(
+            wat.contains("(func (export \"main\")"),
+            "expected successful compilation, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_wat_rejects_wrapper_mutator_that_stores_closure_into_captured_vector() {
+        let program = r#"(do
+(let save! (lambda xs f (push! xs f)))
+(let xs [])
+(let f (lambda () (length xs)))
+(save! xs f)
+0)"#;
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) => {
+                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std")
+            }
+            _ => panic!("std ast should be (do ...)"),
+        };
+        let err = crate::wat::compile_program_to_wat(&wrapped)
+            .expect_err("wrapper mutator should inherit RC cycle check");
+        assert!(
+            err.contains("compile-time RC cycle check") && err.contains("save!"),
+            "expected RC cycle compile error for wrapper mutator, got: {}",
+            err
+        );
+    }
+
     #[test]
     fn test_big_iterations_ref_leak_crash() {
         let test_case = r#"

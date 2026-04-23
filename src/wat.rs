@@ -33,6 +33,19 @@ struct ClosureDef {
     user_arity: usize,
 }
 
+#[derive(Clone, Default)]
+struct RcCycleCheckEnv {
+    managed_roots: HashMap<String, String>,
+    closure_captures: HashMap<String, HashSet<String>>,
+    storage_summaries: HashMap<String, StorageSummary>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StorageSummary {
+    target_param: usize,
+    value_param: usize,
+}
+
 struct Ctx<'a> {
     fn_sigs: &'a HashMap<String, (Vec<Type>, Type)>,
     fn_ids: &'a HashMap<String, i32>,
@@ -600,6 +613,312 @@ fn lambda_capture_names(
     let mut caps = refs.into_iter().collect::<Vec<_>>();
     caps.sort();
     caps
+}
+
+fn builtin_storage_summary(name: &str) -> Option<StorageSummary> {
+    match name {
+        "push!"
+        | "std/vector/push!"
+        | "std/vector/append!"
+        | "std/vector/push-and-get!"
+        | "Vector/push!"
+        | "Vector/append!"
+        | "Que/push!"
+        | "Que/enque!"
+        | "Que/append!"
+        | "Que/prepend!"
+        | "Set/add!"
+        | "Heap/push!" => Some(StorageSummary {
+            target_param: 0,
+            value_param: 1,
+        }),
+        "set!" | "std/vector/set!" | "std/vector/update!" | "Vector/set!" => Some(StorageSummary {
+            target_param: 0,
+            value_param: 2,
+        }),
+        "Table/set!" | "Table/push-or!" => Some(StorageSummary {
+            target_param: 0,
+            value_param: 2,
+        }),
+        _ => None,
+    }
+}
+
+fn storage_summary_for_name(name: &str, env: &RcCycleCheckEnv) -> Option<StorageSummary> {
+    env.storage_summaries
+        .get(name)
+        .copied()
+        .or_else(|| builtin_storage_summary(name))
+}
+
+fn expr_managed_root(node: &TypedExpression, env: &RcCycleCheckEnv) -> Option<String> {
+    match &node.expr {
+        Expression::Word(name) => env.managed_roots.get(name).cloned(),
+        _ => None,
+    }
+}
+
+fn closure_capture_roots(node: &TypedExpression, env: &RcCycleCheckEnv) -> Option<HashSet<String>> {
+    match &node.expr {
+        Expression::Word(name) => env.closure_captures.get(name).cloned(),
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") => {
+            let mut roots = HashSet::new();
+            for cap in lambda_capture_names(node, &HashMap::new()) {
+                if let Some(root) = env.managed_roots.get(&cap) {
+                    roots.insert(root.clone());
+                }
+                if let Some(captured) = env.closure_captures.get(&cap) {
+                    roots.extend(captured.iter().cloned());
+                }
+            }
+            Some(roots)
+        }
+        _ => None,
+    }
+}
+
+fn typed_binding_name(node: &TypedExpression) -> Option<String> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), _] = &items[..] else {
+        return None;
+    };
+    if kw == "let" || kw == "letrec" || kw == "mut" {
+        Some(name.clone())
+    } else {
+        None
+    }
+}
+
+fn resolve_param_index(
+    node: &TypedExpression,
+    aliases: &HashMap<String, usize>,
+    params: &HashMap<String, usize>,
+) -> Option<usize> {
+    match &node.expr {
+        Expression::Word(name) => aliases.get(name).copied().or_else(|| params.get(name).copied()),
+        _ => None,
+    }
+}
+
+fn lambda_storage_summary(node: &TypedExpression, env: &RcCycleCheckEnv) -> Option<StorageSummary> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") || items.len() < 3 {
+        return None;
+    }
+    let body = node.children.last()?;
+    let mut params = HashMap::new();
+    for (idx, param) in items[1..items.len() - 1].iter().enumerate() {
+        let Expression::Word(name) = param else {
+            return None;
+        };
+        params.insert(name.clone(), idx);
+    }
+    find_lambda_storage_summary(body, env, &params, &mut HashMap::new())
+}
+
+fn find_lambda_storage_summary(
+    node: &TypedExpression,
+    env: &RcCycleCheckEnv,
+    params: &HashMap<String, usize>,
+    aliases: &mut HashMap<String, usize>,
+) -> Option<StorageSummary> {
+    match &node.expr {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") => None,
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") => {
+            let mut scoped_aliases = aliases.clone();
+            for child in &node.children {
+                if let Some(summary) = find_lambda_storage_summary(child, env, params, &mut scoped_aliases)
+                {
+                    return Some(summary);
+                }
+                if let Some(name) = typed_binding_name(child) {
+                    if let Some(rhs) = child.children.get(2) {
+                        if let Some(param_idx) = resolve_param_index(rhs, &scoped_aliases, params) {
+                            scoped_aliases.insert(name, param_idx);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "let" || w == "letrec" || w == "mut") =>
+        {
+            node.children
+                .get(2)
+                .and_then(|rhs| find_lambda_storage_summary(rhs, env, params, aliases))
+        }
+        Expression::Apply(items) => {
+            if let Some(Expression::Word(name)) = items.first() {
+                if let Some(summary) = storage_summary_for_name(name, env) {
+                    let target = node
+                        .children
+                        .get(summary.target_param + 1)
+                        .and_then(|child| resolve_param_index(child, aliases, params));
+                    let value = node
+                        .children
+                        .get(summary.value_param + 1)
+                        .and_then(|child| resolve_param_index(child, aliases, params));
+                    if let (Some(target_param), Some(value_param)) = (target, value) {
+                        return Some(StorageSummary {
+                            target_param,
+                            value_param,
+                        });
+                    }
+                }
+            }
+            for child in node.children.iter().skip(1) {
+                if let Some(summary) = find_lambda_storage_summary(child, env, params, aliases) {
+                    return Some(summary);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn bind_rc_cycle_let(name: &str, rhs: &TypedExpression, env: &mut RcCycleCheckEnv) {
+    if let Some(captures) = closure_capture_roots(rhs, env) {
+        env.closure_captures.insert(name.to_string(), captures);
+    } else {
+        env.closure_captures.remove(name);
+    }
+
+    match &rhs.expr {
+        Expression::Word(alias) => {
+            if let Some(summary) = storage_summary_for_name(alias, env) {
+                env.storage_summaries.insert(name.to_string(), summary);
+            } else {
+                env.storage_summaries.remove(name);
+            }
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") => {
+            if let Some(summary) = lambda_storage_summary(rhs, env) {
+                env.storage_summaries.insert(name.to_string(), summary);
+            } else {
+                env.storage_summaries.remove(name);
+            }
+        }
+        _ => {
+            env.storage_summaries.remove(name);
+        }
+    }
+
+    let Some(typ) = rhs.typ.as_ref() else {
+        env.managed_roots.remove(name);
+        return;
+    };
+    if !is_managed_local_type(typ) || matches!(typ, Type::Function(_, _)) {
+        env.managed_roots.remove(name);
+        return;
+    }
+
+    let root = expr_managed_root(rhs, env).unwrap_or_else(|| name.to_string());
+    env.managed_roots.insert(name.to_string(), root);
+}
+
+fn rc_cycle_error(op: &str, target_root: &str, value: &TypedExpression) -> String {
+    format!(
+        "compile-time RC cycle check: '{}' would store a closure that captures '{}' back into the same managed value: {}",
+        op,
+        target_root,
+        value.expr.to_lisp()
+    )
+}
+
+fn validate_no_rc_cycles(node: &TypedExpression) -> Result<(), String> {
+    validate_no_rc_cycles_with_env(node, &mut RcCycleCheckEnv::default())
+}
+
+fn validate_no_rc_cycles_with_env(
+    node: &TypedExpression,
+    env: &mut RcCycleCheckEnv,
+) -> Result<(), String> {
+    match &node.expr {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") => {
+            if let Some(body) = node.children.last() {
+                let mut scoped = env.clone();
+                for param in &items[1..items.len().saturating_sub(1)] {
+                    let mut bound = HashSet::new();
+                    collect_pattern_words(param, &mut bound);
+                    for name in bound {
+                        scoped.managed_roots.remove(&name);
+                        scoped.closure_captures.remove(&name);
+                        scoped.storage_summaries.remove(&name);
+                    }
+                }
+                validate_no_rc_cycles_with_env(body, &mut scoped)?;
+            }
+            Ok(())
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") => {
+            let mut scoped = env.clone();
+            for child in &node.children {
+                validate_no_rc_cycles_with_env(child, &mut scoped)?;
+                if let Some(name) = typed_binding_name(child) {
+                    if let Some(rhs) = child.children.get(2) {
+                        bind_rc_cycle_let(&name, rhs, &mut scoped);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "let" || w == "letrec" || w == "mut") => {
+            for child in &node.children {
+                validate_no_rc_cycles_with_env(child, env)?;
+            }
+            Ok(())
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "set!") => {
+            for child in &node.children {
+                validate_no_rc_cycles_with_env(child, env)?;
+            }
+            let Some(target) = node.children.get(1) else {
+                return Ok(());
+            };
+            let Some(value) = node.children.get(3) else {
+                return Ok(());
+            };
+            if let (Some(target_root), Some(captures)) =
+                (expr_managed_root(target, env), closure_capture_roots(value, env))
+            {
+                if captures.contains(&target_root) {
+                    return Err(rc_cycle_error("set!", &target_root, value));
+                }
+            }
+            Ok(())
+        }
+        Expression::Apply(items) => {
+            for child in &node.children {
+                validate_no_rc_cycles_with_env(child, env)?;
+            }
+            if let Some(Expression::Word(name)) = items.first() {
+                if let Some(summary) = storage_summary_for_name(name, env) {
+                    if let (Some(target), Some(value)) =
+                        (
+                            node.children.get(summary.target_param + 1),
+                            node.children.get(summary.value_param + 1),
+                        )
+                    {
+                        if let (Some(target_root), Some(captures)) =
+                            (expr_managed_root(target, env), closure_capture_roots(value, env))
+                        {
+                            if captures.contains(&target_root) {
+                                return Err(rc_cycle_error(name, &target_root, value));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn lambda_syntax_arity(expr: &Expression) -> usize {
@@ -7233,6 +7552,7 @@ pub fn compile_program_to_wat_typed_with_opts(
         None
     };
     let typed_ast = optimized_typed_ast.as_ref().unwrap_or(typed_ast);
+    validate_no_rc_cycles(typed_ast)?;
 
     let (top_defs, main_expr, main_node) = match &typed_ast.expr {
         Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
