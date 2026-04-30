@@ -4385,6 +4385,27 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_last_use_release_for_managed_do_local() {
+        let expr = crate::parser::build(
+            r#"((lambda
+                  (do
+                    (let xs [1])
+                    (length xs)
+                    0)))"#,
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let wat_flat = wat.replace("    ", "");
+
+        assert!(
+            wat_flat.contains("local.get 0\ncall $vec_len\ndrop\nlocal.get 0\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 0"),
+            "managed do-local should be released after its last non-final use, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_wat_rejects_push_of_closure_into_captured_vector() {
         let program = r#"(do
             (let xs [])
