@@ -4222,6 +4222,69 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_vector_literal_releases_fresh_nested_managed_value() {
+        let expr = crate::parser::build("(vector [])").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_push_i32"),
+            "expected vector push in main, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.contains("call $rc_release"),
+            "expected fresh nested managed vector to be released after push, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_tuple_releases_fresh_managed_fields() {
+        let expr = crate::parser::build("(tuple [] [])").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $tuple_new"),
+            "expected tuple construction in main, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.matches("call $rc_release").count() >= 2,
+            "expected fresh tuple fields to be released after tuple construction, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_partial_application_releases_fresh_captured_managed_arg() {
+        let expr = crate::parser::build("((lambda a b a) [])").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $closure_set_ref"),
+            "expected partial application closure capture by ref, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.contains("call $rc_release"),
+            "expected fresh captured managed arg to be released after closure capture, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
     fn test_wat_rejects_push_of_closure_into_captured_vector() {
         let program = r#"(do
 (let xs [])

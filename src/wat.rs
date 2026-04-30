@@ -5007,7 +5007,18 @@ fn is_borrowed_managed_rhs_with_env(
             }
             if matches!(
                 op,
-                "vector" | "tuple" | "lambda" | "box" | "int" | "dec" | "bool"
+                "vector"
+                    | "tuple"
+                    | "lambda"
+                    | "box"
+                    | "int"
+                    | "dec"
+                    | "bool"
+                    | "string"
+                    | "integers"
+                    | "bools"
+                    | "decimals"
+                    | "strings"
             ) {
                 // Fresh constructors return owned values.
                 return false;
@@ -5051,7 +5062,18 @@ fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
                 }
                 return matches!(
                     op.as_str(),
-                    "lambda" | "vector" | "tuple" | "box" | "int" | "dec" | "bool"
+                    "lambda"
+                        | "vector"
+                        | "tuple"
+                        | "box"
+                        | "int"
+                        | "dec"
+                        | "bool"
+                        | "string"
+                        | "integers"
+                        | "bools"
+                        | "decimals"
+                        | "strings"
                 );
             }
             false
@@ -5070,6 +5092,10 @@ fn should_release_set_rhs(node: &TypedExpression) -> bool {
         return false;
     }
     is_fresh_owned_managed_expr(node)
+}
+
+fn emit_release_fresh_owned_temp(tmp_val: usize) -> String {
+    format!("local.get {}\ncall $rc_release\ndrop", tmp_val)
 }
 
 fn local_lambda_binding_needs_runtime_value(name: &str, following_items: &[Expression]) -> bool {
@@ -5402,13 +5428,9 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
-        let is_lambda_literal = matches!(
-            &a.expr,
-            Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-        );
-        let arg_is_managed = a.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
-        if is_lambda_literal && arg_is_managed {
-            // Fresh lambda values are retained by vector push; release the temporary owner.
+        let release_arg = should_release_set_rhs(a);
+        if release_arg {
+            // Fresh managed values are retained by vector push; release the temporary owner.
             out.push(
                 format!(
                     "local.get {}\n{}\nlocal.tee {}\ncall $vec_push_{}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
@@ -5535,29 +5557,88 @@ fn compile_trusted_typed_vector_literal(
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_item(item, &nested_ctx)?;
-        out.push(format!(
-            "local.get {}\n{}\ncall $vec_push_i32\ndrop",
-            ctx.tmp_i32, v
-        ));
+        let fake_node = TypedExpression {
+            expr: item.clone(),
+            typ: node
+                .typ
+                .as_ref()
+                .and_then(|t| match t {
+                    Type::List(inner) => Some((**inner).clone()),
+                    _ => None,
+                }),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        };
+        if should_release_set_rhs(&fake_node) {
+            out.push(format!(
+                "local.get {}\n{}\nlocal.tee {}\ncall $vec_push_i32\ndrop\n{}",
+                ctx.tmp_i32,
+                v,
+                ctx.tmp_i32 + 1,
+                emit_release_fresh_owned_temp(ctx.tmp_i32 + 1)
+            ));
+        } else {
+            out.push(format!(
+                "local.get {}\n{}\ncall $vec_push_i32\ndrop",
+                ctx.tmp_i32, v
+            ));
+        }
     }
     out.push(format!("local.get {}", ctx.tmp_i32));
     Ok(out.join("\n"))
 }
 
 fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 3,
+    };
+    let a_node = node
+        .children
+        .get(1)
+        .ok_or_else(|| "tuple missing first element".to_string())?;
+    let b_node = node
+        .children
+        .get(2)
+        .ok_or_else(|| "tuple missing second element".to_string())?;
     let a = compile_expr(
-        node.children
-            .get(1)
-            .ok_or_else(|| "tuple missing first element".to_string())?,
-        ctx,
+        a_node,
+        &nested_ctx,
     )?;
     let b = compile_expr(
-        node.children
-            .get(2)
-            .ok_or_else(|| "tuple missing second element".to_string())?,
-        ctx,
+        b_node,
+        &nested_ctx,
     )?;
-    Ok(format!("{a}\n{b}\ncall $tuple_new"))
+    let release_a = should_release_set_rhs(a_node);
+    let release_b = should_release_set_rhs(b_node);
+    if release_a || release_b {
+        let a_tmp = ctx.tmp_i32;
+        let b_tmp = ctx.tmp_i32 + 1;
+        let out_tmp = ctx.tmp_i32 + 2;
+        let mut out = Vec::new();
+        out.push(format!("{a}\nlocal.set {}", a_tmp));
+        out.push(format!("{b}\nlocal.set {}", b_tmp));
+        out.push(format!(
+            "local.get {}\nlocal.get {}\ncall $tuple_new\nlocal.set {}",
+            a_tmp, b_tmp, out_tmp
+        ));
+        if release_a {
+            out.push(emit_release_fresh_owned_temp(a_tmp));
+        }
+        if release_b {
+            out.push(emit_release_fresh_owned_temp(b_tmp));
+        }
+        out.push(format!("local.get {}", out_tmp));
+        Ok(out.join("\n"))
+    } else {
+        Ok(format!("{a}\n{b}\ncall $tuple_new"))
+    }
 }
 
 fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -5776,15 +5857,7 @@ fn compile_fast_box_ctor(
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let value = compile_expr(value_node, &nested_ctx)?;
-    let value_is_managed = value_node
-        .typ
-        .as_ref()
-        .map(is_managed_local_type)
-        .unwrap_or(false);
-    let is_lambda_literal = matches!(
-        &value_node.expr,
-        Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-    );
+    let release_value = should_release_set_rhs(value_node);
     // Keep polymorphic `box` as ref-cell like generic lowering; typed scalar ctors stay scalar cells.
     let elem_ref = if op == "box" { 1 } else { 0 };
     let normalized_value = if op == "bool" {
@@ -5794,7 +5867,7 @@ fn compile_fast_box_ctor(
     };
     let vec_local = ctx.tmp_i32;
     let tmp_val = ctx.tmp_i32 + 1;
-    if is_lambda_literal && value_is_managed {
+    if release_value {
         Ok(
             format!(
                 "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\ndrop\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {vec_local}"
@@ -6215,12 +6288,9 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 let av = compile_expr(arg, &nested_ctx)?;
                 let idx = i + 1;
                 let store_op = closure_store_op_for_type_wat(&ret_params[i]);
-                let is_lambda_literal = matches!(
-                    &arg.expr,
-                    Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-                );
+                let release_arg = should_release_set_rhs(arg);
                 if store_op != "$closure_set" {
-                    if is_lambda_literal {
+                    if release_arg {
                         out.push(
                             format!(
                                 "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
@@ -6314,12 +6384,9 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             let av = compile_expr(arg, &nested_ctx)?;
             let idx = i + 1;
             let store_op = closure_store_op_for_type_wat(&params[i]);
-            let is_lambda_literal = matches!(
-                &arg.expr,
-                Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-            );
+            let release_arg = should_release_set_rhs(arg);
             if store_op != "$closure_set" {
-                if is_lambda_literal {
+                if release_arg {
                     out.push(
                         format!(
                             "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
@@ -6431,12 +6498,9 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
             let av = compile_expr(arg, &nested_ctx)?;
             let idx = i + 1;
             let store_op = closure_store_op_for_type_wat(&head_params[i]);
-            let is_lambda_literal = matches!(
-                &arg.expr,
-                Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-            );
+            let release_arg = should_release_set_rhs(arg);
             if store_op != "$closure_set" {
-                if is_lambda_literal {
+                if release_arg {
                     out.push(
                         format!(
                             "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
