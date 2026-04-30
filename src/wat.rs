@@ -235,11 +235,11 @@ fn is_i32ish_type(t: &Type) -> bool {
 }
 
 fn is_ref_type(t: &Type) -> bool {
-    matches!(t, Type::List(_) | Type::Function(_, _) | Type::Var(_))
+    matches!(t, Type::List(_) | Type::Tuple(_) | Type::Function(_, _) | Type::Var(_))
 }
 
 fn is_managed_local_type(t: &Type) -> bool {
-    matches!(t, Type::List(_) | Type::Function(_, _) | Type::Var(_))
+    matches!(t, Type::List(_) | Type::Tuple(_) | Type::Function(_, _) | Type::Var(_))
 }
 
 fn closure_store_op_for_type(t: &Type) -> &'static str {
@@ -5173,6 +5173,29 @@ fn expr_uses_name_as_value(name: &str, expr: &Expression, inside_lambda: bool) -
     }
 }
 
+fn tuple_projection_binding_target(expr: &Expression, source_name: &str) -> Option<(String, bool)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(bound_name), rhs] = &items[..] else {
+        return None;
+    };
+    if kw != "let" && kw != "letrec" && kw != "mut" {
+        return None;
+    }
+    let Expression::Apply(rhs_items) = rhs else {
+        return None;
+    };
+    match &rhs_items[..] {
+        [Expression::Word(op), Expression::Word(arg)]
+            if (op == "fst" || op == "snd") && arg == source_name && bound_name != source_name =>
+        {
+            Some((bound_name.clone(), op == "fst"))
+        }
+        _ => None,
+    }
+}
+
 fn compile_do(
     items: &[Expression],
     node: &TypedExpression,
@@ -5199,6 +5222,7 @@ fn compile_do(
     let managed_local_slots: Vec<usize> = (0..ctx.tmp_i32).collect();
     let mut parts = Vec::new();
     let mut scoped_lambda_bindings = ctx.lambda_bindings.clone();
+    let mut pending_tuple_projection_release: Option<(usize, usize)> = None;
     for i in 1..items.len() - 1 {
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
@@ -5309,8 +5333,39 @@ fn compile_do(
                                 local_idx, cap_idx, local_idx
                             ));
                         }
+                        if managed_local {
+                            let mut projection_end = i;
+                            let mut saw_projection = false;
+                            let mut j = i + 1;
+                            while j < items.len() - 1 {
+                                if tuple_projection_binding_target(&items[j], name).is_some() {
+                                    saw_projection = true;
+                                    projection_end = j;
+                                    j += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                            if saw_projection
+                                && !items[j..]
+                                    .iter()
+                                    .any(|expr| expr_uses_name_as_value(name, expr, false))
+                            {
+                                pending_tuple_projection_release = Some((projection_end, *local_idx));
+                            }
+                        }
                     } else {
                         return Err(format!("Unknown local '{}'", name));
+                    }
+                    if pending_tuple_projection_release
+                        .map(|(release_at, _)| release_at == i)
+                        .unwrap_or(false)
+                    {
+                        let (_, slot) = pending_tuple_projection_release.take().unwrap();
+                        parts.push(format!(
+                            "local.get {}\ncall $rc_release\ndrop\ni32.const 0\nlocal.set {}",
+                            slot, slot
+                        ));
                     }
                     continue;
                 }
@@ -5368,6 +5423,16 @@ fn compile_do(
             } else {
                 parts.push(format!("{c}\ndrop"));
             }
+        }
+        if pending_tuple_projection_release
+            .map(|(release_at, _)| release_at == i)
+            .unwrap_or(false)
+        {
+            let (_, slot) = pending_tuple_projection_release.take().unwrap();
+            parts.push(format!(
+                "local.get {}\ncall $rc_release\ndrop\ni32.const 0\nlocal.set {}",
+                slot, slot
+            ));
         }
     }
     let last = child_at(items.len() - 1)
@@ -5642,6 +5707,52 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
 }
 
 fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if let Some(tuple_node) = node.children.get(1) {
+        if matches!(&tuple_node.expr, Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "tuple")) {
+            let a_node = tuple_node
+                .children
+                .get(1)
+                .ok_or_else(|| "tuple missing first element".to_string())?;
+            let b_node = tuple_node
+                .children
+                .get(2)
+                .ok_or_else(|| "tuple missing second element".to_string())?;
+            let nested_ctx = Ctx {
+                fn_sigs: ctx.fn_sigs,
+                fn_ids: ctx.fn_ids,
+                lambda_ids: ctx.lambda_ids,
+                closure_defs: ctx.closure_defs,
+                lambda_bindings: ctx.lambda_bindings,
+                locals: ctx.locals.clone(),
+                local_types: ctx.local_types.clone(),
+                tmp_i32: ctx.tmp_i32 + 3,
+            };
+            let a = compile_expr(a_node, &nested_ctx)?;
+            let b = compile_expr(b_node, &nested_ctx)?;
+            let keep_a = a_node
+                .typ
+                .as_ref()
+                .map(is_managed_local_type)
+                .unwrap_or(false);
+            let release_b = should_release_set_rhs(b_node);
+            let a_tmp = ctx.tmp_i32;
+            let b_tmp = ctx.tmp_i32 + 1;
+            let mut out = Vec::new();
+            out.push(format!("{a}\nlocal.set {}", a_tmp));
+            if release_b {
+                out.push(format!("{b}\nlocal.set {}", b_tmp));
+                out.push(emit_release_fresh_owned_temp(b_tmp));
+            } else {
+                out.push(format!("{b}\ndrop"));
+            }
+            if keep_a {
+                out.push(format!("local.get {}", a_tmp));
+            } else {
+                out.push(format!("local.get {}", a_tmp));
+            }
+            return Ok(out.join("\n"));
+        }
+    }
     let p = compile_expr(
         node.children
             .get(1)
@@ -5652,6 +5763,43 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
 }
 
 fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if let Some(tuple_node) = node.children.get(1) {
+        if matches!(&tuple_node.expr, Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "tuple")) {
+            let a_node = tuple_node
+                .children
+                .get(1)
+                .ok_or_else(|| "tuple missing first element".to_string())?;
+            let b_node = tuple_node
+                .children
+                .get(2)
+                .ok_or_else(|| "tuple missing second element".to_string())?;
+            let nested_ctx = Ctx {
+                fn_sigs: ctx.fn_sigs,
+                fn_ids: ctx.fn_ids,
+                lambda_ids: ctx.lambda_ids,
+                closure_defs: ctx.closure_defs,
+                lambda_bindings: ctx.lambda_bindings,
+                locals: ctx.locals.clone(),
+                local_types: ctx.local_types.clone(),
+                tmp_i32: ctx.tmp_i32 + 3,
+            };
+            let a = compile_expr(a_node, &nested_ctx)?;
+            let b = compile_expr(b_node, &nested_ctx)?;
+            let release_a = should_release_set_rhs(a_node);
+            let a_tmp = ctx.tmp_i32;
+            let b_tmp = ctx.tmp_i32 + 1;
+            let mut out = Vec::new();
+            if release_a {
+                out.push(format!("{a}\nlocal.set {}", a_tmp));
+                out.push(emit_release_fresh_owned_temp(a_tmp));
+            } else {
+                out.push(format!("{a}\ndrop"));
+            }
+            out.push(format!("{b}\nlocal.set {}", b_tmp));
+            out.push(format!("local.get {}", b_tmp));
+            return Ok(out.join("\n"));
+        }
+    }
     let p = compile_expr(
         node.children
             .get(1)

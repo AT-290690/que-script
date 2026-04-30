@@ -4204,7 +4204,8 @@ Concequent and alternative must match types
     fn test_wat_host_print_releases_temporary_string_arg() {
         let expr =
             crate::parser::build(r#"(do (print! "hello") 1)"#).expect("program should build");
-        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
 
         let host_pos = wat
             .find("call $host_print")
@@ -4224,7 +4225,9 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_vector_literal_releases_fresh_nested_managed_value() {
         let expr = crate::parser::build("(vector [])").expect("program should build");
-        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        eprintln!("{}", wat);
         let main_start = wat
             .find("(func (export \"main\")")
             .expect("main export should exist");
@@ -4285,9 +4288,86 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_fst_of_tuple_constructor_avoids_tuple_allocation() {
+        let expr = crate::parser::build("(fst (tuple 1 2))").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $tuple_new"),
+            "fst of immediate tuple constructor should avoid tuple allocation, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_snd_of_tuple_constructor_avoids_tuple_allocation() {
+        let expr = crate::parser::build("(snd (tuple 1 2))").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $tuple_new"),
+            "snd of immediate tuple constructor should avoid tuple allocation, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_tuple_temp_used_only_for_projections_releases_early() {
+        let expr = crate::parser::build(
+            r#"((lambda
+                  (do
+                    (let mk (lambda x y { x y }))
+                    (let t (mk [1] [2]))
+                    (let a (fst t))
+                    (let b (snd t))
+                    (+ (length a) (length b)))))"#,
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let wat_flat = wat.replace("    ", "");
+
+        assert!(
+            wat_flat.contains("local.get 1\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 1"),
+            "tuple temp used only for projections should be released early, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_wat_tuple_temp_kept_when_used_after_projection() {
+        let expr = crate::parser::build(
+            r#"((lambda
+                  (do
+                    (let mk (lambda x y { x y }))
+                    (let t (mk [1] [2]))
+                    (let a (fst t))
+                    (+ (length a) (length (snd t))))))"#,
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let wat_flat = wat.replace("    ", "");
+
+        assert!(
+            !wat_flat.contains("call $tuple_snd\nlocal.get 1\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 1"),
+            "tuple temp still used later should not be released early, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_wat_rejects_push_of_closure_into_captured_vector() {
         let program = r#"(do
-(let xs [])
+            (let xs [])
 (let f (lambda () (length xs)))
 (push! xs f)
 0)"#;
