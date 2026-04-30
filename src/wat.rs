@@ -5317,14 +5317,7 @@ fn compile_do(
                         } else {
                             value
                         };
-                        if managed_local {
-                            parts.push(format!(
-                                "{value}\nlocal.get {}\ncall $rc_release\ndrop\nlocal.set {}",
-                                local_idx, local_idx
-                            ));
-                        } else {
-                            parts.push(format!("{value}\nlocal.set {}", local_idx));
-                        }
+                        parts.push(format!("{value}\nlocal.set {}", local_idx));
                         if let Some(cap_idx) = self_capture_idx {
                             // Recursive local lambda: fill self-capture after binding is assigned.
                             // Use non-ref capture to avoid RC self-cycles.
