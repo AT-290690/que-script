@@ -5173,26 +5173,100 @@ fn expr_uses_name_as_value(name: &str, expr: &Expression, inside_lambda: bool) -
     }
 }
 
-fn tuple_projection_binding_target(expr: &Expression, source_name: &str) -> Option<(String, bool)> {
-    let Expression::Apply(items) = expr else {
-        return None;
-    };
-    let [Expression::Word(kw), Expression::Word(bound_name), rhs] = &items[..] else {
-        return None;
-    };
-    if kw != "let" && kw != "letrec" && kw != "mut" {
-        return None;
-    }
-    let Expression::Apply(rhs_items) = rhs else {
-        return None;
-    };
-    match &rhs_items[..] {
-        [Expression::Word(op), Expression::Word(arg)]
-            if (op == "fst" || op == "snd") && arg == source_name && bound_name != source_name =>
-        {
-            Some((bound_name.clone(), op == "fst"))
+fn expr_uses_name_via_local_lambda(
+    name: &str,
+    expr: &Expression,
+    lambda_bindings: &HashMap<String, TypedExpression>,
+) -> bool {
+    match expr {
+        Expression::Word(w) => lambda_bindings
+            .get(w)
+            .map(|lambda| expr_uses_name_as_value(name, &lambda.expr, false))
+            .unwrap_or(false),
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return false;
+            }
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+                let mut bound = HashSet::new();
+                if items.len() >= 2 {
+                    for p in &items[1..items.len() - 1] {
+                        collect_pattern_words(p, &mut bound);
+                    }
+                    if bound.contains(name) {
+                        return false;
+                    }
+                }
+            }
+            if let Some(Expression::Word(op)) = items.first() {
+                if let Some(lambda) = lambda_bindings.get(op) {
+                    if expr_uses_name_as_value(name, &lambda.expr, false) {
+                        return true;
+                    }
+                }
+            }
+            items.iter()
+                .any(|item| expr_uses_name_via_local_lambda(name, item, lambda_bindings))
         }
-        _ => None,
+        _ => false,
+    }
+}
+
+fn expr_contains_store_like_mutation(expr: &Expression) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if let Some(Expression::Word(op)) = items.first() {
+                if matches!(
+                    op.as_str(),
+                    "set!"
+                        | "push!"
+                        | "append!"
+                        | "pop!"
+                        | "alter!"
+                        | "&alter!"
+                        | "set"
+                        | "=!"
+                        | "Table/set!"
+                        | "Table/update!"
+                        | "Table/update-or!"
+                        | "Table/push-or!"
+                        | "Set/add!"
+                        | "Heap/push!"
+                        | "std/vector/push!"
+                        | "std/vector/append!"
+                ) {
+                    return true;
+                }
+            }
+            items.iter().any(expr_contains_store_like_mutation)
+        }
+        _ => false,
+    }
+}
+
+fn append_last_use_releases_for_do_expr(
+    parts: &mut Vec<String>,
+    managed_do_locals: &[(String, usize)],
+    current_expr: &Expression,
+    later_exprs: &[Expression],
+    lambda_bindings: &HashMap<String, TypedExpression>,
+) {
+    if expr_contains_store_like_mutation(current_expr) {
+        return;
+    }
+    for (name, slot) in managed_do_locals {
+        if (expr_uses_name_as_value(name, current_expr, false)
+            || expr_uses_name_via_local_lambda(name, current_expr, lambda_bindings))
+            && !later_exprs.iter().any(|expr| {
+                expr_uses_name_as_value(name, expr, false)
+                    || expr_uses_name_via_local_lambda(name, expr, lambda_bindings)
+            })
+        {
+            parts.push(format!(
+                "local.get {}\ncall $rc_release\ndrop\ni32.const 0\nlocal.set {}",
+                slot, slot
+            ));
+        }
     }
 }
 
@@ -5222,7 +5296,31 @@ fn compile_do(
     let managed_local_slots: Vec<usize> = (0..ctx.tmp_i32).collect();
     let mut parts = Vec::new();
     let mut scoped_lambda_bindings = ctx.lambda_bindings.clone();
-    let mut pending_tuple_projection_release: Option<(usize, usize)> = None;
+    let managed_do_locals: Vec<(String, usize)> = items
+        .iter()
+        .filter_map(|expr| {
+            let Expression::Apply(let_items) = expr else {
+                return None;
+            };
+            let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] else {
+                return None;
+            };
+            if kw != "let" && kw != "letrec" && kw != "mut" {
+                return None;
+            }
+            let slot = *ctx.locals.get(name)?;
+            let managed = ctx
+                .local_types
+                .get(name)
+                .map(is_managed_local_type)
+                .unwrap_or(false);
+            if managed {
+                Some((name.clone(), slot))
+            } else {
+                None
+            }
+        })
+        .collect();
     for i in 1..items.len() - 1 {
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
@@ -5326,40 +5424,16 @@ fn compile_do(
                                 local_idx, cap_idx, local_idx
                             ));
                         }
-                        if managed_local {
-                            let mut projection_end = i;
-                            let mut saw_projection = false;
-                            let mut j = i + 1;
-                            while j < items.len() - 1 {
-                                if tuple_projection_binding_target(&items[j], name).is_some() {
-                                    saw_projection = true;
-                                    projection_end = j;
-                                    j += 1;
-                                } else {
-                                    break;
-                                }
-                            }
-                            if saw_projection
-                                && !items[j..]
-                                    .iter()
-                                    .any(|expr| expr_uses_name_as_value(name, expr, false))
-                            {
-                                pending_tuple_projection_release = Some((projection_end, *local_idx));
-                            }
-                        }
                     } else {
                         return Err(format!("Unknown local '{}'", name));
                     }
-                    if pending_tuple_projection_release
-                        .map(|(release_at, _)| release_at == i)
-                        .unwrap_or(false)
-                    {
-                        let (_, slot) = pending_tuple_projection_release.take().unwrap();
-                        parts.push(format!(
-                            "local.get {}\ncall $rc_release\ndrop\ni32.const 0\nlocal.set {}",
-                            slot, slot
-                        ));
-                    }
+                    append_last_use_releases_for_do_expr(
+                        &mut parts,
+                        &managed_do_locals,
+                        &items[i],
+                        &items[i + 1..],
+                        &scoped_lambda_bindings,
+                    );
                     continue;
                 }
             }
@@ -5417,16 +5491,13 @@ fn compile_do(
                 parts.push(format!("{c}\ndrop"));
             }
         }
-        if pending_tuple_projection_release
-            .map(|(release_at, _)| release_at == i)
-            .unwrap_or(false)
-        {
-            let (_, slot) = pending_tuple_projection_release.take().unwrap();
-            parts.push(format!(
-                "local.get {}\ncall $rc_release\ndrop\ni32.const 0\nlocal.set {}",
-                slot, slot
-            ));
-        }
+        append_last_use_releases_for_do_expr(
+            &mut parts,
+            &managed_do_locals,
+            &items[i],
+            &items[i + 1..],
+            &scoped_lambda_bindings,
+        );
     }
     let last = child_at(items.len() - 1)
         .ok_or_else(|| "Missing final do expression".to_string())
