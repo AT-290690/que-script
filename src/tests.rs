@@ -4365,6 +4365,26 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_initial_managed_local_bind_does_not_release_zero_slot() {
+        let expr = crate::parser::build(
+            r#"((lambda
+                  (do
+                    (let xs [1])
+                    (length xs))))"#,
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let wat_flat = wat.replace("    ", "");
+
+        assert!(
+            !wat_flat.contains("local.get 0\ncall $rc_release\ndrop\nlocal.set 0"),
+            "initial managed local binding should not release a zero-initialized slot, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_wat_rejects_push_of_closure_into_captured_vector() {
         let program = r#"(do
             (let xs [])
