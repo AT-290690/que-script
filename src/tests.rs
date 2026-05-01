@@ -2330,6 +2330,40 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_lowers_counted_scalar_builder_to_uninit_store_loop() {
+        let typed = infer_typed(
+            r#"((lambda n
+                  (do
+                    (let xs (vector))
+                    (mut i 0)
+                    (while (< i n)
+                      (do
+                        (set! xs (length xs) (+ i 1))
+                        (alter! i (+ i 1))))
+                    xs))
+                5)"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            optimized_lisp.contains("(__vec_new_uninit_i32 5)"),
+            "expected exact-size scalar allocation rewrite, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.contains("(__vec_store_i32 xs i (+ i 1))"),
+            "expected counted scalar store rewrite, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            !optimized_lisp.contains("(set! xs (length xs)"),
+            "expected append-style scalar builder to be removed, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_keeps_tuple_when_used_as_value() {
         let typed = infer_typed("(do (let p (tuple 10 32)) p)");
         let optimized = crate::op::optimize_typed_ast(&typed);
@@ -4566,6 +4600,44 @@ Concequent and alternative must match types
         assert!(
             main_wat.contains("call $vec_new_zeroed_i32"),
             "hidden zeroed scalar vector builtin should compile to runtime call, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_hidden_uninit_scalar_vector_builtin_compiles_to_runtime_call() {
+        let typed = crate::infer::TypedExpression {
+            expr: crate::parser::Expression::Apply(vec![
+                crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                crate::parser::Expression::Int(8),
+            ]),
+            typ: Some(crate::types::Type::List(Box::new(crate::types::Type::Int))),
+            effect: crate::infer::EffectFlags::PURE,
+            children: vec![
+                crate::infer::TypedExpression {
+                    expr: crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                    typ: None,
+                    effect: crate::infer::EffectFlags::PURE,
+                    children: Vec::new(),
+                },
+                crate::infer::TypedExpression {
+                    expr: crate::parser::Expression::Int(8),
+                    typ: Some(crate::types::Type::Int),
+                    effect: crate::infer::EffectFlags::PURE,
+                    children: Vec::new(),
+                },
+            ],
+        };
+        let wat =
+            crate::wat::compile_program_to_wat_typed_with_opts(&typed, false).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_new_uninit_i32"),
+            "hidden uninit scalar vector builtin should compile to runtime call, got:\n{}",
             main_wat
         );
     }

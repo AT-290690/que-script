@@ -3439,7 +3439,7 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         effect: normalized_do.effect,
         children: inlined_children.clone(),
     };
-    if let Some(lowered) = lower_zeroed_scalar_builder_do(&rebuilt_after_inline) {
+    if let Some(lowered) = lower_scalar_builder_do(&rebuilt_after_inline) {
         return lowered;
     }
 
@@ -3775,7 +3775,7 @@ fn fold_float_to_int(node: TypedExpression, items: &[Expression]) -> TypedExpres
     make_folded_literal(&node, Expression::Int(a.trunc() as i32), Type::Int)
 }
 
-fn lower_zeroed_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
+fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
     let Expression::Apply(items) = &node.expr else {
         return None;
     };
@@ -3804,33 +3804,206 @@ fn lower_zeroed_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpress
         return None;
     }
 
-    if !is_counted_zero_fill_while(items.get(3)?, board_name, idx_name) {
-        return None;
-    }
-
     if !matches!(items.get(4), Some(Expression::Word(w)) if w == board_name) {
         return None;
     }
 
-    let len_node = extract_counted_zero_fill_len_expr(node.children.get(3)?, idx_name)?;
-    let op_expr = Expression::Apply(vec![
-        Expression::Word("__vec_new_zeroed_i32".to_string()),
-        len_node.expr.clone(),
-    ]);
-    Some(TypedExpression {
-        expr: op_expr,
+    let while_node = node.children.get(3)?;
+    let (len_node, value_node) = extract_counted_scalar_builder_parts(while_node, board_name, idx_name)?;
+    if is_zero_scalar_literal_expr(&value_node.expr) {
+        let op_expr = Expression::Apply(vec![
+            Expression::Word("__vec_new_zeroed_i32".to_string()),
+            len_node.expr.clone(),
+        ]);
+        return Some(TypedExpression {
+            expr: op_expr,
+            typ: node.typ.clone(),
+            effect: EffectFlags::PURE,
+            children: vec![
+                pure_word("__vec_new_zeroed_i32"),
+                len_node,
+            ],
+        });
+    }
+
+    let alloc_node = TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("__vec_new_uninit_i32".to_string()),
+            len_node.expr.clone(),
+        ]),
         typ: node.typ.clone(),
         effect: EffectFlags::PURE,
+        children: vec![pure_word("__vec_new_uninit_i32"), len_node.clone()],
+    };
+    let board_let = TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("let".to_string()),
+            Expression::Word(board_name.to_string()),
+            alloc_node.expr.clone(),
+        ]),
+        typ: None,
+        effect: alloc_node.effect,
+        children: vec![pure_word("let"), pure_word(board_name), alloc_node],
+    };
+    let idx_mut = TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("mut".to_string()),
+            Expression::Word(idx_name.to_string()),
+            Expression::Int(0),
+        ]),
+        typ: None,
+        effect: EffectFlags::MUTATE,
         children: vec![
+            pure_word("mut"),
+            pure_word(idx_name),
             TypedExpression {
-                expr: Expression::Word("__vec_new_zeroed_i32".to_string()),
-                typ: None,
+                expr: Expression::Int(0),
+                typ: Some(Type::Int),
                 effect: EffectFlags::PURE,
                 children: Vec::new(),
             },
-            len_node,
         ],
+    };
+    let store_node = TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("__vec_store_i32".to_string()),
+            Expression::Word(board_name.to_string()),
+            Expression::Word(idx_name.to_string()),
+            value_node.expr.clone(),
+        ]),
+        typ: Some(Type::Int),
+        effect: EffectFlags::MUTATE,
+        children: vec![
+            pure_word("__vec_store_i32"),
+            TypedExpression {
+                expr: Expression::Word(board_name.to_string()),
+                typ: node.typ.clone(),
+                effect: EffectFlags::PURE,
+                children: Vec::new(),
+            },
+            TypedExpression {
+                expr: Expression::Word(idx_name.to_string()),
+                typ: Some(Type::Int),
+                effect: EffectFlags::PURE,
+                children: Vec::new(),
+            },
+            value_node,
+        ],
+    };
+    let alter_node = TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("alter!".to_string()),
+            Expression::Word(idx_name.to_string()),
+            Expression::Apply(vec![
+                Expression::Word("+".to_string()),
+                Expression::Word(idx_name.to_string()),
+                Expression::Int(1),
+            ]),
+        ]),
+        typ: Some(Type::Int),
+        effect: EffectFlags::MUTATE,
+        children: vec![
+            pure_word("alter!"),
+            pure_word(idx_name),
+            TypedExpression {
+                expr: Expression::Apply(vec![
+                    Expression::Word("+".to_string()),
+                    Expression::Word(idx_name.to_string()),
+                    Expression::Int(1),
+                ]),
+                typ: Some(Type::Int),
+                effect: EffectFlags::PURE,
+                children: vec![
+                    pure_word("+"),
+                    TypedExpression {
+                        expr: Expression::Word(idx_name.to_string()),
+                        typ: Some(Type::Int),
+                        effect: EffectFlags::PURE,
+                        children: Vec::new(),
+                    },
+                    TypedExpression {
+                        expr: Expression::Int(1),
+                        typ: Some(Type::Int),
+                        effect: EffectFlags::PURE,
+                        children: Vec::new(),
+                    },
+                ],
+            },
+        ],
+    };
+    let while_body = TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            store_node.expr.clone(),
+            alter_node.expr.clone(),
+        ]),
+        typ: alter_node.typ.clone(),
+        effect: store_node.effect | alter_node.effect,
+        children: vec![pure_word("do"), store_node, alter_node],
+    };
+    let while_node = TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("while".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Word(idx_name.to_string()),
+                len_node.expr.clone(),
+            ]),
+            while_body.expr.clone(),
+        ]),
+        typ: while_node.typ.clone(),
+        effect: EffectFlags::MUTATE,
+        children: vec![
+            pure_word("while"),
+            TypedExpression {
+                expr: Expression::Apply(vec![
+                    Expression::Word("<".to_string()),
+                    Expression::Word(idx_name.to_string()),
+                    len_node.expr.clone(),
+                ]),
+                typ: Some(Type::Bool),
+                effect: len_node.effect,
+                children: vec![
+                    pure_word("<"),
+                    TypedExpression {
+                        expr: Expression::Word(idx_name.to_string()),
+                        typ: Some(Type::Int),
+                        effect: EffectFlags::PURE,
+                        children: Vec::new(),
+                    },
+                    len_node,
+                ],
+            },
+            while_body,
+        ],
+    };
+    let board_result = TypedExpression {
+        expr: Expression::Word(board_name.to_string()),
+        typ: node.typ.clone(),
+        effect: EffectFlags::PURE,
+        children: Vec::new(),
+    };
+    Some(TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            board_let.expr.clone(),
+            idx_mut.expr.clone(),
+            while_node.expr.clone(),
+            board_result.expr.clone(),
+        ]),
+        typ: node.typ.clone(),
+        effect: board_let.effect | idx_mut.effect | while_node.effect,
+        children: vec![pure_word("do"), board_let, idx_mut, while_node, board_result],
     })
+}
+
+fn pure_word(word: &str) -> TypedExpression {
+    TypedExpression {
+        expr: Expression::Word(word.to_string()),
+        typ: None,
+        effect: EffectFlags::PURE,
+        children: Vec::new(),
+    }
 }
 
 fn let_binding_parts<'a>(expr: &'a Expression) -> Option<(&'a str, &'a Expression)> {
@@ -3859,35 +4032,38 @@ fn is_zero_scalar_literal_expr(expr: &Expression) -> bool {
     }
 }
 
-fn is_counted_zero_fill_while(expr: &Expression, board_name: &str, idx_name: &str) -> bool {
-    let Expression::Apply(items) = expr else {
-        return false;
+fn extract_counted_scalar_builder_parts(
+    while_node: &TypedExpression,
+    board_name: &str,
+    idx_name: &str,
+) -> Option<(TypedExpression, TypedExpression)> {
+    let Expression::Apply(items) = &while_node.expr else {
+        return None;
     };
     if !matches!(items.first(), Some(Expression::Word(w)) if w == "while") || items.len() != 3 {
-        return false;
+        return None;
     }
-    if !matches!(
-        items.get(1),
-        Some(Expression::Apply(cond))
-            if matches!(cond.first(), Some(Expression::Word(w)) if w == "<")
-                && matches!(cond.get(1), Some(Expression::Word(w)) if w == idx_name)
-    ) {
-        return false;
-    }
-    let Some(Expression::Apply(body)) = items.get(2) else {
-        return false;
+    let len_node = extract_counted_zero_fill_len_expr(while_node, idx_name)?;
+    let Some(body_node) = while_node.children.get(2) else {
+        return None;
     };
-    if !matches!(body.first(), Some(Expression::Word(w)) if w == "do") || body.len() != 3 {
-        return false;
+    let Expression::Apply(body) = &body_node.expr else {
+        return None;
+    };
+    if !matches!(body.first(), Some(Expression::Word(w)) if w == "do") || body.len() != 3 || body_node.children.len() != 3 {
+        return None;
     }
-    let Some(Expression::Apply(set_items)) = body.get(1) else {
-        return false;
+    let Some(set_node) = body_node.children.get(1) else {
+        return None;
+    };
+    let Expression::Apply(set_items) = &set_node.expr else {
+        return None;
     };
     if !matches!(set_items.first(), Some(Expression::Word(w)) if w == "set!") || set_items.len() != 4 {
-        return false;
+        return None;
     }
     if !matches!(set_items.get(1), Some(Expression::Word(w)) if w == board_name) {
-        return false;
+        return None;
     }
     if !matches!(
         set_items.get(2),
@@ -3895,18 +4071,16 @@ fn is_counted_zero_fill_while(expr: &Expression, board_name: &str, idx_name: &st
             if matches!(len_items.first(), Some(Expression::Word(w)) if w == "length")
                 && matches!(len_items.get(1), Some(Expression::Word(w)) if w == board_name)
     ) {
-        return false;
+        return None;
     }
-    let Some(value_expr) = set_items.get(3) else {
-        return false;
-    };
-    if !is_zero_scalar_literal_expr(value_expr) {
-        return false;
+    let value_node = set_node.children.get(3)?.clone();
+    if expression_mentions_name(&value_node.expr, board_name) {
+        return None;
     }
     let Some(Expression::Apply(alter_items)) = body.get(2) else {
-        return false;
+        return None;
     };
-    matches!(
+    if !matches!(
         &alter_items[..],
         [Expression::Word(op), Expression::Word(name), Expression::Apply(add_items)]
             if op == "alter!"
@@ -3914,7 +4088,18 @@ fn is_counted_zero_fill_while(expr: &Expression, board_name: &str, idx_name: &st
                 && matches!(add_items.first(), Some(Expression::Word(w)) if w == "+")
                 && matches!(add_items.get(1), Some(Expression::Word(w)) if w == idx_name)
                 && matches!(add_items.get(2), Some(Expression::Int(1)))
-    )
+    ) {
+        return None;
+    }
+    Some((len_node, value_node))
+}
+
+fn expression_mentions_name(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Word(w) => w == name,
+        Expression::Apply(items) => items.iter().any(|item| expression_mentions_name(item, name)),
+        _ => false,
+    }
 }
 
 fn extract_counted_zero_fill_len_expr<'a>(
