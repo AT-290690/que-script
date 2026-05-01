@@ -2312,6 +2312,24 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_typed_optimization_lowers_new_board_style_builder_to_zeroed_scalar_vector() {
+        let typed = infer_typed(
+            r#"((lambda size
+                  (do
+                    (let board (vector))
+                    (mut i 0)
+                    (while (< i (* size size))
+                      (do
+                        (set! board (length board) 0)
+                        (alter! i (+ i 1))))
+                    board))
+                5)"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(__vec_new_zeroed_i32 25)");
+    }
+
+    #[test]
     fn test_typed_optimization_keeps_tuple_when_used_as_value() {
         let typed = infer_typed("(do (let p (tuple 10 32)) p)");
         let optimized = crate::op::optimize_typed_ast(&typed);
@@ -4471,6 +4489,44 @@ Concequent and alternative must match types
             !wat_flat.contains("call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop\nlocal.set 1"),
             "discarded managed do expr should not add an extra spill temp when no managed locals can alias, got:\n{}",
             wat
+        );
+    }
+
+    #[test]
+    fn test_wat_hidden_zeroed_scalar_vector_builtin_compiles_to_runtime_call() {
+        let typed = crate::infer::TypedExpression {
+            expr: crate::parser::Expression::Apply(vec![
+                crate::parser::Expression::Word("__vec_new_zeroed_i32".to_string()),
+                crate::parser::Expression::Int(25),
+            ]),
+            typ: Some(crate::types::Type::List(Box::new(crate::types::Type::Int))),
+            effect: crate::infer::EffectFlags::PURE,
+            children: vec![
+                crate::infer::TypedExpression {
+                    expr: crate::parser::Expression::Word("__vec_new_zeroed_i32".to_string()),
+                    typ: None,
+                    effect: crate::infer::EffectFlags::PURE,
+                    children: Vec::new(),
+                },
+                crate::infer::TypedExpression {
+                    expr: crate::parser::Expression::Int(25),
+                    typ: Some(crate::types::Type::Int),
+                    effect: crate::infer::EffectFlags::PURE,
+                    children: Vec::new(),
+                },
+            ],
+        };
+        let wat =
+            crate::wat::compile_program_to_wat_typed_with_opts(&typed, false).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_new_zeroed_i32"),
+            "hidden zeroed scalar vector builtin should compile to runtime call, got:\n{}",
+            main_wat
         );
     }
 
