@@ -4320,6 +4320,50 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_snd_of_tuple_constructor_avoids_return_temp_spill() {
+        let expr = crate::parser::build("(snd (tuple 1 2))").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+        let main_flat = main_wat.replace("    ", "");
+
+        assert!(
+            main_flat.contains("i32.const 1\ndrop\ni32.const 2"),
+            "snd of immediate tuple constructor should leave the second value on the stack, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_flat.contains("i32.const 2\nlocal.set 1\nlocal.get 1"),
+            "snd of immediate tuple constructor should not spill the returned value through a temp, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_tuple_with_one_fresh_side_avoids_other_arg_temp_spill() {
+        let expr = crate::parser::build("(tuple [] 1)").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+        let main_flat = main_wat.replace("    ", "");
+
+        assert!(
+            main_flat.contains("local.get 0\ni32.const 1\ncall $tuple_new\nlocal.set 1"),
+            "tuple with one fresh side should build directly from the live stack value and one temp, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_flat.contains("i32.const 1\nlocal.set 1\nlocal.get 0\nlocal.get 1\ncall $tuple_new"),
+            "tuple with one fresh side should not spill the non-fresh side into an extra temp, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
     fn test_wat_tuple_temp_used_only_for_projections_releases_early() {
         let expr = crate::parser::build(
             r#"((lambda
