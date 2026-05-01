@@ -3433,6 +3433,16 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         inlined_children
     );
 
+    let rebuilt_after_inline = TypedExpression {
+        expr: Expression::Apply(inlined_items.clone()),
+        typ: normalized_do.typ.clone(),
+        effect: normalized_do.effect,
+        children: inlined_children.clone(),
+    };
+    if let Some(lowered) = lower_zeroed_scalar_builder_do(&rebuilt_after_inline) {
+        return lowered;
+    }
+
     // Always collapse single-item do, even if no cleanup happened.
     if inlined_items.len() == 2 {
         return inlined_children
@@ -3763,6 +3773,171 @@ fn fold_float_to_int(node: TypedExpression, items: &[Expression]) -> TypedExpres
         return node;
     };
     make_folded_literal(&node, Expression::Int(a.trunc() as i32), Type::Int)
+}
+
+fn lower_zeroed_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    if items.len() != 5 || node.children.len() != 5 {
+        return None;
+    }
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return None;
+    }
+
+    let list_type = match node.typ.as_ref()? {
+        Type::List(inner) => inner.as_ref(),
+        _ => return None,
+    };
+    if !matches!(list_type, Type::Int | Type::Bool | Type::Char | Type::Dec) {
+        return None;
+    }
+
+    let (board_name, board_rhs) = let_binding_parts(items.get(1)?)?;
+    if !is_empty_vector_expr(board_rhs) {
+        return None;
+    }
+
+    let (idx_name, idx_rhs) = let_binding_parts(items.get(2)?)?;
+    if !matches!(idx_rhs, Expression::Int(0)) {
+        return None;
+    }
+
+    if !is_counted_zero_fill_while(items.get(3)?, board_name, idx_name) {
+        return None;
+    }
+
+    if !matches!(items.get(4), Some(Expression::Word(w)) if w == board_name) {
+        return None;
+    }
+
+    let len_node = extract_counted_zero_fill_len_expr(node.children.get(3)?, idx_name)?;
+    let op_expr = Expression::Apply(vec![
+        Expression::Word("__vec_new_zeroed_i32".to_string()),
+        len_node.expr.clone(),
+    ]);
+    Some(TypedExpression {
+        expr: op_expr,
+        typ: node.typ.clone(),
+        effect: EffectFlags::PURE,
+        children: vec![
+            TypedExpression {
+                expr: Expression::Word("__vec_new_zeroed_i32".to_string()),
+                typ: None,
+                effect: EffectFlags::PURE,
+                children: Vec::new(),
+            },
+            len_node,
+        ],
+    })
+}
+
+fn let_binding_parts<'a>(expr: &'a Expression) -> Option<(&'a str, &'a Expression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), rhs] = &items[..] else {
+        return None;
+    };
+    if kw != "let" && kw != "mut" {
+        return None;
+    }
+    Some((name.as_str(), rhs))
+}
+
+fn is_empty_vector_expr(expr: &Expression) -> bool {
+    matches!(expr, Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "vector") && items.len() == 1)
+}
+
+fn is_zero_scalar_literal_expr(expr: &Expression) -> bool {
+    match expr {
+        Expression::Int(0) => true,
+        Expression::Dec(n) => *n == 0.0,
+        Expression::Word(w) if w == "false" || w == "nil" => true,
+        _ => false,
+    }
+}
+
+fn is_counted_zero_fill_while(expr: &Expression, board_name: &str, idx_name: &str) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "while") || items.len() != 3 {
+        return false;
+    }
+    if !matches!(
+        items.get(1),
+        Some(Expression::Apply(cond))
+            if matches!(cond.first(), Some(Expression::Word(w)) if w == "<")
+                && matches!(cond.get(1), Some(Expression::Word(w)) if w == idx_name)
+    ) {
+        return false;
+    }
+    let Some(Expression::Apply(body)) = items.get(2) else {
+        return false;
+    };
+    if !matches!(body.first(), Some(Expression::Word(w)) if w == "do") || body.len() != 3 {
+        return false;
+    }
+    let Some(Expression::Apply(set_items)) = body.get(1) else {
+        return false;
+    };
+    if !matches!(set_items.first(), Some(Expression::Word(w)) if w == "set!") || set_items.len() != 4 {
+        return false;
+    }
+    if !matches!(set_items.get(1), Some(Expression::Word(w)) if w == board_name) {
+        return false;
+    }
+    if !matches!(
+        set_items.get(2),
+        Some(Expression::Apply(len_items))
+            if matches!(len_items.first(), Some(Expression::Word(w)) if w == "length")
+                && matches!(len_items.get(1), Some(Expression::Word(w)) if w == board_name)
+    ) {
+        return false;
+    }
+    let Some(value_expr) = set_items.get(3) else {
+        return false;
+    };
+    if !is_zero_scalar_literal_expr(value_expr) {
+        return false;
+    }
+    let Some(Expression::Apply(alter_items)) = body.get(2) else {
+        return false;
+    };
+    matches!(
+        &alter_items[..],
+        [Expression::Word(op), Expression::Word(name), Expression::Apply(add_items)]
+            if op == "alter!"
+                && name == idx_name
+                && matches!(add_items.first(), Some(Expression::Word(w)) if w == "+")
+                && matches!(add_items.get(1), Some(Expression::Word(w)) if w == idx_name)
+                && matches!(add_items.get(2), Some(Expression::Int(1)))
+    )
+}
+
+fn extract_counted_zero_fill_len_expr<'a>(
+    while_node: &'a TypedExpression,
+    idx_name: &str,
+) -> Option<TypedExpression> {
+    let Expression::Apply(items) = &while_node.expr else {
+        return None;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "while") || while_node.children.len() != 3 {
+        return None;
+    }
+    let cond_node = while_node.children.get(1)?;
+    let Expression::Apply(cond_items) = &cond_node.expr else {
+        return None;
+    };
+    if !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<") || cond_node.children.len() != 3 {
+        return None;
+    }
+    if !matches!(cond_items.get(1), Some(Expression::Word(w)) if w == idx_name) {
+        return None;
+    }
+    Some(cond_node.children.get(2)?.clone())
 }
 
 fn make_folded_literal(node: &TypedExpression, expr: Expression, typ: Type) -> TypedExpression {
