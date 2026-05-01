@@ -2666,6 +2666,58 @@ fn emit_vector_runtime(
     local.get $ptr
   )
 
+  (func $vec_new_uninit_i32 (param $len i32) (result i32)
+    (local $cap i32)
+    (local $ptr i32)
+    (local $data i32)
+    local.get $len
+    i32.const 1
+    i32.lt_s
+    if (result i32)
+      i32.const 1
+    else
+      local.get $len
+    end
+    local.set $cap
+    i32.const 24
+    call $alloc
+    local.set $ptr
+    local.get $cap
+    i32.const 4
+    i32.mul
+    call $alloc
+    local.set $data
+    local.get $ptr
+    local.get $len
+    i32.store
+    local.get $ptr
+    i32.const 4
+    i32.add
+    local.get $cap
+    i32.store
+    local.get $ptr
+    i32.const 8
+    i32.add
+    i32.const 1
+    i32.store
+    local.get $ptr
+    i32.const 12
+    i32.add
+    i32.const 0
+    i32.store
+    local.get $ptr
+    i32.const 16
+    i32.add
+    local.get $data
+    i32.store
+    local.get $ptr
+    i32.const 20
+    i32.add
+    i32.const 1447380017
+    i32.store
+    local.get $ptr
+  )
+
   (func $vec_get_i32 (param $ptr i32) (param $idx i32) (result i32)
     (local $len i32)
     ;; __VEC_GET_BOUNDS_CHECK__
@@ -7208,6 +7260,36 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 ctx,
                             )?;
                             Ok(format!("{len}\ncall $vec_new_zeroed_i32"))
+                        }
+                        "__vec_new_uninit_i32" => {
+                            let len = compile_expr(
+                                node.children
+                                    .get(1)
+                                    .ok_or_else(|| "__vec_new_uninit_i32 missing len".to_string())?,
+                                ctx,
+                            )?;
+                            Ok(format!("{len}\ncall $vec_new_uninit_i32"))
+                        }
+                        "__vec_store_i32" => {
+                            let xs = compile_expr(
+                                node.children
+                                    .get(1)
+                                    .ok_or_else(|| "__vec_store_i32 missing vector".to_string())?,
+                                ctx,
+                            )?;
+                            let idx = compile_expr(
+                                node.children
+                                    .get(2)
+                                    .ok_or_else(|| "__vec_store_i32 missing index".to_string())?,
+                                ctx,
+                            )?;
+                            let value = compile_expr(
+                                node.children
+                                    .get(3)
+                                    .ok_or_else(|| "__vec_store_i32 missing value".to_string())?,
+                                ctx,
+                            )?;
+                            Ok(format!("{xs}\n{idx}\n{value}\ncall $vec_set_scalar_i32"))
                         }
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
