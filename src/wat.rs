@@ -5746,7 +5746,7 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
     )?;
     let release_a = should_release_set_rhs(a_node);
     let release_b = should_release_set_rhs(b_node);
-    if release_a || release_b {
+    if release_a && release_b {
         let a_tmp = ctx.tmp_i32;
         let b_tmp = ctx.tmp_i32 + 1;
         let out_tmp = ctx.tmp_i32 + 2;
@@ -5757,12 +5757,33 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
             "local.get {}\nlocal.get {}\ncall $tuple_new\nlocal.set {}",
             a_tmp, b_tmp, out_tmp
         ));
-        if release_a {
-            out.push(emit_release_fresh_owned_temp(a_tmp));
-        }
-        if release_b {
-            out.push(emit_release_fresh_owned_temp(b_tmp));
-        }
+        out.push(emit_release_fresh_owned_temp(a_tmp));
+        out.push(emit_release_fresh_owned_temp(b_tmp));
+        out.push(format!("local.get {}", out_tmp));
+        Ok(out.join("\n"))
+    } else if release_a {
+        let a_tmp = ctx.tmp_i32;
+        let out_tmp = ctx.tmp_i32 + 1;
+        let mut out = Vec::new();
+        out.push(format!("{a}\nlocal.set {}", a_tmp));
+        out.push(format!(
+            "local.get {}\n{}\ncall $tuple_new\nlocal.set {}",
+            a_tmp, b, out_tmp
+        ));
+        out.push(emit_release_fresh_owned_temp(a_tmp));
+        out.push(format!("local.get {}", out_tmp));
+        Ok(out.join("\n"))
+    } else if release_b {
+        let b_tmp = ctx.tmp_i32;
+        let out_tmp = ctx.tmp_i32 + 1;
+        let mut out = Vec::new();
+        out.push(a);
+        out.push(format!("{b}\nlocal.set {}", b_tmp));
+        out.push(format!(
+            "local.get {}\ncall $tuple_new\nlocal.set {}",
+            b_tmp, out_tmp
+        ));
+        out.push(emit_release_fresh_owned_temp(b_tmp));
         out.push(format!("local.get {}", out_tmp));
         Ok(out.join("\n"))
     } else {
@@ -5851,7 +5872,6 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             let b = compile_expr(b_node, &nested_ctx)?;
             let release_a = should_release_set_rhs(a_node);
             let a_tmp = ctx.tmp_i32;
-            let b_tmp = ctx.tmp_i32 + 1;
             let mut out = Vec::new();
             if release_a {
                 out.push(format!("{a}\nlocal.set {}", a_tmp));
@@ -5859,8 +5879,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             } else {
                 out.push(format!("{a}\ndrop"));
             }
-            out.push(format!("{b}\nlocal.set {}", b_tmp));
-            out.push(format!("local.get {}", b_tmp));
+            out.push(b);
             return Ok(out.join("\n"));
         }
     }
