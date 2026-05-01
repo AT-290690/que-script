@@ -258,6 +258,14 @@ fn closure_store_op_for_type_wat(t: &Type) -> &'static str {
     }
 }
 
+fn vec_push_runtime_for_elem_ref(elem_ref: i32) -> &'static str {
+    if elem_ref == 0 { "$vec_push_scalar_i32" } else { "$vec_push_i32" }
+}
+
+fn vec_set_runtime_for_scalar(is_scalar: bool) -> &'static str {
+    if is_scalar { "$vec_set_scalar_i32" } else { "$vec_set_i32" }
+}
+
 impl VecElemKind {
     fn suffix(self) -> &'static str {
         match self {
@@ -2965,6 +2973,50 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
+  (func $vec_push_scalar_i32 (param $ptr i32) (param $v i32) (result i32)
+    (local $len i32)
+    (local $cap i32)
+    (local $addr i32)
+    local.get $ptr
+    call $vec_materialize_i32
+    drop
+    local.get $ptr
+    i32.load
+    local.set $len
+    local.get $ptr
+    i32.const 4
+    i32.add
+    i32.load
+    local.set $cap
+    local.get $len
+    local.get $cap
+    i32.lt_s
+    i32.eqz
+    if
+      local.get $ptr
+      call $vec_grow_i32
+      drop
+    end
+    local.get $ptr
+    i32.const 16
+    i32.add
+    i32.load
+    local.get $len
+    i32.const 4
+    i32.mul
+    i32.add
+    local.set $addr
+    local.get $addr
+    local.get $v
+    i32.store
+    local.get $ptr
+    local.get $len
+    i32.const 1
+    i32.add
+    i32.store
+    i32.const 0
+  )
+
   (func $vec_concat_i32 (param $a i32) (param $b i32) (param $elem_ref i32) (result i32)
     (local $len_a i32)
     (local $len_b i32)
@@ -3192,6 +3244,83 @@ fn emit_vector_runtime(
           drop
         end
       end
+      local.get $addr
+      local.get $v
+      i32.store
+      i32.const 0
+      return
+    end
+
+    unreachable
+  )
+
+  (func $vec_set_scalar_i32 (param $ptr i32) (param $idx i32) (param $v i32) (result i32)
+    (local $len i32)
+    (local $cap i32)
+    (local $addr i32)
+    local.get $ptr
+    call $vec_materialize_i32
+    drop
+    local.get $ptr
+    i32.load
+    local.set $len
+    local.get $ptr
+    i32.const 4
+    i32.add
+    i32.load
+    local.set $cap
+
+    local.get $idx
+    local.get $len
+    i32.eq
+    if
+      local.get $len
+      local.get $cap
+      i32.lt_s
+      i32.eqz
+      if
+        local.get $ptr
+        call $vec_grow_i32
+        drop
+      end
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      local.get $len
+      i32.const 4
+      i32.mul
+      i32.add
+      local.set $addr
+      local.get $addr
+      local.get $v
+      i32.store
+      local.get $ptr
+      local.get $len
+      i32.const 1
+      i32.add
+      i32.store
+      i32.const 0
+      return
+    end
+
+    local.get $idx
+    i32.const 0
+    i32.ge_s
+    local.get $idx
+    local.get $len
+    i32.lt_s
+    i32.and
+    if
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      local.get $idx
+      i32.const 4
+      i32.mul
+      i32.add
+      local.set $addr
       local.get $addr
       local.get $v
       i32.store
@@ -5613,6 +5742,7 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         _ => 0,
     };
     let mut out = Vec::new();
+    let push_op = vec_push_runtime_for_elem_ref(elem_ref_flag);
     out.push(format!(
         "i32.const {}\ni32.const {}\ncall $vec_new_{}\nlocal.set {}",
         0,
@@ -5637,20 +5767,20 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             // Fresh managed values are retained by vector push; release the temporary owner.
             out.push(
                 format!(
-                    "local.get {}\n{}\nlocal.tee {}\ncall $vec_push_{}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                    "local.get {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
                     ctx.tmp_i32,
                     v,
                     ctx.tmp_i32 + 1,
-                    elem_kind.suffix(),
+                    push_op,
                     ctx.tmp_i32 + 1
                 )
             );
         } else {
             out.push(format!(
-                "local.get {}\n{}\ncall $vec_push_{}\ndrop",
+                "local.get {}\n{}\ncall {}\ndrop",
                 ctx.tmp_i32,
                 v,
-                elem_kind.suffix()
+                push_op
             ));
         }
     }
@@ -5705,7 +5835,7 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             _ => return Err("strings expects string literal elements".to_string()),
         };
         out.push(format!(
-            "local.get {}\n{}\ncall $vec_push_i32\ndrop",
+            "local.get {}\n{}\ncall $vec_push_scalar_i32\ndrop",
             ctx.tmp_i32, v
         ));
     }
@@ -5745,6 +5875,7 @@ fn compile_trusted_typed_vector_literal(
         };
 
     let mut out = Vec::new();
+    let push_op = vec_push_runtime_for_elem_ref(elem_ref_flag);
     out.push(format!(
         "i32.const 0\ni32.const {}\ncall $vec_new_i32\nlocal.set {}",
         elem_ref_flag, ctx.tmp_i32
@@ -5775,16 +5906,17 @@ fn compile_trusted_typed_vector_literal(
         };
         if should_release_set_rhs(&fake_node) {
             out.push(format!(
-                "local.get {}\n{}\nlocal.tee {}\ncall $vec_push_i32\ndrop\n{}",
+                "local.get {}\n{}\nlocal.tee {}\ncall {}\ndrop\n{}",
                 ctx.tmp_i32,
                 v,
                 ctx.tmp_i32 + 1,
+                push_op,
                 emit_release_fresh_owned_temp(ctx.tmp_i32 + 1)
             ));
         } else {
             out.push(format!(
-                "local.get {}\n{}\ncall $vec_push_i32\ndrop",
-                ctx.tmp_i32, v
+                "local.get {}\n{}\ncall {}\ndrop",
+                ctx.tmp_i32, v, push_op
             ));
         }
     }
@@ -6006,11 +6138,18 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .get(3)
         .ok_or_else(|| "set! missing value".to_string())?;
     let v = compile_expr(val_node, ctx)?;
-    let elem = val_node
+    val_node
         .typ
         .as_ref()
         .ok_or_else(|| "set! value missing type".to_string())
         .and_then(vec_elem_kind_from_type)?;
+    let scalar_set_op = vec_set_runtime_for_scalar(
+        val_node
+            .typ
+            .as_ref()
+            .map(|t| !is_ref_type(t))
+            .unwrap_or(false)
+    );
     let release_rhs = should_release_set_rhs(val_node);
     let release_target = false;
     let managed_slots = managed_local_slots(ctx);
@@ -6037,20 +6176,20 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             tail.push(target_release);
         }
         Ok(format!(
-            "{target_prefix}\n{idx}\n{v}\nlocal.tee {tmp_val}\ncall $vec_set_{}\n{}",
-            elem.suffix(),
+            "{target_prefix}\n{idx}\n{v}\nlocal.tee {tmp_val}\ncall {}\n{}",
+            scalar_set_op,
             tail.join("\n")
         ))
     } else {
         if target_release.is_empty() {
             Ok(format!(
-                "{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}",
-                elem.suffix()
+                "{target_prefix}\n{idx}\n{v}\ncall {}",
+                scalar_set_op
             ))
         } else {
             Ok(format!(
-                "{target_prefix}\n{idx}\n{v}\ncall $vec_set_{}\n{}",
-                elem.suffix(),
+                "{target_prefix}\n{idx}\n{v}\ncall {}\n{}",
+                scalar_set_op,
                 target_release
             ))
         }
@@ -6171,18 +6310,19 @@ fn compile_fast_box_ctor(
     } else {
         value
     };
+    let set_op = vec_set_runtime_for_scalar(elem_ref == 0);
     let vec_local = ctx.tmp_i32;
     let tmp_val = ctx.tmp_i32 + 1;
     if release_value {
         Ok(
             format!(
-                "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\ndrop\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {vec_local}"
+                "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\nlocal.tee {tmp_val}\ncall {set_op}\ndrop\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {vec_local}"
             )
         )
     } else {
         Ok(
             format!(
-                "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\ncall $vec_set_i32\ndrop\nlocal.get {vec_local}"
+                "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\ncall {set_op}\ndrop\nlocal.get {vec_local}"
             )
         )
     }
@@ -6225,18 +6365,28 @@ fn compile_fast_cell_set(
     let release_rhs = should_release_set_rhs(value_node);
     let managed_slots = managed_local_slots(ctx);
     let cell_prefix = cell;
+    let set_op = vec_set_runtime_for_scalar(
+        cell_node
+            .typ
+            .as_ref()
+            .and_then(|t| match t {
+                Type::List(inner) => Some(!is_ref_type(inner)),
+                _ => None,
+            })
+            .unwrap_or(false)
+    );
     if release_rhs {
         let tmp_val = ctx.tmp_i32 + 1;
         let keep_tmp = ctx.tmp_i32 + 2;
         let release =
             emit_release_managed_temp_if_not_local_alias(tmp_val, keep_tmp, &managed_slots);
         Ok(format!(
-            "{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall $vec_set_i32\n{}",
+            "{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall {set_op}\n{}",
             release
         ))
     } else {
         Ok(format!(
-            "{cell_prefix}\ni32.const 0\n{value}\ncall $vec_set_i32"
+            "{cell_prefix}\ni32.const 0\n{value}\ncall {set_op}"
         ))
     }
 }

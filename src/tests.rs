@@ -4264,6 +4264,28 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_scalar_vector_literal_uses_scalar_push_runtime() {
+        let expr = crate::parser::build("(vector 1 2 3)").expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_push_scalar_i32"),
+            "scalar vector literal should use scalar push runtime, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $vec_push_i32"),
+            "scalar vector literal should avoid generic ref-aware push runtime, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
     fn test_wat_tuple_releases_fresh_managed_fields() {
         let expr = crate::parser::build("(tuple [] [])").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
@@ -4464,6 +4486,24 @@ Concequent and alternative must match types
             wat_flat.contains("local.get 0\ncall $vec_len\ndrop\nlocal.get 0\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 0"),
             "managed do-local should be released after its last non-final use, got:\n{}",
             wat
+        );
+    }
+
+    #[test]
+    fn test_wat_scalar_set_uses_scalar_set_runtime() {
+        let expr = crate::parser::build("(do (let xs [1]) (set! xs 0 2) xs)")
+            .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_set_scalar_i32"),
+            "scalar set! should use scalar set runtime, got:\n{}",
+            main_wat
         );
     }
 
