@@ -5463,10 +5463,10 @@ fn compile_do(
                 let tmp_val = ctx.tmp_i32;
                 let tmp_keep = ctx.tmp_i32 + 1;
                 let mut blk = Vec::new();
-                blk.push(format!("{c}\nlocal.set {}", tmp_val));
                 if managed_local_slots.is_empty() {
-                    blk.push(format!("local.get {}\ncall $rc_release\ndrop", tmp_val));
+                    blk.push(format!("{c}\ncall $rc_release\ndrop"));
                 } else {
+                    blk.push(format!("{c}\nlocal.set {}", tmp_val));
                     blk.push(format!("i32.const 0\nlocal.set {}", tmp_keep));
                     for slot in &managed_local_slots {
                         blk.push(

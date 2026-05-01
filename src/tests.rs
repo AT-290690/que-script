@@ -4406,6 +4406,31 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_discarded_managed_do_expr_releases_without_temp_spill_when_no_alias_locals() {
+        let expr = crate::parser::build(
+            r#"((lambda
+                  (do
+                    []
+                    0)))"#,
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let wat_flat = wat.replace("    ", "");
+
+        assert!(
+            wat_flat.contains("call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop"),
+            "discarded managed do expr should reuse the constructor temp for release, got:\n{}",
+            wat
+        );
+        assert!(
+            !wat_flat.contains("call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop\nlocal.set 1"),
+            "discarded managed do expr should not add an extra spill temp when no managed locals can alias, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_wat_rejects_push_of_closure_into_captured_vector() {
         let program = r#"(do
             (let xs [])
