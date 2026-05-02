@@ -6152,17 +6152,27 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
 }
 
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        tmp_i32: ctx.tmp_i32 + 3,
+    };
     let xs = compile_expr(
         node.children
             .get(1)
             .ok_or_else(|| "get missing vector".to_string())?,
-        ctx,
+        &nested_ctx,
     )?;
     let idx = compile_expr(
         node.children
             .get(2)
             .ok_or_else(|| "get missing index".to_string())?,
-        ctx,
+        &nested_ctx,
     )?;
     let elem = match node.typ.as_ref() {
         Some(t) => vec_elem_kind_from_type(t)?,
@@ -6170,6 +6180,75 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             return Err("get missing return type".to_string());
         }
     };
+    if node
+        .typ
+        .as_ref()
+        .map(|t| !is_ref_type(t))
+        .unwrap_or(false)
+    {
+        let bounds = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+            format!(
+                "{xs}\n\
+                 local.set {}\n\
+                 {idx}\n\
+                 local.set {}\n\
+                 local.get {}\n\
+                 i32.const 0\n\
+                 i32.lt_s\n\
+                 if\n\
+                   unreachable\n\
+                 end\n\
+                 local.get {}\n\
+                 i32.load\n\
+                 local.set {}\n\
+                 local.get {}\n\
+                 local.get {}\n\
+                 i32.ge_s\n\
+                 if\n\
+                   unreachable\n\
+                 end\n\
+                 local.get {}\n\
+                 i32.const 16\n\
+                 i32.add\n\
+                 i32.load\n\
+                 local.get {}\n\
+                 i32.const 4\n\
+                 i32.mul\n\
+                 i32.add\n\
+                 i32.load",
+                ctx.tmp_i32,
+                ctx.tmp_i32 + 1,
+                ctx.tmp_i32 + 1,
+                ctx.tmp_i32,
+                ctx.tmp_i32 + 2,
+                ctx.tmp_i32 + 1,
+                ctx.tmp_i32 + 2,
+                ctx.tmp_i32,
+                ctx.tmp_i32 + 1,
+            )
+        } else {
+            format!(
+                "{xs}\n\
+                 local.set {}\n\
+                 {idx}\n\
+                 local.set {}\n\
+                 local.get {}\n\
+                 i32.const 16\n\
+                 i32.add\n\
+                 i32.load\n\
+                 local.get {}\n\
+                 i32.const 4\n\
+                 i32.mul\n\
+                 i32.add\n\
+                 i32.load",
+                ctx.tmp_i32,
+                ctx.tmp_i32 + 1,
+                ctx.tmp_i32,
+                ctx.tmp_i32 + 1,
+            )
+        };
+        return Ok(bounds);
+    }
     Ok(format!("{xs}\n{idx}\ncall $vec_get_{}", elem.suffix()))
 }
 
