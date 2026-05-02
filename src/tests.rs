@@ -3055,8 +3055,8 @@ Concequent and alternative must match types
             main_wat
         );
         assert!(
-            main_wat.contains("call $vec_get_i32") && main_wat.contains("i32.add"),
-            "fused loop should read both vectors and add values, got:\n{}",
+            main_wat.contains("i32.load") && main_wat.contains("i32.add"),
+            "fused loop should read both vectors via direct loads and add values, got:\n{}",
             main_wat
         );
     }
@@ -4347,6 +4347,45 @@ Concequent and alternative must match types
         assert!(
             !main_wat.contains("call $vec_push_i32"),
             "scalar vector literal should avoid generic ref-aware push runtime, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_scalar_get_inlines_without_vec_get_runtime_call() {
+        let expr = crate::parser::build("(get [1 2 3] 1)").expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $vec_get_i32"),
+            "scalar get should inline direct load instead of calling vec_get_i32, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.contains("i32.load"),
+            "scalar get inline path should contain direct load, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_ref_get_keeps_vec_get_runtime_call() {
+        let expr = crate::parser::build("(get [[]] 0)").expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_get_i32"),
+            "ref get should keep vec_get_i32 runtime path, got:\n{}",
             main_wat
         );
     }
