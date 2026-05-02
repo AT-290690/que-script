@@ -119,11 +119,88 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     for _ in 0..MAX_OPT_FIXPOINT_PASSES {
         let next = optimize_typed_ast_once(&cur);
         if next.expr.to_lisp() == cur.expr.to_lisp() {
+            let next = run_tuple_return_destructuring_env_pass(&next);
             return dead_code_eliminate_top_level_defs(&next);
         }
         cur = next;
     }
+    let cur = run_tuple_return_destructuring_env_pass(&cur);
     dead_code_eliminate_top_level_defs(&cur)
+}
+
+fn run_tuple_return_destructuring_env_pass(node: &TypedExpression) -> TypedExpression {
+    let mut state = InlineState::new(&node.expr);
+    rewrite_tuple_return_destructuring_with_env(node, &HashMap::new(), &mut state)
+}
+
+fn rewrite_tuple_return_destructuring_with_env(
+    node: &TypedExpression,
+    inherited_defs: &HashMap<String, TupleReturnLambdaDef>,
+    state: &mut InlineState,
+) -> TypedExpression {
+    let Expression::Apply(items) = &node.expr else {
+        let new_children = node
+            .children
+            .iter()
+            .map(|child| rewrite_tuple_return_destructuring_with_env(child, inherited_defs, state))
+            .collect::<Vec<_>>();
+        return TypedExpression {
+            expr: rebuild_expr_from_children(&node.expr, &new_children),
+            typ: node.typ.clone(),
+            effect: node.effect,
+            children: new_children,
+        };
+    };
+
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        let new_children = node
+            .children
+            .iter()
+            .map(|child| rewrite_tuple_return_destructuring_with_env(child, inherited_defs, state))
+            .collect::<Vec<_>>();
+        return TypedExpression {
+            expr: rebuild_expr_from_children(&node.expr, &new_children),
+            typ: node.typ.clone(),
+            effect: node.effect,
+            children: new_children,
+        };
+    }
+
+    let Some(normalized_do) = normalize_do_node(node, items) else {
+        return node.clone();
+    };
+    let Expression::Apply(norm_items) = &normalized_do.expr else {
+        return normalized_do;
+    };
+    let mut scoped_defs = inherited_defs.clone();
+    let mut rebuilt_items = vec![norm_items[0].clone()];
+    let mut rebuilt_children = vec![normalized_do.children[0].clone()];
+
+    for idx in 1..norm_items.len() {
+        let child = normalized_do.children.get(idx).cloned().unwrap_or_else(|| normalized_do.children[0].clone());
+        let rewritten_child =
+            rewrite_tuple_return_destructuring_with_env(&child, &scoped_defs, state);
+        let rewritten_expr = rewritten_child.expr.clone();
+        rebuilt_items.push(rewritten_expr.clone());
+        rebuilt_children.push(rewritten_child.clone());
+        if let Some((name, def)) = extract_tuple_return_lambda_def(&rewritten_expr, &rewritten_child) {
+            scoped_defs.insert(name, def);
+        }
+    }
+
+    let (rebuilt_items, rebuilt_children) = eliminate_tuple_return_destructuring_calls_with_defs(
+        rebuilt_items,
+        rebuilt_children,
+        state,
+        inherited_defs,
+    );
+
+    TypedExpression {
+        expr: Expression::Apply(rebuilt_items),
+        typ: normalized_do.typ.clone(),
+        effect: normalized_do.effect,
+        children: rebuilt_children,
+    }
 }
 
 fn dead_code_eliminate_top_level_defs(node: &TypedExpression) -> TypedExpression {
@@ -2929,6 +3006,98 @@ fn alpha_rename_lambda_local_bindings(expr: &Expression, prefix: &str) -> Expres
     alpha_rename_local_bindings_expr(expr, &mut HashMap::new(), &mut counter, prefix)
 }
 
+fn alpha_rename_local_bindings_typed(
+    node: &TypedExpression,
+    env: &mut HashMap<String, String>,
+    state: &mut InlineState,
+) -> TypedExpression {
+    match &node.expr {
+        Expression::Word(w) => {
+            if let Some(mapped) = env.get(w) {
+                TypedExpression {
+                    expr: Expression::Word(mapped.clone()),
+                    typ: node.typ.clone(),
+                    effect: node.effect,
+                    children: Vec::new(),
+                }
+            } else {
+                node.clone()
+            }
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") => {
+            let mut scoped = env.clone();
+            let children = node
+                .children
+                .iter()
+                .map(|child| alpha_rename_local_bindings_typed(child, &mut scoped, state))
+                .collect::<Vec<_>>();
+            TypedExpression {
+                expr: rebuild_expr_from_children(&node.expr, &children),
+                typ: node.typ.clone(),
+                effect: node.effect,
+                children,
+            }
+        }
+        Expression::Apply(items) if items.len() == 3 => {
+            if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
+                if kw == "let" || kw == "mut" || kw == "letrec" {
+                    let rhs = alpha_rename_local_bindings_typed(node.children.get(2).unwrap_or(node), env, state);
+                    let fresh = state.fresh_tmp();
+                    env.insert(name.clone(), fresh.clone());
+                    let head = node.children.first().cloned().unwrap_or_else(|| pure_word(kw));
+                    let bind = TypedExpression {
+                        expr: Expression::Word(fresh.clone()),
+                        typ: node.children.get(1).and_then(|n| n.typ.clone()),
+                        effect: EffectFlags::PURE,
+                        children: Vec::new(),
+                    };
+                    return TypedExpression {
+                        expr: Expression::Apply(vec![
+                            Expression::Word(kw.clone()),
+                            Expression::Word(fresh),
+                            rhs.expr.clone(),
+                        ]),
+                        typ: node.typ.clone(),
+                        effect: node.effect,
+                        children: vec![head, bind, rhs],
+                    };
+                }
+            }
+            let children = node
+                .children
+                .iter()
+                .map(|child| {
+                    let mut scoped = env.clone();
+                    alpha_rename_local_bindings_typed(child, &mut scoped, state)
+                })
+                .collect::<Vec<_>>();
+            TypedExpression {
+                expr: rebuild_expr_from_children(&node.expr, &children),
+                typ: node.typ.clone(),
+                effect: node.effect,
+                children,
+            }
+        }
+        Expression::Apply(_) => {
+            let children = node
+                .children
+                .iter()
+                .map(|child| {
+                    let mut scoped = env.clone();
+                    alpha_rename_local_bindings_typed(child, &mut scoped, state)
+                })
+                .collect::<Vec<_>>();
+            TypedExpression {
+                expr: rebuild_expr_from_children(&node.expr, &children),
+                typ: node.typ.clone(),
+                effect: node.effect,
+                children,
+            }
+        }
+        _ => node.clone(),
+    }
+}
+
 fn alpha_rename_local_bindings_expr(
     expr: &Expression,
     env: &mut HashMap<String, String>,
@@ -3431,6 +3600,13 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     let (inlined_items, inlined_children) = eliminate_single_use_let_bindings(
         inlined_items,
         inlined_children
+    );
+    let tuple_inline_root = Expression::Apply(inlined_items.clone());
+    let mut tuple_inline_state = InlineState::new(&tuple_inline_root);
+    let (inlined_items, inlined_children) = eliminate_tuple_return_destructuring_calls(
+        inlined_items,
+        inlined_children,
+        &mut tuple_inline_state,
     );
 
     let rebuilt_after_inline = TypedExpression {
@@ -4288,6 +4464,13 @@ struct InlineLambdaDef {
     body_typed: TypedExpression,
 }
 
+#[derive(Clone)]
+struct TupleReturnLambdaDef {
+    params: Vec<String>,
+    body_expr: Expression,
+    body_typed: TypedExpression,
+}
+
 struct InlineState {
     used_names: HashSet<String>,
     next_id: usize,
@@ -4358,6 +4541,130 @@ fn inline_do_simple_calls(
     }
 
     (cur_items, cur_children)
+}
+
+fn eliminate_tuple_return_destructuring_calls(
+    items: Vec<Expression>,
+    children: Vec<TypedExpression>,
+    state: &mut InlineState,
+) -> (Vec<Expression>, Vec<TypedExpression>) {
+    eliminate_tuple_return_destructuring_calls_with_defs(
+        items,
+        children,
+        state,
+        &HashMap::new(),
+    )
+}
+
+fn eliminate_tuple_return_destructuring_calls_with_defs(
+    mut items: Vec<Expression>,
+    mut children: Vec<TypedExpression>,
+    state: &mut InlineState,
+    seed_defs: &HashMap<String, TupleReturnLambdaDef>,
+) -> (Vec<Expression>, Vec<TypedExpression>) {
+    if items.len() != children.len() || items.len() <= 3 {
+        return (items, children);
+    }
+
+    for _ in 0..MAX_INLINE_FIXPOINT_PASSES {
+        let mut defs: HashMap<String, TupleReturnLambdaDef> = seed_defs.clone();
+        let mut changed = false;
+        let mut i = 1usize;
+        while i < items.len() {
+            if let Some((name, def)) = extract_tuple_return_lambda_def(&items[i], &children[i]) {
+                defs.insert(name, def);
+                i += 1;
+                continue;
+            }
+
+            let Some((temp_name, call_expr, call_node)) = let_call_binding(&items[i], &children[i]) else {
+                i += 1;
+                continue;
+            };
+            let Some(def) = call_expr
+                .first()
+                .and_then(|head| match head {
+                    Expression::Word(callee) => defs.get(callee),
+                    _ => None,
+                })
+                .cloned() else {
+                i += 1;
+                continue;
+            };
+
+            let Some((projection_count, projected_bindings)) =
+                contiguous_tuple_projection_bindings(&items, i + 1, &temp_name) else {
+                i += 1;
+                continue;
+            };
+            if projection_count == 0 || count_word_uses_in_slice(&items[i + 1 + projection_count..], &temp_name) != 0 {
+                i += 1;
+                continue;
+            }
+
+            let Some((prep, _inlined_expr, inlined_typed)) =
+                inline_call_with_def(
+                    &InlineLambdaDef {
+                        params: def.params.clone(),
+                        body_expr: def.body_expr.clone(),
+                        body_typed: def.body_typed.clone(),
+                    },
+                    &call_expr[1..],
+                    &call_node.children[1..],
+                    state,
+                ) else {
+                    i += 1;
+                    continue;
+                };
+            let inlined_typed =
+                alpha_rename_local_bindings_typed(&inlined_typed, &mut HashMap::new(), state);
+            let Some((prefix_pairs, fst_typed, snd_typed)) =
+                extract_terminal_tuple_parts(&inlined_typed) else {
+                    i += 1;
+                    continue;
+                };
+
+            let fst_tmp = state.fresh_tmp();
+            let snd_tmp = state.fresh_tmp();
+            let fst_tmp_word = typed_word(fst_tmp.clone(), fst_typed.typ.clone());
+            let snd_tmp_word = typed_word(snd_tmp.clone(), snd_typed.typ.clone());
+
+            let mut replacement: Vec<(Expression, TypedExpression)> = prep;
+            replacement.extend(prefix_pairs);
+            replacement.push(make_let_binding(
+                fst_tmp.clone(),
+                fst_typed.clone(),
+            ));
+            replacement.push(make_let_binding(
+                snd_tmp.clone(),
+                snd_typed.clone(),
+            ));
+            for (bind_name, is_fst) in projected_bindings {
+                let rhs = if is_fst {
+                    fst_tmp_word.clone()
+                } else {
+                    snd_tmp_word.clone()
+                };
+                replacement.push(make_named_let_binding(bind_name, rhs));
+            }
+
+            items.splice(
+                i..i + 1 + projection_count,
+                replacement.iter().map(|(expr, _)| expr.clone()),
+            );
+            children.splice(
+                i..i + 1 + projection_count,
+                replacement.into_iter().map(|(_, typed)| typed),
+            );
+            changed = true;
+            break;
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    (items, children)
 }
 
 fn eliminate_single_use_let_bindings(
@@ -4878,6 +5185,218 @@ fn extract_inline_lambda_def(
         body_typed,
     };
     Some((expr.clone(), node.clone(), (name.clone(), def)))
+}
+
+fn extract_tuple_return_lambda_def(
+    expr: &Expression,
+    node: &TypedExpression,
+) -> Option<(String, TupleReturnLambdaDef)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if items.len() != 3 {
+        return None;
+    }
+    let (kw, name, rhs) = (items.first()?, items.get(1)?, items.get(2)?);
+    let (Expression::Word(kw), Expression::Word(name)) = (kw, name) else {
+        return None;
+    };
+    if kw != "let" && kw != "letrec" {
+        return None;
+    }
+    let Expression::Apply(lambda_items) = rhs else {
+        return None;
+    };
+    if !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") {
+        return None;
+    }
+    if lambda_items.len() < 2 {
+        return None;
+    }
+    let body_expr = lambda_items.last()?.clone();
+    if contains_word(&body_expr, name) || contains_nested_lambda_or_letrec(&body_expr) {
+        return None;
+    }
+    let body_typed = node.children.get(2)?.children.last()?.clone();
+    extract_terminal_tuple_parts(&body_typed)?;
+    let params = lambda_items[1..lambda_items.len() - 1]
+        .iter()
+        .map(|p| match p {
+            Expression::Word(w) => Some(w.clone()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some((
+        name.clone(),
+        TupleReturnLambdaDef {
+            params,
+            body_expr,
+            body_typed,
+        },
+    ))
+}
+
+fn contains_nested_lambda_or_letrec(expr: &Expression) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda" || w == "letrec") {
+                return true;
+            }
+            items.iter().any(contains_nested_lambda_or_letrec)
+        }
+        _ => false,
+    }
+}
+
+fn let_call_binding<'a>(
+    expr: &'a Expression,
+    node: &'a TypedExpression,
+) -> Option<(String, &'a [Expression], &'a TypedExpression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), Expression::Apply(call_expr)] = &items[..] else {
+        return None;
+    };
+    if kw != "let" && kw != "letrec" {
+        return None;
+    }
+    let rhs_typed = node.children.get(2)?;
+    Some((name.clone(), call_expr.as_slice(), rhs_typed))
+}
+
+fn contiguous_tuple_projection_bindings(
+    items: &[Expression],
+    start: usize,
+    temp_name: &str,
+) -> Option<(usize, Vec<(String, bool)>)> {
+    let mut consumed = 0usize;
+    let mut current_name = temp_name.to_string();
+    let mut idx = start;
+    while idx < items.len() {
+        let Expression::Apply(let_items) = &items[idx] else {
+            break;
+        };
+        let [Expression::Word(kw), Expression::Word(bind_name), Expression::Word(rhs_name)] = &let_items[..] else {
+            break;
+        };
+        if (kw != "let" && kw != "letrec") || rhs_name != &current_name {
+            break;
+        }
+        current_name = bind_name.clone();
+        consumed += 1;
+        idx += 1;
+    }
+
+    let mut out = Vec::new();
+    while idx < items.len() {
+        let Expression::Apply(let_items) = &items[idx] else {
+            break;
+        };
+        let [Expression::Word(kw), Expression::Word(bind_name), rhs] = &let_items[..] else {
+            break;
+        };
+        if kw != "let" && kw != "letrec" {
+            break;
+        }
+        let Expression::Apply(rhs_items) = rhs else {
+            break;
+        };
+        let Some(Expression::Word(op)) = rhs_items.first() else {
+            break;
+        };
+        if rhs_items.len() != 2 || !matches!(rhs_items.get(1), Some(Expression::Word(w)) if w == &current_name) {
+            break;
+        }
+        let is_fst = match op.as_str() {
+            "fst" => true,
+            "snd" => false,
+            _ => break,
+        };
+        out.push((bind_name.clone(), is_fst));
+        idx += 1;
+        consumed += 1;
+        if out.len() == 2 {
+            break;
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some((consumed, out))
+    }
+}
+
+fn extract_terminal_tuple_parts(
+    node: &TypedExpression,
+) -> Option<(Vec<(Expression, TypedExpression)>, TypedExpression, TypedExpression)> {
+    if parse_zip_pair_expr(&node.expr).is_some() && node.children.len() >= 3 {
+        return Some((Vec::new(), node.children.get(1)?.clone(), node.children.get(2)?.clone()));
+    }
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") || items.len() != node.children.len() {
+        return None;
+    }
+    let last = node.children.last()?;
+    let (mut prefix, fst_typed, snd_typed) = extract_terminal_tuple_parts(last)?;
+    let direct_prefix = items[1..items.len() - 1]
+        .iter()
+        .cloned()
+        .zip(node.children[1..node.children.len() - 1].iter().cloned())
+        .collect::<Vec<_>>();
+    let mut all_prefix = direct_prefix;
+    all_prefix.append(&mut prefix);
+    Some((all_prefix, fst_typed, snd_typed))
+}
+
+fn typed_word(name: String, typ: Option<Type>) -> TypedExpression {
+    TypedExpression {
+        expr: Expression::Word(name),
+        typ,
+        effect: EffectFlags::PURE,
+        children: Vec::new(),
+    }
+}
+
+fn make_let_binding(name: String, rhs: TypedExpression) -> (Expression, TypedExpression) {
+    let rhs_typ = rhs.typ.clone();
+    let expr = Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(name.clone()),
+        rhs.expr.clone(),
+    ]);
+    let typed = TypedExpression {
+        expr: expr.clone(),
+        typ: rhs_typ.clone(),
+        effect: rhs.effect,
+        children: vec![
+            pure_word("let"),
+            typed_word(name, rhs_typ),
+            rhs,
+        ],
+    };
+    (expr, typed)
+}
+
+fn make_named_let_binding(name: String, rhs: TypedExpression) -> (Expression, TypedExpression) {
+    let expr = Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(name.clone()),
+        rhs.expr.clone(),
+    ]);
+    let typed = TypedExpression {
+        expr: expr.clone(),
+        typ: rhs.typ.clone(),
+        effect: rhs.effect,
+        children: vec![
+            pure_word("let"),
+            typed_word(name, rhs.typ.clone()),
+            rhs,
+        ],
+    };
+    (expr, typed)
 }
 
 fn is_inline_safe_body(expr: &Expression) -> bool {

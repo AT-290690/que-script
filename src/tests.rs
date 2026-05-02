@@ -520,6 +520,38 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_runtime_tuple_return_destructure_inside_loop_does_not_shadow_outer_mut() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let MOD 100000007)
+                (let new-board (lambda size (do
+                  (let board [])
+                  (mut i 0)
+                  (while (< i (* size size)) (do
+                    (set! board (length board) 0)
+                    (alter! i (+ i 1))))
+                  board)))
+                (let step-and-hash (lambda board size weight (do
+                  (let next (new-board size))
+                  (mut acc weight)
+                  { next (mod acc MOD) })))
+                (let SIZE 4)
+                (let initial (new-board SIZE))
+                (variable STATE initial)
+                (mut step 0)
+                (mut acc 0)
+                (while (< step 1) (do
+                  (let { a b } (step-and-hash (get STATE) SIZE (+ step 1)))
+                  (set STATE a)
+                  (alter! acc (mod (+ acc b) MOD))
+                  (alter! step (+ step 1))))
+                acc)"#,
+            true,
+        );
+        assert_eq!(output.trim(), "1");
+    }
+
+    #[test]
     fn test_runtime_std_dec_log_and_aliases_work() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -4638,6 +4670,56 @@ Concequent and alternative must match types
         assert!(
             main_wat.contains("call $vec_new_uninit_i32"),
             "hidden uninit scalar vector builtin should compile to runtime call, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_immediate_destructure_of_tuple_returning_local_lambda_avoids_tuple_allocation() {
+        let expr = crate::parser::build(
+            "(do (let f (lambda x (do (let y (+ x 1)) (tuple y (+ y 1))))) (let { a b } (f 10)) (+ a b))",
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, true).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $tuple_new"),
+            "immediate destructuring of tuple-returning local lambda should avoid tuple allocation, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_nested_do_sees_outer_tuple_returning_lambda_for_immediate_destructure() {
+        let expr = crate::parser::build(
+            "(do (let f (lambda x (do (let y (+ x 1)) (tuple y (+ y 1))))) (mut out 0) (while (< out 1) (do (let { a b } (f 10)) (alter! out (+ a b)))) out)",
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, true).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $tuple_new"),
+            "nested do immediate destructuring should reuse outer tuple-returning lambda def without tuple allocation, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $tuple_fst"),
+            "nested do immediate destructuring should avoid tuple fst projection, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $tuple_snd"),
+            "nested do immediate destructuring should avoid tuple snd projection, got:\n{}",
             main_wat
         );
     }
