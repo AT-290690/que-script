@@ -4595,20 +4595,102 @@ Concequent and alternative must match types
     }
 
     #[test]
-    fn test_wat_scalar_set_uses_scalar_set_runtime() {
-        let expr = crate::parser::build("(do (let xs [1]) (set! xs 0 2) xs)")
+    fn test_wat_scalar_set_on_materialized_local_uses_materialized_scalar_set_runtime() {
+        let expr = crate::parser::build("((lambda (do (let xs [1]) (set! xs 0 2) xs)))")
             .expect("program should build");
         let wat =
             crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
-        let main_wat = &wat[main_start..];
 
         assert!(
-            main_wat.contains("call $vec_set_scalar_i32"),
-            "scalar set! should use scalar set runtime, got:\n{}",
-            main_wat
+            wat.contains("call $vec_set_scalar_materialized_i32"),
+            "scalar set! on a definitely materialized local should use the materialized scalar set runtime, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_wat_scalar_set_on_slice_keeps_materializing_runtime() {
+        let expr = crate::parser::build("((lambda (do (let xs [1 2]) (let ys (cdr xs 1)) (set! ys 0 3) ys)))")
+            .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+
+        assert!(
+            wat.contains("call $vec_set_scalar_i32"),
+            "scalar set! on a slice/view should keep the materializing runtime path, got:\n{}",
+            wat
+        );
+        assert!(
+            !wat.contains("call $vec_set_scalar_materialized_i32"),
+            "scalar set! on a slice/view must not use the materialized-only runtime path, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_wat_hidden_scalar_store_uses_materialized_scalar_set_runtime() {
+        let typed = crate::infer::TypedExpression {
+            expr: crate::parser::Expression::Apply(vec![
+                crate::parser::Expression::Word("__vec_store_i32".to_string()),
+                crate::parser::Expression::Apply(vec![
+                    crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                    crate::parser::Expression::Int(5),
+                ]),
+                crate::parser::Expression::Int(0),
+                crate::parser::Expression::Int(7),
+            ]),
+            typ: Some(crate::types::Type::Int),
+            effect: crate::infer::EffectFlags::IO,
+            children: vec![
+                crate::infer::TypedExpression {
+                    expr: crate::parser::Expression::Word("__vec_store_i32".to_string()),
+                    typ: None,
+                    effect: crate::infer::EffectFlags::PURE,
+                    children: Vec::new(),
+                },
+                crate::infer::TypedExpression {
+                    expr: crate::parser::Expression::Apply(vec![
+                        crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                        crate::parser::Expression::Int(5),
+                    ]),
+                    typ: Some(crate::types::Type::List(Box::new(crate::types::Type::Int))),
+                    effect: crate::infer::EffectFlags::PURE,
+                    children: vec![
+                        crate::infer::TypedExpression {
+                            expr: crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                            typ: None,
+                            effect: crate::infer::EffectFlags::PURE,
+                            children: Vec::new(),
+                        },
+                        crate::infer::TypedExpression {
+                            expr: crate::parser::Expression::Int(5),
+                            typ: Some(crate::types::Type::Int),
+                            effect: crate::infer::EffectFlags::PURE,
+                            children: Vec::new(),
+                        },
+                    ],
+                },
+                crate::infer::TypedExpression {
+                    expr: crate::parser::Expression::Int(0),
+                    typ: Some(crate::types::Type::Int),
+                    effect: crate::infer::EffectFlags::PURE,
+                    children: Vec::new(),
+                },
+                crate::infer::TypedExpression {
+                    expr: crate::parser::Expression::Int(7),
+                    typ: Some(crate::types::Type::Int),
+                    effect: crate::infer::EffectFlags::PURE,
+                    children: Vec::new(),
+                },
+            ],
+        };
+        let wat =
+            crate::wat::compile_program_to_wat_typed_with_opts(&typed, false).expect("program should compile");
+
+        assert!(
+            wat.contains("call $vec_set_scalar_materialized_i32"),
+            "hidden exact-size scalar stores should use the materialized scalar set runtime, got:\n{}",
+            wat
         );
     }
 

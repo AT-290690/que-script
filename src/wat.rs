@@ -54,6 +54,7 @@ struct Ctx<'a> {
     lambda_bindings: &'a HashMap<String, TypedExpression>,
     locals: HashMap<String, usize>,
     local_types: HashMap<String, Type>,
+    materialized_scalar_local_slots: HashSet<usize>,
     tmp_i32: usize,
 }
 const EXTRA_I32_LOCALS: usize = 16;
@@ -264,6 +265,43 @@ fn vec_push_runtime_for_elem_ref(elem_ref: i32) -> &'static str {
 
 fn vec_set_runtime_for_scalar(is_scalar: bool) -> &'static str {
     if is_scalar { "$vec_set_scalar_i32" } else { "$vec_set_i32" }
+}
+
+fn vec_set_runtime_for_materialized_scalar(is_scalar: bool) -> &'static str {
+    if is_scalar {
+        "$vec_set_scalar_materialized_i32"
+    } else {
+        "$vec_set_i32"
+    }
+}
+
+fn is_scalar_vector_type(t: &Type) -> bool {
+    matches!(t, Type::List(inner) if !is_ref_type(inner))
+}
+
+fn expr_is_definitely_materialized_scalar_vector(
+    expr: &TypedExpression,
+    materialized_scalar_local_slots: &HashSet<usize>,
+    locals: &HashMap<String, usize>,
+) -> bool {
+    if !expr.typ.as_ref().map(is_scalar_vector_type).unwrap_or(false) {
+        return false;
+    }
+    match &expr.expr {
+        Expression::Word(name) => locals
+            .get(name)
+            .map(|slot| materialized_scalar_local_slots.contains(slot))
+            .unwrap_or(false),
+        Expression::Apply(items) => matches!(
+            items.first(),
+            Some(Expression::Word(op))
+                if matches!(
+                    op.as_str(),
+                    "vector" | "string" | "__vec_new_zeroed_i32" | "__vec_new_uninit_i32" | "integers" | "bools" | "decimals"
+                )
+        ),
+        _ => false,
+    }
 }
 
 impl VecElemKind {
@@ -3383,6 +3421,80 @@ fn emit_vector_runtime(
     unreachable
   )
 
+  (func $vec_set_scalar_materialized_i32 (param $ptr i32) (param $idx i32) (param $v i32) (result i32)
+    (local $len i32)
+    (local $cap i32)
+    (local $addr i32)
+    local.get $ptr
+    i32.load
+    local.set $len
+    local.get $ptr
+    i32.const 4
+    i32.add
+    i32.load
+    local.set $cap
+
+    local.get $idx
+    local.get $len
+    i32.eq
+    if
+      local.get $len
+      local.get $cap
+      i32.lt_s
+      i32.eqz
+      if
+        local.get $ptr
+        call $vec_grow_i32
+        drop
+      end
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      local.get $len
+      i32.const 4
+      i32.mul
+      i32.add
+      local.set $addr
+      local.get $addr
+      local.get $v
+      i32.store
+      local.get $ptr
+      local.get $len
+      i32.const 1
+      i32.add
+      i32.store
+      i32.const 0
+      return
+    end
+
+    local.get $idx
+    i32.const 0
+    i32.ge_s
+    local.get $idx
+    local.get $len
+    i32.lt_s
+    i32.and
+    if
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      local.get $idx
+      i32.const 4
+      i32.mul
+      i32.add
+      local.set $addr
+      local.get $addr
+      local.get $v
+      i32.store
+      i32.const 0
+      return
+    end
+
+    unreachable
+  )
+
   (func $vec_pop_i32 (param $ptr i32) (result i32)
     (local $len i32)
     (local $elem_ref i32)
@@ -5552,6 +5664,7 @@ fn compile_do(
     let managed_local_slots: Vec<usize> = (0..ctx.tmp_i32).collect();
     let mut parts = Vec::new();
     let mut scoped_lambda_bindings = ctx.lambda_bindings.clone();
+    let mut scoped_materialized_scalar_local_slots = ctx.materialized_scalar_local_slots.clone();
     let managed_do_locals: Vec<(String, usize)> = items
         .iter()
         .filter_map(|expr| {
@@ -5643,6 +5756,8 @@ fn compile_do(
                                 lambda_bindings: &scoped_lambda_bindings,
                                 locals: ctx.locals.clone(),
                                 local_types: ctx.local_types.clone(),
+                                materialized_scalar_local_slots: scoped_materialized_scalar_local_slots
+                                    .clone(),
                                 tmp_i32: ctx.tmp_i32,
                             };
                             if
@@ -5672,6 +5787,18 @@ fn compile_do(
                             value
                         };
                         parts.push(format!("{value}\nlocal.set {}", local_idx));
+                        if val_node
+                            .map(|n| {
+                                expr_is_definitely_materialized_scalar_vector(
+                                    n,
+                                    &scoped_materialized_scalar_local_slots,
+                                    &ctx.locals,
+                                )
+                            })
+                            .unwrap_or(false)
+                        {
+                            scoped_materialized_scalar_local_slots.insert(*local_idx);
+                        }
                         if let Some(cap_idx) = self_capture_idx {
                             // Recursive local lambda: fill self-capture after binding is assigned.
                             // Use non-ref capture to avoid RC self-cycles.
@@ -5703,6 +5830,7 @@ fn compile_do(
                 lambda_bindings: &scoped_lambda_bindings,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
+                materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
                 tmp_i32: ctx.tmp_i32,
             };
             let c = compile_expr(n, &scoped_ctx)?;
@@ -5766,6 +5894,7 @@ fn compile_do(
                 lambda_bindings: &scoped_lambda_bindings,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
+                materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
                 tmp_i32: ctx.tmp_i32,
             };
             compile_expr(n, &scoped_ctx)
@@ -5811,6 +5940,7 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             lambda_bindings: ctx.lambda_bindings,
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
+            materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
@@ -5865,6 +5995,7 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             lambda_bindings: ctx.lambda_bindings,
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
+            materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = match item {
@@ -5941,6 +6072,7 @@ fn compile_trusted_typed_vector_literal(
             lambda_bindings: ctx.lambda_bindings,
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
+            materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_item(item, &nested_ctx)?;
@@ -5985,6 +6117,7 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let a_node = node
@@ -6069,6 +6202,7 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 lambda_bindings: ctx.lambda_bindings,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
+                materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                 tmp_i32: ctx.tmp_i32 + 3,
             };
             let a = compile_expr(a_node, &nested_ctx)?;
@@ -6125,6 +6259,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 lambda_bindings: ctx.lambda_bindings,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
+                materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                 tmp_i32: ctx.tmp_i32 + 3,
             };
             let a = compile_expr(a_node, &nested_ctx)?;
@@ -6160,6 +6295,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let xs = compile_expr(
@@ -6274,13 +6410,28 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .as_ref()
         .ok_or_else(|| "set! value missing type".to_string())
         .and_then(vec_elem_kind_from_type)?;
-    let scalar_set_op = vec_set_runtime_for_scalar(
-        val_node
-            .typ
-            .as_ref()
-            .map(|t| !is_ref_type(t))
-            .unwrap_or(false)
-    );
+    let is_scalar_value = val_node
+        .typ
+        .as_ref()
+        .map(|t| !is_ref_type(t))
+        .unwrap_or(false);
+    let definitely_materialized_scalar_target = if is_scalar_value {
+        match &xs_node.expr {
+            Expression::Word(name) => ctx
+                .locals
+                .get(name)
+                .map(|slot| ctx.materialized_scalar_local_slots.contains(slot))
+                .unwrap_or(false),
+            _ => false,
+        }
+    } else {
+        false
+    };
+    let scalar_set_op = if definitely_materialized_scalar_target {
+        vec_set_runtime_for_materialized_scalar(is_scalar_value)
+    } else {
+        vec_set_runtime_for_scalar(is_scalar_value)
+    };
     let release_rhs = should_release_set_rhs(val_node);
     let release_target = false;
     let managed_slots = managed_local_slots(ctx);
@@ -6430,6 +6581,7 @@ fn compile_fast_box_ctor(
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let value = compile_expr(value_node, &nested_ctx)?;
@@ -6484,6 +6636,7 @@ fn compile_fast_cell_set(
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(cell_node, &nested_ctx)?;
@@ -6539,6 +6692,7 @@ fn compile_fast_truthy(
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(
@@ -6636,6 +6790,7 @@ fn compile_host_unary_string_call(
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let arg = compile_expr(
@@ -6701,6 +6856,7 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let path = compile_expr(
@@ -6749,6 +6905,7 @@ fn compile_host_binary_string_call(
         lambda_bindings: ctx.lambda_bindings,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let left = compile_expr(
@@ -6870,6 +7027,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                     lambda_bindings: ctx.lambda_bindings,
                     locals: ctx.locals.clone(),
                     local_types: ctx.local_types.clone(),
+                    materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                     tmp_i32: ctx.tmp_i32 + 2,
                 };
                 let av = compile_expr(arg, &nested_ctx)?;
@@ -6966,6 +7124,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 lambda_bindings: ctx.lambda_bindings,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
+                materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                 tmp_i32: ctx.tmp_i32 + 2,
             };
             let av = compile_expr(arg, &nested_ctx)?;
@@ -7080,6 +7239,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                 lambda_bindings: ctx.lambda_bindings,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
+                materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                 tmp_i32: ctx.tmp_i32 + 2,
             };
             let av = compile_expr(arg, &nested_ctx)?;
@@ -7368,7 +7528,9 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                     .ok_or_else(|| "__vec_store_i32 missing value".to_string())?,
                                 ctx,
                             )?;
-                            Ok(format!("{xs}\n{idx}\n{value}\ncall $vec_set_scalar_i32"))
+                            Ok(format!(
+                                "{xs}\n{idx}\n{value}\ncall $vec_set_scalar_materialized_i32"
+                            ))
                         }
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
@@ -7821,6 +7983,7 @@ fn compile_lambda_func(
         lambda_bindings: &scoped_lambda_bindings,
         locals,
         local_types,
+        materialized_scalar_local_slots: HashSet::new(),
         tmp_i32,
     };
     let body_code =
@@ -7963,6 +8126,7 @@ fn compile_closure_func(
         lambda_bindings: &scoped_lambda_bindings,
         locals,
         local_types,
+        materialized_scalar_local_slots: HashSet::new(),
         tmp_i32,
     };
     let body_code =
@@ -8084,6 +8248,7 @@ fn compile_value_func(
         lambda_bindings: &scoped_lambda_bindings,
         locals,
         local_types,
+        materialized_scalar_local_slots: HashSet::new(),
         tmp_i32,
     };
     let body_code =
@@ -8184,6 +8349,7 @@ fn compile_partial_helper_func(
         lambda_bindings,
         locals,
         local_types,
+        materialized_scalar_local_slots: HashSet::new(),
         tmp_i32: h.remaining_params.len(),
     };
 
@@ -8707,6 +8873,7 @@ pub fn compile_program_to_wat_typed_with_opts(
         lambda_bindings: &scoped_lambda_bindings,
         locals: main_locals,
         local_types: main_local_types,
+        materialized_scalar_local_slots: HashSet::new(),
         tmp_i32: main_local_defs.len(),
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;
