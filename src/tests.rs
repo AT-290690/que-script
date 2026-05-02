@@ -2077,6 +2077,16 @@ Concequent and alternative must match types
         typed
     }
 
+    fn infer_typed_built(input: &str) -> crate::infer::TypedExpression {
+        let expr = crate::parser::build(input).expect("input should build");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("input should infer");
+        typed
+    }
+
     #[test]
     fn test_typed_optimization_constant_folds_nested_int_ops() {
         let typed = infer_typed("(+ 2 (* 3 4))");
@@ -2393,6 +2403,28 @@ Concequent and alternative must match types
             "expected append-style scalar builder to be removed, got: {}",
             optimized_lisp
         );
+    }
+
+    #[test]
+    fn test_typed_optimization_lowers_non_escaping_local_variable_cell_to_mut_local() {
+        let typed = infer_typed_built(
+            "(do (let box (lambda value [value])) (let set (lambda vrbl x (set! vrbl 0 x))) (variable x 0) (set x 1) (get x))",
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let lisp = optimized.expr.to_lisp();
+        assert!(lisp.contains("(mut x 0)"), "expected local cell to lower to mut, got: {}", lisp);
+        assert!(lisp.contains("(alter! x 1)"), "expected cell set to lower to alter!, got: {}", lisp);
+        assert!(!lisp.contains("(get x)"), "expected cell get to lower to bare local read, got: {}", lisp);
+    }
+
+    #[test]
+    fn test_typed_optimization_keeps_local_variable_cell_when_lambda_would_capture_it() {
+        let typed = infer_typed_built(
+            "(do (let box (lambda value [value])) (variable x 0) (let f (lambda () (get x))) f)",
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let lisp = optimized.expr.to_lisp();
+        assert!(lisp.contains("(let x (box 0))"), "expected captured local cell to stay boxed, got: {}", lisp);
     }
 
     #[test]
