@@ -3615,62 +3615,551 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         effect: normalized_do.effect,
         children: inlined_children.clone(),
     };
+    let rebuilt_after_inline = lower_non_escaping_local_cells_in_do(&rebuilt_after_inline)
+        .unwrap_or(rebuilt_after_inline);
+    let Expression::Apply(rewritten_items) = &rebuilt_after_inline.expr else {
+        return rebuilt_after_inline;
+    };
+    let rewritten_children = rebuilt_after_inline.children.clone();
     if let Some(lowered) = lower_scalar_builder_do(&rebuilt_after_inline) {
         return lowered;
     }
 
     // Always collapse single-item do, even if no cleanup happened.
-    if inlined_items.len() == 2 {
-        return inlined_children
+    if rewritten_items.len() == 2 {
+        return rewritten_children
             .get(1)
             .cloned()
-            .or_else(|| inlined_children.last().cloned())
-            .unwrap_or(normalized_do);
+            .or_else(|| rewritten_children.last().cloned())
+            .unwrap_or(rebuilt_after_inline);
     }
 
-    let last_idx = inlined_items.len() - 1;
+    let last_idx = rewritten_items.len() - 1;
     let mut kept_indices: Vec<usize> = Vec::new();
     kept_indices.push(0); // keep "do"
     for i in 1..last_idx {
-        let Some(child) = inlined_children.get(i) else {
+        let Some(child) = rewritten_children.get(i) else {
             kept_indices.push(i);
             continue;
         };
-        if !is_elidable_do_statement_expr(&inlined_items[i], child) {
+        if !is_elidable_do_statement_expr(&rewritten_items[i], child) {
             kept_indices.push(i);
         }
     }
     kept_indices.push(last_idx);
 
-    if kept_indices.len() == inlined_items.len() {
+    if kept_indices.len() == rewritten_items.len() {
         return TypedExpression {
-            expr: Expression::Apply(inlined_items),
-            typ: normalized_do.typ,
-            effect: normalized_do.effect,
-            children: inlined_children,
+            expr: Expression::Apply(rewritten_items.clone()),
+            typ: rebuilt_after_inline.typ.clone(),
+            effect: rebuilt_after_inline.effect,
+            children: rewritten_children.clone(),
         };
     }
 
     // (do x) => x
     if kept_indices.len() == 2 {
         let only_expr_idx = kept_indices[1];
-        return inlined_children.get(only_expr_idx).cloned().unwrap_or(normalized_do);
+        return rewritten_children.get(only_expr_idx).cloned().unwrap_or(rebuilt_after_inline);
     }
 
     let new_expr_items = kept_indices
         .iter()
-        .filter_map(|idx| inlined_items.get(*idx).cloned())
+        .filter_map(|idx| rewritten_items.get(*idx).cloned())
         .collect::<Vec<_>>();
     let new_children = kept_indices
         .iter()
-        .filter_map(|idx| inlined_children.get(*idx).cloned())
+        .filter_map(|idx| rewritten_children.get(*idx).cloned())
         .collect::<Vec<_>>();
 
     TypedExpression {
         expr: Expression::Apply(new_expr_items),
-        typ: normalized_do.typ,
-        effect: normalized_do.effect,
+        typ: rebuilt_after_inline.typ,
+        effect: rebuilt_after_inline.effect,
         children: new_children,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LocalCellKind {
+    Value,
+    Bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LocalCellAliasKind {
+    Set,
+    Get,
+}
+
+fn lower_non_escaping_local_cells_in_do(node: &TypedExpression) -> Option<TypedExpression> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    if items.len() != node.children.len() || items.len() <= 1 {
+        return None;
+    }
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return None;
+    }
+
+    let mut out_items = items.clone();
+    let mut out_children = node.children.clone();
+    let mut changed = false;
+    let mut cell_set_aliases: HashSet<String> = HashSet::new();
+    let mut cell_get_aliases: HashSet<String> = HashSet::new();
+
+    for i in 1..out_items.len().saturating_sub(1) {
+        if let Some((alias_name, alias_kind)) = extract_local_cell_alias(out_children.get(i)?) {
+            match alias_kind {
+                LocalCellAliasKind::Set => {
+                    cell_set_aliases.insert(alias_name);
+                }
+                LocalCellAliasKind::Get => {
+                    cell_get_aliases.insert(alias_name);
+                }
+            }
+        }
+        let Some((name, init_node, kind, payload_type)) =
+            extract_non_escaping_local_cell_candidate(out_children.get(i)?) else {
+            continue;
+        };
+        let end = find_next_do_rebinding(&out_items, &name, i + 1).unwrap_or(out_items.len());
+        if out_items[i + 1..end]
+            .iter()
+            .any(|expr| contains_nested_lambda_or_letrec(expr) && contains_word(expr, &name))
+        {
+            continue;
+        }
+
+        let mut rewritten_range: Vec<(Expression, TypedExpression)> = Vec::new();
+        let mut valid = true;
+        for j in i + 1..end {
+            let Some(rewritten) = rewrite_local_cell_uses_in_typed_expr(
+                out_children.get(j)?,
+                &name,
+                kind,
+                &payload_type,
+                &cell_get_aliases,
+                &cell_set_aliases,
+                false,
+            ) else {
+                valid = false;
+                break;
+            };
+            rewritten_range.push((rewritten.expr.clone(), rewritten));
+        }
+        if !valid {
+            continue;
+        }
+
+        let rewritten_binding = make_mut_binding_from_local_cell(&name, init_node, &payload_type);
+        out_items[i] = rewritten_binding.expr.clone();
+        out_children[i] = rewritten_binding;
+        for (offset, (expr, child)) in rewritten_range.into_iter().enumerate() {
+            out_items[i + 1 + offset] = expr;
+            out_children[i + 1 + offset] = child;
+        }
+        changed = true;
+    }
+
+    if !changed {
+        return None;
+    }
+
+    Some(TypedExpression {
+        expr: Expression::Apply(out_items),
+        typ: node.typ.clone(),
+        effect: node.effect,
+        children: out_children,
+    })
+}
+
+fn extract_non_escaping_local_cell_candidate(
+    node: &TypedExpression,
+) -> Option<(String, TypedExpression, LocalCellKind, Type)> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), _] = &items[..] else {
+        return None;
+    };
+    if kw != "let" {
+        return None;
+    }
+    let rhs = node.children.get(2)?;
+    let Expression::Apply(rhs_items) = &rhs.expr else {
+        return None;
+    };
+    let Some(Expression::Word(op)) = rhs_items.first() else {
+        return None;
+    };
+    let kind = match op.as_str() {
+        "box" | "int" | "dec" => LocalCellKind::Value,
+        "bool" => LocalCellKind::Bool,
+        _ => return None,
+    };
+    let init_node = rhs.children.get(1)?.clone();
+    let payload_type = init_node.typ.clone()?;
+    Some((name.clone(), init_node, kind, payload_type))
+}
+
+fn find_next_do_rebinding(items: &[Expression], name: &str, start: usize) -> Option<usize> {
+    for idx in start..items.len() {
+        let Expression::Apply(bind_items) = &items[idx] else {
+            continue;
+        };
+        let [Expression::Word(kw), Expression::Word(bound), _] = &bind_items[..] else {
+            continue;
+        };
+        if (kw == "let" || kw == "letrec" || kw == "mut") && bound == name {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+fn extract_local_cell_alias(node: &TypedExpression) -> Option<(String, LocalCellAliasKind)> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), _] = &items[..] else {
+        return None;
+    };
+    if kw != "let" && kw != "letrec" {
+        return None;
+    }
+    let rhs = node.children.get(2)?;
+    let Expression::Apply(lambda_items) = &rhs.expr else {
+        return None;
+    };
+    if !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") {
+        return None;
+    }
+    match lambda_items.as_slice() {
+        [Expression::Word(_), Expression::Word(vrbl), body]
+            if matches!(
+                body,
+                Expression::Apply(body_items)
+                    if matches!(body_items.as_slice(),
+                        [Expression::Word(op), Expression::Word(cell), Expression::Int(0)]
+                            if op == "get" && cell == vrbl
+                    )
+            ) =>
+        {
+            Some((name.clone(), LocalCellAliasKind::Get))
+        }
+        [Expression::Word(_), Expression::Word(vrbl), Expression::Word(value), body]
+            if matches!(
+                body,
+                Expression::Apply(body_items)
+                    if matches!(body_items.as_slice(),
+                        [Expression::Word(op), Expression::Word(cell), Expression::Int(0), Expression::Word(v)]
+                            if op == "set!" && cell == vrbl && v == value
+                    )
+            ) =>
+        {
+            Some((name.clone(), LocalCellAliasKind::Set))
+        }
+        _ => None,
+    }
+}
+
+fn typed_local_binding_name(node: &TypedExpression) -> Option<String> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), _] = &items[..] else {
+        return None;
+    };
+    if kw == "let" || kw == "letrec" || kw == "mut" {
+        Some(name.clone())
+    } else {
+        None
+    }
+}
+
+fn make_typed_word(name: &str, typ: Type) -> TypedExpression {
+    TypedExpression {
+        expr: Expression::Word(name.to_string()),
+        typ: Some(typ),
+        effect: EffectFlags::PURE,
+        children: Vec::new(),
+    }
+}
+
+fn make_mut_binding_from_local_cell(
+    name: &str,
+    init_node: TypedExpression,
+    payload_type: &Type,
+) -> TypedExpression {
+    TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("mut".to_string()),
+            Expression::Word(name.to_string()),
+            init_node.expr.clone(),
+        ]),
+        typ: None,
+        effect: init_node.effect | EffectFlags::MUTATE,
+        children: vec![
+            pure_word("mut"),
+            make_typed_word(name, payload_type.clone()),
+            init_node,
+        ],
+    }
+}
+
+fn rewrite_local_cell_uses_in_typed_expr(
+    node: &TypedExpression,
+    name: &str,
+    kind: LocalCellKind,
+    payload_type: &Type,
+    cell_get_aliases: &HashSet<String>,
+    cell_set_aliases: &HashSet<String>,
+    shadowed: bool,
+) -> Option<TypedExpression> {
+    match &node.expr {
+        Expression::Word(w) => {
+            if !shadowed && w == name {
+                None
+            } else {
+                Some(node.clone())
+            }
+        }
+        Expression::Apply(items) => {
+            let Some(Expression::Word(op)) = items.first() else {
+                let rewritten_children = node
+                    .children
+                    .iter()
+                    .map(|ch| {
+                        rewrite_local_cell_uses_in_typed_expr(
+                            ch,
+                            name,
+                            kind,
+                            payload_type,
+                            cell_get_aliases,
+                            cell_set_aliases,
+                            shadowed,
+                        )
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                return Some(TypedExpression {
+                    expr: rebuild_expr_from_children(&node.expr, &rewritten_children),
+                    typ: node.typ.clone(),
+                    effect: node.effect,
+                    children: rewritten_children,
+                });
+            };
+
+            if !shadowed {
+                match op.as_str() {
+                    "get"
+                        if items.len() == 3
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                            && matches!(items.get(2), Some(Expression::Int(0))) =>
+                    {
+                        return Some(make_typed_word(name, payload_type.clone()));
+                    }
+                    op_name
+                        if cell_get_aliases.contains(op_name)
+                            && items.len() == 2
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
+                        return Some(make_typed_word(name, payload_type.clone()));
+                    }
+                    "true?"
+                        if items.len() == 2 && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
+                        if kind != LocalCellKind::Bool {
+                            return None;
+                        }
+                        return Some(make_typed_word(name, Type::Bool));
+                    }
+                    "false?"
+                        if items.len() == 2 && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
+                        if kind != LocalCellKind::Bool {
+                            return None;
+                        }
+                        let local_word = make_typed_word(name, Type::Bool);
+                        return Some(TypedExpression {
+                            expr: Expression::Apply(vec![
+                                Expression::Word("not".to_string()),
+                                local_word.expr.clone(),
+                            ]),
+                            typ: Some(Type::Bool),
+                            effect: EffectFlags::PURE,
+                            children: vec![pure_word("not"), local_word],
+                        });
+                    }
+                    "set!"
+                        if items.len() == 4
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                            && matches!(items.get(2), Some(Expression::Int(0))) =>
+                    {
+                        let value = rewrite_local_cell_uses_in_typed_expr(
+                            node.children.get(3)?,
+                            name,
+                            kind,
+                            payload_type,
+                            cell_get_aliases,
+                            cell_set_aliases,
+                            shadowed,
+                        )?;
+                        return Some(TypedExpression {
+                            expr: Expression::Apply(vec![
+                                Expression::Word("alter!".to_string()),
+                                Expression::Word(name.to_string()),
+                                value.expr.clone(),
+                            ]),
+                            typ: node.typ.clone(),
+                            effect: node.effect,
+                            children: vec![
+                                pure_word("alter!"),
+                                make_typed_word(name, payload_type.clone()),
+                                value,
+                            ],
+                        });
+                    }
+                    "set" | "=!" | "&alter!"
+                        if items.len() == 3 && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
+                        let value = rewrite_local_cell_uses_in_typed_expr(
+                            node.children.get(2)?,
+                            name,
+                            kind,
+                            payload_type,
+                            cell_get_aliases,
+                            cell_set_aliases,
+                            shadowed,
+                        )?;
+                        return Some(TypedExpression {
+                            expr: Expression::Apply(vec![
+                                Expression::Word("alter!".to_string()),
+                                Expression::Word(name.to_string()),
+                                value.expr.clone(),
+                            ]),
+                            typ: node.typ.clone(),
+                            effect: node.effect,
+                            children: vec![
+                                pure_word("alter!"),
+                                make_typed_word(name, payload_type.clone()),
+                                value,
+                            ],
+                        });
+                    }
+                    op_name
+                        if cell_set_aliases.contains(op_name)
+                            && items.len() == 3
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
+                        let value = rewrite_local_cell_uses_in_typed_expr(
+                            node.children.get(2)?,
+                            name,
+                            kind,
+                            payload_type,
+                            cell_get_aliases,
+                            cell_set_aliases,
+                            shadowed,
+                        )?;
+                        return Some(TypedExpression {
+                            expr: Expression::Apply(vec![
+                                Expression::Word("alter!".to_string()),
+                                Expression::Word(name.to_string()),
+                                value.expr.clone(),
+                            ]),
+                            typ: node.typ.clone(),
+                            effect: node.effect,
+                            children: vec![
+                                pure_word("alter!"),
+                                make_typed_word(name, payload_type.clone()),
+                                value,
+                            ],
+                        });
+                    }
+                    _ => {}
+                }
+            }
+
+            if op == "do" {
+                let Some(normalized_do) = normalize_do_node(node, items) else {
+                    return Some(node.clone());
+                };
+                let Expression::Apply(do_items) = &normalized_do.expr else {
+                    return Some(normalized_do);
+                };
+                let mut rebuilt_items = vec![do_items[0].clone()];
+                let mut rebuilt_children = vec![normalized_do.children[0].clone()];
+                let mut do_shadowed = shadowed;
+                for idx in 1..do_items.len() {
+                    let child = normalized_do.children.get(idx)?;
+                    let rewritten = rewrite_local_cell_uses_in_typed_expr(
+                        child,
+                        name,
+                        kind,
+                        payload_type,
+                        cell_get_aliases,
+                        cell_set_aliases,
+                        do_shadowed,
+                    )?;
+                    rebuilt_items.push(rewritten.expr.clone());
+                    rebuilt_children.push(rewritten.clone());
+                    if let Some(bound) = typed_local_binding_name(&rewritten) {
+                        if bound == name {
+                            do_shadowed = true;
+                        }
+                    }
+                }
+                return Some(TypedExpression {
+                    expr: Expression::Apply(rebuilt_items),
+                    typ: normalized_do.typ.clone(),
+                    effect: normalized_do.effect,
+                    children: rebuilt_children,
+                });
+            }
+
+            let mut rewritten_children = Vec::with_capacity(node.children.len());
+            let binding_shadows = if matches!(op.as_str(), "let" | "letrec" | "mut") {
+                matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+            } else {
+                false
+            };
+            for (idx, child) in node.children.iter().enumerate() {
+                let child_shadowed = if op == "lambda" {
+                    if idx + 1 == items.len() - 1 {
+                        let mut bound = HashSet::new();
+                        for p in &items[1..items.len().saturating_sub(1)] {
+                            collect_bound_pattern_words(p, &mut bound);
+                        }
+                        shadowed || bound.contains(name)
+                    } else {
+                        shadowed
+                    }
+                } else if matches!(op.as_str(), "let" | "mut") {
+                    shadowed || (binding_shadows && idx != 2)
+                } else if op == "letrec" {
+                    shadowed || binding_shadows
+                } else {
+                    shadowed
+                };
+                rewritten_children.push(rewrite_local_cell_uses_in_typed_expr(
+                    child,
+                    name,
+                    kind,
+                    payload_type,
+                    cell_get_aliases,
+                    cell_set_aliases,
+                    child_shadowed,
+                )?);
+            }
+            Some(TypedExpression {
+                expr: rebuild_expr_from_children(&node.expr, &rewritten_children),
+                typ: node.typ.clone(),
+                effect: node.effect,
+                children: rewritten_children,
+            })
+        }
+        _ => Some(node.clone()),
     }
 }
 
