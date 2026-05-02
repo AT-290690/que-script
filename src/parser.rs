@@ -1696,11 +1696,12 @@ fn lambda_destructure_transform(
             let body = if body_forms.len() == 1 {
                 body_forms[0].clone()
             } else {
-                Expression::Apply(
+                transform_do(
                     std::iter::once(Expression::Word("do".to_string()))
                         .chain(body_forms.iter().cloned())
                         .collect(),
-                )
+                    binding_counter,
+                )?
             };
             (param_items.as_slice(), body)
         }
