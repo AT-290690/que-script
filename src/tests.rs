@@ -4583,6 +4583,36 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_top_level_helper_built_scalar_vector_set_uses_materialized_fast_path() {
+        let expr = crate::parser::build(
+            r#"(do
+                (let make-ints (lambda n (do
+                  (let xs [])
+                  (mut i 0)
+                  (while (< i n) (do
+                    (set! xs (length xs) 0)
+                    (alter! i (+ i 1))))
+                  xs)))
+                (let xs (make-ints 3))
+                (set! xs 1 9)
+                (get xs 1))"#,
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, true).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "top-level helper-built scalar vector set should use materialized fast path, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
     fn test_wat_tuple_temp_used_only_for_projections_releases_early() {
         let expr = crate::parser
             ::build(
