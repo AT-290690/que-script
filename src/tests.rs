@@ -3105,6 +3105,49 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_pipeline_inside_top_level_lambda_body_fuses() {
+        let program = "(do (let fn (lambda (a b) (|> (range 1 (* a b)) sum))) (fn 25 2))";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) => {
+                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std")
+            }
+            _ => panic!("std ast should be (do ...)"),
+        };
+        let wat = crate::wat::compile_program_to_wat_with_opts(&wrapped, true)
+            .expect("wat compilation should succeed");
+        let fn_start = wat.find("(func $v_fn").expect("hoisted fn helper should exist");
+        let fn_rest = &wat[fn_start..];
+        let fn_end = fn_rest
+            .find("\n  (func ")
+            .and_then(|idx| if idx == 0 { None } else { Some(idx) })
+            .unwrap_or(fn_rest.len());
+        let fn_wat = &fn_rest[..fn_end];
+
+        assert!(
+            !fn_wat.contains("call $v_sum"),
+            "pipeline inside top-level lambda body should fuse sum, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            !fn_wat.contains("call $v_range"),
+            "pipeline inside top-level lambda body should fuse range, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            !fn_wat.contains("call $apply1_i32") && !fn_wat.contains("call $apply2_i32"),
+            "pipeline inside top-level lambda body should not lower to higher-order apply chain, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            fn_wat.contains("loop"),
+            "pipeline inside top-level lambda body should become a direct loop, got:\n{}",
+            fn_wat
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_some_and_every_fuse_to_short_circuit_loops() {
         let some_expr = crate::parser
             ::parse(
