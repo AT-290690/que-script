@@ -136,11 +136,10 @@ fn run_tuple_return_destructuring_env_pass(node: &TypedExpression) -> TypedExpre
 fn rewrite_tuple_return_destructuring_with_env(
     node: &TypedExpression,
     inherited_defs: &HashMap<String, TupleReturnLambdaDef>,
-    state: &mut InlineState,
+    state: &mut InlineState
 ) -> TypedExpression {
     let Expression::Apply(items) = &node.expr else {
-        let new_children = node
-            .children
+        let new_children = node.children
             .iter()
             .map(|child| rewrite_tuple_return_destructuring_with_env(child, inherited_defs, state))
             .collect::<Vec<_>>();
@@ -153,8 +152,7 @@ fn rewrite_tuple_return_destructuring_with_env(
     };
 
     if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-        let new_children = node
-            .children
+        let new_children = node.children
             .iter()
             .map(|child| rewrite_tuple_return_destructuring_with_env(child, inherited_defs, state))
             .collect::<Vec<_>>();
@@ -177,13 +175,24 @@ fn rewrite_tuple_return_destructuring_with_env(
     let mut rebuilt_children = vec![normalized_do.children[0].clone()];
 
     for idx in 1..norm_items.len() {
-        let child = normalized_do.children.get(idx).cloned().unwrap_or_else(|| normalized_do.children[0].clone());
-        let rewritten_child =
-            rewrite_tuple_return_destructuring_with_env(&child, &scoped_defs, state);
+        let child = normalized_do.children
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| normalized_do.children[0].clone());
+        let rewritten_child = rewrite_tuple_return_destructuring_with_env(
+            &child,
+            &scoped_defs,
+            state
+        );
         let rewritten_expr = rewritten_child.expr.clone();
         rebuilt_items.push(rewritten_expr.clone());
         rebuilt_children.push(rewritten_child.clone());
-        if let Some((name, def)) = extract_tuple_return_lambda_def(&rewritten_expr, &rewritten_child) {
+        if
+            let Some((name, def)) = extract_tuple_return_lambda_def(
+                &rewritten_expr,
+                &rewritten_child
+            )
+        {
             scoped_defs.insert(name, def);
         }
     }
@@ -192,7 +201,7 @@ fn rewrite_tuple_return_destructuring_with_env(
         rebuilt_items,
         rebuilt_children,
         state,
-        inherited_defs,
+        inherited_defs
     );
 
     TypedExpression {
@@ -416,7 +425,59 @@ fn collect_unbound_words(
 
 fn fuse_entry_expression_for_program(expr: &Expression) -> Expression {
     let mut name_state = FuseNameState::default();
-    fuse_map_filter_reduce_chains_expr(expr, &mut name_state)
+    fuse_entry_expression_scoped(expr, &mut name_state)
+}
+
+fn fuse_entry_expression_scoped(expr: &Expression, name_state: &mut FuseNameState) -> Expression {
+    match expr {
+        Expression::Apply(items) if
+            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+        => {
+            let mut out = items.clone();
+
+            for idx in 1..out.len() {
+                let is_last = idx + 1 == out.len();
+
+                out[idx] = if is_last {
+                    // Fuse the actual returned expression.
+                    fuse_map_filter_reduce_chains_expr(&out[idx], name_state)
+                } else {
+                    // Do NOT fuse arbitrary let RHSs.
+                    // Only descend into lambda bodies.
+                    fuse_only_lambda_bodies(&out[idx], name_state)
+                };
+            }
+
+            Expression::Apply(out)
+        }
+
+        _ => fuse_map_filter_reduce_chains_expr(expr, name_state),
+    }
+}
+
+fn fuse_only_lambda_bodies(expr: &Expression, name_state: &mut FuseNameState) -> Expression {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+                let mut out = items.clone();
+
+                if let Some(last) = out.last_mut() {
+                    *last = fuse_map_filter_reduce_chains_expr(last, name_state);
+                }
+
+                return Expression::Apply(out);
+            }
+
+            let out = items
+                .iter()
+                .map(|item| fuse_only_lambda_bodies(item, name_state))
+                .collect::<Vec<_>>();
+
+            Expression::Apply(out)
+        }
+
+        _ => expr.clone(),
+    }
 }
 
 fn fuse_map_filter_reduce_chains_expr(
@@ -1398,7 +1459,9 @@ fn build_reduce_until_loop(
             )
         ]
     );
-    let step_body = Expression::Apply(vec![Expression::Word("do".to_string()), step_action, idx_inc]);
+    let step_body = Expression::Apply(
+        vec![Expression::Word("do".to_string()), step_action, idx_inc]
+    );
 
     let continue_cond = Expression::Apply(
         vec![
@@ -1443,13 +1506,7 @@ fn build_reduce_until_loop(
         )
     );
     setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("while".to_string()),
-                continue_cond,
-                step_body
-            ]
-        )
+        Expression::Apply(vec![Expression::Word("while".to_string()), continue_cond, step_body])
     );
     setup_bindings.push(
         Expression::Apply(
@@ -1790,7 +1847,9 @@ fn build_some_every_loop(
             )
         ]
     );
-    let step_body = Expression::Apply(vec![Expression::Word("do".to_string()), step_action, idx_inc]);
+    let step_body = Expression::Apply(
+        vec![Expression::Word("do".to_string()), step_action, idx_inc]
+    );
 
     let continue_cond = if is_some {
         Expression::Apply(
@@ -1821,13 +1880,7 @@ fn build_some_every_loop(
         )
     );
     setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("while".to_string()),
-                continue_cond,
-                step_body
-            ]
-        )
+        Expression::Apply(vec![Expression::Word("while".to_string()), continue_cond, step_body])
     );
     setup_bindings.push(
         Expression::Apply(
@@ -1913,7 +1966,9 @@ fn build_find_loop(
             )
         ]
     );
-    let step_body = Expression::Apply(vec![Expression::Word("do".to_string()), guarded_step, idx_inc]);
+    let step_body = Expression::Apply(
+        vec![Expression::Word("do".to_string()), guarded_step, idx_inc]
+    );
 
     let continue_cond = Expression::Apply(
         vec![
@@ -1945,13 +2000,7 @@ fn build_find_loop(
         )
     );
     setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("while".to_string()),
-                continue_cond,
-                step_body
-            ]
-        )
+        Expression::Apply(vec![Expression::Word("while".to_string()), continue_cond, step_body])
     );
     setup_bindings.push(
         Expression::Apply(
@@ -2997,7 +3046,7 @@ fn alpha_rename_lambda_local_bindings(expr: &Expression, prefix: &str) -> Expres
 fn alpha_rename_local_bindings_typed(
     node: &TypedExpression,
     env: &mut HashMap<String, String>,
-    state: &mut InlineState,
+    state: &mut InlineState
 ) -> TypedExpression {
     match &node.expr {
         Expression::Word(w) => {
@@ -3012,10 +3061,11 @@ fn alpha_rename_local_bindings_typed(
                 node.clone()
             }
         }
-        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") => {
+        Expression::Apply(items) if
+            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+        => {
             let mut scoped = env.clone();
-            let children = node
-                .children
+            let children = node.children
                 .iter()
                 .map(|child| alpha_rename_local_bindings_typed(child, &mut scoped, state))
                 .collect::<Vec<_>>();
@@ -3029,10 +3079,17 @@ fn alpha_rename_local_bindings_typed(
         Expression::Apply(items) if items.len() == 3 => {
             if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
                 if kw == "let" || kw == "mut" || kw == "letrec" {
-                    let rhs = alpha_rename_local_bindings_typed(node.children.get(2).unwrap_or(node), env, state);
+                    let rhs = alpha_rename_local_bindings_typed(
+                        node.children.get(2).unwrap_or(node),
+                        env,
+                        state
+                    );
                     let fresh = state.fresh_tmp();
                     env.insert(name.clone(), fresh.clone());
-                    let head = node.children.first().cloned().unwrap_or_else(|| pure_word(kw));
+                    let head = node.children
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| pure_word(kw));
                     let bind = TypedExpression {
                         expr: Expression::Word(fresh.clone()),
                         typ: node.children.get(1).and_then(|n| n.typ.clone()),
@@ -3040,19 +3097,20 @@ fn alpha_rename_local_bindings_typed(
                         children: Vec::new(),
                     };
                     return TypedExpression {
-                        expr: Expression::Apply(vec![
-                            Expression::Word(kw.clone()),
-                            Expression::Word(fresh),
-                            rhs.expr.clone(),
-                        ]),
+                        expr: Expression::Apply(
+                            vec![
+                                Expression::Word(kw.clone()),
+                                Expression::Word(fresh),
+                                rhs.expr.clone()
+                            ]
+                        ),
                         typ: node.typ.clone(),
                         effect: node.effect,
                         children: vec![head, bind, rhs],
                     };
                 }
             }
-            let children = node
-                .children
+            let children = node.children
                 .iter()
                 .map(|child| {
                     let mut scoped = env.clone();
@@ -3067,8 +3125,7 @@ fn alpha_rename_local_bindings_typed(
             }
         }
         Expression::Apply(_) => {
-            let children = node
-                .children
+            let children = node.children
                 .iter()
                 .map(|child| {
                     let mut scoped = env.clone();
@@ -3119,7 +3176,9 @@ fn alpha_rename_local_bindings_expr(
             }
             Expression::Apply(out)
         }
-        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") => {
+        Expression::Apply(items) if
+            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+        => {
             let mut out = Vec::with_capacity(items.len());
             if let Some(head) = items.first() {
                 out.push(head.clone());
@@ -3142,11 +3201,9 @@ fn alpha_rename_local_bindings_expr(
                         alpha_rename_local_bindings_expr(rhs, env, counter, prefix)
                     };
                     env.insert(name.clone(), fresh.clone());
-                    return Expression::Apply(vec![
-                        Expression::Word(kw.clone()),
-                        Expression::Word(fresh),
-                        rewritten_rhs,
-                    ]);
+                    return Expression::Apply(
+                        vec![Expression::Word(kw.clone()), Expression::Word(fresh), rewritten_rhs]
+                    );
                 }
             }
             Expression::Apply(
@@ -3201,13 +3258,7 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
 }
 
 fn zip_collect_fusion_is_supported(ops: &[MapFilterOp]) -> bool {
-    let [
-        MapFilterOp::Map {
-            func,
-            with_index: false,
-        },
-    ] = ops
-    else {
+    let [MapFilterOp::Map { func, with_index: false }] = ops else {
         return false;
     };
     zip_map_lambda_can_avoid_row_tuple(func)
@@ -3241,10 +3292,7 @@ fn expression_materializes_tuple(expr: &Expression) -> bool {
                 return true;
             }
             if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-                return items
-                    .last()
-                    .map(expression_materializes_tuple)
-                    .unwrap_or(false);
+                return items.last().map(expression_materializes_tuple).unwrap_or(false);
             }
             false
         }
@@ -3255,8 +3303,11 @@ fn expression_materializes_tuple(expr: &Expression) -> bool {
 fn expression_returns_word(expr: &Expression, name: &str) -> bool {
     match expr {
         Expression::Word(w) => w == name,
-        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
-            items.last()
+        Expression::Apply(items) if
+            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+        =>
+            items
+                .last()
                 .map(|last| expression_returns_word(last, name))
                 .unwrap_or(false),
         _ => false,
@@ -3594,7 +3645,7 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     let (inlined_items, inlined_children) = eliminate_tuple_return_destructuring_calls(
         inlined_items,
         inlined_children,
-        &mut tuple_inline_state,
+        &mut tuple_inline_state
     );
 
     let rebuilt_after_inline = TypedExpression {
@@ -3603,8 +3654,9 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         effect: normalized_do.effect,
         children: inlined_children.clone(),
     };
-    let rebuilt_after_inline = lower_non_escaping_local_cells_in_do(&rebuilt_after_inline)
-        .unwrap_or(rebuilt_after_inline);
+    let rebuilt_after_inline = lower_non_escaping_local_cells_in_do(
+        &rebuilt_after_inline
+    ).unwrap_or(rebuilt_after_inline);
     let Expression::Apply(rewritten_items) = &rebuilt_after_inline.expr else {
         return rebuilt_after_inline;
     };
@@ -3708,14 +3760,16 @@ fn lower_non_escaping_local_cells_in_do(node: &TypedExpression) -> Option<TypedE
                 }
             }
         }
-        let Some((name, init_node, kind, payload_type)) =
-            extract_non_escaping_local_cell_candidate(out_children.get(i)?) else {
+        let Some((name, init_node, kind, payload_type)) = extract_non_escaping_local_cell_candidate(
+            out_children.get(i)?
+        ) else {
             continue;
         };
         let end = find_next_do_rebinding(&out_items, &name, i + 1).unwrap_or(out_items.len());
-        if out_items[i + 1..end]
-            .iter()
-            .any(|expr| contains_nested_lambda_or_letrec(expr) && contains_word(expr, &name))
+        if
+            out_items[i + 1..end]
+                .iter()
+                .any(|expr| contains_nested_lambda_or_letrec(expr) && contains_word(expr, &name))
         {
             continue;
         }
@@ -3730,7 +3784,7 @@ fn lower_non_escaping_local_cells_in_do(node: &TypedExpression) -> Option<TypedE
                 &payload_type,
                 &cell_get_aliases,
                 &cell_set_aliases,
-                false,
+                false
             ) else {
                 valid = false;
                 break;
@@ -3764,7 +3818,7 @@ fn lower_non_escaping_local_cells_in_do(node: &TypedExpression) -> Option<TypedE
 }
 
 fn extract_non_escaping_local_cell_candidate(
-    node: &TypedExpression,
+    node: &TypedExpression
 ) -> Option<(String, TypedExpression, LocalCellKind, Type)> {
     let Expression::Apply(items) = &node.expr else {
         return None;
@@ -3785,7 +3839,9 @@ fn extract_non_escaping_local_cell_candidate(
     let kind = match op.as_str() {
         "box" | "int" | "dec" => LocalCellKind::Value,
         "bool" => LocalCellKind::Bool,
-        _ => return None,
+        _ => {
+            return None;
+        }
     };
     let init_node = rhs.children.get(1)?.clone();
     let payload_type = init_node.typ.clone()?;
@@ -3825,28 +3881,28 @@ fn extract_local_cell_alias(node: &TypedExpression) -> Option<(String, LocalCell
         return None;
     }
     match lambda_items.as_slice() {
-        [Expression::Word(_), Expression::Word(vrbl), body]
-            if matches!(
+        [Expression::Word(_), Expression::Word(vrbl), body] if
+            matches!(
                 body,
                 Expression::Apply(body_items)
                     if matches!(body_items.as_slice(),
                         [Expression::Word(op), Expression::Word(cell), Expression::Int(0)]
                             if op == "get" && cell == vrbl
                     )
-            ) =>
-        {
+            )
+        => {
             Some((name.clone(), LocalCellAliasKind::Get))
         }
-        [Expression::Word(_), Expression::Word(vrbl), Expression::Word(value), body]
-            if matches!(
+        [Expression::Word(_), Expression::Word(vrbl), Expression::Word(value), body] if
+            matches!(
                 body,
                 Expression::Apply(body_items)
                     if matches!(body_items.as_slice(),
                         [Expression::Word(op), Expression::Word(cell), Expression::Int(0), Expression::Word(v)]
                             if op == "set!" && cell == vrbl && v == value
                     )
-            ) =>
-        {
+            )
+        => {
             Some((name.clone(), LocalCellAliasKind::Set))
         }
         _ => None,
@@ -3879,21 +3935,19 @@ fn make_typed_word(name: &str, typ: Type) -> TypedExpression {
 fn make_mut_binding_from_local_cell(
     name: &str,
     init_node: TypedExpression,
-    payload_type: &Type,
+    payload_type: &Type
 ) -> TypedExpression {
     TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("mut".to_string()),
-            Expression::Word(name.to_string()),
-            init_node.expr.clone(),
-        ]),
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("mut".to_string()),
+                Expression::Word(name.to_string()),
+                init_node.expr.clone()
+            ]
+        ),
         typ: None,
         effect: init_node.effect | EffectFlags::MUTATE,
-        children: vec![
-            pure_word("mut"),
-            make_typed_word(name, payload_type.clone()),
-            init_node,
-        ],
+        children: vec![pure_word("mut"), make_typed_word(name, payload_type.clone()), init_node],
     }
 }
 
@@ -3904,20 +3958,15 @@ fn rewrite_local_cell_uses_in_typed_expr(
     payload_type: &Type,
     cell_get_aliases: &HashSet<String>,
     cell_set_aliases: &HashSet<String>,
-    shadowed: bool,
+    shadowed: bool
 ) -> Option<TypedExpression> {
     match &node.expr {
         Expression::Word(w) => {
-            if !shadowed && w == name {
-                None
-            } else {
-                Some(node.clone())
-            }
+            if !shadowed && w == name { None } else { Some(node.clone()) }
         }
         Expression::Apply(items) => {
             let Some(Expression::Word(op)) = items.first() else {
-                let rewritten_children = node
-                    .children
+                let rewritten_children = node.children
                     .iter()
                     .map(|ch| {
                         rewrite_local_cell_uses_in_typed_expr(
@@ -3927,7 +3976,7 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             payload_type,
                             cell_get_aliases,
                             cell_set_aliases,
-                            shadowed,
+                            shadowed
                         )
                     })
                     .collect::<Option<Vec<_>>>()?;
@@ -3941,50 +3990,51 @@ fn rewrite_local_cell_uses_in_typed_expr(
 
             if !shadowed {
                 match op.as_str() {
-                    "get"
-                        if items.len() == 3
-                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name)
-                            && matches!(items.get(2), Some(Expression::Int(0))) =>
-                    {
+                    "get" if
+                        items.len() == 3 &&
+                        matches!(items.get(1), Some(Expression::Word(w)) if w == name) &&
+                        matches!(items.get(2), Some(Expression::Int(0)))
+                    => {
                         return Some(make_typed_word(name, payload_type.clone()));
                     }
-                    op_name
-                        if cell_get_aliases.contains(op_name)
-                            && items.len() == 2
-                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
-                    {
+                    op_name if
+                        cell_get_aliases.contains(op_name) &&
+                        items.len() == 2 &&
+                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                    => {
                         return Some(make_typed_word(name, payload_type.clone()));
                     }
-                    "true?"
-                        if items.len() == 2 && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
-                    {
+                    "true?" if
+                        items.len() == 2 &&
+                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                    => {
                         if kind != LocalCellKind::Bool {
                             return None;
                         }
                         return Some(make_typed_word(name, Type::Bool));
                     }
-                    "false?"
-                        if items.len() == 2 && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
-                    {
+                    "false?" if
+                        items.len() == 2 &&
+                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                    => {
                         if kind != LocalCellKind::Bool {
                             return None;
                         }
                         let local_word = make_typed_word(name, Type::Bool);
                         return Some(TypedExpression {
-                            expr: Expression::Apply(vec![
-                                Expression::Word("not".to_string()),
-                                local_word.expr.clone(),
-                            ]),
+                            expr: Expression::Apply(
+                                vec![Expression::Word("not".to_string()), local_word.expr.clone()]
+                            ),
                             typ: Some(Type::Bool),
                             effect: EffectFlags::PURE,
                             children: vec![pure_word("not"), local_word],
                         });
                     }
-                    "set!"
-                        if items.len() == 4
-                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name)
-                            && matches!(items.get(2), Some(Expression::Int(0))) =>
-                    {
+                    "set!" if
+                        items.len() == 4 &&
+                        matches!(items.get(1), Some(Expression::Word(w)) if w == name) &&
+                        matches!(items.get(2), Some(Expression::Int(0)))
+                    => {
                         let value = rewrite_local_cell_uses_in_typed_expr(
                             node.children.get(3)?,
                             name,
@@ -3992,26 +4042,29 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             payload_type,
                             cell_get_aliases,
                             cell_set_aliases,
-                            shadowed,
+                            shadowed
                         )?;
                         return Some(TypedExpression {
-                            expr: Expression::Apply(vec![
-                                Expression::Word("alter!".to_string()),
-                                Expression::Word(name.to_string()),
-                                value.expr.clone(),
-                            ]),
+                            expr: Expression::Apply(
+                                vec![
+                                    Expression::Word("alter!".to_string()),
+                                    Expression::Word(name.to_string()),
+                                    value.expr.clone()
+                                ]
+                            ),
                             typ: node.typ.clone(),
                             effect: node.effect,
                             children: vec![
                                 pure_word("alter!"),
                                 make_typed_word(name, payload_type.clone()),
-                                value,
+                                value
                             ],
                         });
                     }
-                    "set" | "=!" | "&alter!"
-                        if items.len() == 3 && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
-                    {
+                    "set" | "=!" | "&alter!" if
+                        items.len() == 3 &&
+                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                    => {
                         let value = rewrite_local_cell_uses_in_typed_expr(
                             node.children.get(2)?,
                             name,
@@ -4019,28 +4072,30 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             payload_type,
                             cell_get_aliases,
                             cell_set_aliases,
-                            shadowed,
+                            shadowed
                         )?;
                         return Some(TypedExpression {
-                            expr: Expression::Apply(vec![
-                                Expression::Word("alter!".to_string()),
-                                Expression::Word(name.to_string()),
-                                value.expr.clone(),
-                            ]),
+                            expr: Expression::Apply(
+                                vec![
+                                    Expression::Word("alter!".to_string()),
+                                    Expression::Word(name.to_string()),
+                                    value.expr.clone()
+                                ]
+                            ),
                             typ: node.typ.clone(),
                             effect: node.effect,
                             children: vec![
                                 pure_word("alter!"),
                                 make_typed_word(name, payload_type.clone()),
-                                value,
+                                value
                             ],
                         });
                     }
-                    op_name
-                        if cell_set_aliases.contains(op_name)
-                            && items.len() == 3
-                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
-                    {
+                    op_name if
+                        cell_set_aliases.contains(op_name) &&
+                        items.len() == 3 &&
+                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                    => {
                         let value = rewrite_local_cell_uses_in_typed_expr(
                             node.children.get(2)?,
                             name,
@@ -4048,20 +4103,22 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             payload_type,
                             cell_get_aliases,
                             cell_set_aliases,
-                            shadowed,
+                            shadowed
                         )?;
                         return Some(TypedExpression {
-                            expr: Expression::Apply(vec![
-                                Expression::Word("alter!".to_string()),
-                                Expression::Word(name.to_string()),
-                                value.expr.clone(),
-                            ]),
+                            expr: Expression::Apply(
+                                vec![
+                                    Expression::Word("alter!".to_string()),
+                                    Expression::Word(name.to_string()),
+                                    value.expr.clone()
+                                ]
+                            ),
                             typ: node.typ.clone(),
                             effect: node.effect,
                             children: vec![
                                 pure_word("alter!"),
                                 make_typed_word(name, payload_type.clone()),
-                                value,
+                                value
                             ],
                         });
                     }
@@ -4088,7 +4145,7 @@ fn rewrite_local_cell_uses_in_typed_expr(
                         payload_type,
                         cell_get_aliases,
                         cell_set_aliases,
-                        do_shadowed,
+                        do_shadowed
                     )?;
                     rebuilt_items.push(rewritten.expr.clone());
                     rebuilt_children.push(rewritten.clone());
@@ -4130,15 +4187,17 @@ fn rewrite_local_cell_uses_in_typed_expr(
                 } else {
                     shadowed
                 };
-                rewritten_children.push(rewrite_local_cell_uses_in_typed_expr(
-                    child,
-                    name,
-                    kind,
-                    payload_type,
-                    cell_get_aliases,
-                    cell_set_aliases,
-                    child_shadowed,
-                )?);
+                rewritten_children.push(
+                    rewrite_local_cell_uses_in_typed_expr(
+                        child,
+                        name,
+                        kind,
+                        payload_type,
+                        cell_get_aliases,
+                        cell_set_aliases,
+                        child_shadowed
+                    )?
+                );
             }
             Some(TypedExpression {
                 expr: rebuild_expr_from_children(&node.expr, &rewritten_children),
@@ -4441,7 +4500,9 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
 
     let list_type = match node.typ.as_ref()? {
         Type::List(inner) => inner.as_ref(),
-        _ => return None,
+        _ => {
+            return None;
+        }
     };
     if !matches!(list_type, Type::Int | Type::Bool | Type::Char | Type::Dec) {
         return None;
@@ -4462,68 +4523,69 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
     }
 
     let while_node = node.children.get(3)?;
-    let (len_node, value_node) = extract_counted_scalar_builder_parts(while_node, board_name, idx_name)?;
+    let (len_node, value_node) = extract_counted_scalar_builder_parts(
+        while_node,
+        board_name,
+        idx_name
+    )?;
     if is_zero_scalar_literal_expr(&value_node.expr) {
-        let op_expr = Expression::Apply(vec![
-            Expression::Word("__vec_new_zeroed_i32".to_string()),
-            len_node.expr.clone(),
-        ]);
+        let op_expr = Expression::Apply(
+            vec![Expression::Word("__vec_new_zeroed_i32".to_string()), len_node.expr.clone()]
+        );
         return Some(TypedExpression {
             expr: op_expr,
             typ: node.typ.clone(),
             effect: EffectFlags::PURE,
-            children: vec![
-                pure_word("__vec_new_zeroed_i32"),
-                len_node,
-            ],
+            children: vec![pure_word("__vec_new_zeroed_i32"), len_node],
         });
     }
 
     let alloc_node = TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("__vec_new_uninit_i32".to_string()),
-            len_node.expr.clone(),
-        ]),
+        expr: Expression::Apply(
+            vec![Expression::Word("__vec_new_uninit_i32".to_string()), len_node.expr.clone()]
+        ),
         typ: node.typ.clone(),
         effect: EffectFlags::PURE,
         children: vec![pure_word("__vec_new_uninit_i32"), len_node.clone()],
     };
     let board_let = TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("let".to_string()),
-            Expression::Word(board_name.to_string()),
-            alloc_node.expr.clone(),
-        ]),
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(board_name.to_string()),
+                alloc_node.expr.clone()
+            ]
+        ),
         typ: None,
         effect: alloc_node.effect,
         children: vec![pure_word("let"), pure_word(board_name), alloc_node],
     };
     let idx_mut = TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("mut".to_string()),
-            Expression::Word(idx_name.to_string()),
-            Expression::Int(0),
-        ]),
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("mut".to_string()),
+                Expression::Word(idx_name.to_string()),
+                Expression::Int(0)
+            ]
+        ),
         typ: None,
         effect: EffectFlags::MUTATE,
-        children: vec![
-            pure_word("mut"),
-            pure_word(idx_name),
-            TypedExpression {
-                expr: Expression::Int(0),
-                typ: Some(Type::Int),
-                effect: EffectFlags::PURE,
-                children: Vec::new(),
-            },
-        ],
+        children: vec![pure_word("mut"), pure_word(idx_name), TypedExpression {
+            expr: Expression::Int(0),
+            typ: Some(Type::Int),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        }],
     };
     let store_node = TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("__vec_store_i32".to_string()),
-            Expression::Word(board_name.to_string()),
-            Expression::Word(idx_name.to_string()),
-            value_node.expr.clone(),
-        ]),
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("__vec_store_i32".to_string()),
+                Expression::Word(board_name.to_string()),
+                Expression::Word(idx_name.to_string()),
+                value_node.expr.clone()
+            ]
+        ),
         typ: Some(Type::Int),
         effect: EffectFlags::MUTATE,
         children: vec![
@@ -4540,80 +4602,90 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
                 effect: EffectFlags::PURE,
                 children: Vec::new(),
             },
-            value_node,
+            value_node
         ],
     };
     let alter_node = TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("alter!".to_string()),
-            Expression::Word(idx_name.to_string()),
-            Expression::Apply(vec![
-                Expression::Word("+".to_string()),
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("alter!".to_string()),
                 Expression::Word(idx_name.to_string()),
-                Expression::Int(1),
-            ]),
-        ]),
+                Expression::Apply(
+                    vec![
+                        Expression::Word("+".to_string()),
+                        Expression::Word(idx_name.to_string()),
+                        Expression::Int(1)
+                    ]
+                )
+            ]
+        ),
         typ: Some(Type::Int),
         effect: EffectFlags::MUTATE,
-        children: vec![
-            pure_word("alter!"),
-            pure_word(idx_name),
-            TypedExpression {
-                expr: Expression::Apply(vec![
+        children: vec![pure_word("alter!"), pure_word(idx_name), TypedExpression {
+            expr: Expression::Apply(
+                vec![
                     Expression::Word("+".to_string()),
                     Expression::Word(idx_name.to_string()),
-                    Expression::Int(1),
-                ]),
-                typ: Some(Type::Int),
-                effect: EffectFlags::PURE,
-                children: vec![
-                    pure_word("+"),
-                    TypedExpression {
-                        expr: Expression::Word(idx_name.to_string()),
-                        typ: Some(Type::Int),
-                        effect: EffectFlags::PURE,
-                        children: Vec::new(),
-                    },
-                    TypedExpression {
-                        expr: Expression::Int(1),
-                        typ: Some(Type::Int),
-                        effect: EffectFlags::PURE,
-                        children: Vec::new(),
-                    },
-                ],
-            },
-        ],
+                    Expression::Int(1)
+                ]
+            ),
+            typ: Some(Type::Int),
+            effect: EffectFlags::PURE,
+            children: vec![
+                pure_word("+"),
+                TypedExpression {
+                    expr: Expression::Word(idx_name.to_string()),
+                    typ: Some(Type::Int),
+                    effect: EffectFlags::PURE,
+                    children: Vec::new(),
+                },
+                TypedExpression {
+                    expr: Expression::Int(1),
+                    typ: Some(Type::Int),
+                    effect: EffectFlags::PURE,
+                    children: Vec::new(),
+                }
+            ],
+        }],
     };
     let while_body = TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("do".to_string()),
-            store_node.expr.clone(),
-            alter_node.expr.clone(),
-        ]),
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("do".to_string()),
+                store_node.expr.clone(),
+                alter_node.expr.clone()
+            ]
+        ),
         typ: alter_node.typ.clone(),
         effect: store_node.effect | alter_node.effect,
         children: vec![pure_word("do"), store_node, alter_node],
     };
     let while_node = TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("while".to_string()),
-            Expression::Apply(vec![
-                Expression::Word("<".to_string()),
-                Expression::Word(idx_name.to_string()),
-                len_node.expr.clone(),
-            ]),
-            while_body.expr.clone(),
-        ]),
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("while".to_string()),
+                Expression::Apply(
+                    vec![
+                        Expression::Word("<".to_string()),
+                        Expression::Word(idx_name.to_string()),
+                        len_node.expr.clone()
+                    ]
+                ),
+                while_body.expr.clone()
+            ]
+        ),
         typ: while_node.typ.clone(),
         effect: EffectFlags::MUTATE,
         children: vec![
             pure_word("while"),
             TypedExpression {
-                expr: Expression::Apply(vec![
-                    Expression::Word("<".to_string()),
-                    Expression::Word(idx_name.to_string()),
-                    len_node.expr.clone(),
-                ]),
+                expr: Expression::Apply(
+                    vec![
+                        Expression::Word("<".to_string()),
+                        Expression::Word(idx_name.to_string()),
+                        len_node.expr.clone()
+                    ]
+                ),
                 typ: Some(Type::Bool),
                 effect: len_node.effect,
                 children: vec![
@@ -4624,10 +4696,10 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
                         effect: EffectFlags::PURE,
                         children: Vec::new(),
                     },
-                    len_node,
+                    len_node
                 ],
             },
-            while_body,
+            while_body
         ],
     };
     let board_result = TypedExpression {
@@ -4637,13 +4709,15 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
         children: Vec::new(),
     };
     Some(TypedExpression {
-        expr: Expression::Apply(vec![
-            Expression::Word("do".to_string()),
-            board_let.expr.clone(),
-            idx_mut.expr.clone(),
-            while_node.expr.clone(),
-            board_result.expr.clone(),
-        ]),
+        expr: Expression::Apply(
+            vec![
+                Expression::Word("do".to_string()),
+                board_let.expr.clone(),
+                idx_mut.expr.clone(),
+                while_node.expr.clone(),
+                board_result.expr.clone()
+            ]
+        ),
         typ: node.typ.clone(),
         effect: board_let.effect | idx_mut.effect | while_node.effect,
         children: vec![pure_word("do"), board_let, idx_mut, while_node, board_result],
@@ -4688,7 +4762,7 @@ fn is_zero_scalar_literal_expr(expr: &Expression) -> bool {
 fn extract_counted_scalar_builder_parts(
     while_node: &TypedExpression,
     board_name: &str,
-    idx_name: &str,
+    idx_name: &str
 ) -> Option<(TypedExpression, TypedExpression)> {
     let Expression::Apply(items) = &while_node.expr else {
         return None;
@@ -4703,7 +4777,11 @@ fn extract_counted_scalar_builder_parts(
     let Expression::Apply(body) = &body_node.expr else {
         return None;
     };
-    if !matches!(body.first(), Some(Expression::Word(w)) if w == "do") || body.len() != 3 || body_node.children.len() != 3 {
+    if
+        !matches!(body.first(), Some(Expression::Word(w)) if w == "do") ||
+        body.len() != 3 ||
+        body_node.children.len() != 3
+    {
         return None;
     }
     let Some(set_node) = body_node.children.get(1) else {
@@ -4712,18 +4790,23 @@ fn extract_counted_scalar_builder_parts(
     let Expression::Apply(set_items) = &set_node.expr else {
         return None;
     };
-    if !matches!(set_items.first(), Some(Expression::Word(w)) if w == "set!") || set_items.len() != 4 {
+    if
+        !matches!(set_items.first(), Some(Expression::Word(w)) if w == "set!") ||
+        set_items.len() != 4
+    {
         return None;
     }
     if !matches!(set_items.get(1), Some(Expression::Word(w)) if w == board_name) {
         return None;
     }
-    if !matches!(
+    if
+        !matches!(
         set_items.get(2),
         Some(Expression::Apply(len_items))
             if matches!(len_items.first(), Some(Expression::Word(w)) if w == "length")
                 && matches!(len_items.get(1), Some(Expression::Word(w)) if w == board_name)
-    ) {
+    )
+    {
         return None;
     }
     let value_node = set_node.children.get(3)?.clone();
@@ -4733,7 +4816,8 @@ fn extract_counted_scalar_builder_parts(
     let Some(Expression::Apply(alter_items)) = body.get(2) else {
         return None;
     };
-    if !matches!(
+    if
+        !matches!(
         &alter_items[..],
         [Expression::Word(op), Expression::Word(name), Expression::Apply(add_items)]
             if op == "alter!"
@@ -4741,7 +4825,8 @@ fn extract_counted_scalar_builder_parts(
                 && matches!(add_items.first(), Some(Expression::Word(w)) if w == "+")
                 && matches!(add_items.get(1), Some(Expression::Word(w)) if w == idx_name)
                 && matches!(add_items.get(2), Some(Expression::Int(1)))
-    ) {
+    )
+    {
         return None;
     }
     Some((len_node, value_node))
@@ -4757,19 +4842,25 @@ fn expression_mentions_name(expr: &Expression, name: &str) -> bool {
 
 fn extract_counted_zero_fill_len_expr<'a>(
     while_node: &'a TypedExpression,
-    idx_name: &str,
+    idx_name: &str
 ) -> Option<TypedExpression> {
     let Expression::Apply(items) = &while_node.expr else {
         return None;
     };
-    if !matches!(items.first(), Some(Expression::Word(w)) if w == "while") || while_node.children.len() != 3 {
+    if
+        !matches!(items.first(), Some(Expression::Word(w)) if w == "while") ||
+        while_node.children.len() != 3
+    {
         return None;
     }
     let cond_node = while_node.children.get(1)?;
     let Expression::Apply(cond_items) = &cond_node.expr else {
         return None;
     };
-    if !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<") || cond_node.children.len() != 3 {
+    if
+        !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<") ||
+        cond_node.children.len() != 3
+    {
         return None;
     }
     if !matches!(cond_items.get(1), Some(Expression::Word(w)) if w == idx_name) {
@@ -5023,21 +5114,16 @@ fn inline_do_simple_calls(
 fn eliminate_tuple_return_destructuring_calls(
     items: Vec<Expression>,
     children: Vec<TypedExpression>,
-    state: &mut InlineState,
+    state: &mut InlineState
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
-    eliminate_tuple_return_destructuring_calls_with_defs(
-        items,
-        children,
-        state,
-        &HashMap::new(),
-    )
+    eliminate_tuple_return_destructuring_calls_with_defs(items, children, state, &HashMap::new())
 }
 
 fn eliminate_tuple_return_destructuring_calls_with_defs(
     mut items: Vec<Expression>,
     mut children: Vec<TypedExpression>,
     state: &mut InlineState,
-    seed_defs: &HashMap<String, TupleReturnLambdaDef>,
+    seed_defs: &HashMap<String, TupleReturnLambdaDef>
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
     if items.len() != children.len() || items.len() <= 3 {
         return (items, children);
@@ -5054,52 +5140,66 @@ fn eliminate_tuple_return_destructuring_calls_with_defs(
                 continue;
             }
 
-            let Some((temp_name, call_expr, call_node)) = let_call_binding(&items[i], &children[i]) else {
+            let Some((temp_name, call_expr, call_node)) = let_call_binding(
+                &items[i],
+                &children[i]
+            ) else {
                 i += 1;
                 continue;
             };
             let Some(def) = call_expr
                 .first()
-                .and_then(|head| match head {
-                    Expression::Word(callee) => defs.get(callee),
-                    _ => None,
+                .and_then(|head| {
+                    match head {
+                        Expression::Word(callee) => defs.get(callee),
+                        _ => None,
+                    }
                 })
                 .cloned() else {
                 i += 1;
                 continue;
             };
 
-            let Some((projection_count, projected_bindings)) =
-                contiguous_tuple_projection_bindings(&items, i + 1, &temp_name) else {
+            let Some((projection_count, projected_bindings)) = contiguous_tuple_projection_bindings(
+                &items,
+                i + 1,
+                &temp_name
+            ) else {
                 i += 1;
                 continue;
             };
-            if projection_count == 0 || count_word_uses_in_slice(&items[i + 1 + projection_count..], &temp_name) != 0 {
+            if
+                projection_count == 0 ||
+                count_word_uses_in_slice(&items[i + 1 + projection_count..], &temp_name) != 0
+            {
                 i += 1;
                 continue;
             }
 
-            let Some((prep, _inlined_expr, inlined_typed)) =
-                inline_call_with_def(
-                    &InlineLambdaDef {
-                        params: def.params.clone(),
-                        body_expr: def.body_expr.clone(),
-                        body_typed: def.body_typed.clone(),
-                    },
-                    &call_expr[1..],
-                    &call_node.children[1..],
-                    state,
-                ) else {
-                    i += 1;
-                    continue;
-                };
-            let inlined_typed =
-                alpha_rename_local_bindings_typed(&inlined_typed, &mut HashMap::new(), state);
-            let Some((prefix_pairs, fst_typed, snd_typed)) =
-                extract_terminal_tuple_parts(&inlined_typed) else {
-                    i += 1;
-                    continue;
-                };
+            let Some((prep, _inlined_expr, inlined_typed)) = inline_call_with_def(
+                &(InlineLambdaDef {
+                    params: def.params.clone(),
+                    body_expr: def.body_expr.clone(),
+                    body_typed: def.body_typed.clone(),
+                }),
+                &call_expr[1..],
+                &call_node.children[1..],
+                state
+            ) else {
+                i += 1;
+                continue;
+            };
+            let inlined_typed = alpha_rename_local_bindings_typed(
+                &inlined_typed,
+                &mut HashMap::new(),
+                state
+            );
+            let Some((prefix_pairs, fst_typed, snd_typed)) = extract_terminal_tuple_parts(
+                &inlined_typed
+            ) else {
+                i += 1;
+                continue;
+            };
 
             let fst_tmp = state.fresh_tmp();
             let snd_tmp = state.fresh_tmp();
@@ -5108,30 +5208,20 @@ fn eliminate_tuple_return_destructuring_calls_with_defs(
 
             let mut replacement: Vec<(Expression, TypedExpression)> = prep;
             replacement.extend(prefix_pairs);
-            replacement.push(make_let_binding(
-                fst_tmp.clone(),
-                fst_typed.clone(),
-            ));
-            replacement.push(make_let_binding(
-                snd_tmp.clone(),
-                snd_typed.clone(),
-            ));
+            replacement.push(make_let_binding(fst_tmp.clone(), fst_typed.clone()));
+            replacement.push(make_let_binding(snd_tmp.clone(), snd_typed.clone()));
             for (bind_name, is_fst) in projected_bindings {
-                let rhs = if is_fst {
-                    fst_tmp_word.clone()
-                } else {
-                    snd_tmp_word.clone()
-                };
+                let rhs = if is_fst { fst_tmp_word.clone() } else { snd_tmp_word.clone() };
                 replacement.push(make_named_let_binding(bind_name, rhs));
             }
 
             items.splice(
                 i..i + 1 + projection_count,
-                replacement.iter().map(|(expr, _)| expr.clone()),
+                replacement.iter().map(|(expr, _)| expr.clone())
             );
             children.splice(
                 i..i + 1 + projection_count,
-                replacement.into_iter().map(|(_, typed)| typed),
+                replacement.into_iter().map(|(_, typed)| typed)
             );
             changed = true;
             break;
@@ -5202,14 +5292,17 @@ fn eliminate_tuple_projection_lets(
         let mut changed = false;
         let mut i = 1usize;
         while i + 1 < items.len() {
-            let Some((name, fst_typed, snd_typed)) = tuple_projection_let(&items[i], &children[i])
-                else {
-                    i += 1;
-                    continue;
+            let Some((name, fst_typed, snd_typed)) = tuple_projection_let(
+                &items[i],
+                &children[i]
+            ) else {
+                i += 1;
+                continue;
             };
             let end = find_shadowing_binding(&items, i + 1, &name).unwrap_or(items.len());
-            if find_shadowing_binding(&items, 1, "fst").is_some_and(|idx| idx < end)
-                || find_shadowing_binding(&items, 1, "snd").is_some_and(|idx| idx < end)
+            if
+                find_shadowing_binding(&items, 1, "fst").is_some_and(|idx| idx < end) ||
+                find_shadowing_binding(&items, 1, "snd").is_some_and(|idx| idx < end)
             {
                 i += 1;
                 continue;
@@ -5218,7 +5311,9 @@ fn eliminate_tuple_projection_lets(
             let mut valid = true;
             for item in &items[i + 1..end] {
                 match count_tuple_projection_uses(item, &name) {
-                    Some(n) => projection_uses += n,
+                    Some(n) => {
+                        projection_uses += n;
+                    }
                     None => {
                         valid = false;
                         break;
@@ -5279,19 +5374,24 @@ fn tuple_projection_let(
 }
 
 fn find_shadowing_binding(items: &[Expression], from: usize, name: &str) -> Option<usize> {
-    items.iter().enumerate().skip(from).find_map(|(idx, expr)| {
-        let Expression::Apply(xs) = expr else {
-            return None;
-        };
-        match &xs[..] {
-            [Expression::Word(kw), Expression::Word(bound), _]
-                if (kw == "let" || kw == "letrec" || kw == "mut") && bound == name =>
-            {
-                Some(idx)
+    items
+        .iter()
+        .enumerate()
+        .skip(from)
+        .find_map(|(idx, expr)| {
+            let Expression::Apply(xs) = expr else {
+                return None;
+            };
+            match &xs[..] {
+                [Expression::Word(kw), Expression::Word(bound), _] if
+                    (kw == "let" || kw == "letrec" || kw == "mut") &&
+                    bound == name
+                => {
+                    Some(idx)
+                }
+                _ => None,
             }
-            _ => None,
-        }
-    })
+        })
 }
 
 fn count_tuple_projection_uses(expr: &Expression, name: &str) -> Option<usize> {
@@ -5331,9 +5431,10 @@ fn count_tuple_projection_uses(expr: &Expression, name: &str) -> Option<usize> {
 
 fn is_direct_tuple_projection(items: &[Expression], name: &str) -> Option<bool> {
     match items {
-        [Expression::Word(op), Expression::Word(arg)]
-            if (op == "fst" || op == "snd") && arg == name =>
-        {
+        [Expression::Word(op), Expression::Word(arg)] if
+            (op == "fst" || op == "snd") &&
+            arg == name
+        => {
             Some(op == "fst")
         }
         _ => None,
@@ -5666,7 +5767,7 @@ fn extract_inline_lambda_def(
 
 fn extract_tuple_return_lambda_def(
     expr: &Expression,
-    node: &TypedExpression,
+    node: &TypedExpression
 ) -> Option<(String, TupleReturnLambdaDef)> {
     let Expression::Apply(items) = expr else {
         return None;
@@ -5698,9 +5799,11 @@ fn extract_tuple_return_lambda_def(
     extract_terminal_tuple_parts(&body_typed)?;
     let params = lambda_items[1..lambda_items.len() - 1]
         .iter()
-        .map(|p| match p {
-            Expression::Word(w) => Some(w.clone()),
-            _ => None,
+        .map(|p| {
+            match p {
+                Expression::Word(w) => Some(w.clone()),
+                _ => None,
+            }
         })
         .collect::<Option<Vec<_>>>()?;
     Some((
@@ -5727,12 +5830,13 @@ fn contains_nested_lambda_or_letrec(expr: &Expression) -> bool {
 
 fn let_call_binding<'a>(
     expr: &'a Expression,
-    node: &'a TypedExpression,
+    node: &'a TypedExpression
 ) -> Option<(String, &'a [Expression], &'a TypedExpression)> {
     let Expression::Apply(items) = expr else {
         return None;
     };
-    let [Expression::Word(kw), Expression::Word(name), Expression::Apply(call_expr)] = &items[..] else {
+    let [Expression::Word(kw), Expression::Word(name), Expression::Apply(call_expr)] =
+        &items[..] else {
         return None;
     };
     if kw != "let" && kw != "letrec" {
@@ -5745,7 +5849,7 @@ fn let_call_binding<'a>(
 fn contiguous_tuple_projection_bindings(
     items: &[Expression],
     start: usize,
-    temp_name: &str,
+    temp_name: &str
 ) -> Option<(usize, Vec<(String, bool)>)> {
     let mut consumed = 0usize;
     let mut current_name = temp_name.to_string();
@@ -5754,7 +5858,8 @@ fn contiguous_tuple_projection_bindings(
         let Expression::Apply(let_items) = &items[idx] else {
             break;
         };
-        let [Expression::Word(kw), Expression::Word(bind_name), Expression::Word(rhs_name)] = &let_items[..] else {
+        let [Expression::Word(kw), Expression::Word(bind_name), Expression::Word(rhs_name)] =
+            &let_items[..] else {
             break;
         };
         if (kw != "let" && kw != "letrec") || rhs_name != &current_name {
@@ -5782,13 +5887,18 @@ fn contiguous_tuple_projection_bindings(
         let Some(Expression::Word(op)) = rhs_items.first() else {
             break;
         };
-        if rhs_items.len() != 2 || !matches!(rhs_items.get(1), Some(Expression::Word(w)) if w == &current_name) {
+        if
+            rhs_items.len() != 2 ||
+            !matches!(rhs_items.get(1), Some(Expression::Word(w)) if w == &current_name)
+        {
             break;
         }
         let is_fst = match op.as_str() {
             "fst" => true,
             "snd" => false,
-            _ => break,
+            _ => {
+                break;
+            }
         };
         out.push((bind_name.clone(), is_fst));
         idx += 1;
@@ -5805,7 +5915,7 @@ fn contiguous_tuple_projection_bindings(
 }
 
 fn extract_terminal_tuple_parts(
-    node: &TypedExpression,
+    node: &TypedExpression
 ) -> Option<(Vec<(Expression, TypedExpression)>, TypedExpression, TypedExpression)> {
     if parse_zip_pair_expr(&node.expr).is_some() && node.children.len() >= 3 {
         return Some((Vec::new(), node.children.get(1)?.clone(), node.children.get(2)?.clone()));
@@ -5813,7 +5923,10 @@ fn extract_terminal_tuple_parts(
     let Expression::Apply(items) = &node.expr else {
         return None;
     };
-    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") || items.len() != node.children.len() {
+    if
+        !matches!(items.first(), Some(Expression::Word(w)) if w == "do") ||
+        items.len() != node.children.len()
+    {
         return None;
     }
     let last = node.children.last()?;
@@ -5839,39 +5952,27 @@ fn typed_word(name: String, typ: Option<Type>) -> TypedExpression {
 
 fn make_let_binding(name: String, rhs: TypedExpression) -> (Expression, TypedExpression) {
     let rhs_typ = rhs.typ.clone();
-    let expr = Expression::Apply(vec![
-        Expression::Word("let".to_string()),
-        Expression::Word(name.clone()),
-        rhs.expr.clone(),
-    ]);
+    let expr = Expression::Apply(
+        vec![Expression::Word("let".to_string()), Expression::Word(name.clone()), rhs.expr.clone()]
+    );
     let typed = TypedExpression {
         expr: expr.clone(),
         typ: rhs_typ.clone(),
         effect: rhs.effect,
-        children: vec![
-            pure_word("let"),
-            typed_word(name, rhs_typ),
-            rhs,
-        ],
+        children: vec![pure_word("let"), typed_word(name, rhs_typ), rhs],
     };
     (expr, typed)
 }
 
 fn make_named_let_binding(name: String, rhs: TypedExpression) -> (Expression, TypedExpression) {
-    let expr = Expression::Apply(vec![
-        Expression::Word("let".to_string()),
-        Expression::Word(name.clone()),
-        rhs.expr.clone(),
-    ]);
+    let expr = Expression::Apply(
+        vec![Expression::Word("let".to_string()), Expression::Word(name.clone()), rhs.expr.clone()]
+    );
     let typed = TypedExpression {
         expr: expr.clone(),
         typ: rhs.typ.clone(),
         effect: rhs.effect,
-        children: vec![
-            pure_word("let"),
-            typed_word(name, rhs.typ.clone()),
-            rhs,
-        ],
+        children: vec![pure_word("let"), typed_word(name, rhs.typ.clone()), rhs],
     };
     (expr, typed)
 }
