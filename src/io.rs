@@ -1,25 +1,27 @@
-use crate::infer::{infer_with_builtins_typed, InferErrorInfo, InferErrorScope, TypedExpression};
+use crate::infer::{ infer_with_builtins_typed, InferErrorInfo, InferErrorScope, TypedExpression };
 use crate::lsp_native_core::{
-    diagnostic_summary_without_snippet, extract_error_snippet, infer_error_ranges,
+    diagnostic_summary_without_snippet,
+    extract_error_snippet,
+    infer_error_ranges,
     normalize_signature,
 };
 use crate::parser::Expression;
-use reqwest::blocking::{Client, Response};
-use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::blocking::{ Client, Response };
+use reqwest::header::{ CONTENT_TYPE, HeaderMap, HeaderValue };
 use reqwest::Method;
-use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
+use serde_json::{ json, Value };
+use std::collections::{ BTreeMap, HashSet };
 use std::env;
 use std::fs;
 use std::io;
 use std::io::Read as _;
 use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::{ Path, PathBuf };
 use std::thread;
 use std::time::Duration;
 use wasmtime::Linker;
-use wasmtime::{Caller, Extern, Memory, TypedFunc};
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime::{ Caller, Extern, Memory, TypedFunc };
+use wasmtime_wasi::{ ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView };
 
 const VEC_LEN_OFFSET: i32 = 0;
 const VEC_CAP_OFFSET: i32 = 4;
@@ -76,7 +78,7 @@ impl ShellPolicy {
         &self,
         permission: ShellPermission,
         operation: &str,
-        target: &str,
+        target: &str
     ) -> Result<(), String> {
         if !self.shell_enabled {
             return Err(
@@ -89,12 +91,14 @@ impl ShellPolicy {
         }
 
         if !self.allows(permission) {
-            return Err(format!(
-                "permission '{}' is required for operation '{}'. denied target: {}",
-                permission.as_str(),
-                operation,
-                target
-            ));
+            return Err(
+                format!(
+                    "permission '{}' is required for operation '{}'. denied target: {}",
+                    permission.as_str(),
+                    operation,
+                    target
+                )
+            );
         }
 
         Ok(())
@@ -107,11 +111,7 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
 
     for part in parts {
         for fragment in part.split(',') {
-            let token = fragment
-                .trim()
-                .trim_matches('"')
-                .trim_matches('\'')
-                .to_ascii_lowercase();
+            let token = fragment.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
             if token.is_empty() {
                 continue;
             }
@@ -129,10 +129,9 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
                     grant_all = true;
                 }
                 _ => {
-                    return Err(format!(
-                        "unknown shell permission '{}'. expected one of: read, write, delete",
-                        token
-                    ));
+                    return Err(
+                        format!("unknown shell permission '{}'. expected one of: read, write, delete", token)
+                    );
                 }
             }
         }
@@ -168,10 +167,12 @@ pub enum DebugMode {
 
 fn merge_debug_mode(current: DebugMode, next: DebugMode) -> DebugMode {
     let enabled = current != DebugMode::Off || next != DebugMode::Off;
-    let code = matches!(current, DebugMode::Code | DebugMode::All)
-        || matches!(next, DebugMode::Code | DebugMode::All);
-    let types = matches!(current, DebugMode::Types | DebugMode::All)
-        || matches!(next, DebugMode::Types | DebugMode::All);
+    let code =
+        matches!(current, DebugMode::Code | DebugMode::All) ||
+        matches!(next, DebugMode::Code | DebugMode::All);
+    let types =
+        matches!(current, DebugMode::Types | DebugMode::All) ||
+        matches!(next, DebugMode::Types | DebugMode::All);
 
     if code && types {
         DebugMode::All
@@ -274,7 +275,8 @@ fn enable_debug_runtime_guards() {
 }
 
 fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>, String> {
-    let root = crate::parser::build(source)
+    let root = crate::parser
+        ::build(source)
         .map_err(|e| format!("failed to parse bundle '{}': {}", label, e))?;
     let defs = crate::baked::ast_to_definitions(root, label)?;
     for (idx, item) in defs.iter().enumerate() {
@@ -289,26 +291,34 @@ fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>
             );
         };
         if form.len() < 3 {
-            return Err(format!(
-                "bundle '{}' must contain only top-level definitions; malformed form {}: {}",
-                label,
-                idx,
-                item.to_lisp()
-            ));
+            return Err(
+                format!(
+                    "bundle '{}' must contain only top-level definitions; malformed form {}: {}",
+                    label,
+                    idx,
+                    item.to_lisp()
+                )
+            );
         }
         let Expression::Word(kw) = &form[0] else {
-            return Err(format!(
-                "bundle '{}' must contain only top-level definitions; malformed form {}: {}",
-                label,
-                idx,
-                item.to_lisp()
-            ));
+            return Err(
+                format!(
+                    "bundle '{}' must contain only top-level definitions; malformed form {}: {}",
+                    label,
+                    idx,
+                    item.to_lisp()
+                )
+            );
         };
         if kw != "let" && kw != "letrec" && kw != "mut" {
-            return Err(format!(
-                "bundle '{}' must contain only top-level definitions; found '{}' at form {}",
-                label, kw, idx
-            ));
+            return Err(
+                format!(
+                    "bundle '{}' must contain only top-level definitions; found '{}' at form {}",
+                    label,
+                    kw,
+                    idx
+                )
+            );
         }
     }
     Ok(defs)
@@ -316,23 +326,17 @@ fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>
 
 fn load_bundle_definitions(
     script_cwd: &Path,
-    bundle_paths: &[String],
+    bundle_paths: &[String]
 ) -> Result<Vec<Expression>, String> {
     let mut out = Vec::new();
     for bundle_path in bundle_paths {
         let raw = Path::new(bundle_path);
-        let resolved = if raw.is_absolute() {
-            raw.to_path_buf()
-        } else {
-            script_cwd.join(raw)
-        };
+        let resolved = if raw.is_absolute() { raw.to_path_buf() } else { script_cwd.join(raw) };
         if resolved.extension().and_then(|e| e.to_str()) != Some("que") {
-            return Err(format!(
-                "bundle '{}' must be a .que file",
-                resolved.display()
-            ));
+            return Err(format!("bundle '{}' must be a .que file", resolved.display()));
         }
-        let source = fs::read_to_string(&resolved)
+        let source = fs
+            ::read_to_string(&resolved)
             .map_err(|e| format!("failed to read bundle '{}': {}", resolved.display(), e))?;
         let mut defs = parse_bundle_definitions(&source, &resolved.display().to_string())?;
         out.append(&mut defs);
@@ -537,7 +541,7 @@ fn native_lambda_help(bin_name: &str) -> String {
         bin = bin_name,
         base = LAMBDA_API_BASE_DEFAULT,
         base_env = LAMBDA_API_BASE_ENV,
-        key_env = LAMBDA_API_KEY_ENV,
+        key_env = LAMBDA_API_KEY_ENV
     )
 }
 
@@ -556,10 +560,7 @@ fn lambda_auth_file_path() -> PathBuf {
 #[cfg(not(target_os = "windows"))]
 fn lambda_auth_file_path() -> PathBuf {
     if let Ok(home) = env::var("HOME") {
-        return PathBuf::from(home)
-            .join(".config")
-            .join("que")
-            .join("lambda-auth.json");
+        return PathBuf::from(home).join(".config").join("que").join("lambda-auth.json");
     }
     PathBuf::from("lambda-auth.json")
 }
@@ -569,16 +570,20 @@ fn read_saved_lambda_api_key() -> Result<Option<String>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let raw = fs::read_to_string(&path)
+    let raw = fs
+        ::read_to_string(&path)
         .map_err(|e| format!("failed to read lambda auth file '{}': {}", path.display(), e))?;
-    let value: Value = serde_json::from_str(&raw)
+    let value: Value = serde_json
+        ::from_str(&raw)
         .map_err(|e| format!("failed to parse lambda auth file '{}': {}", path.display(), e))?;
-    Ok(value
-        .get("api_key")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToOwned::to_owned))
+    Ok(
+        value
+            .get("api_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToOwned::to_owned)
+    )
 }
 
 fn load_lambda_api_key() -> Result<Option<String>, String> {
@@ -593,10 +598,7 @@ fn load_lambda_api_key() -> Result<Option<String>, String> {
 
 fn require_lambda_api_key() -> Result<String, String> {
     load_lambda_api_key()?.ok_or_else(|| {
-        format!(
-            "lambda api key is not configured. run `que lambda auth <api-key>` or set {}",
-            LAMBDA_API_KEY_ENV
-        )
+        format!("lambda api key is not configured. run `que lambda auth <api-key>` or set {}", LAMBDA_API_KEY_ENV)
     })
 }
 
@@ -604,29 +606,30 @@ fn save_lambda_api_key(api_key: &str) -> Result<PathBuf, String> {
     let path = lambda_auth_file_path();
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| {
-                format!(
-                    "failed to create lambda auth directory '{}': {}",
-                    parent.display(),
-                    e
-                )
-            })?;
+            fs
+                ::create_dir_all(parent)
+                .map_err(|e| {
+                    format!("failed to create lambda auth directory '{}': {}", parent.display(), e)
+                })?;
         }
     }
     let payload = json!({ "api_key": api_key.trim() });
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&payload)
-            .map_err(|e| format!("failed to serialize lambda auth config: {}", e))?,
-    )
-    .map_err(|e| format!("failed to write lambda auth file '{}': {}", path.display(), e))?;
+    fs
+        ::write(
+            &path,
+            serde_json
+                ::to_vec_pretty(&payload)
+                .map_err(|e| format!("failed to serialize lambda auth config: {}", e))?
+        )
+        .map_err(|e| format!("failed to write lambda auth file '{}': {}", path.display(), e))?;
     Ok(path)
 }
 
 fn clear_lambda_api_key() -> Result<PathBuf, String> {
     let path = lambda_auth_file_path();
     if path.exists() {
-        fs::remove_file(&path)
+        fs
+            ::remove_file(&path)
             .map_err(|e| format!("failed to remove lambda auth file '{}': {}", path.display(), e))?;
     }
     Ok(path)
@@ -651,7 +654,8 @@ fn lambda_api_base() -> String {
 
 fn lambda_url(path: &str, query: &[(String, String)]) -> Result<reqwest::Url, String> {
     let base = lambda_api_base();
-    let mut url = reqwest::Url::parse(&format!("{}{}", base, path))
+    let mut url = reqwest::Url
+        ::parse(&format!("{}{}", base, path))
         .map_err(|e| format!("invalid lambda api url '{}{}': {}", base, path, e))?;
     if !query.is_empty() {
         let mut pairs = url.query_pairs_mut();
@@ -663,9 +667,7 @@ fn lambda_url(path: &str, query: &[(String, String)]) -> Result<reqwest::Url, St
 }
 
 fn lambda_send(request: reqwest::blocking::RequestBuilder) -> Result<String, String> {
-    let response = request
-        .send()
-        .map_err(|e| format!("lambda api request failed: {}", e))?;
+    let response = request.send().map_err(|e| format!("lambda api request failed: {}", e))?;
     lambda_response_text(response)
 }
 
@@ -679,10 +681,7 @@ fn lambda_response_text(response: Response) -> Result<String, String> {
         if trimmed.is_empty() {
             return Err(format!("lambda api request failed with status {}", status));
         }
-        return Err(format!(
-            "lambda api request failed with status {}: {}",
-            status, trimmed
-        ));
+        return Err(format!("lambda api request failed with status {}: {}", status, trimmed));
     }
     Ok(body)
 }
@@ -691,8 +690,9 @@ fn lambda_auth_headers(api_key: &str) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-api-key",
-        HeaderValue::from_str(api_key)
-            .map_err(|e| format!("invalid lambda api key for header use: {}", e))?,
+        HeaderValue::from_str(api_key).map_err(|e|
+            format!("invalid lambda api key for header use: {}", e)
+        )?
     );
     Ok(headers)
 }
@@ -707,26 +707,22 @@ fn parse_lambda_execute_options(args: &[String]) -> Result<LambdaExecuteOptions,
         match args[i].as_str() {
             "--input" => {
                 i += 1;
-                let value = args
-                    .get(i)
-                    .ok_or_else(|| "missing value for --input".to_string())?;
+                let value = args.get(i).ok_or_else(|| "missing value for --input".to_string())?;
                 input = value.clone();
             }
             "--version" => {
                 i += 1;
-                let value = args
-                    .get(i)
-                    .ok_or_else(|| "missing value for --version".to_string())?;
+                let value = args.get(i).ok_or_else(|| "missing value for --version".to_string())?;
                 version = Some(value.clone());
             }
             "--param" => {
                 i += 1;
-                let raw = args
-                    .get(i)
-                    .ok_or_else(|| "missing value for --param".to_string())?;
-                let (key, value) = raw.split_once('=').ok_or_else(|| {
-                    format!("invalid query item '{}'; expected key=value", raw)
-                })?;
+                let raw = args.get(i).ok_or_else(|| "missing value for --param".to_string())?;
+                let (key, value) = raw
+                    .split_once('=')
+                    .ok_or_else(|| {
+                        format!("invalid query item '{}'; expected key=value", raw)
+                    })?;
                 params.push((key.to_string(), value.to_string()));
             }
             "--get" => {
@@ -758,26 +754,22 @@ fn parse_lambda_example_options(args: &[String]) -> Result<LambdaExampleOptions,
         match args[i].as_str() {
             "--input" => {
                 i += 1;
-                let value = args
-                    .get(i)
-                    .ok_or_else(|| "missing value for --input".to_string())?;
+                let value = args.get(i).ok_or_else(|| "missing value for --input".to_string())?;
                 input = value.clone();
             }
             "--version" => {
                 i += 1;
-                let value = args
-                    .get(i)
-                    .ok_or_else(|| "missing value for --version".to_string())?;
+                let value = args.get(i).ok_or_else(|| "missing value for --version".to_string())?;
                 version = Some(value.clone());
             }
             "--param" => {
                 i += 1;
-                let raw = args
-                    .get(i)
-                    .ok_or_else(|| "missing value for --param".to_string())?;
-                let (key, value) = raw.split_once('=').ok_or_else(|| {
-                    format!("invalid query item '{}'; expected key=value", raw)
-                })?;
+                let raw = args.get(i).ok_or_else(|| "missing value for --param".to_string())?;
+                let (key, value) = raw
+                    .split_once('=')
+                    .ok_or_else(|| {
+                        format!("invalid query item '{}'; expected key=value", raw)
+                    })?;
                 params.push((key.to_string(), value.to_string()));
             }
             other => {
@@ -797,7 +789,7 @@ fn lambda_example_url(
     public_id: &str,
     input: &str,
     version: Option<&str>,
-    params: &[(String, String)],
+    params: &[(String, String)]
 ) -> Result<String, String> {
     let mut query = params.to_vec();
     query.push(("input".to_string(), input.to_string()));
@@ -810,14 +802,13 @@ fn lambda_example_url(
 fn parse_lambda_invoke_target(target: &str) -> Result<LambdaInvokeTarget, String> {
     if target.starts_with("fn_") || target.starts_with("pub_") {
         return Err(
-            "lambda invoke is name-based. use `que lambda execute <fn_...>` or `que lambda public-execute <pub_...>` for id-based execution"
-                .to_string(),
+            "lambda invoke is name-based. use `que lambda execute <fn_...>` or `que lambda public-execute <pub_...>` for id-based execution".to_string()
         );
     }
     if let Some((owner_label, function_name)) = target.split_once('/') {
         if owner_label.is_empty() || function_name.is_empty() {
             return Err(
-                "lambda invoke owner/name expects both owner label and function name".to_string(),
+                "lambda invoke owner/name expects both owner label and function name".to_string()
             );
         }
         return Ok(LambdaInvokeTarget::PublicByName {
@@ -848,10 +839,11 @@ fn resolve_public_id_from_function_json(value: &Value) -> Result<String, String>
 
 fn resolve_owned_function_id_from_functions_list(
     text: &str,
-    function_name: &str,
+    function_name: &str
 ) -> Result<String, String> {
-    let parsed: Value =
-        serde_json::from_str(text).map_err(|e| format!("failed to parse lambda list response: {}", e))?;
+    let parsed: Value = serde_json
+        ::from_str(text)
+        .map_err(|e| format!("failed to parse lambda list response: {}", e))?;
     let functions = parsed
         .get("functions")
         .and_then(Value::as_array)
@@ -863,18 +855,19 @@ fn resolve_owned_function_id_from_functions_list(
         .collect::<Vec<_>>();
 
     match matches.len() {
-        0 => Err(format!(
-            "no function named '{}' was found in your current user functions",
-            function_name
-        )),
-        1 => lambda_value_str(matches[0], "function_id")
-            .filter(|v| !v.is_empty())
-            .map(ToOwned::to_owned)
-            .ok_or_else(|| format!("function '{}' is missing function_id", function_name)),
-        _ => Err(format!(
-            "multiple functions named '{}' were found in your current user functions; use `que lambda execute <fn_...>` instead",
-            function_name
-        )),
+        0 =>
+            Err(
+                format!("no function named '{}' was found in your current user functions", function_name)
+            ),
+        1 =>
+            lambda_value_str(matches[0], "function_id")
+                .filter(|v| !v.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| format!("function '{}' is missing function_id", function_name)),
+        _ =>
+            Err(
+                format!("multiple functions named '{}' were found in your current user functions; use `que lambda execute <fn_...>` instead", function_name)
+            ),
     }
 }
 
@@ -905,7 +898,11 @@ fn format_lambda_functions_list(text: &str) -> Option<String> {
         lines.push(format!("  public: {} ({})", public_id, visibility));
         lines.push(format!("  latest: v{} {}", version, status));
         lines.push(format!("  updated: {}", updated));
-        if let Some(err) = lambda_value_str(function, "latest_compile_error").filter(|v| !v.is_empty()) {
+        if
+            let Some(err) = lambda_value_str(function, "latest_compile_error").filter(
+                |v| !v.is_empty()
+            )
+        {
             lines.push(format!("  compile-error: {}", err));
         }
     }
@@ -916,38 +913,44 @@ fn format_lambda_functions_list(text: &str) -> Option<String> {
 fn read_lambda_source_text(source_path: &str) -> Result<String, String> {
     if source_path == "-" {
         let mut input = String::new();
-        io::stdin()
+        io
+            ::stdin()
             .read_to_string(&mut input)
             .map_err(|e| format!("failed to read lambda source from stdin: {}", e))?;
         return Ok(input);
     }
-    fs::read_to_string(source_path)
-        .map_err(|e| format!("failed to read lambda source '{}': {}", source_path, e))
+    fs::read_to_string(source_path).map_err(|e|
+        format!("failed to read lambda source '{}': {}", source_path, e)
+    )
 }
 
 fn parse_lambda_sources_json(path: &str) -> Result<Value, String> {
-    let raw = fs::read_to_string(path)
+    let raw = fs
+        ::read_to_string(path)
         .map_err(|e| format!("failed to read lambda sources '{}': {}", path, e))?;
-    serde_json::from_str(&raw)
+    serde_json
+        ::from_str(&raw)
         .map_err(|e| format!("failed to parse lambda sources '{}': {}", path, e))
 }
 
 fn validate_lambda_program_source(source: &str) -> Result<(), String> {
     let std_ast = crate::baked::load_ast();
     let lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
-    let merged = crate::parser::merge_std_and_program(source, lib_defs)
+    let merged = crate::parser
+        ::merge_std_and_program(source, lib_defs)
         .map_err(|e| format!("lambda source failed to parse/desugar: {}", e))?;
     let (typ, _typed) = infer_with_builtins_typed(
         &merged,
-        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-    )
-    .map_err(|e| format!("lambda source failed typecheck: {}", e))?;
+        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+    ).map_err(|e| format!("lambda source failed typecheck: {}", e))?;
     let expected = crate::types::Type::List(Box::new(crate::types::Type::Char));
     if typ != expected {
-        return Err(format!(
-            "lambda source must evaluate to [Char], got {}",
-            normalize_signature(&typ.to_string())
-        ));
+        return Err(
+            format!(
+                "lambda source must evaluate to [Char], got {}",
+                normalize_signature(&typ.to_string())
+            )
+        );
     }
     Ok(())
 }
@@ -979,10 +982,9 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
                     println!("saved lambda auth at {}", path.display());
                 }
                 _ => {
-                    return Err(format!(
-                        "Usage: {} lambda auth <api-key> | --show | --clear",
-                        bin_name
-                    ));
+                    return Err(
+                        format!("Usage: {} lambda auth <api-key> | --show | --clear", bin_name)
+                    );
                 }
             }
         }
@@ -999,7 +1001,7 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
                 client
                     .post(lambda_url("/v1/api-keys", &[])?)
                     .header(CONTENT_TYPE, "application/json")
-                    .json(&body),
+                    .json(&body)
             )?;
             println!("{}", text);
         }
@@ -1009,19 +1011,15 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
             let text = lambda_send(
                 client
                     .get(lambda_url("/v1/functions", &[])?)
-                    .headers(lambda_auth_headers(&api_key)?),
+                    .headers(lambda_auth_headers(&api_key)?)
             )?;
-            println!(
-                "{}",
-                format_lambda_functions_list(&text).unwrap_or(text)
-            );
+            println!("{}", format_lambda_functions_list(&text).unwrap_or(text));
         }
         "invoke" => {
             if args.len() < 2 {
-                return Err(format!(
-                    "Usage: {} lambda invoke <function-name|owner_label/function-name> [--input <text>] [--version <n>] [--param <key=value> ...] [--get|--post]",
-                    bin_name
-                ));
+                return Err(
+                    format!("Usage: {} lambda invoke <function-name|owner_label/function-name> [--input <text>] [--version <n>] [--param <key=value> ...] [--get|--post]", bin_name)
+                );
             }
             let target = parse_lambda_invoke_target(&args[1])?;
             let options = parse_lambda_execute_options(&args[2..])?;
@@ -1036,17 +1034,19 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
                     let list_text = lambda_send(
                         client
                             .get(lambda_url("/v1/functions", &[])?)
-                            .headers(lambda_auth_headers(&api_key)?),
+                            .headers(lambda_auth_headers(&api_key)?)
                     )?;
-                    let function_id =
-                        resolve_owned_function_id_from_functions_list(&list_text, &function_name)?;
+                    let function_id = resolve_owned_function_id_from_functions_list(
+                        &list_text,
+                        &function_name
+                    )?;
                     let path = format!("/v1/functions/id/{}/execute", function_id);
                     if options.method == Method::GET {
                         query.push(("input".to_string(), options.input.clone()));
                         lambda_send(
                             client
                                 .get(lambda_url(&path, &query)?)
-                                .headers(lambda_auth_headers(&api_key)?),
+                                .headers(lambda_auth_headers(&api_key)?)
                         )?
                     } else {
                         lambda_send(
@@ -1054,17 +1054,15 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
                                 .post(lambda_url(&path, &query)?)
                                 .headers(lambda_auth_headers(&api_key)?)
                                 .header(CONTENT_TYPE, "text/plain")
-                                .body(options.input.clone()),
+                                .body(options.input.clone())
                         )?
                     }
                 }
-                LambdaInvokeTarget::PublicByName {
-                    owner_label,
-                    function_name,
-                } => {
+                LambdaInvokeTarget::PublicByName { owner_label, function_name } => {
                     let path = format!(
                         "/v1/public/by-name/{}/{}/execute",
-                        owner_label, function_name
+                        owner_label,
+                        function_name
                     );
                     if options.method == Method::GET {
                         query.push(("input".to_string(), options.input.clone()));
@@ -1074,7 +1072,7 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
                             client
                                 .post(lambda_url(&path, &query)?)
                                 .header(CONTENT_TYPE, "text/plain")
-                                .body(options.input.clone()),
+                                .body(options.input.clone())
                         )?
                     }
                 }
@@ -1083,10 +1081,9 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
         }
         "example" => {
             if args.len() < 2 {
-                return Err(format!(
-                    "Usage: {} lambda example <function-id|public-id> [--input <text>] [--version <n>] [--param <key=value> ...]",
-                    bin_name
-                ));
+                return Err(
+                    format!("Usage: {} lambda example <function-id|public-id> [--input <text>] [--version <n>] [--param <key=value> ...]", bin_name)
+                );
             }
             let target_id = args[1].clone();
             let options = parse_lambda_example_options(&args[2..])?;
@@ -1098,16 +1095,17 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
                 let text = lambda_send(
                     client
                         .get(lambda_url(&format!("/v1/functions/id/{}", target_id), &[])?)
-                        .headers(lambda_auth_headers(&api_key)?),
+                        .headers(lambda_auth_headers(&api_key)?)
                 )?;
-                let parsed: Value = serde_json::from_str(&text).map_err(|e| {
-                    format!("failed to parse lambda function metadata response: {}", e)
-                })?;
+                let parsed: Value = serde_json
+                    ::from_str(&text)
+                    .map_err(|e| {
+                        format!("failed to parse lambda function metadata response: {}", e)
+                    })?;
                 resolve_public_id_from_function_json(&parsed)?
             } else {
                 return Err(
-                    "lambda example expects a function id starting with fn_ or a public id starting with pub_"
-                        .to_string(),
+                    "lambda example expects a function id starting with fn_ or a public id starting with pub_".to_string()
                 );
             };
             println!(
@@ -1116,16 +1114,19 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
                     &public_id,
                     &options.input,
                     options.version.as_deref(),
-                    &options.params,
+                    &options.params
                 )?
             );
         }
         "create" | "upload" => {
             if args.len() < 3 {
-                return Err(format!(
-                    "Usage: {} lambda {} <function-name> <file|-> [--sources <sources.json>]",
-                    bin_name, command
-                ));
+                return Err(
+                    format!(
+                        "Usage: {} lambda {} <function-name> <file|-> [--sources <sources.json>]",
+                        bin_name,
+                        command
+                    )
+                );
             }
             let function_name = args[1].clone();
             let source_path = args[2].clone();
@@ -1162,7 +1163,7 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
                     .post(lambda_url(&format!("/v1/functions/{}", function_name), &[])?)
                     .headers(lambda_auth_headers(&api_key)?)
                     .header(CONTENT_TYPE, "application/json")
-                    .json(&payload),
+                    .json(&payload)
             )?;
             println!("{}", text);
         }
@@ -1175,16 +1176,15 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
             let text = lambda_send(
                 client
                     .get(lambda_url(&format!("/v1/functions/id/{}", args[1]), &[])?)
-                    .headers(lambda_auth_headers(&api_key)?),
+                    .headers(lambda_auth_headers(&api_key)?)
             )?;
             println!("{}", text);
         }
         "get-source" => {
             if args.len() < 2 || args.len() > 3 {
-                return Err(format!(
-                    "Usage: {} lambda get-source <function-id> [version]",
-                    bin_name
-                ));
+                return Err(
+                    format!("Usage: {} lambda get-source <function-id> [version]", bin_name)
+                );
             }
             let mut query = Vec::new();
             if let Some(version) = args.get(2) {
@@ -1194,11 +1194,8 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
             let api_key = require_lambda_api_key()?;
             let text = lambda_send(
                 client
-                    .get(lambda_url(
-                        &format!("/v1/functions/id/{}/source", args[1]),
-                        &query,
-                    )?)
-                    .headers(lambda_auth_headers(&api_key)?),
+                    .get(lambda_url(&format!("/v1/functions/id/{}/source", args[1]), &query)?)
+                    .headers(lambda_auth_headers(&api_key)?)
             )?;
             println!("{}", text);
         }
@@ -1211,16 +1208,19 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
             let text = lambda_send(
                 client
                     .delete(lambda_url(&format!("/v1/functions/id/{}", args[1]), &[])?)
-                    .headers(lambda_auth_headers(&api_key)?),
+                    .headers(lambda_auth_headers(&api_key)?)
             )?;
             println!("{}", text);
         }
         "execute" | "public-execute" => {
             if args.len() < 2 {
-                return Err(format!(
-                    "Usage: {} lambda {} <id> [--input <text>] [--version <n>] [--param <key=value> ...] [--get|--post]",
-                    bin_name, command
-                ));
+                return Err(
+                    format!(
+                        "Usage: {} lambda {} <id> [--input <text>] [--version <n>] [--param <key=value> ...] [--get|--post]",
+                        bin_name,
+                        command
+                    )
+                );
             }
             let id = args[1].clone();
             let options = parse_lambda_execute_options(&args[2..])?;
@@ -1258,11 +1258,9 @@ fn run_lambda_cli(bin_name: &str, args: &[String]) -> Result<(), String> {
             println!("{}", text);
         }
         other => {
-            return Err(format!(
-                "unknown lambda command: {}\n{}",
-                other,
-                native_lambda_help(bin_name)
-            ));
+            return Err(
+                format!("unknown lambda command: {}\n{}", other, native_lambda_help(bin_name))
+            );
         }
     }
 
@@ -1323,6 +1321,9 @@ fn native_shell_learn() -> &'static str {
     \n\
     Functions:\n\
     - (lambda a b body)\n\
+    - Alternative form: (lambda (a b c) e1 e2 ... en)\n\
+    - When parameters are wrapped in parentheses, the body can contain multiple expressions without needing (do ...).\n\
+    - The last expression is returned.\n\
     - Recursive functions must use letrec: (letrec f (lambda ... (f ...)))\n\
     - Destructuring works in params:\n\
       - tuples: {a b}\n\
@@ -1405,12 +1406,8 @@ fn emit_bytes_output(out_path: Option<&str>, bytes: &[u8]) -> Result<(), String>
         fs::write(path, bytes).map_err(|e| format!("failed to write '{}': {}", path, e))?;
     } else {
         let mut stdout = io::stdout().lock();
-        stdout
-            .write_all(bytes)
-            .map_err(|e| format!("failed to write stdout: {}", e))?;
-        stdout
-            .flush()
-            .map_err(|e| format!("failed to flush stdout: {}", e))?;
+        stdout.write_all(bytes).map_err(|e| format!("failed to write stdout: {}", e))?;
+        stdout.flush().map_err(|e| format!("failed to flush stdout: {}", e))?;
     }
     Ok(())
 }
@@ -1421,8 +1418,7 @@ fn format_top_level_type_lines(typed: &TypedExpression, user_form_count: usize) 
 
     for (idx, form) in forms.iter().enumerate() {
         if let Some(name) = binding_name_from_def(&form.expr) {
-            let binding_typ = form
-                .children
+            let binding_typ = form.children
                 .get(2)
                 .and_then(|child| child.typ.as_ref())
                 .or(form.typ.as_ref());
@@ -1431,8 +1427,7 @@ fn format_top_level_type_lines(typed: &TypedExpression, user_form_count: usize) 
                 .unwrap_or_else(|| "_".to_string());
             lines.push(format!("{} : {}", name, rendered));
         } else {
-            let rendered = form
-                .typ
+            let rendered = form.typ
                 .as_ref()
                 .map(|typ| normalize_signature(&typ.to_string()))
                 .unwrap_or_else(|| "_".to_string());
@@ -1481,7 +1476,7 @@ fn infer_library_symbol_type(name: &str, lib_defs: &[Expression]) -> Result<Stri
     let merged = crate::parser::merge_std_and_program(name, lib_defs.to_vec())?;
     let (typ, _typed) = infer_with_builtins_typed(
         &merged,
-        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
     )?;
     Ok(normalize_signature(&typ.to_string()))
 }
@@ -1520,10 +1515,7 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
             if args.len() > 2 {
                 return Err("Usage: queio --lib names [pattern]".to_string());
             }
-            for name in all_names
-                .iter()
-                .filter(|name| wildcard_match(pattern, name))
-            {
+            for name in all_names.iter().filter(|name| wildcard_match(pattern, name)) {
                 println!("{}", name);
             }
             Ok(())
@@ -1533,10 +1525,7 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
             if args.len() > 2 {
                 return Err("Usage: queio --lib types [pattern]".to_string());
             }
-            for name in all_names
-                .iter()
-                .filter(|name| wildcard_match(pattern, name))
-            {
+            for name in all_names.iter().filter(|name| wildcard_match(pattern, name)) {
                 match infer_library_symbol_type(name, &lib_defs) {
                     Ok(typ) => println!("{} : {}", name, typ),
                     Err(err) => println!("{} : <type error: {}>", name, err),
@@ -1584,8 +1573,9 @@ fn run_library_install_via_io(mode: LibraryInstallMode, args: &[String]) -> Resu
         return Ok(());
     }
 
-    let out_path = take_install_output_path_from_argv(&mut argv)
-        .map_err(|e| format!("invalid install args: {}", e))?;
+    let out_path = take_install_output_path_from_argv(&mut argv).map_err(|e|
+        format!("invalid install args: {}", e)
+    )?;
     let mut bundle_paths = Vec::new();
     for token in argv {
         if token.starts_with("--") {
@@ -1598,13 +1588,12 @@ fn run_library_install_via_io(mode: LibraryInstallMode, args: &[String]) -> Resu
         return Err("--uninstall does not accept bundle paths".to_string());
     }
 
-    let output = out_path
-        .map(PathBuf::from)
-        .unwrap_or_else(crate::baked::external_library_path);
+    let output = out_path.map(PathBuf::from).unwrap_or_else(crate::baked::external_library_path);
 
     if matches!(mode, LibraryInstallMode::Uninstall) {
         if output.exists() {
-            fs::remove_file(&output)
+            fs
+                ::remove_file(&output)
                 .map_err(|e| format!("failed to remove library '{}': {}", output.display(), e))?;
             eprintln!("library uninstalled from {}", output.display());
         } else {
@@ -1617,24 +1606,19 @@ fn run_library_install_via_io(mode: LibraryInstallMode, args: &[String]) -> Resu
     let mut defs = load_existing_library_definitions(&output)?;
     defs.extend(load_bundle_definitions(&cwd, &bundle_paths)?);
     let wrapped = Expression::Apply(
-        std::iter::once(Expression::Word("do".to_string()))
-            .chain(defs)
-            .collect(),
+        std::iter::once(Expression::Word("do".to_string())).chain(defs).collect()
     );
 
     if let Some(parent) = output.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
+            fs
+                ::create_dir_all(parent)
                 .map_err(|e| format!("failed to create '{}': {}", parent.display(), e))?;
         }
     }
-    fs::write(&output, format!("{}\n", wrapped.to_lisp())).map_err(|e| {
-        format!(
-            "failed to write baked library '{}': {}",
-            output.display(),
-            e
-        )
-    })?;
+    fs
+        ::write(&output, format!("{}\n", wrapped.to_lisp()))
+        .map_err(|e| { format!("failed to write baked library '{}': {}", output.display(), e) })?;
     eprintln!("library installed to {}", output.display());
     Ok(())
 }
@@ -1650,7 +1634,7 @@ pub struct ShellStoreData {
 impl ShellStoreData {
     pub fn new_with_security(
         script_cwd: Option<PathBuf>,
-        shell_policy: ShellPolicy,
+        shell_policy: ShellPolicy
     ) -> wasmtime::Result<Self> {
         let mut p2_builder = WasiCtxBuilder::new();
         p2_builder.inherit_stdio();
@@ -1691,9 +1675,10 @@ fn memory_export(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<Me
 fn read_i32(
     memory: &Memory,
     caller: &Caller<'_, ShellStoreData>,
-    addr: i32,
+    addr: i32
 ) -> wasmtime::Result<i32> {
-    let offset = usize::try_from(addr)
+    let offset = usize
+        ::try_from(addr)
         .map_err(|_| wasmtime::Error::msg(format!("invalid read address: {}", addr)))?;
     let mut bytes = [0u8; 4];
     memory
@@ -1706,9 +1691,10 @@ fn write_i32(
     memory: &Memory,
     caller: &mut Caller<'_, ShellStoreData>,
     addr: i32,
-    value: i32,
+    value: i32
 ) -> wasmtime::Result<()> {
-    let offset = usize::try_from(addr)
+    let offset = usize
+        ::try_from(addr)
         .map_err(|_| wasmtime::Error::msg(format!("invalid write address: {}", addr)))?;
     memory
         .write(caller, offset, &value.to_le_bytes())
@@ -1723,23 +1709,18 @@ fn guest_alloc(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<Type
             }
         }
     }
-    Err(wasmtime::Error::msg(
-        "guest export '$alloc'/'alloc' not found",
-    ))
+    Err(wasmtime::Error::msg("guest export '$alloc'/'alloc' not found"))
 }
 
 pub fn read_lisp_vector(
     caller: &mut Caller<'_, ShellStoreData>,
-    vec_ptr: i32,
+    vec_ptr: i32
 ) -> wasmtime::Result<Vec<i32>> {
     let memory = memory_export(caller)?;
     let len = read_i32(&memory, &*caller, vec_ptr + VEC_LEN_OFFSET)?;
     let data_ptr = read_i32(&memory, &*caller, vec_ptr + VEC_DATA_PTR_OFFSET)?;
     if len < 0 {
-        return Err(wasmtime::Error::msg(format!(
-            "negative vector len: {}",
-            len
-        )));
+        return Err(wasmtime::Error::msg(format!("negative vector len: {}", len)));
     }
 
     let mut values = Vec::with_capacity(len as usize);
@@ -1751,10 +1732,11 @@ pub fn read_lisp_vector(
 
 pub fn write_lisp_vector(
     caller: &mut Caller<'_, ShellStoreData>,
-    values: &[i32],
+    values: &[i32]
 ) -> wasmtime::Result<i32> {
     let alloc = guest_alloc(caller)?;
-    let vec_len = i32::try_from(values.len())
+    let vec_len = i32
+        ::try_from(values.len())
         .map_err(|_| wasmtime::Error::msg("output too large for i32 vector length"))?;
     let header_ptr = alloc.call(&mut *caller, VEC_HEADER_SIZE)?;
     let data_ptr = alloc.call(&mut *caller, vec_len * 4)?;
@@ -1777,18 +1759,20 @@ pub fn write_lisp_vector(
 
 fn read_lisp_string(
     caller: &mut Caller<'_, ShellStoreData>,
-    vec_ptr: i32,
+    vec_ptr: i32
 ) -> wasmtime::Result<String> {
     let codes = read_lisp_vector(caller, vec_ptr)?;
-    Ok(codes
-        .into_iter()
-        .map(|n| char::from_u32(n as u32).unwrap_or('\u{FFFD}'))
-        .collect::<String>())
+    Ok(
+        codes
+            .into_iter()
+            .map(|n| char::from_u32(n as u32).unwrap_or('\u{FFFD}'))
+            .collect::<String>()
+    )
 }
 
 fn write_lisp_string(
     caller: &mut Caller<'_, ShellStoreData>,
-    value: &str,
+    value: &str
 ) -> wasmtime::Result<i32> {
     let codes = value
         .chars()
@@ -1811,7 +1795,8 @@ fn resolve_target_path(caller: &Caller<'_, ShellStoreData>, raw: &str) -> PathBu
 }
 
 fn list_dir_text(path: &Path) -> Result<String, String> {
-    let entries = fs::read_dir(path)
+    let entries = fs
+        ::read_dir(path)
         .map_err(|e: io::Error| format!("failed to read directory '{}': {}", path.display(), e))?;
     let mut names = Vec::new();
     for entry in entries {
@@ -1828,13 +1813,12 @@ fn list_dir_text(path: &Path) -> Result<String, String> {
 
 pub fn host_list_dir(
     mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
+    path_vec_ptr: i32
 ) -> wasmtime::Result<i32> {
     let path = read_lisp_string(&mut caller, path_vec_ptr)?;
     caller
         .data()
-        .shell_policy
-        .require(ShellPermission::Read, "list-dir!", &path)
+        .shell_policy.require(ShellPermission::Read, "list-dir!", &path)
         .map_err(wasmtime::Error::msg)?;
 
     let target = resolve_target_path(&caller, &path);
@@ -1844,107 +1828,107 @@ pub fn host_list_dir(
 
 pub fn host_read_file(
     mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
+    path_vec_ptr: i32
 ) -> wasmtime::Result<i32> {
     let path = read_lisp_string(&mut caller, path_vec_ptr)?;
     caller
         .data()
-        .shell_policy
-        .require(ShellPermission::Read, "read!", &path)
+        .shell_policy.require(ShellPermission::Read, "read!", &path)
         .map_err(wasmtime::Error::msg)?;
 
     let target = resolve_target_path(&caller, &path);
-    let output = fs::read_to_string(&target).map_err(|e| {
-        wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
-    })?;
+    let output = fs
+        ::read_to_string(&target)
+        .map_err(|e| {
+            wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
+        })?;
     write_lisp_string(&mut caller, &output)
 }
 
 pub fn host_write_file(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32,
-    data_vec_ptr: i32,
+    data_vec_ptr: i32
 ) -> wasmtime::Result<i32> {
     let path = read_lisp_string(&mut caller, path_vec_ptr)?;
     let data = read_lisp_string(&mut caller, data_vec_ptr)?;
     caller
         .data()
-        .shell_policy
-        .require(ShellPermission::Write, "write!", &path)
+        .shell_policy.require(ShellPermission::Write, "write!", &path)
         .map_err(wasmtime::Error::msg)?;
 
     let target = resolve_target_path(&caller, &path);
     if let Some(parent) = target.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| {
-                wasmtime::Error::msg(format!(
-                    "failed to create parent dirs '{}': {}",
-                    parent.display(),
-                    e
-                ))
-            })?;
+            fs
+                ::create_dir_all(parent)
+                .map_err(|e| {
+                    wasmtime::Error::msg(
+                        format!("failed to create parent dirs '{}': {}", parent.display(), e)
+                    )
+                })?;
         }
     }
-    fs::write(&target, data.as_bytes()).map_err(|e| {
-        wasmtime::Error::msg(format!("failed to write '{}': {}", target.display(), e))
-    })?;
+    fs
+        ::write(&target, data.as_bytes())
+        .map_err(|e| {
+            wasmtime::Error::msg(format!("failed to write '{}': {}", target.display(), e))
+        })?;
 
     Ok(0)
 }
 
 pub fn host_mkdir_p(
     mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
+    path_vec_ptr: i32
 ) -> wasmtime::Result<i32> {
     let path = read_lisp_string(&mut caller, path_vec_ptr)?;
     caller
         .data()
-        .shell_policy
-        .require(ShellPermission::Write, "mkdir!", &path)
+        .shell_policy.require(ShellPermission::Write, "mkdir!", &path)
         .map_err(wasmtime::Error::msg)?;
 
     let target = resolve_target_path(&caller, &path);
-    fs::create_dir_all(&target).map_err(|e| {
-        wasmtime::Error::msg(format!("failed to mkdir '{}': {}", target.display(), e))
-    })?;
+    fs
+        ::create_dir_all(&target)
+        .map_err(|e| {
+            wasmtime::Error::msg(format!("failed to mkdir '{}': {}", target.display(), e))
+        })?;
     Ok(0)
 }
 
 pub fn host_delete(
     mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
+    path_vec_ptr: i32
 ) -> wasmtime::Result<i32> {
     let path = read_lisp_string(&mut caller, path_vec_ptr)?;
     caller
         .data()
-        .shell_policy
-        .require(ShellPermission::Delete, "delete!", &path)
+        .shell_policy.require(ShellPermission::Delete, "delete!", &path)
         .map_err(wasmtime::Error::msg)?;
 
     let target = resolve_target_path(&caller, &path);
-    let meta = fs::symlink_metadata(&target).map_err(|e| {
-        wasmtime::Error::msg(format!(
-            "failed to inspect path '{}' for delete: {}",
-            target.display(),
-            e
-        ))
-    })?;
+    let meta = fs
+        ::symlink_metadata(&target)
+        .map_err(|e| {
+            wasmtime::Error::msg(
+                format!("failed to inspect path '{}' for delete: {}", target.display(), e)
+            )
+        })?;
     if meta.is_dir() {
-        fs::remove_dir_all(&target).map_err(|e| {
-            wasmtime::Error::msg(format!(
-                "failed to delete directory '{}': {}",
-                target.display(),
-                e
-            ))
-        })?;
+        fs
+            ::remove_dir_all(&target)
+            .map_err(|e| {
+                wasmtime::Error::msg(
+                    format!("failed to delete directory '{}': {}", target.display(), e)
+                )
+            })?;
     } else {
-        fs::remove_file(&target).map_err(|e| {
-            wasmtime::Error::msg(format!(
-                "failed to delete file '{}': {}",
-                target.display(),
-                e
-            ))
-        })?;
+        fs
+            ::remove_file(&target)
+            .map_err(|e| {
+                wasmtime::Error::msg(format!("failed to delete file '{}': {}", target.display(), e))
+            })?;
     }
     Ok(0)
 }
@@ -1952,76 +1936,70 @@ pub fn host_delete(
 pub fn host_move(
     mut caller: Caller<'_, ShellStoreData>,
     src_vec_ptr: i32,
-    dst_vec_ptr: i32,
+    dst_vec_ptr: i32
 ) -> wasmtime::Result<i32> {
     let src = read_lisp_string(&mut caller, src_vec_ptr)?;
     let dst = read_lisp_string(&mut caller, dst_vec_ptr)?;
     caller
         .data()
-        .shell_policy
-        .require(
-            ShellPermission::Write,
-            "move!",
-            &format!("{} -> {}", src, dst),
-        )
+        .shell_policy.require(ShellPermission::Write, "move!", &format!("{} -> {}", src, dst))
         .map_err(wasmtime::Error::msg)?;
 
     let src_path = resolve_target_path(&caller, &src);
     let dst_path = resolve_target_path(&caller, &dst);
     if let Some(parent) = dst_path.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| {
-                wasmtime::Error::msg(format!(
-                    "failed to create destination dirs '{}': {}",
-                    parent.display(),
-                    e
-                ))
-            })?;
+            fs
+                ::create_dir_all(parent)
+                .map_err(|e| {
+                    wasmtime::Error::msg(
+                        format!("failed to create destination dirs '{}': {}", parent.display(), e)
+                    )
+                })?;
         }
     }
-    fs::rename(&src_path, &dst_path).map_err(|e| {
-        wasmtime::Error::msg(format!(
-            "failed to move '{}' to '{}': {}",
-            src_path.display(),
-            dst_path.display(),
-            e
-        ))
-    })?;
+    fs
+        ::rename(&src_path, &dst_path)
+        .map_err(|e| {
+            wasmtime::Error::msg(
+                format!(
+                    "failed to move '{}' to '{}': {}",
+                    src_path.display(),
+                    dst_path.display(),
+                    e
+                )
+            )
+        })?;
 
     Ok(0)
 }
 
 pub fn host_print(
     mut caller: Caller<'_, ShellStoreData>,
-    text_vec_ptr: i32,
+    text_vec_ptr: i32
 ) -> wasmtime::Result<i32> {
     let text = read_lisp_string(&mut caller, text_vec_ptr)?;
     caller
         .data()
-        .shell_policy
-        .require(ShellPermission::Write, "print!", "<stdout>")
+        .shell_policy.require(ShellPermission::Write, "print!", "<stdout>")
         .map_err(wasmtime::Error::msg)?;
 
     let mut out = io::stdout();
-    out.write_all(text.as_bytes())
+    out
+        .write_all(text.as_bytes())
         .map_err(|e| wasmtime::Error::msg(format!("failed to write stdout: {}", e)))?;
-    out.flush()
-        .map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
+    out.flush().map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
     Ok(0)
 }
 
 pub fn host_sleep(caller: Caller<'_, ShellStoreData>, millis: i32) -> wasmtime::Result<i32> {
     caller
         .data()
-        .shell_policy
-        .require(ShellPermission::Write, "sleep!", "<clock>")
+        .shell_policy.require(ShellPermission::Write, "sleep!", "<clock>")
         .map_err(wasmtime::Error::msg)?;
 
     if millis < 0 {
-        return Err(wasmtime::Error::msg(format!(
-            "sleep! expects non-negative ms, got {}",
-            millis
-        )));
+        return Err(wasmtime::Error::msg(format!("sleep! expects non-negative ms, got {}", millis)));
     }
     thread::sleep(Duration::from_millis(millis as u64));
     Ok(0)
@@ -2030,15 +2008,14 @@ pub fn host_sleep(caller: Caller<'_, ShellStoreData>, millis: i32) -> wasmtime::
 pub fn host_clear(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
     caller
         .data()
-        .shell_policy
-        .require(ShellPermission::Write, "clear!", "<stdout>")
+        .shell_policy.require(ShellPermission::Write, "clear!", "<stdout>")
         .map_err(wasmtime::Error::msg)?;
 
     let mut out = io::stdout();
-    out.write_all(b"\x1b[2J\x1b[H")
+    out
+        .write_all(b"\x1b[2J\x1b[H")
         .map_err(|e| wasmtime::Error::msg(format!("failed to clear stdout: {}", e)))?;
-    out.flush()
-        .map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
+    out.flush().map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
     Ok(0)
 }
 
@@ -2059,7 +2036,7 @@ pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Res
 
 fn user_form_nodes<'a>(
     typed: &'a TypedExpression,
-    user_form_count: usize,
+    user_form_count: usize
 ) -> Vec<&'a TypedExpression> {
     if let Expression::Apply(_) = &typed.expr {
         if typed.children.len() > 1 {
@@ -2083,10 +2060,7 @@ fn format_scope_path(scope: Option<&InferErrorScope>) -> String {
                     .collect::<Vec<String>>()
                     .join(" -> ")
             };
-            format!(
-                "top_form={} lambda_path={}",
-                meta.user_top_form, lambda_path
-            )
+            format!("top_form={} lambda_path={}", meta.user_top_form, lambda_path)
         }
         None => "<none>".to_string(),
     }
@@ -2107,7 +2081,7 @@ fn push_location_lines(
     out: &mut Vec<String>,
     source_text: &str,
     message: &str,
-    scope: Option<&InferErrorScope>,
+    scope: Option<&InferErrorScope>
 ) {
     let should_locate = scope.is_some() || extract_error_snippet(message).is_some();
     if !should_locate {
@@ -2168,12 +2142,12 @@ fn lambda_body_child(node: &TypedExpression) -> Option<&TypedExpression> {
 
 fn find_nth_lambda_in_scope<'a>(
     root: &'a TypedExpression,
-    nth: usize,
+    nth: usize
 ) -> Option<&'a TypedExpression> {
     fn walk<'a>(
         node: &'a TypedExpression,
         nth: usize,
-        counter: &mut usize,
+        counter: &mut usize
     ) -> Option<&'a TypedExpression> {
         if is_lambda_expr(&node.expr) {
             if *counter == nth {
@@ -2200,7 +2174,7 @@ fn find_nth_lambda_in_scope<'a>(
 fn scope_focus_node<'a>(
     typed: &'a TypedExpression,
     user_form_count: usize,
-    scope: Option<&InferErrorScope>,
+    scope: Option<&InferErrorScope>
 ) -> Option<(usize, &'a TypedExpression)> {
     let scope = scope?;
     let forms = user_form_nodes(typed, user_form_count);
@@ -2219,24 +2193,18 @@ fn push_typed_tree_lines(
     out: &mut Vec<String>,
     node: &TypedExpression,
     depth: usize,
-    max_nodes: usize,
+    max_nodes: usize
 ) {
     if out.len() >= max_nodes {
         return;
     }
 
     let indent = "  ".repeat(depth);
-    let typ = node
-        .typ
+    let typ = node.typ
         .as_ref()
         .map(|t| t.to_string())
         .unwrap_or_else(|| "_".to_string());
-    out.push(format!(
-        "{}{} :: {}",
-        indent,
-        typed_node_label(&node.expr),
-        typ
-    ));
+    out.push(format!("{}{} :: {}", indent, typed_node_label(&node.expr), typ));
 
     for child in &node.children {
         if out.len() >= max_nodes {
@@ -2272,16 +2240,13 @@ fn build_debug_error_report(
     scope: Option<&InferErrorScope>,
     user_desugared: Option<&Expression>,
     user_form_count: usize,
-    typed: Option<&TypedExpression>,
+    typed: Option<&TypedExpression>
 ) -> String {
     let mut out = Vec::new();
     out.push(format!("debug.phase: {}", phase));
     out.push(format!("debug.error: {}", message));
     if debug_mode.includes_code() || debug_mode.includes_types() {
-        out.push(format!(
-            "debug.summary: {}",
-            diagnostic_summary_without_snippet(message)
-        ));
+        out.push(format!("debug.summary: {}", diagnostic_summary_without_snippet(message)));
     }
     out.push(format!("debug.scope_path: {}", format_scope_path(scope)));
     out.push(
@@ -2301,11 +2266,9 @@ fn build_debug_error_report(
             if let Some((form_idx, focus)) = scope_focus_node(typed_ast, user_form_count, scope) {
                 let mut focus_lines = Vec::new();
                 push_typed_tree_lines(&mut focus_lines, focus, 0, usize::MAX);
-                out.push(format!(
-                    "debug.focus: form={} scope={}",
-                    form_idx,
-                    format_scope_path(scope)
-                ));
+                out.push(
+                    format!("debug.focus: form={} scope={}", form_idx, format_scope_path(scope))
+                );
                 out.extend(focus_lines);
             }
 
@@ -2320,13 +2283,27 @@ fn build_debug_error_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        format_lambda_functions_list, lambda_api_base_from_env_value, lambda_example_url,
-        native_shell_help, parse_bundle_definitions, parse_lambda_example_options,
-        parse_lambda_execute_options, parse_lambda_invoke_target,
-        resolve_owned_function_id_from_functions_list, take_debug_mode_from_argv,
-        take_emit_request_from_argv, take_help_flag_from_argv, take_no_result_flag_from_argv,
-        take_shell_policy_from_argv, validate_lambda_program_source, wildcard_match, DebugMode,
-        EmitKind, LambdaInvokeTarget, ShellPermission, ShellPolicy,
+        format_lambda_functions_list,
+        lambda_api_base_from_env_value,
+        lambda_example_url,
+        native_shell_help,
+        parse_bundle_definitions,
+        parse_lambda_example_options,
+        parse_lambda_execute_options,
+        parse_lambda_invoke_target,
+        resolve_owned_function_id_from_functions_list,
+        take_debug_mode_from_argv,
+        take_emit_request_from_argv,
+        take_help_flag_from_argv,
+        take_no_result_flag_from_argv,
+        take_shell_policy_from_argv,
+        validate_lambda_program_source,
+        wildcard_match,
+        DebugMode,
+        EmitKind,
+        LambdaInvokeTarget,
+        ShellPermission,
+        ShellPolicy,
     };
     use reqwest::Method;
     use std::collections::HashSet;
@@ -2336,9 +2313,7 @@ mod tests {
         let mut args = vec!["alpha".to_string(), "--allow".to_string()];
         let policy = take_shell_policy_from_argv(&mut args).unwrap();
         assert_eq!(args, vec!["alpha".to_string()]);
-        assert!(policy
-            .require(ShellPermission::Read, "read", "./x")
-            .is_err());
+        assert!(policy.require(ShellPermission::Read, "read", "./x").is_err());
     }
 
     #[test]
@@ -2347,26 +2322,18 @@ mod tests {
             "main.que".to_string(),
             "--allow".to_string(),
             "read".to_string(),
-            "write".to_string(),
+            "write".to_string()
         ];
         let policy = take_shell_policy_from_argv(&mut args).unwrap();
         assert_eq!(args, vec!["main.que".to_string()]);
         assert!(policy.require(ShellPermission::Read, "read", "./x").is_ok());
-        assert!(policy
-            .require(ShellPermission::Write, "mkdir", "./x")
-            .is_ok());
-        assert!(policy
-            .require(ShellPermission::Delete, "delete", "./x")
-            .is_err());
+        assert!(policy.require(ShellPermission::Write, "mkdir", "./x").is_ok());
+        assert!(policy.require(ShellPermission::Delete, "delete", "./x").is_err());
     }
 
     #[test]
     fn parse_policy_rejects_unknown_permission() {
-        let mut args = vec![
-            "main.que".to_string(),
-            "--allow".to_string(),
-            "foo".to_string(),
-        ];
+        let mut args = vec!["main.que".to_string(), "--allow".to_string(), "foo".to_string()];
         let err = take_shell_policy_from_argv(&mut args).unwrap_err();
         assert!(err.contains("unknown shell permission 'foo'"));
     }
@@ -2374,9 +2341,7 @@ mod tests {
     #[test]
     fn disabled_policy_blocks_operations() {
         let policy = ShellPolicy::disabled();
-        let err = policy
-            .require(ShellPermission::Read, "read", "./x")
-            .unwrap_err();
+        let err = policy.require(ShellPermission::Read, "read", "./x").unwrap_err();
         assert!(err.contains("host io is disabled"));
     }
 
@@ -2385,12 +2350,8 @@ mod tests {
         let mut perms = HashSet::new();
         perms.insert(ShellPermission::Read);
         let policy = ShellPolicy::enabled(perms);
-        assert!(policy
-            .require(ShellPermission::Read, "list-dir", ".")
-            .is_ok());
-        assert!(policy
-            .require(ShellPermission::Write, "mkdir", "./x")
-            .is_err());
+        assert!(policy.require(ShellPermission::Read, "list-dir", ".").is_ok());
+        assert!(policy.require(ShellPermission::Write, "mkdir", "./x").is_err());
     }
 
     #[test]
@@ -2399,18 +2360,11 @@ mod tests {
             "script.que".to_string(),
             "foo".to_string(),
             "--debug".to_string(),
-            "bar".to_string(),
+            "bar".to_string()
         ];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::Basic);
-        assert_eq!(
-            args,
-            vec![
-                "script.que".to_string(),
-                "foo".to_string(),
-                "bar".to_string()
-            ]
-        );
+        assert_eq!(args, vec!["script.que".to_string(), "foo".to_string(), "bar".to_string()]);
     }
 
     #[test]
@@ -2420,7 +2374,7 @@ mod tests {
             "--debug".to_string(),
             "all".to_string(),
             "--allow".to_string(),
-            "read".to_string(),
+            "read".to_string()
         ];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::All);
@@ -2431,11 +2385,7 @@ mod tests {
 
     #[test]
     fn take_debug_code_mode() {
-        let mut args = vec![
-            "script.que".to_string(),
-            "--debug".to_string(),
-            "code".to_string(),
-        ];
+        let mut args = vec!["script.que".to_string(), "--debug".to_string(), "code".to_string()];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::Code);
         assert_eq!(args, vec!["script.que".to_string()]);
@@ -2443,11 +2393,7 @@ mod tests {
 
     #[test]
     fn take_debug_types_mode() {
-        let mut args = vec![
-            "script.que".to_string(),
-            "--debug".to_string(),
-            "types".to_string(),
-        ];
+        let mut args = vec!["script.que".to_string(), "--debug".to_string(), "types".to_string()];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::Types);
         assert_eq!(args, vec!["script.que".to_string()]);
@@ -2460,7 +2406,7 @@ mod tests {
             "--debug".to_string(),
             "code".to_string(),
             "--debug".to_string(),
-            "types".to_string(),
+            "types".to_string()
         ];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::All);
@@ -2472,7 +2418,7 @@ mod tests {
         let mut args = vec![
             "script.que".to_string(),
             "--debug".to_string(),
-            "user-arg".to_string(),
+            "user-arg".to_string()
         ];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::Basic);
@@ -2485,7 +2431,7 @@ mod tests {
             "script.que".to_string(),
             "--help".to_string(),
             "-h".to_string(),
-            "user-arg".to_string(),
+            "user-arg".to_string()
         ];
         let has_help = take_help_flag_from_argv(&mut args);
         assert!(has_help);
@@ -2505,7 +2451,7 @@ mod tests {
         let mut args = vec![
             "script.que".to_string(),
             "--no-result".to_string(),
-            "user-arg".to_string(),
+            "user-arg".to_string()
         ];
         let has_no_result = take_no_result_flag_from_argv(&mut args);
         assert!(has_no_result);
@@ -2528,7 +2474,7 @@ mod tests {
             "--emit".to_string(),
             "wat".to_string(),
             "--out".to_string(),
-            "out.wat".to_string(),
+            "out.wat".to_string()
         ];
         let request = take_emit_request_from_argv(&mut args).expect("emit should parse");
         assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
@@ -2595,9 +2541,11 @@ mod tests {
             "--param".to_string(),
             "source=github".to_string(),
             "--param".to_string(),
-            "status=200".to_string(),
+            "status=200".to_string()
         ];
-        let options = parse_lambda_execute_options(&args).expect("lambda execute opts should parse");
+        let options = parse_lambda_execute_options(&args).expect(
+            "lambda execute opts should parse"
+        );
         assert_eq!(options.method, Method::GET);
         assert_eq!(options.input, "hello");
         assert_eq!(options.version.as_deref(), Some("18"));
@@ -2626,13 +2574,16 @@ mod tests {
 
     #[test]
     fn validate_lambda_program_accepts_char_output() {
-        validate_lambda_program_source("\"ok\"").expect("string result should be valid lambda output");
+        validate_lambda_program_source("\"ok\"").expect(
+            "string result should be valid lambda output"
+        );
     }
 
     #[test]
     fn validate_lambda_program_rejects_non_char_output() {
-        let err =
-            validate_lambda_program_source("42").expect_err("non-string result should be rejected");
+        let err = validate_lambda_program_source("42").expect_err(
+            "non-string result should be rejected"
+        );
         assert!(err.contains("must evaluate to [Char]"));
         assert!(err.contains("Int"));
     }
@@ -2651,9 +2602,8 @@ mod tests {
             "pub_123",
             "5 6",
             Some("2"),
-            &[("source".to_string(), "github api".to_string())],
-        )
-        .expect("example url should build");
+            &[("source".to_string(), "github api".to_string())]
+        ).expect("example url should build");
         assert_eq!(
             url,
             "https://lambda.quest/v1/public/pub_123/execute?source=github+api&input=5+6&version=2"
@@ -2662,9 +2612,11 @@ mod tests {
 
     #[test]
     fn format_lambda_functions_list_renders_compact_summary() {
-        let raw = r#"{"functions":[{"function_id":"fn_abc","function_name":"tic-tac-toe","visibility":"public","public_id":"pub_abc","created_at":"2026-04-19T19:32:23.452Z","updated_at":"2026-04-19T19:55:31.231Z","latest_version":3,"latest_compile_status":"ready","latest_compile_error":null}]}"#;
-        let rendered =
-            format_lambda_functions_list(raw).expect("function list should render from json");
+        let raw =
+            r#"{"functions":[{"function_id":"fn_abc","function_name":"tic-tac-toe","visibility":"public","public_id":"pub_abc","created_at":"2026-04-19T19:32:23.452Z","updated_at":"2026-04-19T19:55:31.231Z","latest_version":3,"latest_compile_status":"ready","latest_compile_error":null}]}"#;
+        let rendered = format_lambda_functions_list(raw).expect(
+            "function list should render from json"
+        );
         assert!(rendered.contains("tic-tac-toe"));
         assert!(rendered.contains("fn: fn_abc"));
         assert!(rendered.contains("public: pub_abc (public)"));
@@ -2695,17 +2647,21 @@ mod tests {
 
     #[test]
     fn resolve_owned_function_id_from_functions_list_finds_unique_name() {
-        let raw = r#"{"functions":[{"function_id":"fn_power","function_name":"power"},{"function_id":"fn_range","function_name":"range"}]}"#;
-        let function_id = resolve_owned_function_id_from_functions_list(raw, "power")
-            .expect("function should resolve");
+        let raw =
+            r#"{"functions":[{"function_id":"fn_power","function_name":"power"},{"function_id":"fn_range","function_name":"range"}]}"#;
+        let function_id = resolve_owned_function_id_from_functions_list(raw, "power").expect(
+            "function should resolve"
+        );
         assert_eq!(function_id, "fn_power");
     }
 
     #[test]
     fn resolve_owned_function_id_from_functions_list_rejects_duplicates() {
-        let raw = r#"{"functions":[{"function_id":"fn_power_1","function_name":"power"},{"function_id":"fn_power_2","function_name":"power"}]}"#;
-        let err = resolve_owned_function_id_from_functions_list(raw, "power")
-            .expect_err("duplicate names should fail");
+        let raw =
+            r#"{"functions":[{"function_id":"fn_power_1","function_name":"power"},{"function_id":"fn_power_2","function_name":"power"}]}"#;
+        let err = resolve_owned_function_id_from_functions_list(raw, "power").expect_err(
+            "duplicate names should fail"
+        );
         assert!(err.contains("multiple functions named 'power'"));
     }
 
@@ -2750,57 +2706,42 @@ pub fn run_native_shell() -> Result<(), String> {
         run_library_explore_via_io(&args.iter().skip(2).cloned().collect::<Vec<_>>())?;
         return Ok(());
     }
-    if matches!(
-        args.get(1).map(String::as_str),
-        Some("--install" | "--bake")
-    ) {
+    if matches!(args.get(1).map(String::as_str), Some("--install" | "--bake")) {
         run_library_install_via_io(
             LibraryInstallMode::Install,
-            &args.iter().skip(2).cloned().collect::<Vec<_>>(),
+            &args.iter().skip(2).cloned().collect::<Vec<_>>()
         )?;
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("--uninstall")) {
         run_library_install_via_io(
             LibraryInstallMode::Uninstall,
-            &args.iter().skip(2).cloned().collect::<Vec<_>>(),
+            &args.iter().skip(2).cloned().collect::<Vec<_>>()
         )?;
         return Ok(());
     }
     let eval_mode = matches!(args.get(1).map(String::as_str), Some("--eval" | "-e"));
     let (program, mut argv, script_cwd) = if eval_mode {
         let Some(source) = args.get(2) else {
-            return Err(format!(
-                "missing source after --eval\n{}",
-                native_shell_help(bin_name)
-            ));
+            return Err(format!("missing source after --eval\n{}", native_shell_help(bin_name)));
         };
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        (
-            source.clone(),
-            args.iter().skip(3).cloned().collect::<Vec<_>>(),
-            cwd,
-        )
+        (source.clone(), args.iter().skip(3).cloned().collect::<Vec<_>>(), cwd)
     } else {
         let Some(file_path) = args.get(1) else {
-            return Err(format!(
-                "missing file_path\n{}",
-                native_shell_help(bin_name)
-            ));
+            return Err(format!("missing file_path\n{}", native_shell_help(bin_name)));
         };
-        let program = fs::read_to_string(&file_path)
+        let program = fs
+            ::read_to_string(&file_path)
             .map_err(|e| format!("failed to read '{}': {}", file_path, e))?;
-        let script_cwd = fs::canonicalize(file_path)
+        let script_cwd = fs
+            ::canonicalize(file_path)
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .or_else(|| Path::new(file_path).parent().map(Path::to_path_buf))
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| PathBuf::from("."));
-        (
-            program,
-            args.iter().skip(2).cloned().collect::<Vec<_>>(),
-            script_cwd,
-        )
+        (program, args.iter().skip(2).cloned().collect::<Vec<_>>(), script_cwd)
     };
 
     if take_help_flag_from_argv(&mut argv) {
@@ -2813,16 +2754,19 @@ pub fn run_native_shell() -> Result<(), String> {
     if debug_mode.is_enabled() {
         enable_debug_runtime_guards();
     }
-    let shell_policy = crate::io::take_shell_policy_from_argv(&mut argv)
+    let shell_policy = crate::io
+        ::take_shell_policy_from_argv(&mut argv)
         .map_err(|e| format!("invalid shell policy: {}", e))?;
     let analysis_source = crate::lsp_native_core::strip_comment_bodies_preserve_newlines(&program);
-    let needs_user_form_count = debug_mode.is_enabled()
-        || matches!(
+    let needs_user_form_count =
+        debug_mode.is_enabled() ||
+        matches!(
             emit_request.as_ref().map(|req| req.kind),
             Some(EmitKind::Types)
         );
     let user_form_count = if needs_user_form_count {
-        crate::lsp_native_core::parse_user_exprs_for_symbol_collection(&analysis_source)
+        crate::lsp_native_core
+            ::parse_user_exprs_for_symbol_collection(&analysis_source)
             .as_ref()
             .map(|exprs| exprs.len())
             .unwrap_or_else(|| crate::lsp_native_core::top_level_form_ranges(&program).len())
@@ -2841,16 +2785,18 @@ pub fn run_native_shell() -> Result<(), String> {
         Ok(expr) => expr,
         Err(message) => {
             if debug_mode.is_enabled() {
-                return Err(build_debug_error_report(
-                    debug_mode,
-                    "parse+desugar",
-                    &program,
-                    &message,
-                    None,
-                    user_desugared.as_ref(),
-                    user_form_count,
-                    None,
-                ));
+                return Err(
+                    build_debug_error_report(
+                        debug_mode,
+                        "parse+desugar",
+                        &program,
+                        &message,
+                        None,
+                        user_desugared.as_ref(),
+                        user_form_count,
+                        None
+                    )
+                );
             }
             return Err(message);
         }
@@ -2863,31 +2809,30 @@ pub fn run_native_shell() -> Result<(), String> {
                 return Ok(());
             }
             EmitKind::Types => {
-                let (base_env, base_next_id) =
-                    crate::types::create_builtin_environment(crate::types::TypeEnv::new());
+                let (base_env, base_next_id) = crate::types::create_builtin_environment(
+                    crate::types::TypeEnv::new()
+                );
                 let inferred = crate::infer::infer_with_builtins_typed_lsp(
                     &wrapped_ast,
                     (base_env, base_next_id),
-                    user_form_count,
+                    user_form_count
                 );
                 let (_typ, typed_ast) = match inferred {
                     Ok(ok) => ok,
-                    Err(InferErrorInfo {
-                        message,
-                        scope,
-                        partial_typed_ast,
-                    }) => {
+                    Err(InferErrorInfo { message, scope, partial_typed_ast }) => {
                         if debug_mode.is_enabled() {
-                            return Err(build_debug_error_report(
-                                debug_mode,
-                                "type-inference",
-                                &program,
-                                &message,
-                                scope.as_ref(),
-                                user_desugared.as_ref(),
-                                user_form_count,
-                                partial_typed_ast.as_ref(),
-                            ));
+                            return Err(
+                                build_debug_error_report(
+                                    debug_mode,
+                                    "type-inference",
+                                    &program,
+                                    &message,
+                                    scope.as_ref(),
+                                    user_desugared.as_ref(),
+                                    user_form_count,
+                                    partial_typed_ast.as_ref()
+                                )
+                            );
                         }
                         return Err(message);
                     }
@@ -2901,44 +2846,45 @@ pub fn run_native_shell() -> Result<(), String> {
     }
 
     let wat_src = if debug_mode.is_enabled() {
-        let (base_env, base_next_id) =
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new());
+        let (base_env, base_next_id) = crate::types::create_builtin_environment(
+            crate::types::TypeEnv::new()
+        );
         let inferred = crate::infer::infer_with_builtins_typed_lsp(
             &wrapped_ast,
             (base_env, base_next_id),
-            user_form_count,
+            user_form_count
         );
 
         match inferred {
             Ok((_typ, typed_ast)) => {
-                crate::wat::compile_program_to_wat_typed(&typed_ast).map_err(|message| {
+                crate::wat
+                    ::compile_program_to_wat_typed(&typed_ast)
+                    .map_err(|message| {
+                        build_debug_error_report(
+                            debug_mode,
+                            "wat-lowering",
+                            &program,
+                            &message,
+                            None,
+                            user_desugared.as_ref(),
+                            user_form_count,
+                            Some(&typed_ast)
+                        )
+                    })?
+            }
+            Err(InferErrorInfo { message, scope, partial_typed_ast }) => {
+                return Err(
                     build_debug_error_report(
                         debug_mode,
-                        "wat-lowering",
+                        "type-inference",
                         &program,
                         &message,
-                        None,
+                        scope.as_ref(),
                         user_desugared.as_ref(),
                         user_form_count,
-                        Some(&typed_ast),
+                        partial_typed_ast.as_ref()
                     )
-                })?
-            }
-            Err(InferErrorInfo {
-                message,
-                scope,
-                partial_typed_ast,
-            }) => {
-                return Err(build_debug_error_report(
-                    debug_mode,
-                    "type-inference",
-                    &program,
-                    &message,
-                    scope.as_ref(),
-                    user_desugared.as_ref(),
-                    user_form_count,
-                    partial_typed_ast.as_ref(),
-                ));
+                );
             }
         }
     } else {
@@ -2952,7 +2898,8 @@ pub fn run_native_shell() -> Result<(), String> {
                 return Ok(());
             }
             EmitKind::Wasm => {
-                let bytes = wat::parse_str(&wat_src)
+                let bytes = wat
+                    ::parse_str(&wat_src)
                     .map_err(|e| format!("failed to encode wat as wasm: {}", e))?;
                 emit_bytes_output(request.out_path.as_deref(), &bytes)?;
                 return Ok(());
@@ -2961,8 +2908,9 @@ pub fn run_native_shell() -> Result<(), String> {
         }
     }
 
-    let store_data = ShellStoreData::new_with_security(Some(script_cwd), shell_policy)
-        .map_err(|e| e.to_string())?;
+    let store_data = ShellStoreData::new_with_security(Some(script_cwd), shell_policy).map_err(|e|
+        e.to_string()
+    )?;
     if suppress_result_output {
         crate::runtime::run_wat_text_no_result(&wat_src, store_data, &argv, |linker| {
             add_shell_to_linker(linker).map_err(|e| e.to_string())
