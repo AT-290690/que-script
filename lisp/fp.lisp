@@ -79,6 +79,8 @@
 (let zeroes/int std/vector/int/zeroes)
 (let ones/dec std/vector/dec/ones)
 (let zeroes/dec std/vector/dec/zeroes)
+(let truths std/vector/bool/true)
+(let falses std/vector/bool/false)
 
 (let positive? std/int/positive?)
 (let negative? std/int/negative?)

@@ -337,6 +337,16 @@ out)))
      (loop 0 n (lambda i (set! out (length out) 0)))
      out)))
 
+ (let std/vector/bool/true (lambda n (do
+     (let out [])
+     (loop 0 n (lambda i (set! out (length out) true)))
+     out))) 
+
+ (let std/vector/bool/false (lambda n (do
+     (let out [])
+     (loop 0 n (lambda i (set! out (length out) false)))
+     out))) 
+
 (let std/vector/3d/int/range (lambda s w h (do 
   (mut i s)
   (let matrix [])

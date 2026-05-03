@@ -51,25 +51,18 @@ xs)"#,
             let exprs = crate::parser::parse(inp).unwrap();
 
             if let Some(expr) = exprs.first() {
-                let result = crate::infer::infer_with_builtins_typed(
-                    expr,
-                    crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-                )
-                .map(|(typ, _)| typ);
+                let result = crate::infer
+                    ::infer_with_builtins_typed(
+                        expr,
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                    )
+                    .map(|(typ, _)| typ);
                 // Assert that the result is Ok
-                assert!(
-                    result.is_ok(),
-                    "Type inference should succeed for expression: {}",
-                    inp
-                );
+                assert!(result.is_ok(), "Type inference should succeed for expression: {}", inp);
                 // Optionally, check that the type is Int
                 if let Ok(typ) = result {
                     // println!("{:?}", inp);
-                    assert_eq!(
-                        typ.to_string(),
-                        *out,
-                        "Type of expression should match expected"
-                    );
+                    assert_eq!(typ.to_string(), *out, "Type of expression should match expected");
                 }
             } else {
                 panic!("No expressions found in parsed result for: {}", inp);
@@ -81,11 +74,12 @@ xs)"#,
     fn test_type_inference_allows_repeated_discard_params() {
         let exprs = crate::parser::parse("(lambda _ _ 0)").unwrap();
         let expr = exprs.first().expect("lambda should parse");
-        let result = crate::infer::infer_with_builtins_typed(
-            expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-        )
-        .map(|(typ, _)| typ.to_string());
+        let result = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .map(|(typ, _)| typ.to_string());
         assert!(result.is_ok(), "discard params should infer successfully");
         let typ = result.unwrap();
         assert!(
@@ -99,11 +93,12 @@ xs)"#,
     fn test_type_inference_single_arg_variadic_desugar_produces_callable() {
         let exprs = crate::parser::parse("(or false)").unwrap();
         let expr = exprs.first().expect("expression should parse");
-        let result = crate::infer::infer_with_builtins_typed(
-            expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-        )
-        .map(|(typ, _)| typ.to_string());
+        let result = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .map(|(typ, _)| typ.to_string());
         assert!(result.is_ok(), "single-arg or should infer successfully");
         assert_eq!(result.unwrap(), "Bool -> Bool");
     }
@@ -164,26 +159,19 @@ Concequent and alternative must match types
 
             if let Some(expr) = exprs.first() {
                 // Check that type inference returns an Err
-                let result = crate::infer::infer_with_builtins_typed(
-                    expr,
-                    crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-                )
-                .map(|(typ, _)| typ);
+                let result = crate::infer
+                    ::infer_with_builtins_typed(
+                        expr,
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+                    )
+                    .map(|(typ, _)| typ);
                 // Assert that the result is an Err
 
-                assert!(
-                    result.is_err(),
-                    "Expected type inference error for expression: {}",
-                    inp
-                );
+                assert!(result.is_err(), "Expected type inference error for expression: {}", inp);
 
                 // Optionally, you can check the error message
                 if let Err(error_msg) = result {
-                    assert_eq!(
-                        error_msg.to_string(),
-                        *out,
-                        "Type error should match expected"
-                    );
+                    assert_eq!(error_msg.to_string(), *out, "Type error should match expected");
                 }
             } else {
                 panic!("No expressions found in parsed result");
@@ -201,9 +189,7 @@ Concequent and alternative must match types
             _ => panic!("std ast should be (do ...)"),
         };
         assert_eq!(
-            wrapped
-                .err()
-                .unwrap_or_else(|| "expected error".to_string()),
+            wrapped.err().unwrap_or_else(|| "expected error".to_string()),
             "Variable 'map' is forbidden"
         );
     }
@@ -212,27 +198,26 @@ Concequent and alternative must match types
     fn test_merge_std_rejects_reserved_lambda_param_name() {
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
-            crate::parser::Expression::Apply(items) => crate::parser::merge_std_and_program(
-                "(let lower (lambda char char))\nlower",
-                items[1..].to_vec(),
-            ),
+            crate::parser::Expression::Apply(items) =>
+                crate::parser::merge_std_and_program(
+                    "(let lower (lambda char char))\nlower",
+                    items[1..].to_vec()
+                ),
             _ => panic!("std ast should be (do ...)"),
         };
         assert_eq!(
-            wrapped
-                .err()
-                .unwrap_or_else(|| "expected error".to_string()),
+            wrapped.err().unwrap_or_else(|| "expected error".to_string()),
             "Variable 'char' is forbidden"
         );
     }
 
     #[test]
     fn test_baked_ast_to_definitions_flattens_nested_top_level_do() {
-        let ast = crate::parser::build(
-            "(do (do (let inc (lambda x (+ x 1))) (let dec (lambda x (- x 1)))))",
-        )
-        .expect("nested do should parse");
-        let defs = crate::baked::ast_to_definitions(ast, "test")
+        let ast = crate::parser
+            ::build("(do (do (let inc (lambda x (+ x 1))) (let dec (lambda x (- x 1)))))")
+            .expect("nested do should parse");
+        let defs = crate::baked
+            ::ast_to_definitions(ast, "test")
             .expect("nested top-level do should be flattened");
         assert_eq!(defs.len(), 2);
     }
@@ -245,21 +230,9 @@ Concequent and alternative must match types
             "missing error kind, got:\n{}",
             err
         );
-        assert!(
-            err.contains("parse.found: ')' at"),
-            "missing found location, got:\n{}",
-            err
-        );
-        assert!(
-            err.contains("parse.fix_hint[0]:"),
-            "missing repair hint, got:\n{}",
-            err
-        );
-        assert!(
-            err.contains("parse.line_balance["),
-            "missing line balance window, got:\n{}",
-            err
-        );
+        assert!(err.contains("parse.found: ')' at"), "missing found location, got:\n{}", err);
+        assert!(err.contains("parse.fix_hint[0]:"), "missing repair hint, got:\n{}", err);
+        assert!(err.contains("parse.line_balance["), "missing line balance window, got:\n{}", err);
     }
 
     #[test]
@@ -275,35 +248,34 @@ Concequent and alternative must match types
             "missing eof expectation, got:\n{}",
             err
         );
-        assert!(
-            err.contains("parse.open_stack[0]:"),
-            "missing open stack, got:\n{}",
-            err
-        );
+        assert!(err.contains("parse.open_stack[0]:"), "missing open stack, got:\n{}", err);
     }
 
     #[test]
     fn test_parser_normalizes_nested_application_syntax() {
-        let expr =
-            crate::parser::build("((make-adder 2) 3)").expect("nested application should parse");
+        let expr = crate::parser
+            ::build("((make-adder 2) 3)")
+            .expect("nested application should parse");
         assert_eq!(expr.to_lisp(), "(do ((make-adder 2) 3))");
     }
 
     #[test]
     fn test_parser_apply_alias_matches_direct_application() {
-        let expr =
-            crate::parser::build("(apply (make-adder 2) 3)").expect("apply alias should parse");
+        let expr = crate::parser
+            ::build("(apply (make-adder 2) 3)")
+            .expect("apply alias should parse");
         assert_eq!(expr.to_lisp(), "(do ((make-adder 2) 3))");
     }
 
     #[test]
     fn test_parser_expands_top_level_letmacro_before_desugar() {
-        let expr = crate::parser::build(
-            "(do
+        let expr = crate::parser
+            ::build(
+                "(do
                     (letmacro unless (lambda cond body (qq (if (not (uq cond)) (uq body) nil))))
-                    (unless false (+ 1 2)))",
-        )
-        .expect("letmacro program should build");
+                    (unless false (+ 1 2)))"
+            )
+            .expect("letmacro program should build");
         let built = expr.to_lisp();
         assert!(
             !built.contains("letmacro"),
@@ -324,14 +296,15 @@ Concequent and alternative must match types
 
     #[test]
     fn test_parser_macroexpand_and_macroexpand_1_render_expanded_source() {
-        let expr = crate::parser::build(
-            "(do
+        let expr = crate::parser
+            ::build(
+                "(do
                     (letmacro unless (lambda cond body (qq (if (not (uq cond)) (uq body) nil))))
                     (letmacro when-not (lambda cond body (qq (unless (uq cond) (uq body)))))
                     [(macroexpand-1 (when-not false (+ 1 2)))
-                     (macroexpand (when-not false (+ 1 2)))])",
-        )
-        .expect("macroexpand forms should build");
+                     (macroexpand (when-not false (+ 1 2)))])"
+            )
+            .expect("macroexpand forms should build");
         let built = expr.to_lisp();
         assert!(
             built.contains("(string 40 117 110 108 101 115 115"),
@@ -347,12 +320,13 @@ Concequent and alternative must match types
 
     #[test]
     fn test_parser_variadic_letmacro_supports_rest_param_and_splice() {
-        let expr = crate::parser::build(
-            "(do
+        let expr = crate::parser
+            ::build(
+                "(do
                     (letmacro when (lambda cond . body (qq (if (uq cond) (do (uqs body)) nil))))
-                    (when true (+ 1 2) (+ 3 4) nil))",
-        )
-        .expect("variadic letmacro should build");
+                    (when true (+ 1 2) (+ 3 4) nil))"
+            )
+            .expect("variadic letmacro should build");
         let built = expr.to_lisp();
         assert!(
             built.contains("(if true (do (+ 1 2) (+ 3 4) nil) nil)"),
@@ -363,17 +337,18 @@ Concequent and alternative must match types
 
     #[test]
     fn test_parser_multiclause_letmacro_dispatches_by_arity() {
-        let expr = crate::parser::build(
-            "(do
+        let expr = crate::parser
+            ::build(
+                "(do
                     (letmacro unless
                       ((cond) (qq (if (uq cond) nil nil)))
                       ((cond body) (qq (if (uq cond) nil (uq body))))
                       ((cond then else) (qq (if (uq cond) (uq else) (uq then)))))
                     [(unless false)
                      (unless false (+ 1 2))
-                     (unless false (+ 1 2) 9)])",
-        )
-        .expect("multi-clause letmacro should build");
+                     (unless false (+ 1 2) 9)])"
+            )
+            .expect("multi-clause letmacro should build");
         let built = expr.to_lisp();
         assert!(
             built.contains("(if false nil nil)"),
@@ -394,7 +369,8 @@ Concequent and alternative must match types
 
     #[test]
     fn test_parser_vector_destructure_uses_explicit_dot_rest() {
-        let expr = crate::parser::build("(lambda [a b . rest] [a b rest])")
+        let expr = crate::parser
+            ::build("(lambda [a b . rest] [a b rest])")
             .expect("explicit vector rest pattern should build");
         let built = expr.to_lisp();
         assert!(
@@ -406,7 +382,8 @@ Concequent and alternative must match types
 
     #[test]
     fn test_parser_vector_destructure_without_dot_no_longer_captures_implicit_rest() {
-        let expr = crate::parser::build("(lambda [a b c] [a b c])")
+        let expr = crate::parser
+            ::build("(lambda [a b c] [a b c])")
             .expect("fixed-width vector pattern should build");
         let built = expr.to_lisp();
         assert!(
@@ -428,14 +405,15 @@ Concequent and alternative must match types
             r#"(do
                 (let unpack (lambda {a b c} {a {b c}}))
                 (unpack {1 2 3}))"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "{ 1 { 2 3 } }");
     }
 
     #[test]
     fn test_parser_tuple_destructure_single_element_skips_tail() {
-        let expr = crate::parser::build("(do (let {candidate_id} {[] 1}) candidate_id)")
+        let expr = crate::parser
+            ::build("(do (let {candidate_id} {[] 1}) candidate_id)")
             .expect("single-element tuple pattern should build");
         let built = expr.to_lisp();
         assert!(
@@ -451,7 +429,7 @@ Concequent and alternative must match types
             r#"(do
                 (let { candidate_id } { [] 1 })
                 candidate_id)"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "[]");
     }
@@ -462,7 +440,7 @@ Concequent and alternative must match types
             r#"(do
                 (let { a b c } { 1 2 3 })
                 [a b c])"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "[1 2 3]");
     }
@@ -474,7 +452,7 @@ Concequent and alternative must match types
                 (let xs (strings "a" "b"))
                 (let ys (integers 1 2 3))
                 {xs ys})"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "{ [a b] [1 2 3] }");
     }
@@ -489,19 +467,33 @@ Concequent and alternative must match types
     fn test_runtime_std_join_does_not_duplicate_last_item() {
         let output = run_program_output_with_std_and_opts(
             r#"(join ", " (strings "Jill" "Tom" "Anthony"))"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "Jill, Tom, Anthony");
     }
 
     #[test]
     fn test_lambda_grouped_params_multiple_body_forms_wrap_implicit_do() {
-        let expr = crate::parser::build("(lambda (x) (print! x) (+ x 1))")
+        let expr = crate::parser
+            ::build("(lambda (x) (print! x) (+ x 1))")
             .expect("grouped-param lambda with multiple body forms should build");
         let lisp = expr.to_lisp();
         assert!(
             lisp.contains("(lambda x (do (print! x) (+ x 1)))"),
             "expected implicit do-wrapped lambda body, got: {}",
+            lisp
+        );
+    }
+
+    #[test]
+    fn test_lambda_grouped_params_multiple_body_forms_apply_let_destructuring_inside_implicit_do() {
+        let expr = crate::parser
+            ::build("(lambda (x) (let {a b} {1 2}) (+ a b))")
+            .expect("grouped-param lambda with implicit do tuple destructuring should build");
+        let lisp = expr.to_lisp();
+        assert!(
+            lisp.contains("(let a (fst") && lisp.contains("(let b (snd"),
+            "expected implicit do lambda body to run let destructuring transform, got: {}",
             lisp
         );
     }
@@ -514,9 +506,22 @@ Concequent and alternative must match types
                   (+ x 1)
                   (+ x 2)))
                 (f! 4))"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "6");
+    }
+
+    #[test]
+    fn test_runtime_grouped_param_lambda_multiple_body_forms_allow_tuple_destructure_without_explicit_do() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let f! (lambda (x)
+                  (let { a b } { 1 2 })
+                  (+ a b x)))
+                (f! 4))"#,
+            true
+        );
+        assert_eq!(output.trim(), "7");
     }
 
     #[test]
@@ -546,7 +551,16 @@ Concequent and alternative must match types
                   (alter! acc (mod (+ acc b) MOD))
                   (alter! step (+ step 1))))
                 acc)"#,
-            true,
+            true
+        );
+        assert_eq!(output.trim(), "1");
+    }
+
+    #[test]
+    fn test_runtime_vector_of_mixed_tuple_literals_with_five_bools_and_string_compiles() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do (let xs [{ true false false true false "LK" }]) (length xs))"#,
+            true
         );
         assert_eq!(output.trim(), "1");
     }
@@ -562,7 +576,7 @@ Concequent and alternative must match types
                   (fst (std/dec/log/option 2.0))
                   (not (fst (std/dec/log/option 0.0)))
                 ])"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "[true true true true true]");
     }
@@ -587,7 +601,7 @@ Concequent and alternative must match types
             crate::lsp_native_core::CorePosition {
                 line: 1,
                 character: 5,
-            },
+            }
         );
         assert_eq!(prefix.as_deref(), Some("data/"));
     }
@@ -609,19 +623,15 @@ Concequent and alternative must match types
 
     #[test]
     fn test_parser_macro_expansion_errors_include_call_context() {
-        let err =
-            crate::parser::build("(do (letmacro two (lambda a b (qq (+ (uq a) (uq b))))) (two 1))")
-                .expect_err("macro arity mismatch should fail");
+        let err = crate::parser
+            ::build("(do (letmacro two (lambda a b (qq (+ (uq a) (uq b))))) (two 1))")
+            .expect_err("macro arity mismatch should fail");
         assert!(
             err.contains("Macro 'two' expected one of [2] args"),
             "error should include macro arity expectation, got: {}",
             err
         );
-        assert!(
-            err.contains("(two 1)"),
-            "error should include failing macro call, got: {}",
-            err
-        );
+        assert!(err.contains("(two 1)"), "error should include failing macro call, got: {}", err);
     }
 
     #[test]
@@ -629,7 +639,7 @@ Concequent and alternative must match types
         let suggestions = crate::lsp_native_core::suggest_undefined_variable_candidates(
             "Undefined variable: rnage",
             ["range", "reduce", "map", "window"].iter().copied(),
-            3,
+            3
         );
         assert_eq!(suggestions.first().map(String::as_str), Some("range"));
     }
@@ -639,20 +649,16 @@ Concequent and alternative must match types
         let unchanged = crate::lsp_native_core::append_undefined_variable_suggestions(
             "Cannot unify Int with Bool",
             ["range", "reduce", "map"].iter().copied(),
-            3,
+            3
         );
         assert_eq!(unchanged, "Cannot unify Int with Bool");
 
         let with_hint = crate::lsp_native_core::append_undefined_variable_suggestions(
             "Undefined variable: mpa",
             ["map", "filter", "reduce"].iter().copied(),
-            3,
+            3
         );
-        assert!(
-            with_hint.contains("Did you mean: map"),
-            "got:\n{}",
-            with_hint
-        );
+        assert!(with_hint.contains("Did you mean: map"), "got:\n{}", with_hint);
     }
 
     #[test]
@@ -680,21 +686,23 @@ Concequent and alternative must match types
 
     #[test]
     fn test_loop_while_allows_mutating_body_without_lambda_argument() {
-        let expr = crate::parser::build("(do (mut i 0) (while (< i 3) (alter! i (+ i 1))) i)")
+        let expr = crate::parser
+            ::build("(do (mut i 0) (while (< i 3) (alter! i (+ i 1))) i)")
             .expect("program should build");
-        let (typ, _typed) = crate::infer::infer_with_builtins_typed(
-            &expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-        )
-        .expect("program should infer");
+        let (typ, _typed) = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("program should infer");
         assert_eq!(typ.to_string(), "Int");
     }
 
     #[test]
     fn test_loop_while_multiple_body_forms_wrap_implicit_do() {
-        let expr =
-            crate::parser::build("(while (< i 3) (alter! i (+ i 1)) (alter! acc (+ acc i)))")
-                .expect("while with multiple body forms should build");
+        let expr = crate::parser
+            ::build("(while (< i 3) (alter! i (+ i 1)) (alter! acc (+ acc i)))")
+            .expect("while with multiple body forms should build");
         let lisp = expr.to_lisp();
         assert!(
             lisp.contains("(while (< i 3) (do (alter! i (+ i 1)) (alter! acc (+ acc i)) nil))"),
@@ -738,14 +746,15 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn run_program_output_unlocked(src: &str) -> String {
         let expr = crate::parser::build(src).expect("program should build");
-        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
             .expect("program should compile");
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
         #[cfg(feature = "io")]
         let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
@@ -758,14 +767,15 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn run_program_error_unlocked(src: &str) -> String {
         let expr = crate::parser::build(src).expect("program should build");
-        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
             .expect("program should compile");
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
         #[cfg(feature = "io")]
         let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
@@ -777,9 +787,7 @@ Concequent and alternative must match types
 
     #[cfg(feature = "runtime")]
     fn run_program_error_with_debug_guards(src: &str) -> String {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .expect("runtime test lock should not be poisoned");
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
         let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
         let _float_overflow = ScopedEnvVar::set("QUE_FLOAT_OVERFLOW_CHECK", "1");
         let _div_zero = ScopedEnvVar::set("QUE_DIV_ZERO_CHECK", "1");
@@ -789,17 +797,13 @@ Concequent and alternative must match types
 
     #[cfg(feature = "runtime")]
     fn run_program_output(src: &str) -> String {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .expect("runtime test lock should not be poisoned");
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
         run_program_output_unlocked(src)
     }
 
     #[cfg(feature = "runtime")]
     fn run_program_error(src: &str) -> String {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .expect("runtime test lock should not be poisoned");
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
         run_program_error_unlocked(src)
     }
 
@@ -808,27 +812,27 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let expr = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(src, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(src, items[1..].to_vec())
                     .expect("program + std should merge")
             }
             _ => panic!("std ast should be (do ...)"),
         };
-        crate::wat::compile_program_to_wat_with_opts(&expr, enable_optimizer)
+        crate::wat
+            ::compile_program_to_wat_with_opts(&expr, enable_optimizer)
             .expect("program should compile")
     }
 
     #[cfg(feature = "runtime")]
     fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .expect("runtime test lock should not be poisoned");
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
         let wat = compile_std_program_to_wat(src, enable_optimizer);
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
         #[cfg(feature = "io")]
         let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
@@ -843,19 +847,24 @@ Concequent and alternative must match types
         let output_no_opts = run_program_output_with_std_and_opts(src, false);
         let output_with_opts = run_program_output_with_std_and_opts(src, true);
         assert_eq!(
-            output_with_opts, output_no_opts,
+            output_with_opts,
+            output_no_opts,
             "optimizer output must match non-optimized output"
         );
     }
 
     #[cfg(feature = "runtime")]
     fn run_compiled_wat_no_result(wat_src: &str) {
+        use wasmtime::Config;
+
         let wasm_bytes = wat::parse_str(wat_src).expect("wat should encode to wasm");
-        let config = {
+        let config: Config = {
             let mut config = wasmtime::Config::new();
-            match std::env::var("QUE_WASM_OPT")
-                .unwrap_or_else(|_| "speed".to_string())
-                .as_str()
+            match
+                std::env
+                    ::var("QUE_WASM_OPT")
+                    .unwrap_or_else(|_| "speed".to_string())
+                    .as_str()
             {
                 "none" => config.cranelift_opt_level(wasmtime::OptLevel::None),
                 "speed" => config.cranelift_opt_level(wasmtime::OptLevel::Speed),
@@ -872,10 +881,10 @@ Concequent and alternative must match types
         crate::io::add_shell_to_linker(&mut linker).expect("io linker should install");
 
         #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
         #[cfg(not(feature = "io"))]
         let store_data = ();
 
@@ -893,7 +902,7 @@ Concequent and alternative must match types
     fn benchmark_wat_execution_only(
         label: &str,
         wat_src: &str,
-        iterations: usize,
+        iterations: usize
     ) -> std::time::Duration {
         use std::time::Instant;
 
@@ -920,14 +929,15 @@ Concequent and alternative must match types
     fn benchmark_std_program(
         label: &str,
         src: &str,
-        iterations: usize,
+        iterations: usize
     ) -> (std::time::Duration, std::time::Duration, String) {
         assert!(iterations > 0, "benchmark iterations must be > 0");
 
         let output_no_opts = run_program_output_with_std_and_opts(src, false);
         let output_with_opts = run_program_output_with_std_and_opts(src, true);
         assert_eq!(
-            output_with_opts, output_no_opts,
+            output_with_opts,
+            output_no_opts,
             "benchmark '{}' output mismatch between optimized and non-optimized runs",
             label
         );
@@ -935,10 +945,16 @@ Concequent and alternative must match types
         let wat_no_opts = compile_std_program_to_wat(src, false);
         let wat_with_opts = compile_std_program_to_wat(src, true);
 
-        let best_no_opts =
-            benchmark_wat_execution_only(&format!("{} (no opts)", label), &wat_no_opts, iterations);
-        let best_with_opts =
-            benchmark_wat_execution_only(&format!("{} (opts)", label), &wat_with_opts, iterations);
+        let best_no_opts = benchmark_wat_execution_only(
+            &format!("{} (no opts)", label),
+            &wat_no_opts,
+            iterations
+        );
+        let best_with_opts = benchmark_wat_execution_only(
+            &format!("{} (opts)", label),
+            &wat_with_opts,
+            iterations
+        );
 
         eprintln!(
             "[bench] {} | exec_no_opts_best={:?} | exec_opts_best={:?} | speedup={:.2}x",
@@ -960,7 +976,7 @@ Concequent and alternative must match types
                 (let xs [])
                 (loop 0 10 (lambda i (push! xs i)))
                 xs)"#,
-            true,
+            true
         );
         assert_eq!(output, "[0 1 2 3 4 5 6 7 8 9]");
     }
@@ -983,7 +999,8 @@ Concequent and alternative must match types
     #[ignore = "manual benchmark"]
     #[cfg(feature = "runtime")]
     fn bench_runtime_map_filter_reduce_pipeline() {
-        let src = r#"(do
+        let src =
+            r#"(do
             (let xs (range 1 20000))
             (|> xs
                 (map (lambda x (+ x 1)))
@@ -997,7 +1014,8 @@ Concequent and alternative must match types
     #[ignore = "manual benchmark"]
     #[cfg(feature = "runtime")]
     fn bench_runtime_string_split_join_pipeline() {
-        let src = r#"(do
+        let src =
+            r#"(do
             (let lines
               (map
                 (lambda n (cons "row-" (Integer->String n) ",open,US"))
@@ -1018,7 +1036,8 @@ Concequent and alternative must match types
     #[ignore = "manual benchmark"]
     #[cfg(feature = "runtime")]
     fn bench_runtime_table_grouping_workload() {
-        let src = r#"(do
+        let src =
+            r#"(do
             (let ids (range 0 12000))
             (let teams (map (lambda x (if (= (mod x 3) 0) "Blue" (if (= (mod x 3) 1) "Red" "Green"))) ids))
             (Table/entries
@@ -1031,17 +1050,15 @@ Concequent and alternative must match types
                         (Table/new)
                         teams)))"#;
         let (_, _, output) = benchmark_std_program("table-grouping", src, 3);
-        assert!(
-            output.contains("Blue"),
-            "grouping benchmark should contain grouped keys"
-        );
+        assert!(output.contains("Blue"), "grouping benchmark should contain grouped keys");
     }
 
     #[test]
     #[ignore = "manual benchmark"]
     #[cfg(feature = "runtime")]
     fn bench_runtime_graph_cycle_workload() {
-        let src = r#"(do
+        let src =
+            r#"(do
             (let from (map (lambda x (cons "U" (Integer->String x))) (range 1 40)))
             (let to (map (lambda x (cons "U" (Integer->String (+ 1 (mod x 39))))) (range 1 40)))
             (let rows (range 0 (- (length from) 1)))
@@ -1059,7 +1076,7 @@ Concequent and alternative must match types
                 (Table/update! counts "US" 1 (lambda n (+ n 1)))
                 (Table/update! counts "US" 1 (lambda n (+ n 1)))
                 (Table/get-unsafe "US" counts))"#,
-            true,
+            true
         );
         assert_eq!(output, "2");
     }
@@ -1073,7 +1090,7 @@ Concequent and alternative must match types
                 (Table/update-or! counts "US" (lambda 10) (lambda n (+ n 1)))
                 (Table/update-or! counts "US" (lambda 10) (lambda n (+ n 1)))
                 (Table/get-unsafe "US" counts))"#,
-            true,
+            true
         );
         assert_eq!(output, "11");
     }
@@ -1088,7 +1105,7 @@ Concequent and alternative must match types
                 (Table/push-or! groups "blue" "B")
                 (Table/push-or! groups "red" "C")
                 { (Table/get-unsafe "blue" groups) (Table/get-unsafe "red" groups) })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ [A B] [C] }");
     }
@@ -1101,7 +1118,7 @@ Concequent and alternative must match types
                 (let a (SignedBigInt/new "-25"))
                 (let b (SignedBigInt/new "7"))
                 { (SignedBigInt/add a b) (SignedBigInt/sub b (SignedBigInt/new "25")) })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ { true [1 8] } { true [1 8] } }");
     }
@@ -1114,7 +1131,7 @@ Concequent and alternative must match types
                 (let a (SignedBigInt/new "-25"))
                 (let b (SignedBigInt/new "-4"))
                 { (SignedBigInt/mul a b) (SignedBigInt/new "-0") })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ { false [1 0 0] } { false [0] } }");
     }
@@ -1127,7 +1144,7 @@ Concequent and alternative must match types
                 (let a (SignedBigInt/new "-25"))
                 (let b (SignedBigInt/new "7"))
                 { (SignedBigInt/lt? a b) (SignedBigInt/gte? b a) (SignedBigInt/equal? (SignedBigInt/new "-0") SignedBigInt/zero) })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ true { true true } }");
     }
@@ -1140,7 +1157,7 @@ Concequent and alternative must match types
                 { (SignedBigInt/div (SignedBigInt/new "-7") (SignedBigInt/new "3"))
                   (SignedBigInt/div (SignedBigInt/new "7") (SignedBigInt/new "-3"))
                   (SignedBigInt/div (SignedBigInt/new "-7") (SignedBigInt/new "-3")) })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ { true [2] } { { true [2] } { false [2] } } }");
     }
@@ -1153,7 +1170,7 @@ Concequent and alternative must match types
                 { (SignedBigInt/to-string (SignedBigInt/new "-25"))
                   (SignedBigInt/to-string (SignedBigInt/new "7"))
                   (SignedBigInt/to-string (SignedBigInt/new "-0")) })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ -25 { 7 0 } }");
     }
@@ -1165,7 +1182,7 @@ Concequent and alternative must match types
             r#"(do
                 { (BigInt/mod [7] [3])
                   (BigInt/mod [2 5] [7]) })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ [1] [4] }");
     }
@@ -1178,7 +1195,7 @@ Concequent and alternative must match types
                 { (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "3")))
                   (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "7") (SignedBigInt/new "-3")))
                   (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "-3"))) })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ -1 { 1 -1 } }");
     }
@@ -1192,7 +1209,7 @@ Concequent and alternative must match types
                   (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "-3")))
                   (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "-7") (SignedBigInt/new "-3")))
                   (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
-            true,
+            true
         );
         assert_eq!(output, "[-3 -3 2 2]");
     }
@@ -1206,7 +1223,7 @@ Concequent and alternative must match types
                   (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "-3")))
                   (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "-7") (SignedBigInt/new "-3")))
                   (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
-            true,
+            true
         );
         assert_eq!(output, "[-2 -2 3 3]");
     }
@@ -1219,7 +1236,7 @@ Concequent and alternative must match types
                 [ (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 5))
                   (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 4))
                   (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 0)) ])"#,
-            true,
+            true
         );
         assert_eq!(output, "[-32 16 1]");
     }
@@ -1232,7 +1249,7 @@ Concequent and alternative must match types
                 [ (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [5]))
                   (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [4]))
                   (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [0])) ])"#,
-            true,
+            true
         );
         assert_eq!(output, "[-32 16 1]");
     }
@@ -1242,7 +1259,7 @@ Concequent and alternative must match types
     fn test_runtime_signed_bigint_square_keeps_positive_result() {
         let output = run_program_output_with_std_and_opts(
             r#"(SignedBigInt/to-string (SignedBigInt/square (SignedBigInt/new "-12")))"#,
-            true,
+            true
         );
         assert_eq!(output, "144");
     }
@@ -1252,7 +1269,7 @@ Concequent and alternative must match types
     fn test_runtime_signed_bigint_range_builds_ascending_sequence() {
         let output = run_program_output_with_std_and_opts(
             r#"(map SignedBigInt/to-string (SignedBigInt/range (SignedBigInt/new "-2") (SignedBigInt/new "2")))"#,
-            true,
+            true
         );
         assert_eq!(output, "[-2 -1 0 1 2]");
     }
@@ -1265,7 +1282,7 @@ Concequent and alternative must match types
                 (let xs [ (SignedBigInt/new "-2") (SignedBigInt/new "3") (SignedBigInt/new "4") ])
                 [ (SignedBigInt/to-string (SignedBigInt/sum xs))
                   (SignedBigInt/to-string (SignedBigInt/product xs)) ])"#,
-            true,
+            true
         );
         assert_eq!(output, "[5 -24]");
     }
@@ -1281,7 +1298,7 @@ Concequent and alternative must match types
                 })
                 (|> (zip { candidate_id skill })
                     (map (lambda { cid sk } { cid sk }))))"#,
-            true,
+            true
         );
         assert_eq!(
             output,
@@ -1300,7 +1317,7 @@ Concequent and alternative must match types
                   (alter! acc (+ acc i))
                   (alter! i (+ i 1)))
                 acc)"#,
-            true,
+            true
         );
         assert_eq!(output, "3");
     }
@@ -1316,7 +1333,7 @@ Concequent and alternative must match types
                 })
                 (|> (zip { candidate_id skill })
                     (map (lambda { candidate_id skill } { candidate_id skill }))))"#,
-            true,
+            true
         );
         assert_eq!(
             output,
@@ -1356,7 +1373,7 @@ Concequent and alternative must match types
                                         (tail-call:retry! x []))))
                             (|> input (map retry) (map sum) (sum)))))
                 [(part1 PARSED) (part2 PARSED)])"#,
-            true,
+            true
         );
         assert_eq!(output, "[34241 51316]");
     }
@@ -1367,7 +1384,7 @@ Concequent and alternative must match types
         let output = run_program_output(
             r#"(do
                 (letmacro inc1 (lambda x (qq (+ (uq x) 1))))
-                (inc1 41))"#,
+                (inc1 41))"#
         );
         assert_eq!(output, "42");
     }
@@ -1375,23 +1392,27 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_library_macros_expand_library_defs_and_user_program() {
-        let lib_ast = crate::parser::build_library(
-            r#"(do
+        let lib_ast = crate::parser
+            ::build_library(
+                r#"(do
                     (letmacro inc1 (lambda x (qq (+ (uq x) 1))))
-                    (let add2 (lambda x (inc1 (inc1 x)))))"#,
-        )
-        .expect("library source should parse without stripping macros");
-        let lib_defs = crate::baked::ast_to_definitions(lib_ast, "test library")
+                    (let add2 (lambda x (inc1 (inc1 x)))))"#
+            )
+            .expect("library source should parse without stripping macros");
+        let lib_defs = crate::baked
+            ::ast_to_definitions(lib_ast, "test library")
             .expect("library defs should flatten");
-        let expr = crate::parser::merge_std_and_program("(inc1 (add2 40))", lib_defs)
+        let expr = crate::parser
+            ::merge_std_and_program("(inc1 (add2 40))", lib_defs)
             .expect("library macro should expand in std defs and user program");
-        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
             .expect("expanded program should compile");
         #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .expect("io store should initialize");
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
         let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
@@ -1405,13 +1426,12 @@ Concequent and alternative must match types
     #[test]
     fn test_baked_embedded_library_preserves_macros_for_user_program_merge() {
         let std_ast = crate::baked::load_ast();
-        let lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")
+        let lib_defs = crate::baked
+            ::ast_to_definitions(std_ast, "active library")
             .expect("embedded library should flatten to definitions");
-        let expr = crate::parser::merge_std_and_program(
-            "(do (let out []) (when true (set! out 0 0)) out)",
-            lib_defs,
-        )
-        .expect("user program should be able to use baked library macros");
+        let expr = crate::parser
+            ::merge_std_and_program("(do (let out []) (when true (set! out 0 0)) out)", lib_defs)
+            .expect("user program should be able to use baked library macros");
         let rendered = expr.to_lisp();
         assert!(
             rendered.contains("(if true"),
@@ -1433,17 +1453,14 @@ Concequent and alternative must match types
                 [
                     (macroexpand-1 (when-not false (+ 1 2)))
                     (macroexpand (when-not false (+ 1 2)))
-                ])"#,
+                ])"#
         );
-        assert_eq!(
-            expand_output,
-            "[(unless false (+ 1 2)) (if false nil (+ 1 2))]"
-        );
+        assert_eq!(expand_output, "[(unless false (+ 1 2)) (if false nil (+ 1 2))]");
 
         let when_output = run_program_output(
             r#"(do
                 (letmacro when (lambda cond . body (qq (if (uq cond) (do (uqs body)) nil))))
-                (when true (+ 1 2) (+ 3 4) nil))"#,
+                (when true (+ 1 2) (+ 3 4) nil))"#
         );
         assert_eq!(when_output, "0");
     }
@@ -1460,7 +1477,7 @@ Concequent and alternative must match types
                             (qq (do
                                     (let (uq tmp) (uq expr))
                                     ((uq body) (uq tmp)))))))
-                (with-temp (+ 1 2) (lambda t (+ t 10))))"#,
+                (with-temp (+ 1 2) (lambda t (+ t 10))))"#
         );
         assert_eq!(output, "13");
     }
@@ -1492,7 +1509,7 @@ Concequent and alternative must match types
                      (if (get active 0) 1 0)
                      (Dec->Int (get score 0))
                      (length user_names)]))"#,
-            true,
+            true
         );
         assert_eq!(output, "[3 30 1 1 2]");
     }
@@ -1505,7 +1522,7 @@ Concequent and alternative must match types
                 (let headers ["odd" "even"])
                 (let rows [["1" "2"] ["3" "4"] ["5" "6"]])
                 (csv/write/simple headers rows ","))"#,
-            true,
+            true
         );
         assert_eq!(output, "odd,even\n1,2\n3,4\n5,6");
     }
@@ -1536,12 +1553,9 @@ Concequent and alternative must match types
                   (join "," (graph/project-path txs (get cycles 0)))
                   "|"
                   (join ">" (graph/normalize-cycle ["U002" "U003" "U001" "U002"]))))"#,
-            true,
+            true
         );
-        assert_eq!(
-            output.trim(),
-            "1|U001>U002>U003>U001|T1,T2,T3|U001>U002>U003>U001"
-        );
+        assert_eq!(output.trim(), "1|U001>U002>U003>U001|T1,T2,T3|U001>U002>U003>U001");
     }
 
     #[test]
@@ -1567,7 +1581,7 @@ Concequent and alternative must match types
                   (join ">" (graph/path->nodes from to (get cycles 0)))
                   "|"
                   (join "," (graph/project-path txs (get cycles 0)))))"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "1|U006>U005>U006|T0006,T0007");
     }
@@ -1585,7 +1599,7 @@ Concequent and alternative must match types
                   (graph/has-cycle? [0 1 2] cyclic-from cyclic-to)
                   (graph/has-cycle? [0 1 2] acyclic-from acyclic-to)
                 ])"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "[true false]");
     }
@@ -1603,7 +1617,7 @@ Concequent and alternative must match types
                   (lambda (a b) (= (fst a) (fst b)))
                   (get joined 0)
                   (length joined)))"#,
-            true,
+            true
         );
         assert_eq!(output.trim(), "true");
     }
@@ -1617,7 +1631,7 @@ Concequent and alternative must match types
                 (let ys (cdr xs 2))
                 (set! ys 0 99)
                 { xs ys })"#,
-            true,
+            true
         );
         assert_eq!(output, "{ [1 2 3 4 5] [99 4 5] }");
     }
@@ -1633,7 +1647,7 @@ Concequent and alternative must match types
                     ((cond then else) (qq (if (uq cond) (uq else) (uq then)))))
                 [(unless false)
                  (unless false nil)
-                 (unless false nil nil)])"#,
+                 (unless false nil nil)])"#
         );
         assert_eq!(output, "[0 0 0]");
     }
@@ -1641,19 +1655,22 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_runtime_not_equal_alias_macros_expand_from_baked_library() {
-        let output =
-            run_program_output_with_std_and_opts(r#"[(!= 1 2) (!= 2 2) (<> 3 4) (<> 5 5)]"#, true);
+        let output = run_program_output_with_std_and_opts(
+            r#"[(!= 1 2) (!= 2 2) (<> 3 4) (<> 5 5)]"#,
+            true
+        );
         assert_eq!(output, "[true false true false]");
     }
 
     #[test]
     fn test_baked_cond_macro_preserves_legacy_parser_expansion_shapes() {
         let std_ast = crate::baked::load_ast();
-        let lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")
+        let lib_defs = crate::baked
+            ::ast_to_definitions(std_ast, "active library")
             .expect("embedded library should flatten to definitions");
-        let expr =
-            crate::parser::merge_std_and_program("[(cond) (cond false 1 true 2 3)]", lib_defs)
-                .expect("cond macro should expand through baked library merge");
+        let expr = crate::parser
+            ::merge_std_and_program("[(cond) (cond false 1 true 2 3)]", lib_defs)
+            .expect("cond macro should expand through baked library merge");
         let rendered = expr.to_lisp();
         assert!(
             rendered.contains("(if false 1 (if true 2 3))"),
@@ -1677,8 +1694,10 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_cons_builtin_works_as_higher_order_function_value() {
-        let output =
-            run_program_output_with_std_and_opts(r#"(reduce cons [] [[1 2] [3] [4 5]])"#, true);
+        let output = run_program_output_with_std_and_opts(
+            r#"(reduce cons [] [[1 2] [3] [4 5]])"#,
+            true
+        );
         assert_eq!(output, "[1 2 3 4 5]");
     }
 
@@ -1688,7 +1707,7 @@ Concequent and alternative must match types
         let err = run_program_error(
             r#"(do
                 (let xs [ 1 2 3 4 ])
-                [(get xs -1) (get xs 4) (get xs 10)])"#,
+                [(get xs -1) (get xs 4) (get xs 10)])"#
         );
         assert!(
             err.contains("call error"),
@@ -1712,9 +1731,7 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_alter_inline_rhs_matches_precompute_with_int_overflow_check() {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .expect("runtime test lock should not be poisoned");
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
         let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
         let output = run_program_output_unlocked(
             r#"(do
@@ -1734,7 +1751,7 @@ Concequent and alternative must match types
                   (alter! num-pre (+ num-pre term))
                   (alter! base-pre (/ base-pre 10))
                   (alter! i-pre (+ i-pre 1))))
-                [num-inline num-pre])"#,
+                [num-inline num-pre])"#
         );
         assert_eq!(output, "[12 12]");
     }
@@ -1754,7 +1771,7 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn test_float_div_zero_traps_with_debug_guards() {
         let err = run_program_error_with_debug_guards(
-            r#"(do (let f (lambda z (/. (Int->Dec 1) z))) (f (Int->Dec 0)))"#,
+            r#"(do (let f (lambda z (/. (Int->Dec 1) z))) (f (Int->Dec 0)))"#
         );
         assert!(
             err.contains("unreachable"),
@@ -1771,7 +1788,7 @@ Concequent and alternative must match types
                 3.1425
                 (+. 1.5 2.25)
                 (*. 1.5 2.25)
-                (/. 7.5 2.5) ]"#,
+                (/. 7.5 2.5) ]"#
         );
         assert_eq!(output, "[3.14 3.142 3.75 3.375 3]");
     }
@@ -1783,7 +1800,7 @@ Concequent and alternative must match types
             r#"(do
                 (let a (Dec->Int 3.99))
                 (let b (Int->Dec 7))
-                (tuple a b))"#,
+                (tuple a b))"#
         );
         assert_eq!(output, "{ 3 7 }");
     }
@@ -1791,9 +1808,7 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_decimal_scale_env_changes_literal_quantization_and_display() {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .expect("runtime test lock should not be poisoned");
+        let _lock = runtime_exec_lock().lock().expect("runtime test lock should not be poisoned");
         let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "100");
         let output = run_program_output_unlocked(r#"[ 3.141 3.146 (+. 1.11 2.22) ]"#);
         assert_eq!(output, "[3.14 3.15 3.33]");
@@ -1808,7 +1823,7 @@ Concequent and alternative must match types
                 (let xs [])
                 (let i [0])
                 (while (< (get i 0) 10) (do (push! xs (get i 0)) (set! i 0 (+ (get i 0) 1))))
-                xs)"#,
+                xs)"#
         );
         assert_eq!(output, "[0 1 2 3 4 5 6 7 8 9]");
     }
@@ -1846,12 +1861,9 @@ Concequent and alternative must match types
 
                 [(valid-path 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2)
                  (valid-path 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)])"#,
-            true,
+            true
         );
-        assert_eq!(
-            output,
-            "[[[1 2] [0 2] [1 0]] [[1 2] [0] [0] [5 4] [5 3] [3 4]]]"
-        );
+        assert_eq!(output, "[[[1 2] [0 2] [1 0]] [[1 2] [0] [0] [5 4] [5 3] [3 4]]]");
     }
 
     #[test]
@@ -1863,7 +1875,7 @@ Concequent and alternative must match types
              (map (lambda t (tuple (+ (fst t) 1) (snd t))))
              (filter (lambda t (> (fst t) 2)))
              unzip))
-  [(sum (fst z)) (length (snd z)) (|> (window 2 [1 2 3 4]) (map length) sum)])"#,
+  [(sum (fst z)) (length (snd z)) (|> (window 2 [1 2 3 4]) (map length) sum)])"#
         )
     }
 
@@ -1879,7 +1891,7 @@ Concequent and alternative must match types
   unzip
   zip
   (map (lambda { a b } (* a b)))
-  sum)"#,
+  sum)"#
         )
     }
 
@@ -1887,7 +1899,7 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_smoke3() {
         assert_std_program_output_matches_with_and_without_optimizer(
-            r#"(|> (range 1 (|> (range 1 20) (map (lambda x (+ x 1))) (find (lambda x (> x 15))))) (map odd?) (every? (Bool/eq? true)))"#,
+            r#"(|> (range 1 (|> (range 1 20) (map (lambda x (+ x 1))) (find (lambda x (> x 15))))) (map odd?) (every? (Bool/eq? true)))"#
         )
     }
     #[test]
@@ -1897,7 +1909,7 @@ Concequent and alternative must match types
             r#"
             (let a (|> (range 1 5) (map/i (lambda x i { x i }))))
 (let b (map/i (lambda x i { x i }) [1 2 3 4 5]))
-[a b]"#,
+[a b]"#
         )
     }
 
@@ -1918,7 +1930,8 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_oversaturated_returned_function_call_matches_explicit_apply() {
-        let src = r#"(do
+        let src =
+            r#"(do
   (let make-adder (lambda x (lambda y (+ x y))))
   [
     (apply (make-adder 2) 3)
@@ -1933,7 +1946,8 @@ Concequent and alternative must match types
     #[ignore = "known remaining issue: returned closures over nested higher-order partials still trap in wasm backend"]
     #[cfg(feature = "runtime")]
     fn test_mapcar_comp_works_with_nested_and_apply_call_forms() {
-        let src = r#"(do
+        let src =
+            r#"(do
   (let mymap (lambda fn xs (if (= (length xs) 0) [] (do
     (let out [])
     (mut i 0)
@@ -1948,10 +1962,7 @@ Concequent and alternative must match types
   ])"#;
         assert_std_program_output_matches_with_and_without_optimizer(src);
         let output = run_program_output_with_std_and_opts(src, true);
-        assert_eq!(
-            output,
-            "[[[1 4 9] [4 16 25 36] [9]] [[1 4 9] [4 16 25 36] [9]]]"
-        );
+        assert_eq!(output, "[[[1 4 9] [4 16 25 36] [9]] [[1 4 9] [4 16 25 36] [9]]]");
     }
 
     #[test]
@@ -1974,7 +1985,7 @@ Concequent and alternative must match types
     (two-sum-test [ 2 7 11 15 ] 9)
     (two-sum-test [3 2 4] 6)
     (two-sum-test [ 2 7 11 15 ] 9)
-]"#,
+]"#
         )
     }
 
@@ -1988,7 +1999,7 @@ Concequent and alternative must match types
     (reduce/until
         (lambda a x (+ a x))
         (lambda a x (> (+ a x) 7))
-        0))"#,
+        0))"#
         )
     }
 
@@ -1996,7 +2007,7 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_template() {
         assert_std_program_output_matches_with_and_without_optimizer(
-            r#"(|> (range 1 10) (map (lambda x (+ x 1))) (filter (lambda x (> x 3))) (reduce + 0))"#,
+            r#"(|> (range 1 10) (map (lambda x (+ x 1))) (filter (lambda x (> x 3))) (reduce + 0))"#
         );
     }
 
@@ -2004,7 +2015,7 @@ Concequent and alternative must match types
     #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_template6() {
         assert_std_program_output_matches_with_and_without_optimizer(
-            r#"(|> (range 1 10) (map (lambda x (+ x 1))) (window 3) (map sum) (filter even?) sum)"#,
+            r#"(|> (range 1 10) (map (lambda x (+ x 1))) (window 3) (map sum) (filter even?) sum)"#
         );
     }
 
@@ -2024,7 +2035,7 @@ Concequent and alternative must match types
                 [(sort-array-by-parity2 [4 2 5 7])
                  (sort-array-by-parity2 [2 3])
                  (sort-array-by-parity2 [4 3])])"#,
-            true,
+            true
         );
         assert_eq!(output, "[[4 2 5 7] [2 3] [4 3]]");
     }
@@ -2038,7 +2049,7 @@ Concequent and alternative must match types
                 (let out [])
                 (std/vector/for [1 2 3 4] (lambda x (set! out (length out) (* x 2))))
                 out)"#,
-            true,
+            true
         );
         assert_eq!(output, "[2 4 6 8]");
     }
@@ -2061,7 +2072,7 @@ Concequent and alternative must match types
                             (std/vector/push! (std/vector/at out -1) (get matrix j i)))))))
                     out))))
                 (std/vector/3d/rotate [[1 2 3] [4 5 6]]))"#,
-            true,
+            true
         );
         assert_eq!(output, "[[1 4] [2 5] [3 6]]");
     }
@@ -2069,21 +2080,23 @@ Concequent and alternative must match types
     fn infer_typed(input: &str) -> crate::infer::TypedExpression {
         let exprs = crate::parser::parse(input).expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
-        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
-            expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-        )
-        .expect("input should infer");
+        let (_typ, typed) = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("input should infer");
         typed
     }
 
     fn infer_typed_built(input: &str) -> crate::infer::TypedExpression {
         let expr = crate::parser::build(input).expect("input should build");
-        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
-            &expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-        )
-        .expect("input should infer");
+        let (_typ, typed) = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("input should infer");
         typed
     }
 
@@ -2229,8 +2242,9 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_inline_avoids_duplicate_vector_eval() {
-        let typed =
-            infer_typed("(do (let f (lambda x (+ (get x 0) (get x 0)))) (f (vector 1 2 3)))");
+        let typed = infer_typed(
+            "(do (let f (lambda x (+ (get x 0) (get x 0)))) (f (vector 1 2 3)))"
+        );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
 
@@ -2255,7 +2269,7 @@ Concequent and alternative must match types
     #[test]
     fn test_typed_optimization_inline_skips_large_lambda_body() {
         let typed = infer_typed(
-            "(do (let f (lambda x (+ (+ (+ (+ (+ (+ (+ (+ x 1) 2) 3) 4) 5) 6) 7) 8))) (f 1))",
+            "(do (let f (lambda x (+ (+ (+ (+ (+ (+ (+ (+ x 1) 2) 3) 4) 5) 6) 7) 8))) (f 1))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -2365,7 +2379,7 @@ Concequent and alternative must match types
                         (set! board (length board) 0)
                         (alter! i (+ i 1))))
                     board))
-                5)"#,
+                5)"#
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         assert_eq!(optimized.expr.to_lisp(), "(__vec_new_zeroed_i32 25)");
@@ -2383,7 +2397,7 @@ Concequent and alternative must match types
                         (set! xs (length xs) (+ i 1))
                         (alter! i (+ i 1))))
                     xs))
-                5)"#,
+                5)"#
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -2408,23 +2422,35 @@ Concequent and alternative must match types
     #[test]
     fn test_typed_optimization_lowers_non_escaping_local_variable_cell_to_mut_local() {
         let typed = infer_typed_built(
-            "(do (let box (lambda value [value])) (let set (lambda vrbl x (set! vrbl 0 x))) (variable x 0) (set x 1) (get x))",
+            "(do (let box (lambda value [value])) (let set (lambda vrbl x (set! vrbl 0 x))) (variable x 0) (set x 1) (get x))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let lisp = optimized.expr.to_lisp();
         assert!(lisp.contains("(mut x 0)"), "expected local cell to lower to mut, got: {}", lisp);
-        assert!(lisp.contains("(alter! x 1)"), "expected cell set to lower to alter!, got: {}", lisp);
-        assert!(!lisp.contains("(get x)"), "expected cell get to lower to bare local read, got: {}", lisp);
+        assert!(
+            lisp.contains("(alter! x 1)"),
+            "expected cell set to lower to alter!, got: {}",
+            lisp
+        );
+        assert!(
+            !lisp.contains("(get x)"),
+            "expected cell get to lower to bare local read, got: {}",
+            lisp
+        );
     }
 
     #[test]
     fn test_typed_optimization_keeps_local_variable_cell_when_lambda_would_capture_it() {
         let typed = infer_typed_built(
-            "(do (let box (lambda value [value])) (variable x 0) (let f (lambda () (get x))) f)",
+            "(do (let box (lambda value [value])) (variable x 0) (let f (lambda () (get x))) f)"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let lisp = optimized.expr.to_lisp();
-        assert!(lisp.contains("(let x (box 0))"), "expected captured local cell to stay boxed, got: {}", lisp);
+        assert!(
+            lisp.contains("(let x (box 0))"),
+            "expected captured local cell to stay boxed, got: {}",
+            lisp
+        );
     }
 
     #[test]
@@ -2436,12 +2462,13 @@ Concequent and alternative must match types
 
     #[test]
     fn test_infer_impure_function_requires_bang_suffix() {
-        let exprs =
-            crate::parser::parse("(let fn (lambda xs (set! xs 0 1)))").expect("input should parse");
+        let exprs = crate::parser
+            ::parse("(let fn (lambda xs (set! xs 0 1)))")
+            .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         let err = inferred.expect_err("impure function without ! should fail");
         assert!(
@@ -2453,14 +2480,13 @@ Concequent and alternative must match types
 
     #[test]
     fn test_infer_impure_function_alias_requires_bang_suffix() {
-        let exprs = crate::parser::parse(
-            "(do (let reverse! (lambda xs (set! xs 0 1))) (let reverse reverse!) reverse)",
-        )
-        .expect("input should parse");
+        let exprs = crate::parser
+            ::parse("(do (let reverse! (lambda xs (set! xs 0 1))) (let reverse reverse!) reverse)")
+            .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         let err = inferred.expect_err("impure function alias without ! should fail");
         assert!(
@@ -2480,7 +2506,7 @@ Concequent and alternative must match types
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         let err = inferred.expect_err("impure wrapper without ! should fail");
         assert!(
@@ -2492,12 +2518,13 @@ Concequent and alternative must match types
 
     #[test]
     fn test_infer_impure_function_non_unit_return_allowed_by_default() {
-        let exprs = crate::parser::parse("(let append-ten! (lambda xs (do (set! xs 0 1) xs)))")
+        let exprs = crate::parser
+            ::parse("(let append-ten! (lambda xs (do (set! xs 0 1) xs)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         assert!(
             inferred.is_ok(),
@@ -2508,12 +2535,13 @@ Concequent and alternative must match types
 
     #[test]
     fn test_infer_impure_hyphenated_function_requires_bang_suffix() {
-        let exprs = crate::parser::parse("(let append-ten (lambda xs (set! xs (length xs) 10)))")
+        let exprs = crate::parser
+            ::parse("(let append-ten (lambda xs (set! xs (length xs) 10)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         let err = inferred.expect_err("impure hyphenated function without ! should fail");
         assert!(
@@ -2525,29 +2553,27 @@ Concequent and alternative must match types
 
     #[test]
     fn test_infer_impure_function_mutation_target_must_be_first_param() {
-        let exprs = crate::parser::parse("(let set-middle! (lambda a b c (set! b 0 1)))")
+        let exprs = crate::parser
+            ::parse("(let set-middle! (lambda a b c (set! b 0 1)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         let err = inferred.expect_err("impure function mutating middle param should fail");
-        assert!(
-            err.contains("must mutate its first parameter"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(err.contains("must mutate its first parameter"), "unexpected error: {}", err);
     }
 
     #[test]
     fn test_infer_impure_function_mutating_first_param_is_allowed() {
-        let exprs = crate::parser::parse("(let sort! (lambda xs fn (set! xs 0 1)))")
+        let exprs = crate::parser
+            ::parse("(let sort! (lambda xs fn (set! xs 0 1)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         assert!(
             inferred.is_ok(),
@@ -2558,19 +2584,16 @@ Concequent and alternative must match types
 
     #[test]
     fn test_infer_impure_function_mutating_last_param_is_rejected() {
-        let exprs = crate::parser::parse("(let sort! (lambda fn xs (set! xs 0 1)))")
+        let exprs = crate::parser
+            ::parse("(let sort! (lambda fn xs (set! xs 0 1)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         let err = inferred.expect_err("impure function mutating last param should fail");
-        assert!(
-            err.contains("must mutate its first parameter"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(err.contains("must mutate its first parameter"), "unexpected error: {}", err);
     }
 
     #[test]
@@ -2583,7 +2606,7 @@ Concequent and alternative must match types
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         assert!(
             inferred.is_ok(),
@@ -2594,17 +2617,18 @@ Concequent and alternative must match types
 
     #[test]
     fn test_infer_impure_operator_aliases_and_set_are_exempt_from_bang_suffix() {
-        let exprs = crate::parser::parse(
-            "(do
+        let exprs = crate::parser
+            ::parse(
+                "(do
                     (let update-set! (lambda vrbl x (set! vrbl 0 x)))
                     (let boolean-set! (lambda vrbl x (set! vrbl 0 x)))
-                    1)",
-        )
-        .expect("input should parse");
+                    1)"
+            )
+            .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         assert!(
             inferred.is_ok(),
@@ -2615,7 +2639,8 @@ Concequent and alternative must match types
 
     #[test]
     fn test_runtime_reclaimed_operatorish_names_compile_as_normal_bindings() {
-        let program = r#"(do
+        let program =
+            r#"(do
   (let ++ (lambda x (+ x 1)))
   (let -- (lambda x (- x 1)))
   (let += (lambda a b (+ a b)))
@@ -2637,20 +2662,21 @@ Concequent and alternative must match types
 
     #[test]
     fn test_infer_local_nested_set_target_does_not_require_bang() {
-        let exprs = crate::parser::parse(
-            "(do
+        let exprs = crate::parser
+            ::parse(
+                "(do
                     (let at (lambda xs i (get xs i)))
                     (let partition (lambda xs n (do
                         (let a (vector (vector 0)))
                         (set! (at a 0) 0 1)
                         a)))
-                    partition)",
-        )
-        .expect("input should parse");
+                    partition)"
+            )
+            .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         assert!(
             inferred.is_ok(),
@@ -2670,10 +2696,7 @@ Concequent and alternative must match types
     fn test_typed_optimization_apply_alias_beta_reduce_skips_managed_args() {
         let typed = infer_typed("(do ((lambda x (+ (get x 0) (get x 1))) (vector 10 20)))");
         let optimized = crate::op::optimize_typed_ast(&typed);
-        assert_eq!(
-            optimized.expr.to_lisp(),
-            "((lambda x (+ (get x 0) (get x 1))) (vector 10 20))"
-        );
+        assert_eq!(optimized.expr.to_lisp(), "((lambda x (+ (get x 0) (get x 1))) (vector 10 20))");
     }
 
     #[test]
@@ -2702,8 +2725,9 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_dce_keeps_dependencies_of_kept_impure_definition() {
-        let typed =
-            infer_typed("(do (let helper (lambda x x)) (let side (print! (helper (vector)))) 1)");
+        let typed = infer_typed(
+            "(do (let helper (lambda x x)) (let side (print! (helper (vector)))) 1)"
+        );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
         assert!(
@@ -2780,13 +2804,14 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_map_map_map_chain_fuses_to_single_reduce_loop() {
-        let expr = crate::parser::parse(
-            "(map (lambda x (+ x 1))
+        let expr = crate::parser
+            ::parse(
+                "(map (lambda x (+ x 1))
                 (map (lambda x (+ x 2))
-                    (map (lambda x (+ x 3)) (vector 1 2 3))))",
-        )
-        .expect("input should parse")
-        .remove(0);
+                    (map (lambda x (+ x 3)) (vector 1 2 3))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
         let fused_lisp = fused.to_lisp();
 
@@ -2811,7 +2836,8 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_typed_optimization_map_partial_application_fuses_by_hoisting_callable_once() {
-        let expr = crate::parser::parse("(map (add 1) (range 0 10))")
+        let expr = crate::parser
+            ::parse("(map (add 1) (range 0 10))")
             .expect("input should parse")
             .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
@@ -2833,25 +2859,25 @@ Concequent and alternative must match types
         );
 
         assert_std_program_output_matches_with_and_without_optimizer(
-            "(|> (range 0 10) (map (add 1)))",
+            "(|> (range 0 10) (map (add 1)))"
         );
     }
 
     #[test]
-    fn test_typed_optimization_map_filter_filter_map_map_reduce_chain_fuses_to_single_reduce_loop()
-    {
-        let expr = crate::parser::parse(
-            "(reduce
+    fn test_typed_optimization_map_filter_filter_map_map_reduce_chain_fuses_to_single_reduce_loop() {
+        let expr = crate::parser
+            ::parse(
+                "(reduce
                 (lambda a x (+ a x))
                 0
                 (map (lambda x (+ x 1))
                     (map (lambda x (+ x 2))
                         (filter (lambda x (> x 1))
                                 (filter (lambda x (> x 0))
-                                        (map (lambda x (+ x 3)) (vector 1 2 3)))))))",
-        )
-        .expect("input should parse")
-        .remove(0);
+                                        (map (lambda x (+ x 3)) (vector 1 2 3)))))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
         let fused_lisp = fused.to_lisp();
 
@@ -2885,14 +2911,15 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_select_exclude_sum_range_fuses_with_whitelist_names() {
-        let expr = crate::parser::parse(
-            "(sum (map (lambda x (+ x 1))
+        let expr = crate::parser
+            ::parse(
+                "(sum (map (lambda x (+ x 1))
                   (select (lambda x (> x 2))
                     (exclude (lambda x (= x 5))
-                      (range 1 10)))))",
-        )
-        .expect("input should parse")
-        .remove(0);
+                      (range 1 10)))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
         let fused_lisp = fused.to_lisp();
 
@@ -2920,20 +2947,17 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_mean_aliases_fuse_to_single_pass_mean_loop() {
-        let int_expr = crate::parser::parse(
-            "(mean (map (lambda x (+ x 1)) (filter (lambda x (> x 2)) (range 1 10))))",
-        )
-        .expect("mean input should parse")
-        .remove(0);
+        let int_expr = crate::parser
+            ::parse("(mean (map (lambda x (+ x 1)) (filter (lambda x (> x 2)) (range 1 10))))")
+            .expect("mean input should parse")
+            .remove(0);
         let float_expr = crate::parser
             ::parse(
                 "(mean/dec (map (lambda x (+. x 1.0)) (filter (lambda x (>. x 2.0)) (range/dec 1 10))))"
             )
             .expect("mean/dec input should parse")
             .remove(0);
-        let avg_expr = crate::parser::parse("(avg 2 4)")
-            .expect("avg input should parse")
-            .remove(0);
+        let avg_expr = crate::parser::parse("(avg 2 4)").expect("avg input should parse").remove(0);
 
         let int_fused = crate::op::fuse_map_filter_reduce_for_test(&int_expr).to_lisp();
         let float_fused = crate::op::fuse_map_filter_reduce_for_test(&float_expr).to_lisp();
@@ -2959,19 +2983,17 @@ Concequent and alternative must match types
             "mean/dec call should be fused away, got: {}",
             float_fused
         );
-        assert_eq!(
-            avg_fused, "(avg 2 4)",
-            "avg should remain binary and unfused"
-        );
+        assert_eq!(avg_fused, "(avg 2 4)", "avg should remain binary and unfused");
     }
 
     #[test]
     fn test_typed_optimization_window_source_fuses_with_pipeline_sinks() {
-        let expr = crate::parser::parse(
-            "(reduce + 0 (map length (window 2 (vector (vector 1) (vector 2) (vector 3)))))",
-        )
-        .expect("input should parse")
-        .remove(0);
+        let expr = crate::parser
+            ::parse(
+                "(reduce + 0 (map length (window 2 (vector (vector 1) (vector 2) (vector 3)))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
@@ -2993,20 +3015,17 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_zip_map_filter_unzip_is_not_fused() {
-        let expr = crate::parser::parse(
-            "(unzip (filter (lambda t (> (fst t) 2))
+        let expr = crate::parser
+            ::parse(
+                "(unzip (filter (lambda t (> (fst t) 2))
                     (map (lambda t (tuple (+ (fst t) 1) (snd t)))
-                        (zip (tuple (vector 1 2 3 4) (vector true false true false))))))",
-        )
-        .expect("input should parse")
-        .remove(0);
+                        (zip (tuple (vector 1 2 3 4) (vector true false true false))))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
-        assert!(
-            fused_lisp.contains("(zip "),
-            "zip fusion should be disabled, got: {}",
-            fused_lisp
-        );
+        assert!(fused_lisp.contains("(zip "), "zip fusion should be disabled, got: {}", fused_lisp);
         assert!(
             fused_lisp.contains("(unzip "),
             "unzip fusion should be disabled, got: {}",
@@ -3016,12 +3035,13 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_zip_pair_form_is_not_fused() {
-        let expr = crate::parser::parse(
-            "(unzip (map (lambda t t)
-                    (zip (pair (vector 1 2 3) (vector true false true)))))",
-        )
-        .expect("input should parse")
-        .remove(0);
+        let expr = crate::parser
+            ::parse(
+                "(unzip (map (lambda t t)
+                    (zip (pair (vector 1 2 3) (vector true false true)))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
@@ -3038,11 +3058,10 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_zip_map_identity_collect_is_not_fused() {
-        let expr = crate::parser::parse(
-            "(map (lambda t t) (zip (tuple (vector 1 2 3) (vector true false true))))",
-        )
-        .expect("input should parse")
-        .remove(0);
+        let expr = crate::parser
+            ::parse("(map (lambda t t) (zip (tuple (vector 1 2 3) (vector true false true))))")
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
@@ -3058,29 +3077,21 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
 
-        let wat =
-            crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
-        assert!(
-            !main_wat.contains("call $v_zip"),
-            "zip should be fused away, got:\n{}",
-            main_wat
-        );
-        assert!(
-            !main_wat.contains("call $v_map"),
-            "map should be fused away, got:\n{}",
-            main_wat
-        );
+        assert!(!main_wat.contains("call $v_zip"), "zip should be fused away, got:\n{}", main_wat);
+        assert!(!main_wat.contains("call $v_map"), "map should be fused away, got:\n{}", main_wat);
         assert!(
             !main_wat.contains("call $tuple_new"),
             "destructuring zip map should avoid row tuple allocation, got:\n{}",
@@ -3095,18 +3106,20 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_some_and_every_fuse_to_short_circuit_loops() {
-        let some_expr = crate::parser::parse(
-            "(some? (lambda x (> x 20))
-               (map (lambda x (+ x 1)) (range 1 10)))",
-        )
-        .expect("some input should parse")
-        .remove(0);
-        let every_expr = crate::parser::parse(
-            "(every? (lambda x (> x 0))
-                (filter (lambda x (> x 1)) (range 1 10)))",
-        )
-        .expect("every input should parse")
-        .remove(0);
+        let some_expr = crate::parser
+            ::parse(
+                "(some? (lambda x (> x 20))
+               (map (lambda x (+ x 1)) (range 1 10)))"
+            )
+            .expect("some input should parse")
+            .remove(0);
+        let every_expr = crate::parser
+            ::parse(
+                "(every? (lambda x (> x 0))
+                (filter (lambda x (> x 1)) (range 1 10)))"
+            )
+            .expect("every input should parse")
+            .remove(0);
 
         let some_fused = crate::op::fuse_map_filter_reduce_for_test(&some_expr).to_lisp();
         let every_fused = crate::op::fuse_map_filter_reduce_for_test(&every_expr).to_lisp();
@@ -3121,11 +3134,7 @@ Concequent and alternative must match types
             "every? should lower to short-circuit while, got: {}",
             every_fused
         );
-        assert!(
-            !some_fused.contains("(some? "),
-            "some? call should be fused, got: {}",
-            some_fused
-        );
+        assert!(!some_fused.contains("(some? "), "some? call should be fused, got: {}", some_fused);
         assert!(
             !every_fused.contains("(every? "),
             "every? call should be fused, got: {}",
@@ -3135,14 +3144,15 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_indexed_variants_fuse_with_whitelist() {
-        let expr = crate::parser::parse(
-            "(reduce/i (lambda a x i (+ a (+ x i))) 0
+        let expr = crate::parser
+            ::parse(
+                "(reduce/i (lambda a x i (+ a (+ x i))) 0
                 (map/i (lambda x i (+ x i))
                     (filter/i (lambda x i (> (+ x i) 3))
-                        (range/int 1 8))))",
-        )
-        .expect("input should parse")
-        .remove(0);
+                        (range/int 1 8))))"
+            )
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
@@ -3155,11 +3165,7 @@ Concequent and alternative must match types
             "reduce/i should be fused, got: {}",
             fused_lisp
         );
-        assert!(
-            !fused_lisp.contains("(map/i "),
-            "map/i should be fused, got: {}",
-            fused_lisp
-        );
+        assert!(!fused_lisp.contains("(map/i "), "map/i should be fused, got: {}", fused_lisp);
         assert!(
             !fused_lisp.contains("(filter/i "),
             "filter/i should be fused, got: {}",
@@ -3169,10 +3175,12 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_some_i_every_i_and_range_float_fuse() {
-        let some_i = crate::parser::parse("(some/i? (lambda x i (> (+ x i) 10)) (range/dec 1 6))")
+        let some_i = crate::parser
+            ::parse("(some/i? (lambda x i (> (+ x i) 10)) (range/dec 1 6))")
             .expect("input should parse")
             .remove(0);
-        let every_i = crate::parser::parse("(every/i? (lambda x i (> (+ x i) 0)) (range/int 1 6))")
+        let every_i = crate::parser
+            ::parse("(every/i? (lambda x i (> (+ x i) 0)) (range/int 1 6))")
             .expect("input should parse")
             .remove(0);
         let fused_some = crate::op::fuse_map_filter_reduce_for_test(&some_i).to_lisp();
@@ -3188,11 +3196,7 @@ Concequent and alternative must match types
             "every/i? should short-circuit fuse, got: {}",
             fused_every
         );
-        assert!(
-            !fused_some.contains("(some/i? "),
-            "some/i? should be fused, got: {}",
-            fused_some
-        );
+        assert!(!fused_some.contains("(some/i? "), "some/i? should be fused, got: {}", fused_some);
         assert!(
             !fused_every.contains("(every/i? "),
             "every/i? should be fused, got: {}",
@@ -3225,11 +3229,7 @@ Concequent and alternative must match types
             "slice call should be eliminated by fusion source lowering, got: {}",
             fused_lisp
         );
-        assert!(
-            !fused_lisp.contains("(reduce "),
-            "reduce should be fused, got: {}",
-            fused_lisp
-        );
+        assert!(!fused_lisp.contains("(reduce "), "reduce should be fused, got: {}", fused_lisp);
     }
 
     #[test]
@@ -3247,11 +3247,7 @@ Concequent and alternative must match types
             "find should fuse to short-circuit while, got: {}",
             fused_lisp
         );
-        assert!(
-            !fused_lisp.contains("(find "),
-            "find call should be fused, got: {}",
-            fused_lisp
-        );
+        assert!(!fused_lisp.contains("(find "), "find call should be fused, got: {}", fused_lisp);
         assert!(
             fused_lisp.contains("(set! __fuse_out 0"),
             "find fusion should update output index inside fused loop, got: {}",
@@ -3269,9 +3265,7 @@ Concequent and alternative must match types
         ];
 
         for program in programs {
-            let expr = crate::parser::parse(program)
-                .expect("input should parse")
-                .remove(0);
+            let expr = crate::parser::parse(program).expect("input should parse").remove(0);
             let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
             assert!(
                 fused_lisp.contains("(while (< __fuse_i __fuse_i_end)"),
@@ -3288,16 +3282,13 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_flat_stage_fuses_as_one_level_nested_loops() {
-        let expr = crate::parser::parse("(flat (map (lambda x (vector x x)) (vector 1 2 3)))")
+        let expr = crate::parser
+            ::parse("(flat (map (lambda x (vector x x)) (vector 1 2 3)))")
             .expect("input should parse")
             .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
-        assert!(
-            !fused_lisp.contains("(flat "),
-            "flat should be fused away, got: {}",
-            fused_lisp
-        );
+        assert!(!fused_lisp.contains("(flat "), "flat should be fused away, got: {}", fused_lisp);
         assert!(
             fused_lisp.matches("(while ").count() >= 2,
             "flat fusion should emit nested loops (outer + one-level inner), got: {}",
@@ -3307,10 +3298,10 @@ Concequent and alternative must match types
 
     #[test]
     fn test_typed_optimization_flat_map_reduce_fuses_as_one_level_nested_loops() {
-        let expr =
-            crate::parser::parse("(reduce + 0 (flat-map (lambda x (vector x x)) (vector 1 2 3)))")
-                .expect("input should parse")
-                .remove(0);
+        let expr = crate::parser
+            ::parse("(reduce + 0 (flat-map (lambda x (vector x x)) (vector 1 2 3)))")
+            .expect("input should parse")
+            .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
 
         assert!(
@@ -3318,11 +3309,7 @@ Concequent and alternative must match types
             "flat-map should be fused away, got: {}",
             fused_lisp
         );
-        assert!(
-            !fused_lisp.contains("(reduce "),
-            "reduce should be fused, got: {}",
-            fused_lisp
-        );
+        assert!(!fused_lisp.contains("(reduce "), "reduce should be fused, got: {}", fused_lisp);
         assert!(
             fused_lisp.matches("(while ").count() >= 2,
             "flat-map reduce fusion should emit nested loops, got: {}",
@@ -3336,17 +3323,17 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
 
-        let wat =
-            crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -3377,17 +3364,17 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
 
-        let wat =
-            crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -3404,18 +3391,21 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_direct_local_capturing_lambda_call_does_not_allocate_closure() {
-        let program = "(let run (lambda n (do (let y (length ARGV)) (let f (lambda x (+ x y))) (f n)))) (run 41)";
+        let program =
+            "(let run (lambda n (do (let y (length ARGV)) (let f (lambda x (+ x y))) (f n)))) (run 41)";
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
 
-        let wat =
-            crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
         let run_start = wat.find("(func $v_run").expect("run function should exist");
         let run_end = wat[run_start + 1..]
             .find("\n  (func ")
@@ -3423,9 +3413,14 @@ Concequent and alternative must match types
             .unwrap_or(wat.len());
         let run_wat = &wat[run_start..run_end];
 
-        if std::env::var("QUE_DEVIRTUALIZE")
-            .map(|v| v.eq_ignore_ascii_case("off") || v == "0" || v.eq_ignore_ascii_case("false"))
-            .unwrap_or(false)
+        if
+            std::env
+                ::var("QUE_DEVIRTUALIZE")
+                .map(
+                    |v|
+                        v.eq_ignore_ascii_case("off") || v == "0" || v.eq_ignore_ascii_case("false")
+                )
+                .unwrap_or(false)
         {
             assert!(
                 run_wat.contains("call $closure_new"),
@@ -3453,17 +3448,18 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
 
         let fused_wrapped = match &wrapped {
-            crate::parser::Expression::Apply(items)
-                if matches!(items.first(), Some(crate::parser::Expression::Word(w)) if w == "do")
-                    && items.len() > 1 =>
-            {
+            crate::parser::Expression::Apply(items) if
+                matches!(items.first(), Some(crate::parser::Expression::Word(w)) if w == "do") &&
+                items.len() > 1
+            => {
                 let mut out = items.clone();
                 let last = out.len() - 1;
                 out[last] = crate::op::fuse_map_filter_reduce_for_test(&out[last]);
@@ -3473,7 +3469,7 @@ Concequent and alternative must match types
         };
         let reinfer = crate::infer::infer_with_builtins_typed(
             &fused_wrapped,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         assert!(
             reinfer.is_ok(),
@@ -3481,11 +3477,10 @@ Concequent and alternative must match types
             reinfer.err().unwrap_or_else(|| "unknown error".to_string())
         );
 
-        let wat =
-            crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -3512,14 +3507,16 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
 
-        let wat =
-            crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
+        let wat = crate::wat
+            ::compile_program_to_wat(&wrapped)
+            .expect("wat compilation should succeed");
         assert!(
             !wat.contains("$v_unused_dce_probe"),
             "post-optimization DCE should remove unused top-level def from emitted wat, got:\n{}",
@@ -3533,16 +3530,17 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
         let fused_wrapped = match &wrapped {
-            crate::parser::Expression::Apply(items)
-                if matches!(items.first(), Some(crate::parser::Expression::Word(w)) if w == "do")
-                    && items.len() > 1 =>
-            {
+            crate::parser::Expression::Apply(items) if
+                matches!(items.first(), Some(crate::parser::Expression::Word(w)) if w == "do") &&
+                items.len() > 1
+            => {
                 let mut out = items.clone();
                 let last = out.len() - 1;
                 out[last] = crate::op::fuse_map_filter_reduce_for_test(&out[last]);
@@ -3552,7 +3550,7 @@ Concequent and alternative must match types
         };
         let reinfer = crate::infer::infer_with_builtins_typed(
             &fused_wrapped,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
         );
         assert!(
             reinfer.is_ok(),
@@ -3578,10 +3576,10 @@ Concequent and alternative must match types
 
     #[test]
     fn test_fused_pipeline_expression_has_word_only_call_heads() {
-        let expr =
-            crate::parser::parse("(reduce + 0 (map square (filter even? (vector 1 2 3 4 5))))")
-                .expect("input should parse")
-                .remove(0);
+        let expr = crate::parser
+            ::parse("(reduce + 0 (map square (filter even? (vector 1 2 3 4 5))))")
+            .expect("input should parse")
+            .remove(0);
         let fused = crate::op::fuse_map_filter_reduce_for_test(&expr);
         assert!(
             !has_non_word_call_head(&fused),
@@ -3596,16 +3594,18 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
-        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
-            &wrapped,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-        )
-        .expect("wrapped should infer");
+        let (_typ, typed) = crate::infer
+            ::infer_with_builtins_typed(
+                &wrapped,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("wrapped should infer");
         let optimized = crate::op::optimize_typed_ast(&typed);
         assert!(
             !has_non_word_call_head(&optimized.expr),
@@ -3617,8 +3617,9 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_hover_map_is_specialized_in_call_context() {
         let hover_json = crate::wasm_api::lsp_hover(r#"(map reverse ["G"])"#.to_string(), 0, 1);
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3633,9 +3634,10 @@ Concequent and alternative must match types
         let completion_json = crate::wasm_api::lsp_completions_at(
             "(let data/manager_id 1)\n(let data/department_id 2)\ndata/".to_string(),
             2,
-            5,
+            5
         );
-        let items: serde_json::Value = serde_json::from_str(&completion_json)
+        let items: serde_json::Value = serde_json
+            ::from_str(&completion_json)
             .expect("completion response should be valid JSON");
         let labels: Vec<String> = items
             .as_array()
@@ -3657,10 +3659,14 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wasm_lsp_hover_map_alone_is_generic() {
-        let hover_json =
-            crate::wasm_api::lsp_hover("(let xs (map reverse [\"G\"]))\nmap".to_string(), 1, 1);
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover_json = crate::wasm_api::lsp_hover(
+            "(let xs (map reverse [\"G\"]))\nmap".to_string(),
+            1,
+            1
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3672,10 +3678,14 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wasm_lsp_hover_let_binding_uses_rhs_type_without_extra_usage() {
-        let hover_json =
-            crate::wasm_api::lsp_hover(r#"(let xs (map reverse ["G"]))"#.to_string(), 0, 5);
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover_json = crate::wasm_api::lsp_hover(
+            r#"(let xs (map reverse ["G"]))"#.to_string(),
+            0,
+            5
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3690,10 +3700,11 @@ Concequent and alternative must match types
         let hover_json = crate::wasm_api::lsp_hover(
             "(let touch! (lambda xs (do (set! xs 0 1) nil)))\ntouch!".to_string(),
             1,
-            2,
+            2
         );
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3717,8 +3728,9 @@ Concequent and alternative must match types
         let program =
             "(let std/vector/reverse! (lambda xs (do (set! xs 0 1) nil)))\n(let reverse! std/vector/reverse!)\nreverse!";
         let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 2, 3);
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3734,10 +3746,14 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wasm_lsp_hover_std_usage_includes_global_effects() {
-        let hover_json =
-            crate::wasm_api::lsp_hover("(std/vector/reverse! [ 1 2 3 ])".to_string(), 0, 6);
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover_json = crate::wasm_api::lsp_hover(
+            "(std/vector/reverse! [ 1 2 3 ])".to_string(),
+            0,
+            6
+        );
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3756,10 +3772,11 @@ Concequent and alternative must match types
         let hover_json = crate::wasm_api::lsp_hover(
             "(let fn (lambda xs (do (let out []) (push! out 0) out)))\nfn".to_string(),
             1,
-            1,
+            1
         );
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3783,10 +3800,11 @@ Concequent and alternative must match types
         let hover_json = crate::wasm_api::lsp_hover(
             "(let append-ten! (lambda xs (push! xs 10)))\nappend-ten!".to_string(),
             1,
-            3,
+            3
         );
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3805,10 +3823,11 @@ Concequent and alternative must match types
         let hover_json = crate::wasm_api::lsp_hover(
             "(let _fn (lambda xs (std/vector/reverse! xs)))\n_fn".to_string(),
             1,
-            1,
+            1
         );
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3830,8 +3849,9 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_hover_string_literal_has_fenced_que_format() {
         let hover_json = crate::wasm_api::lsp_hover("\"dsadas\"".to_string(), 0, 2);
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3844,8 +3864,9 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_hover_numeric_literal_shows_type_without_echo() {
         let hover_json = crate::wasm_api::lsp_hover("123".to_string(), 0, 1);
-        let hover: serde_json::Value =
-            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
 
         let contents = hover
             .get("contents")
@@ -3857,7 +3878,8 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wasm_lsp_hover_zip_lambda_params_use_local_element_type_not_std_impl_param_type() {
-        let program = r#"(let xs [ 1 2 3 4 ])
+        let program =
+            r#"(let xs [ 1 2 3 4 ])
 (|>
     { (|> xs (map identity) (sort <)) xs }
     (zip)
@@ -3865,24 +3887,30 @@ Concequent and alternative must match types
 )"#;
 
         let needle = "(<> a b)";
-        let base = program
-            .find(needle)
-            .expect("program should contain comparison form");
+        let base = program.find(needle).expect("program should contain comparison form");
         let a_off = base + needle.find('a').expect("comparison should contain 'a'");
         let b_off = base + needle.rfind('b').expect("comparison should contain 'b'");
 
         let a_pos = crate::lsp_native_core::byte_offset_to_position(program, a_off);
         let b_pos = crate::lsp_native_core::byte_offset_to_position(program, b_off);
 
-        let a_hover_json =
-            crate::wasm_api::lsp_hover(program.to_string(), a_pos.line, a_pos.character);
-        let b_hover_json =
-            crate::wasm_api::lsp_hover(program.to_string(), b_pos.line, b_pos.character);
+        let a_hover_json = crate::wasm_api::lsp_hover(
+            program.to_string(),
+            a_pos.line,
+            a_pos.character
+        );
+        let b_hover_json = crate::wasm_api::lsp_hover(
+            program.to_string(),
+            b_pos.line,
+            b_pos.character
+        );
 
-        let a_hover: serde_json::Value =
-            serde_json::from_str(&a_hover_json).expect("a hover response should be valid JSON");
-        let b_hover: serde_json::Value =
-            serde_json::from_str(&b_hover_json).expect("b hover response should be valid JSON");
+        let a_hover: serde_json::Value = serde_json
+            ::from_str(&a_hover_json)
+            .expect("a hover response should be valid JSON");
+        let b_hover: serde_json::Value = serde_json
+            ::from_str(&b_hover_json)
+            .expect("b hover response should be valid JSON");
 
         let a_contents = a_hover
             .get("contents")
@@ -3918,7 +3946,8 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_diagnostics_reports_if_branch_type_mismatch() {
         let diagnostics_json = crate::wasm_api::lsp_diagnostics("(if true 8 2.)".to_string());
-        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
 
         let has_unify_message = diagnostics
@@ -3963,18 +3992,20 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match &std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should parse with std")
             }
             _ => panic!("expected baked std ast to be an application"),
         };
 
-        let err = crate::infer::infer_with_builtins_typed(
-            &wrapped,
-            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-        )
-        .map(|_| ())
-        .expect_err("expected occurs check inference error");
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &wrapped,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .map(|_| ())
+            .expect_err("expected occurs check inference error");
 
         let lines: Vec<&str> = err.lines().collect();
         assert!(
@@ -3991,9 +4022,11 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wasm_lsp_diagnostics_occurs_check_summary_drops_snippet() {
-        let diagnostics_json =
-            crate::wasm_api::lsp_diagnostics("(let v [])\n(push! v v)".to_string());
-        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(
+            "(let v [])\n(push! v v)".to_string()
+        );
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
 
         let messages: Vec<&str> = diagnostics
@@ -4004,9 +4037,7 @@ Concequent and alternative must match types
             .collect();
 
         assert!(
-            messages
-                .iter()
-                .any(|msg| msg.starts_with("Occurs check failed: t")),
+            messages.iter().any(|msg| msg.starts_with("Occurs check failed: t")),
             "expected occurs-check diagnostic, got: {}",
             diagnostics_json
         );
@@ -4020,12 +4051,11 @@ Concequent and alternative must match types
     #[test]
     fn test_wasm_lsp_diagnostics_whitespace_is_empty() {
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(" \n\t  ".to_string());
-        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
 
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
         assert!(
             items.is_empty(),
             "expected no diagnostics for whitespace-only text, got: {}",
@@ -4038,12 +4068,7 @@ Concequent and alternative must match types
         let program =
             "(let solve (lambda input (- (count/char '(' input) (count/char ')' input))))\n(solve \"())\")\n";
         let ranges = crate::lsp_native_core::top_level_form_ranges(program);
-        assert_eq!(
-            ranges.len(),
-            2,
-            "expected two top-level forms, got: {:?}",
-            ranges
-        );
+        assert_eq!(ranges.len(), 2, "expected two top-level forms, got: {:?}", ranges);
     }
 
     #[test]
@@ -4051,13 +4076,10 @@ Concequent and alternative must match types
         let program =
             "(let solve (lambda input (- (count/char '(' input) (count/char ')' input))))\n(solve \"())\")\n";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
-        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
-        assert!(
-            diagnostics.is_array(),
-            "expected diagnostics array, got: {}",
-            diagnostics_json
-        );
+        assert!(diagnostics.is_array(), "expected diagnostics array, got: {}", diagnostics_json);
     }
 
     #[test]
@@ -4065,17 +4087,12 @@ Concequent and alternative must match types
         let program =
             "(let fn (lambda x (get x)))\n\n(integer x 1)\n(while (< (get x) 10) (do\n (match? (get x) \"10\")\n(&alter! x (+ (&get x) 1))))";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
-        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
 
-        assert!(
-            !items.is_empty(),
-            "expected at least one diagnostic, got: {}",
-            diagnostics_json
-        );
+        assert!(!items.is_empty(), "expected at least one diagnostic, got: {}", diagnostics_json);
 
         let loop_condition_pos = (3u64, 9u64);
         let match_scope_pos = (4u64, 14u64);
@@ -4130,17 +4147,12 @@ Concequent and alternative must match types
         let program =
             "(let fn (lambda x (get x 's')))\n\n(integer x 1)\n(while (< (get x) 10) (do\n    (match? (Integer->String (get x)) \"10\")\n(&alter! x (+ (&get x) 1))))";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
-        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
 
-        assert!(
-            !items.is_empty(),
-            "expected at least one diagnostic, got: {}",
-            diagnostics_json
-        );
+        assert!(!items.is_empty(), "expected at least one diagnostic, got: {}", diagnostics_json);
 
         for item in items {
             let message = item
@@ -4167,12 +4179,14 @@ Concequent and alternative must match types
                 .expect("diagnostic should include range.end.line");
 
             assert_eq!(
-                start_line, 0,
+                start_line,
+                0,
                 "diagnostic should be scoped to fn form only, got: {}",
                 diagnostics_json
             );
             assert_eq!(
-                end_line, 0,
+                end_line,
+                0,
                 "diagnostic should be scoped to fn form only, got: {}",
                 diagnostics_json
             );
@@ -4184,11 +4198,10 @@ Concequent and alternative must match types
         let program =
             "(let fn1 (lambda x x))\n(let fn2 (lambda x x))\n() ; Error!: Empty application";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
-        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
 
         assert_eq!(
             items.len(),
@@ -4215,12 +4228,14 @@ Concequent and alternative must match types
             .expect("diagnostic should include message");
 
         assert_eq!(
-            start_line, 2,
+            start_line,
+            2,
             "expected empty application error on third form, got: {}",
             diagnostics_json
         );
         assert_eq!(
-            end_line, 2,
+            end_line,
+            2,
             "expected empty application error on third form, got: {}",
             diagnostics_json
         );
@@ -4256,16 +4271,11 @@ Concequent and alternative must match types
     (Vector->String nl))";
 
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
-        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+        let diagnostics: serde_json::Value = serde_json
+            ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
-        let items = diagnostics
-            .as_array()
-            .expect("diagnostics response should be an array");
-        assert!(
-            !items.is_empty(),
-            "expected at least one diagnostic, got: {}",
-            diagnostics_json
-        );
+        let items = diagnostics.as_array().expect("diagnostics response should be an array");
+        assert!(!items.is_empty(), "expected at least one diagnostic, got: {}", diagnostics_json);
 
         let wrong_map_pos = (3u64, 10u64);
         let expected_or_pos = (12u64, 10u64);
@@ -4318,14 +4328,14 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "io")]
     fn test_wat_host_print_releases_temporary_string_arg() {
-        let expr =
-            crate::parser::build(r#"(do (print! "hello") 1)"#).expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let expr = crate::parser
+            ::build(r#"(do (print! "hello") 1)"#)
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
 
-        let host_pos = wat
-            .find("call $host_print")
-            .expect("expected host print call in wat");
+        let host_pos = wat.find("call $host_print").expect("expected host print call in wat");
         let release_pos = wat[host_pos..]
             .find("call $rc_release")
             .map(|p| host_pos + p)
@@ -4341,12 +4351,11 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_vector_literal_releases_fresh_nested_managed_value() {
         let expr = crate::parser::build("(vector [])").expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
         eprintln!("{}", wat);
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4364,11 +4373,10 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_scalar_vector_literal_uses_scalar_push_runtime() {
         let expr = crate::parser::build("(vector 1 2 3)").expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4386,11 +4394,10 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_scalar_get_inlines_without_vec_get_runtime_call() {
         let expr = crate::parser::build("(get [1 2 3] 1)").expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4408,11 +4415,10 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_ref_get_keeps_vec_get_runtime_call() {
         let expr = crate::parser::build("(get [[]] 0)").expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4426,9 +4432,7 @@ Concequent and alternative must match types
     fn test_wat_tuple_releases_fresh_managed_fields() {
         let expr = crate::parser::build("(tuple [] [])").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4447,9 +4451,7 @@ Concequent and alternative must match types
     fn test_wat_partial_application_releases_fresh_captured_managed_arg() {
         let expr = crate::parser::build("((lambda a b a) [])").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4468,9 +4470,7 @@ Concequent and alternative must match types
     fn test_wat_fst_of_tuple_constructor_avoids_tuple_allocation() {
         let expr = crate::parser::build("(fst (tuple 1 2))").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4484,9 +4484,7 @@ Concequent and alternative must match types
     fn test_wat_snd_of_tuple_constructor_avoids_tuple_allocation() {
         let expr = crate::parser::build("(snd (tuple 1 2))").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4500,9 +4498,7 @@ Concequent and alternative must match types
     fn test_wat_snd_of_tuple_constructor_avoids_return_temp_spill() {
         let expr = crate::parser::build("(snd (tuple 1 2))").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
         let main_flat = main_wat.replace("    ", "");
 
@@ -4519,41 +4515,41 @@ Concequent and alternative must match types
     }
 
     #[test]
-    fn test_wat_tuple_with_one_fresh_side_avoids_other_arg_temp_spill() {
+    fn test_wat_tuple_with_one_fresh_side_uses_uniform_temp_lowering() {
         let expr = crate::parser::build("(tuple [] 1)").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
         let main_flat = main_wat.replace("    ", "");
 
         assert!(
-            main_flat.contains("local.get 0\ni32.const 1\ncall $tuple_new\nlocal.set 1"),
-            "tuple with one fresh side should build directly from the live stack value and one temp, got:\n{}",
+            main_flat.contains("local.get 0\nlocal.get 1\ncall $tuple_new\nlocal.set 2"),
+            "tuple lowering should materialize both tuple operands in temps before construction, got:\n{}",
             main_wat
         );
         assert!(
-            !main_flat.contains("i32.const 1\nlocal.set 1\nlocal.get 0\nlocal.get 1\ncall $tuple_new"),
-            "tuple with one fresh side should not spill the non-fresh side into an extra temp, got:\n{}",
+            main_flat.contains("local.get 0\ncall $rc_release\ndrop"),
+            "tuple lowering should still release the fresh-owned side after construction, got:\n{}",
             main_wat
         );
     }
 
     #[test]
     fn test_wat_tuple_temp_used_only_for_projections_releases_early() {
-        let expr = crate::parser::build(
-            r#"((lambda
+        let expr = crate::parser
+            ::build(
+                r#"((lambda
                   (do
                     (let mk (lambda x y { x y }))
                     (let t (mk [1] [2]))
                     (let a (fst t))
                     (let b (snd t))
-                    (+ (length a) (length b)))))"#,
-        )
-        .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+                    (+ (length a) (length b)))))"#
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
         let wat_flat = wat.replace("    ", "");
 
         assert!(
@@ -4565,21 +4561,25 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_tuple_temp_kept_when_used_after_projection() {
-        let expr = crate::parser::build(
-            r#"((lambda
+        let expr = crate::parser
+            ::build(
+                r#"((lambda
                   (do
                     (let mk (lambda x y { x y }))
                     (let t (mk [1] [2]))
                     (let a (fst t))
-                    (+ (length a) (length (snd t))))))"#,
-        )
-        .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+                    (+ (length a) (length (snd t))))))"#
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
         let wat_flat = wat.replace("    ", "");
 
         assert!(
-            !wat_flat.contains("call $tuple_snd\nlocal.get 1\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 1"),
+            !wat_flat.contains(
+                "call $tuple_snd\nlocal.get 1\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 1"
+            ),
             "tuple temp still used later should not be released early, got:\n{}",
             wat
         );
@@ -4587,15 +4587,17 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_initial_managed_local_bind_does_not_release_zero_slot() {
-        let expr = crate::parser::build(
-            r#"((lambda
+        let expr = crate::parser
+            ::build(
+                r#"((lambda
                   (do
                     (let xs [1])
-                    (length xs))))"#,
-        )
-        .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+                    (length xs))))"#
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
         let wat_flat = wat.replace("    ", "");
 
         assert!(
@@ -4607,20 +4609,24 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_last_use_release_for_managed_do_local() {
-        let expr = crate::parser::build(
-            r#"((lambda
+        let expr = crate::parser
+            ::build(
+                r#"((lambda
                   (do
                     (let xs [1])
                     (length xs)
-                    0)))"#,
-        )
-        .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+                    0)))"#
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
         let wat_flat = wat.replace("    ", "");
 
         assert!(
-            wat_flat.contains("local.get 0\ncall $vec_len\ndrop\nlocal.get 0\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 0"),
+            wat_flat.contains(
+                "local.get 0\ncall $vec_len\ndrop\nlocal.get 0\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 0"
+            ),
             "managed do-local should be released after its last non-final use, got:\n{}",
             wat
         );
@@ -4628,10 +4634,12 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_scalar_set_on_materialized_local_uses_materialized_scalar_set_runtime() {
-        let expr = crate::parser::build("((lambda (do (let xs [1]) (set! xs 0 2) xs)))")
+        let expr = crate::parser
+            ::build("((lambda (do (let xs [1]) (set! xs 0 2) xs)))")
             .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
 
         assert!(
             wat.contains("call $vec_set_scalar_materialized_i32"),
@@ -4642,10 +4650,12 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_scalar_set_on_slice_keeps_materializing_runtime() {
-        let expr = crate::parser::build("((lambda (do (let xs [1 2]) (let ys (cdr xs 1)) (set! ys 0 3) ys)))")
+        let expr = crate::parser
+            ::build("((lambda (do (let xs [1 2]) (let ys (cdr xs 1)) (set! ys 0 3) ys)))")
             .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
 
         assert!(
             wat.contains("call $vec_set_scalar_i32"),
@@ -4662,15 +4672,19 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_hidden_scalar_store_uses_materialized_scalar_set_runtime() {
         let typed = crate::infer::TypedExpression {
-            expr: crate::parser::Expression::Apply(vec![
-                crate::parser::Expression::Word("__vec_store_i32".to_string()),
-                crate::parser::Expression::Apply(vec![
-                    crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
-                    crate::parser::Expression::Int(5),
-                ]),
-                crate::parser::Expression::Int(0),
-                crate::parser::Expression::Int(7),
-            ]),
+            expr: crate::parser::Expression::Apply(
+                vec![
+                    crate::parser::Expression::Word("__vec_store_i32".to_string()),
+                    crate::parser::Expression::Apply(
+                        vec![
+                            crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                            crate::parser::Expression::Int(5)
+                        ]
+                    ),
+                    crate::parser::Expression::Int(0),
+                    crate::parser::Expression::Int(7)
+                ]
+            ),
             typ: Some(crate::types::Type::Int),
             effect: crate::infer::EffectFlags::IO,
             children: vec![
@@ -4681,15 +4695,19 @@ Concequent and alternative must match types
                     children: Vec::new(),
                 },
                 crate::infer::TypedExpression {
-                    expr: crate::parser::Expression::Apply(vec![
-                        crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
-                        crate::parser::Expression::Int(5),
-                    ]),
+                    expr: crate::parser::Expression::Apply(
+                        vec![
+                            crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                            crate::parser::Expression::Int(5)
+                        ]
+                    ),
                     typ: Some(crate::types::Type::List(Box::new(crate::types::Type::Int))),
                     effect: crate::infer::EffectFlags::PURE,
                     children: vec![
                         crate::infer::TypedExpression {
-                            expr: crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                            expr: crate::parser::Expression::Word(
+                                "__vec_new_uninit_i32".to_string()
+                            ),
                             typ: None,
                             effect: crate::infer::EffectFlags::PURE,
                             children: Vec::new(),
@@ -4699,7 +4717,7 @@ Concequent and alternative must match types
                             typ: Some(crate::types::Type::Int),
                             effect: crate::infer::EffectFlags::PURE,
                             children: Vec::new(),
-                        },
+                        }
                     ],
                 },
                 crate::infer::TypedExpression {
@@ -4713,11 +4731,12 @@ Concequent and alternative must match types
                     typ: Some(crate::types::Type::Int),
                     effect: crate::infer::EffectFlags::PURE,
                     children: Vec::new(),
-                },
+                }
             ],
         };
-        let wat =
-            crate::wat::compile_program_to_wat_typed_with_opts(&typed, false).expect("program should compile");
+        let wat = crate::wat
+            ::compile_program_to_wat_typed_with_opts(&typed, false)
+            .expect("program should compile");
 
         assert!(
             wat.contains("call $vec_set_scalar_materialized_i32"),
@@ -4728,24 +4747,30 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_discarded_managed_do_expr_releases_without_temp_spill_when_no_alias_locals() {
-        let expr = crate::parser::build(
-            r#"((lambda
+        let expr = crate::parser
+            ::build(
+                r#"((lambda
                   (do
                     []
-                    0)))"#,
-        )
-        .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, false).expect("program should compile");
+                    0)))"#
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
         let wat_flat = wat.replace("    ", "");
 
         assert!(
-            wat_flat.contains("call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop"),
+            wat_flat.contains(
+                "call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop"
+            ),
             "discarded managed do expr should reuse the constructor temp for release, got:\n{}",
             wat
         );
         assert!(
-            !wat_flat.contains("call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop\nlocal.set 1"),
+            !wat_flat.contains(
+                "call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop\nlocal.set 1"
+            ),
             "discarded managed do expr should not add an extra spill temp when no managed locals can alias, got:\n{}",
             wat
         );
@@ -4754,10 +4779,12 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_hidden_zeroed_scalar_vector_builtin_compiles_to_runtime_call() {
         let typed = crate::infer::TypedExpression {
-            expr: crate::parser::Expression::Apply(vec![
-                crate::parser::Expression::Word("__vec_new_zeroed_i32".to_string()),
-                crate::parser::Expression::Int(25),
-            ]),
+            expr: crate::parser::Expression::Apply(
+                vec![
+                    crate::parser::Expression::Word("__vec_new_zeroed_i32".to_string()),
+                    crate::parser::Expression::Int(25)
+                ]
+            ),
             typ: Some(crate::types::Type::List(Box::new(crate::types::Type::Int))),
             effect: crate::infer::EffectFlags::PURE,
             children: vec![
@@ -4772,14 +4799,13 @@ Concequent and alternative must match types
                     typ: Some(crate::types::Type::Int),
                     effect: crate::infer::EffectFlags::PURE,
                     children: Vec::new(),
-                },
+                }
             ],
         };
-        let wat =
-            crate::wat::compile_program_to_wat_typed_with_opts(&typed, false).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat_typed_with_opts(&typed, false)
+            .expect("program should compile");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4792,10 +4818,12 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_hidden_uninit_scalar_vector_builtin_compiles_to_runtime_call() {
         let typed = crate::infer::TypedExpression {
-            expr: crate::parser::Expression::Apply(vec![
-                crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
-                crate::parser::Expression::Int(8),
-            ]),
+            expr: crate::parser::Expression::Apply(
+                vec![
+                    crate::parser::Expression::Word("__vec_new_uninit_i32".to_string()),
+                    crate::parser::Expression::Int(8)
+                ]
+            ),
             typ: Some(crate::types::Type::List(Box::new(crate::types::Type::Int))),
             effect: crate::infer::EffectFlags::PURE,
             children: vec![
@@ -4810,14 +4838,13 @@ Concequent and alternative must match types
                     typ: Some(crate::types::Type::Int),
                     effect: crate::infer::EffectFlags::PURE,
                     children: Vec::new(),
-                },
+                }
             ],
         };
-        let wat =
-            crate::wat::compile_program_to_wat_typed_with_opts(&typed, false).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let wat = crate::wat
+            ::compile_program_to_wat_typed_with_opts(&typed, false)
+            .expect("program should compile");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4829,15 +4856,15 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_immediate_destructure_of_tuple_returning_local_lambda_avoids_tuple_allocation() {
-        let expr = crate::parser::build(
-            "(do (let f (lambda x (do (let y (+ x 1)) (tuple y (+ y 1))))) (let { a b } (f 10)) (+ a b))",
-        )
-        .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, true).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let expr = crate::parser
+            ::build(
+                "(do (let f (lambda x (do (let y (+ x 1)) (tuple y (+ y 1))))) (let { a b } (f 10)) (+ a b))"
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4849,15 +4876,15 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_nested_do_sees_outer_tuple_returning_lambda_for_immediate_destructure() {
-        let expr = crate::parser::build(
-            "(do (let f (lambda x (do (let y (+ x 1)) (tuple y (+ y 1))))) (mut out 0) (while (< out 1) (do (let { a b } (f 10)) (alter! out (+ a b)))) out)",
-        )
-        .expect("program should build");
-        let wat =
-            crate::wat::compile_program_to_wat_with_opts(&expr, true).expect("program should compile");
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
+        let expr = crate::parser
+            ::build(
+                "(do (let f (lambda x (do (let y (+ x 1)) (tuple y (+ y 1))))) (mut out 0) (while (< out 1) (do (let { a b } (f 10)) (alter! out (+ a b)))) out)"
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
@@ -4887,12 +4914,14 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
-        let err = crate::wat::compile_program_to_wat(&wrapped)
+        let err = crate::wat
+            ::compile_program_to_wat(&wrapped)
             .expect_err("cycle-forming push! should fail at compile time");
         assert!(
             err.contains("compile-time RC cycle check") && err.contains("push!"),
@@ -4903,14 +4932,14 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_rejects_set_of_inline_closure_into_captured_vector() {
-        let expr = crate::parser::build(
-            r#"(do
+        let expr = crate::parser
+            ::build(r#"(do
 (let xs [(lambda () 0)])
 (set! xs 0 (lambda () (length xs)))
-0)"#,
-        )
-        .expect("program should build");
-        let err = crate::wat::compile_program_to_wat(&expr)
+0)"#)
+            .expect("program should build");
+        let err = crate::wat
+            ::compile_program_to_wat(&expr)
             .expect_err("cycle-forming set! should fail at compile time");
         assert!(
             err.contains("compile-time RC cycle check") && err.contains("set!"),
@@ -4921,12 +4950,11 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_allows_closure_capturing_vector_when_not_stored_back_into_it() {
-        let expr = crate::parser::build(
-            r#"(do
+        let expr = crate::parser
+            ::build(r#"(do
 (let xs [1 2 3])
-((lambda () (length xs))))"#,
-        )
-        .expect("program should build");
+((lambda () (length xs))))"#)
+            .expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
         assert!(
             wat.contains("(func (export \"main\")"),
@@ -4937,7 +4965,8 @@ Concequent and alternative must match types
 
     #[test]
     fn test_wat_rejects_wrapper_mutator_that_stores_closure_into_captured_vector() {
-        let program = r#"(do
+        let program =
+            r#"(do
 (let save! (lambda xs f (push! xs f)))
 (let xs [])
 (let f (lambda () (length xs)))
@@ -4946,12 +4975,14 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
-                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
                     .expect("program should merge with std")
             }
             _ => panic!("std ast should be (do ...)"),
         };
-        let err = crate::wat::compile_program_to_wat(&wrapped)
+        let err = crate::wat
+            ::compile_program_to_wat(&wrapped)
             .expect_err("wrapper mutator should inherit RC cycle check");
         assert!(
             err.contains("compile-time RC cycle check") && err.contains("save!"),
@@ -4962,7 +4993,8 @@ Concequent and alternative must match types
 
     #[test]
     fn test_big_iterations_ref_leak_crash() {
-        let test_case = r#"
+        let test_case =
+            r#"
 (let box (lambda value [value]))
 (let int box)
 (let dec box)
@@ -5187,10 +5219,10 @@ Concequent and alternative must match types
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .unwrap();
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .unwrap();
         #[cfg(feature = "io")]
         let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
@@ -5206,23 +5238,24 @@ Concequent and alternative must match types
     #[test]
     #[cfg(feature = "runtime")]
     fn test_set_ref_vector_stress_no_leak_crash() {
-        let expr = crate::parser::build(
-            r#"(do
+        let expr = crate::parser
+            ::build(
+                r#"(do
 (let x [[]])
 (mut i 0)
 (while (< i 300000) (do
   (set! x 0 [])
   (alter! i (+ i 1))))
-1)"#,
-        )
-        .expect("program should build");
+1)"#
+            )
+            .expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .unwrap();
+        let store_data = crate::io::ShellStoreData
+            ::new_with_security(None, crate::io::ShellPolicy::disabled())
+            .map_err(|e| e.to_string())
+            .unwrap();
         #[cfg(feature = "io")]
         let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
             crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
@@ -7829,11 +7862,15 @@ nil)))
             if let crate::parser::Expression::Apply(items) = &std_ast {
                 match crate::parser::merge_std_and_program(&inp, items[1..].to_vec()) {
                     Ok(exprs) => {
-                        match crate::infer::infer_with_builtins_typed(
-                            &exprs,
-                            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-                        )
-                        .map(|(typ, _)| typ)
+                        match
+                            crate::infer
+                                ::infer_with_builtins_typed(
+                                    &exprs,
+                                    crate::types::create_builtin_environment(
+                                        crate::types::TypeEnv::new()
+                                    )
+                                )
+                                .map(|(typ, _)| typ)
                         {
                             Ok(_) => {
                                 // match crate::vm::run(&exprs, crate::vm::VM::new()) {
@@ -7841,10 +7878,10 @@ nil)))
                                     Ok(result) => {
                                         let argv: Vec<String> = Vec::new();
                                         #[cfg(feature = "io")]
-                                        let store_data =
-                                            crate::io::ShellStoreData::new_with_security(
+                                        let store_data = crate::io::ShellStoreData
+                                            ::new_with_security(
                                                 None,
-                                                crate::io::ShellPolicy::disabled(),
+                                                crate::io::ShellPolicy::disabled()
                                             )
                                             .map_err(|e| e.to_string())
                                             .unwrap();
@@ -7854,16 +7891,17 @@ nil)))
                                             store_data,
                                             &argv,
                                             |linker| {
-                                                crate::io::add_shell_to_linker(linker)
+                                                crate::io
+                                                    ::add_shell_to_linker(linker)
                                                     .map_err(|e| e.to_string())
-                                            },
+                                            }
                                         );
                                         #[cfg(not(feature = "io"))]
                                         let run_result = crate::runtime::run_wat_text(
                                             &result,
                                             (),
                                             &argv,
-                                            |_linker| Ok(()),
+                                            |_linker| Ok(())
                                         );
                                         match run_result {
                                             Ok(res) => {
