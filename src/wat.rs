@@ -398,6 +398,26 @@ fn cache_value_global(name: &str) -> String {
     format!("g_val_{}", ident(name))
 }
 
+fn compile_borrowed_top_level_cached_ref(
+    name: &str,
+    ctx: &Ctx<'_>,
+    scratch_slot: usize,
+) -> Option<String> {
+    if ctx.locals.contains_key(name) || name == "ARGV" {
+        return None;
+    }
+    let (params, ret_ty) = ctx.fn_sigs.get(name)?;
+    if !params.is_empty() || !is_managed_local_type(ret_ty) {
+        return None;
+    }
+    let g_init = cache_init_global(name);
+    let g_val = cache_value_global(name);
+    Some(format!(
+        "global.get ${g_init}\nif (result i32)\n  global.get ${g_val}\nelse\n  call ${}\n  local.set {scratch_slot}\n  local.get {scratch_slot}\n  call $rc_release\n  drop\n  global.get ${g_val}\nend",
+        ident(name)
+    ))
+}
+
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
         Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => Ok("i32"),
@@ -6300,6 +6320,10 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
 }
 
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let xs_node = node
+        .children
+        .get(1)
+        .ok_or_else(|| "get missing vector".to_string())?;
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
@@ -6311,12 +6335,11 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         tmp_i32: ctx.tmp_i32 + 3,
     };
-    let xs = compile_expr(
-        node.children
-            .get(1)
-            .ok_or_else(|| "get missing vector".to_string())?,
-        &nested_ctx,
-    )?;
+    let xs = match &xs_node.expr {
+        Expression::Word(name) => compile_borrowed_top_level_cached_ref(name, ctx, ctx.tmp_i32 + 3)
+            .unwrap_or(compile_expr(xs_node, &nested_ctx)?),
+        _ => compile_expr(xs_node, &nested_ctx)?,
+    };
     let idx = compile_expr(
         node.children
             .get(2)
@@ -6406,18 +6429,33 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .children
         .get(1)
         .ok_or_else(|| "set! missing vector".to_string())?;
-    let xs = compile_expr(xs_node, ctx)?;
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        tmp_i32: ctx.tmp_i32 + 5,
+    };
+    let xs = match &xs_node.expr {
+        Expression::Word(name) => compile_borrowed_top_level_cached_ref(name, ctx, ctx.tmp_i32 + 5)
+            .unwrap_or(compile_expr(xs_node, &nested_ctx)?),
+        _ => compile_expr(xs_node, &nested_ctx)?,
+    };
     let idx = compile_expr(
         node.children
             .get(2)
             .ok_or_else(|| "set! missing index".to_string())?,
-        ctx,
+        &nested_ctx,
     )?;
     let val_node = node
         .children
         .get(3)
         .ok_or_else(|| "set! missing value".to_string())?;
-    let v = compile_expr(val_node, ctx)?;
+    let v = compile_expr(val_node, &nested_ctx)?;
     val_node
         .typ
         .as_ref()
