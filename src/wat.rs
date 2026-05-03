@@ -55,6 +55,7 @@ struct Ctx<'a> {
     locals: HashMap<String, usize>,
     local_types: HashMap<String, Type>,
     materialized_scalar_local_slots: HashSet<usize>,
+    definitely_materialized_top_level_scalar_names: &'a HashSet<String>,
     tmp_i32: usize,
 }
 
@@ -321,6 +322,7 @@ fn expr_is_definitely_materialized_scalar_vector(
     expr: &TypedExpression,
     materialized_scalar_local_slots: &HashSet<usize>,
     locals: &HashMap<String, usize>,
+    definitely_materialized_top_level_scalar_names: &HashSet<String>,
 ) -> bool {
     if !expr.typ.as_ref().map(is_scalar_vector_type).unwrap_or(false) {
         return false;
@@ -329,7 +331,7 @@ fn expr_is_definitely_materialized_scalar_vector(
         Expression::Word(name) => locals
             .get(name)
             .map(|slot| materialized_scalar_local_slots.contains(slot))
-            .unwrap_or(false),
+            .unwrap_or_else(|| definitely_materialized_top_level_scalar_names.contains(name)),
         Expression::Apply(items) => matches!(
             items.first(),
             Some(Expression::Word(op))
@@ -348,6 +350,118 @@ impl VecElemKind {
             VecElemKind::I32 => "i32",
         }
     }
+}
+
+fn top_level_expr_is_definitely_materialized_scalar_vector(
+    expr: &TypedExpression,
+    top_defs: &HashMap<String, TopDef>,
+    visiting: &mut HashSet<String>,
+) -> bool {
+    if !expr.typ.as_ref().map(is_scalar_vector_type).unwrap_or(false) {
+        return false;
+    }
+    match &expr.expr {
+        Expression::Word(name) => {
+            if !visiting.insert(name.clone()) {
+                return false;
+            }
+            let out = top_defs
+                .get(name)
+                .map(|def| top_level_expr_is_definitely_materialized_scalar_vector(&def.node, top_defs, visiting))
+                .unwrap_or(false);
+            visiting.remove(name);
+            out
+        }
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
+        {
+            let child_offset = if expr.children.len() + 1 == items.len() { 1 } else { 0 };
+            let child_at = |item_idx: usize| -> Option<&TypedExpression> {
+                if item_idx < child_offset {
+                    None
+                } else {
+                    expr.children.get(item_idx - child_offset)
+                }
+            };
+            let mut local_slots: HashMap<String, usize> = HashMap::new();
+            let mut local_materialized: HashSet<usize> = HashSet::new();
+            for i in 1..items.len().saturating_sub(1) {
+                if let Expression::Apply(let_items) = &items[i] {
+                    if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
+                        let slot = local_slots.len();
+                        local_slots.entry(name.clone()).or_insert(slot);
+                        if (kw == "let" || kw == "letrec" || kw == "mut")
+                            && child_at(i)
+                                .and_then(|n| n.children.get(2))
+                                .map(|rhs| {
+                                    expr_is_definitely_materialized_scalar_vector(
+                                        rhs,
+                                        &local_materialized,
+                                        &local_slots,
+                                        &HashSet::new(),
+                                    ) || top_level_expr_is_definitely_materialized_scalar_vector(
+                                        rhs,
+                                        top_defs,
+                                        visiting,
+                                    )
+                                })
+                                .unwrap_or(false)
+                        {
+                            local_materialized.insert(*local_slots.get(name).unwrap());
+                        }
+                    }
+                }
+            }
+            if let Some(last) = expr.children.last() {
+                return expr_is_definitely_materialized_scalar_vector(
+                    last,
+                    &local_materialized,
+                    &local_slots,
+                    &HashSet::new(),
+                ) || top_level_expr_is_definitely_materialized_scalar_vector(last, top_defs, visiting);
+            }
+            false
+        }
+        Expression::Apply(items) => {
+            if matches!(
+                items.first(),
+                Some(Expression::Word(op))
+                    if matches!(
+                        op.as_str(),
+                        "vector" | "string" | "__vec_new_zeroed_i32" | "__vec_new_uninit_i32" | "integers" | "bools" | "decimals"
+                    )
+            ) {
+                return true;
+            }
+            if let Some(Expression::Word(op)) = items.first() {
+                if let Some(def) = top_defs.get(op) {
+                    if matches!(&def.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")) {
+                        if let Some(body) = def.node.children.last() {
+                            return top_level_expr_is_definitely_materialized_scalar_vector(body, top_defs, visiting);
+                        }
+                    }
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn collect_definitely_materialized_top_level_scalar_names(
+    top_defs: &HashMap<String, TopDef>,
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for (name, def) in top_defs {
+        if top_level_expr_is_definitely_materialized_scalar_vector(
+            &def.node,
+            top_defs,
+            &mut HashSet::new(),
+        ) {
+            out.insert(name.clone());
+        }
+    }
+    out
 }
 
 fn ident(name: &str) -> String {
@@ -5816,6 +5930,7 @@ fn compile_do(
                                 local_types: ctx.local_types.clone(),
                                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots
                                     .clone(),
+                                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                                 tmp_i32: ctx.tmp_i32,
                             };
                             if
@@ -5851,6 +5966,7 @@ fn compile_do(
                                     n,
                                     &scoped_materialized_scalar_local_slots,
                                     &ctx.locals,
+                                    ctx.definitely_materialized_top_level_scalar_names,
                                 )
                             })
                             .unwrap_or(false)
@@ -5889,6 +6005,7 @@ fn compile_do(
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
+                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                 tmp_i32: ctx.tmp_i32,
             };
             let c = compile_expr(n, &scoped_ctx)?;
@@ -5953,6 +6070,7 @@ fn compile_do(
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
+                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                 tmp_i32: ctx.tmp_i32,
             };
             compile_expr(n, &scoped_ctx)
@@ -5999,6 +6117,7 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+            definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
@@ -6054,6 +6173,7 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+            definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = match item {
@@ -6131,6 +6251,7 @@ fn compile_trusted_typed_vector_literal(
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+            definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_item(item, &nested_ctx)?;
@@ -6176,6 +6297,7 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let a_node = node
@@ -6236,6 +6358,7 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                 tmp_i32: ctx.tmp_i32 + 3,
             };
             let a = compile_expr(a_node, &nested_ctx)?;
@@ -6293,6 +6416,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                 tmp_i32: ctx.tmp_i32 + 3,
             };
             let a = compile_expr(a_node, &nested_ctx)?;
@@ -6333,6 +6457,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let xs = match &xs_node.expr {
@@ -6438,6 +6563,7 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let xs = match &xs_node.expr {
@@ -6468,11 +6594,9 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .unwrap_or(false);
     let definitely_materialized_scalar_target = if is_scalar_value {
         match &xs_node.expr {
-            Expression::Word(name) => ctx
-                .locals
-                .get(name)
+            Expression::Word(name) => ctx.locals.get(name)
                 .map(|slot| ctx.materialized_scalar_local_slots.contains(slot))
-                .unwrap_or(false),
+                .unwrap_or_else(|| ctx.definitely_materialized_top_level_scalar_names.contains(name)),
             _ => false,
         }
     } else {
@@ -6633,6 +6757,7 @@ fn compile_fast_box_ctor(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let value = compile_expr(value_node, &nested_ctx)?;
@@ -6688,6 +6813,7 @@ fn compile_fast_cell_set(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(cell_node, &nested_ctx)?;
@@ -6744,6 +6870,7 @@ fn compile_fast_truthy(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(
@@ -6842,6 +6969,7 @@ fn compile_host_unary_string_call(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let arg = compile_expr(
@@ -6908,6 +7036,7 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let path = compile_expr(
@@ -6957,6 +7086,7 @@ fn compile_host_binary_string_call(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let left = compile_expr(
@@ -7079,6 +7209,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                     locals: ctx.locals.clone(),
                     local_types: ctx.local_types.clone(),
                     materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                    definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                     tmp_i32: ctx.tmp_i32 + 2,
                 };
                 let av = compile_expr(arg, &nested_ctx)?;
@@ -7176,6 +7307,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                 tmp_i32: ctx.tmp_i32 + 2,
             };
             let av = compile_expr(arg, &nested_ctx)?;
@@ -7291,6 +7423,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                 tmp_i32: ctx.tmp_i32 + 2,
             };
             let av = compile_expr(arg, &nested_ctx)?;
@@ -7937,6 +8070,7 @@ fn compile_lambda_func(
     lambda_ids: &HashMap<String, i32>,
     closure_defs: &HashMap<String, ClosureDef>,
     lambda_bindings: &HashMap<String, TypedExpression>,
+    definitely_materialized_top_level_scalar_names: &HashSet<String>,
     tail_call_mode: TailCallMode,
 ) -> Result<String, String> {
     let items = match lambda_expr {
@@ -8035,6 +8169,7 @@ fn compile_lambda_func(
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        definitely_materialized_top_level_scalar_names,
         tmp_i32,
     };
     let body_code =
@@ -8103,6 +8238,7 @@ fn compile_closure_func(
     lambda_ids: &HashMap<String, i32>,
     closure_defs: &HashMap<String, ClosureDef>,
     lambda_bindings: &HashMap<String, TypedExpression>,
+    definitely_materialized_top_level_scalar_names: &HashSet<String>,
 ) -> Result<String, String> {
     let items = match &lambda_node.expr {
         Expression::Apply(xs) => xs,
@@ -8182,6 +8318,7 @@ fn compile_closure_func(
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        definitely_materialized_top_level_scalar_names,
         tmp_i32,
     };
     let body_code =
@@ -8272,6 +8409,7 @@ fn compile_value_func(
     lambda_ids: &HashMap<String, i32>,
     closure_defs: &HashMap<String, ClosureDef>,
     lambda_bindings: &HashMap<String, TypedExpression>,
+    definitely_materialized_top_level_scalar_names: &HashSet<String>,
 ) -> Result<String, String> {
     let ret_ty = value_node
         .typ
@@ -8305,6 +8443,7 @@ fn compile_value_func(
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        definitely_materialized_top_level_scalar_names,
         tmp_i32,
     };
     let body_code =
@@ -8398,6 +8537,7 @@ fn compile_partial_helper_func(
     for (i, t) in h.remaining_params.iter().enumerate() {
         local_types.insert(format!("__p{}", i), t.clone());
     }
+    let empty_top_level_materialized = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
@@ -8407,6 +8547,7 @@ fn compile_partial_helper_func(
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        definitely_materialized_top_level_scalar_names: &empty_top_level_materialized,
         tmp_i32: h.remaining_params.len(),
     };
 
@@ -8573,6 +8714,8 @@ pub fn compile_program_to_wat_typed_with_opts(
     for name in top_defs.keys() {
         needed.insert(name.clone());
     }
+    let definitely_materialized_top_level_scalar_names =
+        collect_definitely_materialized_top_level_scalar_names(&top_defs);
 
     let mut fn_sigs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
     let mut top_level_lambda_key_to_name: HashMap<String, String> = HashMap::new();
@@ -8828,6 +8971,7 @@ pub fn compile_program_to_wat_typed_with_opts(
                     &lambda_ids,
                     &closure_defs,
                     &lambda_bindings,
+                    &definitely_materialized_top_level_scalar_names,
                     tail_call_mode,
                 )?);
             }
@@ -8841,6 +8985,7 @@ pub fn compile_program_to_wat_typed_with_opts(
                     &lambda_ids,
                     &closure_defs,
                     &lambda_bindings,
+                    &definitely_materialized_top_level_scalar_names,
                 )?);
             }
         }
@@ -8881,6 +9026,7 @@ pub fn compile_program_to_wat_typed_with_opts(
                 &lambda_ids,
                 &closure_defs,
                 &lambda_bindings,
+                &definitely_materialized_top_level_scalar_names,
                 tail_call_mode,
             )?);
         }
@@ -8896,6 +9042,7 @@ pub fn compile_program_to_wat_typed_with_opts(
                 &lambda_ids,
                 &closure_defs,
                 &lambda_bindings,
+                &definitely_materialized_top_level_scalar_names,
             )?);
         }
     }
@@ -8929,6 +9076,7 @@ pub fn compile_program_to_wat_typed_with_opts(
         locals: main_locals,
         local_types: main_local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        definitely_materialized_top_level_scalar_names: &definitely_materialized_top_level_scalar_names,
         tmp_i32: main_local_defs.len(),
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;

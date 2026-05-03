@@ -2481,3 +2481,106 @@ q)))
           (alter! best-dist dist)))
     (alter! i (+ i 1))))
   { (get best-word) best-dist })))
+
+(let std/vector/char/join2 (lambda a b (do
+  (let out [])
+  (mut i 0)
+  (while (< i (length a)) (do
+    (push! out (get a i))
+    (alter! i (+ i 1))))
+  (mut j 0)
+  (while (< j (length b)) (do
+    (push! out (get b j))
+    (alter! j (+ j 1))))
+  out)))
+
+(let std/vector/char/join3 (lambda a b c
+  (std/vector/char/join2
+    (std/vector/char/join2 a b)
+    c)))
+
+; Patch format:
+; {pos delete-count insert-text}
+;
+; Example:
+; {5 0 " world"} means insert " world" at index 5
+; {5 6 ""} means delete 6 chars from index 5
+; {5 5 "Que"} means replace 5 chars with "Que"
+
+(let std/vector/char/diff/simple (lambda old new (do
+  (let old-len (length old))
+  (let new-len (length new))
+
+  ; common prefix
+  (mut prefix 0)
+  (while
+    (and
+      (< prefix old-len)
+      (< prefix new-len)
+      (=# (get old prefix) (get new prefix)))
+    (alter! prefix (+ prefix 1)))
+
+  ; common suffix
+  (mut old-suffix old-len)
+  (mut new-suffix new-len)
+
+  (while
+    (and
+      (> old-suffix prefix)
+      (> new-suffix prefix)
+      (=#
+        (get old (- old-suffix 1))
+        (get new (- new-suffix 1))))
+    (do
+      (alter! old-suffix (- old-suffix 1))
+      (alter! new-suffix (- new-suffix 1))))
+
+  (let delete-count (- old-suffix prefix))
+  (let insert-text (std/vector/slice new prefix new-suffix))
+
+  {prefix delete-count insert-text})))
+
+(let std/vector/char/apply-patch (lambda source patch (do
+  (let pos (fst patch))
+  (let rest (snd patch))
+  (let delete-count (fst rest))
+  (let insert-text (snd rest))
+
+  (let before (std/vector/slice source 0 pos))
+  (let after
+    (std/vector/slice
+      source
+      (+ pos delete-count)
+      (length source)))
+
+  (std/vector/char/join3 before insert-text after))))
+
+(let std/vector/char/apply-patches (lambda source patches (do
+  (mut result source)
+  (mut i 0)
+  (while (< i (length patches)) (do
+    (alter! result (std/vector/char/apply-patch result (get patches i)))
+    (alter! i (+ i 1))))
+  result)))
+
+(let std/text/history/new (lambda _ {"" []}))
+
+(let std/text/history/source (lambda history
+  (fst history)))
+
+(let std/text/history/patches (lambda history
+  (snd history)))
+
+(let std/text/history/add! (lambda history new-source (do
+  (let old-source (fst history))
+  (let patches (snd history))
+  (let patch (std/vector/char/diff/simple old-source new-source))
+
+  (push! patches patch)
+
+  ; return updated history
+  {new-source patches})))
+
+(let std/text/history/reconstruct (lambda history (do
+  (let patches (snd history))
+  (std/vector/char/apply-patches "" patches))))
