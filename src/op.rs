@@ -415,20 +415,8 @@ fn collect_unbound_words(
 }
 
 fn fuse_entry_expression_for_program(expr: &Expression) -> Expression {
-    let prepared = expr.clone();
     let mut name_state = FuseNameState::default();
-    match &prepared {
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "do") &&
-            items.len() > 1
-        => {
-            let mut out = items.clone();
-            let last = out.len() - 1;
-            out[last] = fuse_map_filter_reduce_chains_expr(&out[last], &mut name_state);
-            Expression::Apply(out)
-        }
-        _ => fuse_map_filter_reduce_chains_expr(&prepared, &mut name_state),
-    }
+    fuse_map_filter_reduce_chains_expr(expr, &mut name_state)
 }
 
 fn fuse_map_filter_reduce_chains_expr(
