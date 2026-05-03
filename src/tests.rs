@@ -4535,6 +4535,54 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_top_level_scalar_vector_get_uses_borrowed_global_cache_path() {
+        let expr = crate::parser::build(
+            "(do (let xs [1 2 3]) (let f! (lambda () (get xs 1))) (f!))",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let func_wat = &wat[main_start..];
+
+        assert!(
+            func_wat.contains("global.get $g_val_v_xs"),
+            "top-level scalar vector get should borrow the cached global value directly, got:\n{}",
+            func_wat
+        );
+        assert!(
+            !func_wat.contains("call $rc_retain"),
+            "borrowed top-level scalar vector get path should avoid per-access rc_retain, got:\n{}",
+            func_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_top_level_scalar_vector_set_uses_borrowed_global_cache_path() {
+        let expr = crate::parser::build(
+            "(do (let xs [1 2 3]) (let f! (lambda () (do (set! xs 1 9) (get xs 1)))) (f!))",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let func_wat = &wat[main_start..];
+
+        assert!(
+            func_wat.contains("global.get $g_val_v_xs"),
+            "top-level scalar vector set should borrow the cached global value directly, got:\n{}",
+            func_wat
+        );
+        assert!(
+            !func_wat.contains("call $rc_retain"),
+            "borrowed top-level scalar vector set path should avoid per-access rc_retain, got:\n{}",
+            func_wat
+        );
+    }
+
+    #[test]
     fn test_wat_tuple_temp_used_only_for_projections_releases_early() {
         let expr = crate::parser
             ::build(
