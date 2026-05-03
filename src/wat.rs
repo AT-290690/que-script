@@ -57,7 +57,6 @@ struct Ctx<'a> {
     materialized_scalar_local_slots: HashSet<usize>,
     tmp_i32: usize,
 }
-const EXTRA_I32_LOCALS: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DevirtualizeMode {
@@ -70,6 +69,45 @@ enum DevirtualizeMode {
 enum TailCallMode {
     Conservative,
     Aggressive,
+}
+
+fn max_local_index_in_code(code: &str) -> Option<usize> {
+    let tokens: Vec<&str> = code.split_whitespace().collect();
+    let mut max_idx = None;
+    let mut i = 0usize;
+    while i + 1 < tokens.len() {
+        match tokens[i] {
+            "local.get" | "local.set" | "local.tee" => {
+                if let Ok(idx) = tokens[i + 1].parse::<usize>() {
+                    max_idx = Some(max_idx.map_or(idx, |m: usize| m.max(idx)));
+                }
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+    max_idx
+}
+
+fn scratch_i32_locals_needed(base_local_count: usize, codes: &[&str], needs_release_scratch: bool) -> usize {
+    let body_needed = codes
+        .iter()
+        .filter_map(|code| max_local_index_in_code(code))
+        .filter(|idx| *idx >= base_local_count)
+        .map(|idx| idx - base_local_count + 1)
+        .max()
+        .unwrap_or(0);
+    if needs_release_scratch {
+        body_needed.max(1)
+    } else {
+        body_needed
+    }
+}
+
+fn emit_i32_locals(out: &mut String, count: usize) {
+    for _ in 0..count {
+        out.push_str("    (local i32)\n");
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -6138,49 +6176,24 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
     )?;
     let release_a = should_release_set_rhs(a_node);
     let release_b = should_release_set_rhs(b_node);
-    if release_a && release_b {
-        let a_tmp = ctx.tmp_i32;
-        let b_tmp = ctx.tmp_i32 + 1;
-        let out_tmp = ctx.tmp_i32 + 2;
-        let mut out = Vec::new();
-        out.push(format!("{a}\nlocal.set {}", a_tmp));
-        out.push(format!("{b}\nlocal.set {}", b_tmp));
-        out.push(format!(
-            "local.get {}\nlocal.get {}\ncall $tuple_new\nlocal.set {}",
-            a_tmp, b_tmp, out_tmp
-        ));
+    let a_tmp = ctx.tmp_i32;
+    let b_tmp = ctx.tmp_i32 + 1;
+    let out_tmp = ctx.tmp_i32 + 2;
+    let mut out = Vec::new();
+    out.push(format!("{a}\nlocal.set {}", a_tmp));
+    out.push(format!("{b}\nlocal.set {}", b_tmp));
+    out.push(format!(
+        "local.get {}\nlocal.get {}\ncall $tuple_new\nlocal.set {}",
+        a_tmp, b_tmp, out_tmp
+    ));
+    if release_a {
         out.push(emit_release_fresh_owned_temp(a_tmp));
-        out.push(emit_release_fresh_owned_temp(b_tmp));
-        out.push(format!("local.get {}", out_tmp));
-        Ok(out.join("\n"))
-    } else if release_a {
-        let a_tmp = ctx.tmp_i32;
-        let out_tmp = ctx.tmp_i32 + 1;
-        let mut out = Vec::new();
-        out.push(format!("{a}\nlocal.set {}", a_tmp));
-        out.push(format!(
-            "local.get {}\n{}\ncall $tuple_new\nlocal.set {}",
-            a_tmp, b, out_tmp
-        ));
-        out.push(emit_release_fresh_owned_temp(a_tmp));
-        out.push(format!("local.get {}", out_tmp));
-        Ok(out.join("\n"))
-    } else if release_b {
-        let b_tmp = ctx.tmp_i32;
-        let out_tmp = ctx.tmp_i32 + 1;
-        let mut out = Vec::new();
-        out.push(a);
-        out.push(format!("{b}\nlocal.set {}", b_tmp));
-        out.push(format!(
-            "local.get {}\ncall $tuple_new\nlocal.set {}",
-            b_tmp, out_tmp
-        ));
-        out.push(emit_release_fresh_owned_temp(b_tmp));
-        out.push(format!("local.get {}", out_tmp));
-        Ok(out.join("\n"))
-    } else {
-        Ok(format!("{a}\n{b}\ncall $tuple_new"))
     }
+    if release_b {
+        out.push(emit_release_fresh_owned_temp(b_tmp));
+    }
+    out.push(format!("local.get {}", out_tmp));
+    Ok(out.join("\n"))
 }
 
 fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -8005,6 +8018,12 @@ fn compile_lambda_func(
     } else {
         None
     };
+    let base_local_count = params.len() + local_defs.len();
+    let scratch_i32_locals = scratch_i32_locals_needed(
+        base_local_count,
+        &[&body_code, tail_body_code.as_deref().unwrap_or("")],
+        !ref_slots.is_empty(),
+    );
     let mut out = String::new();
     out.push_str(&format!("  (func ${}", ident(name)));
     for (_pname, pty) in &params {
@@ -8014,9 +8033,7 @@ fn compile_lambda_func(
     for (_n, t) in &local_defs {
         out.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
-    for _ in 0..EXTRA_I32_LOCALS {
-        out.push_str("    (local i32)\n");
-    }
+    emit_i32_locals(&mut out, scratch_i32_locals);
     if let Some(tail_code) = tail_body_code {
         out.push_str(&format!("    {}\n", tail_code.replace('\n', "\n    ")));
         out.push_str("    unreachable\n");
@@ -8024,10 +8041,10 @@ fn compile_lambda_func(
         return Ok(out);
     }
     out.push_str(&format!("    (local {})\n", wasm_val_type(&ret_ty)?));
-    let ret_slot = params.len() + local_defs.len() + EXTRA_I32_LOCALS;
+    let ret_slot = base_local_count + scratch_i32_locals;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
-    let scratch_slot = params.len() + local_defs.len();
+    let scratch_slot = base_local_count;
     out.push_str(&emit_release_unique_refs(
         &ref_slots,
         ret_slot,
@@ -8138,6 +8155,9 @@ fn compile_closure_func(
             ref_slots.push(params.len() + i);
         }
     }
+    let base_local_count = params.len() + local_defs.len();
+    let scratch_i32_locals =
+        scratch_i32_locals_needed(base_local_count, &[&body_code], !ref_slots.is_empty());
 
     let mut out = String::new();
     out.push_str(&format!("  (func ${}", ident(name)));
@@ -8148,14 +8168,12 @@ fn compile_closure_func(
     for (_n, t) in &local_defs {
         out.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
-    for _ in 0..EXTRA_I32_LOCALS {
-        out.push_str("    (local i32)\n");
-    }
+    emit_i32_locals(&mut out, scratch_i32_locals);
     out.push_str(&format!("    (local {})\n", wasm_val_type(&ret_ty)?));
-    let ret_slot = params.len() + local_defs.len() + EXTRA_I32_LOCALS;
+    let ret_slot = base_local_count + scratch_i32_locals;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
-    let scratch_slot = params.len() + local_defs.len();
+    let scratch_slot = base_local_count;
     out.push_str(&emit_release_unique_refs(
         &ref_slots,
         ret_slot,
@@ -8265,6 +8283,9 @@ fn compile_value_func(
             }
         })
         .collect();
+    let base_local_count = local_defs.len();
+    let scratch_i32_locals =
+        scratch_i32_locals_needed(base_local_count, &[&body_code], !ref_slots.is_empty());
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -8275,12 +8296,10 @@ fn compile_value_func(
     for (_n, t) in &local_defs {
         out.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
-    for _ in 0..EXTRA_I32_LOCALS {
-        out.push_str("    (local i32)\n");
-    }
+    emit_i32_locals(&mut out, scratch_i32_locals);
     out.push_str(&format!("    (local {})\n", wasm_val_type(ret_ty)?));
-    let ret_slot = local_defs.len() + EXTRA_I32_LOCALS;
-    let scratch_slot = local_defs.len();
+    let ret_slot = base_local_count + scratch_i32_locals;
+    let scratch_slot = base_local_count;
     let g_init = cache_init_global(name);
     let g_val = cache_value_global(name);
 
@@ -8361,6 +8380,9 @@ fn compile_partial_helper_func(
         body_parts.push(format!("local.get {}", i));
     }
     body_parts.push(format!("call ${}", ident(&h.target_name)));
+    let body_code = body_parts.join("\n    ");
+    let scratch_i32_locals =
+        scratch_i32_locals_needed(h.remaining_params.len(), &[&body_code], false);
 
     let mut out = String::new();
     out.push_str(&format!("  (func ${}", ident(&h.helper_name)));
@@ -8368,10 +8390,8 @@ fn compile_partial_helper_func(
         out.push_str(&format!(" (param {})", wasm_val_type(p)?));
     }
     out.push_str(&format!(" (result {})\n", wasm_val_type(&h.ret)?));
-    for _ in 0..EXTRA_I32_LOCALS {
-        out.push_str("    (local i32)\n");
-    }
-    out.push_str(&format!("    {}\n", body_parts.join("\n    ")));
+    emit_i32_locals(&mut out, scratch_i32_locals);
+    out.push_str(&format!("    {}\n", body_code));
     out.push_str("  )\n");
     Ok(out)
 }
@@ -8383,9 +8403,6 @@ fn compile_dynamic_partial_helper_func(h: &DynamicPartialHelper) -> String {
         out.push_str(" (param i32)");
     }
     out.push_str(" (result i32)\n");
-    for _ in 0..EXTRA_I32_LOCALS {
-        out.push_str("    (local i32)\n");
-    }
     out.push_str("    local.get 0\n");
     for i in 1..=h.total_arity {
         out.push_str(&format!("    local.get {}\n", i));
@@ -8882,6 +8899,8 @@ pub fn compile_program_to_wat_typed_with_opts(
         collect_apply_arities_from_code(func, &mut apply_arities);
     }
     collect_apply_arities_from_code(&main_code, &mut apply_arities);
+    let main_scratch_i32_locals =
+        scratch_i32_locals_needed(main_local_defs.len(), &[&main_code], false);
 
     let mut main_func = String::new();
     main_func.push_str(&format!("  ;; Type: {}\n", main_ret_ty));
@@ -8891,9 +8910,7 @@ pub fn compile_program_to_wat_typed_with_opts(
     for (_n, t) in &main_local_defs {
         main_func.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
-    for _ in 0..EXTRA_I32_LOCALS {
-        main_func.push_str("    (local i32)\n");
-    }
+    emit_i32_locals(&mut main_func, main_scratch_i32_locals);
     main_func.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
     main_func.push_str("  )\n");
 
