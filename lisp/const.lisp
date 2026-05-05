@@ -244,3 +244,24 @@
   (let Meta/get/text
     (lambda (text key)
       (Meta/get (Meta/table text) key)))
+
+  (let std/int/prime? (lambda n
+    (cond
+      (< n 2) false
+      (= n 2) true
+      (= n 3) true
+      (= (mod n 2) 0) false
+      (= (mod n 3) 0) false
+
+      (do
+        (mut i 5)
+        (mut ok true)
+
+        (while (and ok (<= (* i i) n)) (do
+          (if (or (= (mod n i) 0)
+                  (= (mod n (+ i 2)) 0))
+              (alter! ok false))
+
+          (alter! i (+ i 6))))
+
+        ok))))

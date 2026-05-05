@@ -27,6 +27,7 @@
 (let std/char/ampersand (get "&" 0))
 (let std/char/at (get "@" 0))
 (let std/char/backtick (get "`" 0))
+(let std/char/carriage-return (char 13))
 
 (let nl std/char/new-line)
 (let sp std/char/space)
@@ -34,6 +35,7 @@
 (let dq std/char/double-quote)
 (let sq std/char/single-quote)
 (let bt std/char/backtick)
+(let cr std/char/carriage-return)
 
 (let std/dec/floor (lambda n (-. n (mod. n 1.0))))
 (let std/dec/ceil (lambda n (do 
@@ -396,16 +398,24 @@ out)))
 (let std/vector/3d/char/count (lambda xs x (<| xs (std/vector/map (lambda ys (std/vector/2d/char/count ys x))) (std/vector/int/sum))))
 (let std/vector/3d/bool/count (lambda xs x (<| xs (std/vector/map (lambda ys (std/vector/2d/bool/count ys x))) (std/vector/int/sum))))
 
-(let std/vector/cons (lambda a b (do 
-  (let lena (length a))
-  (let lenb (length b))
-  (cond (= lena 0) b (= lenb 0) a (do 
-  (let out []) 
-  (mut i 0)
-  (while (< i lena) (do (set! out (length out) (get a i)) (alter! i (+ i 1))))
-  (alter! i 0)
-  (while (< i lenb) (do (set! out (length out) (get b i)) (alter! i (+ i 1))))
-  out)))))
+(let std/vector/cons
+  (lambda a b
+    (do
+      (let lena (length a))
+      (let lenb (length b))
+      (let out [])
+
+      (mut i 0)
+      (while (< i lena) (do
+        (set! out (length out) (get a i))
+        (alter! i (+ i 1))))
+
+      (mut j 0)
+      (while (< j lenb) (do
+        (set! out (length out) (get b j))
+        (alter! j (+ j 1))))
+
+      out)))
 
 (let std/vector/cons! (lambda a b (if (and (std/vector/empty? a) (std/vector/empty? b)) a (do 
   (loop 0 (length b) (lambda i (set! a (length a) (get b i)))) 
@@ -718,6 +728,23 @@ out)))
      (mut i (- len start))
      (while (< i len) (do (set! out (length out) (get xs i)) (alter! i (+ i 1))))
      out))))
+
+(let std/vector/take/while
+  (lambda xs fn?
+    (do
+      (let out [])
+      (mut i 0)
+      (while (and (< i (length xs)) (fn? (get xs i))) (do
+        (push! out (get xs i))
+        (++ i)))
+      out)))
+
+(let std/vector/drop/while
+  (lambda xs fn?
+    (do
+      (mut i 0)
+      (while (and (< i (length xs)) (fn? (get xs i))) (++ i))
+      (cdr xs i))))
 
 (let std/vector/reverse (lambda xs (if (std/vector/empty? xs) xs (do
      (let out [])
@@ -1497,190 +1524,222 @@ q)))
   (let b (std/vector/reverse b1))
   (let max-length (std/int/max (length a) (length b)))
   (let result [])
-  (&mut carry 0)
-  (loop 0 max-length (lambda i (do
+  (mut carry 0)
+  (loop/range/exclusive i 0 max-length
     (let digit-A (if (< i (length a)) (get a i) 0))
     (let digit-B (if (< i (length b)) (get b i) 0))
-    (let sm (+ digit-A digit-B (&get carry)))
+    (let sm (+ digit-A digit-B carry))
     (std/vector/push! result (mod sm 10))
-    (&alter! carry (/ sm 10)))
-  ))
+    (alter! carry (/ sm 10)))
   ; Handle remaining carry
-  (while (> (&get carry) 0) (do
-    (std/vector/push! result (mod (&get carry) 10))
-    (&alter! carry (/ (&get carry) 10))))
+  (while (> carry 0) (do
+    (std/vector/push! result (mod carry 10))
+    (alter! carry (/ carry 10))))
   (std/vector/reverse result))))
   
-(let std/int/big/sub (lambda a1 b1 (do
-  (let a (std/vector/reverse a1))
-  (let b (std/vector/reverse b1))
-  (let max-length (std/int/max (length a) (length b)))
-  (let result (as [] [Int]))
-  (&mut borrow 0)
-  (loop 0 max-length (lambda i (do
-    (let digit-A (if (< i (length a)) (get a i) 0))
-    (let digit-B (if (< i (length b)) (get b i) 0))
-    (let sub (- digit-A digit-B (&get borrow)))
-    (if (< sub 0)
-      (do
-        (std/vector/push! result (+ sub 10))
-        (&alter! borrow 1))
-      (do
-        (std/vector/push! result sub)
-        (&alter! borrow 0))))))
-  ; Remove trailing zeros (from the most significant end)
-  (&mut i (- (length result) 1))
-  (while (and (> (&get i) 0) (= (get result (&get i)) 0)) (do
-    (pop! result)
-    (&alter! i (- (&get i) 1))))
-  (std/vector/reverse result))))
+(let std/int/big/sub
+  (lambda a1 b1
+    (do
+      (let a (std/vector/reverse a1))
+      (let b (std/vector/reverse b1))
+      (let result [])
+      (mut borrow 0)
+      (mut j 0)
+      (let max-length (std/int/max (length a) (length b)))
+
+      (while (< j max-length) (do
+        (let digit-a (if (< j (length a)) (get a j) 0))
+        (let digit-b (if (< j (length b)) (get b j) 0))
+        (let diff (- (- digit-a digit-b) borrow))
+
+        (if (< diff 0)
+            (do
+              (push! result (+ diff 10))
+              (alter! borrow 1))
+            (do
+              (push! result diff)
+              (alter! borrow 0)))
+
+        (alter! j (+ j 1))))
+
+      (mut k (- (length result) 1))
+      (while (and (> k 0) (= (get result k) 0)) (do
+        (pop! result)
+        (alter! k (- k 1))))
+
+      (std/vector/reverse result))))
 
 (let std/int/big/mul (lambda a1 b1 (do
   (let a (std/vector/reverse a1))
   (let b (std/vector/reverse b1))
   (let result [])
   ; Initialize result array with zeros
-  (loop 0 (+ (length a) (length b)) (lambda _ (std/vector/push! result 0)))
-  (loop 0 (length a) (lambda i (do
-    (&mut carry 0)
+  (loop/range/exclusive _ 0 (+ (length a) (length b)) (std/vector/push! result 0))
+  (loop/range/exclusive i 0 (length a)
+    (mut carry 0)
     (let digit-a (get a i))
-    (loop 0 (length b) (lambda j (do
+    (loop/range/exclusive j 0 (length b)
       (let digit-B (get b j))
       (let idx (+ i j))
-      (let prod (+ (* digit-a digit-B) (get result idx) (&get carry)))
+      (let prod (+ (* digit-a digit-B) (get result idx) carry))
       (set! result idx (mod prod 10))
-      (&alter! carry (/ prod 10)))))
+      (alter! carry (/ prod 10)))
     ; Handle carry for this digit-a
-    (&mut k (+ i (length b)))
-    (while (> (&get carry) 0) (do
-      (if (not (< (&get k) (length result))) (do (std/vector/push! result 0) nil) nil)
-      (let sm (+ (get result (&get k)) (&get carry)))
-      (set! result (&get k) (mod sm 10))
-      (&alter! carry (/ sm 10))
-      (&alter! k (+ (&get k) 1)))))))
+    (mut k (+ i (length b)))
+    (while (> carry 0) (do
+      (if (not (< k (length result))) (do (std/vector/push! result 0) nil) nil)
+      (let sm (+ (get result k) carry))
+      (set! result k (mod sm 10))
+      (alter! carry (/ sm 10))
+      (alter! k (+ k 1)))))
   ; Remove trailing zeros (from the most significant end), but keep at least one digit
-  (&mut i (- (length result) 1))
-  (while (and (> (&get i) 0) (= (get result (&get i)) 0) (> (length result) 1)) (do
+  (mut ii (- (length result) 1))
+  (while (and (> ii 0) (= (get result ii) 0) (> (length result) 1)) (do
     (pop! result)
-    (&alter! i (- (&get i) 1))))
+    (alter! ii (- ii 1))))
   (std/vector/reverse result))))
 
-(let std/vector/int/remove-leading-zeroes (lambda digits (do
-  (&mut tr true)
-  (<| digits (std/vector/reduce (lambda a b (if
-  (and (true? tr) (std/int/zero? b)) a
+(let std/vector/int/remove-leading-zeroes
+  (lambda digits
     (do
-      (if (true? tr) (&alter! tr false))
-      (std/vector/cons! a [b])))) [])))))
+      (mut i 0)
+      (while (and (< i (length digits))
+                  (std/int/zero? (get digits i))) (do
+        (++ i)))
+      (if (= i (length digits))
+          [0]
+          (std/vector/slice digits i (length digits))))))
 
 (let std/int/big/less-or-equal? (lambda a b (do
   (if (< (length a) (length b)) true
   (if (> (length a) (length b)) false
     ; Equal length, compare digit by digit
     (do
-      (&mut i 0)
-      (&mut result true) ; assume a <= b
-      (while (< (&get i) (length a)) (do
-        (let da (get a (&get i)))
-        (let db (get b (&get i)))
+      (mut i 0)
+      (mut result true) ; assume a <= b
+      (while (< i (length a)) (do
+        (let da (get a i))
+        (let db (get b i))
         (if (< da db) (do
-          (&alter! result true)
-          (&alter! i (length a))))
+          (alter! result true)
+          (alter! i (length a))))
         (if (> da db) (do
-          (&alter! result false)
-          (&alter! i (length a))))
-        (&alter! i (+ (&get i) 1))))
-      (if (true? result) true false)))))))
+          (alter! result false)
+          (alter! i (length a))))
+        (alter! i (+ i 1))))
+      result))))))
 
 (let std/int/big/greater-or-equal? (lambda a b (do
   (if (> (length a) (length b)) true
   (if (< (length a) (length b)) false
     ; Equal length, compare digit by digit
     (do
-      (&mut i 0)
-      (&mut result true) ; assume a >= b
-      (while (< (&get i) (length a)) (do
-        (let da (get a (&get i)))
-        (let db (get b (&get i)))
+      (mut i 0)
+      (mut result true) ; assume a >= b
+      (while (< i (length a)) (do
+        (let da (get a i))
+        (let db (get b i))
         (if (> da db) (do
-          (&alter! result true)
-          (&alter! i (length a))))
+          (alter! result true)
+          (alter! i (length a))))
         (if (< da db) (do
-          (&alter! result false)
-          (&alter! i (length a))))
-        (&alter! i (+ (&get i) 1))))
-      (if (true? result) true false)))))))
+          (alter! result false)
+          (alter! i (length a))))
+        (alter! i (+ i 1))))
+      result))))))
 
 (let std/int/big/less-than? (lambda a b (do
   (if (< (length a) (length b)) true
   (if (> (length a) (length b)) false
     ; Equal length, check for strict less (not equal)
     (do
-      (&mut i 0)
-      (&mut found-less false) ; true if a < b at some digit
-      (while (< (&get i) (length a)) (do
-        (let da (get a (&get i)))
-        (let db (get b (&get i)))
+      (mut i 0)
+      (mut found-less false) ; true if a < b at some digit
+      (while (< i (length a)) (do
+        (let da (get a i))
+        (let db (get b i))
         (if (< da db) (do
-          (&alter! found-less true)
-          (&alter! i (length a))))
+          (alter! found-less true)
+          (alter! i (length a))))
         (if (> da db) (do
-          (&alter! i (length a)))) ; stop on a > b, keep found-less false
-        (&alter! i (+ (&get i) 1))))
-      (if (true? found-less) true false)))))))
+          (alter! i (length a)))) ; stop on a > b, keep found-less false
+        (alter! i (+ i 1))))
+      found-less))))))
 
 (let std/int/big/greater-than? (lambda a b (do
   (if (> (length a) (length b)) true
   (if (< (length a) (length b)) false
     ; Equal length, check for strict greater (not equal)
     (do
-      (&mut i 0)
-      (&mut found-greater false) ; true if a > b at some digit
-      (while (< (&get i) (length a)) (do
-        (let da (get a (&get i)))
-        (let db (get b (&get i)))
+      (mut i 0)
+      (mut found-greater false) ; true if a > b at some digit
+      (while (< i (length a)) (do
+        (let da (get a i))
+        (let db (get b i))
         (if (> da db) (do
-          (&alter! found-greater true)
-          (&alter! i (length a))))
+          (alter! found-greater true)
+          (alter! i (length a))))
         (if (< da db) (do
-          (&alter! i (length a)))) ; stop on a < b, keep found-greater false
-        (&alter! i (+ (&get i) 1))))
-      (if (true? found-greater) true false)))))))
+          (alter! i (length a)))) ; stop on a < b, keep found-greater false
+        (alter! i (+ i 1))))
+      found-greater))))))
 
 (let std/int/big/equal? std/vector/int/equal?)
 
-(let std/int/big/div (lambda dividend divisor (do
-  (let result [])
-  (&mut current [])
-  (let len (length dividend))
-  (&mut i 0)
-  ; Main loop/ process each digit of the dividend
-  (while (< (&get i) len) (do
-    (let digit (get dividend (&get i)))
-    (&alter! current (std/vector/int/remove-leading-zeroes (std/vector/cons (&get current) [ digit ])))
-    ; Find max digit q such that (divisor * q) <= current
-    (&mut low 0)
-    (&mut high 9)
-    (&mut q 0)
-    (while (<= (&get low) (&get high)) (do
-      (let mid (/ (+ (&get low) (&get high)) 2))
-      (let prod (std/int/big/mul divisor [ mid ]))
-      (if (std/int/big/less-or-equal? prod (&get current))
-        (do
-          (&alter! q mid)
-          (&alter! low (+ mid 1)))
-        (&alter! high (- mid 1)))))
 
-    (std/vector/push! result (&get q))
+(let std/int/big/div
+  (lambda dividend divisor
+    (do
+      (let result [])
+      (&mut current [])
+      (let len (length dividend))
+      (mut i 0)
 
-    ; current /= current - (divisor * q)
-    (let sub (std/int/big/mul divisor [ (&get q) ]))
-    (&alter! current (std/int/big/sub (&get current) sub))
-    (&alter! i (+ (&get i) 1))))
-  (let out (std/vector/int/remove-leading-zeroes result))
-  (if (std/vector/empty? out) [ 0 ] out))))
-(let std/int/big/mod (lambda a b
-  (std/int/big/sub a (std/int/big/mul b (std/int/big/div a b)))))
+      (while (< i len) (do
+        (let digit (get dividend i))
+
+        ;; current = trim(cons(current, [digit]))
+        (let cur0 (&get current))
+        (let cur1 (cons cur0 [digit]))
+        (let cur2 (std/vector/int/remove-leading-zeroes cur1))
+        (&alter! current cur2)
+
+        ;; binary search q in [0,9]
+        (mut low 0)
+        (mut high 9)
+        (mut q 0)
+
+        (while (<= low high) (do
+          (let mid (/ (+ low high) 2))
+          (let prod (std/int/big/mul divisor [mid]))
+          (let cur (&get current))
+
+          (if (std/int/big/less-or-equal? prod cur)
+              (do
+                (alter! q mid)
+                (alter! low (+ mid 1)))
+              (alter! high (- mid 1)))))
+
+        (std/vector/push! result q)
+
+        ;; current = current - divisor*q
+        (let prod2 (std/int/big/mul divisor [q]))
+        (let cur3 (&get current))
+        (let cur4 (std/int/big/sub cur3 prod2))
+        (&alter! current cur4)
+
+        (alter! i (+ i 1))))
+
+      (let out (std/vector/int/remove-leading-zeroes result))
+      (if (std/vector/empty? out) [0] out))))
+
+(let std/int/big/mod
+  (lambda a b
+    (do
+      (let q (std/int/big/div a b))
+      (let p (std/int/big/mul b q))
+      (let r (std/int/big/sub a p))
+      r)))
 (let std/int/big/square (lambda x (std/int/big/mul x x)))
 (let std/int/big/floor/div (lambda a b (std/int/big/div a b)))
 (let std/int/big/ceil/div (lambda a b (std/int/big/div 
@@ -1691,24 +1750,24 @@ q)))
 (let std/int/pow/big (lambda n pow (do
   ; Initialize digits array with the first digit
   (let digits [ n ])
-  (&mut p 1) ; Use numeric variable for p
-  (&mut carry 0) ; Use numeric variable for carry
+  (mut p 1) ; Use numeric variable for p
+  (mut carry 0) ; Use numeric variable for carry
   ; Loop to calculate n^pow
-  (while (< (&get p) pow) (do
-    (&alter! carry 0) ; Reset carry to 0
+  (while (< p pow) (do
+    (alter! carry 0) ; Reset carry to 0
     (loop 0 (length digits) (lambda exp (do
-      (let prod (+ (* (get digits exp) n) (&get carry)))
+      (let prod (+ (* (get digits exp) n) carry))
       (let new-carry (/ prod 10))
       (set! digits exp (mod prod 10))
       ; Update carry using variable helper
-      (&alter! carry new-carry))))
+      (alter! carry new-carry))))
     ; Handle carry
-    (while (> (&get carry) 0) (do
-      (std/vector/push! digits (mod (&get carry) 10))
+    (while (> carry 0) (do
+      (std/vector/push! digits (mod carry 10))
       ; Update carry using variable helper
-      (&alter! carry (/ (&get carry) 10))))
+      (alter! carry (/ carry 10))))
     ; Increment p using variable helper
-    (&alter! p (+ (&get p) 1))))
+    (alter! p (+ p 1))))
   (std/vector/reverse digits))))
 
 (let std/int/big/pow (lambda a b (if (= b 0) [ 1 ] (do 
@@ -2584,3 +2643,25 @@ q)))
 (let std/text/history/reconstruct (lambda history (do
   (let patches (snd history))
   (std/vector/char/apply-patches "" patches))))
+
+(let std/char/space? (lambda c
+    (or (=# c std/char/space)
+        (=# c std/char/new-line)
+        (=# c std/char/carriage-return)
+        (=# c std/char/tab))))
+
+(let std/vector/char/trim/left (lambda xs (do
+      (let len (length xs))
+      (mut start 0)
+      (while (and (< start len) (std/char/space? (get xs start))) (do
+        (++ start)))
+      (std/vector/slice xs start len))))
+
+(let std/vector/char/trim/right (lambda xs (do
+      (let len (length xs))
+      (mut end (- len 1))
+      (while (and (>= end 0) (std/char/space? (get xs end))) (do
+        (-- end)))
+      (std/vector/slice xs 0 (+ end 1)))))
+
+(let std/vector/char/trim (lambda xs (std/vector/char/trim/right (std/vector/char/trim/left xs))))

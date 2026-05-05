@@ -57,6 +57,9 @@
 (let one/dec? std/dec/one?)
 (let zero/dec? std/dec/zero?)
 
+
+(let space? std/char/space?)
+
 (let map/until (lambda fn fn? xs (std/vector/map/until xs fn fn?)))
 (let map/until/i (lambda fn fn? xs (std/vector/map/until/i xs fn fn?)))
 (let reduce/until (lambda fn fn? init xs (std/vector/reduce/until xs fn fn? init)))
@@ -216,6 +219,9 @@
 (let take/last (lambda n xs (std/vector/take/last xs n)))
 (let drop/last (lambda n xs (std/vector/drop/last xs n)))
 
+(let take/while (lambda fn? xs (std/vector/take/while xs fn?)))
+(let drop/while (lambda fn? xs (std/vector/drop/while xs fn?)))
+
 (let true/option std/true/option)
 (let false/option std/false/option)
 (let resolve/option (lambda fn df xs (std/vector/option/resolve xs fn df)))
@@ -323,6 +329,9 @@
    out)))
 (let join/lines (lambda xs (join [nl] xs)))
 (let join/commas (lambda xs (join "," xs)))
+(let split/lines std/vector/char/lines)
+(let split/words std/vector/char/words)
+(let split/commas std/vector/char/commas)
 
 (let replace (lambda a b xs (|> xs (split a) (join b))))
 
@@ -511,3 +520,6 @@
       found?)))
 
 (let autocorrect (lambda dict word (std/vector/char/autocorrect word dict)))
+(let trim std/vector/char/trim)
+(let trim/left std/vector/char/trim/left)
+(let trim/right std/vector/char/trim/right)
