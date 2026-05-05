@@ -40,6 +40,14 @@
   (lambda x n
     (qq (alter! (uq x) (- (uq x) (uq n))))))
 
+(letmacro *=
+  (lambda x n
+    (qq (alter! (uq x) (* (uq x) (uq n))))))
+
+(letmacro /=
+  (lambda x n
+    (qq (alter! (uq x) (/ (uq x) (uq n))))))
+
 (letmacro ++
   (lambda x
     (qq (alter! (uq x) (+ (uq x) 1)))))
@@ -58,6 +66,85 @@
               (uqs body)
               (uq step)
               nil))))))
+
+(letmacro loop/range/exclusive
+  (lambda name start end . body
+    (qq (do
+          (mut (uq name) (uq start))
+          (while (< (uq name) (uq end))
+            (do
+              (uqs body)
+              (++ (uq name))
+              nil))))))
+
+(letmacro loop/range/inclusive
+  (lambda name start end . body
+    (qq (do
+          (mut (uq name) (uq start))
+          (while (<= (uq name) (uq end))
+            (do
+              (uqs body)
+              (++ (uq name))
+              nil))))))
+
+(letmacro loop/range
+  (lambda name start end . body
+    (qq (loop/range/inclusive (uq name) (uq start) (uq end)
+          (uqs body)))))
+
+(letmacro loop/range/inclusive/by
+  (lambda name start end step . body
+    (qq (do
+          (mut (uq name) (uq start))
+          (let step# (uq step))
+          (if (> step# 0)
+              (while (<= (uq name) (uq end))
+                (do
+                  (uqs body)
+                  (+= (uq name) step#)
+                  nil))
+              (while (>= (uq name) (uq end))
+                (do
+                  (uqs body)
+                  (+= (uq name) step#)
+                  nil)))))))
+
+(letmacro loop/range/exclusive/by
+  (lambda name start end step . body
+    (qq (do
+          (mut (uq name) (uq start))
+          (let step# (uq step))
+          (if (> step# 0)
+              (while (< (uq name) (uq end))
+                (do
+                  (uqs body)
+                  (+= (uq name) step#)
+                  nil))
+              (while (> (uq name) (uq end))
+                (do
+                  (uqs body)
+                  (+= (uq name) step#)
+                  nil)))))))
+
+(letmacro loop/range/by
+  (lambda name start end step . body
+    (qq (loop/range/inclusive/by (uq name) (uq start) (uq end) (uq step)
+          (uqs body)))))
+
+(letmacro times
+  (lambda n . body
+    (do
+      (let i (gensym))
+      (qq (loop/range/exclusive (uq i) 0 (uq n)
+            (uqs body))))))
+
+(letmacro repeat
+  (lambda n body
+    (do
+      (let i (gensym))
+      (qq (loop/range/exclusive (uq i) 0 (uq n)
+            (uq body))))))
+
 
 (letmacro loop
   (lambda start end fn
