@@ -176,3 +176,163 @@
     (lambda . body
       (qq ((lambda
               (do (uqs body)))))))
+
+
+(let __type/vec1
+  (lambda a x
+    (do
+      [a x]
+      x)))
+
+(let __type/fn1
+  (lambda in out f
+    (do
+      (let probe
+        (lambda x
+          (__type/vec1 out (f (__type/vec1 in x)))))
+      f)))
+
+(let __type/fn2
+  (lambda a b out f
+    (do
+      (let probe
+        (lambda x y
+          (__type/vec1 out
+            (f (__type/vec1 a x)
+               (__type/vec1 b y)))))
+      f)))
+
+(let __type/fn3
+  (lambda a b c out f
+    (do
+      (let probe
+        (lambda x y z
+          (__type/vec1 out
+            (f (__type/vec1 a x)
+               (__type/vec1 b y)
+               (__type/vec1 c z)))))
+      f)))
+
+
+(let __type/fn4
+  (lambda a b c d out f
+    (do
+      (let probe
+        (lambda x y z w
+          (__type/vec1 out
+            (f (__type/vec1 a x)
+               (__type/vec1 b y)
+               (__type/vec1 c z)
+               (__type/vec1 d w)))))
+      f)))
+
+(let __type/fn5
+  (lambda a b c d e out f
+    (do
+      (let probe
+        (lambda x y z w v
+          (__type/vec1 out
+            (f (__type/vec1 a x)
+               (__type/vec1 b y)
+               (__type/vec1 c z)
+               (__type/vec1 d w)
+               (__type/vec1 e v)))))
+      f)))
+
+(let __type/fn6
+  (lambda a b c d e g out f
+    (do
+      (let probe
+        (lambda x y z w v u
+          (__type/vec1 out
+            (f (__type/vec1 a x)
+               (__type/vec1 b y)
+               (__type/vec1 c z)
+               (__type/vec1 d w)
+               (__type/vec1 e v)
+               (__type/vec1 g u)))))
+      f)))
+
+(letmacro Fn1
+  (lambda A R
+    (qq
+      (lambda f
+        (__type/fn1 (uq A) (uq R) f)))))
+
+(letmacro Fn2
+  (lambda A B R
+    (qq
+      (lambda f
+        (__type/fn2 (uq A) (uq B) (uq R) f)))))
+
+(letmacro Fn3
+  (lambda A B C R
+    (qq
+      (lambda f
+        (__type/fn3 (uq A) (uq B) (uq C) (uq R) f)))))
+
+(letmacro Fn4
+  (lambda A B C D R
+    (qq
+      (lambda f
+        (__type/fn4 (uq A) (uq B) (uq C) (uq D) (uq R) f)))))
+
+(letmacro Fn5
+  (lambda A B C D E R
+    (qq
+      (lambda f
+        (__type/fn5 (uq A) (uq B) (uq C) (uq D) (uq E) (uq R) f)))))
+
+(letmacro Fn6
+  (lambda A B C D E G R
+    (qq
+      (lambda f
+        (__type/fn6 (uq A) (uq B) (uq C) (uq D) (uq E) (uq G) (uq R) f)))))
+
+(letmacro letype
+  (lambda Name Ty
+    (qq
+      (let (uq Name)
+        (lambda x
+          (__type/vec1 (uq Ty) x))))))
+
+(letmacro sig
+  (lambda Ty value
+    (qq
+      ((uq Ty) (uq value)))))
+
+(letmacro letype/fn1
+  (lambda Name A R
+    (qq
+      (let (uq Name)
+        (Fn1 (uq A) (uq R))))))
+
+(letmacro letype/fn2
+  (lambda Name A B R
+    (qq
+      (let (uq Name)
+        (Fn2 (uq A) (uq B) (uq R))))))
+
+(letmacro letype/fn3
+  (lambda Name A B C R
+    (qq
+      (let (uq Name)
+        (Fn3 (uq A) (uq B) (uq C) (uq R))))))
+
+(letmacro letype/fn4
+  (lambda Name A B C D R
+    (qq
+      (let (uq Name)
+        (Fn4 (uq A) (uq B) (uq C) (uq D) (uq R))))))
+
+(letmacro letype/fn5
+  (lambda Name A B C D E R
+    (qq
+      (let (uq Name)
+        (Fn5 (uq A) (uq B) (uq C) (uq D) (uq E) (uq R))))))
+
+(letmacro letype/fn6
+  (lambda Name A B C D E G R
+    (qq
+      (let (uq Name)
+        (Fn6 (uq A) (uq B) (uq C) (uq D) (uq E) (uq G) (uq R))))))
