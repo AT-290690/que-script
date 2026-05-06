@@ -265,3 +265,14 @@
           (alter! i (+ i 6))))
 
         ok))))
+
+(letype String [Char])
+(letype Vector (vector))
+(letype Integer Int)
+(letype Boolean Bool)
+(letype Decimal Dec)
+
+(letype Vector/Integer (vector Int))
+(letype Vector/String (vector (String)))
+(letype Vector/Boolean (vector (Boolean)))
+(letype Vector/Decimal (vector (Decimal)))
