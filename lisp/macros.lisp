@@ -187,70 +187,69 @@
 (let __type/fn1
   (lambda in out f
     (do
-      (let probe
-        (lambda x
-          (__type/vec1 out (f (__type/vec1 in x)))))
+      (if false (do  (__type/vec1 out
+            (f (__type/vec1 in in))) 
+            nil)
+          nil)
       f)))
 
 (let __type/fn2
   (lambda a b out f
     (do
-      (let probe
-        (lambda x y
-          (__type/vec1 out
-            (f (__type/vec1 a x)
-               (__type/vec1 b y)))))
+      (if false
+          (do (__type/vec1 out
+            (f (__type/vec1 a a)
+               (__type/vec1 b b))) nil)
+          nil)
       f)))
 
 (let __type/fn3
   (lambda a b c out f
     (do
-      (let probe
-        (lambda x y z
-          (__type/vec1 out
-            (f (__type/vec1 a x)
-               (__type/vec1 b y)
-               (__type/vec1 c z)))))
+      (if false
+          (do (__type/vec1 out
+            (f (__type/vec1 a a)
+               (__type/vec1 b b)
+               (__type/vec1 c c))) nil)
+          nil)
       f)))
-
-
 (let __type/fn4
   (lambda a b c d out f
     (do
-      (let probe
-        (lambda x y z w
-          (__type/vec1 out
-            (f (__type/vec1 a x)
-               (__type/vec1 b y)
-               (__type/vec1 c z)
-               (__type/vec1 d w)))))
+      (if false
+          (do (__type/vec1 out
+            (f (__type/vec1 a a)
+               (__type/vec1 b b)
+               (__type/vec1 c c)
+               (__type/vec1 d d))) nil)
+          nil)
       f)))
 
 (let __type/fn5
   (lambda a b c d e out f
     (do
-      (let probe
-        (lambda x y z w v
-          (__type/vec1 out
-            (f (__type/vec1 a x)
-               (__type/vec1 b y)
-               (__type/vec1 c z)
-               (__type/vec1 d w)
-               (__type/vec1 e v)))))
+      (if false
+          (do (__type/vec1 out
+            (f (__type/vec1 a a)
+               (__type/vec1 b b)
+               (__type/vec1 c c)
+               (__type/vec1 d d)
+               (__type/vec1 e e))) nil)
+          nil)
       f)))
 
 (let __type/fn6
   (lambda a b c d e g out f
     (do
-      (let probe
-        (lambda x y z w v u
-          (__type/vec1 out
-            (f (__type/vec1 a x)
-               (__type/vec1 b y)
-               (__type/vec1 c z)
-               (__type/vec1 d w)
-               (__type/vec1 e v)
-               (__type/vec1 g u)))))
+      (if false
+          (do (__type/vec1 out
+            (f (__type/vec1 a a)
+               (__type/vec1 b b)
+               (__type/vec1 c c)
+               (__type/vec1 d d)
+               (__type/vec1 e e)
+               (__type/vec1 g g))) nil)
+          nil)
       f)))
 
 (letmacro Fn1
@@ -292,9 +291,9 @@
 (letmacro letype
   (lambda Name Ty
     (qq
-      (let (uq Name)
-        (lambda x
-          (__type/vec1 (uq Ty) x))))))
+      (letmacro (uq Name)
+        (lambda ()
+          (qq (uq Ty)))))))
 
 (letmacro sig
   (lambda Ty value
