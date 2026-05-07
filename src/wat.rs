@@ -449,19 +449,17 @@ fn top_level_expr_is_definitely_materialized_scalar_vector(
                 }
             }
             if let Some(last) = expr.children.last() {
-                return (
-                    expr_is_definitely_materialized_scalar_vector(
-                        last,
-                        &local_materialized,
-                        &local_slots,
-                        &HashSet::new()
-                    ) ||
+                return expr_is_definitely_materialized_scalar_vector(
+                    last,
+                    &local_materialized,
+                    &local_slots,
+                    &HashSet::new()
+                ) ||
                     top_level_expr_is_definitely_materialized_scalar_vector(
                         last,
                         top_defs,
                         visiting
-                    )
-                );
+                    );
             }
             false
         }
@@ -1298,9 +1296,7 @@ fn emit_high_arity_apply_i32(
         .collect::<Vec<_>>();
 
     if !closure_cases.is_empty() {
-        out.push_str(
-            "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
-        );
+        out.push_str("    local.get $f\n    call $is_closure_ptr\n    if (result i32)\n");
         for (fid, name, cap_len) in &closure_cases {
             out.push_str(
                 &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
@@ -2137,7 +2133,7 @@ fn emit_vector_runtime(
   (func $closure_new (param $fn i32) (param $n i32) (result i32)
     (local $ptr i32)
     (local $i i32)
-    i32.const 12
+    i32.const 16
     local.get $n
     i32.const 8
     i32.mul
@@ -2145,15 +2141,20 @@ fn emit_vector_runtime(
     call $alloc
     local.set $ptr
     local.get $ptr
-    local.get $fn
+    i32.const 1131176307
     i32.store
     local.get $ptr
     i32.const 4
     i32.add
-    local.get $n
+    local.get $fn
     i32.store
     local.get $ptr
     i32.const 8
+    i32.add
+    local.get $n
+    i32.store
+    local.get $ptr
+    i32.const 12
     i32.add
     i32.const 1
     i32.store
@@ -2166,7 +2167,7 @@ fn emit_vector_runtime(
         i32.ge_s
         br_if $done
         local.get $ptr
-        i32.const 12
+        i32.const 16
         i32.add
         local.get $i
         i32.const 4
@@ -2175,7 +2176,7 @@ fn emit_vector_runtime(
         i32.const 0
         i32.store
         local.get $ptr
-        i32.const 12
+        i32.const 16
         i32.add
         local.get $n
         i32.const 4
@@ -2195,23 +2196,19 @@ fn emit_vector_runtime(
       end
     end
     local.get $ptr
-    i32.const -2147483648
-    i32.or
   )
 
   (func $closure_set (param $ptr i32) (param $idx i32) (param $v i32) (result i32)
     (local $base i32)
     (local $n i32)
     local.get $ptr
-    i32.const 2147483647
-    i32.and
     local.tee $base
-    i32.const 4
+    i32.const 8
     i32.add
     i32.load
     local.set $n
     local.get $base
-    i32.const 12
+    i32.const 16
     i32.add
     local.get $idx
     i32.const 4
@@ -2220,7 +2217,7 @@ fn emit_vector_runtime(
     i32.const 0
     i32.store
     local.get $base
-    i32.const 12
+    i32.const 16
     i32.add
     local.get $n
     i32.const 4
@@ -2241,15 +2238,13 @@ fn emit_vector_runtime(
     (local $old i32)
     (local $old_ref i32)
     local.get $ptr
-    i32.const 2147483647
-    i32.and
     local.tee $base
-    i32.const 4
+    i32.const 8
     i32.add
     i32.load
     local.set $n
     local.get $base
-    i32.const 12
+    i32.const 16
     i32.add
     local.get $idx
     i32.const 4
@@ -2262,7 +2257,7 @@ fn emit_vector_runtime(
     i32.ne
     if
       local.get $base
-      i32.const 12
+      i32.const 16
       i32.add
       local.get $n
       i32.const 4
@@ -2282,7 +2277,7 @@ fn emit_vector_runtime(
     call $rc_retain
     drop
     local.get $base
-    i32.const 12
+    i32.const 16
     i32.add
     local.get $idx
     i32.const 4
@@ -2291,7 +2286,7 @@ fn emit_vector_runtime(
     i32.const 1
     i32.store
     local.get $base
-    i32.const 12
+    i32.const 16
     i32.add
     local.get $n
     i32.const 4
@@ -2308,10 +2303,7 @@ fn emit_vector_runtime(
 
   (func $closure_set_fun (param $ptr i32) (param $idx i32) (param $v i32) (result i32)
     local.get $v
-    i32.const -2147483648
-    i32.and
-    i32.const -2147483648
-    i32.eq
+    call $is_closure_ptr
     if (result i32)
       local.get $ptr
       local.get $idx
@@ -2329,15 +2321,13 @@ fn emit_vector_runtime(
     (local $base i32)
     (local $n i32)
     local.get $ptr
-    i32.const 2147483647
-    i32.and
     local.tee $base
-    i32.const 4
+    i32.const 8
     i32.add
     i32.load
     local.set $n
     local.get $base
-    i32.const 12
+    i32.const 16
     i32.add
     local.get $n
     i32.const 4
@@ -2352,8 +2342,8 @@ fn emit_vector_runtime(
 
   (func $closure_fn (param $ptr i32) (result i32)
     local.get $ptr
-    i32.const 2147483647
-    i32.and
+    i32.const 4
+    i32.add
     i32.load
   )
 
@@ -2366,13 +2356,11 @@ fn emit_vector_runtime(
       return
     end
     local.get $ptr
-    i32.const 2147483647
-    i32.and
     local.tee $base
-    i32.const 8
+    i32.const 12
     i32.add
     local.get $base
-    i32.const 8
+    i32.const 12
     i32.add
     i32.load
     i32.const 1
@@ -2395,11 +2383,9 @@ fn emit_vector_runtime(
       return
     end
     local.get $ptr
-    i32.const 2147483647
-    i32.and
     local.set $base
     local.get $base
-    i32.const 8
+    i32.const 12
     i32.add
     i32.load
     local.set $rc
@@ -2408,7 +2394,7 @@ fn emit_vector_runtime(
     i32.sub
     local.set $rc
     local.get $base
-    i32.const 8
+    i32.const 12
     i32.add
     local.get $rc
     i32.store
@@ -2420,7 +2406,7 @@ fn emit_vector_runtime(
       return
     end
     local.get $base
-    i32.const 4
+    i32.const 8
     i32.add
     i32.load
     local.set $n
@@ -2433,7 +2419,7 @@ fn emit_vector_runtime(
         i32.ge_s
         br_if $done
         local.get $base
-        i32.const 12
+        i32.const 16
         i32.add
         local.get $i
         i32.const 4
@@ -2446,7 +2432,7 @@ fn emit_vector_runtime(
         i32.ne
         if
           local.get $base
-          i32.const 12
+          i32.const 16
           i32.add
           local.get $n
           i32.const 4
@@ -2475,6 +2461,85 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
+  (func $is_closure_ptr (param $ptr i32) (result i32)
+    (local $mem_end i32)
+    (local $n i32)
+    (local $rc i32)
+    local.get $ptr
+    i32.const 65536
+    i32.lt_u
+    if
+      i32.const 0
+      return
+    end
+    memory.size
+    i32.const 16
+    i32.shl
+    local.set $mem_end
+    local.get $ptr
+    local.get $mem_end
+    i32.ge_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    local.get $mem_end
+    i32.const 16
+    i32.sub
+    i32.gt_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    i32.load
+    i32.const 1131176307
+    i32.ne
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    i32.const 8
+    i32.add
+    i32.load
+    local.set $n
+    local.get $n
+    i32.const 0
+    i32.lt_s
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    i32.const 12
+    i32.add
+    i32.load
+    local.set $rc
+    local.get $rc
+    i32.const 0
+    i32.le_s
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    i32.const 16
+    i32.add
+    local.get $n
+    i32.const 8
+    i32.mul
+    i32.add
+    local.get $mem_end
+    i32.gt_u
+    if
+      i32.const 0
+      return
+    end
+    i32.const 1
+  )
+
   (func $is_vec_ptr (param $ptr i32) (result i32)
     (local $mem_end i32)
     (local $len i32)
@@ -2499,9 +2564,16 @@ fn emit_vector_runtime(
     i32.shl
     local.set $mem_end
     local.get $ptr
-    i32.const 28
-    i32.add
     local.get $mem_end
+    i32.ge_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
+    local.get $mem_end
+    i32.const 28
+    i32.sub
     i32.gt_u
     if
       i32.const 0
@@ -2714,31 +2786,8 @@ fn emit_vector_runtime(
     end
     ;; __DBG_RC_RETAIN_INC__
     local.get $ptr
-    i32.const -2147483648
-    i32.and
-    i32.const -2147483648
-    i32.eq
+    call $is_closure_ptr
     if
-      local.get $ptr
-      i32.const 2147483647
-      i32.and
-      i32.const 65536
-      i32.lt_u
-      if
-        i32.const 0
-        return
-      end
-      local.get $ptr
-      i32.const 2147483647
-      i32.and
-      memory.size
-      i32.const 16
-      i32.shl
-      i32.ge_u
-      if
-        i32.const 0
-        return
-      end
       local.get $ptr
       call $closure_retain
       return
@@ -2770,31 +2819,8 @@ fn emit_vector_runtime(
     end
     ;; __DBG_RC_RELEASE_INC__
     local.get $ptr
-    i32.const -2147483648
-    i32.and
-    i32.const -2147483648
-    i32.eq
+    call $is_closure_ptr
     if
-      local.get $ptr
-      i32.const 2147483647
-      i32.and
-      i32.const 65536
-      i32.lt_u
-      if
-        i32.const 0
-        return
-      end
-      local.get $ptr
-      i32.const 2147483647
-      i32.and
-      memory.size
-      i32.const 16
-      i32.shl
-      i32.ge_u
-      if
-        i32.const 0
-        return
-      end
       local.get $ptr
       call $closure_release
       return
@@ -3961,9 +3987,7 @@ fn emit_vector_runtime(
             })
             .collect::<Vec<_>>();
         if !apply1_closures.is_empty() || !apply1_partial_closures.is_empty() {
-            out.push_str(
-                "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
-            );
+            out.push_str("    local.get $f\n    call $is_closure_ptr\n    if (result i32)\n");
             for (fid, name, cap_len) in &apply1_closures {
                 out.push_str(
                     &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
@@ -4169,9 +4193,7 @@ fn emit_vector_runtime(
             })
             .collect::<Vec<_>>();
         if !apply2_closures.is_empty() {
-            out.push_str(
-                "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
-            );
+            out.push_str("    local.get $f\n    call $is_closure_ptr\n    if (result i32)\n");
             for (fid, name, cap_len) in &apply2_closures {
                 out.push_str(
                     &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
@@ -4512,9 +4534,7 @@ fn emit_vector_runtime(
             })
             .collect::<Vec<_>>();
         if !apply3_closures.is_empty() {
-            out.push_str(
-                "    local.get $f\n    i32.const -2147483648\n    i32.and\n    i32.const -2147483648\n    i32.eq\n    if (result i32)\n"
-            );
+            out.push_str("    local.get $f\n    call $is_closure_ptr\n    if (result i32)\n");
             for (fid, name, cap_len) in &apply3_closures {
                 out.push_str(
                     &format!("      local.get $f\n      call $closure_fn\n      i32.const {}\n      i32.eq\n      if (result i32)\n", fid)
@@ -4673,24 +4693,9 @@ fn emit_vector_runtime(
         i32.const 1
       else
       local.get $p
-      i32.const -2147483648
-      i32.and
-      i32.const -2147483648
-      i32.eq
+      call $is_closure_ptr
       if (result i32)
-        local.get $p
-        i32.const 2147483647
-        i32.and
-        i32.const 65536
-        i32.ge_u
-        local.get $p
-        i32.const 2147483647
-        i32.and
-        memory.size
-        i32.const 16
-        i32.shl
-        i32.lt_u
-        i32.and
+        i32.const 1
       else
         local.get $p
         call $is_vec_ptr
@@ -5767,13 +5772,11 @@ fn expr_uses_name_as_value(name: &str, expr: &Expression, inside_lambda: bool) -
             }
             if let [Expression::Word(kw), Expression::Word(bound_name), rhs] = &items[..] {
                 if kw == "let" || kw == "letrec" || kw == "mut" {
-                    return (
-                        expr_uses_name_as_value(name, rhs, inside_lambda) ||
+                    return expr_uses_name_as_value(name, rhs, inside_lambda) ||
                         (bound_name != name &&
                             items[2..]
                                 .iter()
-                                .any(|item| expr_uses_name_as_value(name, item, inside_lambda)))
-                    );
+                                .any(|item| expr_uses_name_as_value(name, item, inside_lambda)));
                 }
             }
             if !inside_lambda && matches!(items.first(), Some(Expression::Word(w)) if w == name) {

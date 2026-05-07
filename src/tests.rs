@@ -3485,6 +3485,40 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wat_closure_runtime_uses_header_check_not_sign_bit_tagging() {
+        let program = "(do (let mk (lambda x (lambda y (+ x y)))) (let f (mk 2)) (f 5))";
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) => {
+                crate::parser
+                    ::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std")
+            }
+            _ => panic!("std ast should be (do ...)"),
+        };
+
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&wrapped, true)
+            .expect("wat compilation should succeed");
+
+        assert!(
+            wat.contains("(func $is_closure_ptr"),
+            "closure runtime should expose header-based closure classification, got:\n{}",
+            wat
+        );
+        assert!(
+            wat.contains("i32.const 1131176307"),
+            "closure runtime should use the closure header magic, got:\n{}",
+            wat
+        );
+        assert!(
+            !wat.contains("i32.const -2147483648") && !wat.contains("i32.const 2147483647"),
+            "closure runtime should not depend on sign-bit tagging anymore, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_wat_pipeline_with_wrapper_barrier_still_segment_fuses() {
         let program =
             "(do (let mymap (lambda fn xs (map square xs))) (|> (range 1 10) (filter even?) (mymap square) (map square) (reduce + 0)))";
