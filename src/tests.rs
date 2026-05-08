@@ -4021,6 +4021,67 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_hover_unused_lambda_params_do_not_leak_same_named_types_from_other_forms() {
+        let program = r#"(let fn1 (lambda (a b c d)
+  (let x (+ a b c))
+  (let y (- a b c))
+  (if (and d false) (* x y) -1)))
+(let fn2 (lambda (a b c d x) 1))"#;
+
+        let fn2_start = program.find("(let fn2").expect("program should contain fn2");
+        let fn2_slice = &program[fn2_start..];
+        let params_rel = fn2_slice.find("(a b c d x)").expect("fn2 params should exist");
+        let a_off = fn2_start + params_rel + 1;
+        let x_off = fn2_start + params_rel + "(a b c d ".len();
+
+        let a_pos = crate::lsp_native_core::byte_offset_to_position(program, a_off);
+        let x_pos = crate::lsp_native_core::byte_offset_to_position(program, x_off);
+
+        let a_hover_json = crate::wasm_api::lsp_hover(
+            program.to_string(),
+            a_pos.line,
+            a_pos.character
+        );
+        let x_hover_json = crate::wasm_api::lsp_hover(
+            program.to_string(),
+            x_pos.line,
+            x_pos.character
+        );
+
+        let a_hover: serde_json::Value = serde_json
+            ::from_str(&a_hover_json)
+            .expect("a hover response should be valid JSON");
+        let x_hover: serde_json::Value = serde_json
+            ::from_str(&x_hover_json)
+            .expect("x hover response should be valid JSON");
+
+        let a_contents = a_hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("a hover response should include string contents");
+        let x_contents = x_hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("x hover response should include string contents");
+
+        assert!(
+            a_contents.contains("a : T"),
+            "expected fn2 parameter a to remain unconstrained, got: {}",
+            a_contents
+        );
+        assert!(
+            x_contents.contains("x : T"),
+            "expected fn2 parameter x to remain unconstrained, got: {}",
+            x_contents
+        );
+        assert!(
+            !a_contents.contains("a : Int") && !a_contents.contains("a : Bool"),
+            "expected fn2 parameter a not to leak fn1 types, got: {}",
+            a_contents
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_diagnostics_reports_if_branch_type_mismatch() {
         let diagnostics_json = crate::wasm_api::lsp_diagnostics("(if true 8 2.)".to_string());
         let diagnostics: serde_json::Value = serde_json

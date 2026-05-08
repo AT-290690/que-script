@@ -63,12 +63,19 @@ struct DocAnalysis {
     let_binding_effects: HashMap<String, EffectFlags>,
     let_binding_external_impure: HashMap<String, bool>,
     user_bound_symbols: HashSet<String>,
+    form_scoped_symbols: Vec<FormScopedAnalysis>,
 }
 
 #[derive(Clone)]
 struct CachedDocAnalysis {
     text: String,
     analysis: DocAnalysis,
+}
+
+#[derive(Clone)]
+struct FormScopedAnalysis {
+    range: TextRange,
+    symbol_types: HashMap<String, String>,
 }
 
 struct WasmLspCore {
@@ -151,6 +158,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             let_binding_effects: HashMap::new(),
             let_binding_external_impure: HashMap::new(),
             user_bound_symbols: HashSet::new(),
+            form_scoped_symbols: Vec::new(),
         };
     }
 
@@ -160,6 +168,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
     let mut let_binding_effects: HashMap<String, EffectFlags> = HashMap::new();
     let mut let_binding_external_impure: HashMap<String, bool> = HashMap::new();
     let mut user_bound_symbols = HashSet::new();
+    let mut form_scoped_symbols = Vec::new();
     let analysis_source = strip_comment_bodies_preserve_newlines(text);
 
     let parsed_exprs = parse_user_exprs_for_symbol_collection(&analysis_source);
@@ -185,6 +194,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                         let_binding_effects: HashMap::new(),
                         let_binding_external_impure: HashMap::new(),
                         user_bound_symbols,
+                        form_scoped_symbols: Vec::new(),
                     };
                 }
             }
@@ -197,11 +207,26 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         user_form_count,
     ) {
         Ok((_typ, typed)) => {
-            for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
+            let typed_user_forms = extract_user_top_level_typed_forms(&typed, user_form_count);
+            for form in &typed_user_forms {
                 collect_symbol_types(form, &mut symbol_types_raw);
                 collect_let_binding_types(form, &mut let_binding_types_raw);
                 collect_let_binding_effects(form, &mut let_binding_effects, &core.global_effects);
                 collect_let_binding_external_impurity(form, &mut let_binding_external_impure);
+            }
+            let form_ranges = top_level_form_ranges(text);
+            let count = form_ranges.len().min(typed_user_forms.len());
+            form_scoped_symbols = Vec::with_capacity(count);
+            for idx in 0..count {
+                let mut raw_symbols: HashMap<String, Type> = HashMap::new();
+                collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
+                form_scoped_symbols.push(FormScopedAnalysis {
+                    range: form_ranges[idx],
+                    symbol_types: raw_symbols
+                        .into_iter()
+                        .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
+                        .collect(),
+                });
             }
         }
         Err(err) => {
@@ -247,6 +272,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         let_binding_effects,
         let_binding_external_impure,
         user_bound_symbols,
+        form_scoped_symbols,
     }
 }
 
@@ -419,6 +445,12 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             return "null".to_string();
         };
 
+        let scoped_sig = analysis
+            .form_scoped_symbols
+            .iter()
+            .find(|form| range_contains_position(form.range, position))
+            .and_then(|form| form.symbol_types.get(&symbol))
+            .cloned();
         let doc_sig = analysis.symbol_types.get(&symbol).cloned();
         let global_sig = core.global_signatures.get(&symbol).cloned();
         let standalone_std_sig = if analysis.user_bound_symbols.contains(&symbol) {
@@ -429,12 +461,12 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             None
         };
         let type_info = if analysis.user_bound_symbols.contains(&symbol) {
-            doc_sig.or(global_sig)
+            scoped_sig.or(doc_sig).or(global_sig)
         } else {
             if is_standalone_symbol_expr_at_range(&text, range, &symbol) {
-                standalone_std_sig.or(global_sig).or(doc_sig)
+                standalone_std_sig.or(global_sig).or(scoped_sig).or(doc_sig)
             } else {
-                doc_sig.or(global_sig)
+                scoped_sig.or(doc_sig).or(global_sig)
             }
         };
 
@@ -481,6 +513,18 @@ fn to_json_range(range: TextRange) -> JsonRange {
             character: range.end.character,
         },
     }
+}
+
+fn range_contains_position(range: TextRange, position: Position) -> bool {
+    position_at_or_after(position, range.start) && position_before(position, range.end)
+}
+
+fn position_at_or_after(a: Position, b: Position) -> bool {
+    a.line > b.line || (a.line == b.line && a.character >= b.character)
+}
+
+fn position_before(a: Position, b: Position) -> bool {
+    a.line < b.line || (a.line == b.line && a.character < b.character)
 }
 
 fn to_core_position(position: Position) -> native_core::CorePosition {
