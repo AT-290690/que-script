@@ -1461,6 +1461,13 @@ fn infer_lambda_inner(exprs: &[Expression], ctx: &mut InferenceContext) -> Resul
         param_types.push(ctx.fresh_var());
     }
 
+    if ctx.collect_expr_types {
+        for (param_expr, param_type) in args[..param_count].iter().zip(param_types.iter()) {
+            ctx.expr_types
+                .insert(expression_id(param_expr), param_type.clone());
+        }
+    }
+
     // Track lexical scope base for this lambda, then enter its parameter/body scope.
     let lambda_scope_base = ctx.env.scopes.len();
     ctx.lambda_scope_bases.push(lambda_scope_base);
