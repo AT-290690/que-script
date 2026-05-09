@@ -22,7 +22,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 const ANALYSIS_DELAY_MS: u64 = 500;
 
@@ -62,11 +62,27 @@ struct PendingChange {
     due_at: Instant,
 }
 
+#[derive(Clone, Debug)]
+struct CachedProjectConfig {
+    modified_at: Option<SystemTime>,
+    loaded: que::project::LoadedProjectConfig,
+}
+
+#[derive(Clone, Debug)]
+struct CachedProjectDefs {
+    config_modified_at: Option<SystemTime>,
+    resolved_dep_paths: Vec<PathBuf>,
+    dep_modified_ats: Vec<Option<SystemTime>>,
+    defs: Vec<Expression>,
+}
+
 struct ServerState {
     connection: Connection,
     documents: HashMap<Uri, DocAnalysis>,
     core: RefCell<Option<LspCore>>,
     pending_changes: HashMap<Uri, PendingChange>,
+    project_config_cache: RefCell<HashMap<PathBuf, CachedProjectConfig>>,
+    project_defs_cache: RefCell<HashMap<PathBuf, CachedProjectDefs>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +164,8 @@ fn run() -> Result<(), String> {
         documents: HashMap::new(),
         core: RefCell::new(None),
         pending_changes: HashMap::new(),
+        project_config_cache: RefCell::new(HashMap::new()),
+        project_defs_cache: RefCell::new(HashMap::new()),
     };
 
     loop {
@@ -202,6 +220,36 @@ fn build_lsp_core() -> LspCore {
 }
 
 impl ServerState {
+    fn analyze_text_for_doc_path(&self, text: &str, doc_path: Option<&Path>) -> DocAnalysis {
+        let project_defs = match self.load_project_dep_definitions_for_doc_path(doc_path) {
+            Ok(defs) => defs,
+            Err(message) => {
+                return DocAnalysis {
+                    text: text.to_string(),
+                    diagnostics: make_error_diagnostic(text, message, None),
+                    symbol_types: HashMap::new(),
+                    let_binding_types: HashMap::new(),
+                    let_binding_effects: HashMap::new(),
+                    let_binding_external_impure: HashMap::new(),
+                    user_bound_symbols: HashSet::new(),
+                    form_scoped_symbols: Vec::new(),
+                };
+            }
+        };
+        self.with_core(|core| {
+            analyze_document_text_safe(
+                text,
+                &project_defs,
+                &core.std_defs,
+                &core.base_env,
+                core.base_next_id,
+                &core.global_signatures,
+                &core.global_effects,
+                &core.std_fallback_names,
+            )
+        })
+    }
+
     fn handle_message(&mut self, msg: Message) -> Result<bool, String> {
         match msg {
             Message::Request(req) => {
@@ -260,18 +308,7 @@ impl ServerState {
                 continue;
             };
             let doc_path = document_path_from_uri(&uri);
-            let analysis = self.with_core(|core| {
-                analyze_document_text_safe(
-                    &change.text,
-                    doc_path.as_deref(),
-                    &core.std_defs,
-                    &core.base_env,
-                    core.base_next_id,
-                    &core.global_signatures,
-                    &core.global_effects,
-                    &core.std_fallback_names,
-                )
-            });
+            let analysis = self.analyze_text_for_doc_path(&change.text, doc_path.as_deref());
             self.publish_diagnostics(uri.clone(), Some(change.version), &analysis.diagnostics)?;
             self.documents.insert(uri, analysis);
         }
@@ -336,18 +373,10 @@ impl ServerState {
                 let uri = params.text_document.uri;
                 self.pending_changes.remove(&uri);
                 let doc_path = document_path_from_uri(&uri);
-                let analysis = self.with_core(|core| {
-                    analyze_document_text_safe(
-                        &params.text_document.text,
-                        doc_path.as_deref(),
-                        &core.std_defs,
-                        &core.base_env,
-                        core.base_next_id,
-                        &core.global_signatures,
-                        &core.global_effects,
-                        &core.std_fallback_names,
-                    )
-                });
+                let analysis = self.analyze_text_for_doc_path(
+                    &params.text_document.text,
+                    doc_path.as_deref(),
+                );
                 self.publish_diagnostics(
                     uri.clone(),
                     Some(params.text_document.version),
@@ -441,18 +470,7 @@ impl ServerState {
     }
 
     fn hover_for_text(&self, text: &str, position: Position) -> Option<Hover> {
-        let analysis = self.with_core(|core| {
-            analyze_document_text_safe(
-                text,
-                None,
-                &core.std_defs,
-                &core.base_env,
-                core.base_next_id,
-                &core.global_signatures,
-                &core.global_effects,
-                &core.std_fallback_names,
-            )
-        });
+        let analysis = self.analyze_text_for_doc_path(text, None);
         self.hover_for_analyzed_doc(&analysis, position)
     }
 
@@ -629,18 +647,7 @@ impl ServerState {
     }
 
     fn completion_items_for_text(&self, text: &str, position: Position) -> Vec<CompletionItem> {
-        let analysis = self.with_core(|core| {
-            analyze_document_text_safe(
-                text,
-                None,
-                &core.std_defs,
-                &core.base_env,
-                core.base_next_id,
-                &core.global_signatures,
-                &core.global_effects,
-                &core.std_fallback_names,
-            )
-        });
+        let analysis = self.analyze_text_for_doc_path(text, None);
         let mut items = Vec::new();
         let prefix = native_core::symbol_prefix_at_position(text, to_core_position(position));
         for keyword in [
@@ -789,18 +796,7 @@ impl ServerState {
         symbol: &str,
         position: Option<Position>,
     ) -> Option<String> {
-        let analysis = self.with_core(|core| {
-            analyze_document_text_safe(
-                text,
-                None,
-                &core.std_defs,
-                &core.base_env,
-                core.base_next_id,
-                &core.global_signatures,
-                &core.global_effects,
-                &core.std_fallback_names,
-            )
-        });
+        let analysis = self.analyze_text_for_doc_path(text, None);
         self.resolve_signature_for_doc(&analysis, symbol, position)
             .map(|s| normalize_signature(&s))
     }
@@ -830,19 +826,7 @@ impl ServerState {
     }
 
     fn analyze_text(&self, text: &str) -> Vec<Diagnostic> {
-        self.with_core(|core| {
-            analyze_document_text_safe(
-                text,
-                None,
-                &core.std_defs,
-                &core.base_env,
-                core.base_next_id,
-                &core.global_signatures,
-                &core.global_effects,
-                &core.std_fallback_names,
-            )
-        })
-        .diagnostics
+        self.analyze_text_for_doc_path(text, None).diagnostics
     }
 
     fn form_signatures_at<'a>(
@@ -887,6 +871,82 @@ impl ServerState {
             .iter()
             .find(|form| range_contains_position(&form.range, position))
             .map(|form| &form.let_binding_external_impure)
+    }
+
+    fn load_project_dep_definitions_for_doc_path(
+        &self,
+        doc_path: Option<&Path>,
+    ) -> Result<Vec<Expression>, String> {
+        let Some(path) = doc_path else {
+            return Ok(Vec::new());
+        };
+        let start_dir = if path.is_dir() {
+            path.to_path_buf()
+        } else {
+            path.parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+        };
+        let Some(config_path) = find_project_config_path(&start_dir) else {
+            return Ok(Vec::new());
+        };
+        let loaded = self.load_project_config_cached(&config_path)?;
+        self.load_project_defs_cached(&loaded)
+    }
+
+    fn load_project_config_cached(
+        &self,
+        config_path: &Path,
+    ) -> Result<que::project::LoadedProjectConfig, String> {
+        let modified_at = file_modified_time(config_path)?;
+        if let Some(cached) = self.project_config_cache.borrow().get(config_path) {
+            if cached.modified_at == modified_at {
+                return Ok(cached.loaded.clone());
+            }
+        }
+        let loaded = que::project::load_project_config_from_path(config_path)?;
+        self.project_config_cache.borrow_mut().insert(
+            config_path.to_path_buf(),
+            CachedProjectConfig {
+                modified_at,
+                loaded: loaded.clone(),
+            },
+        );
+        self.project_defs_cache.borrow_mut().remove(config_path);
+        Ok(loaded)
+    }
+
+    fn load_project_defs_cached(
+        &self,
+        loaded: &que::project::LoadedProjectConfig,
+    ) -> Result<Vec<Expression>, String> {
+        let resolved_dep_paths = resolve_dep_paths(&loaded.root_dir, &loaded.config.deps);
+        let config_modified_at = file_modified_time(&loaded.path)?;
+        let dep_modified_ats = resolved_dep_paths
+            .iter()
+            .map(|path| file_modified_time(path))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if let Some(cached) = self.project_defs_cache.borrow().get(&loaded.path) {
+            if cached.config_modified_at == config_modified_at
+                && cached.resolved_dep_paths == resolved_dep_paths
+                && cached.dep_modified_ats == dep_modified_ats
+            {
+                return Ok(cached.defs.clone());
+            }
+        }
+
+        let defs = que::project::load_bundle_definitions(&loaded.root_dir, &loaded.config.deps)?;
+        self.project_defs_cache.borrow_mut().insert(
+            loaded.path.clone(),
+            CachedProjectDefs {
+                config_modified_at,
+                resolved_dep_paths,
+                dep_modified_ats,
+                defs: defs.clone(),
+            },
+        );
+        Ok(defs)
     }
 }
 
@@ -990,21 +1050,40 @@ fn percent_decode_uri_path(raw: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn load_project_dep_definitions_for_doc_path(doc_path: Option<&Path>) -> Result<Vec<Expression>, String> {
-    let Some(path) = doc_path else {
-        return Ok(Vec::new());
-    };
-    let start_dir = if path.is_dir() {
-        path.to_path_buf()
-    } else {
-        path.parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."))
-    };
-    let Some(project) = que::project::discover_project_config(&start_dir)? else {
-        return Ok(Vec::new());
-    };
-    que::project::load_bundle_definitions(&project.root_dir, &project.config.deps)
+fn find_project_config_path(start_dir: &Path) -> Option<PathBuf> {
+    let mut current = std::fs::canonicalize(start_dir).unwrap_or_else(|_| start_dir.to_path_buf());
+    loop {
+        let candidate = current.join(que::project::PROJECT_CONFIG_FILE);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        let parent = current.parent()?;
+        if parent == current {
+            return None;
+        }
+        current = parent.to_path_buf();
+    }
+}
+
+fn file_modified_time(path: &Path) -> Result<Option<SystemTime>, String> {
+    std::fs::metadata(path)
+        .map_err(|e| format!("failed to stat '{}': {}", path.display(), e))?
+        .modified()
+        .map(Some)
+        .map_err(|e| format!("failed to read modified time for '{}': {}", path.display(), e))
+}
+
+fn resolve_dep_paths(root_dir: &Path, deps: &[String]) -> Vec<PathBuf> {
+    deps.iter()
+        .map(|dep| {
+            let path = Path::new(dep);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                root_dir.join(path)
+            }
+        })
+        .collect()
 }
 
 fn analyze_document_text(
@@ -1134,7 +1213,7 @@ fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
 
 fn analyze_document_text_safe(
     text: &str,
-    doc_path: Option<&Path>,
+    project_defs: &[Expression],
     std_defs: &[Expression],
     base_env: &TypeEnv,
     base_next_id: u64,
@@ -1142,25 +1221,10 @@ fn analyze_document_text_safe(
     global_effects: &HashMap<String, EffectFlags>,
     std_fallback_names: &HashSet<String>,
 ) -> DocAnalysis {
-    let project_defs = match load_project_dep_definitions_for_doc_path(doc_path) {
-        Ok(defs) => defs,
-        Err(message) => {
-            return DocAnalysis {
-                text: text.to_string(),
-                diagnostics: make_error_diagnostic(text, message, None),
-                symbol_types: HashMap::new(),
-                let_binding_types: HashMap::new(),
-                let_binding_effects: HashMap::new(),
-                let_binding_external_impure: HashMap::new(),
-                user_bound_symbols: HashSet::new(),
-                form_scoped_symbols: Vec::new(),
-            };
-        }
-    };
     match catch_unwind(AssertUnwindSafe(|| {
         analyze_document_text(
             text,
-            &project_defs,
+            project_defs,
             std_defs,
             base_env,
             base_next_id,
