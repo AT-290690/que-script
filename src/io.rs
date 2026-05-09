@@ -281,6 +281,16 @@ fn load_project_library_definitions(start_dir: &Path) -> Result<Vec<Expression>,
     crate::project::load_bundle_definitions(&project.root_dir, &project.config.deps)
 }
 
+fn apply_project_env_vars(start_dir: &Path) -> Result<(), String> {
+    let Some(project) = crate::project::discover_project_config(start_dir)? else {
+        return Ok(());
+    };
+    for (key, value) in project.config.env.iter() {
+        env::set_var(key, value);
+    }
+    Ok(())
+}
+
 fn resolve_project_entry_path(
     cwd: &Path,
     explicit_path: Option<&str>,
@@ -2272,6 +2282,7 @@ fn build_debug_error_report(
 #[cfg(test)]
 mod tests {
     use super::{
+        apply_project_env_vars,
         format_lambda_functions_list,
         init_project_config_file,
         lambda_api_base_from_env_value,
@@ -2695,6 +2706,28 @@ mod tests {
             std::fs::canonicalize(&base).expect("base should canonicalize")
         );
     }
+
+    #[test]
+    fn apply_project_env_vars_loads_env_from_project_config() {
+        let base = std::env::temp_dir().join(format!(
+            "que-env-project-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("temp dir should be created");
+        std::fs::write(
+            base.join(crate::project::PROJECT_CONFIG_FILE),
+            "entry = \"main.que\"\ndeps = []\n[env]\nQUE_WASM_OPT = \"none\"\nQUE_TCO = \"conservative\"\n",
+        )
+        .expect("config should be written");
+
+        apply_project_env_vars(&base).expect("env should load from config");
+        assert_eq!(std::env::var("QUE_WASM_OPT").ok().as_deref(), Some("none"));
+        assert_eq!(std::env::var("QUE_TCO").ok().as_deref(), Some("conservative"));
+    }
 }
 
 pub fn run_native_shell() -> Result<(), String> {
@@ -2769,6 +2802,7 @@ pub fn run_native_shell() -> Result<(), String> {
     }
     let suppress_result_output = take_no_result_flag_from_argv(&mut argv);
     let emit_request = take_emit_request_from_argv(&mut argv)?;
+    apply_project_env_vars(&script_cwd)?;
     let debug_mode = crate::io::take_debug_mode_from_argv(&mut argv);
     if debug_mode.is_enabled() {
         enable_debug_runtime_guards();

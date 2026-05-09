@@ -255,6 +255,25 @@ Generating docs
   cargo run --no-default-features --features repo-tools --bin quelibdump -- --split-std --output ./example/dist/lib.json
 ```
 
+Example que.toml file
+
+```toml
+entry = "main.que"
+deps = [
+  "./lib/math.que",
+  "./lib/utils.que",
+]
+
+QUE_DEVIRTUALIZE = "aggressive"
+QUE_TCO = "aggressive"
+QUE_BOUNDS_CHECK = "0"
+QUE_VEC_GROWTH_DEN = "1"
+QUE_DECIMAL_SCALE = "1000"
+QUE_RAW_WASM = "0"
+QUE_NO_OPT = "0"
+QUE_NO_FUNC_INLINE = "0"
+```
+
 **Disclaimer!**
 
 _This project is a work in progress and might contain bugs! Do NOT use it in production!_
