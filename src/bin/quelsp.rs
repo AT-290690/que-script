@@ -21,6 +21,7 @@ use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const ANALYSIS_DELAY_MS: u64 = 500;
@@ -258,9 +259,11 @@ impl ServerState {
             let Some(change) = self.pending_changes.remove(&uri) else {
                 continue;
             };
+            let doc_path = document_path_from_uri(&uri);
             let analysis = self.with_core(|core| {
                 analyze_document_text_safe(
                     &change.text,
+                    doc_path.as_deref(),
                     &core.std_defs,
                     &core.base_env,
                     core.base_next_id,
@@ -332,9 +335,11 @@ impl ServerState {
                 let params: DidOpenTextDocumentParams = parse_params(notif.params)?;
                 let uri = params.text_document.uri;
                 self.pending_changes.remove(&uri);
+                let doc_path = document_path_from_uri(&uri);
                 let analysis = self.with_core(|core| {
                     analyze_document_text_safe(
                         &params.text_document.text,
+                        doc_path.as_deref(),
                         &core.std_defs,
                         &core.base_env,
                         core.base_next_id,
@@ -439,6 +444,7 @@ impl ServerState {
         let analysis = self.with_core(|core| {
             analyze_document_text_safe(
                 text,
+                None,
                 &core.std_defs,
                 &core.base_env,
                 core.base_next_id,
@@ -626,6 +632,7 @@ impl ServerState {
         let analysis = self.with_core(|core| {
             analyze_document_text_safe(
                 text,
+                None,
                 &core.std_defs,
                 &core.base_env,
                 core.base_next_id,
@@ -785,6 +792,7 @@ impl ServerState {
         let analysis = self.with_core(|core| {
             analyze_document_text_safe(
                 text,
+                None,
                 &core.std_defs,
                 &core.base_env,
                 core.base_next_id,
@@ -825,6 +833,7 @@ impl ServerState {
         self.with_core(|core| {
             analyze_document_text_safe(
                 text,
+                None,
                 &core.std_defs,
                 &core.base_env,
                 core.base_next_id,
@@ -953,8 +962,54 @@ fn collect_let_binding_external_impurity(node: &TypedExpression, out: &mut HashM
     que::infer::collect_top_level_function_external_impurity(node, out)
 }
 
+fn document_path_from_uri(uri: &Uri) -> Option<PathBuf> {
+    if uri.scheme().map(|scheme| scheme.as_str()) != Some("file") {
+        return None;
+    }
+    let raw_path = uri.path().as_str();
+    Some(PathBuf::from(percent_decode_uri_path(raw_path)))
+}
+
+fn percent_decode_uri_path(raw: &str) -> String {
+    let mut out = Vec::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = bytes[i + 1] as char;
+            let lo = bytes[i + 2] as char;
+            if let (Some(a), Some(b)) = (hi.to_digit(16), lo.to_digit(16)) {
+                out.push(((a << 4) | b) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn load_project_dep_definitions_for_doc_path(doc_path: Option<&Path>) -> Result<Vec<Expression>, String> {
+    let Some(path) = doc_path else {
+        return Ok(Vec::new());
+    };
+    let start_dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    };
+    let Some(project) = que::project::discover_project_config(&start_dir)? else {
+        return Ok(Vec::new());
+    };
+    que::project::load_bundle_definitions(&project.root_dir, &project.config.deps)
+}
+
 fn analyze_document_text(
     text: &str,
+    project_defs: &[Expression],
     std_defs: &[Expression],
     base_env: &TypeEnv,
     base_next_id: u64,
@@ -992,11 +1047,13 @@ fn analyze_document_text(
         .map(|exprs| exprs.len())
         .unwrap_or_else(|| top_level_form_ranges(text).len());
 
-    let program = match que::parser::merge_std_and_program(&analysis_source, std_defs.to_vec()) {
+    let mut lib_defs = std_defs.to_vec();
+    lib_defs.extend(project_defs.iter().cloned());
+    let program = match que::parser::merge_std_and_program(&analysis_source, lib_defs.clone()) {
         Ok(expr) => expr,
         Err(primary_err) => {
             let repaired = repair_source_for_analysis(&analysis_source);
-            match que::parser::merge_std_and_program(&repaired, std_defs.to_vec()) {
+            match que::parser::merge_std_and_program(&repaired, lib_defs) {
                 Ok(expr) => expr,
                 Err(_) => {
                     diagnostics.extend(make_error_diagnostic(text, primary_err, None));
@@ -1077,6 +1134,7 @@ fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
 
 fn analyze_document_text_safe(
     text: &str,
+    doc_path: Option<&Path>,
     std_defs: &[Expression],
     base_env: &TypeEnv,
     base_next_id: u64,
@@ -1084,9 +1142,25 @@ fn analyze_document_text_safe(
     global_effects: &HashMap<String, EffectFlags>,
     std_fallback_names: &HashSet<String>,
 ) -> DocAnalysis {
+    let project_defs = match load_project_dep_definitions_for_doc_path(doc_path) {
+        Ok(defs) => defs,
+        Err(message) => {
+            return DocAnalysis {
+                text: text.to_string(),
+                diagnostics: make_error_diagnostic(text, message, None),
+                symbol_types: HashMap::new(),
+                let_binding_types: HashMap::new(),
+                let_binding_effects: HashMap::new(),
+                let_binding_external_impure: HashMap::new(),
+                user_bound_symbols: HashSet::new(),
+                form_scoped_symbols: Vec::new(),
+            };
+        }
+    };
     match catch_unwind(AssertUnwindSafe(|| {
         analyze_document_text(
             text,
+            &project_defs,
             std_defs,
             base_env,
             base_next_id,
