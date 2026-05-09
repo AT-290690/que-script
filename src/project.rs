@@ -1,4 +1,5 @@
 use crate::parser::Expression;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,7 @@ pub const PROJECT_CONFIG_FILE: &str = "que.toml";
 pub struct ProjectConfig {
     pub entry: Option<String>,
     pub deps: Vec<String>,
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,10 +22,27 @@ pub struct LoadedProjectConfig {
 pub fn parse_project_config(source: &str, label: &str) -> Result<ProjectConfig, String> {
     let mut cfg = ProjectConfig::default();
     let mut lines = source.lines().enumerate().peekable();
+    let mut section: Option<String> = None;
 
     while let Some((line_no, raw_line)) = lines.next() {
         let line = strip_inline_comment(raw_line).trim();
         if line.is_empty() {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            let name = line[1..line.len() - 1].trim();
+            match name {
+                "env" => section = Some(name.to_string()),
+                other => {
+                    return Err(format!(
+                        "failed to parse project config '{}': unknown section '{}' on line {}",
+                        label,
+                        other,
+                        line_no + 1
+                    ));
+                }
+            }
             continue;
         }
 
@@ -37,34 +56,49 @@ pub fn parse_project_config(source: &str, label: &str) -> Result<ProjectConfig, 
 
         let key = raw_key.trim();
         let mut value = raw_value.trim().to_string();
-        match key {
-            "entry" => {
-                cfg.entry = Some(parse_quoted_string(&value, label, line_no + 1, "entry")?);
-            }
-            "deps" => {
-                while !array_literal_is_complete(&value) {
-                    let Some((_, next_line)) = lines.next() else {
-                        return Err(format!(
-                            "failed to parse project config '{}': unterminated deps array",
-                            label
-                        ));
-                    };
-                    let next = strip_inline_comment(next_line).trim();
-                    if !next.is_empty() {
-                        if !value.ends_with('[') && !value.ends_with(',') {
-                            value.push(' ');
-                        }
-                        value.push_str(next);
-                    }
+        match section.as_deref() {
+            None => match key {
+                "entry" => {
+                    cfg.entry = Some(parse_quoted_string(&value, label, line_no + 1, "entry")?);
                 }
-                cfg.deps = parse_string_array(&value, label, line_no + 1, "deps")?;
+                "deps" => {
+                    while !array_literal_is_complete(&value) {
+                        let Some((_, next_line)) = lines.next() else {
+                            return Err(format!(
+                                "failed to parse project config '{}': unterminated deps array",
+                                label
+                            ));
+                        };
+                        let next = strip_inline_comment(next_line).trim();
+                        if !next.is_empty() {
+                            if !value.ends_with('[') && !value.ends_with(',') {
+                                value.push(' ');
+                            }
+                            value.push_str(next);
+                        }
+                    }
+                    cfg.deps = parse_string_array(&value, label, line_no + 1, "deps")?;
+                }
+                other => {
+                    return Err(format!(
+                        "failed to parse project config '{}': unknown key '{}' on line {}",
+                        label,
+                        other,
+                        line_no + 1
+                    ));
+                }
+            },
+            Some("env") => {
+                cfg.env.insert(
+                    key.to_string(),
+                    parse_quoted_string(&value, label, line_no + 1, key)?,
+                );
             }
-            other => {
+            Some(other) => {
                 return Err(format!(
-                    "failed to parse project config '{}': unknown key '{}' on line {}",
+                    "failed to parse project config '{}': unsupported section '{}'",
                     label,
-                    other,
-                    line_no + 1
+                    other
                 ));
             }
         }
@@ -179,6 +213,11 @@ pub fn load_bundle_definitions(
 pub fn default_project_config_text() -> String {
     r#"entry = "main.que"
 deps = []
+
+[env]
+QUE_WASM_OPT = "speed"
+QUE_DEVIRTUALIZE = "aggressive"
+QUE_TCO = "aggressive"
 "#
     .to_string()
 }
@@ -351,12 +390,13 @@ mod tests {
     #[test]
     fn parse_project_config_reads_entry_and_deps() {
         let cfg = parse_project_config(
-            "entry = \"main.que\"\ndeps = [\"./utils.que\", \"./lib/math.que\"]",
+            "entry = \"main.que\"\ndeps = [\"./utils.que\", \"./lib/math.que\"]\n[env]\nQUE_WASM_OPT = \"speed\"",
             "que.toml",
         )
         .expect("config should parse");
         assert_eq!(cfg.entry.as_deref(), Some("main.que"));
         assert_eq!(cfg.deps.len(), 2);
+        assert_eq!(cfg.env.get("QUE_WASM_OPT").map(String::as_str), Some("speed"));
     }
 
     #[test]
@@ -408,5 +448,6 @@ mod tests {
         let text = default_project_config_text();
         assert!(text.contains("entry = \"main.que\""));
         assert!(text.contains("deps = []"));
+        assert!(text.contains("[env]"));
     }
 }
