@@ -5,6 +5,7 @@ pub mod io;
 pub mod lsp_native_core;
 pub mod op;
 pub mod parser;
+pub mod project;
 #[cfg(feature = "runtime")]
 pub mod runtime;
 #[cfg(test)]

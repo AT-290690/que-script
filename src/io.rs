@@ -274,74 +274,57 @@ fn enable_debug_runtime_guards() {
     env::set_var("QUE_BOUNDS_CHECK", "1");
 }
 
-fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Expression>, String> {
-    let root = crate::parser
-        ::build(source)
-        .map_err(|e| format!("failed to parse bundle '{}': {}", label, e))?;
-    let defs = crate::baked::ast_to_definitions(root, label)?;
-    for (idx, item) in defs.iter().enumerate() {
-        let Expression::Apply(form) = item else {
-            return Err(
-                format!(
-                    "bundle '{}' must contain only top-level definitions; found non-definition at form {}: {}",
-                    label,
-                    idx,
-                    item.to_lisp()
-                )
-            );
-        };
-        if form.len() < 3 {
-            return Err(
-                format!(
-                    "bundle '{}' must contain only top-level definitions; malformed form {}: {}",
-                    label,
-                    idx,
-                    item.to_lisp()
-                )
-            );
-        }
-        let Expression::Word(kw) = &form[0] else {
-            return Err(
-                format!(
-                    "bundle '{}' must contain only top-level definitions; malformed form {}: {}",
-                    label,
-                    idx,
-                    item.to_lisp()
-                )
-            );
-        };
-        if kw != "let" && kw != "letrec" && kw != "mut" {
-            return Err(
-                format!(
-                    "bundle '{}' must contain only top-level definitions; found '{}' at form {}",
-                    label,
-                    kw,
-                    idx
-                )
-            );
-        }
-    }
-    Ok(defs)
+fn load_project_library_definitions(start_dir: &Path) -> Result<Vec<Expression>, String> {
+    let Some(project) = crate::project::discover_project_config(start_dir)? else {
+        return Ok(Vec::new());
+    };
+    crate::project::load_bundle_definitions(&project.root_dir, &project.config.deps)
 }
 
-fn load_bundle_definitions(
-    script_cwd: &Path,
-    bundle_paths: &[String]
-) -> Result<Vec<Expression>, String> {
-    let mut out = Vec::new();
-    for bundle_path in bundle_paths {
-        let raw = Path::new(bundle_path);
-        let resolved = if raw.is_absolute() { raw.to_path_buf() } else { script_cwd.join(raw) };
-        if resolved.extension().and_then(|e| e.to_str()) != Some("que") {
-            return Err(format!("bundle '{}' must be a .que file", resolved.display()));
-        }
-        let source = fs
-            ::read_to_string(&resolved)
-            .map_err(|e| format!("failed to read bundle '{}': {}", resolved.display(), e))?;
-        let mut defs = parse_bundle_definitions(&source, &resolved.display().to_string())?;
-        out.append(&mut defs);
+fn resolve_project_entry_path(
+    cwd: &Path,
+    explicit_path: Option<&str>,
+) -> Result<(PathBuf, String, PathBuf), String> {
+    if let Some(file_path) = explicit_path {
+        let program = fs
+            ::read_to_string(file_path)
+            .map_err(|e| format!("failed to read '{}': {}", file_path, e))?;
+        let script_path = fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+        let script_cwd = script_path
+            .parent()
+            .map(Path::to_path_buf)
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| PathBuf::from("."));
+        return Ok((script_path, program, script_cwd));
     }
-    Ok(out)
+
+    let Some(project) = crate::project::discover_project_config(cwd)? else {
+        return Err("missing file_path".to_string());
+    };
+    let Some(entry) = project.config.entry.as_deref() else {
+        return Err(
+            format!(
+                "missing file_path and '{}' has no `entry`",
+                project.path.display()
+            )
+        );
+    };
+    let entry_path = project.root_dir.join(entry);
+    let program = fs
+        ::read_to_string(&entry_path)
+        .map_err(|e| format!("failed to read '{}': {}", entry_path.display(), e))?;
+    let script_path = fs::canonicalize(&entry_path).unwrap_or(entry_path);
+    Ok((script_path, program, project.root_dir))
+}
+
+fn init_project_config_file(dir: &Path) -> Result<PathBuf, String> {
+    let path = dir.join(crate::project::PROJECT_CONFIG_FILE);
+    if path.exists() {
+        return Err(format!("project config already exists at '{}'", path.display()));
+    }
+    fs::write(&path, crate::project::default_project_config_text())
+        .map_err(|e| format!("failed to write '{}': {}", path.display(), e))?;
+    Ok(path)
 }
 
 fn take_install_output_path_from_argv(argv: &mut Vec<String>) -> Result<Option<String>, String> {
@@ -429,10 +412,11 @@ fn native_shell_help(bin_name: &str) -> String {
     format!(
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
          or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
-         or:    {bin} <script.que> [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
+         or:    {bin} [<script.que>] [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
          or:    {bin} --eval <source> [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
-         or:    {bin} <script.que> [arg ...] --emit-source [--out <expanded.lisp>]\n\
+         or:    {bin} [<script.que>] [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
+         or:    {bin} init\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} lambda <command> [...]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
@@ -448,6 +432,7 @@ fn native_shell_help(bin_name: &str) -> String {
            --emit         Output source, wat, wasm, or top-level types and exit.\n\
            --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
                          Use with --out <file> to write it instead of printing.\n\
+          init           Write a default `{config}` in the current directory.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
                          QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
@@ -456,8 +441,11 @@ fn native_shell_help(bin_name: &str) -> String {
          \n\
          Notes:\n\
            - Recommended: run with `--debug` for stronger safety checks and richer diagnostics.\n\
-           - Script arguments come before --allow.\n\
-           - `--install` accepts helper .que files as positional arguments.\n\
+          - If a nearby `{config}` exists, native CLI and native LSP load its `deps`.\n\
+          - If no `{config}` exists, no project config is used.\n\
+          - Omitting `<script.que>` uses `entry` from `{config}` when present.\n\
+          - Script arguments come before flags like --allow.\n\
+          - `--install` accepts helper .que files as positional arguments.\n\
            - `lambda` manages https://lambda.quest auth, uploads, deletes, and execution.\n\
            - `--lib names [pattern]` lists available library names.\n\
            - `--lib types [pattern]` prints name and inferred type.\n\
@@ -476,7 +464,8 @@ fn native_shell_help(bin_name: &str) -> String {
            - After install/uninstall, restart editor/LSP to reload library state.\n\
            - Once installed, helper bundle source files can be removed.\n\
          ",
-        bin = bin_name
+        bin = bin_name,
+        config = crate::project::PROJECT_CONFIG_FILE
     )
 }
 
@@ -1604,7 +1593,7 @@ fn run_library_install_via_io(mode: LibraryInstallMode, args: &[String]) -> Resu
 
     let cwd = env::current_dir().map_err(|e| format!("failed to read current directory: {}", e))?;
     let mut defs = load_existing_library_definitions(&output)?;
-    defs.extend(load_bundle_definitions(&cwd, &bundle_paths)?);
+    defs.extend(crate::project::load_bundle_definitions(&cwd, &bundle_paths)?);
     let wrapped = Expression::Apply(
         std::iter::once(Expression::Word("do".to_string())).chain(defs).collect()
     );
@@ -2284,13 +2273,14 @@ fn build_debug_error_report(
 mod tests {
     use super::{
         format_lambda_functions_list,
+        init_project_config_file,
         lambda_api_base_from_env_value,
         lambda_example_url,
         native_shell_help,
-        parse_bundle_definitions,
         parse_lambda_example_options,
         parse_lambda_execute_options,
         parse_lambda_invoke_target,
+        resolve_project_entry_path,
         resolve_owned_function_id_from_functions_list,
         take_debug_mode_from_argv,
         take_emit_request_from_argv,
@@ -2501,27 +2491,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_bundle_definitions_accepts_top_level_defs_only() {
-        let src = "(let inc (lambda x (+ x 1)))\n(let dec (lambda x (- x 1)))";
-        let defs = parse_bundle_definitions(src, "bundle.que").expect("bundle should parse");
-        assert_eq!(defs.len(), 2);
-    }
-
-    #[test]
-    fn parse_bundle_definitions_accepts_nested_top_level_do() {
-        let src = "(do (let inc (lambda x (+ x 1))) (let dec (lambda x (- x 1))))";
-        let defs = parse_bundle_definitions(src, "bundle.que").expect("bundle should parse");
-        assert_eq!(defs.len(), 2);
-    }
-
-    #[test]
-    fn parse_bundle_definitions_rejects_non_definition_form() {
-        let src = "(let inc (lambda x (+ x 1)))\n(inc 1)";
-        let err = parse_bundle_definitions(src, "bundle.que").expect_err("bundle should fail");
-        assert!(err.contains("must contain only top-level definitions"));
-    }
-
-    #[test]
     fn wildcard_match_supports_star_and_question() {
         assert!(wildcard_match("*map*", "std/vector/map"));
         assert!(wildcard_match("map/?", "map/i"));
@@ -2570,6 +2539,9 @@ mod tests {
         let help = native_shell_help("que");
         assert!(help.contains("que lambda <command>"));
         assert!(help.contains("https://lambda.quest"));
+        assert!(help.contains("que init"));
+        assert!(help.contains("que.toml"));
+        assert!(!help.contains("--deps"));
     }
 
     #[test]
@@ -2677,6 +2649,52 @@ mod tests {
             "https://lambda2.quest"
         );
     }
+
+    #[test]
+    fn init_project_config_file_writes_default_and_rejects_existing() {
+        let base = std::env::temp_dir().join(format!(
+            "que-init-project-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("temp dir should be created");
+
+        let path = init_project_config_file(&base).expect("config should be created");
+        let text = std::fs::read_to_string(&path).expect("config should be readable");
+        assert!(text.contains("entry = \"main.que\""));
+        let err = init_project_config_file(&base).expect_err("second init should fail");
+        assert!(err.contains("already exists"));
+    }
+
+    #[test]
+    fn resolve_project_entry_path_uses_config_entry_when_script_is_omitted() {
+        let base = std::env::temp_dir().join(format!(
+            "que-entry-project-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("temp dir should be created");
+        std::fs::write(
+            base.join(crate::project::PROJECT_CONFIG_FILE),
+            "entry = \"main.que\"\ndeps = []\n",
+        )
+        .expect("config should be written");
+        std::fs::write(base.join("main.que"), "(+ 1 2)").expect("entry should be written");
+
+        let (_path, program, root) =
+            resolve_project_entry_path(&base, None).expect("entry should resolve from config");
+        assert_eq!(program.trim(), "(+ 1 2)");
+        assert_eq!(
+            std::fs::canonicalize(&root).expect("root should canonicalize"),
+            std::fs::canonicalize(&base).expect("base should canonicalize")
+        );
+    }
 }
 
 pub fn run_native_shell() -> Result<(), String> {
@@ -2688,6 +2706,12 @@ pub fn run_native_shell() -> Result<(), String> {
         .unwrap_or("queio");
     if matches!(args.get(1).map(String::as_str), Some("--help" | "-h")) {
         println!("{}", native_shell_help(bin_name));
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("init")) {
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let path = init_project_config_file(&cwd)?;
+        println!("wrote {}", path.display());
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("lambda")) {
@@ -2728,20 +2752,15 @@ pub fn run_native_shell() -> Result<(), String> {
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         (source.clone(), args.iter().skip(3).cloned().collect::<Vec<_>>(), cwd)
     } else {
-        let Some(file_path) = args.get(1) else {
-            return Err(format!("missing file_path\n{}", native_shell_help(bin_name)));
-        };
-        let program = fs
-            ::read_to_string(&file_path)
-            .map_err(|e| format!("failed to read '{}': {}", file_path, e))?;
-        let script_cwd = fs
-            ::canonicalize(file_path)
-            .ok()
-            .and_then(|path| path.parent().map(Path::to_path_buf))
-            .or_else(|| Path::new(file_path).parent().map(Path::to_path_buf))
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or_else(|| PathBuf::from("."));
-        (program, args.iter().skip(2).cloned().collect::<Vec<_>>(), script_cwd)
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let explicit_path = args
+            .get(1)
+            .filter(|token| !token.starts_with("--"))
+            .map(String::as_str);
+        let (_script_path, program, script_cwd) = resolve_project_entry_path(&cwd, explicit_path)
+            .map_err(|message| format!("{}\n{}", message, native_shell_help(bin_name)))?;
+        let argv_start = if explicit_path.is_some() { 2 } else { 1 };
+        (program, args.iter().skip(argv_start).cloned().collect::<Vec<_>>(), script_cwd)
     };
 
     if take_help_flag_from_argv(&mut argv) {
@@ -2780,7 +2799,8 @@ pub fn run_native_shell() -> Result<(), String> {
     };
 
     let std_ast = crate::baked::load_ast();
-    let lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
+    let mut lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
+    lib_defs.extend(load_project_library_definitions(&script_cwd)?);
     let wrapped_ast = match crate::parser::merge_std_and_program(&program, lib_defs) {
         Ok(expr) => expr,
         Err(message) => {
