@@ -4886,7 +4886,7 @@ Concequent and alternative must match types
     }
 
     #[test]
-    fn test_wat_hidden_scalar_store_uses_materialized_scalar_set_runtime() {
+    fn test_wat_hidden_scalar_store_inlines_builder_store_path() {
         let typed = crate::infer::TypedExpression {
             expr: crate::parser::Expression::Apply(
                 vec![
@@ -4955,8 +4955,13 @@ Concequent and alternative must match types
             .expect("program should compile");
 
         assert!(
-            wat.contains("call $vec_set_scalar_materialized_i32"),
-            "hidden exact-size scalar stores should use the materialized scalar set runtime, got:\n{}",
+            wat.contains("i32.store"),
+            "hidden exact-size scalar stores should inline a direct builder store, got:\n{}",
+            wat
+        );
+        assert!(
+            !wat.contains("call $vec_set_scalar_materialized_i32"),
+            "hidden exact-size scalar stores should avoid the generic materialized setter runtime, got:\n{}",
             wat
         );
     }

@@ -5715,6 +5715,34 @@ fn emit_release_fresh_owned_temp(tmp_val: usize) -> String {
     format!("local.get {}\ncall $rc_release\ndrop", tmp_val)
 }
 
+fn emit_direct_builder_scalar_store_i32(
+    ptr: &str,
+    idx: &str,
+    value: &str,
+    ctx: &Ctx<'_>
+) -> String {
+    let ptr_tmp = ctx.tmp_i32 + 1;
+    let idx_tmp = ctx.tmp_i32 + 2;
+    let val_tmp = ctx.tmp_i32 + 3;
+    let len_tmp = ctx.tmp_i32 + 4;
+    let addr_tmp = ctx.tmp_i32 + 5;
+    format!(
+        "{ptr}\nlocal.set {ptr_tmp}\n{idx}\nlocal.set {idx_tmp}\n{value}\nlocal.set {val_tmp}\n\
+local.get {ptr_tmp}\ni32.load\nlocal.set {len_tmp}\n\
+local.get {idx_tmp}\ni32.const 0\ni32.ge_s\n\
+local.get {idx_tmp}\nlocal.get {len_tmp}\ni32.lt_s\ni32.and\n\
+if (result i32)\n\
+  local.get {ptr_tmp}\n  i32.const 16\n  i32.add\n  i32.load\n\
+  local.get {idx_tmp}\n  i32.const 4\n  i32.mul\n  i32.add\n\
+  local.set {addr_tmp}\n\
+  local.get {addr_tmp}\n  local.get {val_tmp}\n  i32.store\n\
+  i32.const 0\n\
+else\n\
+  unreachable\n\
+end"
+    )
+}
+
 fn local_lambda_binding_needs_runtime_value(name: &str, following_items: &[Expression]) -> bool {
     for expr in following_items {
         if let Expression::Apply(items) = expr {
@@ -7789,11 +7817,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                     .ok_or_else(|| "__vec_store_i32 missing value".to_string())?,
                                 ctx
                             )?;
-                            Ok(
-                                format!(
-                                    "{xs}\n{idx}\n{value}\ncall $vec_set_scalar_materialized_i32"
-                                )
-                            )
+                            Ok(emit_direct_builder_scalar_store_i32(&xs, &idx, &value, ctx))
                         }
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
