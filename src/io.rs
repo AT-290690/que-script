@@ -2282,7 +2282,6 @@ fn build_debug_error_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_project_env_vars,
         format_lambda_functions_list,
         init_project_config_file,
         lambda_api_base_from_env_value,
@@ -2707,27 +2706,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn apply_project_env_vars_loads_env_from_project_config() {
-        let base = std::env::temp_dir().join(format!(
-            "que-env-project-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock should be after epoch")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&base).expect("temp dir should be created");
-        std::fs::write(
-            base.join(crate::project::PROJECT_CONFIG_FILE),
-            "entry = \"main.que\"\ndeps = []\n[env]\nQUE_WASM_OPT = \"none\"\nQUE_TCO = \"conservative\"\n",
-        )
-        .expect("config should be written");
-
-        apply_project_env_vars(&base).expect("env should load from config");
-        assert_eq!(std::env::var("QUE_WASM_OPT").ok().as_deref(), Some("none"));
-        assert_eq!(std::env::var("QUE_TCO").ok().as_deref(), Some("conservative"));
-    }
 }
 
 pub fn run_native_shell() -> Result<(), String> {

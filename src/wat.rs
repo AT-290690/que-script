@@ -6703,10 +6703,11 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         if !target_release.is_empty() {
             tail.push(target_release);
         }
+        let set_body = format!("{target_prefix}\n{idx}\n{v}\nlocal.tee {tmp_val}\ncall {}", scalar_set_op);
         Ok(
             format!(
-                "{target_prefix}\n{idx}\n{v}\nlocal.tee {tmp_val}\ncall {}\n{}",
-                scalar_set_op,
+                "{}\n{}",
+                set_body,
                 tail.join("\n")
             )
         )
