@@ -324,18 +324,7 @@ pub fn collect_let_binding_effects(
 }
 
 pub fn known_symbol_effect(symbol: &str) -> Option<EffectFlags> {
-    if matches!(
-        symbol,
-        "read!"
-            | "write!"
-            | "list-dir!"
-            | "mkdir!"
-            | "delete!"
-            | "move!"
-            | "print!"
-            | "sleep!"
-            | "clear!"
-    ) {
+    if crate::externals::is_builtin_host_extern_symbol(symbol) {
         return Some(EffectFlags::IO);
     }
     if matches!(symbol, "set!" | "&alter!" | "alter!" | "pop!") {

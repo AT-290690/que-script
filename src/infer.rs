@@ -97,18 +97,23 @@ fn build_typed_expression(
 }
 
 fn is_io_op(op: &str) -> bool {
-    matches!(
-        op,
-        "read!"
-            | "write!"
-            | "list-dir!"
-            | "mkdir!"
-            | "delete!"
-            | "move!"
-            | "print!"
-            | "sleep!"
-            | "clear!"
-    )
+    crate::externals::is_builtin_host_extern_symbol(op)
+}
+
+fn collect_top_level_extern_names(root: &TypedExpression) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Expression::Apply(items) = &root.expr else {
+        return out;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return out;
+    }
+    for item in items.iter().skip(1) {
+        if let Ok(Some(decl)) = crate::externals::parse_extern_decl(item) {
+            out.insert(decl.local_name);
+        }
+    }
+    out
 }
 
 fn is_mutating_op(op: &str) -> bool {
@@ -214,6 +219,7 @@ fn local_lookup_fn_effect(
 fn estimate_effect_immutable(
     node: &TypedExpression,
     top_fn_effects: &HashMap<String, EffectFlags>,
+    extern_names: &HashSet<String>,
     local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>,
 ) -> EffectFlags {
     match &node.expr {
@@ -240,6 +246,7 @@ fn estimate_effect_immutable(
                     let effect = estimate_effect_immutable(
                         &node.children[body_idx],
                         top_fn_effects,
+                        extern_names,
                         local_fn_scopes,
                     );
                     local_fn_scopes.pop();
@@ -250,20 +257,20 @@ fn estimate_effect_immutable(
                     .iter()
                     .skip(1)
                     .fold(EffectFlags::PURE, |acc, ch| {
-                        acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
+                        acc | estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes)
                     }),
                 Expression::Word(op) if op == "while" => node
                     .children
                     .iter()
                     .skip(1)
                     .fold(EffectFlags::PURE, |acc, ch| {
-                        acc | estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes)
+                        acc | estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes)
                     }),
                 Expression::Word(op) if op == "do" => {
                     local_fn_scopes.push(HashMap::new());
                     let mut effect = EffectFlags::PURE;
                     for (idx, ch) in node.children.iter().enumerate().skip(1) {
-                        effect |= estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes);
+                        effect |= estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes);
                         if let Some(Expression::Apply(form_items)) = items.get(idx) {
                             if let [Expression::Word(kw), Expression::Word(name), rhs] =
                                 &form_items[..]
@@ -286,15 +293,15 @@ fn estimate_effect_immutable(
                 Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => node
                     .children
                     .get(2)
-                    .map(|rhs| estimate_effect_immutable(rhs, top_fn_effects, local_fn_scopes))
+                    .map(|rhs| estimate_effect_immutable(rhs, top_fn_effects, extern_names, local_fn_scopes))
                     .unwrap_or(EffectFlags::PURE),
                 Expression::Word(op) => {
                     let mut effect = EffectFlags::PURE;
                     for ch in node.children.iter().skip(1) {
-                        effect |= estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes);
+                        effect |= estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes);
                     }
 
-                    if is_io_op(op) {
+                    if is_io_op(op) || extern_names.contains(op) {
                         effect |= EffectFlags::IO;
                     } else if is_mutating_op(op) {
                         effect |= EffectFlags::MUTATE;
@@ -311,9 +318,9 @@ fn estimate_effect_immutable(
                 _ => {
                     let mut effect = EffectFlags::UNKNOWN_CALL;
                     effect |=
-                        estimate_effect_immutable(head_child, top_fn_effects, local_fn_scopes);
+                        estimate_effect_immutable(head_child, top_fn_effects, extern_names, local_fn_scopes);
                     for ch in node.children.iter().skip(1) {
-                        effect |= estimate_effect_immutable(ch, top_fn_effects, local_fn_scopes);
+                        effect |= estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes);
                     }
                     effect
                 }
@@ -325,6 +332,7 @@ fn estimate_effect_immutable(
 fn annotate_effects_mut(
     node: &mut TypedExpression,
     top_fn_effects: &HashMap<String, EffectFlags>,
+    extern_names: &HashSet<String>,
     local_fn_scopes: &mut Vec<HashMap<String, EffectFlags>>,
 ) -> EffectFlags {
     let effect = match &node.expr {
@@ -343,6 +351,7 @@ fn annotate_effects_mut(
                             let body_effect = annotate_effects_mut(
                                 &mut node.children[body_idx],
                                 top_fn_effects,
+                                extern_names,
                                 local_fn_scopes,
                             );
                             local_fn_scopes.pop();
@@ -352,7 +361,7 @@ fn annotate_effects_mut(
                     Some(Expression::Word(op)) if op == "if" || op == "while" => {
                         let mut combined = EffectFlags::PURE;
                         for ch in node.children.iter_mut().skip(1) {
-                            combined |= annotate_effects_mut(ch, top_fn_effects, local_fn_scopes);
+                            combined |= annotate_effects_mut(ch, top_fn_effects, extern_names, local_fn_scopes);
                         }
                         combined
                     }
@@ -363,6 +372,7 @@ fn annotate_effects_mut(
                             let child_effect = annotate_effects_mut(
                                 &mut node.children[idx],
                                 top_fn_effects,
+                                extern_names,
                                 local_fn_scopes,
                             );
                             combined |= child_effect;
@@ -388,16 +398,16 @@ fn annotate_effects_mut(
                     Some(Expression::Word(op)) if op == "let" || op == "letrec" || op == "mut" => {
                         node.children
                             .get_mut(2)
-                            .map(|rhs| annotate_effects_mut(rhs, top_fn_effects, local_fn_scopes))
+                            .map(|rhs| annotate_effects_mut(rhs, top_fn_effects, extern_names, local_fn_scopes))
                             .unwrap_or(EffectFlags::PURE)
                     }
                     Some(Expression::Word(op)) => {
                         let mut combined = EffectFlags::PURE;
                         for ch in node.children.iter_mut().skip(1) {
-                            combined |= annotate_effects_mut(ch, top_fn_effects, local_fn_scopes);
+                            combined |= annotate_effects_mut(ch, top_fn_effects, extern_names, local_fn_scopes);
                         }
 
-                        if is_io_op(op) {
+                        if is_io_op(op) || extern_names.contains(op) {
                             combined |= EffectFlags::IO;
                         } else if is_mutating_op(op) {
                             combined |= EffectFlags::MUTATE;
@@ -416,7 +426,7 @@ fn annotate_effects_mut(
                     _ => {
                         let mut combined = EffectFlags::UNKNOWN_CALL;
                         for ch in node.children.iter_mut() {
-                            combined |= annotate_effects_mut(ch, top_fn_effects, local_fn_scopes);
+                            combined |= annotate_effects_mut(ch, top_fn_effects, extern_names, local_fn_scopes);
                         }
                         combined
                     }
@@ -461,6 +471,7 @@ fn collect_top_level_lambda_defs<'a>(
 
 fn compute_top_level_function_effects(root: &TypedExpression) -> HashMap<String, EffectFlags> {
     let defs = collect_top_level_lambda_defs(root);
+    let extern_names = collect_top_level_extern_names(root);
     let mut summaries: HashMap<String, EffectFlags> = defs
         .keys()
         .cloned()
@@ -479,7 +490,12 @@ fn compute_top_level_function_effects(root: &TypedExpression) -> HashMap<String,
             } else {
                 let body_idx = lambda_node.children.len() - 1;
                 let mut scopes = vec![HashMap::new()];
-                estimate_effect_immutable(&lambda_node.children[body_idx], &summaries, &mut scopes)
+                estimate_effect_immutable(
+                    &lambda_node.children[body_idx],
+                    &summaries,
+                    &extern_names,
+                    &mut scopes,
+                )
             };
             if summaries.get(name).copied() != Some(effect) {
                 summaries.insert(name.clone(), effect);
@@ -495,11 +511,13 @@ fn compute_top_level_function_effects(root: &TypedExpression) -> HashMap<String,
 
 fn annotate_effects(root: &mut TypedExpression) {
     let top_effects = compute_top_level_function_effects(root);
+    let extern_names = collect_top_level_extern_names(root);
     let mut scopes = vec![HashMap::new()];
-    let _ = annotate_effects_mut(root, &top_effects, &mut scopes);
+    let _ = annotate_effects_mut(root, &top_effects, &extern_names, &mut scopes);
 }
 
 fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), String> {
+    let extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
     if let Expression::Apply(items) = &root.expr {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
@@ -510,16 +528,35 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                 let Some(let_node) = root.children.get(idx) else {
                     continue;
                 };
+                if let Ok(Some(extern_decl)) = crate::externals::parse_extern_decl(&items[idx]) {
+                    if !extern_decl.local_name.ends_with('!') {
+                        return Err(format!(
+                            "Extern '{}' must end with '!'\n{}",
+                            extern_decl.local_name,
+                            items[idx].to_lisp()
+                        ));
+                    }
+                    continue;
+                }
                 if let Some(message) =
-                    check_impure_binding_name(&items[idx], let_node, &mut known_requires_bang)
+                    check_impure_binding_name(
+                        &items[idx],
+                        let_node,
+                        &extern_names,
+                        &mut known_requires_bang,
+                    )
                 {
                     return Err(message);
                 }
             }
             return Ok(());
         }
-        if let Some(message) = check_impure_binding_name(&root.expr, root, &mut known_requires_bang)
-        {
+        if let Some(message) = check_impure_binding_name(
+            &root.expr,
+            root,
+            &extern_names,
+            &mut known_requires_bang,
+        ) {
             return Err(message);
         }
     }
@@ -530,10 +567,11 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
 fn check_impure_binding_name(
     item_expr: &Expression,
     let_node: &TypedExpression,
+    extern_names: &HashSet<String>,
     known_requires_bang: &mut HashMap<String, bool>,
 ) -> Option<String> {
     let (name, requires_bang) =
-        eval_function_binding_requires_bang(item_expr, let_node, known_requires_bang)?;
+        eval_function_binding_requires_bang(item_expr, let_node, extern_names, known_requires_bang)?;
     if requires_bang {
         if let Some(offending_idx) =
             eval_function_binding_non_first_mutation_target(item_expr, known_requires_bang)
@@ -782,6 +820,7 @@ fn is_impure_bang_exception_name(name: &str) -> bool {
 fn eval_function_binding_requires_bang(
     item_expr: &Expression,
     let_node: &TypedExpression,
+    extern_names: &HashSet<String>,
     known_requires_bang: &mut HashMap<String, bool>,
 ) -> Option<(String, bool)> {
     let Expression::Apply(let_items) = item_expr else {
@@ -814,7 +853,7 @@ fn eval_function_binding_requires_bang(
         _ => match rhs {
             Expression::Apply(rhs_items) => {
                 matches!(rhs_items.first(), Some(Expression::Word(w)) if w == "lambda")
-                    && lambda_requires_bang(rhs, known_requires_bang)
+                    && lambda_requires_bang(rhs, extern_names, known_requires_bang)
             }
             _ => false,
         },
@@ -828,6 +867,7 @@ pub fn collect_top_level_function_external_impurity(
     root: &TypedExpression,
     out: &mut HashMap<String, bool>,
 ) {
+    let extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
     if let Expression::Apply(items) = &root.expr {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
@@ -839,6 +879,7 @@ pub fn collect_top_level_function_external_impurity(
                     if let Some((name, requires)) = eval_function_binding_requires_bang(
                         &items[idx],
                         let_node,
+                        &extern_names,
                         &mut known_requires_bang,
                     ) {
                         out.insert(name, requires);
@@ -848,7 +889,7 @@ pub fn collect_top_level_function_external_impurity(
             return;
         }
         if let Some((name, requires)) =
-            eval_function_binding_requires_bang(&root.expr, root, &mut known_requires_bang)
+            eval_function_binding_requires_bang(&root.expr, root, &extern_names, &mut known_requires_bang)
         {
             out.insert(name, requires);
         }
@@ -857,6 +898,7 @@ pub fn collect_top_level_function_external_impurity(
 
 fn lambda_requires_bang(
     lambda_expr: &Expression,
+    extern_names: &HashSet<String>,
     known_requires_bang: &HashMap<String, bool>,
 ) -> bool {
     let Expression::Apply(items) = lambda_expr else {
@@ -875,7 +917,7 @@ fn lambda_requires_bang(
         }
     }
     if let Some(body) = items.last() {
-        expr_requires_bang(body, known_requires_bang, &mut scopes)
+        expr_requires_bang(body, extern_names, known_requires_bang, &mut scopes)
     } else {
         false
     }
@@ -892,6 +934,7 @@ fn resolve_binding_kind(scopes: &[HashMap<String, bool>], name: &str) -> Option<
 
 fn expr_requires_bang(
     expr: &Expression,
+    extern_names: &HashSet<String>,
     known_requires_bang: &HashMap<String, bool>,
     scopes: &mut Vec<HashMap<String, bool>>,
 ) -> bool {
@@ -912,7 +955,7 @@ fn expr_requires_bang(
                 Expression::Word(op) if op == "do" => {
                     scopes.push(HashMap::new());
                     for item in items.iter().skip(1) {
-                        if expr_requires_bang(item, known_requires_bang, scopes) {
+                        if expr_requires_bang(item, extern_names, known_requires_bang, scopes) {
                             scopes.pop();
                             return true;
                         }
@@ -933,9 +976,9 @@ fn expr_requires_bang(
                 }
                 Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => items
                     .get(2)
-                    .map(|rhs| expr_requires_bang(rhs, known_requires_bang, scopes))
+                    .map(|rhs| expr_requires_bang(rhs, extern_names, known_requires_bang, scopes))
                     .unwrap_or(false),
-                Expression::Word(op) if is_io_op(op) => true,
+                Expression::Word(op) if is_io_op(op) || extern_names.contains(op) => true,
                 Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
                     let Some(target) = items.get(1) else {
                         return true;
@@ -953,7 +996,7 @@ fn expr_requires_bang(
                 }
                 Expression::Word(_op) => {
                     for arg in items.iter().skip(1) {
-                        if expr_requires_bang(arg, known_requires_bang, scopes) {
+                        if expr_requires_bang(arg, extern_names, known_requires_bang, scopes) {
                             return true;
                         }
                     }
@@ -961,7 +1004,7 @@ fn expr_requires_bang(
                 }
                 _ => {
                     for it in items {
-                        if expr_requires_bang(it, known_requires_bang, scopes) {
+                        if expr_requires_bang(it, extern_names, known_requires_bang, scopes) {
                             return true;
                         }
                     }
@@ -1301,6 +1344,9 @@ fn infer_extern(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     let typ = crate::externals::parse_extern_decl(&Expression::Apply(exprs.to_vec()))?
         .ok_or_else(|| "invalid extern declaration".to_string())?
         .typ;
+    if !local_name.ends_with('!') {
+        return Err(format!("Extern '{}' must end with '!'", local_name));
+    }
     let scheme = TypeScheme::monotype(typ);
     if let Some(current) = ctx.env.scopes.last().and_then(|scope| scope.get(local_name)) {
         if current.typ == scheme.typ && current.vars == scheme.vars {
