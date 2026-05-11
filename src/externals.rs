@@ -1,6 +1,14 @@
 use crate::parser::Expression;
 use crate::types::Type;
 
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinHostExternSpec {
+    pub module: &'static str,
+    pub import: &'static str,
+    pub local_name: &'static str,
+    pub type_src: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternDecl {
     pub module: String,
@@ -76,6 +84,17 @@ fn parse_type_expr(expr: &Expression) -> Result<Type, String> {
     }
 }
 
+pub fn parse_type_source(source: &str) -> Result<Type, String> {
+    let ast = crate::parser::build_library(source)?;
+    let Expression::Apply(items) = ast else {
+        return Err(format!("invalid extern type source: {}", source));
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") || items.len() != 2 {
+        return Err(format!("invalid extern type source: {}", source));
+    }
+    parse_type_expr(&items[1])
+}
+
 pub fn parse_extern_decl(expr: &Expression) -> Result<Option<ExternDecl>, String> {
     let Expression::Apply(items) = expr else {
         return Ok(None);
@@ -98,28 +117,90 @@ pub fn parse_extern_decl(expr: &Expression) -> Result<Option<ExternDecl>, String
 }
 
 #[cfg(feature = "io")]
-const BUILTIN_HOST_EXTERNS_SRC: &str = r#"
-(extern host list_dir list-dir! ([Char] -> [Char]))
-(extern host read_file read! ([Char] -> [Char]))
-(extern host write_file write! ([Char] [Char] -> ()))
-(extern host mkdir_p mkdir! ([Char] -> ()))
-(extern host delete delete! ([Char] -> ()))
-(extern host move move! ([Char] [Char] -> ()))
-(extern host print print! ([Char] -> ()))
-(extern host sleep sleep! (Int -> ()))
-(extern host clear clear! (() -> ()))
-"#;
+pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "list_dir",
+        local_name: "list-dir!",
+        type_src: "([Char] -> [Char])",
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "read_file",
+        local_name: "read!",
+        type_src: "([Char] -> [Char])",
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "write_file",
+        local_name: "write!",
+        type_src: "([Char] [Char] -> ())",
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "mkdir_p",
+        local_name: "mkdir!",
+        type_src: "([Char] -> ())",
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "delete",
+        local_name: "delete!",
+        type_src: "([Char] -> ())",
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "move",
+        local_name: "move!",
+        type_src: "([Char] [Char] -> ())",
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "print",
+        local_name: "print!",
+        type_src: "([Char] -> ())",
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "sleep",
+        local_name: "sleep!",
+        type_src: "(Int -> ())",
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "clear",
+        local_name: "clear!",
+        type_src: "(() -> ())",
+    },
+];
+
+#[cfg(not(feature = "io"))]
+pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[];
+
+pub fn is_builtin_host_extern_symbol(name: &str) -> bool {
+    BUILTIN_HOST_EXTERNS.iter().any(|spec| spec.local_name == name)
+}
 
 #[cfg(feature = "io")]
 pub fn builtin_host_extern_definitions() -> Result<Vec<Expression>, String> {
-    let ast = crate::parser::build_library(BUILTIN_HOST_EXTERNS_SRC)?;
-    let Expression::Apply(items) = ast else {
-        return Err("builtin host externs did not parse as top-level do expression".to_string());
-    };
-    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-        return Err("builtin host externs did not parse as top-level do expression".to_string());
+    let mut out = Vec::new();
+    for spec in BUILTIN_HOST_EXTERNS {
+        let type_expr_ast = crate::parser::build_library(spec.type_src)?;
+        let Expression::Apply(type_items) = type_expr_ast else {
+            return Err(format!("invalid builtin host extern type source: {}", spec.type_src));
+        };
+        if !matches!(type_items.first(), Some(Expression::Word(w)) if w == "do") || type_items.len() != 2 {
+            return Err(format!("invalid builtin host extern type source: {}", spec.type_src));
+        }
+        out.push(Expression::Apply(vec![
+            Expression::Word("extern".to_string()),
+            Expression::Word(spec.module.to_string()),
+            Expression::Word(spec.import.to_string()),
+            Expression::Word(spec.local_name.to_string()),
+            type_items[1].clone(),
+        ]));
     }
-    Ok(items.into_iter().skip(1).collect())
+    Ok(out)
 }
 
 #[cfg(not(feature = "io"))]

@@ -527,69 +527,11 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
 
     #[cfg(feature = "io")]
     {
-        let _ = env.insert(
-            "print!".to_string(),
-            TypeScheme::monotype(Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::Unit),
-            )),
-        );
-        let _ = env.insert(
-            "sleep!".to_string(),
-            TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Unit))),
-        );
-        let _ = env.insert(
-            "clear!".to_string(),
-            TypeScheme::monotype(Type::Function(Box::new(Type::Unit), Box::new(Type::Unit))),
-        );
-        let _ = env.insert(
-            "list-dir!".to_string(),
-            TypeScheme::monotype(Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::List(Box::new(Type::Char))),
-            )),
-        );
-        let _ = env.insert(
-            "mkdir!".to_string(),
-            TypeScheme::monotype(Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::Unit),
-            )),
-        );
-        let _ = env.insert(
-            "read!".to_string(),
-            TypeScheme::monotype(Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::List(Box::new(Type::Char))),
-            )),
-        );
-        let _ = env.insert(
-            "delete!".to_string(),
-            TypeScheme::monotype(Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::Unit),
-            )),
-        );
-        let _ = env.insert(
-            "write!".to_string(),
-            TypeScheme::monotype(Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::Function(
-                    Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(Type::Unit),
-                )),
-            )),
-        );
-        let _ = env.insert(
-            "move!".to_string(),
-            TypeScheme::monotype(Type::Function(
-                Box::new(Type::List(Box::new(Type::Char))),
-                Box::new(Type::Function(
-                    Box::new(Type::List(Box::new(Type::Char))),
-                    Box::new(Type::Unit),
-                )),
-            )),
-        );
+        for spec in crate::externals::BUILTIN_HOST_EXTERNS {
+            let typ = crate::externals::parse_type_source(spec.type_src)
+                .expect("builtin host extern type should parse");
+            let _ = env.insert(spec.local_name.to_string(), TypeScheme::monotype(typ));
+        }
     }
     let _ = env.insert(
         "=?".to_string(),

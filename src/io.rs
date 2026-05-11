@@ -2021,18 +2021,54 @@ pub fn host_clear(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
     Ok(0)
 }
 
+fn register_builtin_host_import(
+    linker: &mut Linker<ShellStoreData>,
+    spec: &crate::externals::BuiltinHostExternSpec,
+) -> wasmtime::Result<()> {
+    match spec.import {
+        "list_dir" => {
+            linker.func_wrap(spec.module, spec.import, host_list_dir)?;
+        }
+        "read_file" => {
+            linker.func_wrap(spec.module, spec.import, host_read_file)?;
+        }
+        "write_file" => {
+            linker.func_wrap(spec.module, spec.import, host_write_file)?;
+        }
+        "mkdir_p" => {
+            linker.func_wrap(spec.module, spec.import, host_mkdir_p)?;
+        }
+        "delete" => {
+            linker.func_wrap(spec.module, spec.import, host_delete)?;
+        }
+        "move" => {
+            linker.func_wrap(spec.module, spec.import, host_move)?;
+        }
+        "print" => {
+            linker.func_wrap(spec.module, spec.import, host_print)?;
+        }
+        "sleep" => {
+            linker.func_wrap(spec.module, spec.import, host_sleep)?;
+        }
+        "clear" => {
+            linker.func_wrap(spec.module, spec.import, host_clear)?;
+        }
+        other => {
+            return Err(wasmtime::Error::msg(format!(
+                "unsupported builtin host extern registration: {}::{}",
+                spec.module, other
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Result<()> {
     // Core wasm modules (like this backend) use WASIp1 imports.
     wasmtime_wasi::p1::add_to_linker_sync(linker, |state| &mut state.wasi_p1_ctx)?;
-    linker.func_wrap("host", "list_dir", host_list_dir)?;
-    linker.func_wrap("host", "read_file", host_read_file)?;
-    linker.func_wrap("host", "write_file", host_write_file)?;
-    linker.func_wrap("host", "mkdir_p", host_mkdir_p)?;
-    linker.func_wrap("host", "delete", host_delete)?;
-    linker.func_wrap("host", "move", host_move)?;
-    linker.func_wrap("host", "print", host_print)?;
-    linker.func_wrap("host", "sleep", host_sleep)?;
-    linker.func_wrap("host", "clear", host_clear)?;
+    for spec in crate::externals::BUILTIN_HOST_EXTERNS {
+        register_builtin_host_import(linker, spec)?;
+    }
     Ok(())
 }
 

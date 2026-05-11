@@ -4501,21 +4501,39 @@ Concequent and alternative must match types
     #[test]
     fn test_wat_user_extern_emits_import_and_direct_call() {
         let expr = crate::parser
-            ::build(r#"(do (extern env add_one add-one (Int -> Int)) (add-one 41))"#)
+            ::build(r#"(do (extern env add_one add-one! (Int -> Int)) (add-one! 41))"#)
             .expect("program should build");
         let wat = crate::wat
             ::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
 
         assert!(
-            wat.contains("(import \"env\" \"add_one\" (func $v_add_dash_one (param i32) (result i32)))"),
+            wat.contains("(import \"env\" \"add_one\" (func $v_add_dash_one_bang_ (param i32) (result i32)))"),
             "expected extern import in wat, got:\n{}",
             wat
         );
         assert!(
-            wat.contains("i32.const 41\n    call $v_add_dash_one"),
+            wat.contains("i32.const 41\n    call $v_add_dash_one_bang_"),
             "expected direct extern call in wat main, got:\n{}",
             wat
+        );
+    }
+
+    #[test]
+    fn test_extern_requires_bang_suffix() {
+        let expr = crate::parser
+            ::build(r#"(do (extern env add_one add-one (Int -> Int)) (add-one 41))"#)
+            .expect("program should build");
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("extern without ! should fail");
+        assert!(
+            err.contains("must end with '!'"),
+            "expected extern bang validation error, got: {}",
+            err
         );
     }
 
