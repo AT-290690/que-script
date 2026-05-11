@@ -49,6 +49,7 @@ struct StorageSummary {
 struct Ctx<'a> {
     fn_sigs: &'a HashMap<String, (Vec<Type>, Type)>,
     fn_ids: &'a HashMap<String, i32>,
+    extern_names: &'a HashSet<String>,
     lambda_ids: &'a HashMap<String, i32>,
     closure_defs: &'a HashMap<String, ClosureDef>,
     lambda_bindings: &'a HashMap<String, TypedExpression>,
@@ -596,6 +597,13 @@ fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     }
 }
 
+fn wasm_param_types_for_signature(params: &[Type]) -> Result<Vec<&'static str>, String> {
+    if params.len() == 1 && matches!(params[0], Type::Unit) {
+        return Ok(Vec::new());
+    }
+    params.iter().map(wasm_val_type).collect()
+}
+
 fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
     match typ {
         | Type::Int
@@ -629,6 +637,7 @@ fn function_parts(typ: &Type) -> (Vec<Type>, Type) {
 fn is_special_word(w: &str) -> bool {
     matches!(
         w,
+        "extern" |
         "do" |
             "let" |
             "mut" |
@@ -652,15 +661,6 @@ fn is_special_word(w: &str) -> bool {
             "alter!" |
             "pop!" |
             "while" |
-            "read!" |
-            "write!" |
-            "delete!" |
-            "move!" |
-            "list-dir!" |
-            "mkdir!" |
-            "print!" |
-            "sleep!" |
-            "clear!" |
             "+" |
             "+#" |
             "+." |
@@ -783,6 +783,12 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     }
                     if let Some(rhs) = items.get(2) {
                         collect_refs(rhs, bound, out);
+                    }
+                    return;
+                }
+                if op == "extern" {
+                    if let Some(Expression::Word(name)) = items.get(3) {
+                        bound.insert(name.clone());
                     }
                     return;
                 }
@@ -6027,6 +6033,7 @@ fn compile_do(
                             let scoped_ctx = Ctx {
                                 fn_sigs: ctx.fn_sigs,
                                 fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
                                 lambda_ids: ctx.lambda_ids,
                                 closure_defs: ctx.closure_defs,
                                 lambda_bindings: &scoped_lambda_bindings,
@@ -6107,6 +6114,7 @@ fn compile_do(
             let scoped_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: &scoped_lambda_bindings,
@@ -6172,6 +6180,7 @@ fn compile_do(
             let scoped_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: &scoped_lambda_bindings,
@@ -6221,6 +6230,7 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         let nested_ctx = Ctx {
             fn_sigs: ctx.fn_sigs,
             fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
             lambda_ids: ctx.lambda_ids,
             closure_defs: ctx.closure_defs,
             lambda_bindings: ctx.lambda_bindings,
@@ -6269,6 +6279,7 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
         let nested_ctx = Ctx {
             fn_sigs: ctx.fn_sigs,
             fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
             lambda_ids: ctx.lambda_ids,
             closure_defs: ctx.closure_defs,
             lambda_bindings: ctx.lambda_bindings,
@@ -6375,6 +6386,7 @@ fn compile_trusted_typed_vector_literal(
         let nested_ctx = Ctx {
             fn_sigs: ctx.fn_sigs,
             fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
             lambda_ids: ctx.lambda_ids,
             closure_defs: ctx.closure_defs,
             lambda_bindings: ctx.lambda_bindings,
@@ -6419,6 +6431,7 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -6467,6 +6480,7 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
@@ -6519,6 +6533,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
@@ -6555,6 +6570,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -6658,6 +6674,7 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -6832,6 +6849,7 @@ fn compile_fast_box_ctor(
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -6882,6 +6900,7 @@ fn compile_fast_cell_set(
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -6940,6 +6959,7 @@ fn compile_fast_truthy(
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -7029,6 +7049,7 @@ fn emit_release_managed_temp_if_not_local_alias(
     out.join("\n")
 }
 
+#[allow(dead_code)]
 #[cfg(feature = "io")]
 fn compile_host_unary_string_call(
     node: &TypedExpression,
@@ -7042,6 +7063,7 @@ fn compile_host_unary_string_call(
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -7067,6 +7089,7 @@ fn compile_host_unary_string_call(
     )
 }
 
+#[allow(dead_code)]
 #[cfg(feature = "io")]
 fn compile_host_unary_int_call(
     node: &TypedExpression,
@@ -7084,6 +7107,7 @@ fn compile_host_unary_int_call(
     Ok(format!("{arg}\ncall ${host_symbol}"))
 }
 
+#[allow(dead_code)]
 #[cfg(feature = "io")]
 fn compile_host_unit_call(
     node: &TypedExpression,
@@ -7097,6 +7121,7 @@ fn compile_host_unit_call(
     Ok(format!("call ${host_symbol}"))
 }
 
+#[allow(dead_code)]
 #[cfg(feature = "io")]
 fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     if node.children.len() != 3 {
@@ -7105,6 +7130,7 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -7144,6 +7170,7 @@ fn compile_host_write_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     )
 }
 
+#[allow(dead_code)]
 #[cfg(feature = "io")]
 fn compile_host_binary_string_call(
     node: &TypedExpression,
@@ -7157,6 +7184,7 @@ fn compile_host_binary_string_call(
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
@@ -7196,6 +7224,7 @@ fn compile_host_binary_string_call(
     )
 }
 
+#[allow(dead_code)]
 #[cfg(not(feature = "io"))]
 fn compile_host_unary_string_call(
     _node: &TypedExpression,
@@ -7206,6 +7235,7 @@ fn compile_host_unary_string_call(
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
 
+#[allow(dead_code)]
 #[cfg(not(feature = "io"))]
 fn compile_host_unary_int_call(
     _node: &TypedExpression,
@@ -7216,6 +7246,7 @@ fn compile_host_unary_int_call(
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
 
+#[allow(dead_code)]
 #[cfg(not(feature = "io"))]
 fn compile_host_unit_call(
     _node: &TypedExpression,
@@ -7226,11 +7257,13 @@ fn compile_host_unit_call(
     Err(format!("{op_name} requires enabling the 'io' feature"))
 }
 
+#[allow(dead_code)]
 #[cfg(not(feature = "io"))]
 fn compile_host_write_call(_node: &TypedExpression, _ctx: &Ctx<'_>) -> Result<String, String> {
     Err("write! requires enabling the 'io' feature".to_string())
 }
 
+#[allow(dead_code)]
 #[cfg(not(feature = "io"))]
 fn compile_host_binary_string_call(
     _node: &TypedExpression,
@@ -7239,6 +7272,54 @@ fn compile_host_binary_string_call(
     _host_symbol: &str
 ) -> Result<String, String> {
     Err(format!("{op_name} requires enabling the 'io' feature"))
+}
+
+fn compile_extern_direct_call(
+    op: &str,
+    args: &[TypedExpression],
+    ret_ty: &Type,
+    ctx: &Ctx<'_>
+) -> Result<String, String> {
+    let ret_managed = is_managed_local_type(ret_ty);
+    let result_slot = ctx.tmp_i32;
+    let first_arg_slot = ctx.tmp_i32 + usize::from(ret_managed);
+    let eval_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        extern_names: ctx.extern_names,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
+        tmp_i32: first_arg_slot + args.len(),
+    };
+
+    let mut out = Vec::new();
+    let mut release_slots = Vec::new();
+    for (idx, arg) in args.iter().enumerate() {
+        let av = compile_expr(arg, &eval_ctx)?;
+        if should_release_set_rhs(arg) {
+            let slot = first_arg_slot + idx;
+            out.push(format!("{av}\nlocal.tee {}", slot));
+            release_slots.push(slot);
+        } else {
+            out.push(av);
+        }
+    }
+    out.push(format!("call ${}", ident(op)));
+    if ret_managed {
+        out.push(format!("local.set {}", result_slot));
+    }
+    for slot in release_slots {
+        out.push(format!("local.get {}\ncall $rc_release\ndrop", slot));
+    }
+    if ret_managed {
+        out.push(format!("local.get {}", result_slot));
+    }
+    Ok(out.join("\n"))
 }
 
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -7285,6 +7366,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 let nested_ctx = Ctx {
                     fn_sigs: ctx.fn_sigs,
                     fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
                     lambda_ids: ctx.lambda_ids,
                     closure_defs: ctx.closure_defs,
                     lambda_bindings: ctx.lambda_bindings,
@@ -7391,6 +7473,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
@@ -7444,6 +7527,14 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
     }
     if args.len() > params.len() && !unit_arity_elided {
         let (initial_args, rest_args) = args.split_at(params.len());
+        if ctx.extern_names.contains(op) {
+            let mut out = vec![compile_extern_direct_call(op, initial_args, &ret_ty, ctx)?];
+            for arg in rest_args {
+                out.push(compile_expr(arg, ctx)?);
+                out.push("call $apply1_i32".to_string());
+            }
+            return Ok(out.join("\n"));
+        }
         let mut out = Vec::new();
         for arg in initial_args {
             out.push(compile_expr(arg, ctx)?);
@@ -7464,6 +7555,9 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 args.len()
             )
         );
+    }
+    if ctx.extern_names.contains(op) {
+        return compile_extern_direct_call(op, args, &ret_ty, ctx);
     }
     let mut out = Vec::new();
     if !unit_arity_elided {
@@ -7510,6 +7604,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
@@ -7819,6 +7914,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(emit_direct_builder_scalar_store_i32(&xs, &idx, &value, ctx))
                         }
+                        "extern" => Ok("i32.const 0".to_string()),
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
                         }
@@ -7854,25 +7950,6 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "alter!" => compile_alter(node, ctx),
                         "pop!" => compile_pop(node, ctx),
                         "while" => compile_loop_while(node, ctx),
-                        "list-dir!" => {
-                            compile_host_unary_string_call(node, ctx, "list-dir!", "host_list_dir")
-                        }
-                        "read!" => {
-                            compile_host_unary_string_call(node, ctx, "read!", "host_read_file")
-                        }
-                        "mkdir!" => {
-                            compile_host_unary_string_call(node, ctx, "mkdir!", "host_mkdir_p")
-                        }
-                        "delete!" => {
-                            compile_host_unary_string_call(node, ctx, "delete!", "host_delete")
-                        }
-                        "print!" => {
-                            compile_host_unary_string_call(node, ctx, "print!", "host_print")
-                        }
-                        "sleep!" => compile_host_unary_int_call(node, ctx, "sleep!", "host_sleep"),
-                        "clear!" => compile_host_unit_call(node, ctx, "clear!", "host_clear"),
-                        "write!" => compile_host_write_call(node, ctx),
-                        "move!" => compile_host_binary_string_call(node, ctx, "move!", "host_move"),
                         "not" => {
                             let a = compile_expr(
                                 node.children.get(1).ok_or_else(|| "not missing arg".to_string())?,
@@ -7949,6 +8026,7 @@ fn collect_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
     }
 }
 
+#[allow(dead_code)]
 fn typed_expr_uses_host_io(node: &TypedExpression) -> bool {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() => {
@@ -8263,9 +8341,11 @@ fn compile_lambda_func(
     for (n, t) in &local_defs {
         local_types.insert(n.clone(), t.clone());
     }
+    let empty_extern_names = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
+        extern_names: &empty_extern_names,
         lambda_ids,
         closure_defs,
         lambda_bindings: &scoped_lambda_bindings,
@@ -8407,9 +8487,11 @@ fn compile_closure_func(
     for (n, t) in &local_defs {
         local_types.insert(n.clone(), t.clone());
     }
+    let empty_extern_names = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
+        extern_names: &empty_extern_names,
         lambda_ids,
         closure_defs,
         lambda_bindings: &scoped_lambda_bindings,
@@ -8530,9 +8612,11 @@ fn compile_value_func(
     for (n, t) in &local_defs {
         local_types.insert(n.clone(), t.clone());
     }
+    let empty_extern_names = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
+        extern_names: &empty_extern_names,
         lambda_ids,
         closure_defs,
         lambda_bindings: &scoped_lambda_bindings,
@@ -8625,9 +8709,11 @@ fn compile_partial_helper_func(
         local_types.insert(format!("__p{}", i), t.clone());
     }
     let empty_top_level_materialized = HashSet::new();
+    let empty_extern_names = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
+        extern_names: &empty_extern_names,
         lambda_ids,
         closure_defs,
         lambda_bindings,
@@ -8696,7 +8782,7 @@ pub fn compile_program_to_wat_typed_with_opts(
     let typed_ast = optimized_typed_ast.as_ref().unwrap_or(typed_ast);
     validate_no_rc_cycles(typed_ast)?;
 
-    let (top_defs, main_expr, main_node) = match &typed_ast.expr {
+    let (top_defs, extern_defs, main_expr, main_node) = match &typed_ast.expr {
         Expression::Apply(items) if
             matches!(items.first(), Some(Expression::Word(w)) if w == "do")
         => {
@@ -8709,10 +8795,15 @@ pub fn compile_program_to_wat_typed_with_opts(
                 }
             };
             let mut defs = HashMap::new();
+            let mut externs = HashMap::new();
             let mut main_items_expr = vec![Expression::Word("do".to_string())];
             let mut main_items_nodes: Vec<TypedExpression> = Vec::new();
             for i in 1..items.len() {
                 if let Expression::Apply(let_items) = &items[i] {
+                    if let Ok(Some(extern_decl)) = crate::externals::parse_extern_decl(&items[i]) {
+                        externs.insert(extern_decl.local_name.clone(), extern_decl);
+                        continue;
+                    }
                     if let [Expression::Word(kw), Expression::Word(name), rhs] = &let_items[..] {
                         if kw == "let" || kw == "letrec" {
                             if
@@ -8759,11 +8850,10 @@ pub fn compile_program_to_wat_typed_with_opts(
                 effect: main_effect,
                 children: main_items_nodes,
             };
-            (defs, main_expr, main_node)
+            (defs, externs, main_expr, main_node)
         }
-        _ => (HashMap::new(), typed_ast.expr.clone(), typed_ast.clone()),
+        _ => (HashMap::new(), HashMap::new(), typed_ast.expr.clone(), typed_ast.clone()),
     };
-    let _needs_host_io = typed_expr_uses_host_io(typed_ast);
 
     let mut needed = HashSet::new();
     let mut bound = HashSet::new();
@@ -8808,7 +8898,8 @@ pub fn compile_program_to_wat_typed_with_opts(
 
     let mut fn_sigs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
     let mut top_level_lambda_key_to_name: HashMap<String, String> = HashMap::new();
-    let top_def_names: HashSet<String> = top_defs.keys().cloned().collect();
+    let mut top_def_names: HashSet<String> = top_defs.keys().cloned().collect();
+    top_def_names.extend(extern_defs.keys().cloned());
     let mut dynamic_partial_specs: HashSet<(usize, usize)> = HashSet::new();
     collect_dynamic_partial_specs(typed_ast, &top_def_names, &mut dynamic_partial_specs);
     let mut call_specs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
@@ -8847,6 +8938,17 @@ pub fn compile_program_to_wat_typed_with_opts(
             top_level_lambda_key_to_name.insert(def.expr.to_lisp(), name.clone());
             top_level_lambda_key_to_name.insert(def.node.expr.to_lisp(), name.clone());
         }
+    }
+    for extern_decl in extern_defs.values() {
+        let (mut ps, ret) = function_parts(&extern_decl.typ);
+        if ps.len() == 1 && matches!(ps[0], Type::Unit) {
+            ps.clear();
+        }
+        for p in &ps {
+            wasm_val_type(p)?;
+        }
+        wasm_val_type(&ret)?;
+        fn_sigs.insert(extern_decl.local_name.clone(), (ps, ret));
     }
     let mut lambda_nodes = Vec::new();
     collect_lambda_nodes(typed_ast, &mut lambda_nodes);
@@ -9026,6 +9128,7 @@ pub fn compile_program_to_wat_typed_with_opts(
             lambda_ids.insert(key.clone(), *id);
         }
     }
+    let extern_names: HashSet<String> = extern_defs.keys().cloned().collect();
     let main_ret_ty = main_node.typ
         .as_ref()
         .ok_or_else(|| "Missing main expression type".to_string())?;
@@ -9158,6 +9261,7 @@ pub fn compile_program_to_wat_typed_with_opts(
     let main_ctx = Ctx {
         fn_sigs: &fn_sigs,
         fn_ids: &fn_ids,
+        extern_names: &extern_names,
         lambda_ids: &lambda_ids,
         closure_defs: &closure_defs,
         lambda_bindings: &scoped_lambda_bindings,
@@ -9192,28 +9296,21 @@ pub fn compile_program_to_wat_typed_with_opts(
     let mut wat = String::new();
     wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
     wat.push_str("(module\n");
-    if _needs_host_io {
-        wat.push_str(
-            "  (import \"host\" \"list_dir\" (func $host_list_dir (param i32) (result i32)))\n"
-        );
-        wat.push_str(
-            "  (import \"host\" \"read_file\" (func $host_read_file (param i32) (result i32)))\n"
-        );
-        wat.push_str(
-            "  (import \"host\" \"write_file\" (func $host_write_file (param i32 i32) (result i32)))\n"
-        );
-        wat.push_str(
-            "  (import \"host\" \"mkdir_p\" (func $host_mkdir_p (param i32) (result i32)))\n"
-        );
-        wat.push_str(
-            "  (import \"host\" \"delete\" (func $host_delete (param i32) (result i32)))\n"
-        );
-        wat.push_str(
-            "  (import \"host\" \"move\" (func $host_move (param i32 i32) (result i32)))\n"
-        );
-        wat.push_str("  (import \"host\" \"print\" (func $host_print (param i32) (result i32)))\n");
-        wat.push_str("  (import \"host\" \"sleep\" (func $host_sleep (param i32) (result i32)))\n");
-        wat.push_str("  (import \"host\" \"clear\" (func $host_clear (result i32)))\n");
+    for extern_decl in extern_defs.values() {
+        let (params, ret) = fn_sigs
+            .get(&extern_decl.local_name)
+            .ok_or_else(|| format!("Missing extern signature for '{}'", extern_decl.local_name))?;
+        let wasm_params = wasm_param_types_for_signature(params)?;
+        wat.push_str(&format!(
+            "  (import \"{}\" \"{}\" (func ${}",
+            extern_decl.module,
+            extern_decl.import,
+            ident(&extern_decl.local_name)
+        ));
+        for param in wasm_params {
+            wat.push_str(&format!(" (param {})", param));
+        }
+        wat.push_str(&format!(" (result {})))\n", wasm_val_type(ret)?));
     }
     for name in &cached_value_defs {
         wat.push_str(&format!("  (global ${} (mut i32) (i32.const 0))\n", cache_init_global(name)));
@@ -9239,8 +9336,9 @@ pub fn compile_program_to_wat_with_opts(
     expr: &Expression,
     enable_optimizer: bool
 ) -> Result<String, String> {
+    let wrapped = crate::externals::prepend_builtin_host_externs(expr)?;
     let (_typ, typed_ast) = crate::infer::infer_with_builtins_typed(
-        expr,
+        &wrapped,
         crate::types::create_builtin_environment(crate::types::TypeEnv::new())
     )?;
     compile_program_to_wat_typed_with_opts(&typed_ast, enable_optimizer)

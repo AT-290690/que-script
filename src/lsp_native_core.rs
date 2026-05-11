@@ -152,7 +152,9 @@ pub fn build_base_environment(
 
 pub fn load_std_definitions() -> Vec<Expression> {
     let ast = crate::baked::load_ast();
-    crate::baked::ast_to_definitions(ast, "active library").unwrap_or_default()
+    let mut defs = crate::baked::ast_to_definitions(ast, "active library").unwrap_or_default();
+    let _ = crate::externals::extend_with_builtin_host_externs(&mut defs);
+    defs
 }
 
 pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<String> {

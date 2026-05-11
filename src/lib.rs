@@ -1,4 +1,5 @@
 pub mod baked;
+pub mod externals;
 pub mod infer;
 #[cfg(feature = "io")]
 pub mod io;
