@@ -4538,6 +4538,34 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_pure_program_emits_no_unused_builtin_host_imports() {
+        let expr = crate::parser::build("(+ 1 2)").expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(
+            !wat.contains("(import \"host\""),
+            "pure program should not emit unused builtin host imports, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_used_builtin_host_extern_still_emits_import() {
+        let expr = crate::parser::build(r#"(print! "hi")"#).expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(
+            wat.contains("(import \"host\" \"print\""),
+            "used builtin host extern should still emit its import, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_wat_vector_literal_releases_fresh_nested_managed_value() {
         let expr = crate::parser::build("(vector [])").expect("program should build");
         let wat = crate::wat
