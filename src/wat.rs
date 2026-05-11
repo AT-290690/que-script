@@ -8645,13 +8645,18 @@ pub fn compile_program_to_wat_typed_with_opts(
     for name in top_defs.keys() {
         needed.insert(name.clone());
     }
+    let used_extern_defs: HashMap<String, crate::externals::ExternDecl> = extern_defs
+        .iter()
+        .filter(|(name, _)| needed.contains(*name))
+        .map(|(name, decl)| (name.clone(), decl.clone()))
+        .collect();
     let definitely_materialized_top_level_scalar_names =
         collect_definitely_materialized_top_level_scalar_names(&top_defs);
 
     let mut fn_sigs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
     let mut top_level_lambda_key_to_name: HashMap<String, String> = HashMap::new();
     let mut top_def_names: HashSet<String> = top_defs.keys().cloned().collect();
-    top_def_names.extend(extern_defs.keys().cloned());
+    top_def_names.extend(used_extern_defs.keys().cloned());
     let mut dynamic_partial_specs: HashSet<(usize, usize)> = HashSet::new();
     collect_dynamic_partial_specs(typed_ast, &top_def_names, &mut dynamic_partial_specs);
     let mut call_specs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
@@ -8691,7 +8696,7 @@ pub fn compile_program_to_wat_typed_with_opts(
             top_level_lambda_key_to_name.insert(def.node.expr.to_lisp(), name.clone());
         }
     }
-    for extern_decl in extern_defs.values() {
+    for extern_decl in used_extern_defs.values() {
         let (mut ps, ret) = function_parts(&extern_decl.typ);
         if ps.len() == 1 && matches!(ps[0], Type::Unit) {
             ps.clear();
@@ -8880,7 +8885,7 @@ pub fn compile_program_to_wat_typed_with_opts(
             lambda_ids.insert(key.clone(), *id);
         }
     }
-    let extern_names: HashSet<String> = extern_defs.keys().cloned().collect();
+    let extern_names: HashSet<String> = used_extern_defs.keys().cloned().collect();
     let main_ret_ty = main_node.typ
         .as_ref()
         .ok_or_else(|| "Missing main expression type".to_string())?;
@@ -9048,7 +9053,7 @@ pub fn compile_program_to_wat_typed_with_opts(
     let mut wat = String::new();
     wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
     wat.push_str("(module\n");
-    for extern_decl in extern_defs.values() {
+    for extern_decl in used_extern_defs.values() {
         let (params, ret) = fn_sigs
             .get(&extern_decl.local_name)
             .ok_or_else(|| format!("Missing extern signature for '{}'", extern_decl.local_name))?;
