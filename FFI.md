@@ -139,7 +139,7 @@ BuiltinHostExternSpec {
     module: "host",
     import: "time_now_ms",
     local_name: "time-now-ms!",
-    type_src: "(() -> Int)",
+    typ: || fn1(Type::Unit, Type::Int),
 },
 ```
 
@@ -163,6 +163,8 @@ That is enough for:
 - extern declaration injection
 - effect classification
 - native runtime linking
+
+Builtin host specs use real Rust-side `Type` values now, not string type snippets.
 
 ## Using a user-declared extern
 

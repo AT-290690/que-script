@@ -6,7 +6,7 @@ pub struct BuiltinHostExternSpec {
     pub module: &'static str,
     pub import: &'static str,
     pub local_name: &'static str,
-    pub type_src: &'static str,
+    pub typ: fn() -> Type,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,15 +84,55 @@ fn parse_type_expr(expr: &Expression) -> Result<Type, String> {
     }
 }
 
-pub fn parse_type_source(source: &str) -> Result<Type, String> {
-    let ast = crate::parser::build_library(source)?;
-    let Expression::Apply(items) = ast else {
-        return Err(format!("invalid extern type source: {}", source));
-    };
-    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") || items.len() != 2 {
-        return Err(format!("invalid extern type source: {}", source));
+fn type_to_expr(typ: &Type) -> Expression {
+    match typ {
+        Type::Int => Expression::Word("Int".to_string()),
+        Type::Dec => Expression::Word("Dec".to_string()),
+        Type::Bool => Expression::Word("Bool".to_string()),
+        Type::Char => Expression::Word("Char".to_string()),
+        Type::Unit => Expression::Apply(Vec::new()),
+        Type::List(inner) => Expression::Apply(vec![
+            Expression::Word("vector".to_string()),
+            type_to_expr(inner),
+        ]),
+        Type::Tuple(items) => {
+            let mut out = vec![Expression::Word("tuple".to_string())];
+            out.extend(items.iter().map(type_to_expr));
+            Expression::Apply(out)
+        }
+        Type::Function(_, _) => {
+            let mut parts = Vec::new();
+            let mut current = typ;
+            while let Type::Function(a, b) = current {
+                parts.push(type_to_expr(a));
+                current = b;
+            }
+            parts.push(Expression::Word("->".to_string()));
+            parts.push(type_to_expr(current));
+            Expression::Apply(parts)
+        }
+        Type::Var(v) => Expression::Word(format!("T{}", v.id)),
     }
-    parse_type_expr(&items[1])
+}
+
+fn ty_char_list() -> Type {
+    Type::List(Box::new(Type::Char))
+}
+
+fn ty_unit() -> Type {
+    Type::Unit
+}
+
+fn ty_int() -> Type {
+    Type::Int
+}
+
+fn fn1(a: Type, r: Type) -> Type {
+    Type::Function(Box::new(a), Box::new(r))
+}
+
+fn fn2(a: Type, b: Type, r: Type) -> Type {
+    Type::Function(Box::new(a), Box::new(fn1(b, r)))
 }
 
 pub fn parse_extern_decl(expr: &Expression) -> Result<Option<ExternDecl>, String> {
@@ -122,55 +162,55 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
         module: "host",
         import: "list_dir",
         local_name: "list-dir!",
-        type_src: "([Char] -> [Char])",
+        typ: || fn1(ty_char_list(), ty_char_list()),
     },
     BuiltinHostExternSpec {
         module: "host",
         import: "read_file",
         local_name: "read!",
-        type_src: "([Char] -> [Char])",
+        typ: || fn1(ty_char_list(), ty_char_list()),
     },
     BuiltinHostExternSpec {
         module: "host",
         import: "write_file",
         local_name: "write!",
-        type_src: "([Char] [Char] -> ())",
+        typ: || fn2(ty_char_list(), ty_char_list(), ty_unit()),
     },
     BuiltinHostExternSpec {
         module: "host",
         import: "mkdir_p",
         local_name: "mkdir!",
-        type_src: "([Char] -> ())",
+        typ: || fn1(ty_char_list(), ty_unit()),
     },
     BuiltinHostExternSpec {
         module: "host",
         import: "delete",
         local_name: "delete!",
-        type_src: "([Char] -> ())",
+        typ: || fn1(ty_char_list(), ty_unit()),
     },
     BuiltinHostExternSpec {
         module: "host",
         import: "move",
         local_name: "move!",
-        type_src: "([Char] [Char] -> ())",
+        typ: || fn2(ty_char_list(), ty_char_list(), ty_unit()),
     },
     BuiltinHostExternSpec {
         module: "host",
         import: "print",
         local_name: "print!",
-        type_src: "([Char] -> ())",
+        typ: || fn1(ty_char_list(), ty_unit()),
     },
     BuiltinHostExternSpec {
         module: "host",
         import: "sleep",
         local_name: "sleep!",
-        type_src: "(Int -> ())",
+        typ: || fn1(ty_int(), ty_unit()),
     },
     BuiltinHostExternSpec {
         module: "host",
         import: "clear",
         local_name: "clear!",
-        type_src: "(() -> ())",
+        typ: || fn1(ty_unit(), ty_unit()),
     },
 ];
 
@@ -185,19 +225,12 @@ pub fn is_builtin_host_extern_symbol(name: &str) -> bool {
 pub fn builtin_host_extern_definitions() -> Result<Vec<Expression>, String> {
     let mut out = Vec::new();
     for spec in BUILTIN_HOST_EXTERNS {
-        let type_expr_ast = crate::parser::build_library(spec.type_src)?;
-        let Expression::Apply(type_items) = type_expr_ast else {
-            return Err(format!("invalid builtin host extern type source: {}", spec.type_src));
-        };
-        if !matches!(type_items.first(), Some(Expression::Word(w)) if w == "do") || type_items.len() != 2 {
-            return Err(format!("invalid builtin host extern type source: {}", spec.type_src));
-        }
         out.push(Expression::Apply(vec![
             Expression::Word("extern".to_string()),
             Expression::Word(spec.module.to_string()),
             Expression::Word(spec.import.to_string()),
             Expression::Word(spec.local_name.to_string()),
-            type_items[1].clone(),
+            type_to_expr(&(spec.typ)()),
         ]));
     }
     Ok(out)

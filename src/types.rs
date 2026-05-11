@@ -528,8 +528,7 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     #[cfg(feature = "io")]
     {
         for spec in crate::externals::BUILTIN_HOST_EXTERNS {
-            let typ = crate::externals::parse_type_source(spec.type_src)
-                .expect("builtin host extern type should parse");
+            let typ = (spec.typ)();
             let _ = env.insert(spec.local_name.to_string(), TypeScheme::monotype(typ));
         }
     }
