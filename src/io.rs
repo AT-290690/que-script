@@ -934,7 +934,8 @@ fn parse_lambda_sources_json(path: &str) -> Result<Value, String> {
 
 fn validate_lambda_program_source(source: &str) -> Result<(), String> {
     let std_ast = crate::baked::load_ast();
-    let lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
+    let mut lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
+    crate::externals::extend_with_builtin_host_externs(&mut lib_defs)?;
     let merged = crate::parser
         ::merge_std_and_program(source, lib_defs)
         .map_err(|e| format!("lambda source failed to parse/desugar: {}", e))?;
@@ -1446,7 +1447,9 @@ fn format_top_level_type_lines(typed: &TypedExpression, user_form_count: usize) 
 }
 
 fn active_library_definitions() -> Result<Vec<Expression>, String> {
-    crate::baked::ast_to_definitions(crate::baked::load_ast(), "active")
+    let mut defs = crate::baked::ast_to_definitions(crate::baked::load_ast(), "active")?;
+    crate::externals::extend_with_builtin_host_externs(&mut defs)?;
+    Ok(defs)
 }
 
 fn wildcard_match(pattern: &str, text: &str) -> bool {
@@ -2812,6 +2815,7 @@ pub fn run_native_shell() -> Result<(), String> {
 
     let std_ast = crate::baked::load_ast();
     let mut lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
+    crate::externals::extend_with_builtin_host_externs(&mut lib_defs)?;
     lib_defs.extend(load_project_library_definitions(&script_cwd)?);
     let wrapped_ast = match crate::parser::merge_std_and_program(&program, lib_defs) {
         Ok(expr) => expr,

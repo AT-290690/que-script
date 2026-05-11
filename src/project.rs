@@ -175,7 +175,7 @@ pub fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Express
                 item.to_lisp()
             ));
         };
-        if kw != "let" && kw != "letrec" && kw != "mut" {
+        if kw != "let" && kw != "letrec" && kw != "mut" && kw != "extern" {
             return Err(format!(
                 "bundle '{}' must contain only top-level definitions; found '{}' at form {}",
                 label,

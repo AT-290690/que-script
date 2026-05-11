@@ -812,8 +812,11 @@ Concequent and alternative must match types
         let std_ast = crate::baked::load_ast();
         let expr = match std_ast {
             crate::parser::Expression::Apply(items) => {
+                let mut defs = items[1..].to_vec();
+                crate::externals::extend_with_builtin_host_externs(&mut defs)
+                    .expect("builtin host externs should load");
                 crate::parser
-                    ::merge_std_and_program(src, items[1..].to_vec())
+                    ::merge_std_and_program(src, defs)
                     .expect("program + std should merge")
             }
             _ => panic!("std ast should be (do ...)"),
@@ -1426,9 +1429,11 @@ Concequent and alternative must match types
     #[test]
     fn test_baked_embedded_library_preserves_macros_for_user_program_merge() {
         let std_ast = crate::baked::load_ast();
-        let lib_defs = crate::baked
+        let mut lib_defs = crate::baked
             ::ast_to_definitions(std_ast, "active library")
             .expect("embedded library should flatten to definitions");
+        crate::externals::extend_with_builtin_host_externs(&mut lib_defs)
+            .expect("builtin host externs should load");
         let expr = crate::parser
             ::merge_std_and_program("(do (let out []) (when true (set! out 0 0)) out)", lib_defs)
             .expect("user program should be able to use baked library macros");
@@ -1665,9 +1670,11 @@ Concequent and alternative must match types
     #[test]
     fn test_baked_cond_macro_preserves_legacy_parser_expansion_shapes() {
         let std_ast = crate::baked::load_ast();
-        let lib_defs = crate::baked
+        let mut lib_defs = crate::baked
             ::ast_to_definitions(std_ast, "active library")
             .expect("embedded library should flatten to definitions");
+        crate::externals::extend_with_builtin_host_externs(&mut lib_defs)
+            .expect("builtin host externs should load");
         let expr = crate::parser
             ::merge_std_and_program("[(cond) (cond false 1 true 2 3)]", lib_defs)
             .expect("cond macro should expand through baked library merge");
@@ -4473,7 +4480,12 @@ Concequent and alternative must match types
             ::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
 
-        let host_pos = wat.find("call $host_print").expect("expected host print call in wat");
+        assert!(
+            wat.contains("(import \"host\" \"print\" (func $v_print_bang"),
+            "expected print! to compile through extern import, got wat:\n{}",
+            wat
+        );
+        let host_pos = wat.find("call $v_print_bang").expect("expected print! call in wat");
         let release_pos = wat[host_pos..]
             .find("call $rc_release")
             .map(|p| host_pos + p)
@@ -4482,6 +4494,27 @@ Concequent and alternative must match types
         assert!(
             release_pos > host_pos,
             "expected temporary [Char] arg to be released after print!, got wat:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_wat_user_extern_emits_import_and_direct_call() {
+        let expr = crate::parser
+            ::build(r#"(do (extern env add_one add-one (Int -> Int)) (add-one 41))"#)
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(
+            wat.contains("(import \"env\" \"add_one\" (func $v_add_dash_one (param i32) (result i32)))"),
+            "expected extern import in wat, got:\n{}",
+            wat
+        );
+        assert!(
+            wat.contains("i32.const 41\n    call $v_add_dash_one"),
+            "expected direct extern call in wat main, got:\n{}",
             wat
         );
     }

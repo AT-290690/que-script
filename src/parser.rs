@@ -125,6 +125,14 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                 }
                 if op == "do" {
                     for it in &exprs[1..] {
+                        if let Expression::Apply(extern_items) = it {
+                            if matches!(extern_items.first(), Some(Expression::Word(w)) if w == "extern") {
+                                if let Some(Expression::Word(name)) = extern_items.get(3) {
+                                    bound.insert(name.clone());
+                                }
+                                continue;
+                            }
+                        }
                         if let Expression::Apply(let_items) = it {
                             if let [Expression::Word(kw), Expression::Word(name), rhs] =
                                 &let_items[..]
@@ -147,6 +155,12 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                         return;
                     }
                 }
+                if op == "extern" {
+                    if let Some(Expression::Word(name)) = exprs.get(3) {
+                        bound.insert(name.clone());
+                    }
+                    return;
+                }
             }
             for e in exprs {
                 collect_free_idents(e, bound, acc);
@@ -163,11 +177,16 @@ fn tree_shake(
 ) -> Vec<Expression> {
     let mut index = HashMap::new();
 
-    // Index all std let definitions
+    // Index all std top-level definitions that bind a name.
     for expr in &std_defs {
         if let Expression::Apply(list) = expr {
-            if let [Expression::Word(kw), Expression::Word(name), _rest @ ..] = &list[..] {
-                if kw == "let" {
+            if let Some(Expression::Word(kw)) = list.first() {
+                let name = if kw == "extern" {
+                    list.get(3)
+                } else {
+                    list.get(1)
+                };
+                if let Some(Expression::Word(name)) = name {
                     index.insert(name.clone(), expr.clone());
                 }
             }
@@ -2598,10 +2617,17 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                 let mut definitions: HashSet<String> = HashSet::new();
                 for expr in &desugared {
                     if let Expression::Apply(list) = expr {
-                        if let [Expression::Word(kw), Expression::Word(name), _rest @ ..] =
-                            &list[..]
-                        {
-                            if kw == "let" || kw == "letrec" || kw == "mut" {
+                        if let Some(Expression::Word(kw)) = list.first() {
+                            let name = if kw == "extern" {
+                                list.get(3)
+                            } else {
+                                list.get(1)
+                            };
+                            if
+                                (kw == "let" || kw == "letrec" || kw == "mut" || kw == "extern") &&
+                                matches!(name, Some(Expression::Word(_)))
+                            {
+                                let Expression::Word(name) = name.unwrap() else { unreachable!() };
                                 if is_reserved_word(name) {
                                     return Err(format!("Variable '{}' is forbidden", name));
                                 }

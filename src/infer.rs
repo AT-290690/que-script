@@ -1220,6 +1220,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "let" => infer_let(&exprs, ctx),
                     "mut" => infer_mut(&exprs, ctx),
                     "letrec" => infer_rec(&exprs, ctx),
+                    "extern" => infer_extern(&exprs, ctx),
                     "alter!" => infer_alter(&exprs, ctx),
                     "do" => infer_do(expr, &exprs, ctx),
                     _ => infer_function_call(exprs, ctx),
@@ -1287,6 +1288,28 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
 
         _ => Err(format!("Invalid type hint: {}", expr.to_lisp())),
     }
+}
+
+fn infer_extern(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let [Expression::Word(_kw), Expression::Word(_module), Expression::Word(_import), Expression::Word(local_name), _type_expr] =
+        exprs
+    else {
+        return Err(
+            "extern expects: (extern module import local-name (arg1 ... -> ret))".to_string()
+        );
+    };
+    let typ = crate::externals::parse_extern_decl(&Expression::Apply(exprs.to_vec()))?
+        .ok_or_else(|| "invalid extern declaration".to_string())?
+        .typ;
+    let scheme = TypeScheme::monotype(typ);
+    if let Some(current) = ctx.env.scopes.last().and_then(|scope| scope.get(local_name)) {
+        if current.typ == scheme.typ && current.vars == scheme.vars {
+            return Ok(Type::Unit);
+        }
+        return Err(format!("Variable '{}' already defined in this scope", local_name));
+    }
+    ctx.env.insert(local_name.clone(), scheme)?;
+    Ok(Type::Unit)
 }
 // arity depth (number of list nestings)
 fn type_arity(t: &Type) -> usize {
