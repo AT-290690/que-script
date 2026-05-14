@@ -1085,6 +1085,7 @@ pub struct SolveError {
 pub struct InferenceContext {
     pub env: TypeEnv,
     pub mut_scopes: Vec<HashSet<String>>,
+    pub declared_type_scopes: Vec<HashMap<String, (Type, bool)>>,
     pub lambda_scope_bases: Vec<usize>,
     pub constraints: Vec<(Type, Type, TypeError)>,
     pub fresh_var_counter: u64,
@@ -1175,12 +1176,16 @@ impl InferenceContext {
     pub fn enter_lexical_scope(&mut self) {
         self.env.enter_scope();
         self.mut_scopes.push(HashSet::new());
+        self.declared_type_scopes.push(HashMap::new());
     }
 
     pub fn exit_lexical_scope(&mut self) {
         self.env.exit_scope();
         if self.mut_scopes.len() > 1 {
             self.mut_scopes.pop();
+        }
+        if self.declared_type_scopes.len() > 1 {
+            self.declared_type_scopes.pop();
         }
     }
 
@@ -1227,6 +1232,38 @@ impl InferenceContext {
             .map(|scope| scope.contains(name))
             .unwrap_or(false)
     }
+
+    pub fn declare_type(&mut self, name: String, typ: Type) -> Result<(), String> {
+        if self.env.scopes.last().and_then(|scope| scope.get(&name)).is_some() {
+            return Err(format!(
+                "letype for '{}' must appear before its binding in the same scope",
+                name
+            ));
+        }
+        let Some(scope) = self.declared_type_scopes.last_mut() else {
+            return Err("internal error: missing declared type scope".to_string());
+        };
+        if scope.contains_key(&name) {
+            return Err(format!("letype for '{}' already declared in this scope", name));
+        }
+        scope.insert(name, (typ, false));
+        Ok(())
+    }
+
+    pub fn declared_type_in_current_scope(&self, name: &str) -> Option<Type> {
+        self.declared_type_scopes
+            .last()
+            .and_then(|scope| scope.get(name))
+            .map(|(typ, _used)| typ.clone())
+    }
+
+    pub fn mark_declared_type_used(&mut self, name: &str) {
+        if let Some(scope) = self.declared_type_scopes.last_mut() {
+            if let Some((_, used)) = scope.get_mut(name) {
+                *used = true;
+            }
+        }
+    }
 }
 
 fn mut_capture_error(name: &str) -> String {
@@ -1264,6 +1301,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "mut" => infer_mut(&exprs, ctx),
                     "letrec" => infer_rec(&exprs, ctx),
                     "extern" => infer_extern(&exprs, ctx),
+                    "letype" => infer_letype(&exprs, ctx),
                     "alter!" => infer_alter(&exprs, ctx),
                     "do" => infer_do(expr, &exprs, ctx),
                     _ => infer_function_call(exprs, ctx),
@@ -1347,14 +1385,35 @@ fn infer_extern(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     if !local_name.ends_with('!') {
         return Err(format!("Extern '{}' must end with '!'", local_name));
     }
-    let scheme = TypeScheme::monotype(typ);
+    let scheme = TypeScheme::monotype(typ.clone());
     if let Some(current) = ctx.env.scopes.last().and_then(|scope| scope.get(local_name)) {
         if current.typ == scheme.typ && current.vars == scheme.vars {
+            if ctx.collect_expr_types {
+                ctx.expr_types.insert(expression_id(&exprs[3]), typ.clone());
+            }
             return Ok(Type::Unit);
         }
         return Err(format!("Variable '{}' already defined in this scope", local_name));
     }
     ctx.env.insert(local_name.clone(), scheme)?;
+    if ctx.collect_expr_types {
+        ctx.expr_types.insert(expression_id(&exprs[3]), typ);
+    }
+    Ok(Type::Unit)
+}
+
+fn infer_letype(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let [Expression::Word(_kw), Expression::Word(local_name), type_expr] = exprs else {
+        return Err("letype expects: (letype name Type)".to_string());
+    };
+    let typ = crate::externals::parse_decl_type_expr(type_expr)?;
+    ctx.declare_type(local_name.clone(), typ)?;
+    if ctx.collect_expr_types {
+        ctx.expr_types.insert(expression_id(&exprs[1]), exprs
+            .get(2)
+            .and_then(|_| ctx.declared_type_in_current_scope(local_name))
+            .unwrap_or(Type::Unit));
+    }
     Ok(Type::Unit)
 }
 // arity depth (number of list nestings)
@@ -1859,14 +1918,24 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
     if let Expression::Word(var_name) = var_expr {
         let name = var_name.to_string();
+        let declared_type = ctx.declared_type_in_current_scope(&name);
 
         // assign a fresh monotype placeholder
         let tv = ctx.fresh_var();
 
-        ctx.env
-            .insert(name.clone(), TypeScheme::monotype(tv.clone()))?;
+        ctx.env.insert(
+            name.clone(),
+            TypeScheme::monotype(declared_type.clone().unwrap_or(tv.clone())),
+        )?;
 
         let value_type = infer_expr(value_expr, ctx)?;
+        if let Some(declared_type) = declared_type.clone() {
+            ctx.add_constraint(
+                value_type.clone(),
+                declared_type,
+                ctx.type_error(TypeErrorVariant::Source, vec![var_expr.clone(), value_expr.clone()]),
+            );
+        }
 
         // solve constraints
         let constraints_vec = ctx.constraints.clone();
@@ -1884,6 +1953,9 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
             return Err("Only recursive functions allowed for letrec optimization".to_string());
         }
 
+        if declared_type.is_some() {
+            ctx.mark_declared_type_used(&name);
+        }
         Ok(Type::Unit)
     } else {
         Err("Let variable must be a variable name".to_string())
@@ -1908,6 +1980,14 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
+        let declared_type = ctx.declared_type_in_current_scope(var_name);
+        if let Some(declared_type) = declared_type.clone() {
+            ctx.add_constraint(
+                value_type.clone(),
+                declared_type,
+                ctx.type_error(TypeErrorVariant::Source, vec![var_expr.clone(), value_expr.clone()]),
+            );
+        }
 
         let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
             .constraints
@@ -1931,6 +2011,9 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         };
 
         ctx.env.insert(var_name.clone(), scheme)?;
+        if declared_type.is_some() {
+            ctx.mark_declared_type_used(var_name);
+        }
         Ok(Type::Unit)
     } else {
         Err("Let variable must be a variable name".to_string())
@@ -1955,6 +2038,14 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
+        let declared_type = ctx.declared_type_in_current_scope(var_name);
+        if let Some(declared_type) = declared_type.clone() {
+            ctx.add_constraint(
+                value_type.clone(),
+                declared_type,
+                ctx.type_error(TypeErrorVariant::Source, vec![var_expr.clone(), value_expr.clone()]),
+            );
+        }
 
         let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
             .constraints
@@ -1986,6 +2077,9 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         ctx.env
             .insert(var_name.clone(), TypeScheme::monotype(solved_type))?;
         ctx.mark_mut_binding(var_name.clone());
+        if declared_type.is_some() {
+            ctx.mark_declared_type_used(var_name);
+        }
         Ok(Type::Unit)
     } else {
         Err("mut variable must be a variable name".to_string())
@@ -2059,6 +2153,11 @@ fn infer_do(
     } else {
         0
     };
+    let declared_before = ctx
+        .declared_type_scopes
+        .last()
+        .map(|scope| scope.keys().cloned().collect::<HashSet<_>>())
+        .unwrap_or_default();
 
     for (idx, item) in args.iter().enumerate() {
         if is_root_do {
@@ -2070,6 +2169,18 @@ fn infer_do(
         }
 
         last_type = infer_expr(item, ctx)?;
+    }
+
+    if let Some(scope) = ctx.declared_type_scopes.last() {
+        if let Some((name, _)) = scope
+            .iter()
+            .find(|(name, (_typ, used))| !declared_before.contains(*name) && !*used)
+        {
+            return Err(format!(
+                "letype for '{}' has no matching binding in this scope",
+                name
+            ));
+        }
     }
 
     if is_root_do {
@@ -2318,6 +2429,7 @@ fn infer_with_builtins_typed_internal(
     let mut ctx = InferenceContext {
         env,
         mut_scopes: vec![HashSet::new()],
+        declared_type_scopes: vec![HashMap::new()],
         lambda_scope_bases: Vec::new(),
         constraints: Vec::new(),
         fresh_var_counter: init_id,

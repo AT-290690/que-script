@@ -4538,6 +4538,119 @@ Concequent and alternative must match types
     }
 
     #[test]
+    fn test_wasm_lsp_hover_extern_declaration_local_name_shows_signature() {
+        let program = r#"(extern env add_one add-one! (Int -> Int))
+add-one!"#;
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 0, 20);
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("add-one! : Int -> Int"),
+            "expected extern declaration hover type info, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_letype_declaration_name_shows_signature() {
+        let program = r#"(letype add (Int -> Int -> Int))
+(let add (lambda (a b) (+ a b)))"#;
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 0, 10);
+        let hover: serde_json::Value = serde_json
+            ::from_str(&hover_json)
+            .expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("add : Int -> Int -> Int"),
+            "expected letype declaration hover type info, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_letype_function_signature_matches_inferred_lambda_type() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (letype add (Int -> Int -> Int))
+                    (let add (lambda (a b) (+ a b)))
+                    (add 1 2))"#
+            )
+            .expect("program should build");
+
+        crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("matching letype should infer successfully");
+
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        assert!(
+            !wat.contains("Unsupported free word"),
+            "letype should not survive as a runtime dependency, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_letype_function_signature_mismatch_errors_naturally() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (letype add (Int -> Int -> Int))
+                    (let add (lambda (a b) (and a b)))
+                    (add 1 2))"#
+            )
+            .expect("program should build");
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("mismatched letype should fail");
+        assert!(
+            err.contains("Cannot unify"),
+            "expected normal type mismatch from letype assertion, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_letype_without_matching_binding_errors() {
+        let expr = crate::parser
+            ::build(r#"(do (letype add (Int -> Int -> Int)) 0)"#)
+            .expect("program should build");
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("unmatched letype should fail");
+        assert!(
+            err.contains("no matching binding"),
+            "expected unmatched letype error, got: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_pure_program_emits_no_unused_builtin_host_imports() {
         let expr = crate::parser::build("(+ 1 2)").expect("program should build");
         let wat = crate::wat
