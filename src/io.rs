@@ -63,6 +63,14 @@ impl ShellPolicy {
         }
     }
 
+    pub fn allow_all() -> Self {
+        let mut permissions = HashSet::new();
+        permissions.insert(ShellPermission::Read);
+        permissions.insert(ShellPermission::Write);
+        permissions.insert(ShellPermission::Delete);
+        Self::enabled(permissions)
+    }
+
     fn enabled(permissions: HashSet<ShellPermission>) -> Self {
         Self {
             shell_enabled: true,
@@ -337,6 +345,310 @@ fn init_project_config_file(dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+fn escape_toml_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn host_template_cargo_toml(package_name: &str, que_repo_root: &Path) -> String {
+    let que_path = escape_toml_string(&que_repo_root.display().to_string());
+    format!(
+        r#"[package]
+name = "{package_name}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+que = {{ path = "{que_path}", features = ["io"] }}
+wasmtime = {{ version = "42.0.1", default-features = false, features = ["cranelift", "runtime", "std"] }}
+"#
+    )
+}
+
+fn host_template_main_rs() -> String {
+    r#"mod host;
+
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use que::parser::Expression;
+
+fn load_std_definitions() -> Result<Vec<Expression>, String> {
+    match que::baked::load_ast() {
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(word)) if word == "do") =>
+        {
+            Ok(items[1..].to_vec())
+        }
+        _ => Err("builtin std ast should be (do ...)".to_string()),
+    }
+}
+
+fn load_project_script(
+    cwd: &Path,
+    explicit_path: Option<&str>,
+) -> Result<(PathBuf, String, PathBuf), String> {
+    if let Some(file_path) = explicit_path {
+        let program = fs::read_to_string(file_path)
+            .map_err(|e| format!("failed to read '{}': {}", file_path, e))?;
+        let script_path = fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+        let script_cwd = script_path
+            .parent()
+            .map(Path::to_path_buf)
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| PathBuf::from("."));
+        return Ok((script_path, program, script_cwd));
+    }
+
+    let Some(project) = que::project::discover_project_config(cwd)? else {
+        return Err("missing script path and no nearby que.toml with `entry`".to_string());
+    };
+    let Some(entry) = project.config.entry.as_deref() else {
+        return Err(format!(
+            "missing script path and '{}' has no `entry`",
+            project.path.display()
+        ));
+    };
+    let entry_path = project.root_dir.join(entry);
+    let program = fs::read_to_string(&entry_path)
+        .map_err(|e| format!("failed to read '{}': {}", entry_path.display(), e))?;
+    let script_path = fs::canonicalize(&entry_path).unwrap_or(entry_path);
+    Ok((script_path, program, project.root_dir))
+}
+
+fn load_project_dep_definitions(script_cwd: &Path) -> Result<Vec<Expression>, String> {
+    let Some(project) = que::project::discover_project_config(script_cwd)? else {
+        return Ok(Vec::new());
+    };
+    que::project::load_bundle_definitions(&project.root_dir, &project.config.deps)
+}
+
+fn apply_project_env(script_cwd: &Path) -> Result<(), String> {
+    let Some(project) = que::project::discover_project_config(script_cwd)? else {
+        return Ok(());
+    };
+    for (key, value) in project.config.env.iter() {
+        env::set_var(key, value);
+    }
+    Ok(())
+}
+
+fn main() -> Result<(), String> {
+    let args: Vec<String> = env::args().collect();
+    let cwd = env::current_dir().map_err(|e| format!("failed to read current directory: {}", e))?;
+    let explicit_path = args.get(1).map(String::as_str);
+    let (_script_path, program, script_cwd) = load_project_script(&cwd, explicit_path)?;
+    apply_project_env(&script_cwd)?;
+
+    let mut defs = load_std_definitions()?;
+    defs.extend(load_project_dep_definitions(&script_cwd)?);
+    let bindings_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let bundle_paths = vec!["bindings/host.que".to_string()];
+    defs.extend(que::project::load_bundle_definitions(&bindings_root, &bundle_paths)?);
+
+    let wrapped = que::parser::merge_std_and_program(&program, defs)?;
+    let wat_src = que::wat::compile_program_to_wat(&wrapped)?;
+    let argv = if explicit_path.is_some() {
+        args.iter().skip(2).cloned().collect::<Vec<_>>()
+    } else {
+        args.iter().skip(1).cloned().collect::<Vec<_>>()
+    };
+    let store_data = que::io::ShellStoreData::new_with_security(
+        Some(script_cwd),
+        que::io::ShellPolicy::allow_all(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    let decoded = que::runtime::run_wat_text(&wat_src, store_data, &argv, |linker| {
+        que::io::add_shell_to_linker(linker).map_err(|e| e.to_string())?;
+        host::add_to_linker(linker).map_err(|e| e.to_string())
+    })?;
+    println!("{}", decoded);
+    Ok(())
+}
+"#
+        .to_string()
+}
+
+fn host_template_host_rs() -> String {
+    r#"use std::time::{SystemTime, UNIX_EPOCH};
+
+use que::io::{read_lisp_string, write_lisp_string, ShellStoreData};
+use wasmtime::{Caller, Linker};
+
+pub fn host_time_now_ms(_caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| wasmtime::Error::msg(format!("clock error: {}", e)))?;
+    let millis = i32::try_from(now.as_millis())
+        .map_err(|_| wasmtime::Error::msg("time_now_ms overflowed i32"))?;
+    Ok(millis)
+}
+
+pub fn host_echo(
+    mut caller: Caller<'_, ShellStoreData>,
+    value_ptr: i32,
+) -> wasmtime::Result<i32> {
+    let value = read_lisp_string(&mut caller, value_ptr)?;
+    write_lisp_string(&mut caller, &value)
+}
+
+pub fn add_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Result<()> {
+    linker.func_wrap("host", "time_now_ms", host_time_now_ms)?;
+    linker.func_wrap("host", "echo", host_echo)?;
+    Ok(())
+}
+"#
+        .to_string()
+}
+
+fn host_template_bindings_que() -> String {
+    r#"(extern host time_now_ms time-now-ms! (() -> Int))
+(extern host echo echo! ([Char] -> [Char]))
+"#
+        .to_string()
+}
+
+fn host_template_demo_que() -> String {
+    r#"(print! (echo! "hello from custom host\n"))
+(time-now-ms!)
+"#
+        .to_string()
+}
+
+fn host_template_project_toml() -> String {
+    r#"entry = "examples/demo.que"
+deps = ["bindings/host.que"]
+
+[env]
+QUE_WASM_OPT = "speed"
+QUE_DEVIRTUALIZE = "aggressive"
+QUE_TCO = "aggressive"
+"#
+        .to_string()
+}
+
+fn host_template_readme(package_name: &str) -> String {
+    format!(
+        r#"# {package_name}
+
+This scaffold is a custom Que host binary.
+
+It keeps Que itself small while letting you add Rust-backed bindings for a specific domain, such as creative coding or raylib.
+
+## Files
+
+- `src/main.rs`
+  - compiles and runs Que scripts
+  - loads `bindings/host.que`
+  - registers standard Que IO plus your custom host functions
+- `src/host.rs`
+  - your Rust host functions
+  - includes:
+    - `time-now-ms!` returning `Int`
+    - `echo!` taking and returning `[Char]`
+- `bindings/host.que`
+  - Que-side `extern` declarations for your custom functions
+- `examples/demo.que`
+  - tiny example using both builtin IO and the custom host bindings
+- `que.toml`
+  - default project entry and compiler env settings
+
+## Run
+
+```sh
+cargo run -- examples/demo.que
+```
+
+or just:
+
+```sh
+cargo run
+```
+
+because the scaffold honors the nearest `que.toml`:
+
+- `entry`
+- `deps`
+- `[env]`
+
+So project-level multi-file Que code works the same way it does in the stock native CLI.
+
+## Add a new host function
+
+1. Add a Rust function in `src/host.rs`
+2. Register it in `add_to_linker(...)`
+3. Add the matching `extern` declaration in `bindings/host.que`
+
+## Remove builtin IO
+
+If you do not want `print!`, `read!`, `write!`, and the rest of the standard Que IO imports:
+
+1. Remove this line from `src/main.rs`:
+
+```rust
+que::io::add_shell_to_linker(linker)?;
+```
+
+2. Change the Que dependency in `Cargo.toml` from:
+
+```toml
+que = {{ path = "...", features = ["io"] }}
+```
+
+to:
+
+```toml
+que = {{ path = "...", default-features = false, features = ["runtime"] }}
+```
+
+Then the host will only provide the externs you register yourself.
+"#
+    )
+}
+
+fn init_host_project(dir: &Path, package_name: &str) -> Result<PathBuf, String> {
+    if package_name.trim().is_empty() {
+        return Err("init-host requires a non-empty project name".to_string());
+    }
+
+    let root = dir.join(package_name);
+    if root.exists() {
+        return Err(format!("host project already exists at '{}'", root.display()));
+    }
+
+    let src_dir = root.join("src");
+    let bindings_dir = root.join("bindings");
+    let examples_dir = root.join("examples");
+    fs::create_dir_all(&src_dir)
+        .map_err(|e| format!("failed to create '{}': {}", src_dir.display(), e))?;
+    fs::create_dir_all(&bindings_dir)
+        .map_err(|e| format!("failed to create '{}': {}", bindings_dir.display(), e))?;
+    fs::create_dir_all(&examples_dir)
+        .map_err(|e| format!("failed to create '{}': {}", examples_dir.display(), e))?;
+
+    let que_repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::write(
+        root.join("Cargo.toml"),
+        host_template_cargo_toml(package_name, &que_repo_root),
+    )
+    .map_err(|e| format!("failed to write '{}': {}", root.join("Cargo.toml").display(), e))?;
+    fs::write(root.join("src/main.rs"), host_template_main_rs())
+        .map_err(|e| format!("failed to write '{}': {}", root.join("src/main.rs").display(), e))?;
+    fs::write(root.join("src/host.rs"), host_template_host_rs())
+        .map_err(|e| format!("failed to write '{}': {}", root.join("src/host.rs").display(), e))?;
+    fs::write(root.join("bindings/host.que"), host_template_bindings_que())
+        .map_err(|e| format!("failed to write '{}': {}", root.join("bindings/host.que").display(), e))?;
+    fs::write(root.join("examples/demo.que"), host_template_demo_que())
+        .map_err(|e| format!("failed to write '{}': {}", root.join("examples/demo.que").display(), e))?;
+    fs::write(root.join("que.toml"), host_template_project_toml())
+        .map_err(|e| format!("failed to write '{}': {}", root.join("que.toml").display(), e))?;
+    fs::write(root.join("README.md"), host_template_readme(package_name))
+        .map_err(|e| format!("failed to write '{}': {}", root.join("README.md").display(), e))?;
+
+    Ok(root)
+}
+
 fn take_install_output_path_from_argv(argv: &mut Vec<String>) -> Result<Option<String>, String> {
     let mut out_path: Option<String> = None;
     let mut out = Vec::with_capacity(argv.len());
@@ -427,6 +739,7 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} [<script.que>] [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} init\n\
+         or:    {bin} init-host <name>\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} lambda <command> [...]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
@@ -440,9 +753,10 @@ fn native_shell_help(bin_name: &str) -> String {
           --env          Print environment flags and tuning examples.\n\
            --eval, -e     Execute inline Que source without a script file.\n\
            --emit         Output source, wat, wasm, or top-level types and exit.\n\
-           --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
+          --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
                          Use with --out <file> to write it instead of printing.\n\
           init           Write a default `{config}` in the current directory.\n\
+          init-host      Scaffold a custom Rust host binary in `./<name>`.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
                          QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
@@ -1759,7 +2073,7 @@ pub fn write_lisp_vector(
     Ok(header_ptr)
 }
 
-fn read_lisp_string(
+pub fn read_lisp_string(
     caller: &mut Caller<'_, ShellStoreData>,
     vec_ptr: i32
 ) -> wasmtime::Result<String> {
@@ -1772,7 +2086,7 @@ fn read_lisp_string(
     )
 }
 
-fn write_lisp_string(
+pub fn write_lisp_string(
     caller: &mut Caller<'_, ShellStoreData>,
     value: &str
 ) -> wasmtime::Result<i32> {
@@ -2322,6 +2636,7 @@ fn build_debug_error_report(
 mod tests {
     use super::{
         format_lambda_functions_list,
+        init_host_project,
         init_project_config_file,
         lambda_api_base_from_env_value,
         lambda_example_url,
@@ -2589,6 +2904,7 @@ mod tests {
         assert!(help.contains("que lambda <command>"));
         assert!(help.contains("https://lambda.quest"));
         assert!(help.contains("que init"));
+        assert!(help.contains("que init-host <name>"));
         assert!(help.contains("que.toml"));
         assert!(!help.contains("--deps"));
     }
@@ -2719,6 +3035,55 @@ mod tests {
     }
 
     #[test]
+    fn init_host_project_writes_template_files() {
+        let base = std::env::temp_dir().join(format!(
+            "que-init-host-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("temp dir should be created");
+
+        let root = init_host_project(&base, "que-creative").expect("host project should be created");
+        assert!(root.join("Cargo.toml").is_file());
+        assert!(root.join("src/main.rs").is_file());
+        assert!(root.join("src/host.rs").is_file());
+        assert!(root.join("bindings/host.que").is_file());
+        assert!(root.join("examples/demo.que").is_file());
+        assert!(root.join("que.toml").is_file());
+        assert!(root.join("README.md").is_file());
+
+        let cargo = std::fs::read_to_string(root.join("Cargo.toml"))
+            .expect("cargo manifest should be readable");
+        assert!(cargo.contains("features = [\"io\"]"));
+
+        let bindings = std::fs::read_to_string(root.join("bindings/host.que"))
+            .expect("bindings should be readable");
+        assert!(bindings.contains("time-now-ms!"));
+        assert!(bindings.contains("echo!"));
+
+        let project_toml = std::fs::read_to_string(root.join("que.toml"))
+            .expect("project config should be readable");
+        assert!(project_toml.contains("entry = \"examples/demo.que\""));
+        assert!(project_toml.contains("deps = [\"bindings/host.que\"]"));
+
+        let host_rs = std::fs::read_to_string(root.join("src/host.rs"))
+            .expect("host module should be readable");
+        assert!(host_rs.contains("read_lisp_string"));
+        assert!(host_rs.contains("write_lisp_string"));
+
+        let main_rs = std::fs::read_to_string(root.join("src/main.rs"))
+            .expect("main module should be readable");
+        assert!(main_rs.contains("discover_project_config"));
+        assert!(main_rs.contains("load_bundle_definitions"));
+
+        let err = init_host_project(&base, "que-creative").expect_err("second init should fail");
+        assert!(err.contains("already exists"));
+    }
+
+    #[test]
     fn resolve_project_entry_path_uses_config_entry_when_script_is_omitted() {
         let base = std::env::temp_dir().join(format!(
             "que-entry-project-{}-{}",
@@ -2761,6 +3126,15 @@ pub fn run_native_shell() -> Result<(), String> {
     if matches!(args.get(1).map(String::as_str), Some("init")) {
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let path = init_project_config_file(&cwd)?;
+        println!("wrote {}", path.display());
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("init-host")) {
+        let Some(name) = args.get(2) else {
+            return Err("usage: que init-host <name>".to_string());
+        };
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let path = init_host_project(&cwd, name)?;
         println!("wrote {}", path.display());
         return Ok(());
     }
