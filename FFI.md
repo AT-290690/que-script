@@ -12,6 +12,12 @@ The model is:
 2. compile it to a Wasm import
 3. register a matching host function in Rust
 
+For a custom host scaffold, run:
+
+```sh
+que init-host my-host
+```
+
 ## Que syntax
 
 Example:
