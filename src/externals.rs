@@ -17,6 +17,12 @@ pub struct ExternDecl {
     pub typ: Type,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LetypeDecl {
+    pub local_name: String,
+    pub typ: Type,
+}
+
 fn parse_type_expr(expr: &Expression) -> Result<Type, String> {
     match expr {
         Expression::Word(name) => match name.as_str() {
@@ -28,29 +34,63 @@ fn parse_type_expr(expr: &Expression) -> Result<Type, String> {
         },
         Expression::Apply(items) if items.is_empty() => Ok(Type::Unit),
         Expression::Apply(items) => {
-            if let Some(arrow_idx) = items
+            let arrow_positions = items
                 .iter()
-                .position(|item| matches!(item, Expression::Word(w) if w == "->"))
-            {
-                if items.iter().skip(arrow_idx + 1).any(
-                    |item| matches!(item, Expression::Word(w) if w == "->")
-                ) {
-                    return Err(format!(
-                        "Extern function type must contain exactly one '->': {}",
-                        expr.to_lisp()
-                    ));
+                .enumerate()
+                .filter_map(|(idx, item)| match item {
+                    Expression::Word(w) if w == "->" => Some(idx),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if let Some(&arrow_idx) = arrow_positions.first() {
+                if arrow_positions.len() == 1 {
+                    if arrow_idx == 0 || arrow_idx + 2 != items.len() {
+                        return Err(format!(
+                            "Invalid extern function type syntax: {}",
+                            expr.to_lisp()
+                        ));
+                    }
+                    let ret = parse_type_expr(&items[arrow_idx + 1])?;
+                    let mut out = ret;
+                    for param_expr in items[..arrow_idx].iter().rev() {
+                        let param = parse_type_expr(param_expr)?;
+                        out = Type::Function(Box::new(param), Box::new(out));
+                    }
+                    return Ok(out);
                 }
-                if arrow_idx == 0 || arrow_idx + 2 != items.len() {
+
+                if items.len() < 3 || items.len() % 2 == 0 {
                     return Err(format!(
                         "Invalid extern function type syntax: {}",
                         expr.to_lisp()
                     ));
                 }
-                let ret = parse_type_expr(&items[arrow_idx + 1])?;
-                let mut out = ret;
-                for param_expr in items[..arrow_idx].iter().rev() {
-                    let param = parse_type_expr(param_expr)?;
+                for (idx, item) in items.iter().enumerate() {
+                    let is_arrow_slot = idx % 2 == 1;
+                    match (is_arrow_slot, item) {
+                        (true, Expression::Word(w)) if w == "->" => {}
+                        (false, Expression::Word(w)) if w == "->" => {
+                            return Err(format!(
+                                "Invalid extern function type syntax: {}",
+                                expr.to_lisp()
+                            ));
+                        }
+                        (true, _) => {
+                            return Err(format!(
+                                "Invalid extern function type syntax: {}",
+                                expr.to_lisp()
+                            ));
+                        }
+                        (false, _) => {}
+                    }
+                }
+
+                let mut out = parse_type_expr(items.last().expect("type chain is non-empty"))?;
+                let mut idx = items.len().saturating_sub(2);
+                while idx > 0 {
+                    let param = parse_type_expr(&items[idx - 1])?;
                     out = Type::Function(Box::new(param), Box::new(out));
+                    idx = idx.saturating_sub(2);
                 }
                 return Ok(out);
             }
@@ -82,6 +122,10 @@ fn parse_type_expr(expr: &Expression) -> Result<Type, String> {
         }
         _ => Err(format!("Invalid extern type: {}", expr.to_lisp())),
     }
+}
+
+pub fn parse_decl_type_expr(expr: &Expression) -> Result<Type, String> {
+    parse_type_expr(expr)
 }
 
 fn type_to_expr(typ: &Type) -> Expression {
@@ -151,6 +195,23 @@ pub fn parse_extern_decl(expr: &Expression) -> Result<Option<ExternDecl>, String
     Ok(Some(ExternDecl {
         module: module.clone(),
         import: import.clone(),
+        local_name: local_name.clone(),
+        typ,
+    }))
+}
+
+pub fn parse_letype_decl(expr: &Expression) -> Result<Option<LetypeDecl>, String> {
+    let Expression::Apply(items) = expr else {
+        return Ok(None);
+    };
+    let [Expression::Word(kw), Expression::Word(local_name), typ_expr] = &items[..] else {
+        return Ok(None);
+    };
+    if kw != "letype" {
+        return Ok(None);
+    }
+    let typ = parse_type_expr(typ_expr)?;
+    Ok(Some(LetypeDecl {
         local_name: local_name.clone(),
         typ,
     }))

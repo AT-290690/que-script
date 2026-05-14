@@ -55,7 +55,7 @@ fn validate_reserved_words_in_binders(expr: &Expression) -> Result<(), String> {
         Expression::Apply(list) if !list.is_empty() => {
             if let Expression::Word(op) = &list[0] {
                 match op.as_str() {
-                    "let" | "letrec" | "mut" => {
+                    "let" | "letrec" | "mut" | "letype" => {
                         if let Some(Expression::Word(name)) = list.get(1) {
                             if is_reserved_word(name) {
                                 return Err(format!("Variable '{}' is forbidden", name));
@@ -125,6 +125,11 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                 }
                 if op == "do" {
                     for it in &exprs[1..] {
+                        if let Expression::Apply(letype_items) = it {
+                            if matches!(letype_items.first(), Some(Expression::Word(w)) if w == "letype") {
+                                continue;
+                            }
+                        }
                         if let Expression::Apply(extern_items) = it {
                             if matches!(extern_items.first(), Some(Expression::Word(w)) if w == "extern") {
                                 if let Some(Expression::Word(name)) = extern_items.get(3) {
@@ -146,6 +151,9 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                         }
                         collect_free_idents(it, bound, acc);
                     }
+                    return;
+                }
+                if op == "letype" {
                     return;
                 }
                 if op == "let" || op == "letrec" {
@@ -207,13 +215,15 @@ fn tree_shake(
         if let Some(def) = index.get(name) {
             if let Expression::Apply(list) = def {
                 if list.len() >= 3 {
-                    let mut deps = HashSet::new();
-                    let mut scoped = HashSet::new();
-                    collect_free_idents(&list[2], &mut scoped, &mut deps);
-                    for dep in deps {
-                        visit(&dep, index, kept, visited);
+                    if !matches!(list.first(), Some(Expression::Word(kw)) if kw == "letype") {
+                        let mut deps = HashSet::new();
+                        let mut scoped = HashSet::new();
+                        collect_free_idents(&list[2], &mut scoped, &mut deps);
+                        for dep in deps {
+                            visit(&dep, index, kept, visited);
+                        }
                     }
-                }
+                }                
             }
             kept.push(def.clone());
         }
@@ -786,6 +796,9 @@ fn split_macro_definitions(
                     (items.first(), items.get(1))
                 {
                     if kw == "letmacro" {
+                        if name == "letype" {
+                            return Err("Macro name 'letype' is reserved by the language".to_string());
+                        }
                         let macro_def = parse_macro_definition(&items[2..], name)?;
                         macros.insert(name.clone(), macro_def);
                         continue;
@@ -794,6 +807,9 @@ fn split_macro_definitions(
             }
             if let [Expression::Word(kw), Expression::Word(name), _rhs] = &items[..] {
                 if kw == "letmacro" {
+                    if name == "letype" {
+                        return Err("Macro name 'letype' is reserved by the language".to_string());
+                    }
                     let macro_def = parse_macro_definition(&items[2..], name)?;
                     macros.insert(name.clone(), macro_def);
                     continue;
@@ -2624,7 +2640,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                 list.get(1)
                             };
                             if
-                                (kw == "let" || kw == "letrec" || kw == "mut" || kw == "extern") &&
+                                (kw == "let" || kw == "letrec" || kw == "mut" || kw == "extern" || kw == "letype") &&
                                 matches!(name, Some(Expression::Word(_)))
                             {
                                 let Expression::Word(name) = name.unwrap() else { unreachable!() };

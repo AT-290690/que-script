@@ -792,6 +792,9 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     }
                     return;
                 }
+                if op == "letype" {
+                    return;
+                }
                 // Type/cast hints are compile-time-only in this backend.
                 // Do not treat the hint operand as a runtime dependency.
                 if op == "as" || op == "char" {
@@ -7689,7 +7692,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(emit_direct_builder_scalar_store_i32(&xs, &idx, &value, ctx))
                         }
-                        "extern" => Ok("i32.const 0".to_string()),
+                        "extern" | "letype" => Ok("i32.const 0".to_string()),
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
                         }
