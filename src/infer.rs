@@ -1900,6 +1900,36 @@ pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
         other => other.clone(),
     }
 }
+
+fn ensure_declared_type_matches(
+    name: &str,
+    declared_type: &Type,
+    inferred_type: &Type,
+    binding_expr: &Expression,
+    scope: Option<InferErrorScope>,
+) -> Result<(), String> {
+    let constraints = vec![(
+        inferred_type.clone(),
+        declared_type.clone(),
+        TypeError {
+            variant: TypeErrorVariant::Source,
+            expr: vec![binding_expr.clone()],
+            scope,
+        },
+    )];
+    if solve_constraints_list(&constraints).is_ok() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Signature mismatch for '{}'\ndeclared: {}\ninferred: {}\nin:\n{}",
+        name,
+        declared_type,
+        inferred_type,
+        binding_expr.to_lisp()
+    ))
+}
+
 fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let args = &exprs[1..];
     if args.len() != 2 {
@@ -1929,13 +1959,6 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         )?;
 
         let value_type = infer_expr(value_expr, ctx)?;
-        if let Some(declared_type) = declared_type.clone() {
-            ctx.add_constraint(
-                value_type.clone(),
-                declared_type,
-                ctx.type_error(TypeErrorVariant::Source, vec![var_expr.clone(), value_expr.clone()]),
-            );
-        }
 
         // solve constraints
         let constraints_vec = ctx.constraints.clone();
@@ -1948,12 +1971,19 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
         // generalize only if nonexpansive
         if is_nonexpansive(value_expr) {
-            generalize(&ctx.env, solved_type);
+            generalize(&ctx.env, solved_type.clone());
         } else {
             return Err("Only recursive functions allowed for letrec optimization".to_string());
         }
 
-        if declared_type.is_some() {
+        if let Some(declared_type) = declared_type.as_ref() {
+            ensure_declared_type_matches(
+                &name,
+                declared_type,
+                &solved_type,
+                &Expression::Apply(exprs.to_vec()),
+                ctx.current_error_scope(),
+            )?;
             ctx.mark_declared_type_used(&name);
         }
         Ok(Type::Unit)
@@ -1981,13 +2011,6 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
         let declared_type = ctx.declared_type_in_current_scope(var_name);
-        if let Some(declared_type) = declared_type.clone() {
-            ctx.add_constraint(
-                value_type.clone(),
-                declared_type,
-                ctx.type_error(TypeErrorVariant::Source, vec![var_expr.clone(), value_expr.clone()]),
-            );
-        }
 
         let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
             .constraints
@@ -2005,13 +2028,20 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
         // Apply value restriction
         let scheme = if is_nonexpansive(value_expr) {
-            generalize(&ctx.env, solved_type)
+            generalize(&ctx.env, solved_type.clone())
         } else {
-            TypeScheme::monotype(solved_type)
+            TypeScheme::monotype(solved_type.clone())
         };
 
         ctx.env.insert(var_name.clone(), scheme)?;
-        if declared_type.is_some() {
+        if let Some(declared_type) = declared_type.as_ref() {
+            ensure_declared_type_matches(
+                var_name,
+                declared_type,
+                &solved_type,
+                &Expression::Apply(exprs.to_vec()),
+                ctx.current_error_scope(),
+            )?;
             ctx.mark_declared_type_used(var_name);
         }
         Ok(Type::Unit)
@@ -2039,13 +2069,6 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     if let Expression::Word(var_name) = var_expr {
         let value_type = infer_expr(value_expr, ctx)?;
         let declared_type = ctx.declared_type_in_current_scope(var_name);
-        if let Some(declared_type) = declared_type.clone() {
-            ctx.add_constraint(
-                value_type.clone(),
-                declared_type,
-                ctx.type_error(TypeErrorVariant::Source, vec![var_expr.clone(), value_expr.clone()]),
-            );
-        }
 
         let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
             .constraints
@@ -2075,9 +2098,16 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         }
         // Mutable bindings are monomorphic by design.
         ctx.env
-            .insert(var_name.clone(), TypeScheme::monotype(solved_type))?;
+            .insert(var_name.clone(), TypeScheme::monotype(solved_type.clone()))?;
         ctx.mark_mut_binding(var_name.clone());
-        if declared_type.is_some() {
+        if let Some(declared_type) = declared_type.as_ref() {
+            ensure_declared_type_matches(
+                var_name,
+                declared_type,
+                &solved_type,
+                &Expression::Apply(exprs.to_vec()),
+                ctx.current_error_scope(),
+            )?;
             ctx.mark_declared_type_used(var_name);
         }
         Ok(Type::Unit)
