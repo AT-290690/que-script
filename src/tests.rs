@@ -4665,8 +4665,24 @@ add-one!"#;
             )
             .expect_err("mismatched letype should fail");
         assert!(
-            err.contains("Cannot unify"),
-            "expected normal type mismatch from letype assertion, got: {}",
+            err.contains("Signature mismatch for 'add'"),
+            "expected signature mismatch header, got: {}",
+            err
+        );
+        assert!(
+            err.contains("declared: Int -> Int -> Int"),
+            "expected declared type in message, got: {}",
+            err
+        );
+        assert!(
+            err.contains("inferred: Bool -> Bool -> Bool"),
+            "expected inferred type in message, got: {}",
+            err
+        );
+        assert!(
+            err.contains("(let add (lambda a b (and a b)))")
+                || err.contains("(let add (lambda (a b) (and a b)))"),
+            "expected binding form in message, got: {}",
             err
         );
     }
