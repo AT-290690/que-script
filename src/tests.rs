@@ -4608,6 +4608,46 @@ add-one!"#;
     }
 
     #[test]
+    fn test_sig_desugars_to_letype_and_matches_inferred_lambda_type() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (sig add (Int -> Int -> Int))
+                    (let add (lambda (a b) (+ a b)))
+                    (add 1 2))"#
+            )
+            .expect("program should build");
+
+        crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("matching sig should infer successfully");
+
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        assert!(
+            !wat.contains("sig") && !wat.contains("letype"),
+            "sig should desugar away before runtime codegen, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_sig_macro_name_is_reserved() {
+        let err = crate::parser
+            ::build("(letmacro sig (lambda () 1))")
+            .expect_err("sig macro name should be reserved");
+        assert!(
+            err.contains("Macro name 'sig' is reserved"),
+            "expected reserved sig error, got: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_letype_function_signature_mismatch_errors_naturally() {
         let expr = crate::parser
             ::build(
