@@ -4707,6 +4707,66 @@ add-one!"#;
     }
 
     #[test]
+    fn test_letype_non_function_value_mismatch_uses_declared_vs_inferred_message() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (letype xs [Int])
+                    (let xs ["a" "b"])
+                    xs)"#
+            )
+            .expect("program should build");
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("mismatched letype should fail");
+        assert!(
+            err.contains("Signature mismatch for 'xs'"),
+            "expected signature mismatch header, got: {}",
+            err
+        );
+        assert!(
+            err.contains("declared: [Int]"),
+            "expected declared type in message, got: {}",
+            err
+        );
+        assert!(
+            err.contains("inferred: [[Char]]"),
+            "expected inferred type in message, got: {}",
+            err
+        );
+        assert!(
+            err.contains("(let xs (vector (string 97) (string 98)))")
+                || err.contains("(let xs [[97] [98]])")
+                || err.contains("(let xs [\"a\" \"b\"])"),
+            "expected binding form in message, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_letype_non_function_value_match_still_infers() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (letype xs [Int])
+                    (let xs [1 2 3])
+                    xs)"#
+            )
+            .expect("program should build");
+
+        crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("matching non-function letype should infer successfully");
+    }
+
+    #[test]
     fn test_pure_program_emits_no_unused_builtin_host_imports() {
         let expr = crate::parser::build("(+ 1 2)").expect("program should build");
         let wat = crate::wat
