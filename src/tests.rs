@@ -107,41 +107,39 @@ xs)"#,
     fn test_type_inference_failure() {
         // Test cases that should result in type inference errors
         let test_cases = [
-            ("(+ 1 (= 1 1))", r#"Cannot unify Int with Bool
+            ("(+ 1 (= 1 1))", r#"Arithmetic operator '+' expected Int but got Bool
 (+ 1 (= 1 1))"#),
             ("(1 2)", "Cannot apply non-function type: Int\n(1 2)"),
             ("(do (let t 10) (t))", "Cannot apply non-function type: Int\n(t)"),
-            ("(let x (vector 1 2 (= 1 2)))", "Cannot unify Int with Bool\n(vector 1 2 (= 1 2))"),
-            ("(vector 1 2 (> 1 2))", "Cannot unify Int with Bool\n(vector 1 2 (> 1 2))"),
-            ("(lambda x (and x 42))", "Cannot unify Bool with Int\n(and x 42)"),
+            ("(let x (vector 1 2 (= 1 2)))", "Vector element 3 expected Int but got Bool\n(vector 1 2 (= 1 2))"),
+            ("(vector 1 2 (> 1 2))", "Vector element 3 expected Int but got Bool\n(vector 1 2 (> 1 2))"),
+            ("(lambda x (and x 42))", "Logical operator 'and' expected Bool but got Int\n(and x 42)"),
             ("(summation (range 1 10))", "Undefined variable: summation"),
-            ("(if 1 10 20)", r#"Cannot unify Int with Bool
-Condition must be Bool
+            ("(if 1 10 20)", r#"if condition expected Bool but got Int
 (if 1 10 20)"#),
             (
                 "(if (= 1 2) 10 (= 0 1))",
-                r#"Cannot unify Int with Bool
-Concequent and alternative must match types
+                r#"if branches must match: then branch is Int but else branch is Bool
 (if (= 1 2) 10 (= 0 1))"#,
             ),
             ("(do (let x 10) (let x 2))", "Variable 'x' already defined in this scope"),
             (
                 "(vector (tuple 0 true) (tuple true 0))",
-                "Cannot unify Int with Bool\n(vector (tuple 0 true) (tuple true 0))",
+                "Tuple field 1 expected Int but got Bool\n(tuple 0 true) (tuple true 0)",
             ),
-            ("(+ 1.23 2)", "Cannot unify Int with Dec\n(+ 1.23 2)"),
+            ("(+ 1.23 2)", "Arithmetic operator '+' expected Int but got Dec\n(+ 1.23 2)"),
             (
                 r#"(do (let xs (vector (vector (vector))))
 (set! xs (length xs) (vector (vector true)))
 (set! xs (length xs) (vector (vector 1))))"#,
-                "Cannot unify Int with Bool\n(set! xs (length xs) (vector (vector 1)))",
+                "set! value expected Bool but got Int\n(set! xs (length xs) (vector (vector 1)))",
             ),
             (
                 r#"(do 
 (let xs (vector))
 (set! xs (length xs) false)
 (set! xs (length xs) 1))"#,
-                "Cannot unify Int with Bool\n(set! xs (length xs) 1)",
+                "set! value expected Bool but got Int\n(set! xs (length xs) 1)",
             ),
             (
                 "(do (mut x 1) (let f (lambda y x)) (f 0))",
@@ -177,6 +175,115 @@ Concequent and alternative must match types
                 panic!("No expressions found in parsed result");
             }
         }
+    }
+
+    #[test]
+    fn test_type_inference_call_argument_mismatch_reports_argument_index_and_name() {
+        let exprs = crate::parser
+            ::parse(r#"(do (let add (lambda a b (+ a b))) (add 1 false))"#)
+            .unwrap();
+        let expr = exprs.first().expect("expression should parse");
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("expected call argument mismatch");
+
+        assert!(
+            err.contains("Argument 2 of add expected Int but got Bool"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_type_inference_tuple_vector_mismatch_uses_shape_wording() {
+        let exprs = crate::parser::parse("(get (tuple 1 2) 0)").unwrap();
+        let expr = exprs.first().expect("expression should parse");
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("expected tuple/vector mismatch");
+
+        assert!(err.contains("Expected vector ["));
+        assert!(err.contains("got tuple {Int * Int}"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn test_type_inference_get_index_mismatch_reports_index_message() {
+        let exprs = crate::parser::parse("(get (vector 1 2) false)").unwrap();
+        let expr = exprs.first().expect("expression should parse");
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("expected get index mismatch");
+
+        assert!(
+            err.contains("get index expected Int but got Bool"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_type_inference_set_value_mismatch_reports_value_message() {
+        let exprs = crate::parser::parse("(do (let xs (vector false)) (set! xs 0 1))").unwrap();
+        let expr = exprs.first().expect("expression should parse");
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("expected set! value mismatch");
+
+        assert!(
+            err.contains("set! value expected Bool but got Int"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_type_inference_vector_element_mismatch_reports_element_index() {
+        let exprs = crate::parser::parse("(vector 1 true 3)").unwrap();
+        let expr = exprs.first().expect("expression should parse");
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("expected vector element mismatch");
+
+        assert!(
+            err.contains("Vector element 2 expected Int but got Bool"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_type_inference_tuple_field_mismatch_reports_field_index() {
+        let exprs = crate::parser
+            ::parse("(vector (tuple 1 2) (tuple 1 false))")
+            .unwrap();
+        let expr = exprs.first().expect("expression should parse");
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("expected tuple field mismatch");
+
+        assert!(
+            err.contains("Tuple field 2 expected Int but got Bool"),
+            "unexpected error: {}",
+            err
+        );
     }
 
     #[test]
@@ -4095,35 +4202,21 @@ Concequent and alternative must match types
             ::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
 
-        let has_unify_message = diagnostics
-            .as_array()
-            .map(|items| {
-                items.iter().any(|item| {
-                    item.get("message")
-                        .and_then(|v| v.as_str())
-                        .map(|msg| msg.contains("Cannot unify Int with Dec"))
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-
         let has_branch_message = diagnostics
             .as_array()
             .map(|items| {
                 items.iter().any(|item| {
                     item.get("message")
                         .and_then(|v| v.as_str())
-                        .map(|msg| msg.contains("Concequent and alternative must match types"))
+                        .map(|msg| {
+                            msg.contains(
+                                "if branches must match: then branch is Int but else branch is Dec",
+                            )
+                        })
                         .unwrap_or(false)
                 })
             })
             .unwrap_or(false);
-
-        assert!(
-            has_unify_message,
-            "expected diagnostics to include 'Cannot unify Int with Dec', got: {}",
-            diagnostics_json
-        );
         assert!(
             has_branch_message,
             "expected diagnostics to include branch mismatch detail, got: {}",
@@ -4305,7 +4398,9 @@ Concequent and alternative must match types
                 .and_then(|v| v.as_str())
                 .expect("diagnostic should include message");
             assert!(
-                message.contains("Cannot unify"),
+                message.contains("Cannot unify")
+                    || message.contains("Argument ")
+                    || message.contains("get index expected Int"),
                 "expected type error diagnostic, got: {}",
                 diagnostics_json
             );
