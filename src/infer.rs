@@ -6,7 +6,14 @@ use std::ops::{BitOr, BitOrAssign};
 #[derive(Clone, Debug)]
 pub enum TypeErrorVariant {
     Vector,
-    Call,
+    VectorElement(usize),
+    TupleField(usize),
+    CallArg(usize),
+    GetTarget,
+    GetIndex,
+    SetTarget,
+    SetIndex,
+    SetValue,
     Source,
     IfBody,
     IfCond,
@@ -1055,14 +1062,16 @@ fn src_to_pretty(src: &TypeError) -> String {
         .join(" ");
     match src.variant {
         TypeErrorVariant::Vector => format!("(vector {})", joined),
-        TypeErrorVariant::Call => format!("({})", joined),
-        TypeErrorVariant::IfCond => format!("Condition must be Bool\n(if {})", joined),
-        TypeErrorVariant::IfBody => {
-            format!(
-                "Concequent and alternative must match types\n(if {})",
-                joined
-            )
-        }
+        TypeErrorVariant::VectorElement(_) => format!("(vector {})", joined),
+        TypeErrorVariant::TupleField(_) => joined,
+        TypeErrorVariant::CallArg(_) => format!("({})", joined),
+        TypeErrorVariant::GetTarget => format!("({})", joined),
+        TypeErrorVariant::GetIndex => format!("({})", joined),
+        TypeErrorVariant::SetTarget => format!("({})", joined),
+        TypeErrorVariant::SetIndex => format!("({})", joined),
+        TypeErrorVariant::SetValue => format!("({})", joined),
+        TypeErrorVariant::IfCond => format!("(if {})", joined),
+        TypeErrorVariant::IfBody => format!("(if {})", joined),
         TypeErrorVariant::Source => joined,
     }
 }
@@ -1073,6 +1082,131 @@ fn with_src(message: String, src: &TypeError) -> String {
         message
     } else {
         format!("{}\n{}", message, snippet)
+    }
+}
+
+fn mismatch_shape_phrase(expected: &Type, actual: &Type) -> Option<String> {
+    match (expected, actual) {
+        (Type::List(_), Type::Tuple(_)) => {
+            Some(format!("Expected vector {}, got tuple {}", expected, actual))
+        }
+        (Type::Tuple(_), Type::List(_)) => {
+            Some(format!("Expected tuple {}, got vector {}", expected, actual))
+        }
+        _ => None,
+    }
+}
+
+fn mismatch_shape_phrase_for_call(expected: &Type, actual: &Type) -> Option<String> {
+    match (expected, actual) {
+        (Type::List(_), Type::Tuple(_)) => {
+            Some(format!("expected vector {}, got tuple {}", expected, actual))
+        }
+        (Type::Tuple(_), Type::List(_)) => {
+            Some(format!("expected tuple {}, got vector {}", expected, actual))
+        }
+        _ => None,
+    }
+}
+
+fn is_logical_operator(name: &str) -> bool {
+    matches!(name, "and" | "or" | "not")
+}
+
+fn is_arithmetic_operator(name: &str) -> bool {
+    matches!(
+        name,
+        "+" | "+#" | "+."
+            | "-"
+            | "-#" | "-."
+            | "*"
+            | "*#" | "*."
+            | "/"
+            | "/#" | "/."
+            | "mod"
+            | "mod."
+    )
+}
+
+fn call_target_name(src: &TypeError) -> Option<&str> {
+    match src.expr.first() {
+        Some(Expression::Word(name)) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn format_type_mismatch(expected: &Type, actual: &Type, src: &TypeError) -> String {
+    match src.variant {
+        TypeErrorVariant::VectorElement(elem_idx) => {
+            let mismatch = match mismatch_shape_phrase_for_call(expected, actual) {
+                Some(shape) => shape,
+                None => format!("expected {} but got {}", expected, actual),
+            };
+            format!("Vector element {} {}", elem_idx, mismatch)
+        }
+        TypeErrorVariant::TupleField(field_idx) => {
+            let mismatch = match mismatch_shape_phrase_for_call(expected, actual) {
+                Some(shape) => shape,
+                None => format!("expected {} but got {}", expected, actual),
+            };
+            format!("Tuple field {} {}", field_idx, mismatch)
+        }
+        TypeErrorVariant::CallArg(arg_idx) => {
+            if let Some(name) = call_target_name(src) {
+                if is_logical_operator(name) {
+                    return format!(
+                        "Logical operator '{}' expected Bool but got {}",
+                        name, actual
+                    );
+                }
+                if is_arithmetic_operator(name) {
+                    return format!(
+                        "Arithmetic operator '{}' expected {} but got {}",
+                        name, expected, actual
+                    );
+                }
+            }
+            let mismatch = match mismatch_shape_phrase_for_call(expected, actual) {
+                Some(shape) => shape,
+                None => format!("expected {} but got {}", expected, actual),
+            };
+            match call_target_name(src) {
+                Some(name) => format!("Argument {} of {} {}", arg_idx, name, mismatch),
+                None => format!("Argument {} {}", arg_idx, mismatch),
+            }
+        }
+        TypeErrorVariant::GetTarget => mismatch_shape_phrase(expected, actual)
+            .unwrap_or_else(|| format!("get expected vector as first argument, got {}", actual)),
+        TypeErrorVariant::GetIndex => {
+            format!("get index expected Int but got {}", actual)
+        }
+        TypeErrorVariant::SetTarget => mismatch_shape_phrase(expected, actual)
+            .unwrap_or_else(|| format!("set! expected vector as first argument, got {}", actual)),
+        TypeErrorVariant::SetIndex => {
+            format!("set! index expected Int but got {}", actual)
+        }
+        TypeErrorVariant::SetValue => {
+            format!("set! value expected {} but got {}", expected, actual)
+        }
+        TypeErrorVariant::IfCond => {
+            format!("if condition expected Bool but got {}", actual)
+        }
+        TypeErrorVariant::IfBody => {
+            format!(
+                "if branches must match: then branch is {} but else branch is {}",
+                expected, actual
+            )
+        }
+        _ => mismatch_shape_phrase(expected, actual)
+            .unwrap_or_else(|| format!("Cannot unify {} with {}", expected, actual)),
+    }
+}
+
+fn with_variant(src: &TypeError, variant: TypeErrorVariant) -> TypeError {
+    TypeError {
+        variant,
+        expr: src.expr.clone(),
+        scope: src.scope.clone(),
     }
 }
 
@@ -1644,8 +1778,8 @@ fn infer_if(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, St
     // Infer condition type - should be Bool
     let cond_type = infer_expr(condition, ctx)?;
     ctx.add_constraint(
-        cond_type.clone(),
         Type::Bool,
+        cond_type.clone(),
         ctx.type_error(TypeErrorVariant::IfCond, args.to_vec()),
     );
     // Infer then and else types
@@ -1863,14 +1997,14 @@ pub fn solve_constraints_list(
                         scope: src.scope.clone(),
                     });
                 }
-                for (ai, bi) in a_items.into_iter().zip(b_items.into_iter()) {
-                    work.push_back((ai, bi, src.clone()));
+                for (field_idx, (ai, bi)) in a_items.into_iter().zip(b_items.into_iter()).enumerate() {
+                    work.push_back((ai, bi, with_variant(&src, TypeErrorVariant::TupleField(field_idx + 1))));
                 }
             }
             (a2, b2) => {
                 // can't unify, attach source and return
                 return Err(SolveError {
-                    message: with_src(format!("Cannot unify {} with {}", a2, b2), &src),
+                    message: with_src(format_type_mismatch(&a2, &b2, &src), &src),
                     scope: src.scope.clone(),
                 });
             }
@@ -2247,11 +2381,11 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
 
             let first = elem_types[0].clone();
-            for t in &elem_types[1..] {
+            for (offset, t) in elem_types[1..].iter().enumerate() {
                 ctx.add_constraint(
                     first.clone(),
                     t.clone(),
-                    ctx.type_error(TypeErrorVariant::Vector, args.to_vec()),
+                    ctx.type_error(TypeErrorVariant::VectorElement(offset + 2), args.to_vec()),
                 );
             }
             // Return the type of the vector (List of the first element type)
@@ -2341,6 +2475,72 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 }
             }
             return Ok(Type::Tuple(elem_types));
+        } else if name == "get" && exprs.len() == 3 {
+            let target_type = infer_expr(&exprs[1], ctx)?;
+            let index_type = infer_expr(&exprs[2], ctx)?;
+            let elem_type = match target_type {
+                Type::List(inner) => *inner,
+                Type::Var(tv) => {
+                    let elem_type = ctx.fresh_var();
+                    ctx.add_constraint(
+                        Type::Var(tv),
+                        Type::List(Box::new(elem_type.clone())),
+                        ctx.type_error(TypeErrorVariant::GetTarget, exprs.to_vec()),
+                    );
+                    elem_type
+                }
+                other => {
+                    let placeholder = ctx.fresh_var();
+                    ctx.add_constraint(
+                        Type::List(Box::new(placeholder.clone())),
+                        other,
+                        ctx.type_error(TypeErrorVariant::GetTarget, exprs.to_vec()),
+                    );
+                    placeholder
+                }
+            };
+            ctx.add_constraint(
+                Type::Int,
+                index_type,
+                ctx.type_error(TypeErrorVariant::GetIndex, exprs.to_vec()),
+            );
+            return Ok(elem_type);
+        } else if name == "set!" && exprs.len() == 4 {
+            let target_type = infer_expr(&exprs[1], ctx)?;
+            let index_type = infer_expr(&exprs[2], ctx)?;
+            let value_type = infer_expr(&exprs[3], ctx)?;
+            let elem_type = match target_type {
+                Type::List(inner) => *inner,
+                Type::Var(tv) => {
+                    let elem_type = ctx.fresh_var();
+                    ctx.add_constraint(
+                        Type::Var(tv),
+                        Type::List(Box::new(elem_type.clone())),
+                        ctx.type_error(TypeErrorVariant::SetTarget, exprs.to_vec()),
+                    );
+                    elem_type
+                }
+                other => {
+                    let placeholder = ctx.fresh_var();
+                    ctx.add_constraint(
+                        Type::List(Box::new(placeholder.clone())),
+                        other,
+                        ctx.type_error(TypeErrorVariant::SetTarget, exprs.to_vec()),
+                    );
+                    placeholder
+                }
+            };
+            ctx.add_constraint(
+                Type::Int,
+                index_type,
+                ctx.type_error(TypeErrorVariant::SetIndex, exprs.to_vec()),
+            );
+            ctx.add_constraint(
+                elem_type,
+                value_type,
+                ctx.type_error(TypeErrorVariant::SetValue, exprs.to_vec()),
+            );
+            return Ok(Type::Unit);
         }
     }
     let func_expr = &exprs[0];
@@ -2381,14 +2581,14 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
         }
     }
-    for arg in args {
+    for (arg_idx, arg) in args.iter().enumerate() {
         let arg_type = infer_call_arg(arg, ctx)?;
         match func_type {
             Type::Function(param_ty, ret_ty) => {
                 ctx.add_constraint(
                     *param_ty.clone(),
                     arg_type,
-                    ctx.type_error(TypeErrorVariant::Call, exprs.to_vec()),
+                    ctx.type_error(TypeErrorVariant::CallArg(arg_idx + 1), exprs.to_vec()),
                 );
                 func_type = *ret_ty;
             }
