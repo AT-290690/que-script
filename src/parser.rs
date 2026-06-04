@@ -1318,6 +1318,10 @@ fn preprocess(source: &str) -> Result<String, String> {
                         s.push(next);
                     }
                 }
+                if s.is_empty() {
+                    out.push_str("(char 0)");
+                    continue;
+                }
                 if s.len() != 1 {
                     return Err(format!("Char should be of length 1"));
                 }
