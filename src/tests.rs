@@ -2215,6 +2215,24 @@ xs)"#,
     }
 
     #[test]
+    fn test_empty_char_literal_builds_to_char_zero() {
+        let expr = crate::parser::build("''").expect("empty char literal should build");
+        assert_eq!(expr.to_lisp(), "(do (char 0))");
+    }
+
+    #[test]
+    fn test_empty_char_literal_infers_as_char() {
+        let expr = crate::parser::build("''").expect("empty char literal should build");
+        let (typ, _) = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("empty char literal should infer");
+        assert_eq!(typ.to_string(), "Char");
+    }
+
+    #[test]
     fn test_typed_optimization_constant_folds_nested_int_ops() {
         let typed = infer_typed("(+ 2 (* 3 4))");
         let optimized = crate::op::optimize_typed_ast(&typed);
