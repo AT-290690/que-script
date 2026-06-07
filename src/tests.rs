@@ -632,6 +632,29 @@ xs)"#,
     }
 
     #[test]
+    fn test_parser_cell_helpers_desugar_to_core_ops() {
+        let expr = crate::parser
+            ::build(r#"(do (&mut code "Hello") (let out (&get code)) (&alter! code "World") out)"#)
+            .expect("program should build");
+        let lisp = expr.to_lisp();
+        assert!(
+            lisp.contains("(let code (box (string 72 101 108 108 111)))"),
+            "expected &mut to desugar through box, got: {}",
+            lisp
+        );
+        assert!(
+            lisp.contains("(let out (car code))"),
+            "expected &get to desugar to car, got: {}",
+            lisp
+        );
+        assert!(
+            lisp.contains("(set! code 0 (string 87 111 114 108 100))"),
+            "expected &alter! to desugar to set! index 0, got: {}",
+            lisp
+        );
+    }
+
+    #[test]
     fn test_runtime_tuple_return_destructure_inside_loop_does_not_shadow_outer_mut() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -5556,6 +5579,19 @@ add-one!"#;
         crate::wat
             ::compile_program_to_wat_with_opts(&expr, true)
             .expect("multi-field tuple destructure should compile");
+    }
+
+    #[test]
+    fn test_runtime_top_level_cell_alias_get_compiles_and_runs() {
+        let result = run_program_output_with_std_and_opts(
+            r#"(do
+                (&mut code "Hello")
+                (&alter! code "World")
+                (let out (&get code))
+                out)"#,
+            true
+        );
+        assert_eq!(result, "World");
     }
 
     #[test]
