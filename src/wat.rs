@@ -6583,12 +6583,17 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 3,
     };
-    let xs = match &xs_node.expr {
-        Expression::Word(name) =>
-            compile_borrowed_top_level_cached_ref(name, ctx, ctx.tmp_i32 + 3).unwrap_or(
-                compile_expr(xs_node, &nested_ctx)?
-            ),
-        _ => compile_expr(xs_node, &nested_ctx)?,
+    let (xs, release_xs_after) = match &xs_node.expr {
+        Expression::Word(name) => {
+            if let Some(borrowed) = compile_borrowed_top_level_cached_ref(name, ctx, ctx.tmp_i32 + 3) {
+                (borrowed, false)
+            } else if !ctx.locals.contains_key(name) && name != "ARGV" {
+                (format!("call ${}", ident(name)), true)
+            } else {
+                (compile_expr(xs_node, &nested_ctx)?, false)
+            }
+        }
+        _ => (compile_expr(xs_node, &nested_ctx)?, false),
     };
     let idx = compile_expr(
         node.children.get(2).ok_or_else(|| "get missing index".to_string())?,
@@ -6667,9 +6672,27 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 ctx.tmp_i32 + 1
             )
         };
+        if release_xs_after {
+            return Ok(format!(
+                "{bounds}\nlocal.get {}\ncall $rc_release\ndrop",
+                ctx.tmp_i32
+            ));
+        }
         return Ok(bounds);
     }
-    Ok(format!("{xs}\n{idx}\ncall $vec_get_{}", elem.suffix()))
+    if release_xs_after {
+        Ok(format!(
+            "{xs}\nlocal.set {}\n{idx}\nlocal.get {}\ncall $vec_get_{}\nlocal.set {}\nlocal.get {}\ncall $rc_release\ndrop\nlocal.get {}",
+            ctx.tmp_i32,
+            ctx.tmp_i32,
+            elem.suffix(),
+            ctx.tmp_i32 + 1,
+            ctx.tmp_i32,
+            ctx.tmp_i32 + 1
+        ))
+    } else {
+        Ok(format!("{xs}\n{idx}\ncall $vec_get_{}", elem.suffix()))
+    }
 }
 
 fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -6687,12 +6710,17 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
         tmp_i32: ctx.tmp_i32 + 5,
     };
-    let xs = match &xs_node.expr {
-        Expression::Word(name) =>
-            compile_borrowed_top_level_cached_ref(name, ctx, ctx.tmp_i32 + 5).unwrap_or(
-                compile_expr(xs_node, &nested_ctx)?
-            ),
-        _ => compile_expr(xs_node, &nested_ctx)?,
+    let (xs, release_target) = match &xs_node.expr {
+        Expression::Word(name) => {
+            if let Some(borrowed) = compile_borrowed_top_level_cached_ref(name, ctx, ctx.tmp_i32 + 5) {
+                (borrowed, false)
+            } else if !ctx.locals.contains_key(name) && name != "ARGV" {
+                (format!("call ${}", ident(name)), true)
+            } else {
+                (compile_expr(xs_node, &nested_ctx)?, false)
+            }
+        }
+        _ => (compile_expr(xs_node, &nested_ctx)?, false),
     };
     let idx = compile_expr(
         node.children.get(2).ok_or_else(|| "set! missing index".to_string())?,
@@ -6728,7 +6756,6 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         vec_set_runtime_for_scalar(is_scalar_value)
     };
     let release_rhs = should_release_set_rhs(val_node);
-    let release_target = false;
     let managed_slots = managed_local_slots(ctx);
     let target_tmp = ctx.tmp_i32 + 3;
     let target_keep = ctx.tmp_i32 + 4;
@@ -7603,6 +7630,8 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         Ok(format!("local.get {}", local_idx))
                     } else if w == "ARGV" {
                         Ok("call $__argv_get".to_string())
+                    } else if let Some(borrowed) = compile_borrowed_top_level_cached_ref(w, ctx, ctx.tmp_i32) {
+                        Ok(borrowed)
                     } else if let Some((params, _ret)) = ctx.fn_sigs.get(w) {
                         if params.is_empty() {
                             Ok(format!("call ${}", ident(w)))
