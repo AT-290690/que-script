@@ -5547,6 +5547,18 @@ add-one!"#;
     }
 
     #[test]
+    fn test_wat_multi_field_tuple_destructure_of_tuple_returning_lambda_stays_correct() {
+        let expr = crate::parser
+            ::build(
+                "(do (let f (lambda x {1 2 3 4 5})) (let { a b c d e } (f 0)) e)"
+            )
+            .expect("program should build");
+        crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("multi-field tuple destructure should compile");
+    }
+
+    #[test]
     fn test_wat_rejects_push_of_closure_into_captured_vector() {
         let program = r#"(do
             (let xs [])

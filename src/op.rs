@@ -5170,7 +5170,13 @@ fn eliminate_tuple_return_destructuring_calls_with_defs(
             };
             if
                 projection_count == 0 ||
-                count_word_uses_in_slice(&items[i + 1 + projection_count..], &temp_name) != 0
+                count_word_uses_in_slice(&items[i + 1 + projection_count..], &temp_name) != 0 ||
+                projected_bindings
+                    .iter()
+                    .any(|(bind_name, _)| {
+                        is_destructure_temp_name(bind_name) &&
+                            count_word_uses_in_slice(&items[i + 1 + projection_count..], bind_name) != 0
+                    })
             {
                 i += 1;
                 continue;
@@ -5975,6 +5981,10 @@ fn make_named_let_binding(name: String, rhs: TypedExpression) -> (Expression, Ty
         children: vec![pure_word("let"), typed_word(name, rhs.typ.clone()), rhs],
     };
     (expr, typed)
+}
+
+fn is_destructure_temp_name(name: &str) -> bool {
+    name.starts_with("_temp_tuple_") || name.starts_with("_let_temp_tuple_")
 }
 
 fn is_inline_safe_body(expr: &Expression) -> bool {
