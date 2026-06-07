@@ -1469,8 +1469,59 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
             _ => Ok(ctx.fresh_var()), // unknown type name
         },
 
-        // Handles list-like hints like [Int], [[Char]], etc.
+        Expression::Apply(items) if items.is_empty() => Ok(Type::Unit),
+
+        // Handles function, list, and tuple hints.
         Expression::Apply(items) if !items.is_empty() => {
+            let arrow_positions = items
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, item)| match item {
+                    Expression::Word(w) if w == "->" => Some(idx),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if let Some(&arrow_idx) = arrow_positions.first() {
+                if arrow_positions.len() == 1 {
+                    if arrow_idx == 0 || arrow_idx + 2 != items.len() {
+                        return Err(format!("Invalid type hint syntax: {}", expr.to_lisp()));
+                    }
+                    let ret = parse_type_hint(&items[arrow_idx + 1], ctx)?;
+                    let mut out = ret;
+                    for param_expr in items[..arrow_idx].iter().rev() {
+                        let param = parse_type_hint(param_expr, ctx)?;
+                        out = Type::Function(Box::new(param), Box::new(out));
+                    }
+                    return Ok(out);
+                }
+
+                if items.len() < 3 || items.len() % 2 == 0 {
+                    return Err(format!("Invalid type hint syntax: {}", expr.to_lisp()));
+                }
+                for (idx, item) in items.iter().enumerate() {
+                    let is_arrow_slot = idx % 2 == 1;
+                    match (is_arrow_slot, item) {
+                        (true, Expression::Word(w)) if w == "->" => {}
+                        (false, Expression::Word(w)) if w == "->" => {
+                            return Err(format!("Invalid type hint syntax: {}", expr.to_lisp()));
+                        }
+                        (true, _) => {
+                            return Err(format!("Invalid type hint syntax: {}", expr.to_lisp()));
+                        }
+                        (false, _) => {}
+                    }
+                }
+
+                let mut out = parse_type_hint(items.last().expect("type chain is non-empty"), ctx)?;
+                let mut idx = items.len().saturating_sub(2);
+                while idx > 0 {
+                    let param = parse_type_hint(&items[idx - 1], ctx)?;
+                    out = Type::Function(Box::new(param), Box::new(out));
+                    idx = idx.saturating_sub(2);
+                }
+                return Ok(out);
+            }
+
             // A shorthand for [T] means (vector T)
             if let Expression::Word(t) = &items[0] {
                 if t == "vector"
@@ -1540,7 +1591,7 @@ fn infer_letype(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     let [Expression::Word(_kw), Expression::Word(local_name), type_expr] = exprs else {
         return Err("letype expects: (letype name Type)".to_string());
     };
-    let typ = crate::externals::parse_decl_type_expr(type_expr)?;
+    let typ = parse_type_hint(type_expr, ctx)?;
     ctx.declare_type(local_name.clone(), typ)?;
     if ctx.collect_expr_types {
         ctx.expr_types.insert(expression_id(&exprs[1]), exprs

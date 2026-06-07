@@ -2665,3 +2665,39 @@ q)))
       (std/vector/slice xs 0 (+ end 1)))))
 
 (let std/vector/char/trim (lambda xs (std/vector/char/trim/right (std/vector/char/trim/left xs))))
+(let std/string/prepend-zeroes (lambda (s target-len)
+  (do
+    (mut result s)
+    (while (< (length result) target-len)
+      (alter! result (cons "0" result)))
+    result)))
+(let std/convert/dec->string-scale (lambda (scale x) 
+  (if (=. (std/dec/floor x) x)
+      (cons (std/convert/integer->string (Dec->Int x)) ".0")
+      (do
+        (let flip
+          (if (<. x 0.0) -1.0 1.0))
+
+        (let exponent
+          (std/dec/floor x))
+
+        (let mantisa
+          (-. x exponent))
+
+        (let left
+          (std/convert/integer->string (Dec->Int exponent)))
+
+        (let right-unpadded
+          (std/convert/integer->string
+            (Dec->Int (*. mantisa std/dec/dec-scaling flip))))
+
+        (let right
+          (std/string/prepend-zeroes right-unpadded 6))
+
+        (mut len (length right))
+        (while (=# (get right (- len 1)) '0')
+            (pop! right)
+            (alter! len (- len 1)))
+
+        (cons left [std/char/dot] right)))))
+(let std/convert/dec->string-6 (std/convert/dec->string-scale 6))
