@@ -4903,6 +4903,59 @@ add-one!"#;
     }
 
     #[test]
+    fn test_letype_allows_wildcard_underscore_in_function_signature() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (letype xs (Int -> _ -> Int))
+                    (let xs (lambda (x y) 20))
+                    (xs 1 true))"#
+            )
+            .expect("program should build");
+
+        crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("wildcard underscore should allow unconstrained slots");
+    }
+
+    #[test]
+    fn test_letype_wildcard_underscore_still_enforces_constrained_slots() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (sig xs (Int -> _ -> Bool))
+                    (let xs (lambda (x y) 20))
+                    (xs 1 true))"#
+            )
+            .expect("program should build");
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("wildcard underscore should still enforce specified slots");
+        assert!(
+            err.contains("Signature mismatch for 'xs'"),
+            "expected signature mismatch header, got: {}",
+            err
+        );
+        assert!(
+            err.contains("declared: Int ->") && err.contains("Bool"),
+            "expected declared bool return in message, got: {}",
+            err
+        );
+        assert!(
+            err.contains("inferred:") && err.contains("Int"),
+            "expected inferred type in message, got: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_pure_program_emits_no_unused_builtin_host_imports() {
         let expr = crate::parser::build("(+ 1 2)").expect("program should build");
         let wat = crate::wat

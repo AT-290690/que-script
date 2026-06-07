@@ -24,8 +24,8 @@
 
 (let Integer->Chars std/convert/integer->string)
 (let Integer->String std/convert/integer->string)
-(let Dec->Chars std/convert/dec->string)
-(let Dec->String std/convert/dec->string)
+(let Dec->Chars std/convert/dec->string-6)
+(let Dec->String std/convert/dec->string-6)
 
 (let String->Vector (lambda ch xs (std/convert/string->vector xs ch)))
 (let Vector->String (lambda ch xs (std/convert/vector->string xs ch)))
