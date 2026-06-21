@@ -5648,6 +5648,12 @@ add-one!"#;
     }
 
     #[test]
+    fn test_runtime_dec_to_string_partial_alias_runs() {
+        let result = run_program_output_with_std_and_opts(r#"(Dec->String 1.2)"#, true);
+        assert_eq!(result, "1.2");
+    }
+
+    #[test]
     fn test_wat_rejects_push_of_closure_into_captured_vector() {
         let program = r#"(do
             (let xs [])
