@@ -575,7 +575,7 @@ fn compile_borrowed_top_level_cached_ref(
         return None;
     }
     let (params, ret_ty) = ctx.fn_sigs.get(name)?;
-    if !params.is_empty() || !is_managed_local_type(ret_ty) {
+    if !params.is_empty() || !is_managed_local_type(ret_ty) || matches!(ret_ty, Type::Function(_, _)) {
         return None;
     }
     let g_init = cache_init_global(name);
