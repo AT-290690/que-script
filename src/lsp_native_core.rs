@@ -92,8 +92,14 @@ fn is_quantifier_prefix(prefix: &str) -> bool {
 }
 
 pub fn strip_type_var_numbers(input: &str) -> String {
+    const CANONICAL_TYPE_VAR_NAMES: [&str; 24] = [
+        "T", "K", "V", "R", "S", "U", "W", "X", "Y", "Z", "A", "B", "C", "D", "E", "F", "G",
+        "H", "I", "J", "L", "M", "N", "P",
+    ];
+
     let chars: Vec<char> = input.chars().collect();
     let mut out = String::with_capacity(input.len());
+    let mut seen: HashMap<String, String> = HashMap::new();
     let mut i = 0usize;
     while i < chars.len() {
         if chars[i] == 'T' {
@@ -106,7 +112,19 @@ pub fn strip_type_var_numbers(input: &str) -> String {
                 j += 1;
             }
             if j > digit_start {
-                out.push('T');
+                let raw_name: String = chars[i..j].iter().collect();
+                let canonical = if let Some(existing) = seen.get(&raw_name) {
+                    existing.clone()
+                } else {
+                    let next_name = if seen.len() < CANONICAL_TYPE_VAR_NAMES.len() {
+                        CANONICAL_TYPE_VAR_NAMES[seen.len()].to_string()
+                    } else {
+                        format!("T{}", seen.len() + 1)
+                    };
+                    seen.insert(raw_name, next_name.clone());
+                    next_name
+                };
+                out.push_str(&canonical);
                 i = j;
                 continue;
             }
