@@ -3905,7 +3905,25 @@ xs)"#,
             .and_then(|v| v.as_str())
             .expect("hover response should include string contents");
 
-        assert_eq!(contents, "map : (T -> T) -> [T] -> [T]");
+        assert_eq!(contents, "map : (T -> K) -> [T] -> [K]");
+    }
+
+    #[test]
+    fn test_lsp_type_var_rendering_preserves_distinct_generic_positions() {
+        assert_eq!(
+            crate::lsp_native_core::normalize_signature("T12 -> T12 -> T13"),
+            "T -> T -> K"
+        );
+        assert_eq!(
+            crate::lsp_native_core::normalize_signature("T7 -> T8 -> [T7]"),
+            "T -> K -> [T]"
+        );
+        assert_eq!(
+            crate::lsp_native_core::strip_type_var_numbers(
+                "Cannot unify T12 with T13 in T12 -> [T13]"
+            ),
+            "Cannot unify T with K in T -> [K]"
+        );
     }
 
     #[test]
