@@ -36,7 +36,7 @@
 (let String->Dec std/convert/chars->dec)
 (let Chars->Dec std/convert/chars->dec)
 (let Integer->Bits std/convert/integer->bits)
-
+(let Bits->Integer std/convert/bits->integer)
 (let Char->Digit std/convert/char->digit)
 (let Digit->Char std/convert/digit->char)
 
@@ -170,6 +170,7 @@
 (let Table/push-or! std/vector/hash/table/push-or!)
 (let Table/remove! (lambda table key (do (std/vector/hash/table/remove! table key) nil)))
 (let Table/count std/vector/hash/table/count)
+(let Table/frequency std/vector/hash/table/frequency)
 
 (let Table/drop! (lambda table keys (std/vector/hash/table/drop! table keys)))
 (let Table/keep (lambda keys table (std/vector/hash/table/keep table keys)))
