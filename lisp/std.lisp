@@ -1431,8 +1431,6 @@ q)))
                               (tail-call/bits->integer (+ index 1) (+ out (* (std/vector/at xs index) (std/int/expt 2 (- (length xs) index 1))))))))
   (tail-call/bits->integer 0 0))))
 
-
-
 (let std/vector/copy (lambda xs (std/vector/map xs identity)))
 
 (let std/int/reduce (lambda n fn acc (do 
@@ -2405,6 +2403,19 @@ q)))
   (let len (length arr))
   (while (< i len) (do
     (let key (get arr i))
+    (let hit (std/vector/hash/table/get table key))
+    (if (= (length hit) 0)
+        (std/vector/hash/table/set! table key 1)
+        (std/vector/hash/table/set! table key (+ (snd (get hit 0)) 1)))
+    (alter! i (+ i 1))))
+  table)))
+
+(let std/vector/hash/table/frequency (lambda xs (do
+  (let table (std/vector/hash/table (std/int/max 64 (length xs))))
+  (mut i 0)
+  (let len (length xs))
+  (while (< i len) (do
+    (let key [(get xs i)])
     (let hit (std/vector/hash/table/get table key))
     (if (= (length hit) 0)
         (std/vector/hash/table/set! table key 1)
