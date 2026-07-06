@@ -1076,12 +1076,15 @@ fn expr_requires_bang(
                             return true;
                         }
                         if let Expression::Apply(form_items) = item {
-                            if let [Expression::Word(kw), Expression::Word(name), _rhs] =
+                            if let [Expression::Word(kw), Expression::Word(name), rhs] =
                                 &form_items[..]
                             {
                                 if kw == "let" || kw == "letrec" || kw == "mut" {
+                                    let aliases_param_or_free =
+                                        (kw == "let" || kw == "letrec")
+                                            && direct_aliases_param_or_free_var(rhs, scopes);
                                     if let Some(scope) = scopes.last_mut() {
-                                        scope.insert(name.clone(), false);
+                                        scope.insert(name.clone(), aliases_param_or_free);
                                     }
                                 }
                             }
@@ -1103,7 +1106,10 @@ fn expr_requires_bang(
                     })
                     .unwrap_or(false),
                 Expression::Word(op) if is_io_op(op) || extern_names.contains(op) => true,
-                Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
+                Expression::Word(op)
+                    if resolve_binding_kind(scopes, op).is_none()
+                        && is_bang_contract_op(op, known_requires_bang) =>
+                {
                     let supplied_arity = items.len().saturating_sub(1);
                     let required_arity = known_function_arities
                         .get(op)
@@ -1198,6 +1204,19 @@ fn expr_uses_param_or_free_var(expr: &Expression, scopes: &[HashMap<String, bool
                     .any(|item| expr_uses_param_or_free_var(item, scopes))
             }
         }
+    }
+}
+
+fn direct_aliases_param_or_free_var(expr: &Expression, scopes: &[HashMap<String, bool>]) -> bool {
+    match expr {
+        Expression::Word(name) => {
+            if let Some(is_param) = resolve_binding_kind(scopes, name) {
+                is_param
+            } else {
+                true
+            }
+        }
+        _ => false,
     }
 }
 
