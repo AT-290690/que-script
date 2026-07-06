@@ -211,6 +211,27 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
     )
 }
 
+fn function_type_total_arity(typ: &Type) -> usize {
+    let mut count = 0usize;
+    let mut current = typ;
+    while let Type::Function(_, ret) = current {
+        count += 1;
+        current = ret;
+    }
+    count
+}
+
+fn application_has_remaining_params(node: &TypedExpression) -> bool {
+    let Some(head_child) = node.children.first() else {
+        return false;
+    };
+    let Some(head_type) = head_child.typ.as_ref() else {
+        return false;
+    };
+    let supplied_args = node.children.len().saturating_sub(1);
+    function_type_total_arity(head_type) > supplied_args
+}
+
 fn local_lookup_fn_effect(
     local_fn_scopes: &[HashMap<String, EffectFlags>],
     name: &str,
@@ -308,6 +329,10 @@ fn estimate_effect_immutable(
                         effect |= estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes);
                     }
 
+                    if application_has_remaining_params(node) {
+                        return effect;
+                    }
+
                     if is_io_op(op) || extern_names.contains(op) {
                         effect |= EffectFlags::IO;
                     } else if is_mutating_op(op) {
@@ -323,7 +348,11 @@ fn estimate_effect_immutable(
                     effect
                 }
                 _ => {
-                    let mut effect = EffectFlags::UNKNOWN_CALL;
+                    let mut effect = if application_has_remaining_params(node) {
+                        EffectFlags::PURE
+                    } else {
+                        EffectFlags::UNKNOWN_CALL
+                    };
                     effect |=
                         estimate_effect_immutable(head_child, top_fn_effects, extern_names, local_fn_scopes);
                     for ch in node.children.iter().skip(1) {
@@ -414,24 +443,30 @@ fn annotate_effects_mut(
                             combined |= annotate_effects_mut(ch, top_fn_effects, extern_names, local_fn_scopes);
                         }
 
-                        if is_io_op(op) || extern_names.contains(op) {
-                            combined |= EffectFlags::IO;
-                        } else if is_mutating_op(op) {
-                            combined |= EffectFlags::MUTATE;
-                        } else if let Some(local_effect) =
-                            local_lookup_fn_effect(local_fn_scopes, op)
-                        {
-                            combined |= local_effect;
-                        } else if let Some(top_effect) = top_fn_effects.get(op) {
-                            combined |= *top_effect;
-                        } else if !is_intrinsic_pure_op(op) {
-                            combined |= EffectFlags::UNKNOWN_CALL;
+                        if !application_has_remaining_params(node) {
+                            if is_io_op(op) || extern_names.contains(op) {
+                                combined |= EffectFlags::IO;
+                            } else if is_mutating_op(op) {
+                                combined |= EffectFlags::MUTATE;
+                            } else if let Some(local_effect) =
+                                local_lookup_fn_effect(local_fn_scopes, op)
+                            {
+                                combined |= local_effect;
+                            } else if let Some(top_effect) = top_fn_effects.get(op) {
+                                combined |= *top_effect;
+                            } else if !is_intrinsic_pure_op(op) {
+                                combined |= EffectFlags::UNKNOWN_CALL;
+                            }
                         }
 
                         combined
                     }
                     _ => {
-                        let mut combined = EffectFlags::UNKNOWN_CALL;
+                        let mut combined = if application_has_remaining_params(node) {
+                            EffectFlags::PURE
+                        } else {
+                            EffectFlags::UNKNOWN_CALL
+                        };
                         for ch in node.children.iter_mut() {
                             combined |= annotate_effects_mut(ch, top_fn_effects, extern_names, local_fn_scopes);
                         }
@@ -526,6 +561,7 @@ fn annotate_effects(root: &mut TypedExpression) {
 fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), String> {
     let extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
+    let known_function_arities = top_level_function_arities(root);
     if let Expression::Apply(items) = &root.expr {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
             if items.len() != root.children.len() {
@@ -551,6 +587,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                         let_node,
                         &extern_names,
                         &mut known_requires_bang,
+                        &known_function_arities,
                     )
                 {
                     return Err(message);
@@ -563,6 +600,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
             root,
             &extern_names,
             &mut known_requires_bang,
+            &known_function_arities,
         ) {
             return Err(message);
         }
@@ -576,9 +614,16 @@ fn check_impure_binding_name(
     let_node: &TypedExpression,
     extern_names: &HashSet<String>,
     known_requires_bang: &mut HashMap<String, bool>,
+    known_function_arities: &HashMap<String, usize>,
 ) -> Option<String> {
     let (name, requires_bang) =
-        eval_function_binding_requires_bang(item_expr, let_node, extern_names, known_requires_bang)?;
+        eval_function_binding_requires_bang(
+            item_expr,
+            let_node,
+            extern_names,
+            known_requires_bang,
+            known_function_arities,
+        )?;
     if requires_bang {
         if let Some(offending_idx) =
             eval_function_binding_non_first_mutation_target(item_expr, known_requires_bang)
@@ -802,6 +847,45 @@ fn eval_function_binding_non_first_mutation_target(
     expr_mutates_non_first_param(body, known_requires_bang, &mut scopes)
 }
 
+fn builtin_bang_contract_min_arity(op: &str) -> Option<usize> {
+    match op {
+        "set!" => Some(3),
+        "alter!" => Some(2),
+        "pop!" => Some(1),
+        "push!" => Some(2),
+        _ => None,
+    }
+}
+
+fn top_level_function_arities(root: &TypedExpression) -> HashMap<String, usize> {
+    let mut arities = HashMap::new();
+    let Expression::Apply(items) = &root.expr else {
+        return arities;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return arities;
+    }
+    for item in items.iter().skip(1) {
+        let Expression::Apply(form_items) = item else {
+            continue;
+        };
+        let [Expression::Word(kw), Expression::Word(name), rhs] = &form_items[..] else {
+            continue;
+        };
+        if kw != "let" && kw != "letrec" {
+            continue;
+        }
+        let Expression::Apply(lambda_items) = rhs else {
+            continue;
+        };
+        if !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") {
+            continue;
+        }
+        arities.insert(name.clone(), lambda_items.len().saturating_sub(2));
+    }
+    arities
+}
+
 fn is_impure_bang_exception_name(name: &str) -> bool {
     matches!(
         name,
@@ -829,6 +913,7 @@ fn eval_function_binding_requires_bang(
     let_node: &TypedExpression,
     extern_names: &HashSet<String>,
     known_requires_bang: &mut HashMap<String, bool>,
+    known_function_arities: &HashMap<String, usize>,
 ) -> Option<(String, bool)> {
     let Expression::Apply(let_items) = item_expr else {
         return None;
@@ -860,7 +945,12 @@ fn eval_function_binding_requires_bang(
         _ => match rhs {
             Expression::Apply(rhs_items) => {
                 matches!(rhs_items.first(), Some(Expression::Word(w)) if w == "lambda")
-                    && lambda_requires_bang(rhs, extern_names, known_requires_bang)
+                    && lambda_requires_bang(
+                        rhs,
+                        extern_names,
+                        known_requires_bang,
+                        known_function_arities,
+                    )
             }
             _ => false,
         },
@@ -876,6 +966,7 @@ pub fn collect_top_level_function_external_impurity(
 ) {
     let extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
+    let known_function_arities = top_level_function_arities(root);
     if let Expression::Apply(items) = &root.expr {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
             if items.len() == root.children.len() {
@@ -888,6 +979,7 @@ pub fn collect_top_level_function_external_impurity(
                         let_node,
                         &extern_names,
                         &mut known_requires_bang,
+                        &known_function_arities,
                     ) {
                         out.insert(name, requires);
                     }
@@ -896,7 +988,13 @@ pub fn collect_top_level_function_external_impurity(
             return;
         }
         if let Some((name, requires)) =
-            eval_function_binding_requires_bang(&root.expr, root, &extern_names, &mut known_requires_bang)
+            eval_function_binding_requires_bang(
+                &root.expr,
+                root,
+                &extern_names,
+                &mut known_requires_bang,
+                &known_function_arities,
+            )
         {
             out.insert(name, requires);
         }
@@ -907,6 +1005,7 @@ fn lambda_requires_bang(
     lambda_expr: &Expression,
     extern_names: &HashSet<String>,
     known_requires_bang: &HashMap<String, bool>,
+    known_function_arities: &HashMap<String, usize>,
 ) -> bool {
     let Expression::Apply(items) = lambda_expr else {
         return false;
@@ -924,7 +1023,13 @@ fn lambda_requires_bang(
         }
     }
     if let Some(body) = items.last() {
-        expr_requires_bang(body, extern_names, known_requires_bang, &mut scopes)
+        expr_requires_bang(
+            body,
+            extern_names,
+            known_requires_bang,
+            known_function_arities,
+            &mut scopes,
+        )
     } else {
         false
     }
@@ -943,6 +1048,7 @@ fn expr_requires_bang(
     expr: &Expression,
     extern_names: &HashSet<String>,
     known_requires_bang: &HashMap<String, bool>,
+    known_function_arities: &HashMap<String, usize>,
     scopes: &mut Vec<HashMap<String, bool>>,
 ) -> bool {
     match expr {
@@ -955,14 +1061,17 @@ fn expr_requires_bang(
                 return false;
             };
             match head {
-                Expression::Word(op) if op == "lambda" => {
-                    // Nested lambda effects are checked when that lambda itself is bound.
-                    false
-                }
+                Expression::Word(op) if op == "lambda" => false,
                 Expression::Word(op) if op == "do" => {
                     scopes.push(HashMap::new());
                     for item in items.iter().skip(1) {
-                        if expr_requires_bang(item, extern_names, known_requires_bang, scopes) {
+                        if expr_requires_bang(
+                            item,
+                            extern_names,
+                            known_requires_bang,
+                            known_function_arities,
+                            scopes,
+                        ) {
                             scopes.pop();
                             return true;
                         }
@@ -983,10 +1092,37 @@ fn expr_requires_bang(
                 }
                 Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => items
                     .get(2)
-                    .map(|rhs| expr_requires_bang(rhs, extern_names, known_requires_bang, scopes))
+                    .map(|rhs| {
+                        expr_requires_bang(
+                            rhs,
+                            extern_names,
+                            known_requires_bang,
+                            known_function_arities,
+                            scopes,
+                        )
+                    })
                     .unwrap_or(false),
                 Expression::Word(op) if is_io_op(op) || extern_names.contains(op) => true,
                 Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
+                    let supplied_arity = items.len().saturating_sub(1);
+                    let required_arity = known_function_arities
+                        .get(op)
+                        .copied()
+                        .or_else(|| builtin_bang_contract_min_arity(op));
+                    if let Some(required_arity) = required_arity {
+                        if supplied_arity < required_arity {
+                            return items.iter().skip(1).any(|arg| {
+                                expr_requires_bang(
+                                    arg,
+                                    extern_names,
+                                    known_requires_bang,
+                                    known_function_arities,
+                                    scopes,
+                                )
+                            });
+                        }
+                    }
+
                     let Some(target) = items.get(1) else {
                         return true;
                     };
@@ -1003,7 +1139,13 @@ fn expr_requires_bang(
                 }
                 Expression::Word(_op) => {
                     for arg in items.iter().skip(1) {
-                        if expr_requires_bang(arg, extern_names, known_requires_bang, scopes) {
+                        if expr_requires_bang(
+                            arg,
+                            extern_names,
+                            known_requires_bang,
+                            known_function_arities,
+                            scopes,
+                        ) {
                             return true;
                         }
                     }
@@ -1011,7 +1153,13 @@ fn expr_requires_bang(
                 }
                 _ => {
                     for it in items {
-                        if expr_requires_bang(it, extern_names, known_requires_bang, scopes) {
+                        if expr_requires_bang(
+                            it,
+                            extern_names,
+                            known_requires_bang,
+                            known_function_arities,
+                            scopes,
+                        ) {
                             return true;
                         }
                     }
