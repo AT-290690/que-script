@@ -2672,6 +2672,44 @@ xs)"#,
     }
 
     #[test]
+    fn test_infer_partial_application_of_impure_function_does_not_require_bang_suffix() {
+        let exprs = crate::parser
+            ::parse(
+                "(do (let fn! (lambda a b (do (set! a 0 b) a))) (let f2 (lambda xs (fn! xs))) f2)"
+            )
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            inferred.is_ok(),
+            "partial application of impure function should stay pure until saturated, got: {:?}",
+            inferred
+        );
+    }
+
+    #[test]
+    fn test_infer_partial_application_alias_of_impure_function_stays_equivalent() {
+        let exprs = crate::parser
+            ::parse(
+                "(do (let fn! (lambda a b (do (set! a 0 b) a))) (let f2 (lambda xs (do (let c xs) (fn! c)))) f2)"
+            )
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        assert!(
+            inferred.is_ok(),
+            "aliasing the argument should not change partial-application impurity, got: {:?}",
+            inferred
+        );
+    }
+
+    #[test]
     fn test_infer_impure_function_non_unit_return_allowed_by_default() {
         let exprs = crate::parser
             ::parse("(let append-ten! (lambda xs (do (set! xs 0 1) xs)))")
