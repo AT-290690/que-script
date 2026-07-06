@@ -2710,6 +2710,26 @@ xs)"#,
     }
 
     #[test]
+    fn test_infer_saturated_alias_call_of_impure_function_requires_bang_suffix() {
+        let exprs = crate::parser
+            ::parse(
+                "(do (let fn! (lambda a b (do (set! a 0 b) a))) (let f2 (lambda xs (do (let c xs) (fn! c 2)))) f2)"
+            )
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+        );
+        let err = inferred.expect_err("saturated impure alias call without ! should fail");
+        assert!(
+            err.contains("Impure function 'f2' must end with '!'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_infer_impure_function_non_unit_return_allowed_by_default() {
         let exprs = crate::parser
             ::parse("(let append-ten! (lambda xs (do (set! xs 0 1) xs)))")
