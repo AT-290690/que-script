@@ -3977,6 +3977,18 @@ xs)"#,
             "T -> K -> [T]"
         );
         assert_eq!(
+            crate::lsp_native_core::normalize_signature("(T -> K) -> [T] -> [K]"),
+            "(T -> K) -> [T] -> [K]"
+        );
+        assert_eq!(
+            crate::lsp_native_core::normalize_signature("Int -> T17 -> Int -> {Int * T}"),
+            "Int -> T -> Int -> {Int * T}"
+        );
+        assert_eq!(
+            crate::lsp_native_core::normalize_signature("Int -> T17 -> Int -> {Int * K}"),
+            "Int -> T -> Int -> {Int * K}"
+        );
+        assert_eq!(
             crate::lsp_native_core::strip_type_var_numbers(
                 "Cannot unify T12 with T13 in T12 -> [T13]"
             ),
@@ -4792,6 +4804,76 @@ add-one!"#;
     }
 
     #[test]
+    fn test_wasm_lsp_hover_sig_preserves_shared_bare_generic_name() {
+        let program = r#"(sig add (Int -> T -> Int -> { Int T }))
+(let add (lambda (x f y) { (+ x y) f }))
+add"#;
+        for (line, character) in [(0, 5), (1, 5), (2, 1)] {
+            let hover_json = crate::wasm_api::lsp_hover(program.to_string(), line, character);
+            let hover: serde_json::Value = serde_json
+                ::from_str(&hover_json)
+                .expect("hover response should be valid JSON");
+
+            let contents = hover
+                .get("contents")
+                .and_then(|v| v.as_str())
+                .expect("hover response should include string contents");
+
+            assert!(
+                contents.contains("add : Int -> T -> Int -> {Int * T}"),
+                "expected sig hover to preserve shared generic variable at {line}:{character}, got: {}",
+                contents
+            );
+        }
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_sig_rejects_bare_value_for_vector_generic() {
+        let program = r#"(sig add (Int -> T -> Int -> { Int [T] }))
+(let add (lambda (x f y) { (+ x y) f }))
+add"#;
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
+        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+            .expect("diagnostics should be valid JSON");
+        let first_message = diagnostics
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("message"))
+            .and_then(|message| message.as_str())
+            .unwrap_or("");
+
+        assert!(
+            first_message.contains("Signature mismatch for 'add'")
+                || first_message.contains("Cannot construct infinite type"),
+            "expected wasm LSP diagnostic for generic vector mismatch, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_sig_rejects_identity_for_vector_return() {
+        let program = r#"(sig fn (T -> [T]))
+(let fn (lambda (x) x))
+fn"#;
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
+        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+            .expect("diagnostics should be valid JSON");
+        let first_message = diagnostics
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("message"))
+            .and_then(|message| message.as_str())
+            .unwrap_or("");
+
+        assert!(
+            first_message.contains("Signature mismatch for 'fn'")
+                || first_message.contains("Cannot construct infinite type"),
+            "expected wasm LSP diagnostic for T -> [T] identity mismatch, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
     fn test_letype_function_signature_matches_inferred_lambda_type() {
         let expr = crate::parser
             ::build(
@@ -5027,6 +5109,122 @@ add-one!"#;
         assert!(
             err.contains("inferred:") && err.contains("Int"),
             "expected inferred type in message, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_letype_reuses_named_generic_type_variables_within_one_signature() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (sig pair-same (T -> T -> { T T }))
+                    (let pair-same (lambda (a b) { a b }))
+                    (pair-same 1 true))"#
+            )
+            .expect("program should build");
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("repeated named generic T should enforce same type");
+
+        assert!(
+            err.contains("Argument 2 of pair-same expected Int but got Bool"),
+            "expected repeated named generic mismatch, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_letype_reuses_named_generic_inside_vector_type() {
+        let ok_expr = crate::parser
+            ::build(
+                r#"(do
+                    (sig head ([T] -> T))
+                    (let head (lambda (xs) (car xs)))
+                    (head [1 2 3]))"#
+            )
+            .expect("program should build");
+
+        crate::infer
+            ::infer_with_builtins_typed(
+                &ok_expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect("[T] -> T should accept returning the vector element type");
+
+        let bad_expr = crate::parser
+            ::build(
+                r#"(do
+                    (sig bad-head ([T] -> T))
+                    (let bad-head (lambda (xs) true))
+                    (bad-head [1 2 3]))"#
+            )
+            .expect("program should build");
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &bad_expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("[T] -> T should reject returning a different type");
+
+        assert!(
+            err.contains("Argument 1 of bad-head expected Bool but got Int"),
+            "expected vector generic mismatch, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_letype_rejects_value_when_named_generic_requires_vector() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (sig add (Int -> T -> Int -> { Int [T] }))
+                    (let add (lambda (x f y) { (+ x y) f }))
+                    add)"#
+            )
+            .expect("program should build");
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("declared tuple field [T] should reject returning bare T");
+
+        assert!(
+            err.contains("Signature mismatch for 'add'") || err.contains("Cannot construct infinite type"),
+            "expected [T] mismatch for add, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_letype_rejects_identity_when_return_must_be_vector_of_same_generic() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (sig fn (T -> [T]))
+                    (let fn (lambda (x) x))
+                    fn)"#
+            )
+            .expect("program should build");
+
+        let err = crate::infer
+            ::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
+            )
+            .expect_err("T -> [T] should reject identity function");
+
+        assert!(
+            err.contains("Signature mismatch for 'fn'") || err.contains("Cannot construct infinite type"),
+            "expected T -> [T] mismatch for identity, got: {}",
             err
         );
     }
