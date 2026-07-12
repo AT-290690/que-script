@@ -128,11 +128,63 @@ pub fn strip_type_var_numbers(input: &str) -> String {
                 i = j;
                 continue;
             }
+            if is_bare_canonical_type_var(&chars, i, &CANONICAL_TYPE_VAR_NAMES) {
+                let canonical = canonicalize_bare_type_var(
+                    chars[i],
+                    &mut seen,
+                    &CANONICAL_TYPE_VAR_NAMES,
+                );
+                out.push_str(&canonical);
+                i += 1;
+                continue;
+            }
+        } else if is_bare_canonical_type_var(&chars, i, &CANONICAL_TYPE_VAR_NAMES) {
+            let canonical =
+                canonicalize_bare_type_var(chars[i], &mut seen, &CANONICAL_TYPE_VAR_NAMES);
+            out.push_str(&canonical);
+            i += 1;
+            continue;
         }
         out.push(chars[i]);
         i += 1;
     }
     out
+}
+
+fn canonicalize_bare_type_var(
+    ch: char,
+    seen: &mut HashMap<String, String>,
+    names: &[&str],
+) -> String {
+    let raw_name = ch.to_string();
+    if seen.values().any(|existing| existing == &raw_name) {
+        raw_name
+    } else if let Some(existing) = seen.get(&raw_name) {
+        existing.clone()
+    } else {
+        let next_name = if seen.len() < names.len() {
+            names[seen.len()].to_string()
+        } else {
+            format!("T{}", seen.len() + 1)
+        };
+        seen.insert(raw_name, next_name.clone());
+        next_name
+    }
+}
+
+fn is_bare_canonical_type_var(chars: &[char], i: usize, names: &[&str]) -> bool {
+    let ch = chars[i];
+    if !names.iter().any(|name| name.len() == 1 && name.starts_with(ch)) {
+        return false;
+    }
+
+    let prev_is_ident = i > 0 && is_type_identifier_char(chars[i - 1]);
+    let next_is_ident = i + 1 < chars.len() && is_type_identifier_char(chars[i + 1]);
+    !prev_is_ident && !next_is_ident
+}
+
+fn is_type_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_' || ch == '/'
 }
 
 pub fn build_base_environment(

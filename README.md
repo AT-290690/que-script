@@ -154,12 +154,12 @@ cargo test
 Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner:
 
 ```lisp
-(letrec factorial (lambda n total
+(letrec factorial (lambda (n total)
    (if (= n 0)
        total
        (factorial (- n 1) (* total n)))))
 
-(let bionomial-coefficient (lambda a b
+(let bionomial-coefficient (lambda (a b)
     (/ (factorial a 1)
             (*
                 (factorial b 1)
@@ -177,12 +177,12 @@ Unfortunately, we can't fit that number in 32 big integers.
 Instead we have to use **Big** integers (or numbers as a vectors with arbitrary precision):
 
 ```lisp
-(letrec factorial (lambda n total
+(letrec factorial (lambda (n total)
         (if (= (get n 0) 0)
             total
             (factorial (BigInt/sub n [ 1 ]) (BigInt/mul total n)))))
 
-(let bionomial-coefficient (lambda a b
+(let bionomial-coefficient (lambda (a b)
     (BigInt/div (factorial a [ 1 ])
             (BigInt/mul
                 (factorial b [ 1 ])
@@ -228,7 +228,7 @@ To what floor do the instructions take Santa?
     ")))"     ; result in floor -3.
     ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (count/char '(' input) (count/char ')' input))))
+(let solve (lambda (input) (- (count/char '(' input) (count/char ')' input))))
 (map solve samples)
 ; [Int]
 ; [0 0 3 3 3 -1 -1 -3 -3]

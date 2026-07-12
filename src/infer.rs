@@ -1105,6 +1105,20 @@ fn expr_requires_bang(
                         )
                     })
                     .unwrap_or(false),
+                Expression::Word(op) if resolve_binding_kind(scopes, op).is_some() => {
+                    for arg in items.iter().skip(1) {
+                        if expr_requires_bang(
+                            arg,
+                            extern_names,
+                            known_requires_bang,
+                            known_function_arities,
+                            scopes,
+                        ) {
+                            return true;
+                        }
+                    }
+                    false
+                }
                 Expression::Word(op) if is_io_op(op) || extern_names.contains(op) => true,
                 Expression::Word(op)
                     if resolve_binding_kind(scopes, op).is_none()
@@ -1627,13 +1641,26 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 }
 
 fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
+    let mut named_vars = HashMap::new();
+    parse_type_hint_with_named_vars(expr, ctx, &mut named_vars)
+}
+
+fn parse_type_hint_with_named_vars(
+    expr: &Expression,
+    ctx: &mut InferenceContext,
+    named_vars: &mut HashMap<String, Type>,
+) -> Result<Type, String> {
     match expr {
         Expression::Word(name) => match name.as_str() {
             "Int" => Ok(Type::Int),
             "Dec" => Ok(Type::Dec),
             "Bool" => Ok(Type::Bool),
             "Char" => Ok(Type::Char),
-            _ => Ok(ctx.fresh_var()), // unknown type name
+            "_" => Ok(ctx.fresh_var()),
+            _ => Ok(named_vars
+                .entry(name.clone())
+                .or_insert_with(|| ctx.fresh_var())
+                .clone()),
         },
 
         Expression::Apply(items) if items.is_empty() => Ok(Type::Unit),
@@ -1653,10 +1680,11 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     if arrow_idx == 0 || arrow_idx + 2 != items.len() {
                         return Err(format!("Invalid type hint syntax: {}", expr.to_lisp()));
                     }
-                    let ret = parse_type_hint(&items[arrow_idx + 1], ctx)?;
+                    let ret =
+                        parse_type_hint_with_named_vars(&items[arrow_idx + 1], ctx, named_vars)?;
                     let mut out = ret;
                     for param_expr in items[..arrow_idx].iter().rev() {
-                        let param = parse_type_hint(param_expr, ctx)?;
+                        let param = parse_type_hint_with_named_vars(param_expr, ctx, named_vars)?;
                         out = Type::Function(Box::new(param), Box::new(out));
                     }
                     return Ok(out);
@@ -1679,10 +1707,15 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     }
                 }
 
-                let mut out = parse_type_hint(items.last().expect("type chain is non-empty"), ctx)?;
+                let mut out = parse_type_hint_with_named_vars(
+                    items.last().expect("type chain is non-empty"),
+                    ctx,
+                    named_vars,
+                )?;
                 let mut idx = items.len().saturating_sub(2);
                 while idx > 0 {
-                    let param = parse_type_hint(&items[idx - 1], ctx)?;
+                    let param =
+                        parse_type_hint_with_named_vars(&items[idx - 1], ctx, named_vars)?;
                     out = Type::Function(Box::new(param), Box::new(out));
                     idx = idx.saturating_sub(2);
                 }
@@ -1699,7 +1732,7 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     || t == "strings"
                 {
                     if items.len() == 2 {
-                        let inner = parse_type_hint(&items[1], ctx)?;
+                        let inner = parse_type_hint_with_named_vars(&items[1], ctx, named_vars)?;
                         return Ok(Type::List(Box::new(inner)));
                     }
                 } else if t == "tuple" {
@@ -1711,7 +1744,9 @@ fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type
                     }
                     let mut elems = Vec::new();
                     for elem_expr in &items[1..] {
-                        elems.push(parse_type_hint(elem_expr, ctx)?);
+                        elems.push(parse_type_hint_with_named_vars(
+                            elem_expr, ctx, named_vars,
+                        )?);
                     }
                     return Ok(Type::Tuple(elems));
                 }
@@ -2259,7 +2294,7 @@ fn ensure_declared_type_matches(
     inferred_type: &Type,
     binding_expr: &Expression,
     scope: Option<InferErrorScope>,
-) -> Result<(), String> {
+) -> Result<Type, String> {
     let constraints = vec![(
         inferred_type.clone(),
         declared_type.clone(),
@@ -2269,15 +2304,14 @@ fn ensure_declared_type_matches(
             scope,
         },
     )];
-    if solve_constraints_list(&constraints).is_ok() {
-        return Ok(());
+    if let Ok(subst_map) = solve_constraints_list(&constraints) {
+        return Ok(apply_subst_map_to_type(&subst_map, declared_type));
     }
 
     Err(format!(
         "Signature mismatch for '{}'\ndeclared: {}\ninferred: {}\nin:\n{}",
         name,
-        declared_type,
-        inferred_type,
+        declared_type, inferred_type,
         binding_expr.to_lisp()
     ))
 }
@@ -2378,16 +2412,8 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         let solved_type = apply_subst_map_to_type(&subst_map, &value_type);
         ctx.env.apply_substitution_map(&subst_map);
 
-        // Apply value restriction
-        let scheme = if is_nonexpansive(value_expr) {
-            generalize(&ctx.env, solved_type.clone())
-        } else {
-            TypeScheme::monotype(solved_type.clone())
-        };
-
-        ctx.env.insert(var_name.clone(), scheme)?;
-        if let Some(declared_type) = declared_type.as_ref() {
-            ensure_declared_type_matches(
+        let scheme = if let Some(declared_type) = declared_type.as_ref() {
+            let solved_declared_type = ensure_declared_type_matches(
                 var_name,
                 declared_type,
                 &solved_type,
@@ -2395,7 +2421,18 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
                 ctx.current_error_scope(),
             )?;
             ctx.mark_declared_type_used(var_name);
-        }
+            if is_nonexpansive(value_expr) {
+                generalize(&ctx.env, solved_declared_type)
+            } else {
+                TypeScheme::monotype(solved_declared_type)
+            }
+        } else if is_nonexpansive(value_expr) {
+            generalize(&ctx.env, solved_type.clone())
+        } else {
+            TypeScheme::monotype(solved_type.clone())
+        };
+
+        ctx.env.insert(var_name.clone(), scheme)?;
         Ok(Type::Unit)
     } else {
         Err("Let variable must be a variable name".to_string())
