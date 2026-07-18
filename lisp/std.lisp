@@ -185,7 +185,7 @@
 
 (let std/vector/empty? (lambda xs (= (length xs) 0)))
 (let std/vector/empty! (lambda xs (if (std/vector/empty? xs) xs (do 
-     (loop 0 (length xs) (lambda _ (pop! xs)))
+     (while (not (std/vector/empty? xs)) (pop! xs))
      xs))))
 (let std/vector/not-empty? (lambda xs (not (= (length xs) 0))))
 (let std/vector/in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
@@ -310,43 +310,67 @@ out)))
 
 (let std/vector/int/range (lambda start end (do
      (let out [ start ])
-     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) i)))
+     (mut i (+ start 1))
+     (while (<= i end) (do
+        (set! out (length out) i)
+        (alter! i (+ i 1))))
      out))) 
 
 
 (let std/vector/dec/range (lambda start end (do
      (let out [ (Int->Dec start) ])
-     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) (Int->Dec i))))
+     (mut i (+ start 1))
+     (while (<= i end) (do
+        (set! out (length out) (Int->Dec i))
+        (alter! i (+ i 1))))
      out))) 
     
  (let std/vector/dec/ones (lambda n (do
      (let out [])
-     (loop 0 n (lambda i (set! out (length out) 1.0)))
+     (mut i 0)
+     (while (< i n) (do
+        (set! out (length out) 1.0)
+        (alter! i (+ i 1))))
      out))) 
 
  (let std/vector/dec/zeroes (lambda n (do
      (let out [])
-     (loop 0 n (lambda i (set! out (length out) 0.0)))
+     (mut i 0)
+     (while (< i n) (do
+        (set! out (length out) 0.0)
+        (alter! i (+ i 1))))
      out)))
 
  (let std/vector/int/ones (lambda n (do
      (let out [])
-     (loop 0 n (lambda i (set! out (length out) 1)))
+     (mut i 0)
+     (while (< i n) (do
+        (set! out (length out) 1)
+        (alter! i (+ i 1))))
      out))) 
 
  (let std/vector/int/zeroes (lambda n (do
      (let out [])
-     (loop 0 n (lambda i (set! out (length out) 0)))
+     (mut i 0)
+     (while (< i n) (do
+        (set! out (length out) 0)
+        (alter! i (+ i 1))))
      out)))
 
  (let std/vector/bool/true (lambda n (do
      (let out [])
-     (loop 0 n (lambda i (set! out (length out) true)))
+     (mut i 0)
+     (while (< i n) (do
+        (set! out (length out) true)
+        (alter! i (+ i 1))))
      out))) 
 
  (let std/vector/bool/false (lambda n (do
      (let out [])
-     (loop 0 n (lambda i (set! out (length out) false)))
+     (mut i 0)
+     (while (< i n) (do
+        (set! out (length out) false)
+        (alter! i (+ i 1))))
      out))) 
 
 (let std/vector/3d/int/range (lambda s w h (do 
@@ -369,7 +393,10 @@ out)))
 
 (let std/vector/char/blanks (lambda n (do
     (let out [ std/char/empty ])
-    (loop 1 n (lambda i (set! out (length out) std/char/empty)))
+    (mut i 1)
+    (while (< i n) (do
+        (set! out (length out) std/char/empty)
+        (alter! i (+ i 1))))
     out))) 
 
 (let std/vector/int/all-equal? (lambda xs (do (let x (get xs 0)) (std/vector/every? xs (lambda y (= y x))))))
@@ -418,7 +445,11 @@ out)))
       out)))
 
 (let std/vector/cons! (lambda a b (if (and (std/vector/empty? a) (std/vector/empty? b)) a (do 
-  (loop 0 (length b) (lambda i (set! a (length a) (get b i)))) 
+  (mut i 0)
+  (let lenb (length b))
+  (while (< i lenb) (do
+    (set! a (length a) (get b i))
+    (alter! i (+ i 1))))
   a))))
 
 (let std/vector/concat (lambda xs (std/vector/reduce xs std/vector/cons [])))
@@ -655,10 +686,13 @@ out)))
 (let std/dec/delta (lambda a b (std/dec/abs (-. a b))))
 
 (let std/vector/map/adjacent (lambda xs fn (if (std/vector/empty? xs) [] (do 
-  (do 
-    (let out [])
-    (loop 1 (length xs) (lambda i (std/vector/push! out (fn (get xs (- i 1)) (get xs i)))))
-    out)))))
+  (let out [])
+  (mut i 1)
+  (let len (length xs))
+  (while (< i len) (do
+    (std/vector/push! out (fn (get xs (- i 1)) (get xs i)))
+    (alter! i (+ i 1))))
+  out))))
 
 (let std/vector/zipper (lambda a b (do 
       (mut i 1)
@@ -1276,17 +1310,25 @@ q)))
 (let std/vector/3d/for (lambda matrix fn (do
   (let width (length (std/vector/first matrix)))
   (let height (length matrix))
-  (loop 0 height (lambda y 
-    (loop 0 width (lambda x
-      (fn (get matrix y x))))))
+  (mut y 0)
+  (while (< y height) (do
+    (mut x 0)
+    (while (< x width) (do
+      (fn (get matrix y x))
+      (alter! x (+ x 1))))
+    (alter! y (+ y 1))))
    matrix)))
 
 (let std/vector/3d/for/i (lambda matrix fn (do
   (let width (length (std/vector/first matrix)))
   (let height (length matrix))
-  (loop 0 height (lambda y 
-    (loop 0 width (lambda x
-      (fn (get matrix y x) y x)))))
+  (mut y 0)
+  (while (< y height) (do
+    (mut x 0)
+    (while (< x width) (do
+      (fn (get matrix y x) y x)
+      (alter! x (+ x 1))))
+    (alter! y (+ y 1))))
    matrix)))
 
 (let std/vector/3d/points (lambda matrix fn? (do 
@@ -1411,13 +1453,16 @@ q)))
 (let std/vector/subset (lambda xs (if (std/vector/empty? xs) [ xs ] (do
     (let n (length xs))
     (let out [])
-    (loop 0 (std/int/expt 2 n) (lambda i 
-       ; generate bitmask, from 0..00 to 1..11
+    (mut i 0)
+    (let limit (std/int/expt 2 n))
+    (while (< i limit) (do
+        ; generate bitmask, from 0..00 to 1..11
         (std/vector/push! out (<|
                 i
                 (std/convert/integer->bits)
                 (std/vector/reduce/i (lambda a x i
-                    (if (= x 1) (std/vector/append! a (get xs i)) a)) [])))))
+                    (if (= x 1) (std/vector/append! a (get xs i)) a)) [])))
+        (alter! i (+ i 1))))
     out))))
 
 (let std/vector/flat-map (lambda xs (std/vector/map (std/vector/flat-one xs))))
@@ -1444,9 +1489,14 @@ q)))
     (or (= W 0) (= H 0)) [] 
     (and (= W 1) (= H 1)) [[(fn 0 0)]] (do
       (let matrix [])
-      (loop 0 W (lambda i (do 
+      (mut i 0)
+      (while (< i W) (do 
           (std/vector/push! matrix [])
-          (loop 0 H (lambda j (std/vector/3d/set! matrix i j (fn i j)))))))
+          (mut j 0)
+          (while (< j H) (do
+            (std/vector/3d/set! matrix i j (fn i j))
+            (alter! j (+ j 1))))
+          (alter! i (+ i 1))))
       matrix))))
 (let std/vector/3d/product (lambda A B (do
   (let dimsA (std/vector/3d/dimensions A))
@@ -1514,7 +1564,10 @@ q)))
 
 (let std/vector/int/big/range (lambda start end (do
      (let out [ (std/int/big/new (std/convert/integer->string start)) ])
-     (loop (+ start 1) (+ end 1) (lambda i (set! out (length out) (std/int/big/new (std/convert/integer->string i)))))
+     (mut i (+ start 1))
+     (while (<= i end) (do
+        (set! out (length out) (std/int/big/new (std/convert/integer->string i)))
+        (alter! i (+ i 1))))
    out)))
 
 (let std/int/big/add (lambda a1 b1 (do
@@ -1753,12 +1806,15 @@ q)))
   ; Loop to calculate n^pow
   (while (< p pow) (do
     (alter! carry 0) ; Reset carry to 0
-    (loop 0 (length digits) (lambda exp (do
+    (mut exp 0)
+    (let len-digits (length digits))
+    (while (< exp len-digits) (do
       (let prod (+ (* (get digits exp) n) carry))
       (let new-carry (/ prod 10))
       (set! digits exp (mod prod 10))
       ; Update carry using variable helper
-      (alter! carry new-carry))))
+      (alter! carry new-carry)
+      (alter! exp (+ exp 1))))
     ; Handle carry
     (while (> carry 0) (do
       (std/vector/push! digits (mod carry 10))
@@ -1916,11 +1972,17 @@ q)))
 (let std/vector/cycle (lambda n xs (do 
   (let out [])
   (let len (length xs))
-  (loop 0 n (lambda i (std/vector/push! out (get xs (mod i len)))))
+  (mut i 0)
+  (while (< i n) (do
+    (std/vector/push! out (get xs (mod i len)))
+    (alter! i (+ i 1))))
   out)))
 (let std/vector/replicate (lambda n x (do 
   (let out [])
-  (loop 0 n (lambda _ (std/vector/push! out x)))
+  (mut i 0)
+  (while (< i n) (do
+    (std/vector/push! out x)
+    (alter! i (+ i 1))))
   out)))
 (let std/vector/int/extreme (lambda xs { (std/vector/int/minimum xs) (std/vector/int/maximum xs) }))
 (let std/tuple/map (lambda { a b } fn (fn a b)))
@@ -1971,11 +2033,19 @@ q)))
     (letrec combinations (lambda arr size start temp
         (if (= (length temp) size)
             (set! out (length out) (std/vector/copy temp))
-            (loop start (length arr) (lambda i (do
+            (do
+              (mut i start)
+              (let len (length arr))
+              (while (< i len) (do
                     (set! temp (length temp) (get arr i))
                     (combinations arr size (+ i 1) temp)
-                    (pop! temp)))))))
-   (loop 1 (+ 1 (length xs)) (lambda i (combinations xs i 0 [])))
+                    (pop! temp)
+                    (alter! i (+ i 1))))))))
+   (mut i 1)
+   (let max-size (+ 1 (length xs)))
+   (while (< i max-size) (do
+      (combinations xs i 0 [])
+      (alter! i (+ i 1))))
     out)))
 
 (let std/vector/combinations/n (lambda xs n (do
@@ -1983,10 +2053,14 @@ q)))
     (letrec combinations (lambda arr size start temp
         (if (= (length temp) size)
             (set! out (length out) (std/vector/copy temp))
-            (loop start (length arr) (lambda i (do
+            (do
+              (mut i start)
+              (let len (length arr))
+              (while (< i len) (do
                     (set! temp (length temp) (get arr i))
                     (combinations arr size (+ i 1) temp)
-                    (pop! temp)))))))
+                    (pop! temp)
+                    (alter! i (+ i 1))))))))
     (combinations xs n 0 [])
     out)))
 
