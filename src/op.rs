@@ -3661,6 +3661,16 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         return rebuilt_after_inline;
     };
     let rewritten_children = rebuilt_after_inline.children.clone();
+    let (rewritten_items, rewritten_children) = eliminate_unused_pure_let_bindings_in_do(
+        rewritten_items.clone(),
+        rewritten_children
+    );
+    let rebuilt_after_inline = TypedExpression {
+        expr: Expression::Apply(rewritten_items.clone()),
+        typ: rebuilt_after_inline.typ,
+        effect: rebuilt_after_inline.effect,
+        children: rewritten_children.clone(),
+    };
     if let Some(lowered) = lower_scalar_builder_do(&rebuilt_after_inline) {
         return lowered;
     }
@@ -3718,6 +3728,72 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         effect: rebuilt_after_inline.effect,
         children: new_children,
     }
+}
+
+fn eliminate_unused_pure_let_bindings_in_do(
+    items: Vec<Expression>,
+    children: Vec<TypedExpression>
+) -> (Vec<Expression>, Vec<TypedExpression>) {
+    if items.len() != children.len() || items.len() <= 2 {
+        return (items, children);
+    }
+
+    let last_idx = items.len() - 1;
+    let mut keep = vec![true; items.len()];
+    for i in 1..last_idx {
+        let Some((name, rhs_node)) = pure_let_binding_candidate(&items[i], &children[i]) else {
+            continue;
+        };
+        if !rhs_node.effect.is_pure() {
+            continue;
+        }
+        let end = find_next_do_rebinding(&items, &name, i + 1).unwrap_or(items.len());
+        if !name_is_used_unbound_in_exprs(&name, &items[i + 1..end]) {
+            keep[i] = false;
+        }
+    }
+
+    if keep.iter().all(|k| *k) {
+        return (items, children);
+    }
+
+    let new_items = items
+        .into_iter()
+        .zip(keep.iter())
+        .filter_map(|(item, keep)| if *keep { Some(item) } else { None })
+        .collect::<Vec<_>>();
+    let new_children = children
+        .into_iter()
+        .zip(keep.iter())
+        .filter_map(|(child, keep)| if *keep { Some(child) } else { None })
+        .collect::<Vec<_>>();
+    (new_items, new_children)
+}
+
+fn pure_let_binding_candidate<'a>(
+    expr: &Expression,
+    typed: &'a TypedExpression
+) -> Option<(String, &'a TypedExpression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), _] = &items[..] else {
+        return None;
+    };
+    if kw != "let" {
+        return None;
+    }
+    let rhs = typed.children.get(2)?;
+    Some((name.clone(), rhs))
+}
+
+fn name_is_used_unbound_in_exprs(name: &str, exprs: &[Expression]) -> bool {
+    exprs.iter().any(|expr| {
+        let mut bound = HashSet::new();
+        let mut refs = HashSet::new();
+        collect_unbound_words(expr, &mut bound, &mut refs);
+        refs.contains(name)
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

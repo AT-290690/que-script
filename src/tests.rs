@@ -2355,6 +2355,15 @@ xs)"#,
     }
 
     #[test]
+    fn test_typed_optimization_drops_unused_pure_let_inside_lambda_body() {
+        let typed = infer_typed(
+            "(let fn (lambda (do (let x (+ (+ (+ 1 2) 3) 5)) (let y (* 56 2)) (* x (/ 132 2)))))"
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(let fn (lambda 726))");
+    }
+
+    #[test]
     fn test_typed_optimization_do_cleanup_keeps_impure_call_statement() {
         let typed = infer_typed("(do (print! (vector)) 7)");
         let optimized = crate::op::optimize_typed_ast(&typed);
@@ -2492,11 +2501,7 @@ xs)"#,
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
-        assert!(
-            optimized_lisp.ends_with("-2999)"),
-            "final expression should be folded to literal after inlining, got: {}",
-            optimized_lisp
-        );
+        assert_eq!(optimized_lisp, "-2999");
     }
 
     #[test]
@@ -2507,11 +2512,7 @@ xs)"#,
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
 
-        assert!(
-            optimized_lisp.ends_with("-74975)"),
-            "nested call expression should fold after inline, got: {}",
-            optimized_lisp
-        );
+        assert_eq!(optimized_lisp, "-74975");
     }
 
     #[test]
@@ -5561,6 +5562,29 @@ fn"#;
         assert!(
             wat_flat.contains("local.get 1\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 1"),
             "tuple temp used only for projections should be released early, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_wat_unused_pure_let_inside_lambda_body_is_not_emitted() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (let fn (lambda ()
+                      (let x (+ 1 2 3 5))
+                      (let y (* 56 2))
+                      (* x (/ 132 2))))
+                    (fn))"#
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+
+        assert!(
+            !wat.contains("i32.const 112"),
+            "unused pure local binding should not be emitted, got:\n{}",
             wat
         );
     }
