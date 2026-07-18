@@ -823,33 +823,24 @@ fn collect_lambda_nodes(node: &TypedExpression, out: &mut Vec<TypedExpression>) 
     }
 }
 
-fn collect_let_lambda_bindings(node: &TypedExpression, out: &mut HashMap<String, TypedExpression>) {
-    if let Expression::Apply(items) = &node.expr {
-        if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
-            return;
-        }
-        if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
-            if kw == "let" || kw == "letrec" {
-                if let Some(rhs) = node.children.get(2) {
-                    match &rhs.expr {
-                        Expression::Apply(xs) if
-                            matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
-                        => {
-                            out.insert(name.clone(), rhs.clone());
-                        }
-                        Expression::Word(alias) => {
-                            if let Some(target) = out.get(alias).cloned() {
-                                out.insert(name.clone(), target);
-                            }
-                        }
-                        _ => {}
-                    }
+fn collect_top_level_lambda_bindings(
+    top_defs: &HashMap<String, TopDef>,
+    out: &mut HashMap<String, TypedExpression>
+) {
+    for (name, def) in top_defs {
+        match &def.node.expr {
+            Expression::Apply(xs) if
+                matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+            => {
+                out.insert(name.clone(), def.node.clone());
+            }
+            Expression::Word(alias) => {
+                if let Some(target) = out.get(alias).cloned() {
+                    out.insert(name.clone(), target);
                 }
             }
+            _ => {}
         }
-    }
-    for ch in &node.children {
-        collect_let_lambda_bindings(ch, out);
     }
 }
 
@@ -8112,11 +8103,6 @@ fn compile_lambda_func(
     for (pname, _) in &params {
         scoped_lambda_bindings.remove(pname);
     }
-    let mut local_lambda_bindings = HashMap::new();
-    collect_let_lambda_bindings(body_node, &mut local_lambda_bindings);
-    for (k, v) in local_lambda_bindings {
-        scoped_lambda_bindings.insert(k, v);
-    }
 
     let mut local_types = HashMap::new();
     for (p, t) in &params {
@@ -8258,11 +8244,6 @@ fn compile_closure_func(
     for (pname, _) in &params {
         scoped_lambda_bindings.remove(pname);
     }
-    let mut local_lambda_bindings = HashMap::new();
-    collect_let_lambda_bindings(body_node, &mut local_lambda_bindings);
-    for (k, v) in local_lambda_bindings {
-        scoped_lambda_bindings.insert(k, v);
-    }
 
     let mut local_types = HashMap::new();
     for (p, t) in &params {
@@ -8385,12 +8366,7 @@ fn compile_value_func(
         locals.insert(n.clone(), i);
     }
     let tmp_i32 = local_defs.len();
-    let mut scoped_lambda_bindings = lambda_bindings.clone();
-    let mut local_lambda_bindings = HashMap::new();
-    collect_let_lambda_bindings(value_node, &mut local_lambda_bindings);
-    for (k, v) in local_lambda_bindings {
-        scoped_lambda_bindings.insert(k, v);
-    }
+    let scoped_lambda_bindings = lambda_bindings.clone();
 
     let mut local_types = HashMap::new();
     for (n, t) in &local_defs {
@@ -8742,7 +8718,7 @@ pub fn compile_program_to_wat_typed_with_opts(
     let mut lambda_nodes = Vec::new();
     collect_lambda_nodes(typed_ast, &mut lambda_nodes);
     let mut lambda_bindings: HashMap<String, TypedExpression> = HashMap::new();
-    collect_let_lambda_bindings(typed_ast, &mut lambda_bindings);
+    collect_top_level_lambda_bindings(&top_defs, &mut lambda_bindings);
     let mut lambda_names: HashMap<String, String> = HashMap::new();
     let mut closure_defs: HashMap<String, ClosureDef> = HashMap::new();
     let mut dynamic_partial_helpers: Vec<DynamicPartialHelper> = Vec::new();
@@ -9036,13 +9012,6 @@ pub fn compile_program_to_wat_typed_with_opts(
         main_locals.insert(n.clone(), i);
     }
 
-    let mut scoped_lambda_bindings = lambda_bindings.clone();
-    let mut local_lambda_bindings = HashMap::new();
-    collect_let_lambda_bindings(&main_node, &mut local_lambda_bindings);
-    for (k, v) in local_lambda_bindings {
-        scoped_lambda_bindings.insert(k, v);
-    }
-
     let mut main_local_types = HashMap::new();
     for (n, t) in &main_local_defs {
         main_local_types.insert(n.clone(), t.clone());
@@ -9053,7 +9022,7 @@ pub fn compile_program_to_wat_typed_with_opts(
         extern_names: &extern_names,
         lambda_ids: &lambda_ids,
         closure_defs: &closure_defs,
-        lambda_bindings: &scoped_lambda_bindings,
+        lambda_bindings: &lambda_bindings,
         locals: main_locals,
         local_types: main_local_types,
         materialized_scalar_local_slots: HashSet::new(),

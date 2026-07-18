@@ -571,6 +571,25 @@ xs)"#,
     }
 
     #[test]
+    fn test_runtime_later_block_local_lambda_does_not_shadow_earlier_top_level_lambda() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let parse (lambda (input) input))
+
+                (block
+                  (parse ""))
+
+                (block
+                  (let INPUT "1")
+                  (let parse (lambda (input) (map String->Integer (split "," input))))
+                  (let solve (lambda (notes) notes))
+                  (solve (parse INPUT))))"#,
+            true
+        );
+        assert_eq!(output.trim(), "[1]");
+    }
+
+    #[test]
     fn test_runtime_std_join_does_not_duplicate_last_item() {
         let output = run_program_output_with_std_and_opts(
             r#"(join ", " (strings "Jill" "Tom" "Anthony"))"#,
