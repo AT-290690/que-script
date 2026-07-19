@@ -176,6 +176,7 @@
 (let sum std/vector/int/sum)
 (let sum/int std/vector/int/sum)
 (let sum/dec std/vector/dec/sum)
+(let sum/bool std/vector/bool/sum)
 (let sum. sum/dec)
 (let avg std/int/average)
 (let avg/int std/int/average)
