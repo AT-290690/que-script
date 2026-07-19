@@ -546,6 +546,7 @@ out)))
 (let std/dec/odd? (lambda x (not (=. (mod. x 2.) 0.))))
 (let std/vector/int/sum (lambda xs (std/vector/reduce xs (lambda a b (+ a b)) 0)))
 (let std/vector/dec/sum (lambda xs (std/vector/reduce xs (lambda a b (+. a b)) 0.0)))
+(let std/vector/bool/sum (lambda xs (std/vector/reduce xs (lambda a b (+ a (Bool->Int b))) 0)))
 
 (let std/vector/int/product (lambda xs (std/vector/reduce xs (lambda a b (* a b)) 1)))
 (let std/vector/dec/product (lambda xs (std/vector/reduce xs (lambda a b (*. a b)) 1.0)))
