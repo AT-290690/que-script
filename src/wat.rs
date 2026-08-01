@@ -6118,7 +6118,6 @@ fn compile_do(
                 definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                 tmp_i32: ctx.tmp_i32,
             };
-            let c = compile_expr(n, &scoped_ctx)?;
             let managed = n.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
             // Non-last managed expressions in `do` are usually temporaries and should be
             // released, but borrowed aliases (e.g. push! returning the same vector) must not
@@ -6129,6 +6128,7 @@ fn compile_do(
                 false
             };
             if managed && !borrowed {
+                let c = compile_expr(n, &scoped_ctx)?;
                 let tmp_val = ctx.tmp_i32;
                 let tmp_keep = ctx.tmp_i32 + 1;
                 let mut blk = Vec::new();
@@ -6157,7 +6157,10 @@ fn compile_do(
                 }
                 parts.push(blk.join("\n"));
             } else {
-                parts.push(format!("{c}\ndrop"));
+                let c = compile_expr_discarding_result(n, &scoped_ctx)?;
+                if !c.is_empty() {
+                    parts.push(c);
+                }
             }
         }
         append_last_use_releases_for_do_expr(
@@ -6813,6 +6816,21 @@ fn compile_alter(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
     Ok(format!("{value}\nlocal.set {local_idx}\ni32.const 0"))
 }
 
+fn compile_expr_discarding_result(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let code = compile_expr(node, ctx)?;
+    if !matches!(node.typ.as_ref(), Some(Type::Unit)) {
+        return Ok(format!("{code}\ndrop"));
+    }
+    let trimmed = code.trim_end();
+    if trimmed == "i32.const 0" {
+        return Ok(String::new());
+    }
+    if let Some(prefix) = trimmed.strip_suffix("\ni32.const 0") {
+        return Ok(prefix.to_string());
+    }
+    Ok(format!("{code}\ndrop"))
+}
+
 fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs = compile_expr(
         node.children.get(1).ok_or_else(|| "pop! missing vector".to_string())?,
@@ -6847,7 +6865,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
         ctx
     )?;
     let body_node = node.children.get(2).ok_or_else(|| "while missing body".to_string())?;
-    let body_and_drop = format!("{}\ndrop", compile_expr(body_node, ctx)?);
+    let body_and_drop = compile_expr_discarding_result(body_node, ctx)?;
 
     Ok(
         format!(
