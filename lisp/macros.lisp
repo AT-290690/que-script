@@ -32,6 +32,10 @@
   (lambda con . body
     (qq (unless (uq con) (do (uqs body))))))
 
+(letmacro test
+  (lambda name expr
+    (qq { (uq name) (uq expr) })))
+
 (letmacro +=
   (lambda x n
     (qq (alter! (uq x) (+ (uq x) (uq n))))))

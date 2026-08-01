@@ -330,6 +330,209 @@ fn resolve_project_entry_path(
     Ok((script_path, program, project.root_dir))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QueTestCase {
+    name: Option<String>,
+    passed: bool,
+}
+
+fn resolve_test_program(cwd: &Path, target: &str) -> Result<(String, PathBuf), String> {
+    let target_path = Path::new(target);
+    if target_path.is_dir() {
+        let config_path = target_path.join(crate::project::PROJECT_CONFIG_FILE);
+        if !config_path.is_file() {
+            return Err(format!(
+                "test folder '{}' must contain {}",
+                target_path.display(),
+                crate::project::PROJECT_CONFIG_FILE
+            ));
+        }
+        let project = crate::project::load_project_config_from_path(&config_path)?;
+        let Some(entry) = project.config.entry.as_deref() else {
+            return Err(format!("'{}' has no `entry`", project.path.display()));
+        };
+        let entry_path = project.root_dir.join(entry);
+        let test_path = project.root_dir.join("main.test.que");
+        if !test_path.is_file() {
+            return Err(format!("no tests found at '{}'", test_path.display()));
+        }
+        let entry_source = fs
+            ::read_to_string(&entry_path)
+            .map_err(|e| format!("failed to read '{}': {}", entry_path.display(), e))?;
+        let test_source = fs
+            ::read_to_string(&test_path)
+            .map_err(|e| format!("failed to read '{}': {}", test_path.display(), e))?;
+        let program = format!("(do\n{}\n{})", entry_source, test_source);
+        return Ok((program, project.root_dir));
+    }
+
+    let resolved = if target_path.is_absolute() {
+        target_path.to_path_buf()
+    } else {
+        cwd.join(target_path)
+    };
+    let test_source = fs
+        ::read_to_string(&resolved)
+        .map_err(|e| format!("failed to read '{}': {}", resolved.display(), e))?;
+    let script_cwd = resolved
+        .parent()
+        .map(Path::to_path_buf)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| cwd.to_path_buf());
+    Ok((test_source, script_cwd))
+}
+
+fn split_top_level_items(inner: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = None;
+    let mut depth = 0i32;
+    let mut prev_was_ws = true;
+    for (idx, ch) in inner.char_indices() {
+        match ch {
+            '[' | '{' => {
+                if start.is_none() {
+                    start = Some(idx);
+                }
+                depth += 1;
+                prev_was_ws = false;
+            }
+            ']' | '}' => {
+                depth -= 1;
+                prev_was_ws = false;
+            }
+            ch if ch.is_whitespace() && depth == 0 => {
+                if let Some(s) = start.take() {
+                    out.push(inner[s..idx].trim().to_string());
+                }
+                prev_was_ws = true;
+            }
+            _ => {
+                if start.is_none() || (depth == 0 && prev_was_ws) {
+                    start = Some(idx);
+                }
+                prev_was_ws = false;
+            }
+        }
+    }
+    if let Some(s) = start {
+        let item = inner[s..].trim();
+        if !item.is_empty() {
+            out.push(item.to_string());
+        }
+    }
+    out
+}
+
+fn parse_test_tuple(item: &str) -> Option<QueTestCase> {
+    let inner = item.strip_prefix('{')?.strip_suffix('}')?.trim();
+    let passed = if let Some(name) = inner.strip_suffix(" true") {
+        Some((name.trim(), true))
+    } else {
+        inner.strip_suffix(" false").map(|name| (name.trim(), false))
+    }?;
+    Some(QueTestCase {
+        name: Some(passed.0.to_string()),
+        passed: passed.1,
+    })
+}
+
+fn parse_test_results(decoded: &str) -> Result<Vec<QueTestCase>, String> {
+    let trimmed = decoded.trim();
+    if trimmed == "true" || trimmed == "false" {
+        return Ok(vec![QueTestCase {
+            name: None,
+            passed: trimmed == "true",
+        }]);
+    }
+    let Some(inner) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) else {
+        return Err(format!(
+            "test program must return Bool, [Bool], or [{{ [Char] Bool }}], got: {}",
+            trimmed
+        ));
+    };
+    let items = split_top_level_items(inner.trim());
+    let mut tests = Vec::new();
+    for (idx, item) in items.iter().enumerate() {
+        match item.as_str() {
+            "true" | "false" => tests.push(QueTestCase {
+                name: Some(format!("test {}", idx + 1)),
+                passed: item == "true",
+            }),
+            _ if item.starts_with('{') && item.ends_with('}') => {
+                let parsed = parse_test_tuple(item).ok_or_else(|| {
+                    format!("invalid named test result '{}'; expected {{ name Bool }}", item)
+                })?;
+                tests.push(parsed);
+            }
+            _ => {
+                return Err(format!(
+                    "invalid test result '{}'; expected Bool or {{ name Bool }}",
+                    item
+                ));
+            }
+        }
+    }
+    Ok(tests)
+}
+
+fn print_test_report(tests: &[QueTestCase]) -> bool {
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    for (idx, test) in tests.iter().enumerate() {
+        let name = test
+            .name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("test {}", idx + 1));
+        if test.passed {
+            passed += 1;
+            println!("\x1b[32mPASS\x1b[0m {}", name);
+        } else {
+            failed += 1;
+            println!("\x1b[31mFAIL\x1b[0m {}", name);
+        }
+    }
+    println!();
+    if failed == 0 {
+        println!("\x1b[32m{} passed, {} failed\x1b[0m", passed, failed);
+        true
+    } else {
+        println!("\x1b[31m{} passed, {} failed\x1b[0m", passed, failed);
+        false
+    }
+}
+
+fn run_test_command(args: &[String], bin_name: &str) -> Result<(), String> {
+    let Some(target) = args.first() else {
+        return Err(format!("missing test target\n{}", native_shell_help(bin_name)));
+    };
+    let cwd = env::current_dir().map_err(|e| format!("failed to read current directory: {}", e))?;
+    let (program, script_cwd) = resolve_test_program(&cwd, target)?;
+    apply_project_env_vars(&script_cwd)?;
+
+    let std_ast = crate::baked::load_ast();
+    let mut lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
+    crate::externals::extend_with_builtin_host_externs(&mut lib_defs)?;
+    lib_defs.extend(load_project_library_definitions(&script_cwd)?);
+    let wrapped_ast = crate::parser::merge_std_and_program(&program, lib_defs)?;
+    let wat_src = crate::wat::compile_program_to_wat(&wrapped_ast)?;
+    let store_data = ShellStoreData::new_with_security(Some(script_cwd), ShellPolicy::disabled())
+        .map_err(|e| e.to_string())?;
+    let argv: Vec<String> = args.iter().skip(1).cloned().collect();
+    let decoded = crate::runtime::run_wat_text(&wat_src, store_data, &argv, |linker| {
+        add_shell_to_linker(linker).map_err(|e| e.to_string())
+    })?;
+    let tests = parse_test_results(&decoded)?;
+    if tests.is_empty() {
+        return Err("test program returned no tests".to_string());
+    }
+    if !print_test_report(&tests) {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 fn init_project_config_file(dir: &Path) -> Result<PathBuf, String> {
     let path = dir.join(crate::project::PROJECT_CONFIG_FILE);
     if path.exists() {
@@ -729,6 +932,7 @@ fn native_shell_help(bin_name: &str) -> String {
     format!(
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
          or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
+         or:    {bin} test <folder-or-test.que>\n\
          or:    {bin} [<script.que>] [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
          or:    {bin} --eval <source> [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
          or:    {bin} [<script.que>] [arg ...] --emit-source [--out <expanded.lisp>]\n\
@@ -746,6 +950,7 @@ fn native_shell_help(bin_name: &str) -> String {
           --learn        Print Que language quick reference.\n\
           --env          Print environment flags and tuning examples.\n\
            --eval, -e     Execute inline Que source without a script file.\n\
+          test           Run Que tests. Folder mode appends main.test.que after the folder entry.\n\
            --emit         Output source, wat, wasm, or top-level types and exit.\n\
           --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
                          Use with --out <file> to write it instead of printing.\n\
@@ -1842,6 +2047,8 @@ mod tests {
     use super::{
         init_host_project,
         init_project_config_file,
+        parse_test_results,
+        QueTestCase,
         resolve_project_entry_path,
         take_debug_mode_from_argv,
         take_emit_request_from_argv,
@@ -2152,6 +2359,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_test_results_accepts_bool_vector_and_named_tuples() {
+        assert_eq!(
+            parse_test_results("true").expect("bool test result should parse"),
+            vec![QueTestCase { name: None, passed: true }]
+        );
+        assert_eq!(
+            parse_test_results("[true false]").expect("bool vector test result should parse"),
+            vec![
+                QueTestCase { name: Some("test 1".to_string()), passed: true },
+                QueTestCase { name: Some("test 2".to_string()), passed: false },
+            ]
+        );
+        assert_eq!(
+            parse_test_results("[{ add 1+2 true } { add 2+3 false }]")
+                .expect("named tuple test result should parse"),
+            vec![
+                QueTestCase { name: Some("add 1+2".to_string()), passed: true },
+                QueTestCase { name: Some("add 2+3".to_string()), passed: false },
+            ]
+        );
+    }
+
 }
 
 pub fn run_native_shell() -> Result<(), String> {
@@ -2178,6 +2408,10 @@ pub fn run_native_shell() -> Result<(), String> {
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let path = init_host_project(&cwd, name)?;
         println!("wrote {}", path.display());
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("test")) {
+        run_test_command(&args.iter().skip(2).cloned().collect::<Vec<_>>(), bin_name)?;
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("--learn")) {
