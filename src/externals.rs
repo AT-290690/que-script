@@ -101,14 +101,20 @@ fn parse_type_expr(expr: &Expression) -> Result<Type, String> {
                     "vector" | "string" | "integers" | "bools" | "decimals" | "strings"
                 ) {
                     if items.len() != 2 {
-                        return Err(format!("Invalid list extern type syntax: {}", expr.to_lisp()));
+                        return Err(format!(
+                            "Invalid list extern type syntax: {}",
+                            expr.to_lisp()
+                        ));
                     }
                     let inner = parse_type_expr(&items[1])?;
                     return Ok(Type::List(Box::new(inner)));
                 }
                 if head == "tuple" {
                     if items.len() < 2 {
-                        return Err(format!("Tuple type must have at least one element: {}", expr.to_lisp()));
+                        return Err(format!(
+                            "Tuple type must have at least one element: {}",
+                            expr.to_lisp()
+                        ));
                     }
                     let mut elems = Vec::new();
                     for item in &items[1..] {
@@ -279,7 +285,9 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
 pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[];
 
 pub fn is_builtin_host_extern_symbol(name: &str) -> bool {
-    BUILTIN_HOST_EXTERNS.iter().any(|spec| spec.local_name == name)
+    BUILTIN_HOST_EXTERNS
+        .iter()
+        .any(|spec| spec.local_name == name)
 }
 
 #[cfg(feature = "io")]

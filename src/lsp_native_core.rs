@@ -93,8 +93,8 @@ fn is_quantifier_prefix(prefix: &str) -> bool {
 
 pub fn strip_type_var_numbers(input: &str) -> String {
     const CANONICAL_TYPE_VAR_NAMES: [&str; 24] = [
-        "T", "K", "V", "R", "S", "U", "W", "X", "Y", "Z", "A", "B", "C", "D", "E", "F", "G",
-        "H", "I", "J", "L", "M", "N", "P",
+        "T", "K", "V", "R", "S", "U", "W", "X", "Y", "Z", "A", "B", "C", "D", "E", "F", "G", "H",
+        "I", "J", "L", "M", "N", "P",
     ];
 
     let chars: Vec<char> = input.chars().collect();
@@ -129,11 +129,8 @@ pub fn strip_type_var_numbers(input: &str) -> String {
                 continue;
             }
             if is_bare_canonical_type_var(&chars, i, &CANONICAL_TYPE_VAR_NAMES) {
-                let canonical = canonicalize_bare_type_var(
-                    chars[i],
-                    &mut seen,
-                    &CANONICAL_TYPE_VAR_NAMES,
-                );
+                let canonical =
+                    canonicalize_bare_type_var(chars[i], &mut seen, &CANONICAL_TYPE_VAR_NAMES);
                 out.push_str(&canonical);
                 i += 1;
                 continue;
@@ -174,7 +171,10 @@ fn canonicalize_bare_type_var(
 
 fn is_bare_canonical_type_var(chars: &[char], i: usize, names: &[&str]) -> bool {
     let ch = chars[i];
-    if !names.iter().any(|name| name.len() == 1 && name.starts_with(ch)) {
+    if !names
+        .iter()
+        .any(|name| name.len() == 1 && name.starts_with(ch))
+    {
         return false;
     }
 

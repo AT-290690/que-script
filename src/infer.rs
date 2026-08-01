@@ -280,25 +280,42 @@ fn estimate_effect_immutable(
                     local_fn_scopes.pop();
                     effect
                 }
-                Expression::Word(op) if op == "if" => node
-                    .children
-                    .iter()
-                    .skip(1)
-                    .fold(EffectFlags::PURE, |acc, ch| {
-                        acc | estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes)
-                    }),
-                Expression::Word(op) if op == "while" => node
-                    .children
-                    .iter()
-                    .skip(1)
-                    .fold(EffectFlags::PURE, |acc, ch| {
-                        acc | estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes)
-                    }),
+                Expression::Word(op) if op == "if" => {
+                    node.children
+                        .iter()
+                        .skip(1)
+                        .fold(EffectFlags::PURE, |acc, ch| {
+                            acc | estimate_effect_immutable(
+                                ch,
+                                top_fn_effects,
+                                extern_names,
+                                local_fn_scopes,
+                            )
+                        })
+                }
+                Expression::Word(op) if op == "while" => {
+                    node.children
+                        .iter()
+                        .skip(1)
+                        .fold(EffectFlags::PURE, |acc, ch| {
+                            acc | estimate_effect_immutable(
+                                ch,
+                                top_fn_effects,
+                                extern_names,
+                                local_fn_scopes,
+                            )
+                        })
+                }
                 Expression::Word(op) if op == "do" => {
                     local_fn_scopes.push(HashMap::new());
                     let mut effect = EffectFlags::PURE;
                     for (idx, ch) in node.children.iter().enumerate().skip(1) {
-                        effect |= estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes);
+                        effect |= estimate_effect_immutable(
+                            ch,
+                            top_fn_effects,
+                            extern_names,
+                            local_fn_scopes,
+                        );
                         if let Some(Expression::Apply(form_items)) = items.get(idx) {
                             if let [Expression::Word(kw), Expression::Word(name), rhs] =
                                 &form_items[..]
@@ -321,12 +338,24 @@ fn estimate_effect_immutable(
                 Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => node
                     .children
                     .get(2)
-                    .map(|rhs| estimate_effect_immutable(rhs, top_fn_effects, extern_names, local_fn_scopes))
+                    .map(|rhs| {
+                        estimate_effect_immutable(
+                            rhs,
+                            top_fn_effects,
+                            extern_names,
+                            local_fn_scopes,
+                        )
+                    })
                     .unwrap_or(EffectFlags::PURE),
                 Expression::Word(op) => {
                     let mut effect = EffectFlags::PURE;
                     for ch in node.children.iter().skip(1) {
-                        effect |= estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes);
+                        effect |= estimate_effect_immutable(
+                            ch,
+                            top_fn_effects,
+                            extern_names,
+                            local_fn_scopes,
+                        );
                     }
 
                     if application_has_remaining_params(node) {
@@ -353,10 +382,19 @@ fn estimate_effect_immutable(
                     } else {
                         EffectFlags::UNKNOWN_CALL
                     };
-                    effect |=
-                        estimate_effect_immutable(head_child, top_fn_effects, extern_names, local_fn_scopes);
+                    effect |= estimate_effect_immutable(
+                        head_child,
+                        top_fn_effects,
+                        extern_names,
+                        local_fn_scopes,
+                    );
                     for ch in node.children.iter().skip(1) {
-                        effect |= estimate_effect_immutable(ch, top_fn_effects, extern_names, local_fn_scopes);
+                        effect |= estimate_effect_immutable(
+                            ch,
+                            top_fn_effects,
+                            extern_names,
+                            local_fn_scopes,
+                        );
                     }
                     effect
                 }
@@ -397,7 +435,12 @@ fn annotate_effects_mut(
                     Some(Expression::Word(op)) if op == "if" || op == "while" => {
                         let mut combined = EffectFlags::PURE;
                         for ch in node.children.iter_mut().skip(1) {
-                            combined |= annotate_effects_mut(ch, top_fn_effects, extern_names, local_fn_scopes);
+                            combined |= annotate_effects_mut(
+                                ch,
+                                top_fn_effects,
+                                extern_names,
+                                local_fn_scopes,
+                            );
                         }
                         combined
                     }
@@ -434,13 +477,25 @@ fn annotate_effects_mut(
                     Some(Expression::Word(op)) if op == "let" || op == "letrec" || op == "mut" => {
                         node.children
                             .get_mut(2)
-                            .map(|rhs| annotate_effects_mut(rhs, top_fn_effects, extern_names, local_fn_scopes))
+                            .map(|rhs| {
+                                annotate_effects_mut(
+                                    rhs,
+                                    top_fn_effects,
+                                    extern_names,
+                                    local_fn_scopes,
+                                )
+                            })
                             .unwrap_or(EffectFlags::PURE)
                     }
                     Some(Expression::Word(op)) => {
                         let mut combined = EffectFlags::PURE;
                         for ch in node.children.iter_mut().skip(1) {
-                            combined |= annotate_effects_mut(ch, top_fn_effects, extern_names, local_fn_scopes);
+                            combined |= annotate_effects_mut(
+                                ch,
+                                top_fn_effects,
+                                extern_names,
+                                local_fn_scopes,
+                            );
                         }
 
                         if !application_has_remaining_params(node) {
@@ -468,7 +523,12 @@ fn annotate_effects_mut(
                             EffectFlags::UNKNOWN_CALL
                         };
                         for ch in node.children.iter_mut() {
-                            combined |= annotate_effects_mut(ch, top_fn_effects, extern_names, local_fn_scopes);
+                            combined |= annotate_effects_mut(
+                                ch,
+                                top_fn_effects,
+                                extern_names,
+                                local_fn_scopes,
+                            );
                         }
                         combined
                     }
@@ -581,15 +641,13 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                     }
                     continue;
                 }
-                if let Some(message) =
-                    check_impure_binding_name(
-                        &items[idx],
-                        let_node,
-                        &extern_names,
-                        &mut known_requires_bang,
-                        &known_function_arities,
-                    )
-                {
+                if let Some(message) = check_impure_binding_name(
+                    &items[idx],
+                    let_node,
+                    &extern_names,
+                    &mut known_requires_bang,
+                    &known_function_arities,
+                ) {
                     return Err(message);
                 }
             }
@@ -616,14 +674,13 @@ fn check_impure_binding_name(
     known_requires_bang: &mut HashMap<String, bool>,
     known_function_arities: &HashMap<String, usize>,
 ) -> Option<String> {
-    let (name, requires_bang) =
-        eval_function_binding_requires_bang(
-            item_expr,
-            let_node,
-            extern_names,
-            known_requires_bang,
-            known_function_arities,
-        )?;
+    let (name, requires_bang) = eval_function_binding_requires_bang(
+        item_expr,
+        let_node,
+        extern_names,
+        known_requires_bang,
+        known_function_arities,
+    )?;
     if requires_bang {
         if let Some(offending_idx) =
             eval_function_binding_non_first_mutation_target(item_expr, known_requires_bang)
@@ -987,15 +1044,13 @@ pub fn collect_top_level_function_external_impurity(
             }
             return;
         }
-        if let Some((name, requires)) =
-            eval_function_binding_requires_bang(
-                &root.expr,
-                root,
-                &extern_names,
-                &mut known_requires_bang,
-                &known_function_arities,
-            )
-        {
+        if let Some((name, requires)) = eval_function_binding_requires_bang(
+            &root.expr,
+            root,
+            &extern_names,
+            &mut known_requires_bang,
+            &known_function_arities,
+        ) {
             out.insert(name, requires);
         }
     }
@@ -1080,9 +1135,8 @@ fn expr_requires_bang(
                                 &form_items[..]
                             {
                                 if kw == "let" || kw == "letrec" || kw == "mut" {
-                                    let aliases_param_or_free =
-                                        (kw == "let" || kw == "letrec")
-                                            && direct_aliases_param_or_free_var(rhs, scopes);
+                                    let aliases_param_or_free = (kw == "let" || kw == "letrec")
+                                        && direct_aliases_param_or_free_var(rhs, scopes);
                                     if let Some(scope) = scopes.last_mut() {
                                         scope.insert(name.clone(), aliases_param_or_free);
                                     }
@@ -1268,24 +1322,28 @@ fn with_src(message: String, src: &TypeError) -> String {
 
 fn mismatch_shape_phrase(expected: &Type, actual: &Type) -> Option<String> {
     match (expected, actual) {
-        (Type::List(_), Type::Tuple(_)) => {
-            Some(format!("Expected vector {}, got tuple {}", expected, actual))
-        }
-        (Type::Tuple(_), Type::List(_)) => {
-            Some(format!("Expected tuple {}, got vector {}", expected, actual))
-        }
+        (Type::List(_), Type::Tuple(_)) => Some(format!(
+            "Expected vector {}, got tuple {}",
+            expected, actual
+        )),
+        (Type::Tuple(_), Type::List(_)) => Some(format!(
+            "Expected tuple {}, got vector {}",
+            expected, actual
+        )),
         _ => None,
     }
 }
 
 fn mismatch_shape_phrase_for_call(expected: &Type, actual: &Type) -> Option<String> {
     match (expected, actual) {
-        (Type::List(_), Type::Tuple(_)) => {
-            Some(format!("expected vector {}, got tuple {}", expected, actual))
-        }
-        (Type::Tuple(_), Type::List(_)) => {
-            Some(format!("expected tuple {}, got vector {}", expected, actual))
-        }
+        (Type::List(_), Type::Tuple(_)) => Some(format!(
+            "expected vector {}, got tuple {}",
+            expected, actual
+        )),
+        (Type::Tuple(_), Type::List(_)) => Some(format!(
+            "expected tuple {}, got vector {}",
+            expected, actual
+        )),
         _ => None,
     }
 }
@@ -1297,13 +1355,17 @@ fn is_logical_operator(name: &str) -> bool {
 fn is_arithmetic_operator(name: &str) -> bool {
     matches!(
         name,
-        "+" | "+#" | "+."
+        "+" | "+#"
+            | "+."
             | "-"
-            | "-#" | "-."
+            | "-#"
+            | "-."
             | "*"
-            | "*#" | "*."
+            | "*#"
+            | "*."
             | "/"
-            | "/#" | "/."
+            | "/#"
+            | "/."
             | "mod"
             | "mod."
     )
@@ -1549,7 +1611,13 @@ impl InferenceContext {
     }
 
     pub fn declare_type(&mut self, name: String, typ: Type) -> Result<(), String> {
-        if self.env.scopes.last().and_then(|scope| scope.get(&name)).is_some() {
+        if self
+            .env
+            .scopes
+            .last()
+            .and_then(|scope| scope.get(&name))
+            .is_some()
+        {
             return Err(format!(
                 "letype for '{}' must appear before its binding in the same scope",
                 name
@@ -1559,7 +1627,10 @@ impl InferenceContext {
             return Err("internal error: missing declared type scope".to_string());
         };
         if scope.contains_key(&name) {
-            return Err(format!("letype for '{}' already declared in this scope", name));
+            return Err(format!(
+                "letype for '{}' already declared in this scope",
+                name
+            ));
         }
         scope.insert(name, (typ, false));
         Ok(())
@@ -1714,8 +1785,7 @@ fn parse_type_hint_with_named_vars(
                 )?;
                 let mut idx = items.len().saturating_sub(2);
                 while idx > 0 {
-                    let param =
-                        parse_type_hint_with_named_vars(&items[idx - 1], ctx, named_vars)?;
+                    let param = parse_type_hint_with_named_vars(&items[idx - 1], ctx, named_vars)?;
                     out = Type::Function(Box::new(param), Box::new(out));
                     idx = idx.saturating_sub(2);
                 }
@@ -1744,9 +1814,7 @@ fn parse_type_hint_with_named_vars(
                     }
                     let mut elems = Vec::new();
                     for elem_expr in &items[1..] {
-                        elems.push(parse_type_hint_with_named_vars(
-                            elem_expr, ctx, named_vars,
-                        )?);
+                        elems.push(parse_type_hint_with_named_vars(elem_expr, ctx, named_vars)?);
                     }
                     return Ok(Type::Tuple(elems));
                 }
@@ -1763,7 +1831,7 @@ fn infer_extern(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         exprs
     else {
         return Err(
-            "extern expects: (extern module import local-name (arg1 ... -> ret))".to_string()
+            "extern expects: (extern module import local-name (arg1 ... -> ret))".to_string(),
         );
     };
     let typ = crate::externals::parse_extern_decl(&Expression::Apply(exprs.to_vec()))?
@@ -1773,14 +1841,22 @@ fn infer_extern(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         return Err(format!("Extern '{}' must end with '!'", local_name));
     }
     let scheme = TypeScheme::monotype(typ.clone());
-    if let Some(current) = ctx.env.scopes.last().and_then(|scope| scope.get(local_name)) {
+    if let Some(current) = ctx
+        .env
+        .scopes
+        .last()
+        .and_then(|scope| scope.get(local_name))
+    {
         if current.typ == scheme.typ && current.vars == scheme.vars {
             if ctx.collect_expr_types {
                 ctx.expr_types.insert(expression_id(&exprs[3]), typ.clone());
             }
             return Ok(Type::Unit);
         }
-        return Err(format!("Variable '{}' already defined in this scope", local_name));
+        return Err(format!(
+            "Variable '{}' already defined in this scope",
+            local_name
+        ));
     }
     ctx.env.insert(local_name.clone(), scheme)?;
     if ctx.collect_expr_types {
@@ -1796,10 +1872,13 @@ fn infer_letype(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     let typ = parse_type_hint(type_expr, ctx)?;
     ctx.declare_type(local_name.clone(), typ)?;
     if ctx.collect_expr_types {
-        ctx.expr_types.insert(expression_id(&exprs[1]), exprs
-            .get(2)
-            .and_then(|_| ctx.declared_type_in_current_scope(local_name))
-            .unwrap_or(Type::Unit));
+        ctx.expr_types.insert(
+            expression_id(&exprs[1]),
+            exprs
+                .get(2)
+                .and_then(|_| ctx.declared_type_in_current_scope(local_name))
+                .unwrap_or(Type::Unit),
+        );
     }
     Ok(Type::Unit)
 }
@@ -2250,8 +2329,14 @@ pub fn solve_constraints_list(
                         scope: src.scope.clone(),
                     });
                 }
-                for (field_idx, (ai, bi)) in a_items.into_iter().zip(b_items.into_iter()).enumerate() {
-                    work.push_back((ai, bi, with_variant(&src, TypeErrorVariant::TupleField(field_idx + 1))));
+                for (field_idx, (ai, bi)) in
+                    a_items.into_iter().zip(b_items.into_iter()).enumerate()
+                {
+                    work.push_back((
+                        ai,
+                        bi,
+                        with_variant(&src, TypeErrorVariant::TupleField(field_idx + 1)),
+                    ));
                 }
             }
             (a2, b2) => {
@@ -2311,7 +2396,8 @@ fn ensure_declared_type_matches(
     Err(format!(
         "Signature mismatch for '{}'\ndeclared: {}\ninferred: {}\nin:\n{}",
         name,
-        declared_type, inferred_type,
+        declared_type,
+        inferred_type,
         binding_expr.to_lisp()
     ))
 }

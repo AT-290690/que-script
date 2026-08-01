@@ -1,7 +1,7 @@
-use crate::infer::{ EffectFlags, TypedExpression };
+use crate::infer::{EffectFlags, TypedExpression};
 use crate::parser::Expression;
 use crate::types::Type;
-use std::collections::{ HashMap, HashSet };
+use std::collections::{HashMap, HashSet};
 
 const MAX_INLINE_BODY_COST: usize = 16;
 const MAX_INLINE_FIXPOINT_PASSES: usize = 16;
@@ -105,12 +105,10 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     let mut seed = node.clone();
     let fused_expr = fuse_entry_expression_for_program(&node.expr);
     if fused_expr.to_lisp() != node.expr.to_lisp() {
-        if
-            let Ok((_typ, fused_typed)) = crate::infer::infer_with_builtins_typed(
-                &fused_expr,
-                crate::types::create_builtin_environment(crate::types::TypeEnv::new())
-            )
-        {
+        if let Ok((_typ, fused_typed)) = crate::infer::infer_with_builtins_typed(
+            &fused_expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        ) {
             seed = fused_typed;
         }
     }
@@ -136,10 +134,11 @@ fn run_tuple_return_destructuring_env_pass(node: &TypedExpression) -> TypedExpre
 fn rewrite_tuple_return_destructuring_with_env(
     node: &TypedExpression,
     inherited_defs: &HashMap<String, TupleReturnLambdaDef>,
-    state: &mut InlineState
+    state: &mut InlineState,
 ) -> TypedExpression {
     let Expression::Apply(items) = &node.expr else {
-        let new_children = node.children
+        let new_children = node
+            .children
             .iter()
             .map(|child| rewrite_tuple_return_destructuring_with_env(child, inherited_defs, state))
             .collect::<Vec<_>>();
@@ -152,7 +151,8 @@ fn rewrite_tuple_return_destructuring_with_env(
     };
 
     if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-        let new_children = node.children
+        let new_children = node
+            .children
             .iter()
             .map(|child| rewrite_tuple_return_destructuring_with_env(child, inherited_defs, state))
             .collect::<Vec<_>>();
@@ -175,23 +175,18 @@ fn rewrite_tuple_return_destructuring_with_env(
     let mut rebuilt_children = vec![normalized_do.children[0].clone()];
 
     for idx in 1..norm_items.len() {
-        let child = normalized_do.children
+        let child = normalized_do
+            .children
             .get(idx)
             .cloned()
             .unwrap_or_else(|| normalized_do.children[0].clone());
-        let rewritten_child = rewrite_tuple_return_destructuring_with_env(
-            &child,
-            &scoped_defs,
-            state
-        );
+        let rewritten_child =
+            rewrite_tuple_return_destructuring_with_env(&child, &scoped_defs, state);
         let rewritten_expr = rewritten_child.expr.clone();
         rebuilt_items.push(rewritten_expr.clone());
         rebuilt_children.push(rewritten_child.clone());
-        if
-            let Some((name, def)) = extract_tuple_return_lambda_def(
-                &rewritten_expr,
-                &rewritten_child
-            )
+        if let Some((name, def)) =
+            extract_tuple_return_lambda_def(&rewritten_expr, &rewritten_child)
         {
             scoped_defs.insert(name, def);
         }
@@ -201,7 +196,7 @@ fn rewrite_tuple_return_destructuring_with_env(
         rebuilt_items,
         rebuilt_children,
         state,
-        &scoped_defs
+        &scoped_defs,
     );
 
     TypedExpression {
@@ -362,7 +357,7 @@ fn collect_bound_pattern_words(expr: &Expression, out: &mut HashSet<String>) {
 fn collect_unbound_words(
     expr: &Expression,
     bound: &mut HashSet<String>,
-    out: &mut HashSet<String>
+    out: &mut HashSet<String>,
 ) {
     match expr {
         Expression::Word(w) => {
@@ -430,9 +425,8 @@ fn fuse_entry_expression_for_program(expr: &Expression) -> Expression {
 
 fn fuse_entry_expression_scoped(expr: &Expression, name_state: &mut FuseNameState) -> Expression {
     match expr {
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
-        => {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
+        {
             let mut out = items.clone();
 
             for idx in 1..out.len() {
@@ -482,7 +476,7 @@ fn fuse_only_lambda_bodies(expr: &Expression, name_state: &mut FuseNameState) ->
 
 fn fuse_map_filter_reduce_chains_expr(
     expr: &Expression,
-    name_state: &mut FuseNameState
+    name_state: &mut FuseNameState,
 ) -> Expression {
     match expr {
         Expression::Apply(items) => {
@@ -508,7 +502,7 @@ fn fuse_map_filter_reduce_chains_expr(
 
 fn fuse_terminal_over_map_filter_chain(
     expr: &Expression,
-    name_state: &mut FuseNameState
+    name_state: &mut FuseNameState,
 ) -> Option<Expression> {
     let (sink, input_expr) = parse_terminal_call(expr)?;
     let (base, ops) = match collect_map_filter_chain(input_expr.clone()) {
@@ -530,7 +524,7 @@ fn fuse_terminal_over_map_filter_chain(
 
 fn fuse_map_filter_chain_to_collect(
     expr: &Expression,
-    name_state: &mut FuseNameState
+    name_state: &mut FuseNameState,
 ) -> Option<Expression> {
     let (_, _) = parse_map_or_filter_call(expr)?;
     let (base, ops) = collect_map_filter_chain(expr.clone())?;
@@ -556,87 +550,79 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
     };
     match name.as_str() {
         // reduce fn init xs
-        "reduce" if items.len() == 4 =>
-            Some((
-                FuseSink::Reduce {
-                    reduce_fn: items.get(1)?.clone(),
-                    init_expr: items.get(2)?.clone(),
-                    with_index: false,
-                },
-                items.get(3)?.clone(),
-            )),
+        "reduce" if items.len() == 4 => Some((
+            FuseSink::Reduce {
+                reduce_fn: items.get(1)?.clone(),
+                init_expr: items.get(2)?.clone(),
+                with_index: false,
+            },
+            items.get(3)?.clone(),
+        )),
         // reduce/i fn init xs
-        "reduce/i" if items.len() == 4 =>
-            Some((
-                FuseSink::Reduce {
-                    reduce_fn: items.get(1)?.clone(),
-                    init_expr: items.get(2)?.clone(),
-                    with_index: true,
-                },
-                items.get(3)?.clone(),
-            )),
+        "reduce/i" if items.len() == 4 => Some((
+            FuseSink::Reduce {
+                reduce_fn: items.get(1)?.clone(),
+                init_expr: items.get(2)?.clone(),
+                with_index: true,
+            },
+            items.get(3)?.clone(),
+        )),
         // reduce/until fn stop? init xs
-        "reduce/until" if items.len() == 5 =>
-            Some((
-                FuseSink::ReduceUntil {
-                    reduce_fn: items.get(1)?.clone(),
-                    stop_fn: items.get(2)?.clone(),
-                    init_expr: items.get(3)?.clone(),
-                    with_index: false,
-                },
-                items.get(4)?.clone(),
-            )),
+        "reduce/until" if items.len() == 5 => Some((
+            FuseSink::ReduceUntil {
+                reduce_fn: items.get(1)?.clone(),
+                stop_fn: items.get(2)?.clone(),
+                init_expr: items.get(3)?.clone(),
+                with_index: false,
+            },
+            items.get(4)?.clone(),
+        )),
         // reduce/until/i fn stop? init xs
-        "reduce/until/i" if items.len() == 5 =>
-            Some((
-                FuseSink::ReduceUntil {
-                    reduce_fn: items.get(1)?.clone(),
-                    stop_fn: items.get(2)?.clone(),
-                    init_expr: items.get(3)?.clone(),
-                    with_index: true,
-                },
-                items.get(4)?.clone(),
-            )),
+        "reduce/until/i" if items.len() == 5 => Some((
+            FuseSink::ReduceUntil {
+                reduce_fn: items.get(1)?.clone(),
+                stop_fn: items.get(2)?.clone(),
+                init_expr: items.get(3)?.clone(),
+                with_index: true,
+            },
+            items.get(4)?.clone(),
+        )),
         // sum xs => reduce + 0 xs
-        "sum" | "sum/int" if items.len() == 2 =>
-            Some((
-                FuseSink::Reduce {
-                    reduce_fn: Expression::Word("+".to_string()),
-                    init_expr: Expression::Int(0),
-                    with_index: false,
-                },
-                items.get(1)?.clone(),
-            )),
+        "sum" | "sum/int" if items.len() == 2 => Some((
+            FuseSink::Reduce {
+                reduce_fn: Expression::Word("+".to_string()),
+                init_expr: Expression::Int(0),
+                with_index: false,
+            },
+            items.get(1)?.clone(),
+        )),
         // sum/dec xs => reduce +. 0. xs
-        "sum/dec" if items.len() == 2 =>
-            Some((
-                FuseSink::Reduce {
-                    reduce_fn: Expression::Word("+.".to_string()),
-                    init_expr: Expression::Dec(0.0),
-                    with_index: false,
-                },
-                items.get(1)?.clone(),
-            )),
+        "sum/dec" if items.len() == 2 => Some((
+            FuseSink::Reduce {
+                reduce_fn: Expression::Word("+.".to_string()),
+                init_expr: Expression::Dec(0.0),
+                with_index: false,
+            },
+            items.get(1)?.clone(),
+        )),
         // product xs => reduce * 1 xs
-        "product" | "product/int" if items.len() == 2 =>
-            Some((
-                FuseSink::Reduce {
-                    reduce_fn: Expression::Word("*".to_string()),
-                    init_expr: Expression::Int(1),
-                    with_index: false,
-                },
-                items.get(1)?.clone(),
-            )),
+        "product" | "product/int" if items.len() == 2 => Some((
+            FuseSink::Reduce {
+                reduce_fn: Expression::Word("*".to_string()),
+                init_expr: Expression::Int(1),
+                with_index: false,
+            },
+            items.get(1)?.clone(),
+        )),
         // product xs => reduce *. 1. xs
-        "product/dec" if items.len() == 2 =>
-            Some((
-                FuseSink::Reduce {
-                    reduce_fn: Expression::Word("*.".to_string()),
-                    init_expr: Expression::Dec(1.0),
-                    with_index: false,
-                },
-                items.get(1)?.clone(),
-            )),
+        "product/dec" if items.len() == 2 => Some((
+            FuseSink::Reduce {
+                reduce_fn: Expression::Word("*.".to_string()),
+                init_expr: Expression::Dec(1.0),
+                with_index: false,
+            },
+            items.get(1)?.clone(),
+        )),
         // mean aliases over vectors
         "mean" | "mean/int" if items.len() == 2 => {
             Some((FuseSink::Average { dec: false }, items.get(1)?.clone()))
@@ -647,49 +633,44 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
         // unzip xs => tuple of mapped first/second in one pass
         "unzip" if items.len() == 2 => Some((FuseSink::Unzip, items.get(1)?.clone())),
         // some? pred xs
-        "some?" if items.len() == 3 =>
-            Some((
-                FuseSink::Some {
-                    predicate: items.get(1)?.clone(),
-                    with_index: false,
-                },
-                items.get(2)?.clone(),
-            )),
+        "some?" if items.len() == 3 => Some((
+            FuseSink::Some {
+                predicate: items.get(1)?.clone(),
+                with_index: false,
+            },
+            items.get(2)?.clone(),
+        )),
         // some/i? pred xs
-        "some/i?" if items.len() == 3 =>
-            Some((
-                FuseSink::Some {
-                    predicate: items.get(1)?.clone(),
-                    with_index: true,
-                },
-                items.get(2)?.clone(),
-            )),
+        "some/i?" if items.len() == 3 => Some((
+            FuseSink::Some {
+                predicate: items.get(1)?.clone(),
+                with_index: true,
+            },
+            items.get(2)?.clone(),
+        )),
         // every? pred xs
-        "every?" if items.len() == 3 =>
-            Some((
-                FuseSink::Every {
-                    predicate: items.get(1)?.clone(),
-                    with_index: false,
-                },
-                items.get(2)?.clone(),
-            )),
+        "every?" if items.len() == 3 => Some((
+            FuseSink::Every {
+                predicate: items.get(1)?.clone(),
+                with_index: false,
+            },
+            items.get(2)?.clone(),
+        )),
         // every/i? pred xs
-        "every/i?" if items.len() == 3 =>
-            Some((
-                FuseSink::Every {
-                    predicate: items.get(1)?.clone(),
-                    with_index: true,
-                },
-                items.get(2)?.clone(),
-            )),
+        "every/i?" if items.len() == 3 => Some((
+            FuseSink::Every {
+                predicate: items.get(1)?.clone(),
+                with_index: true,
+            },
+            items.get(2)?.clone(),
+        )),
         // find pred xs => first matching index, -1 if none
-        "find" if items.len() == 3 =>
-            Some((
-                FuseSink::Find {
-                    predicate: items.get(1)?.clone(),
-                },
-                items.get(2)?.clone(),
-            )),
+        "find" if items.len() == 3 => Some((
+            FuseSink::Find {
+                predicate: items.get(1)?.clone(),
+            },
+            items.get(2)?.clone(),
+        )),
         _ => None,
     }
 }
@@ -706,73 +687,66 @@ fn parse_map_or_filter_call(expr: &Expression) -> Option<(MapFilterOp, Expressio
     };
     match name.as_str() {
         // map fn xs
-        "map" =>
-            Some((
-                MapFilterOp::Map {
-                    func: items.get(1)?.clone(),
-                    with_index: false,
-                },
-                items.get(2)?.clone(),
-            )),
+        "map" => Some((
+            MapFilterOp::Map {
+                func: items.get(1)?.clone(),
+                with_index: false,
+            },
+            items.get(2)?.clone(),
+        )),
         // map/i fn xs
-        "map/i" =>
-            Some((
-                MapFilterOp::Map {
-                    func: items.get(1)?.clone(),
-                    with_index: true,
-                },
-                items.get(2)?.clone(),
-            )),
+        "map/i" => Some((
+            MapFilterOp::Map {
+                func: items.get(1)?.clone(),
+                with_index: true,
+            },
+            items.get(2)?.clone(),
+        )),
         // flat-map fn xs
-        "flat-map" if items.len() == 3 =>
-            Some((
-                MapFilterOp::FlatMap {
-                    func: items.get(1)?.clone(),
-                },
-                items.get(2)?.clone(),
-            )),
+        "flat-map" if items.len() == 3 => Some((
+            MapFilterOp::FlatMap {
+                func: items.get(1)?.clone(),
+            },
+            items.get(2)?.clone(),
+        )),
         // flat xs (one-level flatten)
         "flat" if items.len() == 2 => Some((MapFilterOp::Flat, items.get(1)?.clone())),
         // filter fn xs
-        "filter" if items.len() == 3 =>
-            Some((
-                MapFilterOp::Filter {
-                    predicate: items.get(1)?.clone(),
-                    keep_when_true: true,
-                    with_index: false,
-                },
-                items.get(2)?.clone(),
-            )),
+        "filter" if items.len() == 3 => Some((
+            MapFilterOp::Filter {
+                predicate: items.get(1)?.clone(),
+                keep_when_true: true,
+                with_index: false,
+            },
+            items.get(2)?.clone(),
+        )),
         // filter/i fn xs
-        "filter/i" if items.len() == 3 =>
-            Some((
-                MapFilterOp::Filter {
-                    predicate: items.get(1)?.clone(),
-                    keep_when_true: true,
-                    with_index: true,
-                },
-                items.get(2)?.clone(),
-            )),
+        "filter/i" if items.len() == 3 => Some((
+            MapFilterOp::Filter {
+                predicate: items.get(1)?.clone(),
+                keep_when_true: true,
+                with_index: true,
+            },
+            items.get(2)?.clone(),
+        )),
         // select fn xs (same behavior as filter)
-        "select" if items.len() == 3 =>
-            Some((
-                MapFilterOp::Filter {
-                    predicate: items.get(1)?.clone(),
-                    keep_when_true: true,
-                    with_index: false,
-                },
-                items.get(2)?.clone(),
-            )),
+        "select" if items.len() == 3 => Some((
+            MapFilterOp::Filter {
+                predicate: items.get(1)?.clone(),
+                keep_when_true: true,
+                with_index: false,
+            },
+            items.get(2)?.clone(),
+        )),
         // exclude fn xs (inverse filter)
-        "exclude" if items.len() == 3 =>
-            Some((
-                MapFilterOp::Filter {
-                    predicate: items.get(1)?.clone(),
-                    keep_when_true: false,
-                    with_index: false,
-                },
-                items.get(2)?.clone(),
-            )),
+        "exclude" if items.len() == 3 => Some((
+            MapFilterOp::Filter {
+                predicate: items.get(1)?.clone(),
+                keep_when_true: false,
+                with_index: false,
+            },
+            items.get(2)?.clone(),
+        )),
         _ => None,
     }
 }
@@ -793,67 +767,67 @@ fn collect_map_filter_chain(root: Expression) -> Option<(Expression, Vec<MapFilt
 
 fn parse_fuse_source(base_expr: Expression) -> FuseSource {
     match &base_expr {
-        Expression::Apply(items) if
-            items.len() == 2 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "zip")
-        => {
+        Expression::Apply(items)
+            if items.len() == 2
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "zip") =>
+        {
             if let Some((left, right)) = parse_zip_pair_expr(&items[1]) {
                 FuseSource::Zip { left, right }
             } else {
                 FuseSource::Vector(base_expr)
             }
         }
-        Expression::Apply(items) if
-            items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "range")
-        => {
+        Expression::Apply(items)
+            if items.len() == 3
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "range") =>
+        {
             FuseSource::RangeInt {
                 start: items[1].clone(),
                 end: items[2].clone(),
             }
         }
-        Expression::Apply(items) if
-            items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "range/int")
-        => {
+        Expression::Apply(items)
+            if items.len() == 3
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "range/int") =>
+        {
             FuseSource::RangeInt {
                 start: items[1].clone(),
                 end: items[2].clone(),
             }
         }
-        Expression::Apply(items) if
-            items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "range/dec")
-        => {
+        Expression::Apply(items)
+            if items.len() == 3
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "range/dec") =>
+        {
             FuseSource::RangeFloat {
                 start: items[1].clone(),
                 end: items[2].clone(),
             }
         }
-        Expression::Apply(items) if
-            items.len() == 4 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "slice")
-        => {
+        Expression::Apply(items)
+            if items.len() == 4
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "slice") =>
+        {
             FuseSource::Slice {
                 start: items[1].clone(),
                 end: items[2].clone(),
                 xs: items[3].clone(),
             }
         }
-        Expression::Apply(items) if
-            items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "window")
-        => {
+        Expression::Apply(items)
+            if items.len() == 3
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "window") =>
+        {
             FuseSource::Window {
                 size: items[1].clone(),
                 xs: items[2].clone(),
             }
         }
         // take/first n xs => slice 0 n xs
-        Expression::Apply(items) if
-            items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "take/first")
-        => {
+        Expression::Apply(items)
+            if items.len() == 3
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "take/first") =>
+        {
             FuseSource::Slice {
                 start: Expression::Int(0),
                 end: items[1].clone(),
@@ -861,50 +835,53 @@ fn parse_fuse_source(base_expr: Expression) -> FuseSource {
             }
         }
         // drop/first n xs => slice n (length xs) xs
-        Expression::Apply(items) if
-            items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "drop/first")
-        => {
+        Expression::Apply(items)
+            if items.len() == 3
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "drop/first") =>
+        {
             FuseSource::Slice {
                 start: items[1].clone(),
-                end: Expression::Apply(
-                    vec![Expression::Word("length".to_string()), items[2].clone()]
-                ),
+                end: Expression::Apply(vec![
+                    Expression::Word("length".to_string()),
+                    items[2].clone(),
+                ]),
                 xs: items[2].clone(),
             }
         }
         // take/last n xs => slice (length xs - n) (length xs) xs
-        Expression::Apply(items) if
-            items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "take/last")
-        => {
-            let len_expr = Expression::Apply(
-                vec![Expression::Word("length".to_string()), items[2].clone()]
-            );
+        Expression::Apply(items)
+            if items.len() == 3
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "take/last") =>
+        {
+            let len_expr = Expression::Apply(vec![
+                Expression::Word("length".to_string()),
+                items[2].clone(),
+            ]);
             FuseSource::Slice {
-                start: Expression::Apply(
-                    vec![Expression::Word("-".to_string()), len_expr.clone(), items[1].clone()]
-                ),
+                start: Expression::Apply(vec![
+                    Expression::Word("-".to_string()),
+                    len_expr.clone(),
+                    items[1].clone(),
+                ]),
                 end: len_expr,
                 xs: items[2].clone(),
             }
         }
         // drop/last n xs => slice 0 (length xs - n) xs
-        Expression::Apply(items) if
-            items.len() == 3 &&
-            matches!(items.first(), Some(Expression::Word(w)) if w == "drop/last")
-        => {
+        Expression::Apply(items)
+            if items.len() == 3
+                && matches!(items.first(), Some(Expression::Word(w)) if w == "drop/last") =>
+        {
             FuseSource::Slice {
                 start: Expression::Int(0),
-                end: Expression::Apply(
-                    vec![
-                        Expression::Word("-".to_string()),
-                        Expression::Apply(
-                            vec![Expression::Word("length".to_string()), items[2].clone()]
-                        ),
-                        items[1].clone()
-                    ]
-                ),
+                end: Expression::Apply(vec![
+                    Expression::Word("-".to_string()),
+                    Expression::Apply(vec![
+                        Expression::Word("length".to_string()),
+                        items[2].clone(),
+                    ]),
+                    items[1].clone(),
+                ]),
                 xs: items[2].clone(),
             }
         }
@@ -916,7 +893,7 @@ fn build_direct_fused_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
     sink: FuseSink,
-    name_state: &mut FuseNameState
+    name_state: &mut FuseNameState,
 ) -> Option<Expression> {
     let has_flatten = ops_outer_to_inner
         .iter()
@@ -928,11 +905,10 @@ fn build_direct_fused_loop(
                 MapFilterOp::Map {
                     with_index: true,
                     ..
-                } |
-                    MapFilterOp::Filter {
-                        with_index: true,
-                        ..
-                    }
+                } | MapFilterOp::Filter {
+                    with_index: true,
+                    ..
+                }
             )
         });
         let unsupported_sink = match &sink {
@@ -948,29 +924,44 @@ fn build_direct_fused_loop(
         }
     }
     let suffix = name_state.next_suffix();
-    let (hoisted_bindings, hoisted_ops, hoisted_sink) = hoist_fusion_callables(
-        ops_outer_to_inner,
-        sink,
-        &suffix
-    );
+    let (hoisted_bindings, hoisted_ops, hoisted_sink) =
+        hoist_fusion_callables(ops_outer_to_inner, sink, &suffix);
     let fused = (match hoisted_sink {
-        FuseSink::Some { predicate, with_index } =>
-            build_some_every_loop(source, &hoisted_ops, predicate, with_index, true, &suffix),
-        FuseSink::Every { predicate, with_index } =>
-            build_some_every_loop(source, &hoisted_ops, predicate, with_index, false, &suffix),
+        FuseSink::Some {
+            predicate,
+            with_index,
+        } => build_some_every_loop(source, &hoisted_ops, predicate, with_index, true, &suffix),
+        FuseSink::Every {
+            predicate,
+            with_index,
+        } => build_some_every_loop(source, &hoisted_ops, predicate, with_index, false, &suffix),
         FuseSink::Collect => build_collect_loop(source, &hoisted_ops, &suffix),
-        FuseSink::Reduce { reduce_fn, init_expr, with_index } =>
-            build_reduce_loop(source, &hoisted_ops, reduce_fn, init_expr, with_index, &suffix),
-        FuseSink::ReduceUntil { reduce_fn, stop_fn, init_expr, with_index } =>
-            build_reduce_until_loop(
-                source,
-                &hoisted_ops,
-                reduce_fn,
-                stop_fn,
-                init_expr,
-                with_index,
-                &suffix
-            ),
+        FuseSink::Reduce {
+            reduce_fn,
+            init_expr,
+            with_index,
+        } => build_reduce_loop(
+            source,
+            &hoisted_ops,
+            reduce_fn,
+            init_expr,
+            with_index,
+            &suffix,
+        ),
+        FuseSink::ReduceUntil {
+            reduce_fn,
+            stop_fn,
+            init_expr,
+            with_index,
+        } => build_reduce_until_loop(
+            source,
+            &hoisted_ops,
+            reduce_fn,
+            stop_fn,
+            init_expr,
+            with_index,
+            &suffix,
+        ),
         FuseSink::Average { dec } => build_average_loop(source, &hoisted_ops, dec, &suffix),
         FuseSink::Unzip => build_unzip_loop(source, &hoisted_ops, &suffix),
         FuseSink::Find { predicate } => build_find_loop(source, &hoisted_ops, predicate, &suffix),
@@ -978,70 +969,66 @@ fn build_direct_fused_loop(
     if hoisted_bindings.is_empty() {
         Some(fused)
     } else {
-        Some(
-            Expression::Apply(
-                vec![Expression::Word("do".to_string())]
-                    .into_iter()
-                    .chain(hoisted_bindings)
-                    .chain(std::iter::once(fused))
-                    .collect()
-            )
-        )
+        Some(Expression::Apply(
+            vec![Expression::Word("do".to_string())]
+                .into_iter()
+                .chain(hoisted_bindings)
+                .chain(std::iter::once(fused))
+                .collect(),
+        ))
     }
 }
 
 fn fuse_tmp_name(base: &str, suffix: &str) -> String {
-    if suffix.is_empty() { base.to_string() } else { format!("{}{}", base, suffix) }
+    if suffix.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}{}", base, suffix)
+    }
 }
 
 fn build_while_range_body(
     start_expr: Expression,
     end_expr: Expression,
     i_name: &str,
-    step_body: Expression
+    step_body: Expression,
 ) -> Expression {
     let i_word = Expression::Word(i_name.to_string());
     let end_name = format!("{}_end", i_name);
     let end_word = Expression::Word(end_name.clone());
-    let inc_i = Expression::Apply(
-        vec![
-            Expression::Word("alter!".to_string()),
+    let inc_i = Expression::Apply(vec![
+        Expression::Word("alter!".to_string()),
+        i_word.clone(),
+        Expression::Apply(vec![
+            Expression::Word("+".to_string()),
             i_word.clone(),
-            Expression::Apply(
-                vec![Expression::Word("+".to_string()), i_word.clone(), Expression::Int(1)]
-            )
-        ]
-    );
-    let body = Expression::Apply(
-        vec![
-            Expression::Word("do".to_string()),
-            step_body,
-            inc_i,
-            Expression::Word("nil".to_string())
-        ]
-    );
-    Expression::Apply(
-        vec![
-            Expression::Word("do".to_string()),
-            Expression::Apply(
-                vec![
-                    Expression::Word("mut".to_string()),
-                    Expression::Word(i_name.to_string()),
-                    start_expr
-                ]
-            ),
-            Expression::Apply(
-                vec![Expression::Word("let".to_string()), Expression::Word(end_name), end_expr]
-            ),
-            Expression::Apply(
-                vec![
-                    Expression::Word("while".to_string()),
-                    Expression::Apply(vec![Expression::Word("<".to_string()), i_word, end_word]),
-                    body
-                ]
-            )
-        ]
-    )
+            Expression::Int(1),
+        ]),
+    ]);
+    let body = Expression::Apply(vec![
+        Expression::Word("do".to_string()),
+        step_body,
+        inc_i,
+        Expression::Word("nil".to_string()),
+    ]);
+    Expression::Apply(vec![
+        Expression::Word("do".to_string()),
+        Expression::Apply(vec![
+            Expression::Word("mut".to_string()),
+            Expression::Word(i_name.to_string()),
+            start_expr,
+        ]),
+        Expression::Apply(vec![
+            Expression::Word("let".to_string()),
+            Expression::Word(end_name),
+            end_expr,
+        ]),
+        Expression::Apply(vec![
+            Expression::Word("while".to_string()),
+            Expression::Apply(vec![Expression::Word("<".to_string()), i_word, end_word]),
+            body,
+        ]),
+    ])
 }
 
 fn build_non_flatten_chain_process<F>(
@@ -1050,28 +1037,25 @@ fn build_non_flatten_chain_process<F>(
     raw_index: Expression,
     suffix: &str,
     setup_bindings: &mut Vec<Expression>,
-    sink_builder: &F
+    sink_builder: &F,
 ) -> Option<Expression>
-    where F: Fn(Expression, Expression) -> Option<Expression>
+where
+    F: Fn(Expression, Expression) -> Option<Expression>,
 {
     let ops_inner_to_outer = ops_outer_to_inner.iter().rev().cloned().collect::<Vec<_>>();
-    let mut filter_output_index_refs: Vec<Option<String>> = Vec::with_capacity(
-        ops_inner_to_outer.len()
-    );
+    let mut filter_output_index_refs: Vec<Option<String>> =
+        Vec::with_capacity(ops_inner_to_outer.len());
     for (idx, op) in ops_inner_to_outer.iter().enumerate() {
         if matches!(op, MapFilterOp::Filter { .. }) {
             let ref_name = fuse_tmp_name(&format!("__fuse_idx_after_filter_{}", idx), suffix);
-            setup_bindings.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(ref_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
-                        )
-                    ]
-                )
-            );
+            setup_bindings.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(ref_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("vector".to_string()),
+                    Expression::Int(0),
+                ]),
+            ]));
             filter_output_index_refs.push(Some(ref_name));
         } else {
             filter_output_index_refs.push(None);
@@ -1084,7 +1068,7 @@ fn build_non_flatten_chain_process<F>(
         input_value,
         raw_index,
         &filter_output_index_refs,
-        sink_builder
+        sink_builder,
     )
 }
 
@@ -1094,9 +1078,10 @@ fn build_non_flatten_chain_step<F>(
     current_value: Expression,
     current_index: Expression,
     filter_output_index_refs: &[Option<String>],
-    sink_builder: &F
+    sink_builder: &F,
 ) -> Option<Expression>
-    where F: Fn(Expression, Expression) -> Option<Expression>
+where
+    F: Fn(Expression, Expression) -> Option<Expression>,
 {
     if idx >= ops_inner_to_outer.len() {
         return sink_builder(current_value, current_index);
@@ -1115,12 +1100,19 @@ fn build_non_flatten_chain_step<F>(
                 mapped,
                 current_index,
                 filter_output_index_refs,
-                sink_builder
+                sink_builder,
             )
         }
-        MapFilterOp::Filter { predicate, keep_when_true, with_index } => {
+        MapFilterOp::Filter {
+            predicate,
+            keep_when_true,
+            with_index,
+        } => {
             let pred_value = if *with_index {
-                call_callable_expr(predicate, vec![current_value.clone(), current_index.clone()])?
+                call_callable_expr(
+                    predicate,
+                    vec![current_value.clone(), current_index.clone()],
+                )?
             } else {
                 call_callable_expr(predicate, vec![current_value.clone()])?
             };
@@ -1137,9 +1129,11 @@ fn build_non_flatten_chain_step<F>(
                 }
             };
             let counter_word = Expression::Word(counter_name.clone());
-            let next_stage_index = Expression::Apply(
-                vec![Expression::Word("get".to_string()), counter_word.clone(), Expression::Int(0)]
-            );
+            let next_stage_index = Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                counter_word.clone(),
+                Expression::Int(0),
+            ]);
 
             let then_stage = build_non_flatten_chain_step(
                 ops_inner_to_outer,
@@ -1147,46 +1141,34 @@ fn build_non_flatten_chain_step<F>(
                 current_value,
                 next_stage_index,
                 filter_output_index_refs,
-                sink_builder
+                sink_builder,
             )?;
-            let inc_counter = Expression::Apply(
-                vec![
-                    Expression::Word("set!".to_string()),
-                    counter_word.clone(),
-                    Expression::Int(0),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("+".to_string()),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("get".to_string()),
-                                    counter_word,
-                                    Expression::Int(0)
-                                ]
-                            ),
-                            Expression::Int(1)
-                        ]
-                    )
-                ]
-            );
-            let then_expr = Expression::Apply(
-                vec![
-                    Expression::Word("do".to_string()),
-                    then_stage,
-                    inc_counter,
-                    Expression::Word("nil".to_string())
-                ]
-            );
-            Some(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("if".to_string()),
-                        pass_cond,
-                        then_expr,
-                        no_op_unit_expr()
-                    ]
-                )
-            )
+            let inc_counter = Expression::Apply(vec![
+                Expression::Word("set!".to_string()),
+                counter_word.clone(),
+                Expression::Int(0),
+                Expression::Apply(vec![
+                    Expression::Word("+".to_string()),
+                    Expression::Apply(vec![
+                        Expression::Word("get".to_string()),
+                        counter_word,
+                        Expression::Int(0),
+                    ]),
+                    Expression::Int(1),
+                ]),
+            ]);
+            let then_expr = Expression::Apply(vec![
+                Expression::Word("do".to_string()),
+                then_stage,
+                inc_counter,
+                Expression::Word("nil".to_string()),
+            ]);
+            Some(Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                pass_cond,
+                then_expr,
+                no_op_unit_expr(),
+            ]))
         }
         MapFilterOp::Flat | MapFilterOp::FlatMap { .. } => None,
     }
@@ -1195,21 +1177,18 @@ fn build_non_flatten_chain_step<F>(
 fn build_collect_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
-    suffix: &str
+    suffix: &str,
 ) -> Option<Expression> {
-    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(
-        source,
-        suffix
-    )?;
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) =
+        make_loop_source_bindings(source, suffix)?;
 
     let out_name = fuse_tmp_name("__fuse_out", suffix);
     let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
-    let process_body = if
-        ops_outer_to_inner
-            .iter()
-            .any(|op| matches!(op, MapFilterOp::Flat | MapFilterOp::FlatMap { .. }))
+    let process_body = if ops_outer_to_inner
+        .iter()
+        .any(|op| matches!(op, MapFilterOp::Flat | MapFilterOp::FlatMap { .. }))
     {
         let mut flat_tmp_counter = 0usize;
         let ops_inner_to_outer = ops_outer_to_inner.iter().rev().cloned().collect::<Vec<_>>();
@@ -1220,26 +1199,20 @@ fn build_collect_loop(
             i_word.clone(),
             &out_name,
             suffix,
-            &mut flat_tmp_counter
+            &mut flat_tmp_counter,
         )?
     } else {
         let out_name_for_sink = out_name.clone();
         let sink_builder = |mapped: Expression, _logical_i: Expression| {
-            Some(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("set!".to_string()),
-                        Expression::Word(out_name_for_sink.clone()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("length".to_string()),
-                                Expression::Word(out_name_for_sink.clone())
-                            ]
-                        ),
-                        mapped
-                    ]
-                )
-            )
+            Some(Expression::Apply(vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(out_name_for_sink.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("length".to_string()),
+                    Expression::Word(out_name_for_sink.clone()),
+                ]),
+                mapped,
+            ]))
         };
         build_non_flatten_chain_process(
             ops_outer_to_inner,
@@ -1247,19 +1220,20 @@ fn build_collect_loop(
             i_word.clone(),
             suffix,
             &mut setup_bindings,
-            &sink_builder
+            &sink_builder,
         )?
     };
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(out_name.clone()),
-                Expression::Apply(vec![Expression::Word("vector".to_string())])
-            ]
-        )
-    );
-    setup_bindings.push(build_while_range_body(start_expr, end_expr, &i_name, process_body));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Apply(vec![Expression::Word("vector".to_string())]),
+    ]));
+    setup_bindings.push(build_while_range_body(
+        start_expr,
+        end_expr,
+        &i_name,
+        process_body,
+    ));
     setup_bindings.push(Expression::Word(out_name));
 
     let mut do_items = vec![Expression::Word("do".to_string())];
@@ -1273,21 +1247,18 @@ fn build_reduce_loop(
     reduce_fn: Expression,
     init_expr: Expression,
     with_index: bool,
-    suffix: &str
+    suffix: &str,
 ) -> Option<Expression> {
-    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(
-        source,
-        suffix
-    )?;
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) =
+        make_loop_source_bindings(source, suffix)?;
 
     let out_name = fuse_tmp_name("__fuse_out", suffix);
     let i_name = fuse_tmp_name("__fuse_i", suffix);
     let i_word = Expression::Word(i_name.clone());
     let x_expr = value_expr_for_i(&i_word);
-    let process_body = if
-        ops_outer_to_inner
-            .iter()
-            .any(|op| matches!(op, MapFilterOp::Flat | MapFilterOp::FlatMap { .. }))
+    let process_body = if ops_outer_to_inner
+        .iter()
+        .any(|op| matches!(op, MapFilterOp::Flat | MapFilterOp::FlatMap { .. }))
     {
         let mut flat_tmp_counter = 0usize;
         let ops_inner_to_outer = ops_outer_to_inner.iter().rev().cloned().collect::<Vec<_>>();
@@ -1299,34 +1270,31 @@ fn build_reduce_loop(
             &reduce_fn,
             &out_name,
             suffix,
-            &mut flat_tmp_counter
+            &mut flat_tmp_counter,
         )?
     } else {
         let out_name_for_sink = out_name.clone();
         let reduce_fn_for_sink = reduce_fn.clone();
         let sink_builder = move |mapped: Expression, logical_i: Expression| {
-            let acc_get = Expression::Apply(
-                vec![
-                    Expression::Word("get".to_string()),
-                    Expression::Word(out_name_for_sink.clone()),
-                    Expression::Int(0)
-                ]
-            );
+            let acc_get = Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(out_name_for_sink.clone()),
+                Expression::Int(0),
+            ]);
             let reduced = if with_index {
-                call_callable_expr(&reduce_fn_for_sink, vec![acc_get.clone(), mapped, logical_i])?
+                call_callable_expr(
+                    &reduce_fn_for_sink,
+                    vec![acc_get.clone(), mapped, logical_i],
+                )?
             } else {
                 call_callable_expr(&reduce_fn_for_sink, vec![acc_get.clone(), mapped])?
             };
-            Some(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("set!".to_string()),
-                        Expression::Word(out_name_for_sink.clone()),
-                        Expression::Int(0),
-                        reduced
-                    ]
-                )
-            )
+            Some(Expression::Apply(vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(out_name_for_sink.clone()),
+                Expression::Int(0),
+                reduced,
+            ]))
         };
         build_non_flatten_chain_process(
             ops_outer_to_inner,
@@ -1334,28 +1302,25 @@ fn build_reduce_loop(
             i_word.clone(),
             suffix,
             &mut setup_bindings,
-            &sink_builder
+            &sink_builder,
         )?
     };
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(out_name.clone()),
-                Expression::Apply(vec![Expression::Word("vector".to_string()), init_expr])
-            ]
-        )
-    );
-    setup_bindings.push(build_while_range_body(start_expr, end_expr, &i_name, process_body));
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("get".to_string()),
-                Expression::Word(out_name),
-                Expression::Int(0)
-            ]
-        )
-    );
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Apply(vec![Expression::Word("vector".to_string()), init_expr]),
+    ]));
+    setup_bindings.push(build_while_range_body(
+        start_expr,
+        end_expr,
+        &i_name,
+        process_body,
+    ));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(out_name),
+        Expression::Int(0),
+    ]));
 
     let mut do_items = vec![Expression::Word("do".to_string())];
     do_items.extend(setup_bindings);
@@ -1369,7 +1334,7 @@ fn build_reduce_until_loop(
     stop_fn: Expression,
     init_expr: Expression,
     with_index: bool,
-    suffix: &str
+    suffix: &str,
 ) -> Option<Expression> {
     let (mut setup_bindings, idx_ref_name, cond_bound_expr, value_expr_for_idx_ref) =
         make_short_circuit_source_bindings(source, suffix)?;
@@ -1377,13 +1342,11 @@ fn build_reduce_until_loop(
     let out_name = fuse_tmp_name("__fuse_out", suffix);
     let placed_name = fuse_tmp_name("__fuse_placed", suffix);
 
-    let idx_get = Expression::Apply(
-        vec![
-            Expression::Word("get".to_string()),
-            Expression::Word(idx_ref_name.clone()),
-            Expression::Int(0)
-        ]
-    );
+    let idx_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(idx_ref_name.clone()),
+        Expression::Int(0),
+    ]);
     let x_expr = value_expr_for_idx_ref(&idx_get);
     let out_name_for_sink = out_name.clone();
     let placed_name_for_sink = placed_name.clone();
@@ -1396,17 +1359,15 @@ fn build_reduce_until_loop(
         suffix,
         &mut setup_bindings,
         &(move |mapped: Expression, logical_i: Expression| {
-            let acc_get = Expression::Apply(
-                vec![
-                    Expression::Word("get".to_string()),
-                    Expression::Word(out_name_for_sink.clone()),
-                    Expression::Int(0)
-                ]
-            );
+            let acc_get = Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(out_name_for_sink.clone()),
+                Expression::Int(0),
+            ]);
             let stop_value = if with_index {
                 call_callable_expr(
                     &stop_fn_for_sink,
-                    vec![acc_get.clone(), mapped.clone(), logical_i.clone()]
+                    vec![acc_get.clone(), mapped.clone(), logical_i.clone()],
                 )?
             } else {
                 call_callable_expr(&stop_fn_for_sink, vec![acc_get.clone(), mapped.clone()])?
@@ -1416,107 +1377,82 @@ fn build_reduce_until_loop(
             } else {
                 call_callable_expr(&reduce_fn_for_sink, vec![acc_get, mapped])?
             };
-            let set_placed_true = Expression::Apply(
-                vec![
-                    Expression::Word("set!".to_string()),
-                    Expression::Word(placed_name_for_sink.clone()),
-                    Expression::Int(0),
-                    Expression::Word("true".to_string())
-                ]
-            );
-            let set_out = Expression::Apply(
-                vec![
-                    Expression::Word("set!".to_string()),
-                    Expression::Word(out_name_for_sink.clone()),
-                    Expression::Int(0),
-                    reduced
-                ]
-            );
-            Some(
-                Expression::Apply(
-                    vec![Expression::Word("if".to_string()), stop_value, set_placed_true, set_out]
-                )
-            )
-        })
+            let set_placed_true = Expression::Apply(vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(placed_name_for_sink.clone()),
+                Expression::Int(0),
+                Expression::Word("true".to_string()),
+            ]);
+            let set_out = Expression::Apply(vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(out_name_for_sink.clone()),
+                Expression::Int(0),
+                reduced,
+            ]);
+            Some(Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                stop_value,
+                set_placed_true,
+                set_out,
+            ]))
+        }),
     )?;
-    let idx_inc = Expression::Apply(
-        vec![
-            Expression::Word("set!".to_string()),
-            Expression::Word(idx_ref_name.clone()),
-            Expression::Int(0),
-            Expression::Apply(
-                vec![
-                    Expression::Word("+".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Int(1)
-                ]
-            )
-        ]
-    );
-    let step_body = Expression::Apply(
-        vec![Expression::Word("do".to_string()), step_action, idx_inc]
-    );
-
-    let continue_cond = Expression::Apply(
-        vec![
-            Expression::Word("and".to_string()),
-            cond_bound_expr,
-            Expression::Apply(
-                vec![
-                    Expression::Word("not".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(placed_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    )
-                ]
-            )
-        ]
-    );
-
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(out_name.clone()),
-                Expression::Apply(vec![Expression::Word("vector".to_string()), init_expr])
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(placed_name.clone()),
-                Expression::Apply(
-                    vec![
-                        Expression::Word("vector".to_string()),
-                        Expression::Word("false".to_string())
-                    ]
-                )
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(vec![Expression::Word("while".to_string()), continue_cond, step_body])
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
+    let idx_inc = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(idx_ref_name.clone()),
+        Expression::Int(0),
+        Expression::Apply(vec![
+            Expression::Word("+".to_string()),
+            Expression::Apply(vec![
                 Expression::Word("get".to_string()),
-                Expression::Word(out_name),
-                Expression::Int(0)
-            ]
-        )
-    );
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Int(0),
+            ]),
+            Expression::Int(1),
+        ]),
+    ]);
+    let step_body = Expression::Apply(vec![
+        Expression::Word("do".to_string()),
+        step_action,
+        idx_inc,
+    ]);
+
+    let continue_cond = Expression::Apply(vec![
+        Expression::Word("and".to_string()),
+        cond_bound_expr,
+        Expression::Apply(vec![
+            Expression::Word("not".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(placed_name.clone()),
+                Expression::Int(0),
+            ]),
+        ]),
+    ]);
+
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Apply(vec![Expression::Word("vector".to_string()), init_expr]),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(placed_name.clone()),
+        Expression::Apply(vec![
+            Expression::Word("vector".to_string()),
+            Expression::Word("false".to_string()),
+        ]),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("while".to_string()),
+        continue_cond,
+        step_body,
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(out_name),
+        Expression::Int(0),
+    ]));
 
     let mut do_items = vec![Expression::Word("do".to_string())];
     do_items.extend(setup_bindings);
@@ -1527,12 +1463,10 @@ fn build_average_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
     dec: bool,
-    suffix: &str
+    suffix: &str,
 ) -> Option<Expression> {
-    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(
-        source,
-        suffix
-    )?;
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) =
+        make_loop_source_bindings(source, suffix)?;
 
     let sum_name = fuse_tmp_name("__fuse_sum", suffix);
     let count_name = fuse_tmp_name("__fuse_count", suffix);
@@ -1542,54 +1476,42 @@ fn build_average_loop(
     let sum_name_for_sink = sum_name.clone();
     let count_name_for_sink = count_name.clone();
     let sink_builder = move |mapped: Expression, _logical_i: Expression| {
-        let sum_get = Expression::Apply(
-            vec![
-                Expression::Word("get".to_string()),
-                Expression::Word(sum_name_for_sink.clone()),
-                Expression::Int(0)
-            ]
-        );
-        let next_sum = Expression::Apply(
-            vec![Expression::Word((if dec { "+." } else { "+" }).to_string()), sum_get, mapped]
-        );
-        let set_sum = Expression::Apply(
-            vec![
-                Expression::Word("set!".to_string()),
-                Expression::Word(sum_name_for_sink.clone()),
-                Expression::Int(0),
-                next_sum
-            ]
-        );
-        let set_count = Expression::Apply(
-            vec![
-                Expression::Word("set!".to_string()),
-                Expression::Word(count_name_for_sink.clone()),
-                Expression::Int(0),
-                Expression::Apply(
-                    vec![
-                        Expression::Word("+".to_string()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("get".to_string()),
-                                Expression::Word(count_name_for_sink.clone()),
-                                Expression::Int(0)
-                            ]
-                        ),
-                        Expression::Int(1)
-                    ]
-                )
-            ]
-        );
-        Some(
-            Expression::Apply(
-                vec![
-                    Expression::Word("do".to_string()),
-                    set_sum,
-                    set_count,
-                    Expression::Word("nil".to_string())
-                ]
-            )
-        )
+        let sum_get = Expression::Apply(vec![
+            Expression::Word("get".to_string()),
+            Expression::Word(sum_name_for_sink.clone()),
+            Expression::Int(0),
+        ]);
+        let next_sum = Expression::Apply(vec![
+            Expression::Word((if dec { "+." } else { "+" }).to_string()),
+            sum_get,
+            mapped,
+        ]);
+        let set_sum = Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(sum_name_for_sink.clone()),
+            Expression::Int(0),
+            next_sum,
+        ]);
+        let set_count = Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(count_name_for_sink.clone()),
+            Expression::Int(0),
+            Expression::Apply(vec![
+                Expression::Word("+".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(count_name_for_sink.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Int(1),
+            ]),
+        ]);
+        Some(Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            set_sum,
+            set_count,
+            Expression::Word("nil".to_string()),
+        ]))
     };
     let process_body = build_non_flatten_chain_process(
         ops_outer_to_inner,
@@ -1597,48 +1519,51 @@ fn build_average_loop(
         i_word.clone(),
         suffix,
         &mut setup_bindings,
-        &sink_builder
+        &sink_builder,
     )?;
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(sum_name.clone()),
-                Expression::Apply(
-                    vec![Expression::Word("vector".to_string()), if dec {
-                        Expression::Dec(0.0)
-                    } else {
-                        Expression::Int(0)
-                    }]
-                )
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(count_name.clone()),
-                Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(0)])
-            ]
-        )
-    );
-    setup_bindings.push(build_while_range_body(start_expr, end_expr, &i_name, process_body));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(sum_name.clone()),
+        Expression::Apply(vec![
+            Expression::Word("vector".to_string()),
+            if dec {
+                Expression::Dec(0.0)
+            } else {
+                Expression::Int(0)
+            },
+        ]),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(count_name.clone()),
+        Expression::Apply(vec![
+            Expression::Word("vector".to_string()),
+            Expression::Int(0),
+        ]),
+    ]));
+    setup_bindings.push(build_while_range_body(
+        start_expr,
+        end_expr,
+        &i_name,
+        process_body,
+    ));
 
-    let count_get = Expression::Apply(
-        vec![Expression::Word("get".to_string()), Expression::Word(count_name), Expression::Int(0)]
-    );
-    let sum_get = Expression::Apply(
-        vec![Expression::Word("get".to_string()), Expression::Word(sum_name), Expression::Int(0)]
-    );
+    let count_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(count_name),
+        Expression::Int(0),
+    ]);
+    let sum_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(sum_name),
+        Expression::Int(0),
+    ]);
     let mean_expr = if dec {
-        Expression::Apply(
-            vec![
-                Expression::Word("/.".to_string()),
-                sum_get,
-                Expression::Apply(vec![Expression::Word("Int->Dec".to_string()), count_get])
-            ]
-        )
+        Expression::Apply(vec![
+            Expression::Word("/.".to_string()),
+            sum_get,
+            Expression::Apply(vec![Expression::Word("Int->Dec".to_string()), count_get]),
+        ])
     } else {
         Expression::Apply(vec![Expression::Word("/".to_string()), sum_get, count_get])
     };
@@ -1652,12 +1577,10 @@ fn build_average_loop(
 fn build_unzip_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
-    suffix: &str
+    suffix: &str,
 ) -> Option<Expression> {
-    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) = make_loop_source_bindings(
-        source,
-        suffix
-    )?;
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) =
+        make_loop_source_bindings(source, suffix)?;
 
     let out_a_name = fuse_tmp_name("__fuse_out_a", suffix);
     let out_b_name = fuse_tmp_name("__fuse_out_b", suffix);
@@ -1667,42 +1590,30 @@ fn build_unzip_loop(
     let out_a_for_sink = out_a_name.clone();
     let out_b_for_sink = out_b_name.clone();
     let sink_builder = move |mapped: Expression, _logical_i: Expression| {
-        let push_a = Expression::Apply(
-            vec![
-                Expression::Word("set!".to_string()),
+        let push_a = Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(out_a_for_sink.clone()),
+            Expression::Apply(vec![
+                Expression::Word("length".to_string()),
                 Expression::Word(out_a_for_sink.clone()),
-                Expression::Apply(
-                    vec![
-                        Expression::Word("length".to_string()),
-                        Expression::Word(out_a_for_sink.clone())
-                    ]
-                ),
-                Expression::Apply(vec![Expression::Word("fst".to_string()), mapped.clone()])
-            ]
-        );
-        let push_b = Expression::Apply(
-            vec![
-                Expression::Word("set!".to_string()),
+            ]),
+            Expression::Apply(vec![Expression::Word("fst".to_string()), mapped.clone()]),
+        ]);
+        let push_b = Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(out_b_for_sink.clone()),
+            Expression::Apply(vec![
+                Expression::Word("length".to_string()),
                 Expression::Word(out_b_for_sink.clone()),
-                Expression::Apply(
-                    vec![
-                        Expression::Word("length".to_string()),
-                        Expression::Word(out_b_for_sink.clone())
-                    ]
-                ),
-                Expression::Apply(vec![Expression::Word("snd".to_string()), mapped])
-            ]
-        );
-        Some(
-            Expression::Apply(
-                vec![
-                    Expression::Word("do".to_string()),
-                    push_a,
-                    push_b,
-                    Expression::Word("nil".to_string())
-                ]
-            )
-        )
+            ]),
+            Expression::Apply(vec![Expression::Word("snd".to_string()), mapped]),
+        ]);
+        Some(Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            push_a,
+            push_b,
+            Expression::Word("nil".to_string()),
+        ]))
     };
     let process_body = build_non_flatten_chain_process(
         ops_outer_to_inner,
@@ -1710,36 +1621,29 @@ fn build_unzip_loop(
         i_word.clone(),
         suffix,
         &mut setup_bindings,
-        &sink_builder
+        &sink_builder,
     )?;
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(out_a_name.clone()),
-                Expression::Apply(vec![Expression::Word("vector".to_string())])
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(out_b_name.clone()),
-                Expression::Apply(vec![Expression::Word("vector".to_string())])
-            ]
-        )
-    );
-    setup_bindings.push(build_while_range_body(start_expr, end_expr, &i_name, process_body));
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("tuple".to_string()),
-                Expression::Word(out_a_name),
-                Expression::Word(out_b_name)
-            ]
-        )
-    );
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(out_a_name.clone()),
+        Expression::Apply(vec![Expression::Word("vector".to_string())]),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(out_b_name.clone()),
+        Expression::Apply(vec![Expression::Word("vector".to_string())]),
+    ]));
+    setup_bindings.push(build_while_range_body(
+        start_expr,
+        end_expr,
+        &i_name,
+        process_body,
+    ));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("tuple".to_string()),
+        Expression::Word(out_a_name),
+        Expression::Word(out_b_name),
+    ]));
 
     let mut do_items = vec![Expression::Word("do".to_string())];
     do_items.extend(setup_bindings);
@@ -1752,44 +1656,36 @@ fn build_some_every_loop(
     predicate: Expression,
     with_index: bool,
     is_some: bool,
-    suffix: &str
+    suffix: &str,
 ) -> Option<Expression> {
     let (mut setup_bindings, idx_ref_name, cond_bound_expr, value_expr_for_idx_ref) =
         make_short_circuit_source_bindings(source, suffix)?;
 
     let flag_name = fuse_tmp_name("__fuse_flag", suffix);
-    let idx_get = Expression::Apply(
-        vec![
-            Expression::Word("get".to_string()),
-            Expression::Word(idx_ref_name.clone()),
-            Expression::Int(0)
-        ]
-    );
+    let idx_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(idx_ref_name.clone()),
+        Expression::Int(0),
+    ]);
     let x_expr = value_expr_for_idx_ref(&idx_get);
 
-    let flag_get = Expression::Apply(
-        vec![
-            Expression::Word("get".to_string()),
-            Expression::Word(flag_name.clone()),
-            Expression::Int(0)
-        ]
-    );
-    let set_flag_true = Expression::Apply(
-        vec![
-            Expression::Word("set!".to_string()),
-            Expression::Word(flag_name.clone()),
-            Expression::Int(0),
-            Expression::Word("true".to_string())
-        ]
-    );
-    let set_flag_false = Expression::Apply(
-        vec![
-            Expression::Word("set!".to_string()),
-            Expression::Word(flag_name.clone()),
-            Expression::Int(0),
-            Expression::Word("false".to_string())
-        ]
-    );
+    let flag_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(flag_name.clone()),
+        Expression::Int(0),
+    ]);
+    let set_flag_true = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(flag_name.clone()),
+        Expression::Int(0),
+        Expression::Word("true".to_string()),
+    ]);
+    let set_flag_false = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(flag_name.clone()),
+        Expression::Int(0),
+        Expression::Word("false".to_string()),
+    ]);
     let predicate_for_sink = predicate.clone();
     let set_flag_true_for_sink = set_flag_true.clone();
     let set_flag_false_for_sink = set_flag_false.clone();
@@ -1806,91 +1702,75 @@ fn build_some_every_loop(
                 call_callable_expr(&predicate_for_sink, vec![mapped])?
             };
             let action = if is_some {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("if".to_string()),
-                        pred_value,
-                        set_flag_true_for_sink.clone(),
-                        no_op_unit_expr()
-                    ]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("if".to_string()),
+                    pred_value,
+                    set_flag_true_for_sink.clone(),
+                    no_op_unit_expr(),
+                ])
             } else {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("if".to_string()),
-                        pred_value,
-                        no_op_unit_expr(),
-                        set_flag_false_for_sink.clone()
-                    ]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("if".to_string()),
+                    pred_value,
+                    no_op_unit_expr(),
+                    set_flag_false_for_sink.clone(),
+                ])
             };
             Some(action)
-        })
+        }),
     )?;
-    let idx_inc = Expression::Apply(
-        vec![
-            Expression::Word("set!".to_string()),
-            Expression::Word(idx_ref_name.clone()),
-            Expression::Int(0),
-            Expression::Apply(
-                vec![
-                    Expression::Word("+".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Int(1)
-                ]
-            )
-        ]
-    );
-    let step_body = Expression::Apply(
-        vec![Expression::Word("do".to_string()), step_action, idx_inc]
-    );
+    let idx_inc = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(idx_ref_name.clone()),
+        Expression::Int(0),
+        Expression::Apply(vec![
+            Expression::Word("+".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Int(0),
+            ]),
+            Expression::Int(1),
+        ]),
+    ]);
+    let step_body = Expression::Apply(vec![
+        Expression::Word("do".to_string()),
+        step_action,
+        idx_inc,
+    ]);
 
     let continue_cond = if is_some {
-        Expression::Apply(
-            vec![
-                Expression::Word("and".to_string()),
-                cond_bound_expr,
-                Expression::Apply(vec![Expression::Word("not".to_string()), flag_get.clone()])
-            ]
-        )
+        Expression::Apply(vec![
+            Expression::Word("and".to_string()),
+            cond_bound_expr,
+            Expression::Apply(vec![Expression::Word("not".to_string()), flag_get.clone()]),
+        ])
     } else {
-        Expression::Apply(
-            vec![Expression::Word("and".to_string()), cond_bound_expr, flag_get.clone()]
-        )
+        Expression::Apply(vec![
+            Expression::Word("and".to_string()),
+            cond_bound_expr,
+            flag_get.clone(),
+        ])
     };
 
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(flag_name.clone()),
-                Expression::Apply(
-                    vec![
-                        Expression::Word("vector".to_string()),
-                        Expression::Word((if is_some { "false" } else { "true" }).to_string())
-                    ]
-                )
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(vec![Expression::Word("while".to_string()), continue_cond, step_body])
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("get".to_string()),
-                Expression::Word(flag_name),
-                Expression::Int(0)
-            ]
-        )
-    );
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(flag_name.clone()),
+        Expression::Apply(vec![
+            Expression::Word("vector".to_string()),
+            Expression::Word((if is_some { "false" } else { "true" }).to_string()),
+        ]),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("while".to_string()),
+        continue_cond,
+        step_body,
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(flag_name),
+        Expression::Int(0),
+    ]));
 
     let mut do_items = vec![Expression::Word("do".to_string())];
     do_items.extend(setup_bindings);
@@ -1901,20 +1781,18 @@ fn build_find_loop(
     source: FuseSource,
     ops_outer_to_inner: &[MapFilterOp],
     predicate: Expression,
-    suffix: &str
+    suffix: &str,
 ) -> Option<Expression> {
     let (mut setup_bindings, idx_ref_name, cond_bound_expr, value_expr_for_idx_ref) =
         make_short_circuit_source_bindings(source, suffix)?;
 
     let out_name = fuse_tmp_name("__fuse_out", suffix);
 
-    let idx_get = Expression::Apply(
-        vec![
-            Expression::Word("get".to_string()),
-            Expression::Word(idx_ref_name.clone()),
-            Expression::Int(0)
-        ]
-    );
+    let idx_get = Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(idx_ref_name.clone()),
+        Expression::Int(0),
+    ]);
     let x_expr = value_expr_for_idx_ref(&idx_get);
     let out_name_for_sink = out_name.clone();
     let predicate_for_sink = predicate.clone();
@@ -1926,91 +1804,72 @@ fn build_find_loop(
         &mut setup_bindings,
         &(move |mapped: Expression, logical_i: Expression| {
             let pred_value = call_callable_expr(&predicate_for_sink, vec![mapped])?;
-            let set_found = Expression::Apply(
-                vec![
-                    Expression::Word("set!".to_string()),
-                    Expression::Word(out_name_for_sink.clone()),
-                    Expression::Int(0),
-                    logical_i
-                ]
-            );
-            Some(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("if".to_string()),
-                        pred_value,
-                        set_found,
-                        no_op_unit_expr()
-                    ]
-                )
-            )
-        })
+            let set_found = Expression::Apply(vec![
+                Expression::Word("set!".to_string()),
+                Expression::Word(out_name_for_sink.clone()),
+                Expression::Int(0),
+                logical_i,
+            ]);
+            Some(Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                pred_value,
+                set_found,
+                no_op_unit_expr(),
+            ]))
+        }),
     )?;
-    let idx_inc = Expression::Apply(
-        vec![
-            Expression::Word("set!".to_string()),
-            Expression::Word(idx_ref_name.clone()),
-            Expression::Int(0),
-            Expression::Apply(
-                vec![
-                    Expression::Word("+".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Int(1)
-                ]
-            )
-        ]
-    );
-    let step_body = Expression::Apply(
-        vec![Expression::Word("do".to_string()), guarded_step, idx_inc]
-    );
-
-    let continue_cond = Expression::Apply(
-        vec![
-            Expression::Word("and".to_string()),
-            cond_bound_expr,
-            Expression::Apply(
-                vec![
-                    Expression::Word("=".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(out_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Int(-1)
-                ]
-            )
-        ]
-    );
-
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(out_name.clone()),
-                Expression::Apply(vec![Expression::Word("vector".to_string()), Expression::Int(-1)])
-            ]
-        )
-    );
-    setup_bindings.push(
-        Expression::Apply(vec![Expression::Word("while".to_string()), continue_cond, step_body])
-    );
-    setup_bindings.push(
-        Expression::Apply(
-            vec![
+    let idx_inc = Expression::Apply(vec![
+        Expression::Word("set!".to_string()),
+        Expression::Word(idx_ref_name.clone()),
+        Expression::Int(0),
+        Expression::Apply(vec![
+            Expression::Word("+".to_string()),
+            Expression::Apply(vec![
                 Expression::Word("get".to_string()),
-                Expression::Word(out_name),
-                Expression::Int(0)
-            ]
-        )
-    );
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Int(0),
+            ]),
+            Expression::Int(1),
+        ]),
+    ]);
+    let step_body = Expression::Apply(vec![
+        Expression::Word("do".to_string()),
+        guarded_step,
+        idx_inc,
+    ]);
+
+    let continue_cond = Expression::Apply(vec![
+        Expression::Word("and".to_string()),
+        cond_bound_expr,
+        Expression::Apply(vec![
+            Expression::Word("=".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(out_name.clone()),
+                Expression::Int(0),
+            ]),
+            Expression::Int(-1),
+        ]),
+    ]);
+
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(out_name.clone()),
+        Expression::Apply(vec![
+            Expression::Word("vector".to_string()),
+            Expression::Int(-1),
+        ]),
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("while".to_string()),
+        continue_cond,
+        step_body,
+    ]));
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("get".to_string()),
+        Expression::Word(out_name),
+        Expression::Int(0),
+    ]));
 
     let mut do_items = vec![Expression::Word("do".to_string())];
     do_items.extend(setup_bindings);
@@ -2019,26 +1878,34 @@ fn build_find_loop(
 
 fn make_loop_source_bindings(
     source: FuseSource,
-    suffix: &str
-) -> Option<(Vec<Expression>, Expression, Expression, Box<dyn Fn(&Expression) -> Expression>)> {
+    suffix: &str,
+) -> Option<(
+    Vec<Expression>,
+    Expression,
+    Expression,
+    Box<dyn Fn(&Expression) -> Expression>,
+)> {
     match source {
         FuseSource::Vector(xs_expr) => {
             let xs_name = fuse_tmp_name("__fuse_xs", suffix);
             let xs_word = Expression::Word(xs_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(xs_name), xs_expr]
-                )
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs_expr,
+            ]));
             let start_expr = Expression::Int(0);
-            let end_expr = Expression::Apply(
-                vec![Expression::Word("length".to_string()), xs_word.clone()]
-            );
+            let end_expr = Expression::Apply(vec![
+                Expression::Word("length".to_string()),
+                xs_word.clone(),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![Expression::Word("get".to_string()), xs_word.clone(), i_expr.clone()]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    xs_word.clone(),
+                    i_expr.clone(),
+                ])
             });
             Some((setup, start_expr, end_expr, value))
         }
@@ -2049,49 +1916,40 @@ fn make_loop_source_bindings(
             let left_word = Expression::Word(left_name.clone());
             let right_word = Expression::Word(right_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(left_name), left]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(right_name), right]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(len_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("length".to_string()), left_word.clone()]
-                        )
-                    ]
-                )
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(left_name),
+                left,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(right_name),
+                right,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(len_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("length".to_string()),
+                    left_word.clone(),
+                ]),
+            ]));
             let start_expr = Expression::Int(0);
             let end_expr = Expression::Word(len_name);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("tuple".to_string()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("get".to_string()),
-                                left_word.clone(),
-                                i_expr.clone()
-                            ]
-                        ),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("get".to_string()),
-                                right_word.clone(),
-                                i_expr.clone()
-                            ]
-                        )
-                    ]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("tuple".to_string()),
+                    Expression::Apply(vec![
+                        Expression::Word("get".to_string()),
+                        left_word.clone(),
+                        i_expr.clone(),
+                    ]),
+                    Expression::Apply(vec![
+                        Expression::Word("get".to_string()),
+                        right_word.clone(),
+                        i_expr.clone(),
+                    ]),
+                ])
             });
             Some((setup, start_expr, end_expr, value))
         }
@@ -2101,32 +1959,34 @@ fn make_loop_source_bindings(
             let from_word = Expression::Word(from_name.clone());
             let to_word = Expression::Word(to_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(to_name), end]
-                )
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(from_name),
+                start,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name),
+                end,
+            ]));
             // Use a normalized 0-based loop counter for consistent /i semantics.
             let start_expr = Expression::Int(0);
             // range is inclusive in user language, loop end is exclusive; normalize to count.
-            let end_expr = Expression::Apply(
-                vec![
-                    Expression::Word("+".to_string()),
-                    Expression::Apply(
-                        vec![Expression::Word("-".to_string()), to_word, from_word.clone()]
-                    ),
-                    Expression::Int(1)
-                ]
-            );
+            let end_expr = Expression::Apply(vec![
+                Expression::Word("+".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("-".to_string()),
+                    to_word,
+                    from_word.clone(),
+                ]),
+                Expression::Int(1),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("+".to_string()),
+                    from_word.clone(),
+                    i_expr.clone(),
+                ])
             });
             Some((setup, start_expr, end_expr, value))
         }
@@ -2136,39 +1996,35 @@ fn make_loop_source_bindings(
             let from_word = Expression::Word(from_name.clone());
             let to_word = Expression::Word(to_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(to_name), end]
-                )
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(from_name),
+                start,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name),
+                end,
+            ]));
             let start_expr = Expression::Int(0);
-            let end_expr = Expression::Apply(
-                vec![
-                    Expression::Word("+".to_string()),
-                    Expression::Apply(
-                        vec![Expression::Word("-".to_string()), to_word, from_word.clone()]
-                    ),
-                    Expression::Int(1)
-                ]
-            );
+            let end_expr = Expression::Apply(vec![
+                Expression::Word("+".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("-".to_string()),
+                    to_word,
+                    from_word.clone(),
+                ]),
+                Expression::Int(1),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("Int->Dec".to_string()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("+".to_string()),
-                                from_word.clone(),
-                                i_expr.clone()
-                            ]
-                        )
-                    ]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("Int->Dec".to_string()),
+                    Expression::Apply(vec![
+                        Expression::Word("+".to_string()),
+                        from_word.clone(),
+                        i_expr.clone(),
+                    ]),
+                ])
             });
             Some((setup, start_expr, end_expr, value))
         }
@@ -2180,39 +2036,37 @@ fn make_loop_source_bindings(
             let from_word = Expression::Word(from_name.clone());
             let to_word = Expression::Word(to_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(xs_name), xs]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(to_name), end]
-                )
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(from_name),
+                start,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name),
+                end,
+            ]));
             let start_expr = Expression::Int(0);
-            let end_expr = Expression::Apply(
-                vec![Expression::Word("-".to_string()), to_word, from_word.clone()]
-            );
+            let end_expr = Expression::Apply(vec![
+                Expression::Word("-".to_string()),
+                to_word,
+                from_word.clone(),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("get".to_string()),
-                        xs_word.clone(),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("+".to_string()),
-                                from_word.clone(),
-                                i_expr.clone()
-                            ]
-                        )
-                    ]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    xs_word.clone(),
+                    Expression::Apply(vec![
+                        Expression::Word("+".to_string()),
+                        from_word.clone(),
+                        i_expr.clone(),
+                    ]),
+                ])
             });
             Some((setup, start_expr, end_expr, value))
         }
@@ -2226,53 +2080,42 @@ fn make_loop_source_bindings(
             let len_word = Expression::Word(len_name.clone());
             let end_word = Expression::Word(end_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(xs_name), xs]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(size_name), size]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(len_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("length".to_string()), xs_word.clone()]
-                        )
-                    ]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(end_name),
-                        build_window_end_expr(len_word.clone(), size_word.clone())
-                    ]
-                )
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(size_name),
+                size,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(len_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("length".to_string()),
+                    xs_word.clone(),
+                ]),
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(end_name),
+                build_window_end_expr(len_word.clone(), size_word.clone()),
+            ]));
             let start_expr = Expression::Int(0);
             let end_expr = end_word;
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("slice".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("slice".to_string()),
+                    i_expr.clone(),
+                    Expression::Apply(vec![
+                        Expression::Word("+".to_string()),
                         i_expr.clone(),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("+".to_string()),
-                                i_expr.clone(),
-                                size_word.clone()
-                            ]
-                        ),
-                        xs_word.clone()
-                    ]
-                )
+                        size_word.clone(),
+                    ]),
+                    xs_word.clone(),
+                ])
             });
             Some((setup, start_expr, end_expr, value))
         }
@@ -2281,8 +2124,13 @@ fn make_loop_source_bindings(
 
 fn make_short_circuit_source_bindings(
     source: FuseSource,
-    suffix: &str
-) -> Option<(Vec<Expression>, String, Expression, Box<dyn Fn(&Expression) -> Expression>)> {
+    suffix: &str,
+) -> Option<(
+    Vec<Expression>,
+    String,
+    Expression,
+    Box<dyn Fn(&Expression) -> Expression>,
+)> {
     match source {
         FuseSource::Vector(xs_expr) => {
             let xs_name = fuse_tmp_name("__fuse_xs", suffix);
@@ -2290,50 +2138,42 @@ fn make_short_circuit_source_bindings(
             let idx_ref_name = fuse_tmp_name("__fuse_i", suffix);
             let xs_word = Expression::Word(xs_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(xs_name), xs_expr]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(len_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("length".to_string()), xs_word.clone()]
-                        )
-                    ]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
-                        )
-                    ]
-                )
-            );
-            let cond = Expression::Apply(
-                vec![
-                    Expression::Word("<".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Word(len_name)
-                ]
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs_expr,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(len_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("length".to_string()),
+                    xs_word.clone(),
+                ]),
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("vector".to_string()),
+                    Expression::Int(0),
+                ]),
+            ]));
+            let cond = Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(idx_ref_name.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Word(len_name),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![Expression::Word("get".to_string()), xs_word.clone(), i_expr.clone()]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    xs_word.clone(),
+                    i_expr.clone(),
+                ])
             });
             Some((setup, idx_ref_name, cond, value))
         }
@@ -2345,71 +2185,55 @@ fn make_short_circuit_source_bindings(
             let left_word = Expression::Word(left_name.clone());
             let right_word = Expression::Word(right_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(left_name), left]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(right_name), right]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(len_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("length".to_string()), left_word.clone()]
-                        )
-                    ]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
-                        )
-                    ]
-                )
-            );
-            let cond = Expression::Apply(
-                vec![
-                    Expression::Word("<".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Word(len_name)
-                ]
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(left_name),
+                left,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(right_name),
+                right,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(len_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("length".to_string()),
+                    left_word.clone(),
+                ]),
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("vector".to_string()),
+                    Expression::Int(0),
+                ]),
+            ]));
+            let cond = Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(idx_ref_name.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Word(len_name),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("tuple".to_string()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("get".to_string()),
-                                left_word.clone(),
-                                i_expr.clone()
-                            ]
-                        ),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("get".to_string()),
-                                right_word.clone(),
-                                i_expr.clone()
-                            ]
-                        )
-                    ]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("tuple".to_string()),
+                    Expression::Apply(vec![
+                        Expression::Word("get".to_string()),
+                        left_word.clone(),
+                        i_expr.clone(),
+                    ]),
+                    Expression::Apply(vec![
+                        Expression::Word("get".to_string()),
+                        right_word.clone(),
+                        i_expr.clone(),
+                    ]),
+                ])
             });
             Some((setup, idx_ref_name, cond, value))
         }
@@ -2419,60 +2243,47 @@ fn make_short_circuit_source_bindings(
             let to_name = fuse_tmp_name("__fuse_to", suffix);
             let from_word = Expression::Word(from_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(to_name.clone()),
-                        end
-                    ]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
-                        )
-                    ]
-                )
-            );
-            let cond = Expression::Apply(
-                vec![
-                    Expression::Word("<".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("+".to_string()),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("-".to_string()),
-                                    Expression::Word(to_name),
-                                    from_word.clone()
-                                ]
-                            ),
-                            Expression::Int(1)
-                        ]
-                    )
-                ]
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(from_name),
+                start,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name.clone()),
+                end,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("vector".to_string()),
+                    Expression::Int(0),
+                ]),
+            ]));
+            let cond = Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(idx_ref_name.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Apply(vec![
+                    Expression::Word("+".to_string()),
+                    Expression::Apply(vec![
+                        Expression::Word("-".to_string()),
+                        Expression::Word(to_name),
+                        from_word.clone(),
+                    ]),
+                    Expression::Int(1),
+                ]),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![Expression::Word("+".to_string()), from_word.clone(), i_expr.clone()]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("+".to_string()),
+                    from_word.clone(),
+                    i_expr.clone(),
+                ])
             });
             Some((setup, idx_ref_name, cond, value))
         }
@@ -2482,69 +2293,50 @@ fn make_short_circuit_source_bindings(
             let to_name = fuse_tmp_name("__fuse_to", suffix);
             let from_word = Expression::Word(from_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(to_name.clone()),
-                        end
-                    ]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
-                        )
-                    ]
-                )
-            );
-            let cond = Expression::Apply(
-                vec![
-                    Expression::Word("<".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("+".to_string()),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("-".to_string()),
-                                    Expression::Word(to_name),
-                                    from_word.clone()
-                                ]
-                            ),
-                            Expression::Int(1)
-                        ]
-                    )
-                ]
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(from_name),
+                start,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name.clone()),
+                end,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("vector".to_string()),
+                    Expression::Int(0),
+                ]),
+            ]));
+            let cond = Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(idx_ref_name.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Apply(vec![
+                    Expression::Word("+".to_string()),
+                    Expression::Apply(vec![
+                        Expression::Word("-".to_string()),
+                        Expression::Word(to_name),
+                        from_word.clone(),
+                    ]),
+                    Expression::Int(1),
+                ]),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("Int->Dec".to_string()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("+".to_string()),
-                                from_word.clone(),
-                                i_expr.clone()
-                            ]
-                        )
-                    ]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("Int->Dec".to_string()),
+                    Expression::Apply(vec![
+                        Expression::Word("+".to_string()),
+                        from_word.clone(),
+                        i_expr.clone(),
+                    ]),
+                ])
             });
             Some((setup, idx_ref_name, cond, value))
         }
@@ -2556,69 +2348,52 @@ fn make_short_circuit_source_bindings(
             let xs_word = Expression::Word(xs_name.clone());
             let from_word = Expression::Word(from_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(xs_name), xs]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(from_name), start]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
-                        )
-                    ]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(to_name.clone()),
-                        end
-                    ]
-                )
-            );
-            let cond = Expression::Apply(
-                vec![
-                    Expression::Word("<".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("-".to_string()),
-                            Expression::Word(to_name),
-                            from_word.clone()
-                        ]
-                    )
-                ]
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(from_name),
+                start,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("vector".to_string()),
+                    Expression::Int(0),
+                ]),
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(to_name.clone()),
+                end,
+            ]));
+            let cond = Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(idx_ref_name.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Apply(vec![
+                    Expression::Word("-".to_string()),
+                    Expression::Word(to_name),
+                    from_word.clone(),
+                ]),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("get".to_string()),
-                        xs_word.clone(),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("+".to_string()),
-                                from_word.clone(),
-                                i_expr.clone()
-                            ]
-                        )
-                    ]
-                )
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    xs_word.clone(),
+                    Expression::Apply(vec![
+                        Expression::Word("+".to_string()),
+                        from_word.clone(),
+                        i_expr.clone(),
+                    ]),
+                ])
             });
             Some((setup, idx_ref_name, cond, value))
         }
@@ -2632,75 +2407,57 @@ fn make_short_circuit_source_bindings(
             let size_word = Expression::Word(size_name.clone());
             let len_word = Expression::Word(len_name.clone());
             let mut setup = Vec::new();
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(xs_name), xs]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![Expression::Word("let".to_string()), Expression::Word(size_name), size]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(len_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("length".to_string()), xs_word.clone()]
-                        )
-                    ]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(end_name.clone()),
-                        build_window_end_expr(len_word, size_word.clone())
-                    ]
-                )
-            );
-            setup.push(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(idx_ref_name.clone()),
-                        Expression::Apply(
-                            vec![Expression::Word("vector".to_string()), Expression::Int(0)]
-                        )
-                    ]
-                )
-            );
-            let cond = Expression::Apply(
-                vec![
-                    Expression::Word("<".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("get".to_string()),
-                            Expression::Word(idx_ref_name.clone()),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    Expression::Word(end_name)
-                ]
-            );
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(xs_name),
+                xs,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(size_name),
+                size,
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(len_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("length".to_string()),
+                    xs_word.clone(),
+                ]),
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(end_name.clone()),
+                build_window_end_expr(len_word, size_word.clone()),
+            ]));
+            setup.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(idx_ref_name.clone()),
+                Expression::Apply(vec![
+                    Expression::Word("vector".to_string()),
+                    Expression::Int(0),
+                ]),
+            ]));
+            let cond = Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("get".to_string()),
+                    Expression::Word(idx_ref_name.clone()),
+                    Expression::Int(0),
+                ]),
+                Expression::Word(end_name),
+            ]);
             let value = Box::new(move |i_expr: &Expression| {
-                Expression::Apply(
-                    vec![
-                        Expression::Word("slice".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("slice".to_string()),
+                    i_expr.clone(),
+                    Expression::Apply(vec![
+                        Expression::Word("+".to_string()),
                         i_expr.clone(),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("+".to_string()),
-                                i_expr.clone(),
-                                size_word.clone()
-                            ]
-                        ),
-                        xs_word.clone()
-                    ]
-                )
+                        size_word.clone(),
+                    ]),
+                    xs_word.clone(),
+                ])
             });
             Some((setup, idx_ref_name, cond, value))
         }
@@ -2708,37 +2465,29 @@ fn make_short_circuit_source_bindings(
 }
 
 fn build_window_end_expr(len_expr: Expression, size_expr: Expression) -> Expression {
-    Expression::Apply(
-        vec![
+    Expression::Apply(vec![
+        Expression::Word("if".to_string()),
+        Expression::Apply(vec![
+            Expression::Word(">".to_string()),
+            size_expr.clone(),
+            len_expr.clone(),
+        ]),
+        Expression::Int(0),
+        Expression::Apply(vec![
             Expression::Word("if".to_string()),
-            Expression::Apply(
-                vec![Expression::Word(">".to_string()), size_expr.clone(), len_expr.clone()]
-            ),
-            Expression::Int(0),
-            Expression::Apply(
-                vec![
-                    Expression::Word("if".to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("=".to_string()),
-                            size_expr.clone(),
-                            Expression::Int(0)
-                        ]
-                    ),
-                    len_expr.clone(),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("+".to_string()),
-                            Expression::Apply(
-                                vec![Expression::Word("-".to_string()), len_expr, size_expr]
-                            ),
-                            Expression::Int(1)
-                        ]
-                    )
-                ]
-            )
-        ]
-    )
+            Expression::Apply(vec![
+                Expression::Word("=".to_string()),
+                size_expr.clone(),
+                Expression::Int(0),
+            ]),
+            len_expr.clone(),
+            Expression::Apply(vec![
+                Expression::Word("+".to_string()),
+                Expression::Apply(vec![Expression::Word("-".to_string()), len_expr, size_expr]),
+                Expression::Int(1),
+            ]),
+        ]),
+    ])
 }
 
 fn next_flatten_tmp_name(prefix: &str, suffix: &str, counter: &mut usize) -> String {
@@ -2754,24 +2503,18 @@ fn build_collect_step_with_flatten(
     current_index: Expression,
     out_name: &str,
     suffix: &str,
-    flat_tmp_counter: &mut usize
+    flat_tmp_counter: &mut usize,
 ) -> Option<Expression> {
     if idx >= ops_inner_to_outer.len() {
-        return Some(
-            Expression::Apply(
-                vec![
-                    Expression::Word("set!".to_string()),
-                    Expression::Word(out_name.to_string()),
-                    Expression::Apply(
-                        vec![
-                            Expression::Word("length".to_string()),
-                            Expression::Word(out_name.to_string())
-                        ]
-                    ),
-                    current_value
-                ]
-            )
-        );
+        return Some(Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(out_name.to_string()),
+            Expression::Apply(vec![
+                Expression::Word("length".to_string()),
+                Expression::Word(out_name.to_string()),
+            ]),
+            current_value,
+        ]));
     }
 
     match &ops_inner_to_outer[idx] {
@@ -2788,12 +2531,19 @@ fn build_collect_step_with_flatten(
                 current_index,
                 out_name,
                 suffix,
-                flat_tmp_counter
+                flat_tmp_counter,
             )
         }
-        MapFilterOp::Filter { predicate, keep_when_true, with_index } => {
+        MapFilterOp::Filter {
+            predicate,
+            keep_when_true,
+            with_index,
+        } => {
             let pred = if *with_index {
-                call_callable_expr(predicate, vec![current_value.clone(), current_index.clone()])?
+                call_callable_expr(
+                    predicate,
+                    vec![current_value.clone(), current_index.clone()],
+                )?
             } else {
                 call_callable_expr(predicate, vec![current_value.clone()])?
             };
@@ -2809,13 +2559,14 @@ fn build_collect_step_with_flatten(
                 current_index,
                 out_name,
                 suffix,
-                flat_tmp_counter
+                flat_tmp_counter,
             )?;
-            Some(
-                Expression::Apply(
-                    vec![Expression::Word("if".to_string()), cond, then_expr, no_op_unit_expr()]
-                )
-            )
+            Some(Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                cond,
+                then_expr,
+                no_op_unit_expr(),
+            ]))
         }
         MapFilterOp::Flat | MapFilterOp::FlatMap { .. } => {
             let list_expr = match &ops_inner_to_outer[idx] {
@@ -2826,13 +2577,11 @@ fn build_collect_step_with_flatten(
             let xs_name = next_flatten_tmp_name("__fuse_flat_xs", suffix, flat_tmp_counter);
             let i_name = next_flatten_tmp_name("__fuse_flat_i", suffix, flat_tmp_counter);
             let i_word = Expression::Word(i_name.clone());
-            let item_expr = Expression::Apply(
-                vec![
-                    Expression::Word("get".to_string()),
-                    Expression::Word(xs_name.clone()),
-                    i_word.clone()
-                ]
-            );
+            let item_expr = Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(xs_name.clone()),
+                i_word.clone(),
+            ]);
             let process_body = build_collect_step_with_flatten(
                 ops_inner_to_outer,
                 idx + 1,
@@ -2840,33 +2589,25 @@ fn build_collect_step_with_flatten(
                 i_word,
                 out_name,
                 suffix,
-                flat_tmp_counter
+                flat_tmp_counter,
             )?;
-            Some(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("do".to_string()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("let".to_string()),
-                                Expression::Word(xs_name.clone()),
-                                list_expr
-                            ]
-                        ),
-                        build_while_range_body(
-                            Expression::Int(0),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("length".to_string()),
-                                    Expression::Word(xs_name)
-                                ]
-                            ),
-                            &i_name,
-                            process_body
-                        )
-                    ]
-                )
-            )
+            Some(Expression::Apply(vec![
+                Expression::Word("do".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("let".to_string()),
+                    Expression::Word(xs_name.clone()),
+                    list_expr,
+                ]),
+                build_while_range_body(
+                    Expression::Int(0),
+                    Expression::Apply(vec![
+                        Expression::Word("length".to_string()),
+                        Expression::Word(xs_name),
+                    ]),
+                    &i_name,
+                    process_body,
+                ),
+            ]))
         }
     }
 }
@@ -2879,27 +2620,21 @@ fn build_reduce_step_with_flatten(
     reduce_fn: &Expression,
     out_name: &str,
     suffix: &str,
-    flat_tmp_counter: &mut usize
+    flat_tmp_counter: &mut usize,
 ) -> Option<Expression> {
     if idx >= ops_inner_to_outer.len() {
-        let acc_get = Expression::Apply(
-            vec![
-                Expression::Word("get".to_string()),
-                Expression::Word(out_name.to_string()),
-                Expression::Int(0)
-            ]
-        );
+        let acc_get = Expression::Apply(vec![
+            Expression::Word("get".to_string()),
+            Expression::Word(out_name.to_string()),
+            Expression::Int(0),
+        ]);
         let reduced = call_callable_expr(reduce_fn, vec![acc_get, current_value])?;
-        return Some(
-            Expression::Apply(
-                vec![
-                    Expression::Word("set!".to_string()),
-                    Expression::Word(out_name.to_string()),
-                    Expression::Int(0),
-                    reduced
-                ]
-            )
-        );
+        return Some(Expression::Apply(vec![
+            Expression::Word("set!".to_string()),
+            Expression::Word(out_name.to_string()),
+            Expression::Int(0),
+            reduced,
+        ]));
     }
 
     match &ops_inner_to_outer[idx] {
@@ -2917,12 +2652,19 @@ fn build_reduce_step_with_flatten(
                 reduce_fn,
                 out_name,
                 suffix,
-                flat_tmp_counter
+                flat_tmp_counter,
             )
         }
-        MapFilterOp::Filter { predicate, keep_when_true, with_index } => {
+        MapFilterOp::Filter {
+            predicate,
+            keep_when_true,
+            with_index,
+        } => {
             let pred = if *with_index {
-                call_callable_expr(predicate, vec![current_value.clone(), current_index.clone()])?
+                call_callable_expr(
+                    predicate,
+                    vec![current_value.clone(), current_index.clone()],
+                )?
             } else {
                 call_callable_expr(predicate, vec![current_value.clone()])?
             };
@@ -2939,13 +2681,14 @@ fn build_reduce_step_with_flatten(
                 reduce_fn,
                 out_name,
                 suffix,
-                flat_tmp_counter
+                flat_tmp_counter,
             )?;
-            Some(
-                Expression::Apply(
-                    vec![Expression::Word("if".to_string()), cond, then_expr, no_op_unit_expr()]
-                )
-            )
+            Some(Expression::Apply(vec![
+                Expression::Word("if".to_string()),
+                cond,
+                then_expr,
+                no_op_unit_expr(),
+            ]))
         }
         MapFilterOp::Flat | MapFilterOp::FlatMap { .. } => {
             let list_expr = match &ops_inner_to_outer[idx] {
@@ -2956,13 +2699,11 @@ fn build_reduce_step_with_flatten(
             let xs_name = next_flatten_tmp_name("__fuse_flat_xs", suffix, flat_tmp_counter);
             let i_name = next_flatten_tmp_name("__fuse_flat_i", suffix, flat_tmp_counter);
             let i_word = Expression::Word(i_name.clone());
-            let item_expr = Expression::Apply(
-                vec![
-                    Expression::Word("get".to_string()),
-                    Expression::Word(xs_name.clone()),
-                    i_word.clone()
-                ]
-            );
+            let item_expr = Expression::Apply(vec![
+                Expression::Word("get".to_string()),
+                Expression::Word(xs_name.clone()),
+                i_word.clone(),
+            ]);
             let process_body = build_reduce_step_with_flatten(
                 ops_inner_to_outer,
                 idx + 1,
@@ -2971,33 +2712,25 @@ fn build_reduce_step_with_flatten(
                 reduce_fn,
                 out_name,
                 suffix,
-                flat_tmp_counter
+                flat_tmp_counter,
             )?;
-            Some(
-                Expression::Apply(
-                    vec![
-                        Expression::Word("do".to_string()),
-                        Expression::Apply(
-                            vec![
-                                Expression::Word("let".to_string()),
-                                Expression::Word(xs_name.clone()),
-                                list_expr
-                            ]
-                        ),
-                        build_while_range_body(
-                            Expression::Int(0),
-                            Expression::Apply(
-                                vec![
-                                    Expression::Word("length".to_string()),
-                                    Expression::Word(xs_name)
-                                ]
-                            ),
-                            &i_name,
-                            process_body
-                        )
-                    ]
-                )
-            )
+            Some(Expression::Apply(vec![
+                Expression::Word("do".to_string()),
+                Expression::Apply(vec![
+                    Expression::Word("let".to_string()),
+                    Expression::Word(xs_name.clone()),
+                    list_expr,
+                ]),
+                build_while_range_body(
+                    Expression::Int(0),
+                    Expression::Apply(vec![
+                        Expression::Word("length".to_string()),
+                        Expression::Word(xs_name),
+                    ]),
+                    &i_name,
+                    process_body,
+                ),
+            ]))
         }
     }
 }
@@ -3010,9 +2743,8 @@ fn call_callable_expr(callable: &Expression, args: Vec<Expression>) -> Option<Ex
             items.extend(args);
             Some(Expression::Apply(items))
         }
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
-        => {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") =>
+        {
             if items.len() < 2 {
                 return None;
             }
@@ -3046,7 +2778,7 @@ fn alpha_rename_lambda_local_bindings(expr: &Expression, prefix: &str) -> Expres
 fn alpha_rename_local_bindings_typed(
     node: &TypedExpression,
     env: &mut HashMap<String, String>,
-    state: &mut InlineState
+    state: &mut InlineState,
 ) -> TypedExpression {
     match &node.expr {
         Expression::Word(w) => {
@@ -3061,11 +2793,11 @@ fn alpha_rename_local_bindings_typed(
                 node.clone()
             }
         }
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
-        => {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
+        {
             let mut scoped = env.clone();
-            let children = node.children
+            let children = node
+                .children
                 .iter()
                 .map(|child| alpha_rename_local_bindings_typed(child, &mut scoped, state))
                 .collect::<Vec<_>>();
@@ -3082,11 +2814,12 @@ fn alpha_rename_local_bindings_typed(
                     let rhs = alpha_rename_local_bindings_typed(
                         node.children.get(2).unwrap_or(node),
                         env,
-                        state
+                        state,
                     );
                     let fresh = state.fresh_tmp();
                     env.insert(name.clone(), fresh.clone());
-                    let head = node.children
+                    let head = node
+                        .children
                         .first()
                         .cloned()
                         .unwrap_or_else(|| pure_word(kw));
@@ -3097,20 +2830,19 @@ fn alpha_rename_local_bindings_typed(
                         children: Vec::new(),
                     };
                     return TypedExpression {
-                        expr: Expression::Apply(
-                            vec![
-                                Expression::Word(kw.clone()),
-                                Expression::Word(fresh),
-                                rhs.expr.clone()
-                            ]
-                        ),
+                        expr: Expression::Apply(vec![
+                            Expression::Word(kw.clone()),
+                            Expression::Word(fresh),
+                            rhs.expr.clone(),
+                        ]),
                         typ: node.typ.clone(),
                         effect: node.effect,
                         children: vec![head, bind, rhs],
                     };
                 }
             }
-            let children = node.children
+            let children = node
+                .children
                 .iter()
                 .map(|child| {
                     let mut scoped = env.clone();
@@ -3125,7 +2857,8 @@ fn alpha_rename_local_bindings_typed(
             }
         }
         Expression::Apply(_) => {
-            let children = node.children
+            let children = node
+                .children
                 .iter()
                 .map(|child| {
                     let mut scoped = env.clone();
@@ -3147,18 +2880,16 @@ fn alpha_rename_local_bindings_expr(
     expr: &Expression,
     env: &mut HashMap<String, String>,
     counter: &mut usize,
-    prefix: &str
+    prefix: &str,
 ) -> Expression {
     match expr {
-        Expression::Word(w) =>
-            env
-                .get(w)
-                .cloned()
-                .map(Expression::Word)
-                .unwrap_or_else(|| Expression::Word(w.clone())),
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
-        => {
+        Expression::Word(w) => env
+            .get(w)
+            .cloned()
+            .map(Expression::Word)
+            .unwrap_or_else(|| Expression::Word(w.clone())),
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") =>
+        {
             if items.len() < 2 {
                 return Expression::Apply(items.clone());
             }
@@ -3172,13 +2903,17 @@ fn alpha_rename_local_bindings_expr(
             }
             let mut out = items[..items.len() - 1].to_vec();
             if let Some(body) = items.last() {
-                out.push(alpha_rename_local_bindings_expr(body, &mut scoped, counter, prefix));
+                out.push(alpha_rename_local_bindings_expr(
+                    body,
+                    &mut scoped,
+                    counter,
+                    prefix,
+                ));
             }
             Expression::Apply(out)
         }
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
-        => {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
+        {
             let mut out = Vec::with_capacity(items.len());
             if let Some(head) = items.first() {
                 out.push(head.clone());
@@ -3201,28 +2936,29 @@ fn alpha_rename_local_bindings_expr(
                         alpha_rename_local_bindings_expr(rhs, env, counter, prefix)
                     };
                     env.insert(name.clone(), fresh.clone());
-                    return Expression::Apply(
-                        vec![Expression::Word(kw.clone()), Expression::Word(fresh), rewritten_rhs]
-                    );
+                    return Expression::Apply(vec![
+                        Expression::Word(kw.clone()),
+                        Expression::Word(fresh),
+                        rewritten_rhs,
+                    ]);
                 }
             }
             Expression::Apply(
                 items
                     .iter()
                     .map(|item| alpha_rename_local_bindings_expr(item, env, counter, prefix))
-                    .collect()
+                    .collect(),
             )
         }
-        Expression::Apply(items) =>
-            Expression::Apply(
-                items
-                    .iter()
-                    .map(|item| {
-                        let mut scoped = env.clone();
-                        alpha_rename_local_bindings_expr(item, &mut scoped, counter, prefix)
-                    })
-                    .collect()
-            ),
+        Expression::Apply(items) => Expression::Apply(
+            items
+                .iter()
+                .map(|item| {
+                    let mut scoped = env.clone();
+                    alpha_rename_local_bindings_expr(item, &mut scoped, counter, prefix)
+                })
+                .collect(),
+        ),
         Expression::Int(n) => Expression::Int(*n),
         Expression::Dec(n) => Expression::Dec(*n),
     }
@@ -3246,8 +2982,9 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
     match sink {
         FuseSink::Collect => true,
         FuseSink::Reduce { reduce_fn, .. } => is_fusion_safe_callable(reduce_fn),
-        FuseSink::ReduceUntil { reduce_fn, stop_fn, .. } =>
-            is_fusion_safe_callable(reduce_fn) && is_fusion_safe_callable(stop_fn),
+        FuseSink::ReduceUntil {
+            reduce_fn, stop_fn, ..
+        } => is_fusion_safe_callable(reduce_fn) && is_fusion_safe_callable(stop_fn),
         FuseSink::Average { .. } => true,
         FuseSink::Unzip => false,
         FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } => {
@@ -3258,7 +2995,11 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
 }
 
 fn zip_collect_fusion_is_supported(ops: &[MapFilterOp]) -> bool {
-    let [MapFilterOp::Map { func, with_index: false }] = ops else {
+    let [MapFilterOp::Map {
+        func,
+        with_index: false,
+    }] = ops
+    else {
         return false;
     };
     zip_map_lambda_can_avoid_row_tuple(func)
@@ -3292,7 +3033,10 @@ fn expression_materializes_tuple(expr: &Expression) -> bool {
                 return true;
             }
             if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
-                return items.last().map(expression_materializes_tuple).unwrap_or(false);
+                return items
+                    .last()
+                    .map(expression_materializes_tuple)
+                    .unwrap_or(false);
             }
             false
         }
@@ -3303,13 +3047,12 @@ fn expression_materializes_tuple(expr: &Expression) -> bool {
 fn expression_returns_word(expr: &Expression, name: &str) -> bool {
     match expr {
         Expression::Word(w) => w == name,
-        Expression::Apply(items) if
-            matches!(items.first(), Some(Expression::Word(w)) if w == "do")
-        =>
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") => {
             items
                 .last()
                 .map(|last| expression_returns_word(last, name))
-                .unwrap_or(false),
+                .unwrap_or(false)
+        }
         _ => false,
     }
 }
@@ -3344,128 +3087,127 @@ fn hoist_fusion_callable_expr(
     expr: Expression,
     suffix: &str,
     counter: &mut usize,
-    hoisted_bindings: &mut Vec<Expression>
+    hoisted_bindings: &mut Vec<Expression>,
 ) -> Expression {
     if !fusion_callable_needs_hoist(&expr) {
         return expr;
     }
     let name = fuse_tmp_name(&format!("__fuse_callable_{}", *counter), suffix);
     *counter += 1;
-    hoisted_bindings.push(
-        Expression::Apply(
-            vec![Expression::Word("let".to_string()), Expression::Word(name.clone()), expr]
-        )
-    );
+    hoisted_bindings.push(Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(name.clone()),
+        expr,
+    ]));
     Expression::Word(name)
 }
 
 fn hoist_fusion_callables(
     ops_outer_to_inner: &[MapFilterOp],
     sink: FuseSink,
-    suffix: &str
+    suffix: &str,
 ) -> (Vec<Expression>, Vec<MapFilterOp>, FuseSink) {
     let mut counter = 0usize;
     let mut hoisted_bindings = Vec::new();
     let hoisted_ops = ops_outer_to_inner
         .iter()
         .cloned()
-        .map(|op| {
-            match op {
-                MapFilterOp::Map { func, with_index } =>
-                    MapFilterOp::Map {
-                        func: hoist_fusion_callable_expr(
-                            func,
-                            suffix,
-                            &mut counter,
-                            &mut hoisted_bindings
-                        ),
-                        with_index,
-                    },
-                MapFilterOp::FlatMap { func } =>
-                    MapFilterOp::FlatMap {
-                        func: hoist_fusion_callable_expr(
-                            func,
-                            suffix,
-                            &mut counter,
-                            &mut hoisted_bindings
-                        ),
-                    },
-                MapFilterOp::Flat => MapFilterOp::Flat,
-                MapFilterOp::Filter { predicate, keep_when_true, with_index } =>
-                    MapFilterOp::Filter {
-                        predicate: hoist_fusion_callable_expr(
-                            predicate,
-                            suffix,
-                            &mut counter,
-                            &mut hoisted_bindings
-                        ),
-                        keep_when_true,
-                        with_index,
-                    },
-            }
+        .map(|op| match op {
+            MapFilterOp::Map { func, with_index } => MapFilterOp::Map {
+                func: hoist_fusion_callable_expr(func, suffix, &mut counter, &mut hoisted_bindings),
+                with_index,
+            },
+            MapFilterOp::FlatMap { func } => MapFilterOp::FlatMap {
+                func: hoist_fusion_callable_expr(func, suffix, &mut counter, &mut hoisted_bindings),
+            },
+            MapFilterOp::Flat => MapFilterOp::Flat,
+            MapFilterOp::Filter {
+                predicate,
+                keep_when_true,
+                with_index,
+            } => MapFilterOp::Filter {
+                predicate: hoist_fusion_callable_expr(
+                    predicate,
+                    suffix,
+                    &mut counter,
+                    &mut hoisted_bindings,
+                ),
+                keep_when_true,
+                with_index,
+            },
         })
         .collect::<Vec<_>>();
     let hoisted_sink = match sink {
         FuseSink::Collect => FuseSink::Collect,
-        FuseSink::Reduce { reduce_fn, init_expr, with_index } =>
-            FuseSink::Reduce {
-                reduce_fn: hoist_fusion_callable_expr(
-                    reduce_fn,
-                    suffix,
-                    &mut counter,
-                    &mut hoisted_bindings
-                ),
-                init_expr,
-                with_index,
-            },
-        FuseSink::ReduceUntil { reduce_fn, stop_fn, init_expr, with_index } =>
-            FuseSink::ReduceUntil {
-                reduce_fn: hoist_fusion_callable_expr(
-                    reduce_fn,
-                    suffix,
-                    &mut counter,
-                    &mut hoisted_bindings
-                ),
-                stop_fn: hoist_fusion_callable_expr(
-                    stop_fn,
-                    suffix,
-                    &mut counter,
-                    &mut hoisted_bindings
-                ),
-                init_expr,
-                with_index,
-            },
+        FuseSink::Reduce {
+            reduce_fn,
+            init_expr,
+            with_index,
+        } => FuseSink::Reduce {
+            reduce_fn: hoist_fusion_callable_expr(
+                reduce_fn,
+                suffix,
+                &mut counter,
+                &mut hoisted_bindings,
+            ),
+            init_expr,
+            with_index,
+        },
+        FuseSink::ReduceUntil {
+            reduce_fn,
+            stop_fn,
+            init_expr,
+            with_index,
+        } => FuseSink::ReduceUntil {
+            reduce_fn: hoist_fusion_callable_expr(
+                reduce_fn,
+                suffix,
+                &mut counter,
+                &mut hoisted_bindings,
+            ),
+            stop_fn: hoist_fusion_callable_expr(
+                stop_fn,
+                suffix,
+                &mut counter,
+                &mut hoisted_bindings,
+            ),
+            init_expr,
+            with_index,
+        },
         FuseSink::Average { dec } => FuseSink::Average { dec },
         FuseSink::Unzip => FuseSink::Unzip,
-        FuseSink::Some { predicate, with_index } =>
-            FuseSink::Some {
-                predicate: hoist_fusion_callable_expr(
-                    predicate,
-                    suffix,
-                    &mut counter,
-                    &mut hoisted_bindings
-                ),
-                with_index,
-            },
-        FuseSink::Every { predicate, with_index } =>
-            FuseSink::Every {
-                predicate: hoist_fusion_callable_expr(
-                    predicate,
-                    suffix,
-                    &mut counter,
-                    &mut hoisted_bindings
-                ),
-                with_index,
-            },
-        FuseSink::Find { predicate } =>
-            FuseSink::Find {
-                predicate: hoist_fusion_callable_expr(
-                    predicate,
-                    suffix,
-                    &mut counter,
-                    &mut hoisted_bindings
-                ),
-            },
+        FuseSink::Some {
+            predicate,
+            with_index,
+        } => FuseSink::Some {
+            predicate: hoist_fusion_callable_expr(
+                predicate,
+                suffix,
+                &mut counter,
+                &mut hoisted_bindings,
+            ),
+            with_index,
+        },
+        FuseSink::Every {
+            predicate,
+            with_index,
+        } => FuseSink::Every {
+            predicate: hoist_fusion_callable_expr(
+                predicate,
+                suffix,
+                &mut counter,
+                &mut hoisted_bindings,
+            ),
+            with_index,
+        },
+        FuseSink::Find { predicate } => FuseSink::Find {
+            predicate: hoist_fusion_callable_expr(
+                predicate,
+                suffix,
+                &mut counter,
+                &mut hoisted_bindings,
+            ),
+        },
     };
     (hoisted_bindings, hoisted_ops, hoisted_sink)
 }
@@ -3477,7 +3219,11 @@ pub(crate) fn fuse_map_filter_reduce_for_test(expr: &Expression) -> Expression {
 }
 
 fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
-    let optimized_children = node.children.iter().map(optimize_typed_ast_once).collect::<Vec<_>>();
+    let optimized_children = node
+        .children
+        .iter()
+        .map(optimize_typed_ast_once)
+        .collect::<Vec<_>>();
     let rebuilt_expr = rebuild_expr_from_children(&node.expr, &optimized_children);
     let rebuilt_node = TypedExpression {
         expr: rebuilt_expr,
@@ -3491,12 +3237,7 @@ fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
 fn rebuild_expr_from_children(expr: &Expression, children: &[TypedExpression]) -> Expression {
     match expr {
         Expression::Apply(items) if items.len() == children.len() => {
-            Expression::Apply(
-                children
-                    .iter()
-                    .map(|ch| ch.expr.clone())
-                    .collect()
-            )
+            Expression::Apply(children.iter().map(|ch| ch.expr.clone()).collect())
         }
         _ => expr.clone(),
     }
@@ -3563,7 +3304,7 @@ fn is_lambda_expr(expr: &Expression) -> bool {
 
 fn beta_reduce_immediate_lambda_call(
     node: &TypedExpression,
-    call_items: &[Expression]
+    call_items: &[Expression],
 ) -> Option<TypedExpression> {
     let Expression::Apply(lambda_items) = call_items.first()? else {
         return None;
@@ -3586,11 +3327,9 @@ fn beta_reduce_immediate_lambda_call(
 
     let params = params_expr
         .iter()
-        .map(|p| {
-            match p {
-                Expression::Word(w) => Some(w.clone()),
-                _ => None,
-            }
+        .map(|p| match p {
+            Expression::Word(w) => Some(w.clone()),
+            _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
 
@@ -3615,7 +3354,11 @@ fn beta_reduce_immediate_lambda_call(
         typed_subst.insert(param.clone(), arg_node);
     }
 
-    Some(substitute_params_typed(body_typed, &expr_subst, &typed_subst))
+    Some(substitute_params_typed(
+        body_typed,
+        &expr_subst,
+        &typed_subst,
+    ))
 }
 
 fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
@@ -3628,24 +3371,18 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
 
     // First, inline simple direct lambda calls at do-scope with hygienic temp args.
     let mut inline_state = InlineState::new(&normalized_do.expr);
-    let (inlined_items, inlined_children) = inline_do_simple_calls(
-        &normalized_do,
-        &mut inline_state
-    );
-    let (inlined_items, inlined_children) = eliminate_tuple_projection_lets(
-        inlined_items,
-        inlined_children
-    );
-    let (inlined_items, inlined_children) = eliminate_single_use_let_bindings(
-        inlined_items,
-        inlined_children
-    );
+    let (inlined_items, inlined_children) =
+        inline_do_simple_calls(&normalized_do, &mut inline_state);
+    let (inlined_items, inlined_children) =
+        eliminate_tuple_projection_lets(inlined_items, inlined_children);
+    let (inlined_items, inlined_children) =
+        eliminate_single_use_let_bindings(inlined_items, inlined_children);
     let tuple_inline_root = Expression::Apply(inlined_items.clone());
     let mut tuple_inline_state = InlineState::new(&tuple_inline_root);
     let (inlined_items, inlined_children) = eliminate_tuple_return_destructuring_calls(
         inlined_items,
         inlined_children,
-        &mut tuple_inline_state
+        &mut tuple_inline_state,
     );
 
     let rebuilt_after_inline = TypedExpression {
@@ -3654,17 +3391,14 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         effect: normalized_do.effect,
         children: inlined_children.clone(),
     };
-    let rebuilt_after_inline = lower_non_escaping_local_cells_in_do(
-        &rebuilt_after_inline
-    ).unwrap_or(rebuilt_after_inline);
+    let rebuilt_after_inline =
+        lower_non_escaping_local_cells_in_do(&rebuilt_after_inline).unwrap_or(rebuilt_after_inline);
     let Expression::Apply(rewritten_items) = &rebuilt_after_inline.expr else {
         return rebuilt_after_inline;
     };
     let rewritten_children = rebuilt_after_inline.children.clone();
-    let (rewritten_items, rewritten_children) = eliminate_unused_pure_let_bindings_in_do(
-        rewritten_items.clone(),
-        rewritten_children
-    );
+    let (rewritten_items, rewritten_children) =
+        eliminate_unused_pure_let_bindings_in_do(rewritten_items.clone(), rewritten_children);
     let rebuilt_after_inline = TypedExpression {
         expr: Expression::Apply(rewritten_items.clone()),
         typ: rebuilt_after_inline.typ,
@@ -3710,7 +3444,10 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     // (do x) => x
     if kept_indices.len() == 2 {
         let only_expr_idx = kept_indices[1];
-        return rewritten_children.get(only_expr_idx).cloned().unwrap_or(rebuilt_after_inline);
+        return rewritten_children
+            .get(only_expr_idx)
+            .cloned()
+            .unwrap_or(rebuilt_after_inline);
     }
 
     let new_expr_items = kept_indices
@@ -3732,7 +3469,7 @@ fn fold_do(node: TypedExpression, items: &[Expression]) -> TypedExpression {
 
 fn eliminate_unused_pure_let_bindings_in_do(
     items: Vec<Expression>,
-    children: Vec<TypedExpression>
+    children: Vec<TypedExpression>,
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
     if items.len() != children.len() || items.len() <= 2 {
         return (items, children);
@@ -3772,7 +3509,7 @@ fn eliminate_unused_pure_let_bindings_in_do(
 
 fn pure_let_binding_candidate<'a>(
     expr: &Expression,
-    typed: &'a TypedExpression
+    typed: &'a TypedExpression,
 ) -> Option<(String, &'a TypedExpression)> {
     let Expression::Apply(items) = expr else {
         return None;
@@ -3836,16 +3573,15 @@ fn lower_non_escaping_local_cells_in_do(node: &TypedExpression) -> Option<TypedE
                 }
             }
         }
-        let Some((name, init_node, kind, payload_type)) = extract_non_escaping_local_cell_candidate(
-            out_children.get(i)?
-        ) else {
+        let Some((name, init_node, kind, payload_type)) =
+            extract_non_escaping_local_cell_candidate(out_children.get(i)?)
+        else {
             continue;
         };
         let end = find_next_do_rebinding(&out_items, &name, i + 1).unwrap_or(out_items.len());
-        if
-            out_items[i + 1..end]
-                .iter()
-                .any(|expr| contains_nested_lambda_or_letrec(expr) && contains_word(expr, &name))
+        if out_items[i + 1..end]
+            .iter()
+            .any(|expr| contains_nested_lambda_or_letrec(expr) && contains_word(expr, &name))
         {
             continue;
         }
@@ -3860,7 +3596,7 @@ fn lower_non_escaping_local_cells_in_do(node: &TypedExpression) -> Option<TypedE
                 &payload_type,
                 &cell_get_aliases,
                 &cell_set_aliases,
-                false
+                false,
             ) else {
                 valid = false;
                 break;
@@ -3894,7 +3630,7 @@ fn lower_non_escaping_local_cells_in_do(node: &TypedExpression) -> Option<TypedE
 }
 
 fn extract_non_escaping_local_cell_candidate(
-    node: &TypedExpression
+    node: &TypedExpression,
 ) -> Option<(String, TypedExpression, LocalCellKind, Type)> {
     let Expression::Apply(items) = &node.expr else {
         return None;
@@ -3957,28 +3693,28 @@ fn extract_local_cell_alias(node: &TypedExpression) -> Option<(String, LocalCell
         return None;
     }
     match lambda_items.as_slice() {
-        [Expression::Word(_), Expression::Word(vrbl), body] if
-            matches!(
+        [Expression::Word(_), Expression::Word(vrbl), body]
+            if matches!(
                 body,
                 Expression::Apply(body_items)
                     if matches!(body_items.as_slice(),
                         [Expression::Word(op), Expression::Word(cell), Expression::Int(0)]
                             if op == "get" && cell == vrbl
                     )
-            )
-        => {
+            ) =>
+        {
             Some((name.clone(), LocalCellAliasKind::Get))
         }
-        [Expression::Word(_), Expression::Word(vrbl), Expression::Word(value), body] if
-            matches!(
+        [Expression::Word(_), Expression::Word(vrbl), Expression::Word(value), body]
+            if matches!(
                 body,
                 Expression::Apply(body_items)
                     if matches!(body_items.as_slice(),
                         [Expression::Word(op), Expression::Word(cell), Expression::Int(0), Expression::Word(v)]
                             if op == "set!" && cell == vrbl && v == value
                     )
-            )
-        => {
+            ) =>
+        {
             Some((name.clone(), LocalCellAliasKind::Set))
         }
         _ => None,
@@ -4011,19 +3747,21 @@ fn make_typed_word(name: &str, typ: Type) -> TypedExpression {
 fn make_mut_binding_from_local_cell(
     name: &str,
     init_node: TypedExpression,
-    payload_type: &Type
+    payload_type: &Type,
 ) -> TypedExpression {
     TypedExpression {
-        expr: Expression::Apply(
-            vec![
-                Expression::Word("mut".to_string()),
-                Expression::Word(name.to_string()),
-                init_node.expr.clone()
-            ]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("mut".to_string()),
+            Expression::Word(name.to_string()),
+            init_node.expr.clone(),
+        ]),
         typ: None,
         effect: init_node.effect | EffectFlags::MUTATE,
-        children: vec![pure_word("mut"), make_typed_word(name, payload_type.clone()), init_node],
+        children: vec![
+            pure_word("mut"),
+            make_typed_word(name, payload_type.clone()),
+            init_node,
+        ],
     }
 }
 
@@ -4034,15 +3772,20 @@ fn rewrite_local_cell_uses_in_typed_expr(
     payload_type: &Type,
     cell_get_aliases: &HashSet<String>,
     cell_set_aliases: &HashSet<String>,
-    shadowed: bool
+    shadowed: bool,
 ) -> Option<TypedExpression> {
     match &node.expr {
         Expression::Word(w) => {
-            if !shadowed && w == name { None } else { Some(node.clone()) }
+            if !shadowed && w == name {
+                None
+            } else {
+                Some(node.clone())
+            }
         }
         Expression::Apply(items) => {
             let Some(Expression::Word(op)) = items.first() else {
-                let rewritten_children = node.children
+                let rewritten_children = node
+                    .children
                     .iter()
                     .map(|ch| {
                         rewrite_local_cell_uses_in_typed_expr(
@@ -4052,7 +3795,7 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             payload_type,
                             cell_get_aliases,
                             cell_set_aliases,
-                            shadowed
+                            shadowed,
                         )
                     })
                     .collect::<Option<Vec<_>>>()?;
@@ -4066,51 +3809,52 @@ fn rewrite_local_cell_uses_in_typed_expr(
 
             if !shadowed {
                 match op.as_str() {
-                    "get" if
-                        items.len() == 3 &&
-                        matches!(items.get(1), Some(Expression::Word(w)) if w == name) &&
-                        matches!(items.get(2), Some(Expression::Int(0)))
-                    => {
+                    "get"
+                        if items.len() == 3
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                            && matches!(items.get(2), Some(Expression::Int(0))) =>
+                    {
                         return Some(make_typed_word(name, payload_type.clone()));
                     }
-                    op_name if
-                        cell_get_aliases.contains(op_name) &&
-                        items.len() == 2 &&
-                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
-                    => {
+                    op_name
+                        if cell_get_aliases.contains(op_name)
+                            && items.len() == 2
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
                         return Some(make_typed_word(name, payload_type.clone()));
                     }
-                    "true?" if
-                        items.len() == 2 &&
-                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
-                    => {
+                    "true?"
+                        if items.len() == 2
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
                         if kind != LocalCellKind::Bool {
                             return None;
                         }
                         return Some(make_typed_word(name, Type::Bool));
                     }
-                    "false?" if
-                        items.len() == 2 &&
-                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
-                    => {
+                    "false?"
+                        if items.len() == 2
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
                         if kind != LocalCellKind::Bool {
                             return None;
                         }
                         let local_word = make_typed_word(name, Type::Bool);
                         return Some(TypedExpression {
-                            expr: Expression::Apply(
-                                vec![Expression::Word("not".to_string()), local_word.expr.clone()]
-                            ),
+                            expr: Expression::Apply(vec![
+                                Expression::Word("not".to_string()),
+                                local_word.expr.clone(),
+                            ]),
                             typ: Some(Type::Bool),
                             effect: EffectFlags::PURE,
                             children: vec![pure_word("not"), local_word],
                         });
                     }
-                    "set!" if
-                        items.len() == 4 &&
-                        matches!(items.get(1), Some(Expression::Word(w)) if w == name) &&
-                        matches!(items.get(2), Some(Expression::Int(0)))
-                    => {
+                    "set!"
+                        if items.len() == 4
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name)
+                            && matches!(items.get(2), Some(Expression::Int(0))) =>
+                    {
                         let value = rewrite_local_cell_uses_in_typed_expr(
                             node.children.get(3)?,
                             name,
@@ -4118,29 +3862,27 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             payload_type,
                             cell_get_aliases,
                             cell_set_aliases,
-                            shadowed
+                            shadowed,
                         )?;
                         return Some(TypedExpression {
-                            expr: Expression::Apply(
-                                vec![
-                                    Expression::Word("alter!".to_string()),
-                                    Expression::Word(name.to_string()),
-                                    value.expr.clone()
-                                ]
-                            ),
+                            expr: Expression::Apply(vec![
+                                Expression::Word("alter!".to_string()),
+                                Expression::Word(name.to_string()),
+                                value.expr.clone(),
+                            ]),
                             typ: node.typ.clone(),
                             effect: node.effect,
                             children: vec![
                                 pure_word("alter!"),
                                 make_typed_word(name, payload_type.clone()),
-                                value
+                                value,
                             ],
                         });
                     }
-                    "set" | "=!" | "&alter!" if
-                        items.len() == 3 &&
-                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
-                    => {
+                    "set" | "=!" | "&alter!"
+                        if items.len() == 3
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
                         let value = rewrite_local_cell_uses_in_typed_expr(
                             node.children.get(2)?,
                             name,
@@ -4148,30 +3890,28 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             payload_type,
                             cell_get_aliases,
                             cell_set_aliases,
-                            shadowed
+                            shadowed,
                         )?;
                         return Some(TypedExpression {
-                            expr: Expression::Apply(
-                                vec![
-                                    Expression::Word("alter!".to_string()),
-                                    Expression::Word(name.to_string()),
-                                    value.expr.clone()
-                                ]
-                            ),
+                            expr: Expression::Apply(vec![
+                                Expression::Word("alter!".to_string()),
+                                Expression::Word(name.to_string()),
+                                value.expr.clone(),
+                            ]),
                             typ: node.typ.clone(),
                             effect: node.effect,
                             children: vec![
                                 pure_word("alter!"),
                                 make_typed_word(name, payload_type.clone()),
-                                value
+                                value,
                             ],
                         });
                     }
-                    op_name if
-                        cell_set_aliases.contains(op_name) &&
-                        items.len() == 3 &&
-                        matches!(items.get(1), Some(Expression::Word(w)) if w == name)
-                    => {
+                    op_name
+                        if cell_set_aliases.contains(op_name)
+                            && items.len() == 3
+                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
+                    {
                         let value = rewrite_local_cell_uses_in_typed_expr(
                             node.children.get(2)?,
                             name,
@@ -4179,22 +3919,20 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             payload_type,
                             cell_get_aliases,
                             cell_set_aliases,
-                            shadowed
+                            shadowed,
                         )?;
                         return Some(TypedExpression {
-                            expr: Expression::Apply(
-                                vec![
-                                    Expression::Word("alter!".to_string()),
-                                    Expression::Word(name.to_string()),
-                                    value.expr.clone()
-                                ]
-                            ),
+                            expr: Expression::Apply(vec![
+                                Expression::Word("alter!".to_string()),
+                                Expression::Word(name.to_string()),
+                                value.expr.clone(),
+                            ]),
                             typ: node.typ.clone(),
                             effect: node.effect,
                             children: vec![
                                 pure_word("alter!"),
                                 make_typed_word(name, payload_type.clone()),
-                                value
+                                value,
                             ],
                         });
                     }
@@ -4221,7 +3959,7 @@ fn rewrite_local_cell_uses_in_typed_expr(
                         payload_type,
                         cell_get_aliases,
                         cell_set_aliases,
-                        do_shadowed
+                        do_shadowed,
                     )?;
                     rebuilt_items.push(rewritten.expr.clone());
                     rebuilt_children.push(rewritten.clone());
@@ -4263,17 +4001,15 @@ fn rewrite_local_cell_uses_in_typed_expr(
                 } else {
                     shadowed
                 };
-                rewritten_children.push(
-                    rewrite_local_cell_uses_in_typed_expr(
-                        child,
-                        name,
-                        kind,
-                        payload_type,
-                        cell_get_aliases,
-                        cell_set_aliases,
-                        child_shadowed
-                    )?
-                );
+                rewritten_children.push(rewrite_local_cell_uses_in_typed_expr(
+                    child,
+                    name,
+                    kind,
+                    payload_type,
+                    cell_get_aliases,
+                    cell_set_aliases,
+                    child_shadowed,
+                )?);
             }
             Some(TypedExpression {
                 expr: rebuild_expr_from_children(&node.expr, &rewritten_children),
@@ -4290,9 +4026,8 @@ fn normalize_do_node(node: &TypedExpression, items: &[Expression]) -> Option<Typ
     if node.children.len() == items.len() {
         return Some(node.clone());
     }
-    if
-        node.children.len() + 1 == items.len() &&
-        matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+    if node.children.len() + 1 == items.len()
+        && matches!(items.first(), Some(Expression::Word(w)) if w == "do")
     {
         let mut children = Vec::with_capacity(items.len());
         children.push(TypedExpression {
@@ -4385,11 +4120,8 @@ fn fold_and(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         if rhs {
             return lhs_node;
         }
-        let false_node = make_folded_literal(
-            &node,
-            Expression::Word("false".to_string()),
-            Type::Bool
-        );
+        let false_node =
+            make_folded_literal(&node, Expression::Word("false".to_string()), Type::Bool);
         if lhs_node.effect.is_pure() {
             return false_node;
         }
@@ -4415,11 +4147,8 @@ fn fold_or(node: TypedExpression, items: &[Expression]) -> TypedExpression {
         if !rhs {
             return lhs_node;
         }
-        let true_node = make_folded_literal(
-            &node,
-            Expression::Word("true".to_string()),
-            Type::Bool
-        );
+        let true_node =
+            make_folded_literal(&node, Expression::Word("true".to_string()), Type::Bool);
         if lhs_node.effect.is_pure() {
             return true_node;
         }
@@ -4438,16 +4167,18 @@ fn fold_not(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     make_folded_literal(
         &node,
         Expression::Word((if !v { "true" } else { "false" }).to_string()),
-        Type::Bool
+        Type::Bool,
     )
 }
 
 fn parse_env_bool_like(name: &str, default: bool) -> bool {
-    std::env
-        ::var(name)
+    std::env::var(name)
         .ok()
         .map(|v| {
-            !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no")
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off" | "no"
+            )
         })
         .unwrap_or(default)
 }
@@ -4456,7 +4187,7 @@ fn fold_int_bin_with_overflow_policy(
     node: TypedExpression,
     items: &[Expression],
     wrapping: fn(i32, i32) -> i32,
-    checked: fn(i32, i32) -> Option<i32>
+    checked: fn(i32, i32) -> Option<i32>,
 ) -> TypedExpression {
     let (Some(a), Some(b)) = (
         items.get(1).and_then(int_literal),
@@ -4476,7 +4207,7 @@ fn fold_int_bin_with_overflow_policy(
 fn fold_int_checked_bin(
     node: TypedExpression,
     items: &[Expression],
-    f: fn(i32, i32) -> Option<i32>
+    f: fn(i32, i32) -> Option<i32>,
 ) -> TypedExpression {
     let (Some(a), Some(b)) = (
         items.get(1).and_then(int_literal),
@@ -4494,7 +4225,7 @@ fn fold_int_checked_bin(
 fn fold_int_cmp(
     node: TypedExpression,
     items: &[Expression],
-    f: fn(i32, i32) -> bool
+    f: fn(i32, i32) -> bool,
 ) -> TypedExpression {
     let (Some(a), Some(b)) = (
         items.get(1).and_then(int_literal),
@@ -4505,7 +4236,7 @@ fn fold_int_cmp(
     make_folded_literal(
         &node,
         Expression::Word((if f(a, b) { "true" } else { "false" }).to_string()),
-        Type::Bool
+        Type::Bool,
     )
 }
 
@@ -4513,7 +4244,7 @@ fn fold_float_bin(
     node: TypedExpression,
     items: &[Expression],
     op: &str,
-    f: fn(f32, f32) -> f32
+    f: fn(f32, f32) -> f32,
 ) -> TypedExpression {
     let (Some(a), Some(b)) = (
         items.get(1).and_then(float_literal),
@@ -4521,20 +4252,25 @@ fn fold_float_bin(
     ) else {
         return node;
     };
-    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", false) && (op == "/." || op == "mod.") && b == 0.0 {
+    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", false) && (op == "/." || op == "mod.") && b == 0.0
+    {
         return node;
     }
     let result = f(a, b);
     if parse_env_bool_like("QUE_FLOAT_OVERFLOW_CHECK", false) && !result.is_finite() {
         return node;
     }
-    make_folded_literal(&node, Expression::Dec(quantize_float_literal(result)), Type::Dec)
+    make_folded_literal(
+        &node,
+        Expression::Dec(quantize_float_literal(result)),
+        Type::Dec,
+    )
 }
 
 fn fold_float_cmp(
     node: TypedExpression,
     items: &[Expression],
-    f: fn(f32, f32) -> bool
+    f: fn(f32, f32) -> bool,
 ) -> TypedExpression {
     let (Some(a), Some(b)) = (
         items.get(1).and_then(float_literal),
@@ -4545,7 +4281,7 @@ fn fold_float_cmp(
     make_folded_literal(
         &node,
         Expression::Word((if f(a, b) { "true" } else { "false" }).to_string()),
-        Type::Bool
+        Type::Bool,
     )
 }
 
@@ -4553,7 +4289,11 @@ fn fold_int_to_float(node: TypedExpression, items: &[Expression]) -> TypedExpres
     let Some(a) = items.get(1).and_then(int_literal) else {
         return node;
     };
-    make_folded_literal(&node, Expression::Dec(quantize_float_literal(a as f32)), Type::Dec)
+    make_folded_literal(
+        &node,
+        Expression::Dec(quantize_float_literal(a as f32)),
+        Type::Dec,
+    )
 }
 
 fn fold_float_to_int(node: TypedExpression, items: &[Expression]) -> TypedExpression {
@@ -4599,15 +4339,13 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
     }
 
     let while_node = node.children.get(3)?;
-    let (len_node, value_node) = extract_counted_scalar_builder_parts(
-        while_node,
-        board_name,
-        idx_name
-    )?;
+    let (len_node, value_node) =
+        extract_counted_scalar_builder_parts(while_node, board_name, idx_name)?;
     if is_zero_scalar_literal_expr(&value_node.expr) {
-        let op_expr = Expression::Apply(
-            vec![Expression::Word("__vec_new_zeroed_i32".to_string()), len_node.expr.clone()]
-        );
+        let op_expr = Expression::Apply(vec![
+            Expression::Word("__vec_new_zeroed_i32".to_string()),
+            len_node.expr.clone(),
+        ]);
         return Some(TypedExpression {
             expr: op_expr,
             typ: node.typ.clone(),
@@ -4617,51 +4355,50 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
     }
 
     let alloc_node = TypedExpression {
-        expr: Expression::Apply(
-            vec![Expression::Word("__vec_new_uninit_i32".to_string()), len_node.expr.clone()]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("__vec_new_uninit_i32".to_string()),
+            len_node.expr.clone(),
+        ]),
         typ: node.typ.clone(),
         effect: EffectFlags::PURE,
         children: vec![pure_word("__vec_new_uninit_i32"), len_node.clone()],
     };
     let board_let = TypedExpression {
-        expr: Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(board_name.to_string()),
-                alloc_node.expr.clone()
-            ]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("let".to_string()),
+            Expression::Word(board_name.to_string()),
+            alloc_node.expr.clone(),
+        ]),
         typ: None,
         effect: alloc_node.effect,
         children: vec![pure_word("let"), pure_word(board_name), alloc_node],
     };
     let idx_mut = TypedExpression {
-        expr: Expression::Apply(
-            vec![
-                Expression::Word("mut".to_string()),
-                Expression::Word(idx_name.to_string()),
-                Expression::Int(0)
-            ]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("mut".to_string()),
+            Expression::Word(idx_name.to_string()),
+            Expression::Int(0),
+        ]),
         typ: None,
         effect: EffectFlags::MUTATE,
-        children: vec![pure_word("mut"), pure_word(idx_name), TypedExpression {
-            expr: Expression::Int(0),
-            typ: Some(Type::Int),
-            effect: EffectFlags::PURE,
-            children: Vec::new(),
-        }],
+        children: vec![
+            pure_word("mut"),
+            pure_word(idx_name),
+            TypedExpression {
+                expr: Expression::Int(0),
+                typ: Some(Type::Int),
+                effect: EffectFlags::PURE,
+                children: Vec::new(),
+            },
+        ],
     };
     let store_node = TypedExpression {
-        expr: Expression::Apply(
-            vec![
-                Expression::Word("__vec_store_i32".to_string()),
-                Expression::Word(board_name.to_string()),
-                Expression::Word(idx_name.to_string()),
-                value_node.expr.clone()
-            ]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("__vec_store_i32".to_string()),
+            Expression::Word(board_name.to_string()),
+            Expression::Word(idx_name.to_string()),
+            value_node.expr.clone(),
+        ]),
         typ: Some(Type::Int),
         effect: EffectFlags::MUTATE,
         children: vec![
@@ -4678,90 +4415,80 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
                 effect: EffectFlags::PURE,
                 children: Vec::new(),
             },
-            value_node
+            value_node,
         ],
     };
     let alter_node = TypedExpression {
-        expr: Expression::Apply(
-            vec![
-                Expression::Word("alter!".to_string()),
+        expr: Expression::Apply(vec![
+            Expression::Word("alter!".to_string()),
+            Expression::Word(idx_name.to_string()),
+            Expression::Apply(vec![
+                Expression::Word("+".to_string()),
                 Expression::Word(idx_name.to_string()),
-                Expression::Apply(
-                    vec![
-                        Expression::Word("+".to_string()),
-                        Expression::Word(idx_name.to_string()),
-                        Expression::Int(1)
-                    ]
-                )
-            ]
-        ),
+                Expression::Int(1),
+            ]),
+        ]),
         typ: Some(Type::Int),
         effect: EffectFlags::MUTATE,
-        children: vec![pure_word("alter!"), pure_word(idx_name), TypedExpression {
-            expr: Expression::Apply(
-                vec![
+        children: vec![
+            pure_word("alter!"),
+            pure_word(idx_name),
+            TypedExpression {
+                expr: Expression::Apply(vec![
                     Expression::Word("+".to_string()),
                     Expression::Word(idx_name.to_string()),
-                    Expression::Int(1)
-                ]
-            ),
-            typ: Some(Type::Int),
-            effect: EffectFlags::PURE,
-            children: vec![
-                pure_word("+"),
-                TypedExpression {
-                    expr: Expression::Word(idx_name.to_string()),
-                    typ: Some(Type::Int),
-                    effect: EffectFlags::PURE,
-                    children: Vec::new(),
-                },
-                TypedExpression {
-                    expr: Expression::Int(1),
-                    typ: Some(Type::Int),
-                    effect: EffectFlags::PURE,
-                    children: Vec::new(),
-                }
-            ],
-        }],
+                    Expression::Int(1),
+                ]),
+                typ: Some(Type::Int),
+                effect: EffectFlags::PURE,
+                children: vec![
+                    pure_word("+"),
+                    TypedExpression {
+                        expr: Expression::Word(idx_name.to_string()),
+                        typ: Some(Type::Int),
+                        effect: EffectFlags::PURE,
+                        children: Vec::new(),
+                    },
+                    TypedExpression {
+                        expr: Expression::Int(1),
+                        typ: Some(Type::Int),
+                        effect: EffectFlags::PURE,
+                        children: Vec::new(),
+                    },
+                ],
+            },
+        ],
     };
     let while_body = TypedExpression {
-        expr: Expression::Apply(
-            vec![
-                Expression::Word("do".to_string()),
-                store_node.expr.clone(),
-                alter_node.expr.clone()
-            ]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            store_node.expr.clone(),
+            alter_node.expr.clone(),
+        ]),
         typ: alter_node.typ.clone(),
         effect: store_node.effect | alter_node.effect,
         children: vec![pure_word("do"), store_node, alter_node],
     };
     let while_node = TypedExpression {
-        expr: Expression::Apply(
-            vec![
-                Expression::Word("while".to_string()),
-                Expression::Apply(
-                    vec![
-                        Expression::Word("<".to_string()),
-                        Expression::Word(idx_name.to_string()),
-                        len_node.expr.clone()
-                    ]
-                ),
-                while_body.expr.clone()
-            ]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("while".to_string()),
+            Expression::Apply(vec![
+                Expression::Word("<".to_string()),
+                Expression::Word(idx_name.to_string()),
+                len_node.expr.clone(),
+            ]),
+            while_body.expr.clone(),
+        ]),
         typ: while_node.typ.clone(),
         effect: EffectFlags::MUTATE,
         children: vec![
             pure_word("while"),
             TypedExpression {
-                expr: Expression::Apply(
-                    vec![
-                        Expression::Word("<".to_string()),
-                        Expression::Word(idx_name.to_string()),
-                        len_node.expr.clone()
-                    ]
-                ),
+                expr: Expression::Apply(vec![
+                    Expression::Word("<".to_string()),
+                    Expression::Word(idx_name.to_string()),
+                    len_node.expr.clone(),
+                ]),
                 typ: Some(Type::Bool),
                 effect: len_node.effect,
                 children: vec![
@@ -4772,10 +4499,10 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
                         effect: EffectFlags::PURE,
                         children: Vec::new(),
                     },
-                    len_node
+                    len_node,
                 ],
             },
-            while_body
+            while_body,
         ],
     };
     let board_result = TypedExpression {
@@ -4785,18 +4512,22 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
         children: Vec::new(),
     };
     Some(TypedExpression {
-        expr: Expression::Apply(
-            vec![
-                Expression::Word("do".to_string()),
-                board_let.expr.clone(),
-                idx_mut.expr.clone(),
-                while_node.expr.clone(),
-                board_result.expr.clone()
-            ]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            board_let.expr.clone(),
+            idx_mut.expr.clone(),
+            while_node.expr.clone(),
+            board_result.expr.clone(),
+        ]),
         typ: node.typ.clone(),
         effect: board_let.effect | idx_mut.effect | while_node.effect,
-        children: vec![pure_word("do"), board_let, idx_mut, while_node, board_result],
+        children: vec![
+            pure_word("do"),
+            board_let,
+            idx_mut,
+            while_node,
+            board_result,
+        ],
     })
 }
 
@@ -4838,7 +4569,7 @@ fn is_zero_scalar_literal_expr(expr: &Expression) -> bool {
 fn extract_counted_scalar_builder_parts(
     while_node: &TypedExpression,
     board_name: &str,
-    idx_name: &str
+    idx_name: &str,
 ) -> Option<(TypedExpression, TypedExpression)> {
     let Expression::Apply(items) = &while_node.expr else {
         return None;
@@ -4869,23 +4600,20 @@ fn extract_counted_scalar_builder_parts(
     let Expression::Apply(set_items) = &set_node.expr else {
         return None;
     };
-    if
-        !matches!(set_items.first(), Some(Expression::Word(w)) if w == "set!") ||
-        set_items.len() != 4
+    if !matches!(set_items.first(), Some(Expression::Word(w)) if w == "set!")
+        || set_items.len() != 4
     {
         return None;
     }
     if !matches!(set_items.get(1), Some(Expression::Word(w)) if w == board_name) {
         return None;
     }
-    if
-        !matches!(
+    if !matches!(
         set_items.get(2),
         Some(Expression::Apply(len_items))
             if matches!(len_items.first(), Some(Expression::Word(w)) if w == "length")
                 && matches!(len_items.get(1), Some(Expression::Word(w)) if w == board_name)
-    )
-    {
+    ) {
         return None;
     }
     let value_node = set_node.children.get(3)?.clone();
@@ -4895,8 +4623,7 @@ fn extract_counted_scalar_builder_parts(
     let Some(Expression::Apply(alter_items)) = body.get(2) else {
         return None;
     };
-    if
-        !matches!(
+    if !matches!(
         &alter_items[..],
         [Expression::Word(op), Expression::Word(name), Expression::Apply(add_items)]
             if op == "alter!"
@@ -4904,8 +4631,7 @@ fn extract_counted_scalar_builder_parts(
                 && matches!(add_items.first(), Some(Expression::Word(w)) if w == "+")
                 && matches!(add_items.get(1), Some(Expression::Word(w)) if w == idx_name)
                 && matches!(add_items.get(2), Some(Expression::Int(1)))
-    )
-    {
+    ) {
         return None;
     }
     Some((len_node, value_node))
@@ -4914,21 +4640,22 @@ fn extract_counted_scalar_builder_parts(
 fn expression_mentions_name(expr: &Expression, name: &str) -> bool {
     match expr {
         Expression::Word(w) => w == name,
-        Expression::Apply(items) => items.iter().any(|item| expression_mentions_name(item, name)),
+        Expression::Apply(items) => items
+            .iter()
+            .any(|item| expression_mentions_name(item, name)),
         _ => false,
     }
 }
 
 fn extract_counted_zero_fill_len_expr<'a>(
     while_node: &'a TypedExpression,
-    idx_name: &str
+    idx_name: &str,
 ) -> Option<TypedExpression> {
     let Expression::Apply(items) = &while_node.expr else {
         return None;
     };
-    if
-        !matches!(items.first(), Some(Expression::Word(w)) if w == "while") ||
-        while_node.children.len() != 3
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "while")
+        || while_node.children.len() != 3
     {
         return None;
     }
@@ -4936,9 +4663,8 @@ fn extract_counted_zero_fill_len_expr<'a>(
     let Expression::Apply(cond_items) = &cond_node.expr else {
         return None;
     };
-    if
-        !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<") ||
-        cond_node.children.len() != 3
+    if !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<")
+        || cond_node.children.len() != 3
     {
         return None;
     }
@@ -4960,12 +4686,14 @@ fn make_folded_literal(node: &TypedExpression, expr: Expression, typ: Type) -> T
 fn make_do_pair(
     parent: &TypedExpression,
     first: TypedExpression,
-    second: TypedExpression
+    second: TypedExpression,
 ) -> TypedExpression {
     TypedExpression {
-        expr: Expression::Apply(
-            vec![Expression::Word("do".to_string()), first.expr.clone(), second.expr.clone()]
-        ),
+        expr: Expression::Apply(vec![
+            Expression::Word("do".to_string()),
+            first.expr.clone(),
+            second.expr.clone(),
+        ]),
         typ: second.typ.clone().or(parent.typ.clone()),
         effect: first.effect | second.effect,
         children: vec![
@@ -4976,7 +4704,7 @@ fn make_do_pair(
                 children: Vec::new(),
             },
             first,
-            second
+            second,
         ],
     }
 }
@@ -5001,11 +4729,9 @@ fn quantize_float_literal(v: f32) -> f32 {
 }
 
 fn decimal_scale_f32() -> f32 {
-    match
-        std::env
-            ::var("QUE_DECIMAL_SCALE")
-            .ok()
-            .and_then(|v| v.trim().parse::<i32>().ok())
+    match std::env::var("QUE_DECIMAL_SCALE")
+        .ok()
+        .and_then(|v| v.trim().parse::<i32>().ok())
     {
         Some(scale) if scale > 0 && is_power_of_ten_i32(scale) && scale <= 1_000_000 => {
             scale as f32
@@ -5058,50 +4784,44 @@ fn is_safe_pure_call_expr(expr: &Expression) -> bool {
     let Some(Expression::Word(op)) = items.first() else {
         return false;
     };
-    if
-        !matches!(
-            op.as_str(),
-            "=" |
-                "=?" |
-                "=#" |
-                "=." |
-                "<" |
-                "<#" |
-                "<." |
-                ">" |
-                ">#" |
-                ">." |
-                "<=" |
-                "<=#" |
-                "<=." |
-                ">=" |
-                ">=#" |
-                ">=." |
-                "and" |
-                "or" |
-                "not" |
-                "~" |
-                "^" |
-                "|" |
-                "&" |
-                "<<" |
-                ">>" |
-                "length" |
-                "Int->Dec" |
-                "Dec->Int"
-        )
-    {
+    if !matches!(
+        op.as_str(),
+        "=" | "=?"
+            | "=#"
+            | "=."
+            | "<"
+            | "<#"
+            | "<."
+            | ">"
+            | ">#"
+            | ">."
+            | "<="
+            | "<=#"
+            | "<=."
+            | ">="
+            | ">=#"
+            | ">=."
+            | "and"
+            | "or"
+            | "not"
+            | "~"
+            | "^"
+            | "|"
+            | "&"
+            | "<<"
+            | ">>"
+            | "length"
+            | "Int->Dec"
+            | "Dec->Int"
+    ) {
         return false;
     }
 
-    items
-        .iter()
-        .skip(1)
-        .all(|arg| {
-            is_pure_literal_expr(arg) ||
-                matches!(arg, Expression::Word(_)) ||
-                is_safe_pure_call_expr(arg)
-        })
+    items.iter().skip(1).all(|arg| {
+        is_pure_literal_expr(arg)
+            || matches!(arg, Expression::Word(_))
+            || is_safe_pure_call_expr(arg)
+    })
 }
 
 #[derive(Clone)]
@@ -5160,7 +4880,7 @@ fn collect_word_names(expr: &Expression, out: &mut HashSet<String>) {
 
 fn inline_do_simple_calls(
     node: &TypedExpression,
-    state: &mut InlineState
+    state: &mut InlineState,
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
     let Expression::Apply(items) = &node.expr else {
         return (vec![node.expr.clone()], vec![node.clone()]);
@@ -5193,7 +4913,7 @@ fn inline_do_simple_calls(
 fn eliminate_tuple_return_destructuring_calls(
     items: Vec<Expression>,
     children: Vec<TypedExpression>,
-    state: &mut InlineState
+    state: &mut InlineState,
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
     eliminate_tuple_return_destructuring_calls_with_defs(items, children, state, &HashMap::new())
 }
@@ -5202,7 +4922,7 @@ fn eliminate_tuple_return_destructuring_calls_with_defs(
     mut items: Vec<Expression>,
     mut children: Vec<TypedExpression>,
     state: &mut InlineState,
-    seed_defs: &HashMap<String, TupleReturnLambdaDef>
+    seed_defs: &HashMap<String, TupleReturnLambdaDef>,
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
     if items.len() != children.len() || items.len() <= 3 {
         return (items, children);
@@ -5219,43 +4939,36 @@ fn eliminate_tuple_return_destructuring_calls_with_defs(
                 continue;
             }
 
-            let Some((temp_name, call_expr, call_node)) = let_call_binding(
-                &items[i],
-                &children[i]
-            ) else {
+            let Some((temp_name, call_expr, call_node)) = let_call_binding(&items[i], &children[i])
+            else {
                 i += 1;
                 continue;
             };
             let Some(def) = call_expr
                 .first()
-                .and_then(|head| {
-                    match head {
-                        Expression::Word(callee) => defs.get(callee),
-                        _ => None,
-                    }
+                .and_then(|head| match head {
+                    Expression::Word(callee) => defs.get(callee),
+                    _ => None,
                 })
-                .cloned() else {
+                .cloned()
+            else {
                 i += 1;
                 continue;
             };
 
-            let Some((projection_count, projected_bindings)) = contiguous_tuple_projection_bindings(
-                &items,
-                i + 1,
-                &temp_name
-            ) else {
+            let Some((projection_count, projected_bindings)) =
+                contiguous_tuple_projection_bindings(&items, i + 1, &temp_name)
+            else {
                 i += 1;
                 continue;
             };
-            if
-                projection_count == 0 ||
-                count_word_uses_in_slice(&items[i + 1 + projection_count..], &temp_name) != 0 ||
-                projected_bindings
-                    .iter()
-                    .any(|(bind_name, _)| {
-                        is_destructure_temp_name(bind_name) &&
-                            count_word_uses_in_slice(&items[i + 1 + projection_count..], bind_name) != 0
-                    })
+            if projection_count == 0
+                || count_word_uses_in_slice(&items[i + 1 + projection_count..], &temp_name) != 0
+                || projected_bindings.iter().any(|(bind_name, _)| {
+                    is_destructure_temp_name(bind_name)
+                        && count_word_uses_in_slice(&items[i + 1 + projection_count..], bind_name)
+                            != 0
+                })
             {
                 i += 1;
                 continue;
@@ -5269,44 +4982,53 @@ fn eliminate_tuple_return_destructuring_calls_with_defs(
                 }),
                 &call_expr[1..],
                 &call_node.children[1..],
-                state
+                state,
             ) else {
                 i += 1;
                 continue;
             };
-            let inlined_typed = alpha_rename_local_bindings_typed(
+            let inlined_typed =
+                alpha_rename_local_bindings_typed(&inlined_typed, &mut HashMap::new(), state);
+            let replacement = if let Some((prefix_pairs, fst_typed, snd_typed)) =
+                extract_terminal_tuple_parts(&inlined_typed)
+            {
+                let fst_tmp = state.fresh_tmp();
+                let snd_tmp = state.fresh_tmp();
+                let fst_tmp_word = typed_word(fst_tmp.clone(), fst_typed.typ.clone());
+                let snd_tmp_word = typed_word(snd_tmp.clone(), snd_typed.typ.clone());
+
+                let mut replacement: Vec<(Expression, TypedExpression)> = prep;
+                replacement.extend(prefix_pairs);
+                replacement.push(make_let_binding(fst_tmp.clone(), fst_typed.clone()));
+                replacement.push(make_let_binding(snd_tmp.clone(), snd_typed.clone()));
+                for (bind_name, is_fst) in projected_bindings {
+                    let rhs = if is_fst {
+                        fst_tmp_word.clone()
+                    } else {
+                        snd_tmp_word.clone()
+                    };
+                    replacement.push(make_named_let_binding(bind_name, rhs));
+                }
+                replacement
+            } else if let Some(replacement) = build_tuple_return_assignment_destructure(
+                prep,
                 &inlined_typed,
-                &mut HashMap::new(),
-                state
-            );
-            let Some((prefix_pairs, fst_typed, snd_typed)) = extract_terminal_tuple_parts(
-                &inlined_typed
-            ) else {
+                projected_bindings,
+                state,
+            ) {
+                replacement
+            } else {
                 i += 1;
                 continue;
             };
-
-            let fst_tmp = state.fresh_tmp();
-            let snd_tmp = state.fresh_tmp();
-            let fst_tmp_word = typed_word(fst_tmp.clone(), fst_typed.typ.clone());
-            let snd_tmp_word = typed_word(snd_tmp.clone(), snd_typed.typ.clone());
-
-            let mut replacement: Vec<(Expression, TypedExpression)> = prep;
-            replacement.extend(prefix_pairs);
-            replacement.push(make_let_binding(fst_tmp.clone(), fst_typed.clone()));
-            replacement.push(make_let_binding(snd_tmp.clone(), snd_typed.clone()));
-            for (bind_name, is_fst) in projected_bindings {
-                let rhs = if is_fst { fst_tmp_word.clone() } else { snd_tmp_word.clone() };
-                replacement.push(make_named_let_binding(bind_name, rhs));
-            }
 
             items.splice(
                 i..i + 1 + projection_count,
-                replacement.iter().map(|(expr, _)| expr.clone())
+                replacement.iter().map(|(expr, _)| expr.clone()),
             );
             children.splice(
                 i..i + 1 + projection_count,
-                replacement.into_iter().map(|(_, typed)| typed)
+                replacement.into_iter().map(|(_, typed)| typed),
             );
             changed = true;
             break;
@@ -5321,7 +5043,7 @@ fn eliminate_tuple_return_destructuring_calls_with_defs(
 
 fn eliminate_single_use_let_bindings(
     mut items: Vec<Expression>,
-    mut children: Vec<TypedExpression>
+    mut children: Vec<TypedExpression>,
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
     if items.len() != children.len() || items.len() <= 2 {
         return (items, children);
@@ -5340,10 +5062,7 @@ fn eliminate_single_use_let_bindings(
                 i += 1;
                 continue;
             }
-            let Some(rhs_typed) = children
-                .get(i)
-                .and_then(|n| n.children.get(2))
-                .cloned() else {
+            let Some(rhs_typed) = children.get(i).and_then(|n| n.children.get(2)).cloned() else {
                 i += 1;
                 continue;
             };
@@ -5367,7 +5086,7 @@ fn eliminate_single_use_let_bindings(
 
 fn eliminate_tuple_projection_lets(
     mut items: Vec<Expression>,
-    mut children: Vec<TypedExpression>
+    mut children: Vec<TypedExpression>,
 ) -> (Vec<Expression>, Vec<TypedExpression>) {
     if items.len() != children.len() || items.len() <= 2 {
         return (items, children);
@@ -5377,17 +5096,14 @@ fn eliminate_tuple_projection_lets(
         let mut changed = false;
         let mut i = 1usize;
         while i + 1 < items.len() {
-            let Some((name, fst_typed, snd_typed)) = tuple_projection_let(
-                &items[i],
-                &children[i]
-            ) else {
+            let Some((name, fst_typed, snd_typed)) = tuple_projection_let(&items[i], &children[i])
+            else {
                 i += 1;
                 continue;
             };
             let end = find_shadowing_binding(&items, i + 1, &name).unwrap_or(items.len());
-            if
-                find_shadowing_binding(&items, 1, "fst").is_some_and(|idx| idx < end) ||
-                find_shadowing_binding(&items, 1, "snd").is_some_and(|idx| idx < end)
+            if find_shadowing_binding(&items, 1, "fst").is_some_and(|idx| idx < end)
+                || find_shadowing_binding(&items, 1, "snd").is_some_and(|idx| idx < end)
             {
                 i += 1;
                 continue;
@@ -5415,14 +5131,10 @@ fn eliminate_tuple_projection_lets(
                     &items[j],
                     &name,
                     &fst_typed.expr,
-                    &snd_typed.expr
+                    &snd_typed.expr,
                 );
-                children[j] = replace_tuple_projection_typed(
-                    &children[j],
-                    &name,
-                    &fst_typed,
-                    &snd_typed
-                );
+                children[j] =
+                    replace_tuple_projection_typed(&children[j], &name, &fst_typed, &snd_typed);
             }
             items.remove(i);
             children.remove(i);
@@ -5438,7 +5150,7 @@ fn eliminate_tuple_projection_lets(
 
 fn tuple_projection_let(
     expr: &Expression,
-    node: &TypedExpression
+    node: &TypedExpression,
 ) -> Option<(String, TypedExpression, TypedExpression)> {
     let Expression::Apply(items) = expr else {
         return None;
@@ -5459,30 +5171,29 @@ fn tuple_projection_let(
 }
 
 fn find_shadowing_binding(items: &[Expression], from: usize, name: &str) -> Option<usize> {
-    items
-        .iter()
-        .enumerate()
-        .skip(from)
-        .find_map(|(idx, expr)| {
-            let Expression::Apply(xs) = expr else {
-                return None;
-            };
-            match &xs[..] {
-                [Expression::Word(kw), Expression::Word(bound), _] if
-                    (kw == "let" || kw == "letrec" || kw == "mut") &&
-                    bound == name
-                => {
-                    Some(idx)
-                }
-                _ => None,
+    items.iter().enumerate().skip(from).find_map(|(idx, expr)| {
+        let Expression::Apply(xs) = expr else {
+            return None;
+        };
+        match &xs[..] {
+            [Expression::Word(kw), Expression::Word(bound), _]
+                if (kw == "let" || kw == "letrec" || kw == "mut") && bound == name =>
+            {
+                Some(idx)
             }
-        })
+            _ => None,
+        }
+    })
 }
 
 fn count_tuple_projection_uses(expr: &Expression, name: &str) -> Option<usize> {
     match expr {
         Expression::Word(w) => {
-            if w == name { None } else { Some(0) }
+            if w == name {
+                None
+            } else {
+                Some(0)
+            }
         }
         Expression::Apply(items) => {
             if is_direct_tuple_projection(items, name).is_some() {
@@ -5516,10 +5227,9 @@ fn count_tuple_projection_uses(expr: &Expression, name: &str) -> Option<usize> {
 
 fn is_direct_tuple_projection(items: &[Expression], name: &str) -> Option<bool> {
     match items {
-        [Expression::Word(op), Expression::Word(arg)] if
-            (op == "fst" || op == "snd") &&
-            arg == name
-        => {
+        [Expression::Word(op), Expression::Word(arg)]
+            if (op == "fst" || op == "snd") && arg == name =>
+        {
             Some(op == "fst")
         }
         _ => None,
@@ -5530,12 +5240,16 @@ fn replace_tuple_projection_expr(
     expr: &Expression,
     name: &str,
     fst_expr: &Expression,
-    snd_expr: &Expression
+    snd_expr: &Expression,
 ) -> Expression {
     match expr {
         Expression::Apply(items) => {
             if let Some(op) = is_direct_tuple_projection(items, name) {
-                return if op { fst_expr.clone() } else { snd_expr.clone() };
+                return if op {
+                    fst_expr.clone()
+                } else {
+                    snd_expr.clone()
+                };
             }
             if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
                 let mut bound = HashSet::new();
@@ -5552,7 +5266,7 @@ fn replace_tuple_projection_expr(
                 items
                     .iter()
                     .map(|item| replace_tuple_projection_expr(item, name, fst_expr, snd_expr))
-                    .collect()
+                    .collect(),
             )
         }
         Expression::Word(w) => Expression::Word(w.clone()),
@@ -5565,11 +5279,15 @@ fn replace_tuple_projection_typed(
     node: &TypedExpression,
     name: &str,
     fst_typed: &TypedExpression,
-    snd_typed: &TypedExpression
+    snd_typed: &TypedExpression,
 ) -> TypedExpression {
     if let Expression::Apply(items) = &node.expr {
         if let Some(op) = is_direct_tuple_projection(items, name) {
-            return if op { fst_typed.clone() } else { snd_typed.clone() };
+            return if op {
+                fst_typed.clone()
+            } else {
+                snd_typed.clone()
+            };
         }
         if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
             let mut bound = HashSet::new();
@@ -5584,18 +5302,14 @@ fn replace_tuple_projection_typed(
         }
     }
 
-    let new_children = node.children
+    let new_children = node
+        .children
         .iter()
         .map(|ch| replace_tuple_projection_typed(ch, name, fst_typed, snd_typed))
         .collect::<Vec<_>>();
     let new_expr = match &node.expr {
         Expression::Apply(items) if items.len() == new_children.len() => {
-            Expression::Apply(
-                new_children
-                    .iter()
-                    .map(|ch| ch.expr.clone())
-                    .collect()
-            )
+            Expression::Apply(new_children.iter().map(|ch| ch.expr.clone()).collect())
         }
         _ => replace_tuple_projection_expr(&node.expr, name, &fst_typed.expr, &snd_typed.expr),
     };
@@ -5629,22 +5343,19 @@ fn eliminable_let_name(expr: &Expression) -> Option<(String, bool)> {
 }
 
 fn count_word_uses_in_slice(items: &[Expression], name: &str) -> usize {
-    items
-        .iter()
-        .map(|e| count_word_uses_expr(e, name))
-        .sum()
+    items.iter().map(|e| count_word_uses_expr(e, name)).sum()
 }
 
 fn count_word_uses_expr(expr: &Expression, name: &str) -> usize {
     match expr {
         Expression::Word(w) => {
-            if w == name { 1 } else { 0 }
+            if w == name {
+                1
+            } else {
+                0
+            }
         }
-        Expression::Apply(items) =>
-            items
-                .iter()
-                .map(|it| count_word_uses_expr(it, name))
-                .sum(),
+        Expression::Apply(items) => items.iter().map(|it| count_word_uses_expr(it, name)).sum(),
         _ => 0,
     }
 }
@@ -5664,19 +5375,22 @@ fn word_used_as_call_head(expr: &Expression, name: &str) -> bool {
 fn substitute_word_with_expr(
     expr: &Expression,
     name: &str,
-    replacement: &Expression
+    replacement: &Expression,
 ) -> Expression {
     match expr {
         Expression::Word(w) => {
-            if w == name { replacement.clone() } else { Expression::Word(w.clone()) }
+            if w == name {
+                replacement.clone()
+            } else {
+                Expression::Word(w.clone())
+            }
         }
-        Expression::Apply(items) =>
-            Expression::Apply(
-                items
-                    .iter()
-                    .map(|it| substitute_word_with_expr(it, name, replacement))
-                    .collect()
-            ),
+        Expression::Apply(items) => Expression::Apply(
+            items
+                .iter()
+                .map(|it| substitute_word_with_expr(it, name, replacement))
+                .collect(),
+        ),
         Expression::Int(n) => Expression::Int(*n),
         Expression::Dec(n) => Expression::Dec(*n),
     }
@@ -5685,25 +5399,21 @@ fn substitute_word_with_expr(
 fn substitute_word_with_typed(
     node: &TypedExpression,
     name: &str,
-    replacement: &TypedExpression
+    replacement: &TypedExpression,
 ) -> TypedExpression {
     if matches!(&node.expr, Expression::Word(w) if w == name) {
         return replacement.clone();
     }
 
-    let new_children = node.children
+    let new_children = node
+        .children
         .iter()
         .map(|ch| substitute_word_with_typed(ch, name, replacement))
         .collect::<Vec<_>>();
 
     let new_expr = match &node.expr {
         Expression::Apply(items) if items.len() == new_children.len() => {
-            Expression::Apply(
-                new_children
-                    .iter()
-                    .map(|ch| ch.expr.clone())
-                    .collect()
-            )
+            Expression::Apply(new_children.iter().map(|ch| ch.expr.clone()).collect())
         }
         _ => substitute_word_with_expr(&node.expr, name, &replacement.expr),
     };
@@ -5718,7 +5428,7 @@ fn substitute_word_with_typed(
 
 fn inline_do_simple_calls_once(
     node: &TypedExpression,
-    state: &mut InlineState
+    state: &mut InlineState,
 ) -> (Vec<Expression>, Vec<TypedExpression>, bool) {
     let Expression::Apply(items) = &node.expr else {
         return (vec![node.expr.clone()], vec![node.clone()], false);
@@ -5743,13 +5453,8 @@ fn inline_do_simple_calls_once(
             continue;
         }
 
-        if
-            let Some((prep, rewritten_expr, rewritten_child)) = try_inline_let_rhs(
-                expr_i,
-                child_i,
-                &defs,
-                state
-            )
+        if let Some((prep, rewritten_expr, rewritten_child)) =
+            try_inline_let_rhs(expr_i, child_i, &defs, state)
         {
             changed = true;
             for (e, c) in prep {
@@ -5761,13 +5466,8 @@ fn inline_do_simple_calls_once(
             continue;
         }
 
-        if
-            let Some((prep, inlined_expr, inlined_child)) = try_inline_call(
-                expr_i,
-                child_i,
-                &defs,
-                state
-            )
+        if let Some((prep, inlined_expr, inlined_child)) =
+            try_inline_call(expr_i, child_i, &defs, state)
         {
             changed = true;
             for (e, c) in prep {
@@ -5796,7 +5496,7 @@ fn inline_do_simple_calls_once(
 
 fn extract_inline_lambda_def(
     expr: &Expression,
-    node: &TypedExpression
+    node: &TypedExpression,
 ) -> Option<(Expression, TypedExpression, (String, InlineLambdaDef))> {
     let Expression::Apply(items) = expr else {
         return None;
@@ -5829,11 +5529,9 @@ fn extract_inline_lambda_def(
     }
     let params = lambda_items[1..lambda_items.len() - 1]
         .iter()
-        .map(|p| {
-            match p {
-                Expression::Word(w) => Some(w.clone()),
-                _ => None,
-            }
+        .map(|p| match p {
+            Expression::Word(w) => Some(w.clone()),
+            _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
     let lambda_typed = node.children.get(2)?;
@@ -5852,7 +5550,7 @@ fn extract_inline_lambda_def(
 
 fn extract_tuple_return_lambda_def(
     expr: &Expression,
-    node: &TypedExpression
+    node: &TypedExpression,
 ) -> Option<(String, TupleReturnLambdaDef)> {
     let Expression::Apply(items) = expr else {
         return None;
@@ -5881,14 +5579,20 @@ fn extract_tuple_return_lambda_def(
         return None;
     }
     let body_typed = node.children.get(2)?.children.last()?.clone();
-    extract_terminal_tuple_parts(&body_typed)?;
+    if extract_terminal_tuple_parts(&body_typed).is_none()
+        && body_typed
+            .typ
+            .as_ref()
+            .and_then(binary_tuple_field_types)
+            .is_none()
+    {
+        return None;
+    }
     let params = lambda_items[1..lambda_items.len() - 1]
         .iter()
-        .map(|p| {
-            match p {
-                Expression::Word(w) => Some(w.clone()),
-                _ => None,
-            }
+        .map(|p| match p {
+            Expression::Word(w) => Some(w.clone()),
+            _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
     Some((
@@ -5904,7 +5608,8 @@ fn extract_tuple_return_lambda_def(
 fn contains_nested_lambda_or_letrec(expr: &Expression) -> bool {
     match expr {
         Expression::Apply(items) => {
-            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda" || w == "letrec") {
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda" || w == "letrec")
+            {
                 return true;
             }
             items.iter().any(contains_nested_lambda_or_letrec)
@@ -5915,13 +5620,13 @@ fn contains_nested_lambda_or_letrec(expr: &Expression) -> bool {
 
 fn let_call_binding<'a>(
     expr: &'a Expression,
-    node: &'a TypedExpression
+    node: &'a TypedExpression,
 ) -> Option<(String, &'a [Expression], &'a TypedExpression)> {
     let Expression::Apply(items) = expr else {
         return None;
     };
-    let [Expression::Word(kw), Expression::Word(name), Expression::Apply(call_expr)] =
-        &items[..] else {
+    let [Expression::Word(kw), Expression::Word(name), Expression::Apply(call_expr)] = &items[..]
+    else {
         return None;
     };
     if kw != "let" && kw != "letrec" {
@@ -5934,7 +5639,7 @@ fn let_call_binding<'a>(
 fn contiguous_tuple_projection_bindings(
     items: &[Expression],
     start: usize,
-    temp_name: &str
+    temp_name: &str,
 ) -> Option<(usize, Vec<(String, bool)>)> {
     let mut consumed = 0usize;
     let mut current_name = temp_name.to_string();
@@ -5944,7 +5649,8 @@ fn contiguous_tuple_projection_bindings(
             break;
         };
         let [Expression::Word(kw), Expression::Word(bind_name), Expression::Word(rhs_name)] =
-            &let_items[..] else {
+            &let_items[..]
+        else {
             break;
         };
         if (kw != "let" && kw != "letrec") || rhs_name != &current_name {
@@ -5972,9 +5678,8 @@ fn contiguous_tuple_projection_bindings(
         let Some(Expression::Word(op)) = rhs_items.first() else {
             break;
         };
-        if
-            rhs_items.len() != 2 ||
-            !matches!(rhs_items.get(1), Some(Expression::Word(w)) if w == &current_name)
+        if rhs_items.len() != 2
+            || !matches!(rhs_items.get(1), Some(Expression::Word(w)) if w == &current_name)
         {
             break;
         }
@@ -6000,17 +5705,24 @@ fn contiguous_tuple_projection_bindings(
 }
 
 fn extract_terminal_tuple_parts(
-    node: &TypedExpression
-) -> Option<(Vec<(Expression, TypedExpression)>, TypedExpression, TypedExpression)> {
+    node: &TypedExpression,
+) -> Option<(
+    Vec<(Expression, TypedExpression)>,
+    TypedExpression,
+    TypedExpression,
+)> {
     if parse_zip_pair_expr(&node.expr).is_some() && node.children.len() >= 3 {
-        return Some((Vec::new(), node.children.get(1)?.clone(), node.children.get(2)?.clone()));
+        return Some((
+            Vec::new(),
+            node.children.get(1)?.clone(),
+            node.children.get(2)?.clone(),
+        ));
     }
     let Expression::Apply(items) = &node.expr else {
         return None;
     };
-    if
-        !matches!(items.first(), Some(Expression::Word(w)) if w == "do") ||
-        items.len() != node.children.len()
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+        || items.len() != node.children.len()
     {
         return None;
     }
@@ -6026,6 +5738,167 @@ fn extract_terminal_tuple_parts(
     Some((all_prefix, fst_typed, snd_typed))
 }
 
+fn build_tuple_return_assignment_destructure(
+    prep: Vec<(Expression, TypedExpression)>,
+    inlined_typed: &TypedExpression,
+    projected_bindings: Vec<(String, bool)>,
+    state: &mut InlineState,
+) -> Option<Vec<(Expression, TypedExpression)>> {
+    let (fst_type, snd_type) = binary_tuple_field_types(inlined_typed.typ.as_ref()?)?;
+    if !is_no_temp_inline_scalar_type(&fst_type) || !is_no_temp_inline_scalar_type(&snd_type) {
+        return None;
+    }
+
+    let fst_tmp = state.fresh_tmp();
+    let snd_tmp = state.fresh_tmp();
+    let assignments = extract_terminal_tuple_assignments(
+        inlined_typed,
+        &fst_tmp,
+        &fst_type,
+        &snd_tmp,
+        &snd_type,
+    )?;
+    let fst_tmp_word = typed_word(fst_tmp.clone(), Some(fst_type.clone()));
+    let snd_tmp_word = typed_word(snd_tmp.clone(), Some(snd_type.clone()));
+
+    let mut replacement = prep;
+    replacement.push(make_mut_binding(
+        fst_tmp.clone(),
+        scalar_default_typed_expr(&fst_type)?,
+    ));
+    replacement.push(make_mut_binding(
+        snd_tmp.clone(),
+        scalar_default_typed_expr(&snd_type)?,
+    ));
+    replacement.extend(assignments);
+    for (bind_name, is_fst) in projected_bindings {
+        let rhs = if is_fst {
+            fst_tmp_word.clone()
+        } else {
+            snd_tmp_word.clone()
+        };
+        replacement.push(make_named_let_binding(bind_name, rhs));
+    }
+    Some(replacement)
+}
+
+fn binary_tuple_field_types(typ: &Type) -> Option<(Type, Type)> {
+    let Type::Tuple(items) = typ else {
+        return None;
+    };
+    if items.len() < 2 {
+        return None;
+    }
+    Some((items[0].clone(), items[1].clone()))
+}
+
+fn extract_terminal_tuple_assignments(
+    node: &TypedExpression,
+    fst_target: &str,
+    fst_type: &Type,
+    snd_target: &str,
+    snd_type: &Type,
+) -> Option<Vec<(Expression, TypedExpression)>> {
+    if parse_zip_pair_expr(&node.expr).is_some() && node.children.len() >= 3 {
+        return Some(vec![
+            make_alter_binding(
+                fst_target.to_string(),
+                fst_type.clone(),
+                node.children.get(1)?.clone(),
+            ),
+            make_alter_binding(
+                snd_target.to_string(),
+                snd_type.clone(),
+                node.children.get(2)?.clone(),
+            ),
+        ]);
+    }
+
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    if items.len() != node.children.len() {
+        return None;
+    }
+
+    if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        let last = node.children.last()?;
+        let mut out = items[1..items.len() - 1]
+            .iter()
+            .cloned()
+            .zip(node.children[1..node.children.len() - 1].iter().cloned())
+            .collect::<Vec<_>>();
+        out.extend(extract_terminal_tuple_assignments(
+            last, fst_target, fst_type, snd_target, snd_type,
+        )?);
+        return Some(out);
+    }
+
+    if matches!(items.first(), Some(Expression::Word(w)) if w == "if") && node.children.len() == 4 {
+        let cond = node.children.get(1)?.clone();
+        let then_assignments = extract_terminal_tuple_assignments(
+            node.children.get(2)?,
+            fst_target,
+            fst_type,
+            snd_target,
+            snd_type,
+        )?;
+        let else_assignments = extract_terminal_tuple_assignments(
+            node.children.get(3)?,
+            fst_target,
+            fst_type,
+            snd_target,
+            snd_type,
+        )?;
+        let then_node = make_unit_sequence(then_assignments);
+        let else_node = make_unit_sequence(else_assignments);
+        let expr = Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            cond.expr.clone(),
+            then_node.expr.clone(),
+            else_node.expr.clone(),
+        ]);
+        let effect = cond.effect | then_node.effect | else_node.effect;
+        let typed = TypedExpression {
+            expr: expr.clone(),
+            typ: Some(Type::Unit),
+            effect,
+            children: vec![pure_word("if"), cond, then_node, else_node],
+        };
+        return Some(vec![(expr, typed)]);
+    }
+
+    None
+}
+
+fn make_unit_sequence(items: Vec<(Expression, TypedExpression)>) -> TypedExpression {
+    if items.len() == 1 {
+        return items
+            .into_iter()
+            .next()
+            .expect("sequence should have one item")
+            .1;
+    }
+
+    let effect = items
+        .iter()
+        .fold(EffectFlags::PURE, |acc, (_, typed)| acc | typed.effect);
+    let expr = Expression::Apply(
+        std::iter::once(Expression::Word("do".to_string()))
+            .chain(items.iter().map(|(expr, _)| expr.clone()))
+            .collect(),
+    );
+    let children = std::iter::once(pure_word("do"))
+        .chain(items.into_iter().map(|(_, typed)| typed))
+        .collect();
+    TypedExpression {
+        expr,
+        typ: Some(Type::Unit),
+        effect,
+        children,
+    }
+}
+
 fn typed_word(name: String, typ: Option<Type>) -> TypedExpression {
     TypedExpression {
         expr: Expression::Word(name),
@@ -6037,9 +5910,11 @@ fn typed_word(name: String, typ: Option<Type>) -> TypedExpression {
 
 fn make_let_binding(name: String, rhs: TypedExpression) -> (Expression, TypedExpression) {
     let rhs_typ = rhs.typ.clone();
-    let expr = Expression::Apply(
-        vec![Expression::Word("let".to_string()), Expression::Word(name.clone()), rhs.expr.clone()]
-    );
+    let expr = Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(name.clone()),
+        rhs.expr.clone(),
+    ]);
     let typed = TypedExpression {
         expr: expr.clone(),
         typ: rhs_typ.clone(),
@@ -6049,10 +5924,83 @@ fn make_let_binding(name: String, rhs: TypedExpression) -> (Expression, TypedExp
     (expr, typed)
 }
 
+fn make_mut_binding(name: String, rhs: TypedExpression) -> (Expression, TypedExpression) {
+    let rhs_typ = rhs.typ.clone();
+    let expr = Expression::Apply(vec![
+        Expression::Word("mut".to_string()),
+        Expression::Word(name.clone()),
+        rhs.expr.clone(),
+    ]);
+    let typed = TypedExpression {
+        expr: expr.clone(),
+        typ: Some(Type::Unit),
+        effect: rhs.effect | EffectFlags::MUTATE,
+        children: vec![pure_word("mut"), typed_word(name, rhs_typ), rhs],
+    };
+    (expr, typed)
+}
+
+fn make_alter_binding(
+    name: String,
+    typ: Type,
+    rhs: TypedExpression,
+) -> (Expression, TypedExpression) {
+    let expr = Expression::Apply(vec![
+        Expression::Word("alter!".to_string()),
+        Expression::Word(name.clone()),
+        rhs.expr.clone(),
+    ]);
+    let typed = TypedExpression {
+        expr: expr.clone(),
+        typ: Some(Type::Unit),
+        effect: rhs.effect | EffectFlags::MUTATE,
+        children: vec![pure_word("alter!"), typed_word(name, Some(typ)), rhs],
+    };
+    (expr, typed)
+}
+
+fn scalar_default_typed_expr(typ: &Type) -> Option<TypedExpression> {
+    match typ {
+        Type::Int => Some(TypedExpression {
+            expr: Expression::Int(0),
+            typ: Some(Type::Int),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        }),
+        Type::Dec => Some(TypedExpression {
+            expr: Expression::Dec(0.0),
+            typ: Some(Type::Dec),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        }),
+        Type::Bool => Some(TypedExpression {
+            expr: Expression::Word("false".to_string()),
+            typ: Some(Type::Bool),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        }),
+        Type::Char => Some(TypedExpression {
+            expr: Expression::Int(0),
+            typ: Some(Type::Char),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        }),
+        Type::Unit => Some(TypedExpression {
+            expr: Expression::Word("nil".to_string()),
+            typ: Some(Type::Unit),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        }),
+        _ => None,
+    }
+}
+
 fn make_named_let_binding(name: String, rhs: TypedExpression) -> (Expression, TypedExpression) {
-    let expr = Expression::Apply(
-        vec![Expression::Word("let".to_string()), Expression::Word(name.clone()), rhs.expr.clone()]
-    );
+    let expr = Expression::Apply(vec![
+        Expression::Word("let".to_string()),
+        Expression::Word(name.clone()),
+        rhs.expr.clone(),
+    ]);
     let typed = TypedExpression {
         expr: expr.clone(),
         typ: rhs.typ.clone(),
@@ -6118,8 +6066,12 @@ fn try_inline_call(
     expr: &Expression,
     node: &TypedExpression,
     defs: &HashMap<String, InlineLambdaDef>,
-    state: &mut InlineState
-) -> Option<(Vec<(Expression, TypedExpression)>, Expression, TypedExpression)> {
+    state: &mut InlineState,
+) -> Option<(
+    Vec<(Expression, TypedExpression)>,
+    Expression,
+    TypedExpression,
+)> {
     let Expression::Apply(call_items) = expr else {
         return None;
     };
@@ -6141,8 +6093,12 @@ fn inline_call_with_def(
     def: &InlineLambdaDef,
     arg_exprs: &[Expression],
     arg_nodes: &[TypedExpression],
-    state: &mut InlineState
-) -> Option<(Vec<(Expression, TypedExpression)>, Expression, TypedExpression)> {
+    state: &mut InlineState,
+) -> Option<(
+    Vec<(Expression, TypedExpression)>,
+    Expression,
+    TypedExpression,
+)> {
     if arg_exprs.len() != def.params.len() || arg_nodes.len() != def.params.len() {
         return None;
     }
@@ -6158,15 +6114,13 @@ fn inline_call_with_def(
         let uses = count_word_uses_expr(&def.body_expr, param);
         let head_used = word_used_as_call_head(&def.body_expr, param);
         let can_no_temp = can_no_temp_inline_arg(&arg_expr, &arg_node, uses);
-        let direct_lambda =
-            can_no_temp &&
-            is_lambda_expr(&arg_expr) &&
-            lambda_takes_only_scalar_args(arg_typ) &&
-            !head_used;
-        let direct_scalar =
-            can_no_temp &&
-            is_no_temp_inline_scalar_type(arg_typ) &&
-            (uses <= 1 || is_atomic_inline_arg_expr(&arg_expr));
+        let direct_lambda = can_no_temp
+            && is_lambda_expr(&arg_expr)
+            && lambda_takes_only_scalar_args(arg_typ)
+            && !head_used;
+        let direct_scalar = can_no_temp
+            && is_no_temp_inline_scalar_type(arg_typ)
+            && (uses <= 1 || is_atomic_inline_arg_expr(&arg_expr));
         if direct_lambda || direct_scalar {
             expr_subst.insert(param.clone(), arg_expr);
             typed_subst.insert(param.clone(), arg_node);
@@ -6176,20 +6130,21 @@ fn inline_call_with_def(
         let tmp = state.fresh_tmp();
         let tmp_expr = Expression::Word(tmp.clone());
         expr_subst.insert(param.clone(), tmp_expr.clone());
-        typed_subst.insert(param.clone(), TypedExpression {
-            expr: tmp_expr.clone(),
-            typ: arg_node.typ.clone(),
-            effect: EffectFlags::PURE,
-            children: Vec::new(),
-        });
-
-        let let_expr = Expression::Apply(
-            vec![
-                Expression::Word("let".to_string()),
-                Expression::Word(tmp.clone()),
-                arg_exprs[idx].clone()
-            ]
+        typed_subst.insert(
+            param.clone(),
+            TypedExpression {
+                expr: tmp_expr.clone(),
+                typ: arg_node.typ.clone(),
+                effect: EffectFlags::PURE,
+                children: Vec::new(),
+            },
         );
+
+        let let_expr = Expression::Apply(vec![
+            Expression::Word("let".to_string()),
+            Expression::Word(tmp.clone()),
+            arg_exprs[idx].clone(),
+        ]);
         let let_typed = TypedExpression {
             expr: let_expr.clone(),
             typ: arg_node.typ.clone(),
@@ -6207,7 +6162,7 @@ fn inline_call_with_def(
                     effect: EffectFlags::PURE,
                     children: Vec::new(),
                 },
-                arg_node
+                arg_node,
             ],
         };
         prep.push((let_expr, let_typed));
@@ -6220,7 +6175,7 @@ fn inline_call_with_def(
 
 fn inline_nested_calls(
     node: &TypedExpression,
-    defs: &HashMap<String, InlineLambdaDef>
+    defs: &HashMap<String, InlineLambdaDef>,
 ) -> (Expression, TypedExpression, bool) {
     let mut changed = false;
     let mut rewritten_children = Vec::with_capacity(node.children.len());
@@ -6249,7 +6204,7 @@ fn inline_nested_calls(
 
 fn try_inline_call_no_temps(
     node: &TypedExpression,
-    defs: &HashMap<String, InlineLambdaDef>
+    defs: &HashMap<String, InlineLambdaDef>,
 ) -> Option<TypedExpression> {
     let Expression::Apply(call_items) = &node.expr else {
         return None;
@@ -6286,11 +6241,18 @@ fn try_inline_call_no_temps(
         typed_subst.insert(param.clone(), arg_node);
     }
 
-    Some(substitute_params_typed(&def.body_typed, &expr_subst, &typed_subst))
+    Some(substitute_params_typed(
+        &def.body_typed,
+        &expr_subst,
+        &typed_subst,
+    ))
 }
 
 fn is_atomic_inline_arg_expr(expr: &Expression) -> bool {
-    matches!(expr, Expression::Word(_) | Expression::Int(_) | Expression::Dec(_))
+    matches!(
+        expr,
+        Expression::Word(_) | Expression::Int(_) | Expression::Dec(_)
+    )
 }
 
 fn can_no_temp_inline_arg(arg_expr: &Expression, arg_node: &TypedExpression, uses: usize) -> bool {
@@ -6308,23 +6270,24 @@ fn can_no_temp_inline_arg(arg_expr: &Expression, arg_node: &TypedExpression, use
 }
 
 fn is_no_temp_inline_scalar_type(typ: &Type) -> bool {
-    matches!(typ, Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit)
+    matches!(
+        typ,
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit
+    )
 }
 
 fn substitute_params_expr(expr: &Expression, subst: &HashMap<String, Expression>) -> Expression {
     match expr {
-        Expression::Word(w) =>
-            subst
-                .get(w)
-                .cloned()
-                .unwrap_or_else(|| Expression::Word(w.clone())),
-        Expression::Apply(items) =>
-            Expression::Apply(
-                items
-                    .iter()
-                    .map(|it| substitute_params_expr(it, subst))
-                    .collect()
-            ),
+        Expression::Word(w) => subst
+            .get(w)
+            .cloned()
+            .unwrap_or_else(|| Expression::Word(w.clone())),
+        Expression::Apply(items) => Expression::Apply(
+            items
+                .iter()
+                .map(|it| substitute_params_expr(it, subst))
+                .collect(),
+        ),
         Expression::Int(n) => Expression::Int(*n),
         Expression::Dec(n) => Expression::Dec(*n),
     }
@@ -6333,7 +6296,7 @@ fn substitute_params_expr(expr: &Expression, subst: &HashMap<String, Expression>
 fn substitute_params_typed(
     node: &TypedExpression,
     expr_subst: &HashMap<String, Expression>,
-    typed_subst: &HashMap<String, TypedExpression>
+    typed_subst: &HashMap<String, TypedExpression>,
 ) -> TypedExpression {
     if let Expression::Word(w) = &node.expr {
         if let Some(repl) = typed_subst.get(w) {
@@ -6341,18 +6304,14 @@ fn substitute_params_typed(
         }
     }
 
-    let new_children = node.children
+    let new_children = node
+        .children
         .iter()
         .map(|ch| substitute_params_typed(ch, expr_subst, typed_subst))
         .collect::<Vec<_>>();
     let new_expr = match &node.expr {
         Expression::Apply(items) if items.len() == new_children.len() => {
-            Expression::Apply(
-                new_children
-                    .iter()
-                    .map(|ch| ch.expr.clone())
-                    .collect()
-            )
+            Expression::Apply(new_children.iter().map(|ch| ch.expr.clone()).collect())
         }
         _ => substitute_params_expr(&node.expr, expr_subst),
     };
@@ -6368,8 +6327,12 @@ fn try_inline_let_rhs(
     expr: &Expression,
     node: &TypedExpression,
     defs: &HashMap<String, InlineLambdaDef>,
-    state: &mut InlineState
-) -> Option<(Vec<(Expression, TypedExpression)>, Expression, TypedExpression)> {
+    state: &mut InlineState,
+) -> Option<(
+    Vec<(Expression, TypedExpression)>,
+    Expression,
+    TypedExpression,
+)> {
     let Expression::Apply(items) = expr else {
         return None;
     };
@@ -6384,16 +6347,14 @@ fn try_inline_let_rhs(
     };
     let rhs_expr = items.get(2)?;
     let rhs_typed = node.children.get(2)?;
-    let (prep, inlined_rhs_expr, inlined_rhs_typed) = try_inline_call(
-        rhs_expr,
-        rhs_typed,
-        defs,
-        state
-    )?;
+    let (prep, inlined_rhs_expr, inlined_rhs_typed) =
+        try_inline_call(rhs_expr, rhs_typed, defs, state)?;
 
-    let rewritten_expr = Expression::Apply(
-        vec![Expression::Word(kw), items.get(1)?.clone(), inlined_rhs_expr]
-    );
+    let rewritten_expr = Expression::Apply(vec![
+        Expression::Word(kw),
+        items.get(1)?.clone(),
+        inlined_rhs_expr,
+    ]);
     let mut rewritten_typed = node.clone();
     rewritten_typed.expr = rewritten_expr.clone();
     rewritten_typed.children[2] = inlined_rhs_typed;
