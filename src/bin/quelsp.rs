@@ -373,10 +373,8 @@ impl ServerState {
                 let uri = params.text_document.uri;
                 self.pending_changes.remove(&uri);
                 let doc_path = document_path_from_uri(&uri);
-                let analysis = self.analyze_text_for_doc_path(
-                    &params.text_document.text,
-                    doc_path.as_deref(),
-                );
+                let analysis =
+                    self.analyze_text_for_doc_path(&params.text_document.text, doc_path.as_deref());
                 self.publish_diagnostics(
                     uri.clone(),
                     Some(params.text_document.version),
@@ -1070,7 +1068,13 @@ fn file_modified_time(path: &Path) -> Result<Option<SystemTime>, String> {
         .map_err(|e| format!("failed to stat '{}': {}", path.display(), e))?
         .modified()
         .map(Some)
-        .map_err(|e| format!("failed to read modified time for '{}': {}", path.display(), e))
+        .map_err(|e| {
+            format!(
+                "failed to read modified time for '{}': {}",
+                path.display(),
+                e
+            )
+        })
 }
 
 fn resolve_dep_paths(root_dir: &Path, deps: &[String]) -> Vec<PathBuf> {

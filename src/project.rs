@@ -97,8 +97,7 @@ pub fn parse_project_config(source: &str, label: &str) -> Result<ProjectConfig, 
             Some(other) => {
                 return Err(format!(
                     "failed to parse project config '{}': unsupported section '{}'",
-                    label,
-                    other
+                    label, other
                 ));
             }
         }
@@ -178,9 +177,7 @@ pub fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Express
         if kw != "let" && kw != "letrec" && kw != "mut" && kw != "extern" && kw != "letype" {
             return Err(format!(
                 "bundle '{}' must contain only top-level definitions; found '{}' at form {}",
-                label,
-                kw,
-                idx
+                label, kw, idx
             ));
         }
     }
@@ -200,7 +197,10 @@ pub fn load_bundle_definitions(
             base_dir.join(raw)
         };
         if resolved.extension().and_then(|e| e.to_str()) != Some("que") {
-            return Err(format!("bundle '{}' must be a .que file", resolved.display()));
+            return Err(format!(
+                "bundle '{}' must be a .que file",
+                resolved.display()
+            ));
         }
         let source = fs::read_to_string(&resolved)
             .map_err(|e| format!("failed to read bundle '{}': {}", resolved.display(), e))?;
@@ -260,14 +260,17 @@ fn array_literal_is_complete(value: &str) -> bool {
     depth <= 0 && value.contains(']')
 }
 
-fn parse_quoted_string(value: &str, label: &str, line_no: usize, key: &str) -> Result<String, String> {
+fn parse_quoted_string(
+    value: &str,
+    label: &str,
+    line_no: usize,
+    key: &str,
+) -> Result<String, String> {
     let trimmed = value.trim();
     if !(trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2) {
         return Err(format!(
             "failed to parse project config '{}': {} on line {} must be a quoted string",
-            label,
-            key,
-            line_no
+            label, key, line_no
         ));
     }
     let inner = &trimmed[1..trimmed.len() - 1];
@@ -278,9 +281,7 @@ fn parse_quoted_string(value: &str, label: &str, line_no: usize, key: &str) -> R
             let Some(next) = chars.next() else {
                 return Err(format!(
                     "failed to parse project config '{}': invalid escape in {} on line {}",
-                    label,
-                    key,
-                    line_no
+                    label, key, line_no
                 ));
             };
             match next {
@@ -314,9 +315,7 @@ fn parse_string_array(
     if !(trimmed.starts_with('[') && trimmed.ends_with(']')) {
         return Err(format!(
             "failed to parse project config '{}': {} on line {} must be a string array",
-            label,
-            key,
-            line_no
+            label, key, line_no
         ));
     }
     let inner = trimmed[1..trimmed.len() - 1].trim();
@@ -339,9 +338,7 @@ fn parse_string_array(
         let end = find_string_end(cursor).ok_or_else(|| {
             format!(
                 "failed to parse project config '{}': unterminated string in {} on line {}",
-                label,
-                key,
-                line_no
+                label, key, line_no
             )
         })?;
         out.push(parse_quoted_string(&cursor[..=end], label, line_no, key)?);
@@ -396,7 +393,10 @@ mod tests {
         .expect("config should parse");
         assert_eq!(cfg.entry.as_deref(), Some("main.que"));
         assert_eq!(cfg.deps.len(), 2);
-        assert_eq!(cfg.env.get("QUE_WASM_OPT").map(String::as_str), Some("speed"));
+        assert_eq!(
+            cfg.env.get("QUE_WASM_OPT").map(String::as_str),
+            Some("speed")
+        );
     }
 
     #[test]
