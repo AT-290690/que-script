@@ -650,6 +650,8 @@ fn is_special_word(w: &str) -> bool {
             "bools" |
             "decimals" |
             "strings" |
+            "__vec_new_zeroed_i32" |
+            "__vec_new_uninit_i32" |
             "tuple" |
             "length" |
             "get" |

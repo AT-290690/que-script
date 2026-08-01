@@ -4853,11 +4853,14 @@ fn extract_counted_scalar_builder_parts(
     let Expression::Apply(body) = &body_node.expr else {
         return None;
     };
-    if
-        !matches!(body.first(), Some(Expression::Word(w)) if w == "do") ||
-        body.len() != 3 ||
-        body_node.children.len() != 3
-    {
+    if !matches!(body.first(), Some(Expression::Word(w)) if w == "do") {
+        return None;
+    }
+    let has_trailing_nil = matches!(body.get(3), Some(Expression::Word(w)) if w == "nil");
+    if body.len() != 3 && !(body.len() == 4 && has_trailing_nil) {
+        return None;
+    }
+    if body_node.children.len() != body.len() {
         return None;
     }
     let Some(set_node) = body_node.children.get(1) else {
