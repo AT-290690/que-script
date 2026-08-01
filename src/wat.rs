@@ -5297,6 +5297,22 @@ fn compile_if(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     Ok(format!("{cond}\n(if (result {result_ty})\n  (then\n    {t}\n  )\n  (else\n    {e}\n  )\n)"))
 }
 
+fn compile_if_discarding_result(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let cond = compile_expr(
+        node.children.get(1).ok_or_else(|| "if missing condition".to_string())?,
+        ctx
+    )?;
+    let then_code = compile_expr_discarding_result(
+        node.children.get(2).ok_or_else(|| "if missing then".to_string())?,
+        ctx
+    )?;
+    let else_code = compile_expr_discarding_result(
+        node.children.get(3).ok_or_else(|| "if missing else".to_string())?,
+        ctx
+    )?;
+    Ok(format!("{cond}\nif\n  {then_code}\nelse\n  {else_code}\nend"))
+}
+
 fn is_borrowing_accessor_expr(node: &TypedExpression) -> bool {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() =>
@@ -6819,6 +6835,9 @@ fn compile_alter(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
 }
 
 fn compile_expr_discarding_result(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if matches!(&node.expr, Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "if")) {
+        return compile_if_discarding_result(node, ctx);
+    }
     let code = compile_expr(node, ctx)?;
     if !matches!(node.typ.as_ref(), Some(Type::Unit)) {
         return Ok(format!("{code}\ndrop"));
