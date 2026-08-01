@@ -57,6 +57,8 @@ struct Ctx<'a> {
     local_types: HashMap<String, Type>,
     materialized_scalar_local_slots: HashSet<usize>,
     definitely_materialized_top_level_scalar_names: &'a HashSet<String>,
+    proven_scalar_index_loads: &'a HashSet<(String, String)>,
+    nonnegative_int_locals: &'a HashSet<String>,
     tmp_i32: usize,
 }
 
@@ -5987,6 +5989,7 @@ fn compile_do(
     let mut parts = Vec::new();
     let mut scoped_lambda_bindings = ctx.lambda_bindings.clone();
     let mut scoped_materialized_scalar_local_slots = ctx.materialized_scalar_local_slots.clone();
+    let mut scoped_nonnegative_int_locals = ctx.nonnegative_int_locals.clone();
     let managed_do_locals: Vec<(String, usize)> = items
         .iter()
         .filter_map(|expr| {
@@ -6081,6 +6084,8 @@ fn compile_do(
                                 local_types: ctx.local_types.clone(),
                                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
                                 definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
+                                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                                nonnegative_int_locals: &scoped_nonnegative_int_locals,
                                 tmp_i32: ctx.tmp_i32,
                             };
                             if
@@ -6131,6 +6136,15 @@ fn compile_do(
                                 local_idx, cap_idx, local_idx
                             ));
                         }
+                        if
+                            val_node
+                                .map(|n| typed_expr_is_nonnegative_int_literal(n))
+                                .unwrap_or(false)
+                        {
+                            scoped_nonnegative_int_locals.insert(name.clone());
+                        } else if kw == "mut" {
+                            scoped_nonnegative_int_locals.remove(name);
+                        }
                     } else {
                         return Err(format!("Unknown local '{}'", name));
                     }
@@ -6158,6 +6172,8 @@ fn compile_do(
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: &scoped_nonnegative_int_locals,
                 tmp_i32: ctx.tmp_i32,
             };
             let managed = n.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
@@ -6228,6 +6244,8 @@ fn compile_do(
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: &scoped_nonnegative_int_locals,
                 tmp_i32: ctx.tmp_i32,
             };
             compile_expr(n, &scoped_ctx)
@@ -6277,6 +6295,8 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
@@ -6333,6 +6353,8 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = match item {
@@ -6419,6 +6441,8 @@ fn compile_trusted_typed_vector_literal(
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_item(item, &nested_ctx)?;
@@ -6464,6 +6488,8 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let a_node = node
@@ -6522,6 +6548,8 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
                 tmp_i32: ctx.tmp_i32 + 3,
             };
             let a = compile_expr(a_node, &nested_ctx)?;
@@ -6583,6 +6611,8 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
                 tmp_i32: ctx.tmp_i32 + 3,
             };
             let a = compile_expr(a_node, &nested_ctx)?;
@@ -6609,6 +6639,46 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     Ok(format!("{p}\ncall $tuple_snd"))
 }
 
+fn typed_expr_is_nonnegative_int_literal(node: &TypedExpression) -> bool {
+    matches!(node.typ.as_ref(), Some(Type::Int))
+        && matches!(&node.expr, Expression::Int(n) if *n >= 0)
+}
+
+fn scalar_get_is_proven_in_bounds(node: &TypedExpression, ctx: &Ctx<'_>) -> Option<(usize, usize)> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let [Expression::Word(op), Expression::Word(xs), Expression::Word(idx)] = &items[..] else {
+        return None;
+    };
+    if op != "get" {
+        return None;
+    }
+    if !ctx
+        .proven_scalar_index_loads
+        .contains(&(xs.clone(), idx.clone()))
+    {
+        return None;
+    }
+    let xs_slot = *ctx.locals.get(xs)?;
+    let idx_slot = *ctx.locals.get(idx)?;
+    Some((xs_slot, idx_slot))
+}
+
+fn emit_unchecked_scalar_get_from_slots(xs_slot: usize, idx_slot: usize) -> String {
+    format!(
+        "local.get {xs_slot}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         local.get {idx_slot}\n\
+         i32.const 4\n\
+         i32.mul\n\
+         i32.add\n\
+         i32.load"
+    )
+}
+
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs_node = node
         .children
@@ -6626,6 +6696,8 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let (xs, release_xs_after) = match &xs_node.expr {
@@ -6655,6 +6727,9 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         }
     };
     if node.typ.as_ref().map(|t| !is_ref_type(t)).unwrap_or(false) {
+        if let Some((xs_slot, idx_slot)) = scalar_get_is_proven_in_bounds(node, ctx) {
+            return Ok(emit_unchecked_scalar_get_from_slots(xs_slot, idx_slot));
+        }
         let bounds = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
             format!(
                 "{xs}\n\
@@ -6756,6 +6831,8 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let (xs, release_target) = match &xs_node.expr {
@@ -6914,6 +6991,101 @@ fn compile_expr_discarding_result(node: &TypedExpression, ctx: &Ctx<'_>) -> Resu
     Ok(format!("{code}\ndrop"))
 }
 
+fn extract_less_than_length_loop_bound(
+    cond_node: &TypedExpression,
+    ctx: &Ctx<'_>,
+) -> Option<(String, String, usize, usize)> {
+    let Expression::Apply(cond_items) = &cond_node.expr else {
+        return None;
+    };
+    if !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<")
+        || cond_node.children.len() != 3
+    {
+        return None;
+    }
+    let (Some(Expression::Word(idx_name)), Some(Expression::Apply(len_items))) =
+        (cond_items.get(1), cond_items.get(2))
+    else {
+        return None;
+    };
+    let [Expression::Word(len_op), Expression::Word(xs_name)] = &len_items[..] else {
+        return None;
+    };
+    if len_op != "length" || !ctx.nonnegative_int_locals.contains(idx_name) {
+        return None;
+    }
+    let idx_slot = *ctx.locals.get(idx_name)?;
+    let xs_slot = *ctx.locals.get(xs_name)?;
+    Some((idx_name.clone(), xs_name.clone(), idx_slot, xs_slot))
+}
+
+fn body_has_only_final_positive_increment(body_node: &TypedExpression, idx_name: &str) -> bool {
+    let Expression::Apply(items) = &body_node.expr else {
+        return false;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do")
+        || body_node.children.len() != items.len()
+        || items.len() < 2
+    {
+        return false;
+    }
+    if !is_positive_index_increment_expr(items.last().expect("do has final item"), idx_name) {
+        return false;
+    }
+    items[1..items.len() - 1]
+        .iter()
+        .all(|expr| !expr_mutates_scalar_name(expr, idx_name))
+}
+
+fn is_positive_index_increment_expr(expr: &Expression, idx_name: &str) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    let [Expression::Word(op), Expression::Word(target), Expression::Apply(add_items)] = &items[..]
+    else {
+        return false;
+    };
+    if op != "alter!" || target != idx_name {
+        return false;
+    }
+    let [Expression::Word(add_op), Expression::Word(lhs), Expression::Int(step)] = &add_items[..]
+    else {
+        return false;
+    };
+    add_op == "+" && lhs == idx_name && *step > 0
+}
+
+fn expr_mutates_scalar_name(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if (op == "alter!" || op == "mut" || op == "let") && target == name {
+                    return true;
+                }
+            }
+            items.iter().any(|item| expr_mutates_scalar_name(item, name))
+        }
+        _ => false,
+    }
+}
+
+fn expr_mutates_vector_name(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if matches!(op.as_str(), "set!" | "push!" | "pop!" | "pull!") && target == name {
+                    return true;
+                }
+                if op.ends_with('!') && target == name {
+                    return true;
+                }
+            }
+            items.iter().any(|item| expr_mutates_vector_name(item, name))
+        }
+        _ => false,
+    }
+}
+
 fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs = compile_expr(
         node.children
@@ -6948,23 +7120,64 @@ fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
 }
 
 fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    let cond = compile_expr(
-        node.children
-            .get(1)
-            .ok_or_else(|| "while missing condition".to_string())?,
-        ctx,
-    )?;
+    let cond_node = node
+        .children
+        .get(1)
+        .ok_or_else(|| "while missing condition".to_string())?;
     let body_node = node
         .children
         .get(2)
         .ok_or_else(|| "while missing body".to_string())?;
+    if let Some((idx_name, xs_name, idx_slot, xs_slot)) =
+        extract_less_than_length_loop_bound(cond_node, ctx)
+    {
+        if body_has_only_final_positive_increment(body_node, &idx_name)
+            && !expr_mutates_vector_name(&body_node.expr, &xs_name)
+        {
+            let mut proven = ctx.proven_scalar_index_loads.clone();
+            proven.insert((xs_name, idx_name));
+            let nested_ctx = Ctx {
+                fn_sigs: ctx.fn_sigs,
+                fn_ids: ctx.fn_ids,
+                extern_names: ctx.extern_names,
+                lambda_ids: ctx.lambda_ids,
+                closure_defs: ctx.closure_defs,
+                lambda_bindings: ctx.lambda_bindings,
+                locals: ctx.locals.clone(),
+                local_types: ctx.local_types.clone(),
+                materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                definitely_materialized_top_level_scalar_names: ctx
+                    .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: &proven,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
+                tmp_i32: ctx.tmp_i32 + 1,
+            };
+            let body_and_drop = compile_expr_discarding_result(body_node, &nested_ctx)?;
+            return Ok(format!(
+                "local.get {xs_slot}\n\
+                 call $vec_len\n\
+                 local.set {}\n\
+                 block\n\
+                   loop\n\
+                     local.get {idx_slot}\n\
+                     local.get {}\n\
+                     i32.ge_s\n\
+                     br_if 1\n\
+                     {body_and_drop}\n\
+                     br 0\n\
+                   end\n\
+                 end\n\
+                 i32.const 0",
+                ctx.tmp_i32, ctx.tmp_i32
+            ));
+        }
+    }
+    let cond = compile_expr(cond_node, ctx)?;
     let body_and_drop = compile_expr_discarding_result(body_node, ctx)?;
 
-    Ok(
-        format!(
-            "block\n  loop\n    {cond}\n    i32.eqz\n    br_if 1\n    {body_and_drop}\n    br 0\n  end\nend\ni32.const 0"
-        )
-    )
+    Ok(format!(
+        "block\n  loop\n    {cond}\n    i32.eqz\n    br_if 1\n    {body_and_drop}\n    br 0\n  end\nend\ni32.const 0"
+    ))
 }
 
 fn compile_fast_box_ctor(
@@ -6991,6 +7204,8 @@ fn compile_fast_box_ctor(
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let value = compile_expr(value_node, &nested_ctx)?;
@@ -7049,6 +7264,8 @@ fn compile_fast_cell_set(
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(cell_node, &nested_ctx)?;
@@ -7108,6 +7325,8 @@ fn compile_fast_truthy(
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(
@@ -7208,6 +7427,8 @@ fn compile_extern_direct_call(
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: first_arg_slot + args.len(),
     };
 
@@ -7286,6 +7507,8 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                     materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                     definitely_materialized_top_level_scalar_names: ctx
                         .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
                     tmp_i32: ctx.tmp_i32 + 2,
                 };
                 let av = compile_expr(arg, &nested_ctx)?;
@@ -7386,6 +7609,8 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
                 tmp_i32: ctx.tmp_i32 + 2,
             };
             let av = compile_expr(arg, &nested_ctx)?;
@@ -7515,6 +7740,8 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: ctx.nonnegative_int_locals,
                 tmp_i32: ctx.tmp_i32 + 2,
             };
             let av = compile_expr(arg, &nested_ctx)?;
@@ -8212,6 +8439,8 @@ fn compile_lambda_func(
         local_types.insert(n.clone(), t.clone());
     }
     let empty_extern_names = HashSet::new();
+    let empty_proven_scalar_index_loads = HashSet::new();
+    let empty_nonnegative_int_locals = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
@@ -8223,6 +8452,8 @@ fn compile_lambda_func(
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
         definitely_materialized_top_level_scalar_names,
+        proven_scalar_index_loads: &empty_proven_scalar_index_loads,
+        nonnegative_int_locals: &empty_nonnegative_int_locals,
         tmp_i32,
     };
     let body_code =
@@ -8358,6 +8589,8 @@ fn compile_closure_func(
         local_types.insert(n.clone(), t.clone());
     }
     let empty_extern_names = HashSet::new();
+    let empty_proven_scalar_index_loads = HashSet::new();
+    let empty_nonnegative_int_locals = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
@@ -8369,6 +8602,8 @@ fn compile_closure_func(
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
         definitely_materialized_top_level_scalar_names,
+        proven_scalar_index_loads: &empty_proven_scalar_index_loads,
+        nonnegative_int_locals: &empty_nonnegative_int_locals,
         tmp_i32,
     };
     let body_code =
@@ -8480,6 +8715,8 @@ fn compile_value_func(
         local_types.insert(n.clone(), t.clone());
     }
     let empty_extern_names = HashSet::new();
+    let empty_proven_scalar_index_loads = HashSet::new();
+    let empty_nonnegative_int_locals = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
@@ -8491,6 +8728,8 @@ fn compile_value_func(
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
         definitely_materialized_top_level_scalar_names,
+        proven_scalar_index_loads: &empty_proven_scalar_index_loads,
+        nonnegative_int_locals: &empty_nonnegative_int_locals,
         tmp_i32,
     };
     let body_code =
@@ -8586,6 +8825,8 @@ fn compile_partial_helper_func(
     }
     let empty_top_level_materialized = HashSet::new();
     let empty_extern_names = HashSet::new();
+    let empty_proven_scalar_index_loads = HashSet::new();
+    let empty_nonnegative_int_locals = HashSet::new();
     let ctx = Ctx {
         fn_sigs,
         fn_ids,
@@ -8597,6 +8838,8 @@ fn compile_partial_helper_func(
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
         definitely_materialized_top_level_scalar_names: &empty_top_level_materialized,
+        proven_scalar_index_loads: &empty_proven_scalar_index_loads,
+        nonnegative_int_locals: &empty_nonnegative_int_locals,
         tmp_i32: h.remaining_params.len(),
     };
 
@@ -9136,6 +9379,8 @@ pub fn compile_program_to_wat_typed_with_opts(
     for (n, t) in &main_local_defs {
         main_local_types.insert(n.clone(), t.clone());
     }
+    let main_proven_scalar_index_loads = HashSet::new();
+    let main_nonnegative_int_locals = HashSet::new();
     let main_ctx = Ctx {
         fn_sigs: &fn_sigs,
         fn_ids: &fn_ids,
@@ -9148,6 +9393,8 @@ pub fn compile_program_to_wat_typed_with_opts(
         materialized_scalar_local_slots: HashSet::new(),
         definitely_materialized_top_level_scalar_names:
             &definitely_materialized_top_level_scalar_names,
+        proven_scalar_index_loads: &main_proven_scalar_index_loads,
+        nonnegative_int_locals: &main_nonnegative_int_locals,
         tmp_i32: main_local_defs.len(),
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;

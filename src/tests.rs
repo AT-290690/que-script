@@ -5704,6 +5704,85 @@ fn"#;
         );
     }
 
+    #[test]
+    fn test_wat_proven_while_loop_hoists_length_and_uses_unchecked_scalar_get() {
+        let expr = crate::parser::build(
+            r#"(do
+                    (let xs [1 2 3 4])
+                    (mut i 0)
+                    (mut acc 0)
+                    (while (< i (length xs))
+                      (do
+                        (alter! acc (+ acc (get xs i)))
+                        (alter! i (+ i 1))))
+                    acc)"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $vec_get_i32"),
+            "proven loop scalar get should inline unchecked load, got:\n{}",
+            main_wat
+        );
+        assert_eq!(
+            main_wat.matches("call $vec_len").count(),
+            1,
+            "proven loop should hoist length out of the loop, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_loop_get_keeps_checked_path_without_nonnegative_index_proof() {
+        let expr = crate::parser::build(
+            r#"(do
+                    (let xs [1 2 3 4])
+                    (mut i -1)
+                    (mut acc 0)
+                    (while (< i (length xs))
+                      (do
+                        (alter! acc (+ acc (get xs i)))
+                        (alter! i (+ i 1))))
+                    acc)"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("unreachable"),
+            "loop with possibly negative index should keep bounds traps, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_runtime_proven_while_loop_scalar_get_stays_correct() {
+        let result = run_program_output(
+            r#"(do
+                (let xs [1 2 3 4])
+                (mut i 0)
+                (mut acc 0)
+                (while (< i (length xs))
+                  (do
+                    (alter! acc (+ acc (get xs i)))
+                    (alter! i (+ i 1))))
+                acc)"#,
+        );
+        assert_eq!(result, "10");
+    }
+
     #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_discarded_and_or_preserve_short_circuit_effects() {
