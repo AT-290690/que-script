@@ -6679,6 +6679,117 @@ fn emit_unchecked_scalar_get_from_slots(xs_slot: usize, idx_slot: usize) -> Stri
     )
 }
 
+fn emit_constant_scalar_get(
+    xs: &str,
+    index: i32,
+    tmp_ptr: usize,
+    release_xs_after: bool,
+) -> String {
+    let offset = index.saturating_mul(4);
+    let upper_check = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        if index < 0 {
+            "unreachable".to_string()
+        } else {
+            format!(
+                "local.get {tmp_ptr}\n\
+                 i32.load\n\
+                 i32.const {index}\n\
+                 i32.le_s\n\
+                 if\n\
+                   unreachable\n\
+                 end"
+            )
+        }
+    } else {
+        String::new()
+    };
+    let offset_code = if offset == 0 {
+        String::new()
+    } else {
+        format!("\ni32.const {offset}\ni32.add")
+    };
+    let load = format!(
+        "{xs}\n\
+         local.set {tmp_ptr}\n\
+         {upper_check}\n\
+         local.get {tmp_ptr}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load{offset_code}\n\
+         i32.load"
+    );
+    if release_xs_after {
+        format!("{load}\nlocal.get {tmp_ptr}\ncall $rc_release\ndrop")
+    } else {
+        load
+    }
+}
+
+fn emit_constant_scalar_set(
+    target_prefix: &str,
+    value: &str,
+    index: i32,
+    target_tmp: usize,
+    value_tmp: usize,
+    release_target_code: &str,
+    target_already_materialized: bool,
+) -> String {
+    let offset = index.saturating_mul(4);
+    let offset_code = if offset == 0 {
+        String::new()
+    } else {
+        format!("\ni32.const {offset}\ni32.add")
+    };
+    let materialize = if target_already_materialized {
+        String::new()
+    } else {
+        format!("local.get {target_tmp}\ncall $vec_materialize_i32\ndrop")
+    };
+    let replacement = format!(
+        "local.get {target_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load{offset_code}\n\
+         local.get {value_tmp}\n\
+         i32.store\n\
+         i32.const 0"
+    );
+    let fallback = format!(
+        "local.get {target_tmp}\n\
+         i32.const {index}\n\
+         local.get {value_tmp}\n\
+         call $vec_set_scalar_materialized_i32"
+    );
+    let body = if index < 0 {
+        format!("unreachable\n{fallback}")
+    } else {
+        format!(
+            "local.get {target_tmp}\n\
+             i32.load\n\
+             i32.const {index}\n\
+             i32.gt_s\n\
+             if (result i32)\n\
+               {replacement}\n\
+             else\n\
+               {fallback}\n\
+             end"
+        )
+    };
+    let mut out = format!(
+        "{target_prefix}\n\
+         local.set {target_tmp}\n\
+         {value}\n\
+         local.set {value_tmp}\n\
+         {materialize}\n\
+         {body}"
+    );
+    if !release_target_code.is_empty() {
+        out.push('\n');
+        out.push_str(release_target_code);
+    }
+    out
+}
+
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs_node = node
         .children
@@ -6729,6 +6840,14 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     if node.typ.as_ref().map(|t| !is_ref_type(t)).unwrap_or(false) {
         if let Some((xs_slot, idx_slot)) = scalar_get_is_proven_in_bounds(node, ctx) {
             return Ok(emit_unchecked_scalar_get_from_slots(xs_slot, idx_slot));
+        }
+        if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
+            return Ok(emit_constant_scalar_get(
+                &xs,
+                *index,
+                ctx.tmp_i32,
+                release_xs_after,
+            ));
         }
         let bounds = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
             format!(
@@ -6904,6 +7023,19 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     } else {
         String::new()
     };
+    if is_scalar_value {
+        if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
+            return Ok(emit_constant_scalar_set(
+                &target_prefix,
+                &v,
+                *index,
+                target_tmp,
+                ctx.tmp_i32 + 1,
+                &target_release,
+                definitely_materialized_scalar_target,
+            ));
+        }
+    }
     if release_rhs {
         let tmp_val = ctx.tmp_i32 + 1;
         let keep_tmp = ctx.tmp_i32 + 2;

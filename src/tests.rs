@@ -6010,8 +6010,13 @@ fn"#;
             .expect("program should compile");
 
         assert!(
-            wat.contains("call $vec_set_scalar_materialized_i32"),
-            "scalar set! on a definitely materialized local should use the materialized scalar set runtime, got:\n{}",
+            wat.contains("i32.store"),
+            "constant-index scalar replacement should emit a direct store fast branch, got:\n{}",
+            wat
+        );
+        assert!(
+            wat.contains("if (result i32)"),
+            "constant-index scalar replacement should guard direct store and keep fallback semantics, got:\n{}",
             wat
         );
     }
@@ -6026,13 +6031,13 @@ fn"#;
             .expect("program should compile");
 
         assert!(
-            wat.contains("call $vec_set_scalar_i32"),
-            "scalar set! on a slice/view should keep the materializing runtime path, got:\n{}",
+            wat.contains("call $vec_materialize_i32"),
+            "constant-index scalar set! on a slice/view should materialize before direct replacement, got:\n{}",
             wat
         );
         assert!(
-            !wat.contains("call $vec_set_scalar_materialized_i32"),
-            "scalar set! on a slice/view must not use the materialized-only runtime path, got:\n{}",
+            wat.contains("i32.store"),
+            "constant-index scalar set! on a slice/view should emit a direct store after materialization, got:\n{}",
             wat
         );
     }
