@@ -180,3 +180,80 @@
     (lambda . body
       (qq ((lambda
               (do (uqs body)))))))
+
+(letmacro vector/default/items/static
+  (lambda n x
+    (if (= n 0)
+        (quote ())
+        (qq ((uq x) (uqs (vector/default/items/static (- n 1) x)))))))
+
+(letmacro vector/default/static
+  (lambda n x
+    (qq [(uqs (vector/default/items/static n x))])))
+
+(letmacro zeros/static
+  (lambda n
+    (qq (vector/default/static (uq n) 0))))
+
+(letmacro ones/static
+  (lambda n
+    (qq (vector/default/static (uq n) 1))))
+
+(letmacro truths/static
+  (lambda n
+    (qq (vector/default/static (uq n) true))))
+
+(letmacro falses/static
+  (lambda n
+    (qq (vector/default/static (uq n) false))))
+
+(letmacro chars/static
+  (lambda n ch
+    (qq (vector/default/static (uq n) (uq ch)))))
+
+(letmacro range/items/static
+  (lambda start end
+    (if (> start end)
+        (quote ())
+        (qq ((uq start) (uqs (range/items/static (+ start 1) end)))))))
+
+(letmacro range/static
+  (lambda start end
+    (qq [(uqs (range/items/static start end))])))
+
+(letmacro repeat/items/static
+  (lambda n body
+    (if (= n 0)
+        (quote ())
+        (qq ((do (uqs body)) (uqs (repeat/items/static (- n 1) body)))))))
+
+(letmacro repeat/static
+  (lambda n . body
+    (qq (do
+          (uqs (repeat/items/static n body))
+          nil))))
+
+(letmacro unroll/items/static
+  (lambda n name i body
+    (if (= i n)
+        (quote ())
+        (qq (((lambda (uq name)
+                (do (uqs body)))
+              (uq i))
+             (uqs (unroll/items/static n name (+ i 1) body)))))))
+
+(letmacro unroll/static
+  (lambda n name . body
+    (qq (do
+          (uqs (unroll/items/static n name 0 body))
+          nil))))
+
+(letmacro assert/static
+  (lambda condition
+    (if condition
+        (qq nil)
+        (error "assert/static failed"))))
+
+(letmacro test-suite/static
+  (lambda name . tests
+    (qq [(uqs tests)])))

@@ -844,15 +844,17 @@ fn flatten_top_level_dos(exprs: Vec<Expression>) -> Vec<Expression> {
 fn eval_macro_expr(
     expr: &Expression,
     bindings: &HashMap<String, Expression>,
+    macros: &HashMap<String, MacroDef>,
     gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     let mut local_bindings = bindings.clone();
-    eval_macro_expr_in_env(expr, &mut local_bindings, gensym_counter)
+    eval_macro_expr_in_env(expr, &mut local_bindings, macros, gensym_counter)
 }
 
 fn eval_macro_expr_in_env(
     expr: &Expression,
     bindings: &mut HashMap<String, Expression>,
+    macros: &HashMap<String, MacroDef>,
     gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     match expr {
@@ -867,13 +869,29 @@ fn eval_macro_expr_in_env(
                 return Ok(Expression::Apply(Vec::new()));
             }
             match items.first() {
+                Some(Expression::Word(head)) if head == "if" => {
+                    if items.len() != 4 {
+                        return Err("compile-time if expects exactly 3 arguments".to_string());
+                    }
+                    let mut cond = eval_macro_expr_in_env(&items[1], bindings, macros, gensym_counter)?;
+                    if macro_expr_as_bool(&cond).is_none() && matches!(cond, Expression::Apply(_)) {
+                        cond = eval_macro_expr_in_env(&cond, bindings, macros, gensym_counter)?;
+                    }
+                    let cond_bool = macro_expr_as_bool(&cond)
+                        .ok_or_else(|| format!("compile-time if condition must be Bool, got {}", cond.to_lisp()))?;
+                    if cond_bool {
+                        eval_macro_expr_in_env(&items[2], bindings, macros, gensym_counter)
+                    } else {
+                        eval_macro_expr_in_env(&items[3], bindings, macros, gensym_counter)
+                    }
+                }
                 Some(Expression::Word(head)) if head == "do" => {
                     if items.len() < 2 {
                         return Err("(do ...) requires at least one expression".to_string());
                     }
                     let mut last = None;
                     for item in items.iter().skip(1) {
-                        last = Some(eval_macro_expr_in_env(item, bindings, gensym_counter)?);
+                        last = Some(eval_macro_expr_in_env(item, bindings, macros, gensym_counter)?);
                     }
                     Ok(last.expect("do body checked to be non-empty"))
                 }
@@ -887,7 +905,7 @@ fn eval_macro_expr_in_env(
                                 .to_string(),
                         );
                     };
-                    let value = eval_macro_expr_in_env(&items[2], bindings, gensym_counter)?;
+                    let value = eval_macro_expr_in_env(&items[2], bindings, macros, gensym_counter)?;
                     bindings.insert(name.clone(), value.clone());
                     Ok(value)
                 }
@@ -901,7 +919,7 @@ fn eval_macro_expr_in_env(
                     if items.len() != 2 {
                         return Err("(qq ...) expects exactly one expression".to_string());
                     }
-                    quasiquote_macro_expr(&items[1], bindings, gensym_counter)
+                    quasiquote_macro_expr(&items[1], bindings, macros, gensym_counter)
                 }
                 Some(Expression::Word(head)) if head == "gensym" => {
                     if items.len() != 1 {
@@ -911,10 +929,30 @@ fn eval_macro_expr_in_env(
                     *gensym_counter += 1;
                     Ok(Expression::Word(name))
                 }
+                Some(Expression::Word(head)) if head == "error" => {
+                    if items.len() != 2 {
+                        return Err("compile-time error expects exactly 1 argument".to_string());
+                    }
+                    let message = eval_macro_expr_in_env(&items[1], bindings, macros, gensym_counter)?;
+                    Err(format!("compile-time error: {}", macro_error_message(&message)))
+                }
+                Some(Expression::Word(head)) if is_compile_time_int_op(head) => {
+                    eval_compile_time_int_op(head, &items[1..], bindings, macros, gensym_counter)
+                }
+                Some(Expression::Word(head)) if is_compile_time_bool_op(head) => {
+                    eval_compile_time_bool_op(head, &items[1..], bindings, macros, gensym_counter)
+                }
+                Some(Expression::Word(head)) if macros.contains_key(head) => {
+                    let evaluated_args = items[1..]
+                        .iter()
+                        .map(|arg| eval_macro_arg(arg, bindings, macros, gensym_counter))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    expand_macro_call(head, macros.get(head).expect("macro exists"), &evaluated_args, macros, gensym_counter)
+                }
                 _ => Ok(Expression::Apply(
                     items
                         .iter()
-                        .map(|it| eval_macro_expr_in_env(it, bindings, gensym_counter))
+                        .map(|it| eval_macro_expr_in_env(it, bindings, macros, gensym_counter))
                         .collect::<Result<Vec<_>, _>>()?,
                 )),
             }
@@ -922,9 +960,193 @@ fn eval_macro_expr_in_env(
     }
 }
 
+fn macro_error_message(expr: &Expression) -> String {
+    if let Expression::Apply(items) = expr {
+        if matches!(items.first(), Some(Expression::Word(w)) if w == "string") {
+            let mut out = String::new();
+            for item in items.iter().skip(1) {
+                let Expression::Int(code) = item else {
+                    return expr.to_lisp();
+                };
+                let Some(ch) = char::from_u32(*code as u32) else {
+                    return expr.to_lisp();
+                };
+                out.push(ch);
+            }
+            return out;
+        }
+    }
+    expr.to_lisp()
+}
+
+fn macro_expr_as_bool(expr: &Expression) -> Option<bool> {
+    match expr {
+        Expression::Word(w) if w == "true" => Some(true),
+        Expression::Word(w) if w == "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn macro_expr_as_int(expr: &Expression) -> Option<i32> {
+    match expr {
+        Expression::Int(n) => Some(*n),
+        _ => None,
+    }
+}
+
+fn is_compile_time_int_op(op: &str) -> bool {
+    matches!(op, "+" | "-" | "*" | "/" | "mod" | "=" | "<" | "<=" | ">" | ">=")
+}
+
+fn is_compile_time_bool_op(op: &str) -> bool {
+    matches!(op, "and" | "or" | "not")
+}
+
+fn eval_macro_arg(
+    arg: &Expression,
+    bindings: &mut HashMap<String, Expression>,
+    macros: &HashMap<String, MacroDef>,
+    gensym_counter: &mut usize,
+) -> Result<Expression, String> {
+    eval_macro_expr_in_env(arg, bindings, macros, gensym_counter)
+}
+
+fn eval_macro_int_arg(
+    op: &str,
+    arg: &Expression,
+    bindings: &mut HashMap<String, Expression>,
+    macros: &HashMap<String, MacroDef>,
+    gensym_counter: &mut usize,
+) -> Result<i32, String> {
+    let value = eval_macro_arg(arg, bindings, macros, gensym_counter)?;
+    macro_expr_as_int(&value)
+        .ok_or_else(|| format!("compile-time '{}' expected Int, got {}", op, value.to_lisp()))
+}
+
+fn eval_compile_time_int_op(
+    op: &str,
+    args: &[Expression],
+    bindings: &mut HashMap<String, Expression>,
+    macros: &HashMap<String, MacroDef>,
+    gensym_counter: &mut usize,
+) -> Result<Expression, String> {
+    match op {
+        "+" => {
+            let mut out = 0i32;
+            for arg in args {
+                out = out.checked_add(eval_macro_int_arg(op, arg, bindings, macros, gensym_counter)?)
+                    .ok_or_else(|| "compile-time '+' overflowed".to_string())?;
+            }
+            Ok(Expression::Int(out))
+        }
+        "*" => {
+            let mut out = 1i32;
+            for arg in args {
+                out = out.checked_mul(eval_macro_int_arg(op, arg, bindings, macros, gensym_counter)?)
+                    .ok_or_else(|| "compile-time '*' overflowed".to_string())?;
+            }
+            Ok(Expression::Int(out))
+        }
+        "-" => {
+            if args.is_empty() {
+                return Err("compile-time '-' expects at least one argument".to_string());
+            }
+            let first = eval_macro_int_arg(op, &args[0], bindings, macros, gensym_counter)?;
+            if args.len() == 1 {
+                return first
+                    .checked_neg()
+                    .map(Expression::Int)
+                    .ok_or_else(|| "compile-time '-' overflowed".to_string());
+            }
+            let mut out = first;
+            for arg in &args[1..] {
+                out = out.checked_sub(eval_macro_int_arg(op, arg, bindings, macros, gensym_counter)?)
+                    .ok_or_else(|| "compile-time '-' overflowed".to_string())?;
+            }
+            Ok(Expression::Int(out))
+        }
+        "/" | "mod" => {
+            if args.len() != 2 {
+                return Err(format!("compile-time '{}' expects exactly 2 arguments", op));
+            }
+            let a = eval_macro_int_arg(op, &args[0], bindings, macros, gensym_counter)?;
+            let b = eval_macro_int_arg(op, &args[1], bindings, macros, gensym_counter)?;
+            if b == 0 {
+                return Err(format!("compile-time '{}' division by zero", op));
+            }
+            if op == "/" {
+                Ok(Expression::Int(a / b))
+            } else {
+                Ok(Expression::Int(a % b))
+            }
+        }
+        "=" | "<" | "<=" | ">" | ">=" => {
+            if args.len() != 2 {
+                return Err(format!("compile-time '{}' expects exactly 2 arguments", op));
+            }
+            let a = eval_macro_int_arg(op, &args[0], bindings, macros, gensym_counter)?;
+            let b = eval_macro_int_arg(op, &args[1], bindings, macros, gensym_counter)?;
+            let result = match op {
+                "=" => a == b,
+                "<" => a < b,
+                "<=" => a <= b,
+                ">" => a > b,
+                ">=" => a >= b,
+                _ => unreachable!(),
+            };
+            Ok(Expression::Word(result.to_string()))
+        }
+        _ => unreachable!("checked by is_compile_time_int_op"),
+    }
+}
+
+fn eval_compile_time_bool_op(
+    op: &str,
+    args: &[Expression],
+    bindings: &mut HashMap<String, Expression>,
+    macros: &HashMap<String, MacroDef>,
+    gensym_counter: &mut usize,
+) -> Result<Expression, String> {
+    let eval_bool = |arg: &Expression,
+                     bindings: &mut HashMap<String, Expression>,
+                     gensym_counter: &mut usize|
+     -> Result<bool, String> {
+        let value = eval_macro_arg(arg, bindings, macros, gensym_counter)?;
+        macro_expr_as_bool(&value)
+            .ok_or_else(|| format!("compile-time '{}' expected Bool, got {}", op, value.to_lisp()))
+    };
+    let result = match op {
+        "not" => {
+            if args.len() != 1 {
+                return Err("compile-time 'not' expects exactly 1 argument".to_string());
+            }
+            !eval_bool(&args[0], bindings, gensym_counter)?
+        }
+        "and" => {
+            for arg in args {
+                if !eval_bool(arg, bindings, gensym_counter)? {
+                    return Ok(Expression::Word("false".to_string()));
+                }
+            }
+            true
+        }
+        "or" => {
+            for arg in args {
+                if eval_bool(arg, bindings, gensym_counter)? {
+                    return Ok(Expression::Word("true".to_string()));
+                }
+            }
+            false
+        }
+        _ => unreachable!("checked by is_compile_time_bool_op"),
+    };
+    Ok(Expression::Word(result.to_string()))
+}
+
 fn quasiquote_macro_expr(
     expr: &Expression,
     bindings: &HashMap<String, Expression>,
+    macros: &HashMap<String, MacroDef>,
     gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     match expr {
@@ -933,7 +1155,7 @@ fn quasiquote_macro_expr(
                 if items.len() != 2 {
                     return Err("(uq ...) expects exactly one expression".to_string());
                 }
-                return eval_macro_expr(&items[1], bindings, gensym_counter);
+                return eval_macro_expr(&items[1], bindings, macros, gensym_counter);
             }
             let mut out = Vec::new();
             for it in items {
@@ -942,7 +1164,7 @@ fn quasiquote_macro_expr(
                         if splice_items.len() != 2 {
                             return Err("(uqs ...) expects exactly one expression".to_string());
                         }
-                        let spliced = eval_macro_expr(&splice_items[1], bindings, gensym_counter)?;
+                        let spliced = eval_macro_expr(&splice_items[1], bindings, macros, gensym_counter)?;
                         match spliced {
                             Expression::Apply(parts) => {
                                 out.extend(parts);
@@ -957,7 +1179,7 @@ fn quasiquote_macro_expr(
                         }
                     }
                 }
-                out.push(quasiquote_macro_expr(it, bindings, gensym_counter)?);
+                out.push(quasiquote_macro_expr(it, bindings, macros, gensym_counter)?);
             }
             Ok(Expression::Apply(out))
         }
@@ -969,6 +1191,7 @@ fn expand_macro_call(
     macro_name: &str,
     macro_def: &MacroDef,
     args: &[Expression],
+    macros: &HashMap<String, MacroDef>,
     gensym_counter: &mut usize,
 ) -> Result<Expression, String> {
     let call_expr = Expression::Apply(
@@ -1020,7 +1243,7 @@ fn expand_macro_call(
             Expression::Apply(args[selected_clause.params.len()..].to_vec()),
         );
     }
-    eval_macro_expr(&selected_clause.body, &bindings, gensym_counter).map_err(|e| {
+    eval_macro_expr(&selected_clause.body, &bindings, macros, gensym_counter).map_err(|e| {
         format!(
             "Macro '{}' expansion failed for call {}: {}",
             macro_name,
@@ -1054,7 +1277,7 @@ fn macroexpand_once_expr(
     let Some(macro_def) = macros.get(head) else {
         return Ok(expr.clone());
     };
-    expand_macro_call(head, macro_def, &items[1..], gensym_counter)
+    expand_macro_call(head, macro_def, &items[1..], macros, gensym_counter)
 }
 
 fn expand_macros_expr(
@@ -1098,7 +1321,7 @@ fn expand_macros_expr(
                     _ => {}
                 }
                 if let Some(macro_def) = macros.get(head) {
-                    let expanded = expand_macro_call(head, macro_def, &items[1..], gensym_counter)?;
+                    let expanded = expand_macro_call(head, macro_def, &items[1..], macros, gensym_counter)?;
                     return expand_macros_expr(&expanded, macros, gensym_counter, depth + 1);
                 }
             }

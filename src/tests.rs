@@ -475,6 +475,72 @@ xs)"#,
     }
 
     #[test]
+    fn test_parser_macro_compile_time_if_arithmetic_and_nested_macro_splice() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (letmacro vec/default/items
+                      (lambda n x
+                        (if (= n 0)
+                            (quote ())
+                            (qq ((uq x) (uqs (vec/default/items (- n 1) x)))))))
+                    (letmacro vec/default
+                      (lambda n x
+                        (qq [(uqs (vec/default/items n x))])))
+                    (vec/default 5 0))"#,
+            )
+            .expect("recursive compile-time macro should build");
+        assert_eq!(expr.to_lisp(), "(do (vector 0 0 0 0 0))");
+    }
+
+    #[test]
+    fn test_runtime_static_helper_macros_expand_and_run() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let out [])
+                (repeat/static 3
+                  (push! out 7))
+                (let unrolled [])
+                (unroll/static 4 i
+                  (push! unrolled i))
+                [
+                  (= (length (zeros/static 3)) 3)
+                  (= (sum (zeros/static 3)) 0)
+                  (= (sum (ones/static 2)) 2)
+                  (every? identity (truths/static 2))
+                  (every? not (falses/static 2))
+                  (=# (get (chars/static 3 'x') 1) 'x')
+                  (= (sum (range/static 2 5)) 14)
+                  (= (sum out) 21)
+                  (= (sum unrolled) 6)
+                ])"#,
+            true
+        );
+        assert_eq!(
+            output.trim(),
+            "[true true true true true true true true true]"
+        );
+    }
+
+    #[test]
+    fn test_parser_assert_static_fails_at_macro_expansion() {
+        let err = crate::parser
+            ::build(r#"(do
+                (letmacro assert/static
+                  (lambda condition
+                    (if condition
+                        (qq nil)
+                        (error "assert/static failed"))))
+                (assert/static (= 1 2)))"#)
+            .expect_err("false static assertion should fail during macro expansion");
+        assert!(
+            err.contains("assert/static failed"),
+            "expected assert/static failure, got: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_parser_vector_destructure_uses_explicit_dot_rest() {
         let expr = crate::parser
             ::build("(lambda [a b . rest] [a b rest])")
