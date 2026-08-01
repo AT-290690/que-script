@@ -5608,6 +5608,34 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_scalar_while_alter_discard_does_not_emit_unit_drops_in_hot_loop() {
+        let expr = crate::parser::build(
+            r#"(do
+                (let MOD 100000007)
+                (let N 1000000)
+                (mut i 1)
+                (mut acc 0)
+                (while (<= i N) (do
+                  (alter! acc (mod (+ acc i) MOD))
+                  (alter! i (+ i 1))))
+                acc)"#,
+        )
+        .expect("program should build");
+        let wat =
+            crate::wat::compile_program_to_wat_with_opts(&expr, true).expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("drop"),
+            "scalar while/alter loop should not materialize discarded Unit values, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
     fn test_wat_tuple_temp_used_only_for_projections_releases_early() {
         let expr = crate::parser
             ::build(
