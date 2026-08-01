@@ -201,7 +201,7 @@ fn rewrite_tuple_return_destructuring_with_env(
         rebuilt_items,
         rebuilt_children,
         state,
-        inherited_defs
+        &scoped_defs
     );
 
     TypedExpression {

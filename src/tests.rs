@@ -5636,6 +5636,70 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_discarded_if_does_not_emit_result_value() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (mut x 0)
+                    (if true
+                        (alter! x 1)
+                        nil)
+                    x)"#
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat.find("(func (export \"main\")").expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("(if (result i32)"),
+            "discarded if should compile as statement control flow, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("i32.const 0\n    )\n  )\n    drop"),
+            "discarded if should not materialize Unit only to drop it, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_top_level_tuple_return_call_destructure_avoids_tuple_allocation() {
+        let expr = crate::parser
+            ::build(
+                r#"(do
+                    (let pair-score (lambda x (do
+                      (let y (+ x 1))
+                      { y (+ y 1) })))
+                    (let use-score (lambda x (do
+                      (let result (pair-score x))
+                      (let a (fst result))
+                      (let b (snd result))
+                      (+ a b))))
+                    (use-score 10))"#
+            )
+            .expect("program should build");
+        let wat = crate::wat
+            ::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let use_score_start = wat.find("(func $v_use_dash_score").expect("use-score should exist");
+        let use_score_wat = &wat[use_score_start..];
+
+        assert!(
+            !use_score_wat.contains("call $tuple_new"),
+            "top-level tuple-return call destructure should avoid tuple allocation, got:\n{}",
+            use_score_wat
+        );
+        assert!(
+            !use_score_wat.contains("call $tuple_fst") && !use_score_wat.contains("call $tuple_snd"),
+            "top-level tuple-return call destructure should avoid tuple projections, got:\n{}",
+            use_score_wat
+        );
+    }
+
+    #[test]
     fn test_wat_tuple_temp_used_only_for_projections_releases_early() {
         let expr = crate::parser
             ::build(
