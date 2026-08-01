@@ -2612,6 +2612,29 @@ xs)"#,
     }
 
     #[test]
+    fn test_typed_optimization_inlines_small_scalar_helper_into_later_lambda_body() {
+        let typed = infer_typed_built(
+            r#"(do
+                (let idx (lambda size x y (+ x (* y size))))
+                (let read-at (lambda board size x y (get board (idx size x y))))
+                (read-at [1 2 3 4] 2 1 1))"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            !optimized_lisp.contains("(idx size x y)"),
+            "small scalar helper should inline through later lambda body, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.contains("(get board (+ x (* y size)))"),
+            "small scalar helper should inline as scalar expression, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_eliminates_single_use_literal_let_binding() {
         let typed = infer_typed("(do (let res -74975) res)");
         let optimized = crate::op::optimize_typed_ast(&typed);
@@ -5735,6 +5758,25 @@ fn"#;
             1,
             "proven loop should hoist length out of the loop, got:\n{}",
             main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_small_scalar_helper_inlines_into_later_lambda_body() {
+        let expr = crate::parser::build(
+            r#"(do
+                    (let idx (lambda size x y (+ x (* y size))))
+                    (let read-at (lambda board size x y (get board (idx size x y))))
+                    (read-at [1 2 3 4] 2 1 1))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+
+        assert!(
+            !wat.contains("call $v_idx"),
+            "small scalar helper should inline into later lambda body, got:\n{}",
+            wat
         );
     }
 

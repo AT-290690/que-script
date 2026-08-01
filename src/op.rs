@@ -4,6 +4,7 @@ use crate::types::Type;
 use std::collections::{HashMap, HashSet};
 
 const MAX_INLINE_BODY_COST: usize = 16;
+const MAX_SMALL_SCALAR_HELPER_INLINE_BODY_COST: usize = 32;
 const MAX_INLINE_FIXPOINT_PASSES: usize = 16;
 const MAX_OPT_FIXPOINT_PASSES: usize = 8;
 
@@ -117,13 +118,102 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     for _ in 0..MAX_OPT_FIXPOINT_PASSES {
         let next = optimize_typed_ast_once(&cur);
         if next.expr.to_lisp() == cur.expr.to_lisp() {
+            let next = run_small_scalar_helper_env_pass(&next);
+            let next = optimize_typed_ast_once(&next);
             let next = run_tuple_return_destructuring_env_pass(&next);
             return dead_code_eliminate_top_level_defs(&next);
         }
         cur = next;
     }
+    let cur = run_small_scalar_helper_env_pass(&cur);
+    let cur = optimize_typed_ast_once(&cur);
     let cur = run_tuple_return_destructuring_env_pass(&cur);
     dead_code_eliminate_top_level_defs(&cur)
+}
+
+fn run_small_scalar_helper_env_pass(node: &TypedExpression) -> TypedExpression {
+    rewrite_small_scalar_helpers_with_env(node, &HashMap::new(), false)
+}
+
+fn rewrite_small_scalar_helpers_with_env(
+    node: &TypedExpression,
+    inherited_defs: &HashMap<String, InlineLambdaDef>,
+    inside_lambda: bool,
+) -> TypedExpression {
+    let Expression::Apply(items) = &node.expr else {
+        let new_children = node
+            .children
+            .iter()
+            .map(|child| {
+                rewrite_small_scalar_helpers_with_env(child, inherited_defs, inside_lambda)
+            })
+            .collect::<Vec<_>>();
+        return TypedExpression {
+            expr: rebuild_expr_from_children(&node.expr, &new_children),
+            typ: node.typ.clone(),
+            effect: node.effect,
+            children: new_children,
+        };
+    };
+
+    if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        let Some(normalized_do) = normalize_do_node(node, items) else {
+            return node.clone();
+        };
+        let Expression::Apply(norm_items) = &normalized_do.expr else {
+            return normalized_do;
+        };
+        let mut scoped_defs = inherited_defs.clone();
+        let mut rebuilt_items = vec![norm_items[0].clone()];
+        let mut rebuilt_children = vec![normalized_do.children[0].clone()];
+
+        for idx in 1..norm_items.len() {
+            let child = normalized_do
+                .children
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| normalized_do.children[0].clone());
+            let rewritten_child =
+                rewrite_small_scalar_helpers_with_env(&child, &scoped_defs, inside_lambda);
+            let rewritten_expr = rewritten_child.expr.clone();
+            if let Some((_, _, (name, def))) =
+                extract_small_scalar_helper_inline_def(&rewritten_expr, &rewritten_child)
+            {
+                scoped_defs.insert(name, def);
+            }
+            rebuilt_items.push(rewritten_expr);
+            rebuilt_children.push(rewritten_child);
+        }
+
+        return TypedExpression {
+            expr: Expression::Apply(rebuilt_items),
+            typ: normalized_do.typ.clone(),
+            effect: normalized_do.effect,
+            children: rebuilt_children,
+        };
+    }
+
+    let new_children = node
+        .children
+        .iter()
+        .map(|child| {
+            let child_inside_lambda = inside_lambda
+                || matches!(items.first(), Some(Expression::Word(w)) if w == "lambda");
+            rewrite_small_scalar_helpers_with_env(child, inherited_defs, child_inside_lambda)
+        })
+        .collect::<Vec<_>>();
+    let rebuilt_expr = rebuild_expr_from_children(&node.expr, &new_children);
+    let rebuilt_node = TypedExpression {
+        expr: rebuilt_expr,
+        typ: node.typ.clone(),
+        effect: node.effect,
+        children: new_children,
+    };
+    if inside_lambda {
+        try_inline_small_scalar_helper_call(&rebuilt_node, inherited_defs).unwrap_or(rebuilt_node)
+    } else {
+        rebuilt_node
+    }
 }
 
 fn run_tuple_return_destructuring_env_pass(node: &TypedExpression) -> TypedExpression {
@@ -5548,6 +5638,75 @@ fn extract_inline_lambda_def(
     Some((expr.clone(), node.clone(), (name.clone(), def)))
 }
 
+fn extract_small_scalar_helper_inline_def(
+    expr: &Expression,
+    node: &TypedExpression,
+) -> Option<(Expression, TypedExpression, (String, InlineLambdaDef))> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if items.len() != 3 {
+        return None;
+    }
+    let (kw, name, rhs) = (items.first()?, items.get(1)?, items.get(2)?);
+    let (Expression::Word(kw), Expression::Word(name)) = (kw, name) else {
+        return None;
+    };
+    if kw != "let" {
+        return None;
+    }
+    let Expression::Apply(lambda_items) = rhs else {
+        return None;
+    };
+    if !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") {
+        return None;
+    }
+    if lambda_items.len() < 2 {
+        return None;
+    }
+    let lambda_typed = node.children.get(2)?;
+    if typed_contains_type_var(lambda_typed) {
+        return None;
+    }
+    let body_expr = lambda_items.last()?.clone();
+    let body_typed = lambda_typed.children.last()?.clone();
+    if contains_word(&body_expr, name) || !body_typed.effect.is_pure() {
+        return None;
+    }
+    if body_typed
+        .typ
+        .as_ref()
+        .map(|typ| !is_no_temp_inline_scalar_type(typ))
+        .unwrap_or(true)
+    {
+        return None;
+    }
+    if !is_inline_safe_body(&body_expr)
+        || inline_body_cost(&body_expr) > MAX_SMALL_SCALAR_HELPER_INLINE_BODY_COST
+    {
+        return None;
+    }
+    let params = lambda_items[1..lambda_items.len() - 1]
+        .iter()
+        .map(|p| match p {
+            Expression::Word(w) => Some(w.clone()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some((
+        expr.clone(),
+        node.clone(),
+        (
+            name.clone(),
+            InlineLambdaDef {
+                params,
+                body_expr,
+                body_typed,
+            },
+        ),
+    ))
+}
+
 fn extract_tuple_return_lambda_def(
     expr: &Expression,
     node: &TypedExpression,
@@ -6235,6 +6394,59 @@ fn try_inline_call_no_temps(
         }
         let uses = count_word_uses_expr(&def.body_expr, param);
         if !can_no_temp_inline_arg(&arg_expr, &arg_node, uses) {
+            return None;
+        }
+        expr_subst.insert(param.clone(), arg_expr);
+        typed_subst.insert(param.clone(), arg_node);
+    }
+
+    Some(substitute_params_typed(
+        &def.body_typed,
+        &expr_subst,
+        &typed_subst,
+    ))
+}
+
+fn try_inline_small_scalar_helper_call(
+    node: &TypedExpression,
+    defs: &HashMap<String, InlineLambdaDef>,
+) -> Option<TypedExpression> {
+    let Expression::Apply(call_items) = &node.expr else {
+        return None;
+    };
+    if call_items.is_empty() {
+        return None;
+    }
+    let callee = match call_items.first() {
+        Some(Expression::Word(w)) => w,
+        _ => {
+            return None;
+        }
+    };
+    let def = defs.get(callee)?;
+    if def.body_typed.typ.as_ref().map(is_no_temp_inline_scalar_type) != Some(true)
+        || !def.body_typed.effect.is_pure()
+    {
+        return None;
+    }
+    let arg_exprs = &call_items[1..];
+    if arg_exprs.len() != def.params.len() || node.children.len() != call_items.len() {
+        return None;
+    }
+
+    let mut expr_subst: HashMap<String, Expression> = HashMap::new();
+    let mut typed_subst: HashMap<String, TypedExpression> = HashMap::new();
+    for (idx, param) in def.params.iter().enumerate() {
+        let arg_expr = arg_exprs[idx].clone();
+        let arg_node = node.children.get(idx + 1)?.clone();
+        let arg_typ = arg_node.typ.as_ref()?;
+        let uses = count_word_uses_expr(&def.body_expr, param);
+        let can_inline_arg = if is_no_temp_inline_scalar_type(arg_typ) {
+            can_no_temp_inline_arg(&arg_expr, &arg_node, uses)
+        } else {
+            matches!(arg_expr, Expression::Word(_)) && arg_node.effect.is_pure()
+        };
+        if !can_inline_arg {
             return None;
         }
         expr_subst.insert(param.clone(), arg_expr);
