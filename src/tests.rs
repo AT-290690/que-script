@@ -949,6 +949,31 @@ xs)"#,
         );
     }
 
+    #[test]
+    fn test_loop_while_multiple_body_forms_apply_let_destructuring() {
+        let expr = crate::parser::build(
+            "(do (mut i 0) (mut out 0) (while (< i 1) (let pair {1 2}) (let {a b} pair) (alter! out (+ a b)) (alter! i 1)) out)",
+        )
+        .expect("while body tuple destructuring should build");
+        let lisp = expr.to_lisp();
+        assert!(
+            lisp.contains("(let a (fst"),
+            "expected while body tuple destructuring to produce fst binding, got: {}",
+            lisp
+        );
+        assert!(
+            lisp.contains("(let b (snd"),
+            "expected while body tuple destructuring to produce snd binding, got: {}",
+            lisp
+        );
+        let (typ, _typed) = crate::infer::infer_with_builtins_typed(
+            &expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("while body tuple destructuring should infer");
+        assert_eq!(typ.to_string(), "Int");
+    }
+
     #[cfg(feature = "runtime")]
     fn runtime_exec_lock() -> &'static std::sync::Mutex<()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
@@ -1550,6 +1575,24 @@ xs)"#,
                   (alter! acc (+ acc i))
                   (alter! i (+ i 1)))
                 acc)"#,
+            true,
+        );
+        assert_eq!(output, "3");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_while_multiple_body_forms_tuple_destructuring() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (mut i 0)
+                (mut out 0)
+                (while (< i 1)
+                  (let pair {1 2})
+                  (let {a b} pair)
+                  (alter! out (+ a b))
+                  (alter! i 1))
+                out)"#,
             true,
         );
         assert_eq!(output, "3");

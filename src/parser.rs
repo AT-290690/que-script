@@ -1666,7 +1666,7 @@ fn desugar_with_counter(
                     "integer" => Ok(integer_transform(exprs)),
                     "fixed" => Ok(float_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
-                    "while" => Ok(loop_while_transform(exprs)?),
+                    "while" => Ok(loop_while_transform(exprs, binding_counter)?),
                     "lambda" => lambda_destructure_transform(exprs, binding_counter),
                     "cons" => Ok(cons_transform(exprs)),
                     "apply" => Ok(apply_transform(exprs)?),
@@ -2157,7 +2157,10 @@ fn normalize_loop_while_body_from_arg(body_arg: &Expression) -> Result<Expressio
     }
 }
 
-fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+fn loop_while_transform(
+    mut exprs: Vec<Expression>,
+    binding_counter: &mut usize,
+) -> Result<Expression, String> {
     exprs.remove(0);
     let len = exprs.len();
     if len < 2 {
@@ -2179,7 +2182,7 @@ fn loop_while_transform(mut exprs: Vec<Expression>) -> Result<Expression, String
         let mut do_items = Vec::with_capacity(len);
         do_items.push(Expression::Word("do".to_string()));
         do_items.extend(exprs[1..].iter().cloned());
-        Expression::Apply(do_items)
+        transform_do(do_items, binding_counter)?
     };
     let body_with_unit = ensure_do_body_with_trailing_nil(raw_body);
     Ok(Expression::Apply(vec![
