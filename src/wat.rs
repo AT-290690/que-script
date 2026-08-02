@@ -1,12 +1,22 @@
 use crate::infer::{EffectFlags, TypedExpression};
 use crate::parser::Expression;
 use crate::types::Type;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Clone)]
 struct TopDef {
     expr: Expression,
     node: TypedExpression,
+}
+
+pub struct SplitWatModules {
+    pub runtime_wat: String,
+    pub user_wat: String,
+}
+
+struct WatBuildOutput {
+    monolithic_wat: String,
+    split: SplitWatModules,
 }
 
 #[derive(Clone)]
@@ -1227,6 +1237,66 @@ fn collect_apply_arities_from_code(code: &str, out: &mut HashSet<usize>) {
         }
         rest = &after[digit_count..];
     }
+}
+
+fn split_generic_runtime_and_apply_runtime(runtime_body: &str) -> (&str, &str) {
+    if let Some(pos) = runtime_body.find("\n  (func $apply") {
+        runtime_body.split_at(pos)
+    } else {
+        (runtime_body, "")
+    }
+}
+
+fn extract_wat_func_signatures(module_body: &str) -> BTreeMap<String, String> {
+    let mut signatures = BTreeMap::new();
+    for line in module_body.lines() {
+        let trimmed = line.trim_start();
+        let Some(rest) = trimmed.strip_prefix("(func $") else {
+            continue;
+        };
+        let name_end = rest
+            .find(|c: char| c.is_whitespace() || c == ')')
+            .unwrap_or(rest.len());
+        if name_end == 0 {
+            continue;
+        }
+        let name = rest[..name_end].to_string();
+        let sig = rest[name_end..].trim_end().to_string();
+        signatures.insert(name, sig);
+    }
+    signatures
+}
+
+fn emit_runtime_func_exports(runtime_body: &str) -> String {
+    let signatures = extract_wat_func_signatures(runtime_body);
+    let mut out = String::new();
+    for name in signatures.keys() {
+        let export_plain = format!("(export \"{}\"", name);
+        if runtime_body.contains(&export_plain) {
+            continue;
+        }
+        out.push_str(&format!("  (export \"{}\" (func ${}))\n", name, name));
+    }
+    out
+}
+
+fn emit_runtime_imports(runtime_body: &str, user_body: &str) -> String {
+    let signatures = extract_wat_func_signatures(runtime_body);
+    let mut out = String::new();
+    out.push_str("  (import \"que_runtime\" \"memory\" (memory 1))\n");
+    out.push_str(
+        "  (import \"que_runtime\" \"dbg_guard_trap_code\" (global $dbg_guard_trap_code (mut i32)))\n",
+    );
+    for (name, sig) in signatures {
+        if !user_body.contains(&format!("call ${}", name)) {
+            continue;
+        }
+        out.push_str(&format!(
+            "  (import \"que_runtime\" \"{}\" (func ${}{}))\n",
+            name, name, sig
+        ));
+    }
+    out
 }
 
 fn emit_high_arity_apply_i32(
@@ -9015,10 +9085,10 @@ fn compile_dynamic_partial_helper_func(h: &DynamicPartialHelper) -> String {
     out
 }
 
-pub fn compile_program_to_wat_typed_with_opts(
+fn compile_program_to_wat_build_typed_with_opts(
     typed_ast: &TypedExpression,
     enable_optimizer: bool,
-) -> Result<String, String> {
+) -> Result<WatBuildOutput, String> {
     // Validate devirtualization mode early so invalid env values fail deterministically.
     let _ = devirtualize_mode_from_env()?;
     let tail_call_mode = tail_call_mode_from_env()?;
@@ -9550,52 +9620,114 @@ pub fn compile_program_to_wat_typed_with_opts(
     main_func.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
     main_func.push_str("  )\n");
 
-    let mut wat = String::new();
-    wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
-    wat.push_str("(module\n");
+    let mut extern_imports = String::new();
     for extern_decl in used_extern_defs.values() {
         let (params, ret) = fn_sigs
             .get(&extern_decl.local_name)
             .ok_or_else(|| format!("Missing extern signature for '{}'", extern_decl.local_name))?;
         let wasm_params = wasm_param_types_for_signature(params)?;
-        wat.push_str(&format!(
+        extern_imports.push_str(&format!(
             "  (import \"{}\" \"{}\" (func ${}",
             extern_decl.module,
             extern_decl.import,
             ident(&extern_decl.local_name)
         ));
         for param in wasm_params {
-            wat.push_str(&format!(" (param {})", param));
+            extern_imports.push_str(&format!(" (param {})", param));
         }
-        wat.push_str(&format!(" (result {})))\n", wasm_val_type(ret)?));
+        extern_imports.push_str(&format!(" (result {})))\n", wasm_val_type(ret)?));
     }
+
+    let mut cached_globals = String::new();
     for name in &cached_value_defs {
-        wat.push_str(&format!(
+        cached_globals.push_str(&format!(
             "  (global ${} (mut i32) (i32.const 0))\n",
             cache_init_global(name)
         ));
-        wat.push_str(&format!(
+        cached_globals.push_str(&format!(
             "  (global ${} (mut i32) (i32.const 0))\n",
             cache_value_global(name)
         ));
     }
-    wat.push_str(&emit_vector_runtime(
+
+    let runtime_body = emit_vector_runtime(
         &fn_ids,
         &fn_sigs,
         &closure_defs,
         &apply_arities,
-    ));
-    for func in emitted_funcs {
-        wat.push_str(&func);
+    );
+    let (generic_runtime_body, apply_runtime_body) =
+        split_generic_runtime_and_apply_runtime(&runtime_body);
+    let mut emitted_funcs_body = String::new();
+    for func in &emitted_funcs {
+        emitted_funcs_body.push_str(func);
     }
-    wat.push_str(&main_func);
-    wat.push_str(")\n");
 
-    Ok(wat)
+    let mut monolithic_wat = String::new();
+    monolithic_wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
+    monolithic_wat.push_str("(module\n");
+    monolithic_wat.push_str(&extern_imports);
+    monolithic_wat.push_str(&cached_globals);
+    monolithic_wat.push_str(&runtime_body);
+    monolithic_wat.push_str(&emitted_funcs_body);
+    monolithic_wat.push_str(&main_func);
+    monolithic_wat.push_str(")\n");
+
+    let mut runtime_wat = String::new();
+    runtime_wat.push_str(";; Que runtime module\n");
+    runtime_wat.push_str("(module\n");
+    runtime_wat.push_str(generic_runtime_body);
+    runtime_wat.push_str(&emit_runtime_func_exports(generic_runtime_body));
+    runtime_wat.push_str(")\n");
+
+    let mut user_body = String::new();
+    user_body.push_str(apply_runtime_body);
+    user_body.push_str(&emitted_funcs_body);
+    user_body.push_str(&main_func);
+
+    let mut user_wat = String::new();
+    user_wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
+    user_wat.push_str(";; Que user module; imports runtime helpers from module \"que_runtime\".\n");
+    user_wat.push_str("(module\n");
+    user_wat.push_str(&extern_imports);
+    user_wat.push_str(&emit_runtime_imports(generic_runtime_body, &user_body));
+    user_wat.push_str(&cached_globals);
+    user_wat.push_str(&user_body);
+    user_wat.push_str(")\n");
+
+    Ok(WatBuildOutput {
+        monolithic_wat,
+        split: SplitWatModules {
+            runtime_wat,
+            user_wat,
+        },
+    })
+}
+
+pub fn compile_program_to_wat_typed_with_opts(
+    typed_ast: &TypedExpression,
+    enable_optimizer: bool,
+) -> Result<String, String> {
+    compile_program_to_wat_build_typed_with_opts(typed_ast, enable_optimizer)
+        .map(|output| output.monolithic_wat)
+}
+
+pub fn compile_program_to_split_wat_typed_with_opts(
+    typed_ast: &TypedExpression,
+    enable_optimizer: bool,
+) -> Result<SplitWatModules, String> {
+    compile_program_to_wat_build_typed_with_opts(typed_ast, enable_optimizer)
+        .map(|output| output.split)
 }
 
 pub fn compile_program_to_wat_typed(typed_ast: &TypedExpression) -> Result<String, String> {
     compile_program_to_wat_typed_with_opts(typed_ast, true)
+}
+
+pub fn compile_program_to_split_wat_typed(
+    typed_ast: &TypedExpression,
+) -> Result<SplitWatModules, String> {
+    compile_program_to_split_wat_typed_with_opts(typed_ast, true)
 }
 
 pub fn compile_program_to_wat_with_opts(
@@ -9610,6 +9742,22 @@ pub fn compile_program_to_wat_with_opts(
     compile_program_to_wat_typed_with_opts(&typed_ast, enable_optimizer)
 }
 
+pub fn compile_program_to_split_wat_with_opts(
+    expr: &Expression,
+    enable_optimizer: bool,
+) -> Result<SplitWatModules, String> {
+    let wrapped = crate::externals::prepend_builtin_host_externs(expr)?;
+    let (_typ, typed_ast) = crate::infer::infer_with_builtins_typed(
+        &wrapped,
+        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+    )?;
+    compile_program_to_split_wat_typed_with_opts(&typed_ast, enable_optimizer)
+}
+
 pub fn compile_program_to_wat(expr: &Expression) -> Result<String, String> {
     compile_program_to_wat_with_opts(expr, true)
+}
+
+pub fn compile_program_to_split_wat(expr: &Expression) -> Result<SplitWatModules, String> {
+    compile_program_to_split_wat_with_opts(expr, true)
 }
