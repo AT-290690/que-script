@@ -5797,7 +5797,9 @@ fn"#;
             split.user_wat
         );
         assert!(
-            split.user_wat.contains("(import \"que_runtime\" \"memory\""),
+            split
+                .user_wat
+                .contains("(import \"que_runtime\" \"memory\""),
             "user module should import runtime memory, got:\n{}",
             split.user_wat
         );

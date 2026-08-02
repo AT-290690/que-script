@@ -6424,7 +6424,12 @@ fn try_inline_small_scalar_helper_call(
         }
     };
     let def = defs.get(callee)?;
-    if def.body_typed.typ.as_ref().map(is_no_temp_inline_scalar_type) != Some(true)
+    if def
+        .body_typed
+        .typ
+        .as_ref()
+        .map(is_no_temp_inline_scalar_type)
+        != Some(true)
         || !def.body_typed.effect.is_pure()
     {
         return None;
