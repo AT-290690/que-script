@@ -9316,6 +9316,141 @@ nil)))
 "#,
                 "346386",
             ),
+
+
+            (r#"(let input "123 -> x
+456 -> y
+x AND y -> d
+x OR y -> e
+x LSHIFT 2 -> f
+y RSHIFT 2 -> g
+NOT x -> h
+NOT y -> i
+d -> a")
+
+(let mask16 (lambda (value) (mod value 65536)))
+
+(let parse-operand
+  (lambda (token)
+    (if (digit? (get token 0))
+      {true {(String->Integer token) ""}}
+      {false {0 token}})))
+
+(let parse-rule
+  (lambda (words)
+    (let dest (last words))
+    (let empty (parse-operand "0"))
+    (let expr
+      (cond
+        (= (length words) 3) {"SET" {(parse-operand (get words 0)) {empty 0}}}
+        (= (length words) 4) {"NOT" {(parse-operand (get words 1)) {empty 0}}}
+        (match? (get words 1) "AND") {"AND" {(parse-operand (get words 0)) {(parse-operand (get words 2)) 0}}}
+        (match? (get words 1) "OR") {"OR" {(parse-operand (get words 0)) {(parse-operand (get words 2)) 0}}}
+        (match? (get words 1) "LSHIFT") {"LSHIFT" {(parse-operand (get words 0)) {empty (String->Integer (get words 2))}}}
+        {"RSHIFT" {(parse-operand (get words 0)) {empty (String->Integer (get words 2))}}}))
+    {dest expr}))
+
+(let parse-input
+  (lambda (text)
+    (reduce
+      (lambda (rules {left right})
+        (Table/set! rules left right)
+        rules)
+      (Table/new/capacity 512)
+      (map parse-rule (map split/words (split/lines text))))))
+
+(letrec eval-wire
+  (lambda (rules cache wire)
+    (if (Table/has? wire cache)
+      (Table/get-unsafe wire cache)
+      (block
+        (let expr (Table/get-unsafe wire rules))
+        (let {op data} expr)
+        (let {left rest} data)
+        (let {right shift} rest)
+        (let eval-operand
+          (lambda (operand)
+            (if (fst operand)
+              (fst (snd operand))
+              (eval-wire rules cache (snd (snd operand))))))
+        (let value
+          (cond
+            (match? op "SET") (eval-operand left)
+            (match? op "NOT") (- 65535 (eval-operand left))
+            (match? op "AND") (& (eval-operand left) (eval-operand right))
+            (match? op "OR") (| (eval-operand left) (eval-operand right))
+            (match? op "LSHIFT") (<< (eval-operand left) shift)
+            (>> (eval-operand left) shift)))
+        (let signal (mask16 value))
+        (Table/set! cache wire signal)
+        signal))))
+
+(let part1
+  (lambda (text)
+    (let rules (parse-input text))
+    (let cache (Table/new/capacity 512))
+    (eval-wire rules cache "a")))
+
+
+(let part2
+  (lambda (text)
+    (let modified (cons text [nl] "956 -> b"))
+    (let rules (parse-input modified))
+    (let cache (Table/new/capacity 512))
+    (eval-wire rules cache "a")))
+{(part1 input) (part2 input)}    
+"#, "{ 72 72 }"),
+
+(r#"(let input "London to Dublin = 464
+London to Belfast = 518
+Dublin to Belfast = 141")
+; (let input (read! "input.txt"))
+(let parse (comp
+          (split/lines) 
+          (map (split " = ")) (map (lambda ([a b]) 
+            (let [l r] (split " to " a))
+          {{l r} (String->Integer b)}))))
+
+(let edge-key (lambda (a b) (join "|" [a b])))
+
+(let entries (parse input))
+(let locations
+  (|> entries
+    (map (lambda ({{l r}}) [l r]))
+    flat
+    Vector->Set
+    Set->Vector))
+
+(let distances
+  (|> entries
+    (map (lambda ({{l r} d})
+        [
+          { (edge-key l r) d }
+          { (edge-key r l) d }
+        ]))
+    flat
+    Vector->Table))
+
+(let route-distance
+  (lambda (route)
+    (|> route
+      (map/adjacent
+        (lambda (a b) (Table/get-unsafe (edge-key a b) distances)))
+      sum/int)))
+
+(let route-distances
+  (|> locations
+    permutation
+    (map route-distance)))
+
+(let part1 (minimum route-distances))
+(let part2 (maximum route-distances))
+
+{
+  part1
+  part2
+}
+"#, "{ 605 982 }")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

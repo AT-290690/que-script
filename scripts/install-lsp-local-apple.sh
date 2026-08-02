@@ -46,7 +46,7 @@ fi
 
 if [ "$BUILD" -eq 1 ]; then
   echo "Building local ${APP_NAME} release binary..."
-  cargo build --release --no-default-features --bin "$APP_NAME"
+  cargo build --release --features io --bin "$APP_NAME"
 fi
 
 if [ ! -x "$BIN_SOURCE" ]; then
