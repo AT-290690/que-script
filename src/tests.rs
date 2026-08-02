@@ -5781,6 +5781,34 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_split_wat_separates_runtime_and_user_modules() {
+        let expr = crate::parser::build("[1 2 3]").expect("program should build");
+        let split = crate::wat::compile_program_to_split_wat(&expr)
+            .expect("split wat compilation should succeed");
+
+        assert!(
+            split.runtime_wat.contains("(func $alloc"),
+            "runtime module should contain allocator helpers, got:\n{}",
+            split.runtime_wat
+        );
+        assert!(
+            !split.user_wat.contains("(func $alloc"),
+            "user module should not duplicate allocator helpers, got:\n{}",
+            split.user_wat
+        );
+        assert!(
+            split.user_wat.contains("(import \"que_runtime\" \"memory\""),
+            "user module should import runtime memory, got:\n{}",
+            split.user_wat
+        );
+        assert!(
+            split.user_wat.contains("(func (export \"main\")"),
+            "user module should contain main export, got:\n{}",
+            split.user_wat
+        );
+    }
+
+    #[test]
     fn test_wat_loop_get_keeps_checked_path_without_nonnegative_index_proof() {
         let expr = crate::parser::build(
             r#"(do

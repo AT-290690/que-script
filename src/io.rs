@@ -914,6 +914,7 @@ fn take_install_output_path_from_argv(argv: &mut Vec<String>) -> Result<Option<S
 enum EmitKind {
     Source,
     Wat,
+    SplitWat,
     Wasm,
     Types,
 }
@@ -928,12 +929,13 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
     let mut kind = None;
     if let Some(pos) = argv.iter().position(|arg| arg == "--emit") {
         if pos + 1 >= argv.len() || argv[pos + 1].starts_with("--") {
-            return Err("--emit requires one of: source | wat | wasm | types".to_string());
+            return Err("--emit requires one of: source | wat | split-wat | wasm | types".to_string());
         }
         let value = argv[pos + 1].clone();
         kind = Some(match value.as_str() {
             "source" => EmitKind::Source,
             "wat" => EmitKind::Wat,
+            "split-wat" => EmitKind::SplitWat,
             "wasm" => EmitKind::Wasm,
             "types" => EmitKind::Types,
             _ => {
@@ -975,8 +977,8 @@ fn native_shell_help(bin_name: &str) -> String {
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
          or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
          or:    {bin} test <folder-or-test.que>\n\
-         or:    {bin} [<script.que>] [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
-         or:    {bin} --eval <source> [arg ...] --emit <source|wat|wasm|types> [--out <file>]\n\
+         or:    {bin} [<script.que>] [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
+         or:    {bin} --eval <source> [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
          or:    {bin} [<script.que>] [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} init\n\
@@ -993,7 +995,7 @@ fn native_shell_help(bin_name: &str) -> String {
           --env          Print environment flags and tuning examples.\n\
            --eval, -e     Execute inline Que source without a script file.\n\
           test           Run Que tests. Folder mode appends main.test.que after the folder entry.\n\
-           --emit         Output source, wat, wasm, or top-level types and exit.\n\
+           --emit         Output source, wat, split-wat, wasm, or top-level types and exit.\n\
           --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
                          Use with --out <file> to write it instead of printing.\n\
           init           Write a default `{config}` in the current directory.\n\
@@ -1018,6 +1020,7 @@ fn native_shell_help(bin_name: &str) -> String {
             - Wildcards in pattern: `*` any sequence, `?` single char.\n\
            - `--emit source` prints merged/tree-shaken/desugared Lisp.\n\
            - `--emit wat` prints WAT text.\n\
+           - `--emit split-wat` writes/prints separate runtime and user WAT modules.\n\
            - `--emit wasm` prints raw wasm bytes unless you pass `--out`.\n\
            - `--emit types` prints inferred top-level user-form types and final result type.\n\
            - --debug, --no-result, --emit, --emit-source and --help can appear after the script path.\n\
@@ -1164,6 +1167,55 @@ fn emit_text_output(out_path: Option<&str>, text: &str) -> Result<(), String> {
     } else {
         println!("{}", text);
     }
+    Ok(())
+}
+
+fn emit_split_wat_output(
+    out_path: Option<&str>,
+    split: &crate::wat::SplitWatModules,
+) -> Result<(), String> {
+    let Some(path) = out_path else {
+        println!(";; === runtime.wat ===");
+        println!("{}", split.runtime_wat);
+        println!(";; === user.wat ===");
+        println!("{}", split.user_wat);
+        return Ok(());
+    };
+
+    let path = Path::new(path);
+    let (runtime_path, user_path) = if path.is_dir() {
+        (path.join("runtime.wat"), path.join("user.wat"))
+    } else {
+        let parent = path.parent().unwrap_or_else(|| Path::new(""));
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| path.file_name().and_then(|s| s.to_str()))
+            .unwrap_or("split");
+        (
+            parent.join(format!("{}.runtime.wat", stem)),
+            parent.join(format!("{}.user.wat", stem)),
+        )
+    };
+
+    if let Some(parent) = runtime_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create '{}': {}", parent.display(), e))?;
+    }
+    if let Some(parent) = user_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create '{}': {}", parent.display(), e))?;
+    }
+    fs::write(&runtime_path, &split.runtime_wat)
+        .map_err(|e| format!("failed to write '{}': {}", runtime_path.display(), e))?;
+    fs::write(&user_path, &split.user_wat)
+        .map_err(|e| format!("failed to write '{}': {}", user_path.display(), e))?;
+    eprintln!(
+        "Wrote split WAT:\n  {}\n  {}",
+        runtime_path.display(),
+        user_path.display()
+    );
     Ok(())
 }
 
@@ -2342,6 +2394,22 @@ mod tests {
     }
 
     #[test]
+    fn take_emit_request_parses_split_wat_kind() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--emit".to_string(),
+            "split-wat".to_string(),
+            "--out".to_string(),
+            "build/app".to_string(),
+        ];
+        let request = take_emit_request_from_argv(&mut args).expect("emit should parse");
+        assert_eq!(args, vec!["script.que".to_string()]);
+        let request = request.expect("emit request should exist");
+        assert_eq!(request.kind, EmitKind::SplitWat);
+        assert_eq!(request.out_path.as_deref(), Some("build/app"));
+    }
+
+    #[test]
     fn take_emit_request_parses_legacy_emit_source_flag() {
         let mut args = vec!["script.que".to_string(), "--emit-source".to_string()];
         let request = take_emit_request_from_argv(&mut args).expect("legacy emit should parse");
@@ -2355,7 +2423,7 @@ mod tests {
     fn take_emit_request_rejects_missing_kind() {
         let mut args = vec!["script.que".to_string(), "--emit".to_string()];
         let err = take_emit_request_from_argv(&mut args).expect_err("missing kind should fail");
-        assert!(err.contains("--emit requires one of: source | wat | wasm | types"));
+        assert!(err.contains("--emit requires one of: source | wat | split-wat | wasm | types"));
     }
 
     #[test]
@@ -2688,6 +2756,55 @@ pub fn run_native_shell() -> Result<(), String> {
                 emit_text_output(request.out_path.as_deref(), &rendered)?;
                 return Ok(());
             }
+            EmitKind::SplitWat => {
+                let split = if debug_mode.is_enabled() {
+                    let (base_env, base_next_id) =
+                        crate::types::create_builtin_environment(crate::types::TypeEnv::new());
+                    let inferred = crate::infer::infer_with_builtins_typed_lsp(
+                        &wrapped_ast,
+                        (base_env, base_next_id),
+                        user_form_count,
+                    );
+                    match inferred {
+                        Ok((_typ, typed_ast)) => {
+                            crate::wat::compile_program_to_split_wat_typed(&typed_ast).map_err(
+                                |message| {
+                                    build_debug_error_report(
+                                        debug_mode,
+                                        "wat-lowering",
+                                        &program,
+                                        &message,
+                                        None,
+                                        user_desugared.as_ref(),
+                                        user_form_count,
+                                        Some(&typed_ast),
+                                    )
+                                },
+                            )?
+                        }
+                        Err(InferErrorInfo {
+                            message,
+                            scope,
+                            partial_typed_ast,
+                        }) => {
+                            return Err(build_debug_error_report(
+                                debug_mode,
+                                "type-inference",
+                                &program,
+                                &message,
+                                scope.as_ref(),
+                                user_desugared.as_ref(),
+                                user_form_count,
+                                partial_typed_ast.as_ref(),
+                            ));
+                        }
+                    }
+                } else {
+                    crate::wat::compile_program_to_split_wat(&wrapped_ast)?
+                };
+                emit_split_wat_output(request.out_path.as_deref(), &split)?;
+                return Ok(());
+            }
             EmitKind::Wat | EmitKind::Wasm => {}
         }
     }
@@ -2749,7 +2866,9 @@ pub fn run_native_shell() -> Result<(), String> {
                 emit_bytes_output(request.out_path.as_deref(), &bytes)?;
                 return Ok(());
             }
-            EmitKind::Source | EmitKind::Types => unreachable!("handled earlier"),
+            EmitKind::Source | EmitKind::SplitWat | EmitKind::Types => {
+                unreachable!("handled earlier")
+            }
         }
     }
 
