@@ -165,7 +165,7 @@ Default `que init` does not create `main.test.que`. Create it when you want fold
 - Example:
 
 ```lisp
-(let sum-odd-squares (lambda xs
+(let sum-odd-squares (lambda (xs)
     (|> xs
         (filter odd?)
         (map square)

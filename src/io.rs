@@ -538,7 +538,7 @@ fn default_main_source_text() -> &'static str {
 }
 
 fn demo_main_source_text() -> &'static str {
-    r#"(let add (lambda a b (+ a b)))
+    r#"(let add (lambda (a b) (+ a b)))
 
 ; This final expression is what `que main.que` prints.
 (add 1 2)
@@ -585,7 +585,7 @@ Create `main.test.que` when you are ready to add tests.
 Tests should return `Bool`, `[Bool]`, or named results:
 
 ```lisp
-(let add (lambda a b (+ a b)))
+(let add (lambda (a b) (+ a b)))
 
 [
   { "add 1 2" (= (add 1 2) 3) }
@@ -1179,21 +1179,26 @@ fn native_shell_learn() -> &'static str {
     - Everything is an expression; last expression is the return value.\n\
     - (let name value) creates immutable bindings.\n\
     - (do e1 e2 ... en) evaluates in order, returns en, and does NOT create a new scope.\n\
+    - (block e1 e2 ... en) evaluates in order, returns en, and creates a new lexical scope.\n\
     - Unit is 0 (nil).\n\
     \n\
     Control:\n\
     - (if cond then else)\n\
+    - (if cond then) is valid and inserts nil as the else branch.\n\
     - (cond c1 e1 c2 e2 ... default)\n\
+    - (unless cond body) runs body only when cond is false; (when cond body...) runs when true.\n\
     - Branches must return the same type.\n\
-    - Loop with (while cond body).\n\
+    - Effect-only branches commonly omit else: (if cond (alter! x 1)).\n\
+    - Loop with (while cond body). Multiple while body expressions are allowed.\n\
     \n\
     Functions:\n\
-    - (lambda a b body)\n\
-    - Alternative form: (lambda (a b c) e1 e2 ... en)\n\
-    - When parameters are wrapped in parentheses, the body can contain multiple expressions without needing (do ...).\n\
+    - Preferred form: (lambda (a b c) e1 e2 ... en)\n\
+    - Single-expression body: (lambda (a b) (+ a b))\n\
+    - Multi-expression body: (lambda (a b) (let x (+ a b)) (* x x))\n\
+    - Alternative/bare form also works: (lambda a b body), but grouped params are clearer.\n\
     - The last expression is returned.\n\
     - Recursive functions must use letrec: (letrec f (lambda ... (f ...)))\n\
-    - Destructuring works in params:\n\
+    - Destructuring works in let bindings and params:\n\
       - tuples: {a b}\n\
       - vectors: [a b c]\n\
       - '_' skips/ignores a binding slot.\n\
@@ -1233,9 +1238,15 @@ fn native_shell_learn() -> &'static str {
     - Functions with side effects (mutation or I/O) must end with !.\n\
     - If a function mutates args, the mutated arg must be the first arg.\n\
     - If mutating multiple values, pass them inside the first arg (typically a tuple).\n\
+    - Low-level mutation forms such as alter!, set!, push!, and pop! are effect-oriented; use their result only when the specific function documents one.\n\
+    \n\
+    Pitfalls:\n\
+    - Use block when branch-local bindings need reusable names; do alone will leak names into the surrounding scope.\n\
+    - Use letrec only when a function calls itself by name; otherwise use let.\n\
+    - Use explicit type suffixes: Int ops use +, =, <; Dec ops use +., =., <.; Char equality uses =#; Bool equality uses =?.\n\
     \n\
     Built-ins:\n\
-    - set! pop! length get car cdr cons fst snd while\n\
+    - set! pop! length get car cdr cons fst snd while block unless when when-not\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! clear! list-dir! mkdir! read! delete! write! move!"
