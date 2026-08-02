@@ -533,7 +533,81 @@ fn run_test_command(args: &[String], bin_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn init_project_config_file(dir: &Path) -> Result<PathBuf, String> {
+fn default_main_source_text() -> &'static str {
+    ""
+}
+
+fn demo_main_source_text() -> &'static str {
+    r#"(let add (lambda a b (+ a b)))
+
+; This final expression is what `que main.que` prints.
+(add 1 2)
+"#
+}
+
+fn demo_main_test_source_text() -> &'static str {
+    r#"[
+  { "add 1 2" (= (add 1 2) 3) }
+  { "add 2 3" (= (add 2 3) 5) }
+]
+"#
+}
+
+fn default_project_readme_text() -> &'static str {
+    r#"# Que Project
+
+This project was created with `que init`.
+
+## Files
+
+- `que.toml`: project config. `entry = "main.que"` tells Que what to run.
+- `main.que`: your program.
+- `main.test.que`: optional tests for `main.que`.
+
+## Run
+
+```sh
+que
+```
+
+This runs the `entry` file from `que.toml`.
+
+## Test
+
+```sh
+que test .
+```
+
+Folder tests append `main.test.que` after `main.que`, so tests can directly call functions defined in `main.que`.
+
+Create `main.test.que` when you are ready to add tests.
+
+Tests should return `Bool`, `[Bool]`, or named results:
+
+```lisp
+(let add (lambda a b (+ a b)))
+
+[
+  { "add 1 2" (= (add 1 2) 3) }
+]
+```
+
+To create a runnable starter project instead of empty source files:
+
+```sh
+que init --demo
+```
+
+## More
+
+```sh
+que --help
+que --learn
+```
+"#
+}
+
+fn init_project_config_file(dir: &Path, demo: bool) -> Result<PathBuf, String> {
     let path = dir.join(crate::project::PROJECT_CONFIG_FILE);
     if path.exists() {
         return Err(format!(
@@ -543,6 +617,28 @@ fn init_project_config_file(dir: &Path) -> Result<PathBuf, String> {
     }
     fs::write(&path, crate::project::default_project_config_text())
         .map_err(|e| format!("failed to write '{}': {}", path.display(), e))?;
+    let main_path = dir.join("main.que");
+    if !main_path.exists() {
+        let text = if demo {
+            demo_main_source_text()
+        } else {
+            default_main_source_text()
+        };
+        fs::write(&main_path, text)
+            .map_err(|e| format!("failed to write '{}': {}", main_path.display(), e))?;
+    }
+    if demo {
+        let test_path = dir.join("main.test.que");
+        if !test_path.exists() {
+            fs::write(&test_path, demo_main_test_source_text())
+                .map_err(|e| format!("failed to write '{}': {}", test_path.display(), e))?;
+        }
+    }
+    let readme_path = dir.join("README.md");
+    if !readme_path.exists() {
+        fs::write(&readme_path, default_project_readme_text())
+            .map_err(|e| format!("failed to write '{}': {}", readme_path.display(), e))?;
+    }
     Ok(path)
 }
 
@@ -929,7 +1025,9 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
     let mut kind = None;
     if let Some(pos) = argv.iter().position(|arg| arg == "--emit") {
         if pos + 1 >= argv.len() || argv[pos + 1].starts_with("--") {
-            return Err("--emit requires one of: source | wat | split-wat | wasm | types".to_string());
+            return Err(
+                "--emit requires one of: source | wat | split-wat | wasm | types".to_string(),
+            );
         }
         let value = argv[pos + 1].clone();
         kind = Some(match value.as_str() {
@@ -981,7 +1079,7 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --eval <source> [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
          or:    {bin} [<script.que>] [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
-         or:    {bin} init\n\
+         or:    {bin} init [--demo]\n\
          or:    {bin} init-host <name>\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
@@ -998,7 +1096,8 @@ fn native_shell_help(bin_name: &str) -> String {
            --emit         Output source, wat, split-wat, wasm, or top-level types and exit.\n\
           --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
                          Use with --out <file> to write it instead of printing.\n\
-          init           Write a default `{config}` in the current directory.\n\
+          init           Write a default `{config}`, empty main.que, and README.md.\n\
+                         Use `init --demo` for runnable sample code and tests.\n\
           init-host      Scaffold a custom Rust host binary in `./<name>`.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
@@ -2436,7 +2535,7 @@ mod tests {
     }
 
     #[test]
-    fn init_project_config_file_writes_default_and_rejects_existing() {
+    fn init_project_config_file_writes_empty_default_without_test_file_and_rejects_existing() {
         let base = std::env::temp_dir().join(format!(
             "que-init-project-{}-{}",
             std::process::id(),
@@ -2447,11 +2546,44 @@ mod tests {
         ));
         std::fs::create_dir_all(&base).expect("temp dir should be created");
 
-        let path = init_project_config_file(&base).expect("config should be created");
+        let path = init_project_config_file(&base, false).expect("config should be created");
         let text = std::fs::read_to_string(&path).expect("config should be readable");
         assert!(text.contains("entry = \"main.que\""));
-        let err = init_project_config_file(&base).expect_err("second init should fail");
+        let main_text =
+            std::fs::read_to_string(base.join("main.que")).expect("main.que should be readable");
+        assert_eq!(main_text, "");
+        assert!(
+            !base.join("main.test.que").exists(),
+            "default init should not create main.test.que"
+        );
+        let readme_text =
+            std::fs::read_to_string(base.join("README.md")).expect("README.md should be readable");
+        assert!(readme_text.contains("que test ."));
+        assert!(readme_text.contains("que init --demo"));
+        assert!(readme_text.contains("que --learn"));
+        let err = init_project_config_file(&base, false).expect_err("second init should fail");
         assert!(err.contains("already exists"));
+    }
+
+    #[test]
+    fn init_project_config_file_demo_writes_runnable_sample() {
+        let base = std::env::temp_dir().join(format!(
+            "que-init-demo-project-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("temp dir should be created");
+
+        init_project_config_file(&base, true).expect("config should be created");
+        let main_text =
+            std::fs::read_to_string(base.join("main.que")).expect("main.que should be readable");
+        assert!(main_text.contains("(let add"));
+        let test_text = std::fs::read_to_string(base.join("main.test.que"))
+            .expect("main.test.que should be readable");
+        assert!(test_text.contains("{ \"add 1 2\""));
     }
 
     #[test]
@@ -2582,8 +2714,13 @@ pub fn run_native_shell() -> Result<(), String> {
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("init")) {
+        if args.len() > 3 || (args.len() == 3 && args.get(2).map(String::as_str) != Some("--demo"))
+        {
+            return Err("usage: que init [--demo]".to_string());
+        }
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let path = init_project_config_file(&cwd)?;
+        let demo = args.get(2).map(String::as_str) == Some("--demo");
+        let path = init_project_config_file(&cwd, demo)?;
         println!("wrote {}", path.display());
         return Ok(());
     }
@@ -2766,22 +2903,21 @@ pub fn run_native_shell() -> Result<(), String> {
                         user_form_count,
                     );
                     match inferred {
-                        Ok((_typ, typed_ast)) => {
-                            crate::wat::compile_program_to_split_wat_typed(&typed_ast).map_err(
-                                |message| {
-                                    build_debug_error_report(
-                                        debug_mode,
-                                        "wat-lowering",
-                                        &program,
-                                        &message,
-                                        None,
-                                        user_desugared.as_ref(),
-                                        user_form_count,
-                                        Some(&typed_ast),
-                                    )
-                                },
-                            )?
-                        }
+                        Ok((_typ, typed_ast)) => crate::wat::compile_program_to_split_wat_typed(
+                            &typed_ast,
+                        )
+                        .map_err(|message| {
+                            build_debug_error_report(
+                                debug_mode,
+                                "wat-lowering",
+                                &program,
+                                &message,
+                                None,
+                                user_desugared.as_ref(),
+                                user_form_count,
+                                Some(&typed_ast),
+                            )
+                        })?,
                         Err(InferErrorInfo {
                             message,
                             scope,

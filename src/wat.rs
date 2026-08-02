@@ -6206,10 +6206,9 @@ fn compile_do(
                                 local_idx, cap_idx, local_idx
                             ));
                         }
-                        if
-                            val_node
-                                .map(|n| typed_expr_is_nonnegative_int_literal(n))
-                                .unwrap_or(false)
+                        if val_node
+                            .map(|n| typed_expr_is_nonnegative_int_literal(n))
+                            .unwrap_or(false)
                         {
                             scoped_nonnegative_int_locals.insert(name.clone());
                         } else if kw == "mut" {
@@ -6365,8 +6364,8 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+            proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+            nonnegative_int_locals: ctx.nonnegative_int_locals,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
@@ -6423,8 +6422,8 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+            proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+            nonnegative_int_locals: ctx.nonnegative_int_locals,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = match item {
@@ -6511,8 +6510,8 @@ fn compile_trusted_typed_vector_literal(
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+            proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+            nonnegative_int_locals: ctx.nonnegative_int_locals,
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_item(item, &nested_ctx)?;
@@ -6558,8 +6557,8 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let a_node = node
@@ -6877,8 +6876,8 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 3,
     };
     let (xs, release_xs_after) = match &xs_node.expr {
@@ -7020,8 +7019,8 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 5,
     };
     let (xs, release_target) = match &xs_node.expr {
@@ -7265,7 +7264,9 @@ fn expr_mutates_scalar_name(expr: &Expression, name: &str) -> bool {
                     return true;
                 }
             }
-            items.iter().any(|item| expr_mutates_scalar_name(item, name))
+            items
+                .iter()
+                .any(|item| expr_mutates_scalar_name(item, name))
         }
         _ => false,
     }
@@ -7282,7 +7283,9 @@ fn expr_mutates_vector_name(expr: &Expression, name: &str) -> bool {
                     return true;
                 }
             }
-            items.iter().any(|item| expr_mutates_vector_name(item, name))
+            items
+                .iter()
+                .any(|item| expr_mutates_vector_name(item, name))
         }
         _ => false,
     }
@@ -7406,8 +7409,8 @@ fn compile_fast_box_ctor(
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let value = compile_expr(value_node, &nested_ctx)?;
@@ -7466,8 +7469,8 @@ fn compile_fast_cell_set(
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(cell_node, &nested_ctx)?;
@@ -7527,8 +7530,8 @@ fn compile_fast_truthy(
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let cell = compile_expr(
@@ -7629,8 +7632,8 @@ fn compile_extern_direct_call(
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: first_arg_slot + args.len(),
     };
 
@@ -7709,8 +7712,8 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                     materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
                     definitely_materialized_top_level_scalar_names: ctx
                         .definitely_materialized_top_level_scalar_names,
-                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-                nonnegative_int_locals: ctx.nonnegative_int_locals,
+                    proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                    nonnegative_int_locals: ctx.nonnegative_int_locals,
                     tmp_i32: ctx.tmp_i32 + 2,
                 };
                 let av = compile_expr(arg, &nested_ctx)?;
@@ -9650,12 +9653,7 @@ fn compile_program_to_wat_build_typed_with_opts(
         ));
     }
 
-    let runtime_body = emit_vector_runtime(
-        &fn_ids,
-        &fn_sigs,
-        &closure_defs,
-        &apply_arities,
-    );
+    let runtime_body = emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs, &apply_arities);
     let (generic_runtime_body, apply_runtime_body) =
         split_generic_runtime_and_apply_runtime(&runtime_body);
     let mut emitted_funcs_body = String::new();

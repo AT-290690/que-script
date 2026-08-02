@@ -114,6 +114,46 @@ Test
 cargo test
 ```
 
+## Quick Start
+
+Create a new Que project:
+
+```bash
+mkdir hello-que
+cd hello-que
+que init
+```
+
+This creates:
+
+```text
+que.toml
+main.que        # empty
+README.md
+```
+
+To create a runnable sample instead:
+
+```bash
+que init --demo
+```
+
+Run the program:
+
+```bash
+que
+```
+
+Run the tests:
+
+```bash
+que test .
+```
+
+`main.que` is the project entry file. `main.test.que` is appended after `main.que` during `que test .`, so tests can directly call functions from the entry file.
+
+Default `que init` does not create `main.test.que`. Create it when you want folder tests, or use `que init --demo` for a runnable sample with tests.
+
 ---
 
 ### Hindley–Milner Type Inference

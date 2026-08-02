@@ -221,7 +221,7 @@ fn build_lsp_core() -> LspCore {
 
 impl ServerState {
     fn analyze_text_for_doc_path(&self, text: &str, doc_path: Option<&Path>) -> DocAnalysis {
-        let project_defs = match self.load_project_dep_definitions_for_doc_path(doc_path) {
+        let project_defs = match self.load_project_analysis_definitions_for_doc_path(doc_path) {
             Ok(defs) => defs,
             Err(message) => {
                 return DocAnalysis {
@@ -871,7 +871,7 @@ impl ServerState {
             .map(|form| &form.let_binding_external_impure)
     }
 
-    fn load_project_dep_definitions_for_doc_path(
+    fn load_project_analysis_definitions_for_doc_path(
         &self,
         doc_path: Option<&Path>,
     ) -> Result<Vec<Expression>, String> {
@@ -889,7 +889,9 @@ impl ServerState {
             return Ok(Vec::new());
         };
         let loaded = self.load_project_config_cached(&config_path)?;
-        self.load_project_defs_cached(&loaded)
+        let mut defs = self.load_project_defs_cached(&loaded)?;
+        append_project_entry_definitions_for_test_doc(&mut defs, &loaded, path)?;
+        Ok(defs)
     }
 
     fn load_project_config_cached(
@@ -946,6 +948,57 @@ impl ServerState {
         );
         Ok(defs)
     }
+}
+
+fn append_project_entry_definitions_for_test_doc(
+    defs: &mut Vec<Expression>,
+    loaded: &que::project::LoadedProjectConfig,
+    doc_path: &Path,
+) -> Result<(), String> {
+    if doc_path.file_name().and_then(|name| name.to_str()) != Some("main.test.que") {
+        return Ok(());
+    }
+
+    let Some(entry) = loaded.config.entry.as_deref() else {
+        return Ok(());
+    };
+    let entry_path = loaded.root_dir.join(entry);
+    if paths_refer_to_same_file(doc_path, &entry_path) {
+        return Ok(());
+    }
+
+    let source = std::fs::read_to_string(&entry_path).map_err(|e| {
+        format!(
+            "failed to read project entry '{}': {}",
+            entry_path.display(),
+            e
+        )
+    })?;
+    let entry_program = que::parser::build_library(&source).map_err(|e| {
+        format!(
+            "failed to parse project entry '{}' for test context: {}",
+            entry_path.display(),
+            e
+        )
+    })?;
+    let mut entry_defs = unwrap_top_level_do(entry_program);
+    defs.append(&mut entry_defs);
+    Ok(())
+}
+
+fn unwrap_top_level_do(expr: Expression) -> Vec<Expression> {
+    match expr {
+        Expression::Apply(mut items) if matches!(items.first(), Some(Expression::Word(head)) if head == "do") => {
+            items.drain(1..).collect()
+        }
+        other => vec![other],
+    }
+}
+
+fn paths_refer_to_same_file(a: &Path, b: &Path) -> bool {
+    let a = std::fs::canonicalize(a).unwrap_or_else(|_| a.to_path_buf());
+    let b = std::fs::canonicalize(b).unwrap_or_else(|_| b.to_path_buf());
+    a == b
 }
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, String> {
@@ -1733,4 +1786,58 @@ fn literal_type_at_position(text: &str, position: Position) -> Option<(String, R
 
 fn format_literal_hover(text: &str, range: Range, literal_type: &str) -> String {
     native_core::format_literal_hover(text, to_core_range(range), literal_type)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_analysis_can_see_project_entry_definitions() {
+        let root = std::env::temp_dir().join(format!("que-lsp-test-entry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("test project dir should be created");
+        std::fs::write(root.join("que.toml"), "entry = \"main.que\"\ndeps = []\n")
+            .expect("project config should be written");
+        std::fs::write(
+            root.join("main.que"),
+            "(let fn (lambda (xs) (map square xs)))\n",
+        )
+        .expect("entry should be written");
+        let test_path = root.join("main.test.que");
+        let test_source = "[{ \"fn squares\" (Vector/equal? = (fn [1 2 3]) [1 4 9])}]\n";
+        std::fs::write(&test_path, test_source).expect("test file should be written");
+
+        let loaded = que::project::load_project_config_from_path(&root.join("que.toml"))
+            .expect("project config should load");
+        let mut project_defs = Vec::new();
+        append_project_entry_definitions_for_test_doc(&mut project_defs, &loaded, &test_path)
+            .expect("entry definitions should be loaded for test file");
+
+        let core = build_lsp_core();
+        let analysis = analyze_document_text_safe(
+            test_source,
+            &project_defs,
+            &core.std_defs,
+            &core.base_env,
+            core.base_next_id,
+            &core.global_signatures,
+            &core.global_effects,
+            &core.std_fallback_names,
+        );
+        let messages = analysis
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            !messages.contains("Undefined variable: fn"),
+            "test file diagnostics should not report entry-defined fn as undefined: {}",
+            messages
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
