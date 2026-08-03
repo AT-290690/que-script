@@ -70,8 +70,6 @@
 (let std/vector/last (lambda xs (get xs (- (length xs) 1))))
 
 (let box (lambda value [ value ]))
-(let set (lambda vrbl x (set! vrbl 0 x)))
-(let =! (lambda vrbl x (set! vrbl 0 x)))
 (let true? (lambda vrbl (if (get vrbl) true false)))
 (let false? (lambda vrbl (if (get vrbl) false true)))
 
@@ -172,7 +170,14 @@
     ; { std/fn/none [] } none
     (cond 
       (= (fst action) std/fn/return) (do (set! result 0 (snd action)) nil)
-      (= (fst action) std/fn/push) (do (loop 0 (length (snd action)) (lambda i (push! stack (get (snd action) i)))) nil)
+      (= (fst action) std/fn/push) (do
+        (let values (snd action))
+        (let len (length values))
+        (mut i 0)
+        (while (< i len) (do
+          (push! stack (get values i))
+          (alter! i (+ i 1))))
+        nil)
       nil
     )))
   (get result))))
@@ -788,7 +793,14 @@ out)))
      (while (< i len) (do (set! out (length out) (get xs (- len i 1))) (alter! i (+ i 1))))
      out))))
 
-(let std/vector/reverse! (lambda xs (loop 0 (/ (length xs) 2) (lambda i (std/vector/swap! xs i (- (length xs) i 1))))))
+(let std/vector/reverse! (lambda xs (do
+  (let len (length xs))
+  (let half (/ len 2))
+  (mut i 0)
+  (while (< i half) (do
+    (std/vector/swap! xs i (- len i 1))
+    (alter! i (+ i 1))))
+  xs)))
 
 (let std/vector/find-index (lambda xs fn? (do
      (mut i 0)
@@ -959,14 +971,14 @@ out)))
     num)))
 
 (let std/convert/chars->positive-or-negative-digits (lambda chars (do
-    (integer current-sign 1)
+    (&mut current-sign 1)
     (<| chars 
         (std/vector/reduce (lambda a ch (do 
             (if (=# ch std/char/minus) 
-                (set current-sign -1) 
+                (&alter! current-sign -1) 
                 (do  
-                    (std/vector/push! a (* (get current-sign) (std/convert/char->digit ch))) 
-                    (set current-sign 1)))
+                    (std/vector/push! a (* (&get current-sign) (std/convert/char->digit ch))) 
+                    (&alter! current-sign 1)))
                 a)) [])))))
 (let std/convert/digits->integer std/convert/positive-or-negative-digits->integer)
 (let std/convert/positive-or-negative-chars->integer (lambda x (<| x (std/convert/chars->positive-or-negative-digits) (std/convert/positive-or-negative-digits->integer))))
@@ -1055,33 +1067,33 @@ out)))
 (let std/heap/top 0)
 (let std/heap/greater? (lambda heap i j fn? (=? (fn? (get heap i) (get heap j)) true)))
 (let std/heap/sift-up! (lambda heap fn (do 
-  (integer node (- (length heap) 1))
+  (&mut node (- (length heap) 1))
   (letrec tail-call/std/heap/sift-up! (lambda heap
-    (if (and (> (get node) std/heap/top) (std/heap/greater? heap (get node) (std/node/parent (get node)) fn))
+    (if (and (> (&get node) std/heap/top) (std/heap/greater? heap (&get node) (std/node/parent (&get node)) fn))
       (do 
-        (std/vector/swap! heap (get node) (std/node/parent (get node)))
-        (set node (std/node/parent (get node)))
+        (std/vector/swap! heap (&get node) (std/node/parent (&get node)))
+        (&alter! node (std/node/parent (&get node)))
         (tail-call/std/heap/sift-up! heap)) heap)))
   (tail-call/std/heap/sift-up! heap))))
 
 (let std/heap/sift-down! (lambda heap fn (do
-  (integer node std/heap/top)
+  (&mut node std/heap/top)
   (letrec tail-call/std/heap/sift-down! (lambda heap
     (if (or 
           (and 
-            (< (std/node/left (get node)) (length heap))
-            (std/heap/greater? heap (std/node/left (get node)) (get node) fn))
+            (< (std/node/left (&get node)) (length heap))
+            (std/heap/greater? heap (std/node/left (&get node)) (&get node) fn))
           (and 
-            (< (std/node/right (get node)) (length heap))
-            (std/heap/greater? heap (std/node/right (get node)) (get node) fn)))
+            (< (std/node/right (&get node)) (length heap))
+            (std/heap/greater? heap (std/node/right (&get node)) (&get node) fn)))
       (do 
         (let max-child (if (and 
-                            (< (std/node/right (get node)) (length heap))
-                            (std/heap/greater? heap (std/node/right (get node)) (std/node/left (get node)) fn))
-                            (std/node/right (get node))
-                            (std/node/left (get node))))
-        (std/vector/swap!  heap (get node) max-child)
-        (set node max-child)
+                            (< (std/node/right (&get node)) (length heap))
+                            (std/heap/greater? heap (std/node/right (&get node)) (std/node/left (&get node)) fn))
+                            (std/node/right (&get node))
+                            (std/node/left (&get node))))
+        (std/vector/swap!  heap (&get node) max-child)
+        (&alter! node max-child)
         (tail-call/std/heap/sift-down! heap)) heap)))
   (tail-call/std/heap/sift-down! heap))))
 
@@ -1115,12 +1127,12 @@ heap)))
 (let std/convert/integer->string-base (lambda num base  
     (if (= num 0) "0" (do 
         (let neg? (< num 0))
-        (integer n (if neg? (* num -1) num))
+        (&mut n (if neg? (* num -1) num))
         (letrec tail-call/while (lambda out
-            (if (> (get n) 0) (do
-                (let x (mod (get n) base))
+            (if (> (&get n) 0) (do
+                (let x (mod (&get n) base))
                 (std/vector/push! out x)
-                (set n (/ (get n) base))
+                (&alter! n (/ (&get n) base))
                 (tail-call/while out)) out)))
         (let str (std/convert/digits->chars (tail-call/while [])))
         (std/vector/reverse (if neg? (std/vector/append! str std/char/dash) str))))))
@@ -1530,16 +1542,22 @@ q)))
 
 (let std/vector/2d/interleave (lambda xs ys (do 
   (let out [])
-  (loop 0 (std/int/min (length xs) (length ys)) (lambda i (do 
+  (let len (std/int/min (length xs) (length ys)))
+  (mut i 0)
+  (while (< i len) (do
     (std/vector/push! out (get xs i))
-    (std/vector/push! out (get ys i)))))
+    (std/vector/push! out (get ys i))
+    (alter! i (+ i 1))))
   out)))
 
 (let std/vector/intersperse (lambda xs x (if (std/vector/empty? xs) [] (do 
   (let out [])
-  (loop 0 (- (length xs) 1) (lambda i (do
+  (let len (- (length xs) 1))
+  (mut i 0)
+  (while (< i len) (do
     (std/vector/push! out (get xs i)) 
-    (std/vector/push! out x))))
+    (std/vector/push! out x)
+    (alter! i (+ i 1))))
    (std/vector/push! out (get xs (- (length xs) 1))) 
   out))))
 
@@ -1939,11 +1957,11 @@ q)))
 
 (let std/convert/integer->digits-base (lambda num base  
     (if (= num 0) [ 0 ] (do 
-        (integer n num)
+        (&mut n num)
         (letrec tail-call/while (lambda out
-            (if (> (get n) 0) (do
-                (std/vector/push! out (mod (get n) base))
-                (set n (/ (get n) base))
+            (if (> (&get n) 0) (do
+                (std/vector/push! out (mod (&get n) base))
+                (&alter! n (/ (&get n) base))
                 (tail-call/while out)) out)))
         (let digits (tail-call/while []))
         (std/vector/reverse digits)))))
@@ -2088,7 +2106,12 @@ q)))
 (let std/tuple/int/mul (lambda { a b } (* a b)))
 (let std/tuple/int/div (lambda { a b } (* a b)))
 
-(let loop/repeat (lambda n fn (loop 0 n (lambda _ (fn)))))
+(let loop/repeat (lambda n fn (do
+  (mut i 0)
+  (while (< i n) (do
+    (fn)
+    (alter! i (+ i 1))))
+  nil)))
 (let loop/some-range? (lambda start end predicate? (do 
   (letrec tail-call/loop/some-range? (lambda i out
                           (if (< i end)
@@ -2614,7 +2637,7 @@ q)))
 
 (let std/vector/char/autocorrect (lambda word dictionary (do
   (let f (get dictionary 0))
-  (variable best-word f)
+  (&mut best-word f)
   (mut best-dist (std/vector/char/damerau-levenshtein word f))
   (mut i 1)
   (while (< i (length dictionary)) (do
@@ -2622,10 +2645,10 @@ q)))
     (let dist (std/vector/char/damerau-levenshtein word candidate))
     (if (< dist best-dist)
         (do
-          (set best-word candidate)
+          (&alter! best-word candidate)
           (alter! best-dist dist)))
     (alter! i (+ i 1))))
-  { (get best-word) best-dist })))
+  { (&get best-word) best-dist })))
 
 (let std/vector/char/join2 (lambda a b (do
   (let out [])
