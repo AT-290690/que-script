@@ -437,7 +437,7 @@ pub fn format_effect_flags_for_symbol(
     }
     let mut labels = Vec::new();
     if effect.contains(EffectFlags::MUTATE) {
-        if symbol.ends_with('!') || symbol == "set" || externally_impure == Some(true) {
+        if symbol.ends_with('!') || externally_impure == Some(true) {
             labels.push("mutate");
         } else {
             labels.push("local-mutate");

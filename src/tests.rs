@@ -774,12 +774,12 @@ xs)"#,
                   { next (mod acc MOD) })))
                 (let SIZE 4)
                 (let initial (new-board SIZE))
-                (variable STATE initial)
+                (&mut STATE initial)
                 (mut step 0)
                 (mut acc 0)
                 (while (< step 1) (do
-                  (let { a b } (step-and-hash (get STATE) SIZE (+ step 1)))
-                  (set STATE a)
+                  (let { a b } (step-and-hash (&get STATE) SIZE (+ step 1)))
+                  (&alter! STATE a)
                   (alter! acc (mod (+ acc b) MOD))
                   (alter! step (+ step 1))))
                 acc)"#,
@@ -2746,7 +2746,7 @@ xs)"#,
     #[test]
     fn test_typed_optimization_lowers_non_escaping_local_variable_cell_to_mut_local() {
         let typed = infer_typed_built(
-            "(do (let box (lambda value [value])) (let set (lambda vrbl x (set! vrbl 0 x))) (variable x 0) (set x 1) (get x))"
+            "(do (let box (lambda value [value])) (let x (box 0)) (set! x 0 1) (get x 0))",
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let lisp = optimized.expr.to_lisp();
@@ -2770,7 +2770,7 @@ xs)"#,
     #[test]
     fn test_typed_optimization_keeps_local_variable_cell_when_lambda_would_capture_it() {
         let typed = infer_typed_built(
-            "(do (let box (lambda value [value])) (variable x 0) (let f (lambda () (get x))) f)",
+            "(do (let box (lambda value [value])) (let x (box 0)) (let f (lambda () (get x 0))) f)",
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let lisp = optimized.expr.to_lisp();
@@ -7148,13 +7148,13 @@ xs"#,
         (loop i n (lambda j (do 
             (&alter! temp (+ (&get temp) (get xs j)))
             (&alter! out (+ (&get out) (get temp)))))))))
-    (get out))))
+    (&get out))))
 
 (let expert-sub-array-sum (lambda xs (do 
     (let n (length xs))
     (integer out 0)
     (loop 0 n (lambda i (&alter! out (+ (&get out) (* (get xs i) (+ i 1) (- n i))))))
-    (get out))))
+    (&get out))))
 
 (let xs [1 4 5 3 2])
 [(naive-sub-array-sum xs) (expert-sub-array-sum xs)]
@@ -7552,9 +7552,9 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"(let *RES* 51)
 (integer generation 0)
-(variable cells (std/vector/int/zeroes *RES*))
+(&mut cells (std/vector/int/zeroes *RES*))
 (let ruleset [ 0 1 0 1 1 0 1 0 ])
-(set! (get cells) (/ (length (get cells)) 2) 1)
+(set! (&get cells) (/ (length (&get cells)) 2) 1)
 (let out [])
 
 (let rules (lambda a b c (do 
@@ -7562,9 +7562,9 @@ D:=,=,=,+,=,=,=,+,=,=")
     (get ruleset (- 7 index)))))
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (while (< (get generation) (/ *RES* 2)) (do 
-    (std/vector/push! out (get cells))
-    (let nextgen (std/vector/copy (get cells)))
-    (loop 1 (- (length (get cells)) 1) (lambda i (do 
+    (std/vector/push! out (&get cells))
+    (let nextgen (std/vector/copy (&get cells)))
+    (loop 1 (- (length (&get cells)) 1) (lambda i (do 
         (let left (get cells 0 (- i 1)))
         (let me (get cells 0 i))
         (let right (get cells 0 (+ i 1)))
@@ -7877,10 +7877,10 @@ L82")
         (if (<> i j) 
           (&alter! M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))))
     (&alter! S (+ (&get S) (get M))))))) 
-    (get S))))
+    (&get S))))
 
 (let part2 (lambda parsed (do
-  (variable S [0])
+  (&mut S [0])
   (for (lambda line (do 
     (let N (length line))
     (let stack [])
@@ -7888,8 +7888,8 @@ L82")
       (while (and (not (empty? stack)) (<# (at stack -1) (get line i)) (> (+ (length stack) (- N i)) 12)) (pop! stack))
       (push! stack (get line i))
       (while (> (length stack) 12) (pop! stack)))))
-    (&alter! S (BigInt/add (get S) (BigInt/new stack))))) parsed)
-  (get S))))
+    (&alter! S (BigInt/add (&get S) (BigInt/new stack))))) parsed)
+  (&get S))))
 
 
 { (part1 (parse INPUT)) (part2 (parse INPUT)) }"#,
@@ -7957,19 +7957,19 @@ L82")
 
 (let part2 (lambda { rng _ } (do
   (let ranges (sort (lambda [ a ] [ b  ] (BigInt/lt? a b)) rng))
-  (variable low (get ranges 0 0))
-  (variable high (get ranges 0 1))
-  (variable out [ 0 ])
+  (&mut low (get ranges 0 0))
+  (&mut high (get ranges 0 1))
+  (&mut out [ 0 ])
   (loop 1 (length ranges) (lambda i (do 
     (let [ dlow dhigh ] (get ranges i))
-    (if (BigInt/gte? (get high) dlow) (do 
-      (&alter! low (if (BigInt/lt? (get low) dlow) (get low) dlow))
-      (&alter! high (if (BigInt/gt? (get high) dhigh) (get high) dhigh))) (do 
-      (&alter! out (BigInt/add (get out) (BigInt/add (BigInt/sub (get high) (get low)) [ 1 ])))
+    (if (BigInt/gte? (&get high) dlow) (do 
+      (&alter! low (if (BigInt/lt? (&get low) dlow) (&get low) dlow))
+      (&alter! high (if (BigInt/gt? (&get high) dhigh) (&get high) dhigh))) (do 
+      (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
       (&alter! low (get ranges i 0))
       (&alter! high (get ranges i 1)))))))
-  (&alter! out (BigInt/add (get out) (BigInt/add (BigInt/sub (get high) (get low)) [ 1 ])))
-  (get out))))
+  (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
+  (&get out))))
 
 (let PARSED (parse INPUT))
 
@@ -8081,7 +8081,7 @@ L82")
 (let parse (lambda input (String->Vector nl input)))
 (let solution (lambda input (do
   (let data (map (lambda x (map identity x)) input))
-  (variable beam [ 0 ])
+  (&mut beam [ 0 ])
   (let timeline (map (lambda _ [ 0 ]) (zeroes (length (get data 0)))))
   (loop 0 (length data) (lambda y (do 
     (let line (get data y))
@@ -8094,14 +8094,14 @@ L82")
         (=# c '^') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do 
           (set! (get data y) (- x 1) '|')
           (set! (get data y) (+ x 1) '|')
-          (&alter! beam (BigInt/add (get beam) [ 1 ]))
+          (&alter! beam (BigInt/add (&get beam) [ 1 ]))
           (set! timeline (- x 1) (BigInt/add (get timeline (- x 1)) (get timeline x)))
           (set! timeline (+ x 1) (BigInt/add (get timeline (+ x 1)) (get timeline x)))
           (set! timeline x [ 0 ])
         ))
         (=# c '.') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do 
           (set! (get data y) x '|'))))))))))
-  [(get beam) (BigInt/sum timeline)])))
+  [(&get beam) (BigInt/sum timeline)])))
 
 (solution (parse INPUT))"#,
                 "[[2 1] [4 0]]",
@@ -9038,7 +9038,7 @@ bbrgwb")
     (let temp (copy word))
     (boolean loop? true)
     (integer i 0)
-    (variable out word)
+    (&mut out word)
 
     (while (and (true? loop?) (< (get i) (length word))) (do
 
@@ -9081,7 +9081,7 @@ bbrgwb")
           (&alter! j (+ (&get j) 1))))
 
         (&alter! i (+ (&get i) 1))))
-    (get out)))))
+    (&get out)))))
 (every? (lambda x (Set/has? x correct)) [
 
   (autocorrect "spellling")
