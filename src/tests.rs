@@ -9492,8 +9492,41 @@ Dublin to Belfast = 141")
 {
   part1
   part2
-}
-"#, "{ 605 982 }")
+}"#, "{ 605 982 }"
+),
+(r#"(let input (string 34 97 122 108 103 120 100 98 108 106 119 121 103 121 116 116 122 107 102 119 117 120 118 34 10 34 118 92 120 102 98 92 34 108 103 115 92 34 107 118 106 102 121 119 109 117 116 92 120 57 99 114 34 10 34 92 92 122 114 115 92 92 115 121 117 114 34))
+
+(letrec memory-length (lambda (line i total) 
+  (if (= i (- (length line) 1)) total 
+        (if (=# (get line i) '\')
+            (memory-length line (if (=# (get line (+ i 1)) 'x') (+ i 4) (+ i 2)) (+ total 1))
+            (memory-length line (+ i 1) (+ total 1))))))
+
+(let line-difference
+  (lambda (line)
+    (- (length line) (memory-length line 1 0))))
+
+(|> input
+  split/lines
+  (map line-difference)
+  sum)"#, "16"),
+
+  (r#"(|> "
+
+she sells
+sea
+shells by
+the sea shore
+
+"
+  (trim)
+  (split/lines)
+  (map split/words)
+  (flat)
+  (map (lambda ([a . b]) (cons [(upper a)] b)))
+  (join " 🐚 ")
+)
+"#, "She 🐚 Sells 🐚 Sea 🐚 Shells 🐚 By 🐚 The 🐚 Sea 🐚 Shore")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

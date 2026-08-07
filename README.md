@@ -150,6 +150,13 @@ Run the tests:
 que test .
 ```
 
+Explain the optimized Wasm shape without running:
+
+```bash
+que explain
+que explain --json
+```
+
 `main.que` is the project entry file. `main.test.que` is appended after `main.que` during `que test .`, so tests can directly call functions from the entry file.
 
 Default `que init` does not create `main.test.que`. Create it when you want folder tests, or use `que init --demo` for a runnable sample with tests.
