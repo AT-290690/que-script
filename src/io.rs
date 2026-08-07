@@ -1081,6 +1081,7 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} init [--demo]\n\
          or:    {bin} init-host <name>\n\
+         or:    {bin} explain [script.que] [--json] [--out <file>]\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
          or:    {bin} --learn\n\
@@ -1099,6 +1100,7 @@ fn native_shell_help(bin_name: &str) -> String {
           init           Write a default `{config}`, empty main.que, and README.md.\n\
                          Use `init --demo` for runnable sample code and tests.\n\
           init-host      Scaffold a custom Rust host binary in `./<name>`.\n\
+          explain        Show type/effect and optimized WAT-shape information without running.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
                          QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
@@ -1122,6 +1124,7 @@ fn native_shell_help(bin_name: &str) -> String {
            - `--emit split-wat` writes/prints separate runtime and user WAT modules.\n\
            - `--emit wasm` prints raw wasm bytes unless you pass `--out`.\n\
            - `--emit types` prints inferred top-level user-form types and final result type.\n\
+           - `explain --json` prints a machine-readable optimization/safety report.\n\
            - --debug, --no-result, --emit, --emit-source and --help can appear after the script path.\n\
            - `--install` writes/extends an external library file (used by all binaries).\n\
            - `--uninstall` removes the active external library file.\n\
@@ -1490,6 +1493,82 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
         }
         other => Err(format!("unknown --lib command '{}'", other)),
     }
+}
+
+fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!(
+            "Usage: {bin} explain [script.que] [--json] [--out <file>]\n\
+             \n\
+             Explains the optimized Wasm shape of a Que program without running it.\n\
+             Omitting script.que uses entry from {config} when present.",
+            bin = bin_name,
+            config = crate::project::PROJECT_CONFIG_FILE
+        );
+        return Ok(());
+    }
+
+    let mut json = false;
+    let mut out_path: Option<String> = None;
+    let mut script_path: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => {
+                json = true;
+                i += 1;
+            }
+            "--out" => {
+                let Some(path) = args.get(i + 1) else {
+                    return Err("explain --out requires a file path".to_string());
+                };
+                out_path = Some(path.clone());
+                i += 2;
+            }
+            token if token.starts_with("--") => {
+                return Err(format!("unknown explain flag '{}'", token));
+            }
+            token => {
+                if script_path.is_some() {
+                    return Err("explain accepts at most one script path".to_string());
+                }
+                script_path = Some(token.to_string());
+                i += 1;
+            }
+        }
+    }
+
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let (_resolved_path, program, script_cwd) =
+        resolve_project_entry_path(&cwd, script_path.as_deref())
+            .map_err(|message| format!("{}\n{}", message, native_shell_help(bin_name)))?;
+    apply_project_env_vars(&script_cwd)?;
+
+    let analysis_source = crate::lsp_native_core::strip_comment_bodies_preserve_newlines(&program);
+    let user_form_count =
+        crate::lsp_native_core::parse_user_exprs_for_symbol_collection(&analysis_source)
+            .as_ref()
+            .map(|exprs| exprs.len())
+            .unwrap_or_else(|| crate::lsp_native_core::top_level_form_ranges(&program).len());
+
+    let std_ast = crate::baked::load_ast();
+    let mut lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
+    crate::externals::extend_with_builtin_host_externs(&mut lib_defs)?;
+    lib_defs.extend(load_project_library_definitions(&script_cwd)?);
+    let wrapped_ast = crate::parser::merge_std_and_program(&program, lib_defs)?;
+    let wrapped_with_externs = crate::externals::prepend_builtin_host_externs(&wrapped_ast)?;
+    let (_typ, typed_ast) = infer_with_builtins_typed(
+        &wrapped_with_externs,
+        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+    )?;
+    let split_wat = crate::wat::compile_program_to_split_wat_typed(&typed_ast)?;
+    let report = crate::explain::explain_program(&typed_ast, &split_wat.user_wat, user_form_count);
+    let rendered = if json {
+        crate::explain::render_json(&report)?
+    } else {
+        crate::explain::render_text(&report)
+    };
+    emit_text_output(out_path.as_deref(), &rendered)
 }
 
 enum LibraryInstallMode {
@@ -2746,6 +2825,10 @@ pub fn run_native_shell() -> Result<(), String> {
     }
     if matches!(args.get(1).map(String::as_str), Some("test")) {
         run_test_command(&args.iter().skip(2).cloned().collect::<Vec<_>>(), bin_name)?;
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("explain")) {
+        run_explain_command(&args.iter().skip(2).cloned().collect::<Vec<_>>(), bin_name)?;
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("--learn")) {

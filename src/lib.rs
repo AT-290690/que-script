@@ -1,4 +1,6 @@
 pub mod baked;
+#[cfg(feature = "compiler")]
+pub mod explain;
 pub mod externals;
 pub mod infer;
 #[cfg(feature = "io")]
