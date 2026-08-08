@@ -9,6 +9,7 @@ pub struct ExplainReport {
     pub effect: Vec<String>,
     pub host_imports: Vec<String>,
     pub metrics: ExplainMetrics,
+    pub optimized_user_calls: Vec<String>,
     pub forms: Vec<ExplainForm>,
     pub warnings: Vec<ExplainWarning>,
 }
@@ -50,6 +51,7 @@ pub fn explain_program(
 ) -> ExplainReport {
     let metrics = collect_wat_metrics(wat);
     let host_imports = collect_host_imports(wat);
+    let optimized_user_calls = collect_prefixed_call_targets(&user_metric_wat(wat), "call $v_");
     let forms = collect_user_forms(typed_ast, user_form_count);
     let user_effect = user_form_nodes(typed_ast, user_form_count)
         .into_iter()
@@ -129,6 +131,7 @@ pub fn explain_program(
         effect: effect_labels(user_effect),
         host_imports,
         metrics,
+        optimized_user_calls,
         forms,
         warnings,
     }
@@ -187,9 +190,16 @@ pub fn render_text(report: &ExplainReport) -> String {
     ));
     lines.push(format!("  wat bytes: {}", report.metrics.wat_bytes));
 
+    if !report.optimized_user_calls.is_empty() {
+        lines.push(format!(
+            "  optimized user calls: {}",
+            report.optimized_user_calls.join(", ")
+        ));
+    }
+
     if !report.forms.is_empty() {
         lines.push(String::new());
-        lines.push("User forms:".to_string());
+        lines.push("Source user forms:".to_string());
         for form in &report.forms {
             lines.push(format!(
                 "  {} {} : {} [{}]",
@@ -389,6 +399,29 @@ fn count_prefixed_calls(wat: &str, prefix: &str) -> usize {
     wat.lines()
         .filter(|line| line.trim_start().starts_with(prefix))
         .count()
+}
+
+fn collect_prefixed_call_targets(wat: &str, prefix: &str) -> Vec<String> {
+    let mut calls = wat
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix(prefix))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .map(demangle_wat_user_symbol)
+        .collect::<Vec<_>>();
+    calls.sort();
+    calls.dedup();
+    calls
+}
+
+fn demangle_wat_user_symbol(symbol: &str) -> String {
+    symbol
+        .replace("_dash__gt_", "->")
+        .replace("_slash_", "/")
+        .replace("_dash_", "-")
+        .replace("_gt_", ">")
+        .replace("_bang_", "!")
+        .replace("_question_", "?")
+        .replace("_dot_", ".")
 }
 
 fn effect_labels(effect: EffectFlags) -> Vec<String> {
