@@ -1646,7 +1646,7 @@ fn desugar_with_counter(
                 match name.as_str() {
                     "<|" => Ok(pipe_data_first_curry_transform(exprs)),
                     "|>" => Ok(pipe_curry_transform(exprs)),
-                    "if" => Ok(if_transform(exprs)),
+                    "if" => Ok(if_transform(exprs)?),
                     "-" => Ok(minus_transform(exprs)),
                     "-." => Ok(minusf_transform(exprs)),
                     "+" => Ok(plus_transform(exprs)),
@@ -2712,25 +2712,15 @@ fn divf_transform(mut exprs: Vec<Expression>) -> Expression {
         }
     }
 }
-fn if_transform(mut exprs: Vec<Expression>) -> Expression {
+fn if_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
-    if exprs.len() == 0 {
-        return Expression::Apply(vec![
-            Expression::Word("if".to_string()),
-            Expression::Word("nil".to_string()),
-            Expression::Word("nil".to_string()),
-            Expression::Word("nil".to_string()),
-        ]);
+    if exprs.len() != 2 && exprs.len() != 3 {
+        return Err(format!(
+            "if expects 2 or 3 arguments after 'if' (condition, then[, else]); got {}",
+            exprs.len()
+        ));
     }
-    if exprs.len() == 1 {
-        return Expression::Apply(vec![
-            Expression::Word("if".to_string()),
-            exprs[0].clone(),
-            Expression::Word("nil".to_string()),
-            Expression::Word("nil".to_string()),
-        ]);
-    }
-    return Expression::Apply(vec![
+    Ok(Expression::Apply(vec![
         Expression::Word("if".to_string()),
         exprs[0].clone(),
         exprs[1].clone(),
@@ -2739,7 +2729,7 @@ fn if_transform(mut exprs: Vec<Expression>) -> Expression {
         } else {
             exprs[2].clone()
         },
-    ]);
+    ]))
 }
 fn pipe_data_first_curry_transform(mut exprs: Vec<Expression>) -> Expression {
     let mut inp = exprs.remove(1); // piped value

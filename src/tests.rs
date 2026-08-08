@@ -925,6 +925,28 @@ xs)"#,
     }
 
     #[test]
+    fn test_parser_if_rejects_extra_branches() {
+        let err = crate::parser::build("(if true 1 2 3 4 5 6)")
+            .expect_err("if with extra branches should fail");
+        assert!(
+            err.contains("if expects 2 or 3 arguments after 'if'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_parser_if_rejects_missing_then_branch() {
+        let err = crate::parser::build("(if true)")
+            .expect_err("if without then branch should fail");
+        assert!(
+            err.contains("if expects 2 or 3 arguments after 'if'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_loop_while_allows_mutating_body_without_lambda_argument() {
         let expr = crate::parser::build("(do (mut i 0) (while (< i 3) (alter! i (+ i 1))) i)")
             .expect("program should build");
@@ -9526,7 +9548,33 @@ the sea shore
   (map (lambda ([a . b]) (cons [(upper a)] b)))
   (join " 🐚 ")
 )
-"#, "She 🐚 Sells 🐚 Sea 🐚 Shells 🐚 By 🐚 The 🐚 Sea 🐚 Shore")
+"#, "She 🐚 Sells 🐚 Sea 🐚 Shells 🐚 By 🐚 The 🐚 Sea 🐚 Shore"),
+(r#";    encode :: [[Char]] -> [{Int * [Char]}]
+(let encode (lambda xs (do
+  (mut prev (car xs))
+  (mut counter 0)
+  (let temp [])
+  (let len (length xs))
+  (loop/range/exclusive i 0 len
+  (let x (get xs i))
+  (if (=# x prev) (++ counter) (do (push! temp { counter prev }) (alter! prev x) (alter! counter 1))))
+  (push! temp { counter prev })
+  temp)))
+(encode ['a' 'a' 'a' 'a' 'b' 'c' 'c' 'a' 'a' 'd' 'e' 'e' 'e' 'e'])"#, "[{ 4 a } { 1 b } { 2 c } { 2 a } { 1 d } { 4 e }]"),
+(r#"(let encode (lambda (xs) (do
+  (mut prev (car xs))
+  (mut counter 0)
+  (let temp [])
+  (let len (length xs))
+  (loop/range/exclusive i 0 len
+    (let x (get xs i))
+    (if (=# x prev) (++ counter) (do (push! temp { counter prev }) (alter! prev x) (alter! counter 1))))
+  (push! temp { counter prev })
+  (|> temp (map (lambda ({ a b }) (cons (Integer->String a) [b]))) (flat)))))
+
+(&mut inp "1")
+(loop/repeat 4 (lambda () (&alter! inp (encode (&get inp)))))
+(&get inp)"#, "111221")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
