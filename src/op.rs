@@ -4,7 +4,8 @@ use crate::types::Type;
 use std::collections::{HashMap, HashSet};
 
 const MAX_INLINE_BODY_COST: usize = 16;
-const MAX_SMALL_SCALAR_HELPER_INLINE_BODY_COST: usize = 32;
+const DEFAULT_SMALL_SCALAR_HELPER_INLINE_BODY_COST: usize = 32;
+const MAX_SMALL_SCALAR_HELPER_INLINE_BODY_COST: usize = 512;
 const MAX_INLINE_FIXPOINT_PASSES: usize = 16;
 const MAX_OPT_FIXPOINT_PASSES: usize = 8;
 
@@ -129,6 +130,14 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     let cur = optimize_typed_ast_once(&cur);
     let cur = run_tuple_return_destructuring_env_pass(&cur);
     dead_code_eliminate_top_level_defs(&cur)
+}
+
+fn small_scalar_helper_inline_body_cost_limit() -> usize {
+    std::env::var("QUE_SMALL_SCALAR_INLINE_COST")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(0, MAX_SMALL_SCALAR_HELPER_INLINE_BODY_COST))
+        .unwrap_or(DEFAULT_SMALL_SCALAR_HELPER_INLINE_BODY_COST)
 }
 
 fn run_small_scalar_helper_env_pass(node: &TypedExpression) -> TypedExpression {
@@ -5682,7 +5691,7 @@ fn extract_small_scalar_helper_inline_def(
         return None;
     }
     if !is_inline_safe_body(&body_expr)
-        || inline_body_cost(&body_expr) > MAX_SMALL_SCALAR_HELPER_INLINE_BODY_COST
+        || inline_body_cost(&body_expr) > small_scalar_helper_inline_body_cost_limit()
     {
         return None;
     }

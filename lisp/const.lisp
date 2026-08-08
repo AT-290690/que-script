@@ -8,6 +8,8 @@
 (let const/dec/max-safe 2147483.647)
 (let const/dec/min-safe -2147483.648)
 (let const/dec/pi 3.142)
+(let const/dec/e 2.718)
+(let const/dec/euler const/dec/e)
 (let const/dec/ln2 0.693)
 (let infinity 2147483647)
 (let -infinity -2147483648)
