@@ -38,6 +38,8 @@
 (let range/dec std/vector/dec/range)
 (let range. range/dec)
 (let square std/int/square)
+(let expt/euler (lambda b (std/int/expt const/dec/e b)))
+(let expt/euler. expt/euler)
 (let expt (lambda b x (std/int/expt x b)))
 (let sqrt std/int/sqrt)
 (let expt/int (lambda b x (std/int/expt x b)))

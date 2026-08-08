@@ -937,8 +937,8 @@ xs)"#,
 
     #[test]
     fn test_parser_if_rejects_missing_then_branch() {
-        let err = crate::parser::build("(if true)")
-            .expect_err("if without then branch should fail");
+        let err =
+            crate::parser::build("(if true)").expect_err("if without then branch should fail");
         assert!(
             err.contains("if expects 2 or 3 arguments after 'if'"),
             "unexpected error: {}",
@@ -5842,6 +5842,55 @@ fn"#;
             !wat.contains("call $v_idx"),
             "small scalar helper should inline into later lambda body, got:\n{}",
             wat
+        );
+    }
+
+    #[test]
+    fn test_wat_branchy_scalar_helper_inlines_into_later_lambda_body() {
+        let _inline_cost = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "64");
+        let expr = crate::parser::build(
+            r#"(do
+                    (let push! (lambda xs x (set! xs (length xs) x)))
+                    (let Counter->Char
+                      (lambda counter
+                        (if (= counter 1)
+                            (char 49)
+                            (if (= counter 2)
+                                (char 50)
+                                (if (= counter 3)
+                                    (char 51)
+                                    (char (+ 48 counter)))))))
+                    (let encode
+                      (lambda xs
+                        (do
+                          (let out [])
+                          (mut counter 1)
+                          (push! out (Counter->Char counter))
+                          out)))
+                    (encode [1]))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let encode_start = wat
+            .find("(func $v_encode")
+            .expect("encode helper should exist");
+        let encode_rest = &wat[encode_start..];
+        let encode_end = encode_rest
+            .find("\n  (func ")
+            .and_then(|idx| if idx == 0 { None } else { Some(idx) })
+            .unwrap_or(encode_rest.len());
+        let encode_wat = &encode_rest[..encode_end];
+
+        assert!(
+            !encode_wat.contains("call $v_Counter_dash__gt_Char"),
+            "branchy scalar helper should inline into encode, got:\n{}",
+            encode_wat
+        );
+        assert!(
+            encode_wat.contains("i32.const 49"),
+            "inlined helper branch should remain in encode, got:\n{}",
+            encode_wat
         );
     }
 
