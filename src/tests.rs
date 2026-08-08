@@ -9623,7 +9623,42 @@ the sea shore
 
 (&mut inp "1")
 (loop/repeat 4 (lambda () (&alter! inp (encode (&get inp)))))
-(&get inp)"#, "111221")
+(&get inp)"#, "111221"),
+(r#"(let Counter->Char (lambda (counter)
+                              (cond
+                                (= counter 1) '1'
+                                (= counter 2) '2'
+                                (= counter 3) '3'
+                                (Int->Char (+ 48 counter)))))
+  (let encode
+    (lambda (xs)
+      (let out [])
+      (let len (length xs))
+      (mut prev (get xs 0))
+      (mut counter 1)
+      (mut i 1)
+      (while (< i len)
+        (let x (get xs i))
+        (if (=# x prev)
+          (++ counter)
+          (do
+            (push! out (Counter->Char counter))
+            (push! out prev)
+            (alter! prev x)
+            (alter! counter 1)))
+        (alter! i (+ i 1)))
+      (push! out (Counter->Char counter))
+      (push! out prev)
+      out))
+
+  (letrec repeat-encode
+    (lambda (xs step)
+      (if (= step 5)
+        xs
+        (repeat-encode (encode xs) (+ step 1)))))
+
+  (length (repeat-encode "1" 0))
+"#, "6")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
