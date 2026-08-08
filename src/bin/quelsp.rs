@@ -7,10 +7,11 @@ use lsp_types::request::Request as LspRequest;
 use lsp_types::request::{Completion, HoverRequest};
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, MarkupContent, MarkupKind, Position, PublishDiagnosticsParams, Range,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    CompletionTextEdit, Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, MarkupContent, MarkupKind, Position,
+    PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Uri,
 };
 use que::infer::{infer_with_builtins_typed_lsp, EffectFlags, InferErrorScope, TypedExpression};
 use que::lsp_native_core as native_core;
@@ -587,9 +588,10 @@ impl ServerState {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let mut items = Vec::new();
-        let prefix = self.documents.get(uri).and_then(|doc| {
-            native_core::symbol_prefix_at_position(&doc.text, to_core_position(position))
-        });
+        let prefix = self
+            .documents
+            .get(uri)
+            .and_then(|doc| completion_prefix_and_range(&doc.text, position));
 
         for keyword in [
             "lambda",
@@ -638,8 +640,9 @@ impl ServerState {
 
         items.sort_by(|a, b| a.label.cmp(&b.label));
         items.dedup_by(|a, b| a.label == b.label);
-        if let Some(prefix) = prefix {
+        if let Some((prefix, replace_range)) = prefix {
             items.retain(|item| completion_matches_prefix(&item.label, &prefix));
+            apply_completion_replace_range(&mut items, replace_range);
         }
         items
     }
@@ -647,7 +650,7 @@ impl ServerState {
     fn completion_items_for_text(&self, text: &str, position: Position) -> Vec<CompletionItem> {
         let analysis = self.analyze_text_for_doc_path(text, None);
         let mut items = Vec::new();
-        let prefix = native_core::symbol_prefix_at_position(text, to_core_position(position));
+        let prefix = completion_prefix_and_range(text, position);
         for keyword in [
             "lambda",
             "if",
@@ -690,8 +693,9 @@ impl ServerState {
 
         items.sort_by(|a, b| a.label.cmp(&b.label));
         items.dedup_by(|a, b| a.label == b.label);
-        if let Some(prefix) = prefix {
+        if let Some((prefix, replace_range)) = prefix {
             items.retain(|item| completion_matches_prefix(&item.label, &prefix));
+            apply_completion_replace_range(&mut items, replace_range);
         }
         items
     }
@@ -1626,6 +1630,32 @@ fn completion_matches_prefix(label: &str, prefix: &str) -> bool {
         .next()
         .map(|segment| segment.starts_with(prefix))
         .unwrap_or(false)
+}
+
+fn completion_prefix_and_range(text: &str, position: Position) -> Option<(String, Range)> {
+    let prefix = native_core::symbol_prefix_at_position(text, to_core_position(position))?;
+    let prefix_len = prefix.chars().count() as u32;
+    if prefix_len > position.character {
+        return None;
+    }
+    Some((
+        prefix,
+        Range::new(
+            Position::new(position.line, position.character - prefix_len),
+            position,
+        ),
+    ))
+}
+
+fn apply_completion_replace_range(items: &mut [CompletionItem], range: Range) {
+    for item in items {
+        let new_text = item
+            .insert_text
+            .clone()
+            .unwrap_or_else(|| item.label.clone());
+        item.text_edit = Some(CompletionTextEdit::Edit(TextEdit { range, new_text }));
+        item.insert_text = None;
+    }
 }
 
 fn should_hide_completion_symbol(symbol: &str) -> bool {
