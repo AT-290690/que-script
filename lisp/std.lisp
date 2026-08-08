@@ -691,6 +691,71 @@ out)))
 (let std/int/delta (lambda a b (std/int/abs (- a b))))
 (let std/dec/delta (lambda a b (std/dec/abs (-. a b))))
 
+; Structural fixed decimal: { negative? whole fraction } with fraction in [0, scale).
+; This is useful when you want decimal-like values without depending on Que's Dec scale.
+(let std/struct-dec/scale 1000)
+(let std/struct-dec/zero { false 0 0 })
+(let std/struct-dec/one { false 1 0 })
+(let std/struct-dec/pi { false 3 142 })
+(let std/struct-dec/e { false 2 718 })
+(let std/struct-dec/negative? fst)
+(let std/struct-dec/whole (lambda n (fst (snd n))))
+(let std/struct-dec/fraction (lambda n (snd (snd n))))
+(let std/struct-dec/normalize (lambda n (do
+  (let neg (fst n))
+  (let whole (std/int/abs (fst (snd n))))
+  (let frac-raw (std/int/abs (snd (snd n))))
+  (let carry (/ frac-raw std/struct-dec/scale))
+  (let frac (mod frac-raw std/struct-dec/scale))
+  (let normalized-whole (+ whole carry))
+  (if (and (= normalized-whole 0) (= frac 0))
+      std/struct-dec/zero
+      { neg normalized-whole frac }))))
+(let std/struct-dec/new (lambda neg whole fraction
+  (std/struct-dec/normalize { neg whole fraction })))
+(let std/struct-dec/from-int (lambda n
+  (std/struct-dec/new (< n 0) (std/int/abs n) 0)))
+(let std/struct-dec/scaled (lambda n
+  (do
+    (let mag (+ (* (std/struct-dec/whole n) std/struct-dec/scale)
+                (std/struct-dec/fraction n)))
+    (if (std/struct-dec/negative? n) (- mag) mag))))
+(let std/struct-dec/from-scaled (lambda n
+  (do
+    (let mag (std/int/abs n))
+    (std/struct-dec/new (< n 0)
+                        (/ mag std/struct-dec/scale)
+                        (mod mag std/struct-dec/scale)))))
+(let std/struct-dec/negate (lambda n
+  (if (= (std/struct-dec/scaled n) 0)
+      std/struct-dec/zero
+      { (not (std/struct-dec/negative? n))
+        (std/struct-dec/whole n)
+        (std/struct-dec/fraction n) })))
+(let std/struct-dec/abs (lambda n
+  { false (std/struct-dec/whole n) (std/struct-dec/fraction n) }))
+(let std/struct-dec/add (lambda a b
+  (std/struct-dec/from-scaled (+ (std/struct-dec/scaled a)
+                                 (std/struct-dec/scaled b)))))
+(let std/struct-dec/sub (lambda a b
+  (std/struct-dec/from-scaled (- (std/struct-dec/scaled a)
+                                 (std/struct-dec/scaled b)))))
+(let std/struct-dec/mul (lambda a b
+  (std/struct-dec/from-scaled (/ (* (std/struct-dec/scaled a)
+                                    (std/struct-dec/scaled b))
+                                 std/struct-dec/scale))))
+(let std/struct-dec/div (lambda a b
+  (std/struct-dec/from-scaled (/ (* (std/struct-dec/scaled a)
+                                    std/struct-dec/scale)
+                                 (std/struct-dec/scaled b)))))
+(let std/struct-dec/equal? (lambda a b (= (std/struct-dec/scaled a) (std/struct-dec/scaled b))))
+(let std/struct-dec/lt? (lambda a b (< (std/struct-dec/scaled a) (std/struct-dec/scaled b))))
+(let std/struct-dec/lte? (lambda a b (<= (std/struct-dec/scaled a) (std/struct-dec/scaled b))))
+(let std/struct-dec/gt? (lambda a b (> (std/struct-dec/scaled a) (std/struct-dec/scaled b))))
+(let std/struct-dec/gte? (lambda a b (>= (std/struct-dec/scaled a) (std/struct-dec/scaled b))))
+(let std/struct-dec/to-dec (lambda n
+  (/. (Int->Dec (std/struct-dec/scaled n)) (Int->Dec std/struct-dec/scale))))
+
 (let std/vector/map/adjacent (lambda xs fn (if (std/vector/empty? xs) [] (do 
   (let out [])
   (mut i 1)
@@ -1954,6 +2019,141 @@ q)))
   (std/vector/reduce xs (lambda a b (std/int/big/signed/add a b)) std/int/big/signed/zero)))
 (let std/vector/int/big/signed/product (lambda xs
   (std/vector/reduce xs (lambda a b (std/int/big/signed/mul a b)) std/int/big/signed/one)))
+
+; Arbitrary-size structural fixed decimal.
+; Representation: { precision signed-scaled }
+; - precision is the count of fractional decimal digits.
+; - signed-scaled is a SignedBigInt containing value * 10^precision.
+(let std/struct-big-dec/zero { 0 std/int/big/signed/zero })
+(let std/struct-big-dec/one { 0 std/int/big/signed/one })
+(let std/struct-big-dec/precision fst)
+(let std/struct-big-dec/signed snd)
+(let std/struct-big-dec/negative? (lambda n (std/int/big/signed/negative? (std/struct-big-dec/signed n))))
+(let std/struct-big-dec/scale (lambda precision (std/int/big/pow [1 0] precision)))
+(let std/struct-big-dec/from-scaled (lambda precision scaled
+  { precision (std/int/big/signed/normalize scaled) }))
+(let std/struct-big-dec/new (lambda precision neg whole fraction
+  (do
+    (let scale (std/struct-big-dec/scale precision))
+    (let whole-scaled (std/int/big/mul whole scale))
+    (let mag (std/int/big/add whole-scaled fraction))
+    (std/struct-big-dec/from-scaled precision { neg mag }))))
+(let std/struct-big-dec/new-digits (lambda neg whole fraction
+  (std/struct-big-dec/new (length fraction) neg whole fraction)))
+(let std/struct-big-dec/pi (std/struct-big-dec/new-digits false [3] [1 4 1 5 9 2 6 5 3 5 8 9 7 9 3]))
+(let std/struct-big-dec/e (std/struct-big-dec/new-digits false [2] [7 1 8 2 8 1 8 2 8 4 5 9 0 4 5]))
+(let std/struct-big-dec/from-int (lambda n
+  { 0 (std/int/big/signed/new (std/convert/integer->string n)) }))
+(let std/struct-big-dec/from-digits (lambda precision neg scaled-digits
+  (std/struct-big-dec/from-scaled precision { neg scaled-digits })))
+(let std/struct-big-dec/scaled (lambda n (std/struct-big-dec/signed n)))
+(let std/struct-big-dec/whole (lambda n
+  (std/int/big/div
+    (std/int/big/signed/digits (std/struct-big-dec/signed n))
+    (std/struct-big-dec/scale (std/struct-big-dec/precision n)))))
+(let std/struct-big-dec/fraction (lambda n
+  (std/int/big/mod
+    (std/int/big/signed/digits (std/struct-big-dec/signed n))
+    (std/struct-big-dec/scale (std/struct-big-dec/precision n)))))
+(let std/struct-big-dec/rescale-signed (lambda signed from-precision to-precision
+  (if (= from-precision to-precision)
+      signed
+      (std/int/big/signed/normalize {
+        (std/int/big/signed/negative? signed)
+        (std/int/big/mul
+          (std/int/big/signed/digits signed)
+          (std/struct-big-dec/scale (- to-precision from-precision)))
+      }))))
+(let std/struct-big-dec/align-left (lambda a b
+  (do
+    (let precision (std/int/max (std/struct-big-dec/precision a) (std/struct-big-dec/precision b)))
+    (std/struct-big-dec/rescale-signed
+      (std/struct-big-dec/signed a)
+      (std/struct-big-dec/precision a)
+      precision))))
+(let std/struct-big-dec/align-right (lambda a b
+  (do
+    (let precision (std/int/max (std/struct-big-dec/precision a) (std/struct-big-dec/precision b)))
+    (std/struct-big-dec/rescale-signed
+      (std/struct-big-dec/signed b)
+      (std/struct-big-dec/precision b)
+      precision))))
+(let std/struct-big-dec/add (lambda a b
+  (do
+    (let precision (std/int/max (std/struct-big-dec/precision a) (std/struct-big-dec/precision b)))
+    (std/struct-big-dec/from-scaled
+      precision
+      (std/int/big/signed/add
+        (std/struct-big-dec/align-left a b)
+        (std/struct-big-dec/align-right a b))))))
+(let std/struct-big-dec/sub (lambda a b
+  (do
+    (let precision (std/int/max (std/struct-big-dec/precision a) (std/struct-big-dec/precision b)))
+    (std/struct-big-dec/from-scaled
+      precision
+      (std/int/big/signed/sub
+        (std/struct-big-dec/align-left a b)
+        (std/struct-big-dec/align-right a b))))))
+(let std/struct-big-dec/mul (lambda a b
+  (std/struct-big-dec/from-scaled
+    (+ (std/struct-big-dec/precision a) (std/struct-big-dec/precision b))
+    (std/int/big/signed/mul (std/struct-big-dec/signed a) (std/struct-big-dec/signed b)))))
+(let std/struct-big-dec/div/precision (lambda precision a b
+  (do
+    (let numerator
+      (std/int/big/signed/mul
+        (std/struct-big-dec/signed a)
+        { false (std/struct-big-dec/scale (+ precision (std/struct-big-dec/precision b))) }))
+    (let denominator
+      { false
+        (std/int/big/mul
+          (std/int/big/signed/digits (std/struct-big-dec/signed b))
+          (std/struct-big-dec/scale (std/struct-big-dec/precision a))) })
+    (std/struct-big-dec/from-scaled precision (std/int/big/signed/div numerator denominator)))))
+(let std/struct-big-dec/div (lambda a b
+  (std/struct-big-dec/div/precision
+    (std/int/max (std/struct-big-dec/precision a) (std/struct-big-dec/precision b))
+    a
+    b)))
+(let std/struct-big-dec/equal? (lambda a b
+  (std/int/big/signed/equal?
+    (std/struct-big-dec/align-left a b)
+    (std/struct-big-dec/align-right a b))))
+(let std/struct-big-dec/lt? (lambda a b
+  (std/int/big/signed/lt?
+    (std/struct-big-dec/align-left a b)
+    (std/struct-big-dec/align-right a b))))
+(let std/struct-big-dec/lte? (lambda a b
+  (std/int/big/signed/lte?
+    (std/struct-big-dec/align-left a b)
+    (std/struct-big-dec/align-right a b))))
+(let std/struct-big-dec/gt? (lambda a b
+  (std/int/big/signed/gt?
+    (std/struct-big-dec/align-left a b)
+    (std/struct-big-dec/align-right a b))))
+(let std/struct-big-dec/gte? (lambda a b
+  (std/int/big/signed/gte?
+    (std/struct-big-dec/align-left a b)
+    (std/struct-big-dec/align-right a b))))
+(let std/struct-big-dec/negate (lambda n
+  (std/struct-big-dec/from-scaled
+    (std/struct-big-dec/precision n)
+    (std/int/big/signed/negate (std/struct-big-dec/signed n)))))
+(let std/struct-big-dec/abs (lambda n
+  (std/struct-big-dec/from-scaled
+    (std/struct-big-dec/precision n)
+    { false (std/int/big/signed/digits (std/struct-big-dec/signed n)) })))
+(let std/struct-big-dec/to-string (lambda n
+  (do
+    (let precision (std/struct-big-dec/precision n))
+    (let whole (std/convert/digits->chars (std/struct-big-dec/whole n)))
+    (let fraction (std/string/prepend-zeroes
+      (std/convert/digits->chars (std/struct-big-dec/fraction n))
+      precision))
+    (let sign (if (std/struct-big-dec/negative? n) "-" ""))
+    (if (= precision 0)
+        (cons sign whole)
+        (cons sign whole "." fraction)))))
 
 (let std/convert/integer->digits-base (lambda num base  
     (if (= num 0) [ 0 ] (do 

@@ -814,6 +814,45 @@ xs)"#,
     }
 
     #[test]
+    fn test_runtime_struct_dec_helpers_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                [
+                  (StructDec/scaled (StructDec/add (StructDec/new false 3 900) (StructDec/new false 0 200)))
+                  (StructDec/scaled (StructDec/sub (StructDec/new false 3 100) (StructDec/new false 5 200)))
+                  (StructDec/scaled (StructDec/mul (StructDec/new false 1 500) (StructDec/new false 2 0)))
+                  (StructDec/scaled (StructDec/div (StructDec/new false 3 0) (StructDec/new false 2 0)))
+                  (Bool->Int (StructDec/gt? StructDec/pi StructDec/e))
+                ])"#,
+            true,
+        );
+        assert_eq!(output.trim(), "[4100 -2100 3000 1500 1]");
+    }
+
+    #[test]
+    fn test_runtime_struct_big_dec_helpers_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let a (StructBigDec/new-digits false (BigInt/new "12345678901234567890") (BigInt/new "987")))
+                (let b (StructBigDec/new-digits false [2] [5]))
+                [
+                  (StructBigDec->String (StructBigDec/new-digits false [3] [1 4]))
+                  (StructBigDec->String StructBigDec/pi)
+                  (StructBigDec->String (StructBigDec/add a b))
+                  (StructBigDec->String (StructBigDec/sub b a))
+                  (StructBigDec->String (StructBigDec/mul b b))
+                  (StructBigDec->String (StructBigDec/div/precision 6 b (StructBigDec/from-int 2)))
+                  (if (StructBigDec/gt? StructBigDec/pi StructBigDec/e) "true" "false")
+                ])"#,
+            true,
+        );
+        assert_eq!(
+            output.trim(),
+            "[3.14 3.141592653589793 12345678901234567893.487 -12345678901234567888.487 6.25 1.250000 true]"
+        );
+    }
+
+    #[test]
     fn test_lsp_base_environment_includes_macro_keywords() {
         let (_, _, signatures, _) = crate::lsp_native_core::build_base_environment(&[]);
         let signature = signatures
@@ -1447,9 +1486,9 @@ xs)"#,
     fn test_runtime_signed_bigint_to_string_formats_sign_and_zero() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                { (SignedBigInt/to-string (SignedBigInt/new "-25"))
-                  (SignedBigInt/to-string (SignedBigInt/new "7"))
-                  (SignedBigInt/to-string (SignedBigInt/new "-0")) })"#,
+                { (SignedBigInt->String (SignedBigInt/new "-25"))
+                  (SignedBigInt->String (SignedBigInt/new "7"))
+                  (SignedBigInt->String (SignedBigInt/new "-0")) })"#,
             true,
         );
         assert_eq!(output, "{ -25 { 7 0 } }");
@@ -1472,9 +1511,9 @@ xs)"#,
     fn test_runtime_signed_bigint_mod_matches_truncate_toward_zero_division() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                { (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "3")))
-                  (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "7") (SignedBigInt/new "-3")))
-                  (SignedBigInt/to-string (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "-3"))) })"#,
+                { (SignedBigInt->String (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "3")))
+                  (SignedBigInt->String (SignedBigInt/mod (SignedBigInt/new "7") (SignedBigInt/new "-3")))
+                  (SignedBigInt->String (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "-3"))) })"#,
             true,
         );
         assert_eq!(output, "{ -1 { 1 -1 } }");
@@ -1485,10 +1524,10 @@ xs)"#,
     fn test_runtime_signed_bigint_floor_division_rounds_down() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                [ (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "-7") (SignedBigInt/new "3")))
-                  (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "-3")))
-                  (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "-7") (SignedBigInt/new "-3")))
-                  (SignedBigInt/to-string (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
+                [ (SignedBigInt->String (SignedBigInt/div/floor (SignedBigInt/new "-7") (SignedBigInt/new "3")))
+                  (SignedBigInt->String (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "-3")))
+                  (SignedBigInt->String (SignedBigInt/div/floor (SignedBigInt/new "-7") (SignedBigInt/new "-3")))
+                  (SignedBigInt->String (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
             true,
         );
         assert_eq!(output, "[-3 -3 2 2]");
@@ -1499,10 +1538,10 @@ xs)"#,
     fn test_runtime_signed_bigint_ceil_division_rounds_up() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                [ (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "-7") (SignedBigInt/new "3")))
-                  (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "-3")))
-                  (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "-7") (SignedBigInt/new "-3")))
-                  (SignedBigInt/to-string (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
+                [ (SignedBigInt->String (SignedBigInt/div/ceil (SignedBigInt/new "-7") (SignedBigInt/new "3")))
+                  (SignedBigInt->String (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "-3")))
+                  (SignedBigInt->String (SignedBigInt/div/ceil (SignedBigInt/new "-7") (SignedBigInt/new "-3")))
+                  (SignedBigInt->String (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
             true,
         );
         assert_eq!(output, "[-2 -2 3 3]");
@@ -1513,9 +1552,9 @@ xs)"#,
     fn test_runtime_signed_bigint_pow_handles_sign_and_zero_exponent() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                [ (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 5))
-                  (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 4))
-                  (SignedBigInt/to-string (SignedBigInt/pow (SignedBigInt/new "-2") 0)) ])"#,
+                [ (SignedBigInt->String (SignedBigInt/pow (SignedBigInt/new "-2") 5))
+                  (SignedBigInt->String (SignedBigInt/pow (SignedBigInt/new "-2") 4))
+                  (SignedBigInt->String (SignedBigInt/pow (SignedBigInt/new "-2") 0)) ])"#,
             true,
         );
         assert_eq!(output, "[-32 16 1]");
@@ -1526,9 +1565,9 @@ xs)"#,
     fn test_runtime_signed_bigint_expt_handles_bigint_exponents() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                [ (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [5]))
-                  (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [4]))
-                  (SignedBigInt/to-string (SignedBigInt/expt (SignedBigInt/new "-2") [0])) ])"#,
+                [ (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") [5]))
+                  (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") [4]))
+                  (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") [0])) ])"#,
             true,
         );
         assert_eq!(output, "[-32 16 1]");
@@ -1538,7 +1577,7 @@ xs)"#,
     #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_square_keeps_positive_result() {
         let output = run_program_output_with_std_and_opts(
-            r#"(SignedBigInt/to-string (SignedBigInt/square (SignedBigInt/new "-12")))"#,
+            r#"(SignedBigInt->String (SignedBigInt/square (SignedBigInt/new "-12")))"#,
             true,
         );
         assert_eq!(output, "144");
@@ -1548,7 +1587,7 @@ xs)"#,
     #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_range_builds_ascending_sequence() {
         let output = run_program_output_with_std_and_opts(
-            r#"(map SignedBigInt/to-string (SignedBigInt/range (SignedBigInt/new "-2") (SignedBigInt/new "2")))"#,
+            r#"(map SignedBigInt->String (SignedBigInt/range (SignedBigInt/new "-2") (SignedBigInt/new "2")))"#,
             true,
         );
         assert_eq!(output, "[-2 -1 0 1 2]");
@@ -1560,8 +1599,8 @@ xs)"#,
         let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let xs [ (SignedBigInt/new "-2") (SignedBigInt/new "3") (SignedBigInt/new "4") ])
-                [ (SignedBigInt/to-string (SignedBigInt/sum xs))
-                  (SignedBigInt/to-string (SignedBigInt/product xs)) ])"#,
+                [ (SignedBigInt->String (SignedBigInt/sum xs))
+                  (SignedBigInt->String (SignedBigInt/product xs)) ])"#,
             true,
         );
         assert_eq!(output, "[5 -24]");
