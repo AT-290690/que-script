@@ -3,7 +3,7 @@ use crate::parser::{self, Expression};
 use crate::types::{create_builtin_environment, Type, TypeEnv};
 use std::collections::{HashMap, HashSet};
 
-pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 18] = [
+pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 17] = [
     ("alter!", "T -> T -> ()"),
     ("&alter!", "[T] -> T -> ()"),
     ("vector", "T... -> [T]"),
@@ -13,7 +13,6 @@ pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 18] = [
     ("decimals", "Dec... -> [Dec]"),
     ("strings", "[Char]... -> [[Char]]"),
     ("tuple", "T... -> {T...}"),
-    ("loop", "Int -> Int -> (Int -> ()) -> ()"),
     ("letmacro", "compile-time macro definition"),
     ("quote", "compile-time syntax quote"),
     ("qq", "compile-time quasiquote"),

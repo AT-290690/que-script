@@ -1307,7 +1307,7 @@ xs)"#,
             r#"(do
                 (let push! (lambda xs x (do (set! xs (length xs) x) xs)))
                 (let xs [])
-                (loop 0 10 (lambda i (push! xs i)))
+                (loop/range/exclusive i 0 10 (push! xs i))
                 xs)"#,
             true,
         );
@@ -2199,10 +2199,10 @@ xs)"#,
      (mut i 1)
      (while (< i (length xs)) (do (set! out (length out) (fn (get xs i))) (alter! i (+ i 1))))
      out))))
-      (let std/vector/int/zeroes (lambda n (do
+     (let std/vector/int/zeroes (lambda n (do
      (let out [ 0 ])
      (let process (lambda i (set! out (length out) 0)))
-     (loop 1 n process)
+     (loop/range/exclusive i 1 n (process i))
      out)))
      (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) nil)))
 
@@ -2389,8 +2389,8 @@ xs)"#,
                   (let odd [])
                   (let even [])
                   (let out [])
-                  (loop 0 (length nums) (lambda i (push! (if (= (mod i 2) 0) even odd) (get nums i))))
-                  (loop 0 (length even) (lambda i (do (push! out (get even i)) (push! out (get odd i)))))
+                  (loop/range/exclusive i 0 (length nums) (push! (if (= (mod i 2) 0) even odd) (get nums i)))
+                  (loop/range/exclusive j 0 (length even) (do (push! out (get even j)) (push! out (get odd j))))
                   out)))
                 [(sort-array-by-parity2 [4 2 5 7])
                  (sort-array-by-parity2 [2 3])
@@ -2405,7 +2405,7 @@ xs)"#,
     fn test_regression_std_vector_for_isolated_behavior() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                (let std/vector/for (lambda xs fn (loop 0 (length xs) (lambda i (fn (get xs i))))))
+                (let std/vector/for (lambda xs fn (loop/range/exclusive i 0 (length xs) (fn (get xs i)))))
                 (let out [])
                 (std/vector/for [1 2 3 4] (lambda x (set! out (length out) (* x 2))))
                 out)"#,
@@ -2426,10 +2426,10 @@ xs)"#,
                     (let H (length matrix))
                     (let W (length (get matrix 0)))
                     (let out [])
-                    (loop 0 W (lambda i (do
+                    (loop/range/exclusive i 0 W (do
                         (std/vector/push! out [])
-                        (loop 0 H (lambda j 
-                            (std/vector/push! (std/vector/at out -1) (get matrix j i)))))))
+                        (loop/range/exclusive j 0 H
+                            (std/vector/push! (std/vector/at out -1) (get matrix j i)))))
                     out))))
                 (std/vector/3d/rotate [[1 2 3] [4 5 6]]))"#,
             true,
@@ -7266,17 +7266,17 @@ xs"#,
                 r#"(let naive-sub-array-sum (lambda xs (do 
     (let n (length xs))
     (integer out 0)
-    (loop 0 n (lambda i (do 
+    (loop/range/exclusive i 0 n (do 
         (integer temp 0)
-        (loop i n (lambda j (do 
+        (loop/range/exclusive j i n (do
             (&alter! temp (+ (&get temp) (get xs j)))
-            (&alter! out (+ (&get out) (get temp)))))))))
+            (&alter! out (+ (&get out) (get temp)))))))
     (&get out))))
 
 (let expert-sub-array-sum (lambda xs (do 
     (let n (length xs))
     (integer out 0)
-    (loop 0 n (lambda i (&alter! out (+ (&get out) (* (get xs i) (+ i 1) (- n i))))))
+    (loop/range/exclusive i 0 n (&alter! out (+ (&get out) (* (get xs i) (+ i 1) (- n i)))))
     (&get out))))
 
 (let xs [1 4 5 3 2])
@@ -7314,8 +7314,8 @@ xs"#,
     (let odd [])
     (let even [])
     (let out [])
-    (loop 0 (length nums) (lambda i (std/vector/push! (if (std/int/even? i) even odd) (get nums i))))
-    (loop 0 (length even) (lambda i (do (std/vector/push! out (get even i)) (std/vector/push! out (get odd i)))))
+    (loop/range/exclusive i 0 (length nums) (std/vector/push! (if (std/int/even? i) even odd) (get nums i)))
+    (loop/range/exclusive j 0 (length even) (do (std/vector/push! out (get even j)) (std/vector/push! out (get odd j))))
     out))))
 
 [
@@ -7387,7 +7387,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"(let palindrome? (lambda str (do 
     (let p? [true])
-    (loop 0 (/ (length str) 2) (lambda i (if (not (=# (get str i) (get str (- (length str) i 1)))) (&alter! p? false))))
+    (loop/range/exclusive i 0 (/ (length str) 2) (if (not (=# (get str i) (get str (- (length str) i 1)))) (&alter! p? false)))
     (true? p?))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[true false]",
@@ -7521,7 +7521,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 r#"(let count-points (lambda rings (do
   (let rods (std/vector/map (std/vector/int/zeroes 10) (lambda _ [false false false]))) ; [R, G, B] for each rod
   (let len (length rings))
-  (loop 0 len (lambda i (do
+  (loop/range/exclusive i 0 len (do
     (if (std/int/even? i)
       (do
         (let color (get rings i))
@@ -7531,7 +7531,7 @@ D:=,=,=,+,=,=,=,+,=,=")
           (=# color 'R') (set! rod 0 true)
           (=# color 'G') (set! rod 1 true)
           (=# color 'B') (set! rod 2 true)
-          nil))))))
+          nil)))))
   (std/vector/count-of rods (lambda rod (and (get rod 0) (get rod 1) (get rod 2)))))))
 
 ; Example usage
@@ -7687,11 +7687,11 @@ D:=,=,=,+,=,=,=,+,=,=")
 (while (< (get generation) (/ *RES* 2)) (do 
     (std/vector/push! out (&get cells))
     (let nextgen (std/vector/copy (&get cells)))
-    (loop 1 (- (length (&get cells)) 1) (lambda i (do 
+    (loop/range/exclusive i 1 (- (length (&get cells)) 1) (do 
         (let left (get cells 0 (- i 1)))
         (let me (get cells 0 i))
         (let right (get cells 0 (+ i 1)))
-        (set! nextgen i (rules left me right)))))
+        (set! nextgen i (rules left me right))))
     (&alter! cells nextgen)
     (&alter! generation (+ (&get generation) 1))))
 
@@ -7767,9 +7767,7 @@ out
           (if (= (get result) 0)
               (do
                 (&alter! facing (turn (get facing) D))
-                (loop 0 M
-                  (lambda _
-                    (if (= (get result) 0)
+                (loop/range/exclusive _ 0 M (if (= (get result) 0)
                         (do
                           (let p (step (get y) (get x) (get facing)))
                           (&alter! y (get p 0))
@@ -7779,7 +7777,7 @@ out
                           (if (Table/has? key visited)
                               (&alter! result (+ (std/int/abs (get y))
                                              (std/int/abs (get x))))
-                              (Table/set! visited key true))))))))) input)
+                              (Table/set! visited key true)))))))) input)
 
       (get result))))
 
@@ -7878,16 +7876,16 @@ b
 
 (let part1 (lambda { _ nums } (do 
 (let sword [[-1 (get nums 0) -1]])
-(loop 1 (length nums) (lambda i (do
+(loop/range/exclusive i 1 (length nums) (do
   (let num (get nums i))
   (boolean placed false)
-  (loop 0 (length sword) (lambda j (do 
+  (loop/range/exclusive j 0 (length sword) (do
     (let segment (get sword j))
     (cond
         (and (false? placed) (< num (get segment 1)) (= (get segment 0) -1)) (do (set! segment 0 num) (&alter! placed true))
         (and (false? placed) (> num (get segment 1)) (= (get segment 2) -1)) (do (set! segment 2 num) (&alter! placed true))
-        nil))))
-    (if (false? placed) (push! sword [-1 num -1])))))
+        nil)))
+    (if (false? placed) (push! sword [-1 num -1]))))
 sword)))
   
 (part1 (parse INPUT))"#,
@@ -7978,7 +7976,7 @@ L82")
   (snd (reduce (lambda { dial counter } [d r] (do 
       (let res (emod (+ dial (* d r)) 100))
       (let rng [dial])
-      (loop 1 r (lambda i (push! rng (emod (+ (at rng -1) (* 1 d)) 100)))) 
+      (loop/range/exclusive i 1 r (push! rng (emod (+ (at rng -1) (* 1 d)) 100))) 
       { res (+ counter (count/int 0 rng)) })) { 50 0 } xs))))
 
 [ (part1 (parse INPUT)) (part2 (parse INPUT)) ]"#,
@@ -7995,10 +7993,9 @@ L82")
   (integer S 0)
   (|> parsed (for (lambda inp (do
     (integer M -infinity)
-    (loop 0 (length inp) (lambda i 
-      (loop i (length inp) (lambda j 
+    (loop/range/exclusive i 0 (length inp) (loop/range/exclusive j i (length inp)
         (if (<> i j) 
-          (&alter! M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))))
+          (&alter! M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))
     (&alter! S (+ (&get S) (get M))))))) 
     (&get S))))
 
@@ -8007,10 +8004,10 @@ L82")
   (for (lambda line (do 
     (let N (length line))
     (let stack [])
-    (loop 0 N (lambda i (do
+    (loop/range/exclusive i 0 N (do
       (while (and (not (empty? stack)) (<# (at stack -1) (get line i)) (> (+ (length stack) (- N i)) 12)) (pop! stack))
       (push! stack (get line i))
-      (while (> (length stack) 12) (pop! stack)))))
+      (while (> (length stack) 12) (pop! stack))))
     (&alter! S (BigInt/add (&get S) (BigInt/new stack))))) parsed)
   (&get S))))
 
@@ -8034,21 +8031,21 @@ L82")
 (let parse (lambda input (|> input (String->Vector nl) (map (lambda x (map (lambda x (if (=# x '@') 1 0)) x))))))
 (let part1 (lambda input (do
   (integer TOTAL 0)
-  (loop 0 (length input) (lambda y (do 
-    (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
+  (loop/range/exclusive y 0 (length input) (do 
+    (loop/range/exclusive x 0 (length (get input 0)) (if (= (get input y x) 1) (do
       (integer SUM 0)
       (neighborhood neighborhood/moore y x (lambda cell dir y x (&alter! SUM (+ (&get SUM) cell))) input)
-      (if (< (get SUM) 4) (&alter! TOTAL (+ (&get TOTAL) 1))))))))))
+      (if (< (get SUM) 4) (&alter! TOTAL (+ (&get TOTAL) 1))))))))
   (get TOTAL))))
 
   (let part2 (lambda input (do
     (letrec rec (lambda total (do
         (let rem [])
-        (loop 0 (length input) (lambda y (do 
-        (loop 0 (length (get input 0)) (lambda x (if (= (get input y x) 1) (do 
+        (loop/range/exclusive y 0 (length input) (do 
+        (loop/range/exclusive x 0 (length (get input 0)) (if (= (get input y x) 1) (do
         (integer ACC 0)
         (neighborhood neighborhood/moore y x (lambda cell dir y x (&alter! ACC (+ (&get ACC) cell))) input)
-        (if (< (get ACC) 4) (push! rem [ y x ])))))))))
+        (if (< (get ACC) 4) (push! rem [ y x ])))))))
         (if (empty? rem) total (do 
         (for (lambda [y x] (set! (get input y) x 0)) rem)
         (rec (+ total (length rem))))))))
@@ -8083,14 +8080,14 @@ L82")
   (&mut low (get ranges 0 0))
   (&mut high (get ranges 0 1))
   (&mut out [ 0 ])
-  (loop 1 (length ranges) (lambda i (do 
+  (loop/range/exclusive i 1 (length ranges) (do 
     (let [ dlow dhigh ] (get ranges i))
     (if (BigInt/gte? (&get high) dlow) (do 
       (&alter! low (if (BigInt/lt? (&get low) dlow) (&get low) dlow))
       (&alter! high (if (BigInt/gt? (&get high) dhigh) (&get high) dhigh))) (do 
       (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
       (&alter! low (get ranges i 0))
-      (&alter! high (get ranges i 1)))))))
+      (&alter! high (get ranges i 1))))))
   (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
   (&get out))))
 
@@ -8206,9 +8203,9 @@ L82")
   (let data (map (lambda x (map identity x)) input))
   (&mut beam [ 0 ])
   (let timeline (map (lambda _ [ 0 ]) (zeroes (length (get data 0)))))
-  (loop 0 (length data) (lambda y (do 
+  (loop/range/exclusive y 0 (length data) (do 
     (let line (get data y))
-    (loop 0 (length line) (lambda x (do 
+    (loop/range/exclusive x 0 (length line) (do
       (let c (get line x))
       (cond 
         (=# c 'S') (do 
@@ -8223,7 +8220,7 @@ L82")
           (set! timeline x [ 0 ])
         ))
         (=# c '.') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do 
-          (set! (get data y) x '|'))))))))))
+          (set! (get data y) x '|'))))))))
   [(&get beam) (BigInt/sum timeline)])))
 
 (solution (parse INPUT))"#,
@@ -8256,9 +8253,9 @@ L82")
 (let part1 (lambda input (do
   (let len (length input))
   (let dist [])
-  (loop 0 len (lambda i (do 
-    (loop i len (lambda j (if (<> i j) 
-      (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) })))))))
+  (loop/range/exclusive i 0 len (do 
+    (loop/range/exclusive j i len (if (<> i j)
+      (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) })))))
   (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2)))
   (let edges (map fst dist))
   (let parent (range 0 (- (length input) 1)))
@@ -8281,9 +8278,9 @@ L82")
   (let dist [])
   
   ; compute all pairwise distances
-  (loop 0 len (lambda i
-    (loop (+ i 1) len (lambda j
-      (push! dist { [i j] (distance/3d (get input i) (get input j)) })))))
+  (loop/range/exclusive i 0 len
+    (loop/range/exclusive j (+ i 1) len
+      (push! dist { [i j] (distance/3d (get input i) (get input j)) })))
 
   ; sort edges by distance
   (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2))) 
@@ -8948,8 +8945,8 @@ bbrgwb")
 (let solve (lambda s (and (> (length s) 2) (do
   (let n (length s))
   (integer c 0)
-  (loop 0 (- n 1) (lambda i (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1)))))
-  (loop 0 (- n 2) (lambda i (if (=# (get s i) (get s (+ i 2))) (&alter! c (+ (&get c) 1)))))
+  (loop/range/exclusive i 0 (- n 1) (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1))))
+  (loop/range/exclusive j 0 (- n 2) (if (=# (get s j) (get s (+ j 2))) (&alter! c (+ (&get c) 1))))
   (> (get c) 0)))))
 
 [
@@ -9151,7 +9148,7 @@ bbrgwb")
 (let generate-abc (lambda (do 
   (let offset (Char->Int 'a'))
   (let out [])
-  (loop 0 26 (lambda i (push! out (Int->Char (+ i offset)))))
+  (loop/range/exclusive i 0 26 (push! out (Int->Char (+ i offset))))
   out)))
 
 (let abc (generate-abc))
@@ -9246,8 +9243,8 @@ SECRET = SANTA")
   (and (> (length s) 2) (do
     (let n (length s))
     (integer c 0)
-    (loop 0 (- n 1) (lambda i (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1)))))
-    (loop 0 (- n 2) (lambda i (if (=# (get s i) (get s (+ i 2))) (&alter! c (+ (&get c) 1)))))
+    (loop/range/exclusive i 0 (- n 1) (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1))))
+    (loop/range/exclusive j 0 (- n 2) (if (=# (get s j) (get s (+ j 2))) (&alter! c (+ (&get c) 1))))
     (> (get c) 0)))))
 
 (map solve ["BCAB" "BB" "A" "AABB" "BAB" "KEEP"])"#,
@@ -9364,9 +9361,9 @@ SECRET = SANTA")
 (add32 (add32 a b) (add32 c d))))
 
 (let block [0])
-(loop 1 64 (lambda i (push! block 0)))
+(loop/range/exclusive i 1 64 (push! block 0))
 (let words [0])
-(loop 1 16 (lambda i (push! words 0)))
+(loop/range/exclusive j 1 16 (push! words 0))
 
 (let shift-by (lambda i
 (do
@@ -9380,7 +9377,7 @@ SECRET = SANTA")
 (if (= r 0) 6 (if (= r 1) 10 (if (= r 2) 15 21)))))))))
 
 (let md5-a0! (lambda n (do
-(loop 0 8 (lambda i (set! block i (get secret-bytes i))))
+(loop/range/exclusive bi 0 8 (set! block bi (get secret-bytes bi)))
 
 (let div-init
 (if (>= n 1000000000) 1000000000
@@ -9396,20 +9393,18 @@ SECRET = SANTA")
 
 (integer x n)
 (integer msg-len 8)
-(loop 0 10 (lambda i
-(if (> (get div) 0) (do
+(loop/range/exclusive di 0 10 (if (> (get div) 0) (do
 (let digit (/ (get x) (get div)))
 (set! block (get msg-len) (+ 48 digit))
 (&alter! x (mod (get x) (get div)))
 (&alter! div (/ (get div) 10))
 (&alter! msg-len (+ (get msg-len) 1)))
-nil)))
+nil))
 
 (set! block (get msg-len) 128)
-(loop 0 56 (lambda i
-(if (> i (get msg-len))
-(set! block i 0)
-nil)))
+(loop/range/exclusive zi 0 56 (if (> zi (get msg-len))
+(set! block zi 0)
+nil))
 
 (let bit-len (* (get msg-len) 8))
 (set! block 56 (& bit-len 255))
@@ -9421,13 +9416,13 @@ nil)))
 (set! block 62 0)
 (set! block 63 0)
 
-(loop 0 16 (lambda i (do
-(let j (* i 4))
-(set! words i
+(loop/range/exclusive wi 0 16 (do
+(let j (* wi 4))
+(set! words wi
 (| (get block j)
    (| (<< (get block (+ j 1)) 8)
       (| (<< (get block (+ j 2)) 16)
-         (<< (get block (+ j 3)) 24))))))))
+         (<< (get block (+ j 3)) 24)))))))
 
 (let a0 1732584193)
 (let b0 -271733879)
@@ -9441,29 +9436,29 @@ nil)))
 (integer f 0)
 (integer g 0)
 
-(loop 0 64 (lambda i (do
-(if (< i 16)
+(loop/range/exclusive ri 0 64 (do
+(if (< ri 16)
 (do
   (&alter! f (| (& (get B) (get C)) (& (~ (get B)) (get D))))
-  (&alter! g i))
-(if (< i 32)
+  (&alter! g ri))
+(if (< ri 32)
 (do
   (&alter! f (| (& (get D) (get B)) (& (~ (get D)) (get C))))
-  (&alter! g (mod (+ (* 5 i) 1) 16)))
-(if (< i 48)
+  (&alter! g (mod (+ (* 5 ri) 1) 16)))
+(if (< ri 48)
 (do
   (&alter! f (^ (get B) (^ (get C) (get D))))
-  (&alter! g (mod (+ (* 3 i) 5) 16)))
+  (&alter! g (mod (+ (* 3 ri) 5) 16)))
 (do
   (&alter! f (^ (get C) (| (get B) (~ (get D)))))
-  (&alter! g (mod (* 7 i) 16))))))
-(let x4 (add32-4 (get A) (get f) (get K i) (get words (get g))))
-(let new-b (add32 (get B) (left-rotate x4 (shift-by i))))
+  (&alter! g (mod (* 7 ri) 16))))))
+(let x4 (add32-4 (get A) (get f) (get K ri) (get words (get g))))
+(let new-b (add32 (get B) (left-rotate x4 (shift-by ri))))
 (let old-d (get D))
 (&alter! D (get C))
 (&alter! C (get B))
 (&alter! B new-b)
-(&alter! A old-d))))
+(&alter! A old-d)))
 
 (add32 a0 (get A)))))
 
@@ -9474,10 +9469,9 @@ nil)))
  (< (& (>> a 16) 255) 16)))))
 
 (integer answer 0)
-(loop 1 500001 (lambda candidate
-(if (and (= (get answer) 0) (has-five-leading-zeroes! candidate))
+(loop/range/exclusive candidate 1 500001 (if (and (= (get answer) 0) (has-five-leading-zeroes! candidate))
 (&alter! answer candidate)
-nil)))
+nil))
 (get answer)
 "#,
                 "346386",

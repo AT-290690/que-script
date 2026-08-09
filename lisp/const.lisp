@@ -169,6 +169,9 @@
 (let random/int const/int/mulberry32/raw)
 (let random/dec const/dec/mulberry32/next)
 
+(let random const/int/mulberry32/raw)
+(let random. const/dec/mulberry32/next)
+
 (let std/dec/log (lambda x
   (if (<=. x 0.0)
       0.0

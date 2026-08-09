@@ -200,20 +200,14 @@
 
 
 (letmacro loop
-  (lambda start end fn
-    (do
-      (let i (gensym))
-      (let loop-end (gensym))
-      (let loop-cb (gensym))
-      (qq (do
-            (mut (uq i) (uq start))
-            (let (uq loop-end) (uq end))
-            (let (uq loop-cb) (uq fn))
-            (while (< (uq i) (uq loop-end))
-              (do
-                ((uq loop-cb) (uq i))
-                (alter! (uq i) (+ (uq i) 1))
-                nil)))))))
+  (lambda name condition . body
+    (qq (do
+          (mut (uq name) 0)
+          (while (uq condition)
+            (do
+              (uqs body)
+              (++ (uq name))
+              nil))))))
 
 (letmacro let*
   ((name value body)

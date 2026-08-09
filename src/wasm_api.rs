@@ -355,7 +355,6 @@ fn lsp_completions_with_prefix(
             "macroexpand",
             "macroexpand-1",
             "while",
-            "loop",
             "vector",
             "string",
             "integers",
