@@ -185,6 +185,10 @@ fn fn2(a: Type, b: Type, r: Type) -> Type {
     Type::Function(Box::new(a), Box::new(fn1(b, r)))
 }
 
+fn fn3(a: Type, b: Type, c: Type, r: Type) -> Type {
+    Type::Function(Box::new(a), Box::new(fn2(b, c, r)))
+}
+
 pub fn parse_extern_decl(expr: &Expression) -> Result<Option<ExternDecl>, String> {
     let Expression::Apply(items) = expr else {
         return Ok(None);
@@ -236,6 +240,25 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
         import: "read_file",
         local_name: "read!",
         typ: || fn1(ty_char_list(), ty_char_list()),
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "read_chunks",
+        local_name: "read/chunks!",
+        typ: || {
+            fn3(
+                ty_char_list(),
+                ty_int(),
+                fn1(ty_char_list(), ty_unit()),
+                ty_unit(),
+            )
+        },
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "read_lines",
+        local_name: "read/lines!",
+        typ: || fn2(ty_char_list(), fn1(ty_char_list(), ty_unit()), ty_unit()),
     },
     BuiltinHostExternSpec {
         module: "host",

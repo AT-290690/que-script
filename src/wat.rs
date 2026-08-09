@@ -4204,6 +4204,8 @@ fn emit_vector_runtime(
             out.push_str("    end\n");
         }
         out.push_str("  )\n");
+        out.push_str("  (export \"$apply1_i32\" (func $apply1_i32))\n");
+        out.push_str("  (export \"apply1_i32\" (func $apply1_i32))\n");
     }
     if apply_arities.contains(&2) {
         out.push_str(
@@ -9608,6 +9610,9 @@ fn compile_program_to_wat_build_typed_with_opts(
         collect_apply_arities_from_code(func, &mut apply_arities);
     }
     collect_apply_arities_from_code(&main_code, &mut apply_arities);
+    if extern_names.contains("read/chunks!") || extern_names.contains("read/lines!") {
+        apply_arities.insert(1);
+    }
     let main_scratch_i32_locals =
         scratch_i32_locals_needed(main_local_defs.len(), &[&main_code], false);
 

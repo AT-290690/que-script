@@ -3028,3 +3028,8 @@ q)))
 
         (cons left [std/char/dot] right)))))
 (let std/convert/dec->string-6 (std/convert/dec->string-scale 6))
+
+(let std/io/println! (lambda text (do
+  (print! text)
+  (print! [nl]))))
+(let println! std/io/println!)

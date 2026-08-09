@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs;
 use std::io;
-use std::io::Write as _;
+use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -1253,7 +1253,7 @@ fn native_shell_learn() -> &'static str {
     - set! pop! length get car cdr cons fst snd while block unless when when-not\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
-    ARGV print! sleep! clear! list-dir! mkdir! read! delete! write! move!"
+    ARGV print! sleep! clear! list-dir! mkdir! read! read/chunks! read/lines! delete! write! move!"
 }
 
 fn binding_name_from_def(expr: &Expression) -> Option<String> {
@@ -1874,6 +1874,130 @@ pub fn host_read_file(
     write_lisp_string(&mut caller, &output)
 }
 
+fn guest_apply1(
+    caller: &mut Caller<'_, ShellStoreData>,
+) -> wasmtime::Result<TypedFunc<(i32, i32), i32>> {
+    for name in ["$apply1_i32", "apply1_i32"] {
+        if let Some(func) = caller.get_export(name).and_then(Extern::into_func) {
+            if let Ok(typed) = func.typed::<(i32, i32), i32>(&mut *caller) {
+                return Ok(typed);
+            }
+        }
+    }
+    Err(wasmtime::Error::msg(
+        "guest export '$apply1_i32'/'apply1_i32' not found",
+    ))
+}
+
+fn guest_rc_release(
+    caller: &mut Caller<'_, ShellStoreData>,
+) -> wasmtime::Result<TypedFunc<i32, i32>> {
+    for name in ["$rc_release", "rc_release", "release"] {
+        if let Some(func) = caller.get_export(name).and_then(Extern::into_func) {
+            if let Ok(typed) = func.typed::<i32, i32>(&mut *caller) {
+                return Ok(typed);
+            }
+        }
+    }
+    Err(wasmtime::Error::msg(
+        "guest export '$rc_release'/'rc_release' not found",
+    ))
+}
+
+pub fn host_read_chunks(
+    mut caller: Caller<'_, ShellStoreData>,
+    path_vec_ptr: i32,
+    chunk_size: i32,
+    callback: i32,
+) -> wasmtime::Result<i32> {
+    if chunk_size <= 0 {
+        return Err(wasmtime::Error::msg(format!(
+            "read/chunks! chunk size must be positive, got {}",
+            chunk_size
+        )));
+    }
+
+    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy
+        .require(ShellPermission::Read, "read/chunks!", &path)
+        .map_err(wasmtime::Error::msg)?;
+
+    let target = resolve_target_path(&caller, &path);
+    let mut file = fs::File::open(&target).map_err(|e| {
+        wasmtime::Error::msg(format!("failed to open '{}': {}", target.display(), e))
+    })?;
+    let apply1 = guest_apply1(&mut caller)?;
+    let rc_release = guest_rc_release(&mut caller)?;
+    let mut buffer = vec![0u8; chunk_size as usize];
+
+    loop {
+        let n = file.read(&mut buffer).map_err(|e| {
+            wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
+        })?;
+        if n == 0 {
+            break;
+        }
+
+        let chars = buffer[..n]
+            .iter()
+            .map(|byte| i32::from(*byte))
+            .collect::<Vec<_>>();
+        let chunk_ptr = write_lisp_vector(&mut caller, &chars)?;
+        let _ = apply1.call(&mut caller, (callback, chunk_ptr))?;
+        let _ = rc_release.call(&mut caller, chunk_ptr)?;
+    }
+
+    Ok(0)
+}
+
+pub fn host_read_lines(
+    mut caller: Caller<'_, ShellStoreData>,
+    path_vec_ptr: i32,
+    callback: i32,
+) -> wasmtime::Result<i32> {
+    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
+    caller
+        .data()
+        .shell_policy
+        .require(ShellPermission::Read, "read/lines!", &path)
+        .map_err(wasmtime::Error::msg)?;
+
+    let target = resolve_target_path(&caller, &path);
+    let file = fs::File::open(&target).map_err(|e| {
+        wasmtime::Error::msg(format!("failed to open '{}': {}", target.display(), e))
+    })?;
+    let mut reader = io::BufReader::new(file);
+    let apply1 = guest_apply1(&mut caller)?;
+    let rc_release = guest_rc_release(&mut caller)?;
+    let mut line = Vec::new();
+
+    loop {
+        line.clear();
+        let n = reader.read_until(b'\n', &mut line).map_err(|e| {
+            wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
+        })?;
+        if n == 0 {
+            break;
+        }
+
+        if line.last() == Some(&b'\n') {
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+        }
+
+        let chars = line.iter().map(|byte| i32::from(*byte)).collect::<Vec<_>>();
+        let line_ptr = write_lisp_vector(&mut caller, &chars)?;
+        let _ = apply1.call(&mut caller, (callback, line_ptr))?;
+        let _ = rc_release.call(&mut caller, line_ptr)?;
+    }
+
+    Ok(0)
+}
+
 pub fn host_write_file(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32,
@@ -2066,6 +2190,12 @@ fn register_builtin_host_import(
         }
         "read_file" => {
             linker.func_wrap(spec.module, spec.import, host_read_file)?;
+        }
+        "read_chunks" => {
+            linker.func_wrap(spec.module, spec.import, host_read_chunks)?;
+        }
+        "read_lines" => {
+            linker.func_wrap(spec.module, spec.import, host_read_lines)?;
         }
         "write_file" => {
             linker.func_wrap(spec.module, spec.import, host_write_file)?;
