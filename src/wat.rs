@@ -8364,6 +8364,61 @@ fn collect_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
     }
 }
 
+fn collect_current_scope_let_locals(node: &TypedExpression, out: &mut Vec<(String, Type)>) {
+    let Expression::Apply(items) = &node.expr else {
+        return;
+    };
+    if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+        return;
+    }
+    if let [Expression::Word(kw), Expression::Word(name), _] = &items[..] {
+        if kw == "let" || kw == "letrec" || kw == "mut" {
+            if let Some(t) = node.children.get(2).and_then(|n| n.typ.as_ref()) {
+                if !out.iter().any(|(n, _)| n == name) {
+                    out.push((name.clone(), t.clone()));
+                }
+            }
+            return;
+        }
+    }
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return;
+    }
+    let child_offset = if node.children.len() + 1 == items.len() {
+        1
+    } else {
+        0
+    };
+    for idx in 1..items.len() {
+        if let Some(child) = idx
+            .checked_sub(child_offset)
+            .and_then(|child_idx| node.children.get(child_idx))
+        {
+            if matches!(&child.expr, Expression::Apply(child_items) if matches!(child_items.first(), Some(Expression::Word(w)) if w == "do"))
+            {
+                collect_current_scope_let_locals(child, out);
+                continue;
+            }
+        }
+        if let Expression::Apply(let_items) = &items[idx] {
+            if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
+                if kw == "let" || kw == "letrec" || kw == "mut" {
+                    if let Some(child) = idx
+                        .checked_sub(child_offset)
+                        .and_then(|child_idx| node.children.get(child_idx))
+                    {
+                        if let Some(t) = child.children.get(2).and_then(|n| n.typ.as_ref()) {
+                            if !out.iter().any(|(n, _)| n == name) {
+                                out.push((name.clone(), t.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn collect_call_specializations(
     node: &TypedExpression,
     top_def_names: &HashSet<String>,
@@ -8666,10 +8721,14 @@ fn compile_lambda_func(
     let body_code =
         compile_expr(body_node, &ctx).map_err(|e| format!("in lambda '{}': {}", name, e))?;
     let ret_is_ref = is_managed_local_type(&ret_ty);
+    let mut cleanup_local_defs = Vec::new();
+    collect_current_scope_let_locals(body_node, &mut cleanup_local_defs);
     let mut ref_slots: Vec<usize> = Vec::new();
-    for (i, (_n, t)) in local_defs.iter().enumerate() {
-        if is_managed_local_type(t) {
-            ref_slots.push(params.len() + i);
+    for (name, t) in cleanup_local_defs {
+        if is_managed_local_type(&t) {
+            if let Some(slot) = ctx.locals.get(&name) {
+                ref_slots.push(*slot);
+            }
         }
     }
     let has_managed_locals = local_defs.iter().any(|(_, t)| is_managed_local_type(t));
@@ -8816,10 +8875,14 @@ fn compile_closure_func(
     let body_code =
         compile_expr(body_node, &ctx).map_err(|e| format!("in closure '{}': {}", name, e))?;
     let ret_is_ref = is_managed_local_type(&ret_ty);
+    let mut cleanup_local_defs = Vec::new();
+    collect_current_scope_let_locals(body_node, &mut cleanup_local_defs);
     let mut ref_slots: Vec<usize> = Vec::new();
-    for (i, (_n, t)) in local_defs.iter().enumerate() {
-        if is_managed_local_type(t) {
-            ref_slots.push(params.len() + i);
+    for (name, t) in cleanup_local_defs {
+        if is_managed_local_type(&t) {
+            if let Some(slot) = ctx.locals.get(&name) {
+                ref_slots.push(*slot);
+            }
         }
     }
     let base_local_count = params.len() + local_defs.len();
@@ -8942,12 +9005,13 @@ fn compile_value_func(
     let body_code =
         compile_expr(value_node, &ctx).map_err(|e| format!("in value '{}': {}", name, e))?;
     let ret_is_ref = is_managed_local_type(ret_ty);
-    let ref_slots: Vec<usize> = local_defs
+    let mut cleanup_local_defs = Vec::new();
+    collect_current_scope_let_locals(value_node, &mut cleanup_local_defs);
+    let ref_slots: Vec<usize> = cleanup_local_defs
         .iter()
-        .enumerate()
-        .filter_map(|(i, (_n, t))| {
+        .filter_map(|(name, t)| {
             if is_managed_local_type(t) {
-                Some(i)
+                ctx.locals.get(name).copied()
             } else {
                 None
             }

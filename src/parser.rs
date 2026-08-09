@@ -1722,14 +1722,19 @@ fn destructure_pattern(
             if let [Expression::Word(ref vector_kw), ref elements @ ..] = &tuple_exprs[..] {
                 if vector_kw == "vector" {
                     // Recursively calling so value_expr should be the vector element
-                    let temp_var = next_destructure_temp("temp_vec", arg_index, binding_counter);
-
                     let mut bindings = vec![];
-                    bindings.push(Expression::Apply(vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(temp_var.clone()),
-                        value_expr,
-                    ]));
+                    let temp_var = if let Expression::Word(name) = &value_expr {
+                        name.clone()
+                    } else {
+                        let temp_var =
+                            next_destructure_temp("temp_vec", arg_index, binding_counter);
+                        bindings.push(Expression::Apply(vec![
+                            Expression::Word("let".to_string()),
+                            Expression::Word(temp_var.clone()),
+                            value_expr,
+                        ]));
+                        temp_var
+                    };
 
                     let vector_bindings = destructure_vector_pattern(
                         pattern,
@@ -1750,13 +1755,18 @@ fn destructure_pattern(
                     }
 
                     let mut bindings = vec![];
-                    let temp_var = next_destructure_temp("temp_tuple", arg_index, binding_counter);
-
-                    bindings.push(Expression::Apply(vec![
-                        Expression::Word("let".to_string()),
-                        Expression::Word(temp_var.clone()),
-                        value_expr,
-                    ]));
+                    let temp_var = if let Expression::Word(name) = &value_expr {
+                        name.clone()
+                    } else {
+                        let temp_var =
+                            next_destructure_temp("temp_tuple", arg_index, binding_counter);
+                        bindings.push(Expression::Apply(vec![
+                            Expression::Word("let".to_string()),
+                            Expression::Word(temp_var.clone()),
+                            value_expr,
+                        ]));
+                        temp_var
+                    };
 
                     let (fst_bindings, _fst_expr) = destructure_pattern(
                         &elements[0],

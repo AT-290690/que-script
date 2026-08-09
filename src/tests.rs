@@ -1625,6 +1625,53 @@ xs)"#,
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_runtime_bigint_tuple_rows_survive_loop_local_cleanup() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let input "seed-to-soil map:
+10 20 3")
+                (let parse-number (lambda text (BigInt/new text)))
+                (let parse-map
+                  (lambda section
+                    (do
+                      (let lines (split [nl] section))
+                      (let out [])
+                      (mut i 1)
+                      (while (< i (length lines))
+                        (do
+                          (let line (Vector/get-unsafe i lines))
+                          (if (not-empty? line)
+                            (block
+                              (let [dst src len] (map parse-number (split/words line)))
+                              (push! out { dst src len })))
+                          (++ i)))
+                      out)))
+                (let rows (parse-map input))
+                (let apply-map-to-value
+                  (lambda value rows
+                    (do
+                      (let result [value])
+                      (mut found false)
+                      (mut i 0)
+                      (while (< i (length rows))
+                        (do
+                          (let {dst src len} (Vector/get-unsafe i rows))
+                          (unless found
+                            (if (BigInt/lte? src value)
+                              (if (BigInt/lt? value (BigInt/add src len))
+                                (do
+                                  (Vector/set! result 0 (BigInt/add dst (BigInt/sub value src)))
+                                  (alter! found true)))))
+                          (++ i)))
+                      (Vector/get-unsafe 0 result))))
+                (Digits->Chars (apply-map-to-value (BigInt/new "20") rows)))"#,
+            true,
+        );
+        assert_eq!(output, "10");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_runtime_inline_zip_map_pipeline_with_distinct_lambda_names_works() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
