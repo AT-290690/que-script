@@ -135,6 +135,55 @@
     (qq (loop/range/inclusive/by (uq name) (uq start) (uq end) (uq step)
           (uqs body)))))
 
+(letmacro loop/in/vector
+  (lambda item items . body
+    (do
+      (let i (gensym))
+      (let xs (gensym))
+      (let len (gensym))
+      (qq (do
+            (let (uq xs) (uq items))
+            (let (uq len) (length (uq xs)))
+            (mut (uq i) 0)
+            (while (< (uq i) (uq len))
+              (do
+                (let (uq item) (get (uq xs) (uq i)))
+                (uqs body)
+                (++ (uq i))
+                nil)))))))
+
+(letmacro loop/in
+  (lambda item items . body
+    (qq (loop/in/vector (uq item) (uq items)
+          (uqs body)))))
+
+(letmacro loop/in/matrix
+  (lambda item items . body
+    (do
+      (let y (gensym))
+      (let x (gensym))
+      (let rows (gensym))
+      (let row (gensym))
+      (let height (gensym))
+      (let width (gensym))
+      (qq (do
+            (let (uq rows) (uq items))
+            (let (uq height) (length (uq rows)))
+            (mut (uq y) 0)
+            (while (< (uq y) (uq height))
+              (do
+                (let (uq row) (get (uq rows) (uq y)))
+                (let (uq width) (length (uq row)))
+                (mut (uq x) 0)
+                (while (< (uq x) (uq width))
+                  (do
+                    (let (uq item) (get (uq row) (uq x)))
+                    (uqs body)
+                    (++ (uq x))
+                    nil))
+                (++ (uq y))
+                nil)))))))
+
 (letmacro times
   (lambda n . body
     (do

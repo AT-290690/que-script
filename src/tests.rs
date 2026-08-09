@@ -654,6 +654,19 @@ xs)"#,
     }
 
     #[test]
+    fn test_runtime_string_find_helpers_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"[
+                (String/find "aa" ["bb" "aa" "cc" "aa"])
+                (String/find/last "aa" ["bb" "aa" "cc" "aa"])
+                (String/find "zz" ["bb" "aa" "cc" "aa"])
+              ]"#,
+            true,
+        );
+        assert_eq!(output.trim(), "[1 3 -1]");
+    }
+
+    #[test]
     fn test_runtime_later_block_local_lambda_does_not_shadow_earlier_top_level_lambda() {
         let output = run_program_output_with_std_and_opts(
             r#"(do

@@ -2974,6 +2974,24 @@ q)))
       (std/vector/slice xs 0 (+ end 1)))))
 
 (let std/vector/char/trim (lambda xs (std/vector/char/trim/right (std/vector/char/trim/left xs))))
+(let std/string/find (lambda target xs (do
+  (let len (length xs))
+  (mut i 0)
+  (mut result -1)
+  (while (and (= result -1) (< i len)) (do
+    (if (std/vector/char/equal? (get xs i) target)
+        (alter! result i))
+    (alter! i (+ i 1))))
+  result)))
+(let std/string/find/last (lambda target xs (do
+  (let len (length xs))
+  (mut i 0)
+  (mut result -1)
+  (while (< i len) (do
+    (if (std/vector/char/equal? (get xs i) target)
+        (alter! result i))
+    (alter! i (+ i 1))))
+  result)))
 (let std/string/prepend-zeroes (lambda (s target-len)
   (do
     (mut result s)
