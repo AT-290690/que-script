@@ -177,6 +177,10 @@ fn ty_int() -> Type {
     Type::Int
 }
 
+fn ty_bool() -> Type {
+    Type::Bool
+}
+
 fn fn1(a: Type, r: Type) -> Type {
     Type::Function(Box::new(a), Box::new(r))
 }
@@ -249,8 +253,8 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
             fn3(
                 ty_char_list(),
                 ty_int(),
-                fn1(ty_char_list(), ty_unit()),
-                ty_unit(),
+                fn1(ty_char_list(), ty_bool()),
+                ty_bool(),
             )
         },
     },
@@ -258,7 +262,7 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
         module: "host",
         import: "read_lines",
         local_name: "read/lines!",
-        typ: || fn2(ty_char_list(), fn1(ty_char_list(), ty_unit()), ty_unit()),
+        typ: || fn2(ty_char_list(), fn1(ty_char_list(), ty_bool()), ty_bool()),
     },
     BuiltinHostExternSpec {
         module: "host",

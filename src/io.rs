@@ -1945,8 +1945,11 @@ pub fn host_read_chunks(
             .map(|byte| i32::from(*byte))
             .collect::<Vec<_>>();
         let chunk_ptr = write_lisp_vector(&mut caller, &chars)?;
-        let _ = apply1.call(&mut caller, (callback, chunk_ptr))?;
+        let should_stop = apply1.call(&mut caller, (callback, chunk_ptr))?;
         let _ = rc_release.call(&mut caller, chunk_ptr)?;
+        if should_stop != 0 {
+            return Ok(1);
+        }
     }
 
     Ok(0)
@@ -1991,8 +1994,11 @@ pub fn host_read_lines(
 
         let chars = line.iter().map(|byte| i32::from(*byte)).collect::<Vec<_>>();
         let line_ptr = write_lisp_vector(&mut caller, &chars)?;
-        let _ = apply1.call(&mut caller, (callback, line_ptr))?;
+        let should_stop = apply1.call(&mut caller, (callback, line_ptr))?;
         let _ = rc_release.call(&mut caller, line_ptr)?;
+        if should_stop != 0 {
+            return Ok(1);
+        }
     }
 
     Ok(0)

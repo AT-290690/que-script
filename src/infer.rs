@@ -2891,8 +2891,23 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
     // TODO: remove repetitive logic for 0 args and +=1 args
     if args.is_empty() {
         match func_type {
-            Type::Function(_, ret_ty) => {
-                return Ok(*ret_ty);
+            Type::Function(param_ty, ret_ty) => {
+                if matches!(*param_ty, Type::Unit) {
+                    return Ok(*ret_ty);
+                }
+                return Err(format!(
+                    "Function '{}' expects at least 1 argument but got 0; use the bare name '{}' for the function value\n{}",
+                    func_expr.to_lisp(),
+                    func_expr.to_lisp(),
+                    format!(
+                        "({})",
+                        exprs
+                            .iter()
+                            .map(|e| e.to_lisp())
+                            .collect::<Vec<String>>()
+                            .join(" ")
+                    )
+                ));
             }
             Type::Var(tv) => {
                 let ret_ty = ctx.fresh_var();
