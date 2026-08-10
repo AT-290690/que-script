@@ -321,6 +321,8 @@ out)))
         (alter! i (+ i 1))))
      out))) 
 
+(let std/vector/int/range/inclusive std/vector/int/range)
+(let std/vector/int/range/exclusive (lambda start end (std/vector/int/range start (- end 1))))
 
 (let std/vector/dec/range (lambda start end (do
      (let out [ (Int->Dec start) ])

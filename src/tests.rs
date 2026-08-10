@@ -10075,7 +10075,49 @@ humidity-to-location map:
 [
   (Digits->Chars part1)
   (Digits->Chars part2)
-]"#, "[35 46]")
+]"#, "[35 46]"),
+(r#"(let INPUT "\#1 @ 1,3: 4x4
+#2 @ 3,1: 4x4
+#3 @ 5,5: 2x2")
+(let N 8)
+(let parse (comp 
+                (split/lines) 
+                (map (comp (split/words)))
+                (map (lambda ([ a _ c d ]) 
+                  { 
+                    (String->Integer (cdr a)) ; id
+                    (|> c (drop/last 1) (split/commas) (map String->Integer)) ; pos
+                    (|> d (split "x") (map String->Integer)) ; dim
+                  }))))
+(let update! (lambda (m x y) (set! m x y (+ (get m x y) 1))))
+(let part1 (comp 
+              (reduce (lambda (a { id [ x y ] [ w h ] }) 
+                (loop/range/exclusive iy y (+ y h)
+                  (loop/range/exclusive ix x (+ w x)
+                    (update! a ix iy))) a)
+                (Matrix/new (lambda _ _ 0) N N))
+              (flat)
+            (count (gt/int? 1))))
+
+(let part2 (lambda (input) 
+  (let out (Vector/new (lambda _ 0) (+ (fst (at input -1)) 1)))
+  
+  (let claim! (lambda (m x y id) 
+      (let prev (get m x y))
+      (if (not (zero? prev)) (do 
+        (set! out id id)
+        (set! out prev prev)))
+      (set! m x y id)))
+              (|> input (reduce (lambda (a { id [ x y ] [ w h ] }) 
+                (loop/range/exclusive iy y (+ y h)
+                  (loop/range/exclusive ix x (+ w x)
+                    (claim! a ix iy id))) a)
+                (Matrix/new (lambda _ _ 0) N N)))
+      (let ids (map (lambda ({ id }) id) input))
+      (let idx (find (lambda (id) (zero? (get out id))) ids))
+      (get ids idx)))
+(let PARSED (parse INPUT))
+[(part1 PARSED) (part2 PARSED)]"#, "[4 3]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

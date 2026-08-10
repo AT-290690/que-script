@@ -1183,14 +1183,18 @@ fn native_shell_learn() -> &'static str {
     - Everything is an expression; last expression is the return value.\n\
     - (let name value) creates immutable bindings.\n\
     - (do e1 e2 ... en) evaluates in order, returns en, and does NOT create a new scope.\n\
+    - Because do does not scope, repeated lets collide: (do (let i 1) (let i 2)) is invalid.\n\
     - (block e1 e2 ... en) evaluates in order, returns en, and creates a new lexical scope.\n\
+    - Use block when reusing local names in separate regions: (do (block (let i 1) i) (block (let i 2) i)).\n\
     - Unit is 0 (nil).\n\
     \n\
     Control:\n\
     - (if cond then else)\n\
     - (if cond then) is valid and inserts nil as the else branch.\n\
     - (cond c1 e1 c2 e2 ... default)\n\
-    - (unless cond body) runs body only when cond is false; (when cond body...) runs when true.\n\
+    - (unless cond then) and (unless cond then else) are inverted if forms, not variadic bodies.\n\
+    - For multiple unless expressions, wrap the branch: (unless cond (do e1 e2)) or (unless cond (block e1 e2)).\n\
+    - (when cond body...) is variadic and wraps its body in do.\n\
     - Branches must return the same type.\n\
     - Effect-only branches commonly omit else: (if cond (alter! x 1)).\n\
     - Loop with (while cond body). Multiple while body expressions are allowed.\n\

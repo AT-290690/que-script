@@ -35,6 +35,8 @@
 (let slice (lambda start end xs (std/vector/slice xs start end)))
 (let range std/vector/int/range)
 (let range/int std/vector/int/range)
+(let range/inclusive std/vector/int/range/inclusive)
+(let range/exclusive std/vector/int/range/exclusive)
 (let range/dec std/vector/dec/range)
 (let range. range/dec)
 (let square std/int/square)
