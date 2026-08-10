@@ -4240,7 +4240,7 @@ xs)"#,
 
         assert_eq!(
             contents,
-            "map : ([Char] -> [Char]) -> [[Char]] -> [[Char]] | effects: local-mutate"
+            "map : ([Char] -> [Char]) -> [[Char]] -> [[Char]] | effects: local-mutate, unknown-call"
         );
     }
 
@@ -4329,7 +4329,7 @@ xs)"#,
 
         assert_eq!(
             contents,
-            "map : (T -> K) -> [T] -> [K] | effects: local-mutate"
+            "map : (T -> K) -> [T] -> [K] | effects: local-mutate, unknown-call"
         );
     }
 
@@ -4477,6 +4477,46 @@ xs)"#,
         assert!(
             contents.contains("effects: local-mutate"),
             "expected map hover to include local-mutate effect, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_resolves_std_alias_effect_in_user_function() {
+        let program = r#"(letrec pure/sum (lambda (xs s) (if (empty? xs) s (pure/sum (cdr xs) (+ (car xs) s)))))
+(pure/sum [ 1 2 3 ] 0)"#;
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 0, 9);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            !contents.contains("unknown-call"),
+            "expected std alias empty? not to leak unknown-call, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_keeps_unknown_call_for_function_parameter() {
+        let program = r#"(letrec pure/sum (lambda (xs s f) (if (f xs) s (pure/sum (cdr xs) (+ (car xs) s) f))))
+(pure/sum [ 1 2 3 ] 0 empty?)"#;
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 0, 9);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("unknown-call"),
+            "expected function parameter call to keep unknown-call, got: {}",
             contents
         );
     }

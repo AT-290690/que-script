@@ -1556,14 +1556,19 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     let mut lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
     crate::externals::extend_with_builtin_host_externs(&mut lib_defs)?;
     lib_defs.extend(load_project_library_definitions(&script_cwd)?);
+    let (base_env, base_next_id, _global_signatures, global_effects) =
+        crate::lsp_native_core::build_base_environment(&lib_defs);
     let wrapped_ast = crate::parser::merge_std_and_program(&program, lib_defs)?;
     let wrapped_with_externs = crate::externals::prepend_builtin_host_externs(&wrapped_ast)?;
-    let (_typ, typed_ast) = infer_with_builtins_typed(
-        &wrapped_with_externs,
-        crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-    )?;
+    let (_typ, typed_ast) =
+        infer_with_builtins_typed(&wrapped_with_externs, (base_env, base_next_id))?;
     let split_wat = crate::wat::compile_program_to_split_wat_typed(&typed_ast)?;
-    let report = crate::explain::explain_program(&typed_ast, &split_wat.user_wat, user_form_count);
+    let report = crate::explain::explain_program_with_effects(
+        &typed_ast,
+        &split_wat.user_wat,
+        user_form_count,
+        &global_effects,
+    );
     let rendered = if json {
         crate::explain::render_json(&report)?
     } else {

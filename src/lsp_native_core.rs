@@ -396,7 +396,8 @@ fn estimate_syntax_effect(
                         .get(op)
                         .copied()
                         .or_else(|| known_symbol_effect(op))
-                        .unwrap_or(EffectFlags::PURE);
+                        .or_else(|| is_known_pure_syntax_call(op).then_some(EffectFlags::PURE))
+                        .unwrap_or(EffectFlags::UNKNOWN_CALL);
                 }
                 _ => {
                     for item in items {
@@ -407,6 +408,103 @@ fn estimate_syntax_effect(
             }
             effect
         }
+    }
+}
+
+fn is_known_pure_syntax_call(op: &str) -> bool {
+    matches!(
+        op,
+        "+" | "+#"
+            | "+."
+            | "-"
+            | "-#"
+            | "-."
+            | "*"
+            | "*#"
+            | "*."
+            | "/"
+            | "/#"
+            | "/."
+            | "mod"
+            | "mod."
+            | "="
+            | "=?"
+            | "=#"
+            | "=."
+            | "<"
+            | "<#"
+            | "<."
+            | ">"
+            | ">#"
+            | ">."
+            | "<="
+            | "<=#"
+            | "<=."
+            | ">="
+            | ">=#"
+            | ">=."
+            | "and"
+            | "or"
+            | "not"
+            | "~"
+            | "^"
+            | "|"
+            | "&"
+            | "<<"
+            | ">>"
+            | "length"
+            | "get"
+            | "&get"
+            | "&mut"
+            | "car"
+            | "cdr"
+            | "fst"
+            | "snd"
+            | "Int->Dec"
+            | "Dec->Int"
+            | "as"
+            | "char"
+            | "vector"
+            | "string"
+            | "integers"
+            | "bools"
+            | "decimals"
+            | "strings"
+            | "tuple"
+            | "lambda"
+            | "if"
+            | "while"
+            | "let"
+            | "letrec"
+            | "mut"
+            | "do"
+            | "block"
+            | "cond"
+    )
+}
+
+pub fn refine_effect_with_known_calls(
+    expr: &Expression,
+    raw_effect: EffectFlags,
+    known_effects: &HashMap<String, EffectFlags>,
+    self_name: Option<&str>,
+) -> EffectFlags {
+    if !raw_effect.contains(EffectFlags::UNKNOWN_CALL) {
+        return raw_effect;
+    }
+
+    let mut scoped_effects = known_effects.clone();
+    if let Some(name) = self_name {
+        scoped_effects
+            .entry(name.to_string())
+            .or_insert(EffectFlags::PURE);
+    }
+
+    let syntax_effect = estimate_syntax_effect(expr, &scoped_effects);
+    if syntax_effect.contains(EffectFlags::UNKNOWN_CALL) {
+        raw_effect
+    } else {
+        syntax_effect
     }
 }
 
@@ -463,6 +561,16 @@ pub fn collect_let_binding_effects(
             if keyword == "let" || keyword == "letrec" || keyword == "mut" {
                 if let Some(rhs_node) = node.children.get(2) {
                     let mut rhs_effect = rhs_node.effect;
+                    if let Some(rhs_expr) = items.get(2) {
+                        let mut known_effects = fallback_effects.clone();
+                        known_effects.extend(effects.iter().map(|(k, v)| (k.clone(), *v)));
+                        rhs_effect = refine_effect_with_known_calls(
+                            rhs_expr,
+                            rhs_effect,
+                            &known_effects,
+                            (keyword == "letrec").then_some(name.as_str()),
+                        );
+                    }
                     if rhs_effect.is_pure() {
                         if let Expression::Word(alias_target) = &rhs_node.expr {
                             if let Some(target_effect) = effects

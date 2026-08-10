@@ -1,7 +1,8 @@
 use crate::infer::{EffectFlags, TypedExpression};
-use crate::lsp_native_core::normalize_signature;
+use crate::lsp_native_core::{normalize_signature, refine_effect_with_known_calls};
 use crate::parser::Expression;
 use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
 pub struct ExplainReport {
@@ -49,13 +50,24 @@ pub fn explain_program(
     wat: &str,
     user_form_count: usize,
 ) -> ExplainReport {
+    explain_program_with_effects(typed_ast, wat, user_form_count, &HashMap::new())
+}
+
+pub fn explain_program_with_effects(
+    typed_ast: &TypedExpression,
+    wat: &str,
+    user_form_count: usize,
+    known_effects: &HashMap<String, EffectFlags>,
+) -> ExplainReport {
     let metrics = collect_wat_metrics(wat);
     let host_imports = collect_host_imports(wat);
     let optimized_user_calls = collect_prefixed_call_targets(&user_metric_wat(wat), "call $v_");
-    let forms = collect_user_forms(typed_ast, user_form_count);
-    let user_effect = user_form_nodes(typed_ast, user_form_count)
-        .into_iter()
-        .fold(EffectFlags::PURE, |acc, form| acc | form.effect);
+    let user_nodes = user_form_nodes(typed_ast, user_form_count);
+    let effect_scope = collect_user_effect_scope(&user_nodes, known_effects);
+    let forms = collect_user_forms(&user_nodes, &effect_scope);
+    let user_effect = user_nodes.into_iter().fold(EffectFlags::PURE, |acc, form| {
+        acc | refined_form_effect(form, &effect_scope)
+    });
     let result_type = user_form_nodes(typed_ast, user_form_count)
         .last()
         .and_then(|form| form.typ.as_ref())
@@ -233,9 +245,12 @@ pub fn render_json(report: &ExplainReport) -> Result<String, String> {
         .map_err(|e| format!("failed to render explain json: {}", e))
 }
 
-fn collect_user_forms(typed: &TypedExpression, user_form_count: usize) -> Vec<ExplainForm> {
-    user_form_nodes(typed, user_form_count)
-        .into_iter()
+fn collect_user_forms(
+    forms: &[&TypedExpression],
+    known_effects: &HashMap<String, EffectFlags>,
+) -> Vec<ExplainForm> {
+    forms
+        .iter()
         .enumerate()
         .map(|(idx, form)| {
             let (name, kind, typ) = describe_form(idx, form);
@@ -247,11 +262,49 @@ fn collect_user_forms(typed: &TypedExpression, user_form_count: usize) -> Vec<Ex
                 name,
                 kind,
                 typ,
-                effect: effect_labels(form.effect),
+                effect: effect_labels(refined_form_effect(form, known_effects)),
                 calls,
             }
         })
         .collect()
+}
+
+fn collect_user_effect_scope(
+    forms: &[&TypedExpression],
+    known_effects: &HashMap<String, EffectFlags>,
+) -> HashMap<String, EffectFlags> {
+    let mut scope = known_effects.clone();
+    for form in forms {
+        if let Some((keyword, name)) = top_level_binding(form) {
+            if keyword == "let" || keyword == "letrec" || keyword == "mut" {
+                let effect = refined_form_effect(form, &scope);
+                scope.insert(name.to_string(), effect);
+            }
+        }
+    }
+    scope
+}
+
+fn refined_form_effect(
+    form: &TypedExpression,
+    known_effects: &HashMap<String, EffectFlags>,
+) -> EffectFlags {
+    let self_name =
+        top_level_binding(form).and_then(|(keyword, name)| (keyword == "letrec").then_some(name));
+
+    refine_effect_with_known_calls(&form.expr, form.effect, known_effects, self_name)
+}
+
+fn top_level_binding(form: &TypedExpression) -> Option<(&str, &str)> {
+    match &form.expr {
+        Expression::Apply(items) => match &items[..] {
+            [Expression::Word(keyword), Expression::Word(name), ..] => {
+                Some((keyword.as_str(), name.as_str()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn user_form_nodes<'a>(
@@ -484,5 +537,55 @@ mod tests {
         let json = render_json(&report).expect("json should render");
         assert!(json.contains("\"result_type\": \"Int\""));
         assert!(json.contains("\"metrics\""));
+    }
+
+    #[test]
+    fn explain_refines_known_std_alias_effects() {
+        let source = r#"(letrec pure/sum (lambda (xs s) (if (empty? xs) s (pure/sum (cdr xs) (+ (car xs) s)))))
+(pure/sum [ 1 2 3 ] 0)"#;
+        let std_defs = crate::lsp_native_core::load_std_definitions();
+        let (base_env, base_next_id, _signatures, effects) =
+            crate::lsp_native_core::build_base_environment(&std_defs);
+        let wrapped_with_program =
+            crate::parser::merge_std_and_program(source, std_defs).expect("source should merge");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &wrapped_with_program,
+            (base_env, base_next_id),
+        )
+        .expect("source should infer");
+        let split =
+            crate::wat::compile_program_to_split_wat_typed(&typed).expect("source should compile");
+        let report = explain_program_with_effects(&typed, &split.user_wat, 2, &effects);
+
+        assert!(
+            !report.effect.iter().any(|label| label == "unknown-call"),
+            "expected explain effect not to contain unknown-call, got: {:?}",
+            report.effect
+        );
+    }
+
+    #[test]
+    fn explain_keeps_unknown_call_for_function_parameter() {
+        let source = r#"(letrec pure/sum (lambda (xs s f) (if (f xs) s (pure/sum (cdr xs) (+ (car xs) s) f))))
+(pure/sum [ 1 2 3 ] 0 empty?)"#;
+        let std_defs = crate::lsp_native_core::load_std_definitions();
+        let (base_env, base_next_id, _signatures, effects) =
+            crate::lsp_native_core::build_base_environment(&std_defs);
+        let wrapped_with_program =
+            crate::parser::merge_std_and_program(source, std_defs).expect("source should merge");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &wrapped_with_program,
+            (base_env, base_next_id),
+        )
+        .expect("source should infer");
+        let split =
+            crate::wat::compile_program_to_split_wat_typed(&typed).expect("source should compile");
+        let report = explain_program_with_effects(&typed, &split.user_wat, 2, &effects);
+
+        assert!(
+            report.effect.iter().any(|label| label == "unknown-call"),
+            "expected explain effect to keep unknown-call, got: {:?}",
+            report.effect
+        );
     }
 }
