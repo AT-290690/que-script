@@ -4238,7 +4238,10 @@ xs)"#,
             .and_then(|v| v.as_str())
             .expect("hover response should include string contents");
 
-        assert_eq!(contents, "map : ([Char] -> [Char]) -> [[Char]] -> [[Char]]");
+        assert_eq!(
+            contents,
+            "map : ([Char] -> [Char]) -> [[Char]] -> [[Char]] | effects: local-mutate"
+        );
     }
 
     #[test]
@@ -4324,7 +4327,10 @@ xs)"#,
             .and_then(|v| v.as_str())
             .expect("hover response should include string contents");
 
-        assert_eq!(contents, "map : (T -> K) -> [T] -> [K]");
+        assert_eq!(
+            contents,
+            "map : (T -> K) -> [T] -> [K] | effects: local-mutate"
+        );
     }
 
     #[test]
@@ -4434,6 +4440,43 @@ xs)"#,
         assert!(
             contents.contains("effects: mutate"),
             "expected std symbol usage hover to include mutate effect, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_std_local_mutating_function_includes_global_effects() {
+        let hover_json =
+            crate::wasm_api::lsp_hover("(std/vector/map [ 1 2 3 ] square)".to_string(), 0, 6);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("effects: local-mutate"),
+            "expected std/vector/map hover to include local-mutate effect, got: {}",
+            contents
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_std_alias_local_mutating_function_includes_global_effects() {
+        let hover_json = crate::wasm_api::lsp_hover("(map square [ 1 2 3 ])".to_string(), 0, 2);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("effects: local-mutate"),
+            "expected map hover to include local-mutate effect, got: {}",
             contents
         );
     }

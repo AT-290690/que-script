@@ -315,7 +315,99 @@ pub fn infer_std_effects(
         effects = fallback;
     }
 
+    for (name, effect) in infer_std_effects_syntax(std_defs) {
+        match effects.get(&name).copied() {
+            Some(existing) if !should_replace_effect(existing, effect) => {}
+            _ => {
+                effects.insert(name, effect);
+            }
+        }
+    }
+
     effects
+}
+
+fn infer_std_effects_syntax(std_defs: &[Expression]) -> HashMap<String, EffectFlags> {
+    let mut bindings = Vec::new();
+    for expr in std_defs {
+        let Expression::Apply(items) = expr else {
+            continue;
+        };
+        if let [Expression::Word(keyword), Expression::Word(name), rhs, ..] = &items[..] {
+            if keyword == "let" || keyword == "letrec" || keyword == "mut" {
+                bindings.push((name.clone(), rhs.clone()));
+            }
+        }
+    }
+
+    let mut effects = HashMap::new();
+    for (name, _) in &bindings {
+        effects.insert(name.clone(), EffectFlags::PURE);
+    }
+
+    let max_iters = bindings.len().saturating_mul(4).max(4);
+    for _ in 0..max_iters {
+        let mut changed = false;
+        let previous = effects.clone();
+        for (name, rhs) in &bindings {
+            let effect = estimate_syntax_effect(rhs, &previous);
+            if effects.get(name).copied() != Some(effect) {
+                effects.insert(name.clone(), effect);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    effects
+}
+
+fn estimate_syntax_effect(
+    expr: &Expression,
+    known_effects: &HashMap<String, EffectFlags>,
+) -> EffectFlags {
+    match expr {
+        Expression::Int(_) | Expression::Dec(_) => EffectFlags::PURE,
+        Expression::Word(name) => known_effects
+            .get(name)
+            .copied()
+            .or_else(|| known_symbol_effect(name))
+            .unwrap_or(EffectFlags::PURE),
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return EffectFlags::PURE;
+            }
+
+            let mut effect = EffectFlags::PURE;
+            match items.first() {
+                Some(Expression::Word(op)) if op == "lambda" => {
+                    if let Some(body) = items.last() {
+                        effect |= estimate_syntax_effect(body, known_effects);
+                    }
+                }
+                Some(Expression::Word(op)) if op == "letype" || op == "extern" => {}
+                Some(Expression::Word(op)) => {
+                    for item in items.iter().skip(1) {
+                        effect |= estimate_syntax_effect(item, known_effects);
+                    }
+                    effect |= known_effects
+                        .get(op)
+                        .copied()
+                        .or_else(|| known_symbol_effect(op))
+                        .unwrap_or(EffectFlags::PURE);
+                }
+                _ => {
+                    for item in items {
+                        effect |= estimate_syntax_effect(item, known_effects);
+                    }
+                    effect |= EffectFlags::UNKNOWN_CALL;
+                }
+            }
+            effect
+        }
+    }
 }
 
 pub fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<String, Type>) {

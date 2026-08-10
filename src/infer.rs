@@ -124,7 +124,7 @@ fn collect_top_level_extern_names(root: &TypedExpression) -> HashSet<String> {
 }
 
 fn is_mutating_op(op: &str) -> bool {
-    matches!(op, "set!" | "alter!" | "pop!")
+    matches!(op, "set!" | "alter!" | "&alter!" | "pop!")
 }
 
 fn is_bang_contract_op(op: &str, known_requires_bang: &HashMap<String, bool>) -> bool {
@@ -186,6 +186,8 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             | ">>"
             | "length"
             | "get"
+            | "&get"
+            | "&mut"
             | "car"
             | "cdr"
             | "fst"
