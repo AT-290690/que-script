@@ -52,6 +52,18 @@
       {
         "command": "que.restartLanguageServer",
         "title": "Que: Restart Language Server"
+      },
+      {
+        "command": "que.toggleLineComment",
+        "title": "Que: Toggle Line Comment"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "que.toggleLineComment",
+        "key": "ctrl+/",
+        "mac": "cmd+/",
+        "when": "editorTextFocus && resourceLangId =~ /^(shellscript|shell|bash|zsh|sh)$/"
       }
     ],
     "configuration": {

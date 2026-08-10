@@ -345,6 +345,82 @@ function findQueHeredocBlockAtPosition(document, position) {
   return null;
 }
 
+function isPositionInQueHeredoc(document, position) {
+  return !!findQueHeredocBlockAtPosition(document, position);
+}
+
+function selectionLineRange(selection) {
+  const start = selection.start.line;
+  let end = selection.end.line;
+  if (!selection.isEmpty && selection.end.character === 0 && end > start) {
+    end -= 1;
+  }
+  return { start, end };
+}
+
+function selectionIsInsideQueHeredoc(document, selection) {
+  const { start, end } = selectionLineRange(selection);
+  for (let line = start; line <= end; line += 1) {
+    if (!isPositionInQueHeredoc(document, new vscode.Position(line, 0))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function lineHasQueComment(lineText) {
+  return /^\s*;/.test(lineText);
+}
+
+async function toggleQueLineComments(editor) {
+  const document = editor.document;
+  const selections = editor.selections.length > 0
+    ? editor.selections
+    : [editor.selection];
+
+  const lineSet = new Set();
+  for (const selection of selections) {
+    if (!selectionIsInsideQueHeredoc(document, selection)) {
+      return false;
+    }
+    const { start, end } = selectionLineRange(selection);
+    for (let line = start; line <= end; line += 1) {
+      lineSet.add(line);
+    }
+  }
+
+  const lines = Array.from(lineSet).sort((a, b) => a - b);
+  if (lines.length === 0) return false;
+
+  const meaningfulLines = lines.filter((line) => {
+    return document.lineAt(line).text.trim().length > 0;
+  });
+  const shouldUncomment =
+    meaningfulLines.length > 0 &&
+    meaningfulLines.every((line) => lineHasQueComment(document.lineAt(line).text));
+
+  await editor.edit((editBuilder) => {
+    for (const line of lines) {
+      const text = document.lineAt(line).text;
+      if (shouldUncomment) {
+        const match = text.match(/^(\s*); ?/);
+        if (!match) continue;
+        editBuilder.delete(
+          new vscode.Range(
+            new vscode.Position(line, match[1].length),
+            new vscode.Position(line, match[0].length)
+          )
+        );
+      } else {
+        const indent = text.match(/^\s*/)[0].length;
+        editBuilder.insert(new vscode.Position(line, indent), "; ");
+      }
+    }
+  });
+
+  return true;
+}
+
 function hoverContentsToVscode(contents) {
   if (!contents) return null;
   if (typeof contents === "string") return contents;
@@ -635,7 +711,25 @@ function lspCompletionKindToVscode(kind) {
   return vscode.CompletionItemKind[kind] ? kind : undefined;
 }
 
-function completionItemFromLsp(item) {
+function lspTextEditToVscode(textEdit, block, document) {
+  if (
+    !textEdit ||
+    typeof textEdit.newText !== "string" ||
+    !textEdit.range
+  ) {
+    return undefined;
+  }
+
+  const mappedRange = mapRelativeHoverRangeToDocument(
+    textEdit.range,
+    block,
+    document
+  );
+  if (!mappedRange) return undefined;
+  return new vscode.TextEdit(mappedRange, textEdit.newText);
+}
+
+function completionItemFromLsp(item, block, document) {
   if (!item || typeof item.label !== "string") return null;
   const completion = new vscode.CompletionItem(
     item.label,
@@ -644,6 +738,11 @@ function completionItemFromLsp(item) {
   if (typeof item.detail === "string") completion.detail = item.detail;
   if (typeof item.insertText === "string") {
     completion.insertText = item.insertText;
+  }
+  const textEdit = lspTextEditToVscode(item.textEdit, block, document);
+  if (textEdit) {
+    completion.textEdit = textEdit;
+    completion.insertText = undefined;
   }
   return completion;
 }
@@ -669,7 +768,7 @@ function registerShellQueCompletionProvider(context) {
           located.relativePosition
         );
         const mapped = result
-          .map((item) => completionItemFromLsp(item))
+          .map((item) => completionItemFromLsp(item, located.block, document))
           .filter((item) => item !== null);
         return mapped;
       },
@@ -896,8 +995,24 @@ async function activate(context) {
     }
   );
 
+  const toggleLineCommentCommand = vscode.commands.registerCommand(
+    "que.toggleLineComment",
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (
+        editor &&
+        isShellScriptDocument(editor.document) &&
+        (await toggleQueLineComments(editor))
+      ) {
+        return;
+      }
+      await vscode.commands.executeCommand("editor.action.commentLine");
+    }
+  );
+
   context.subscriptions.push(signatureProvider);
   context.subscriptions.push(restartCommand);
+  context.subscriptions.push(toggleLineCommentCommand);
 }
 
 async function deactivate() {
