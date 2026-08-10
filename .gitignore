@@ -24,6 +24,8 @@ target
 
 dist
 
+releases/
+
 node_modules
 
 scripts/deprecated/
