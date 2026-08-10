@@ -1253,7 +1253,7 @@ fn native_shell_learn() -> &'static str {
     - set! pop! length get car cdr cons fst snd while block unless when when-not\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
-    ARGV print! sleep! clear! list-dir! mkdir! read! read/chunks! read/lines! delete! write! move!"
+    ARGV print! sleep! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
 }
 
 fn binding_name_from_def(expr: &Expression) -> Option<String> {
@@ -1874,6 +1874,20 @@ pub fn host_read_file(
     write_lisp_string(&mut caller, &output)
 }
 
+pub fn host_read_stdin(mut caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
+    caller
+        .data()
+        .shell_policy
+        .require(ShellPermission::Read, "stdin!", "<stdin>")
+        .map_err(wasmtime::Error::msg)?;
+
+    let mut output = String::new();
+    io::stdin()
+        .read_to_string(&mut output)
+        .map_err(|e| wasmtime::Error::msg(format!("failed to read stdin: {}", e)))?;
+    write_lisp_string(&mut caller, &output)
+}
+
 fn guest_apply1(
     caller: &mut Caller<'_, ShellStoreData>,
 ) -> wasmtime::Result<TypedFunc<(i32, i32), i32>> {
@@ -1936,6 +1950,52 @@ pub fn host_read_chunks(
         let n = file.read(&mut buffer).map_err(|e| {
             wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
         })?;
+        if n == 0 {
+            break;
+        }
+
+        let chars = buffer[..n]
+            .iter()
+            .map(|byte| i32::from(*byte))
+            .collect::<Vec<_>>();
+        let chunk_ptr = write_lisp_vector(&mut caller, &chars)?;
+        let should_stop = apply1.call(&mut caller, (callback, chunk_ptr))?;
+        let _ = rc_release.call(&mut caller, chunk_ptr)?;
+        if should_stop != 0 {
+            return Ok(1);
+        }
+    }
+
+    Ok(0)
+}
+
+pub fn host_read_stdin_chunks(
+    mut caller: Caller<'_, ShellStoreData>,
+    chunk_size: i32,
+    callback: i32,
+) -> wasmtime::Result<i32> {
+    if chunk_size <= 0 {
+        return Err(wasmtime::Error::msg(format!(
+            "stdin/chunks! chunk size must be positive, got {}",
+            chunk_size
+        )));
+    }
+
+    caller
+        .data()
+        .shell_policy
+        .require(ShellPermission::Read, "stdin/chunks!", "<stdin>")
+        .map_err(wasmtime::Error::msg)?;
+
+    let apply1 = guest_apply1(&mut caller)?;
+    let rc_release = guest_rc_release(&mut caller)?;
+    let mut input = io::stdin().lock();
+    let mut buffer = vec![0u8; chunk_size as usize];
+
+    loop {
+        let n = input
+            .read(&mut buffer)
+            .map_err(|e| wasmtime::Error::msg(format!("failed to read stdin: {}", e)))?;
         if n == 0 {
             break;
         }
@@ -2197,8 +2257,14 @@ fn register_builtin_host_import(
         "read_file" => {
             linker.func_wrap(spec.module, spec.import, host_read_file)?;
         }
+        "read_stdin" => {
+            linker.func_wrap(spec.module, spec.import, host_read_stdin)?;
+        }
         "read_chunks" => {
             linker.func_wrap(spec.module, spec.import, host_read_chunks)?;
+        }
+        "read_stdin_chunks" => {
+            linker.func_wrap(spec.module, spec.import, host_read_stdin_chunks)?;
         }
         "read_lines" => {
             linker.func_wrap(spec.module, spec.import, host_read_lines)?;

@@ -33,7 +33,7 @@ Use a `QUE` heredoc in shell files to get embedded Que highlighting:
 que --eval "$(cat <<'QUE'
 (if (empty? ARGV) "Provide a file"
   (do
-    (let [file .] ARGV)
+    (let [file] ARGV)
     (let text (map lower (read! file)))
     text))
 QUE

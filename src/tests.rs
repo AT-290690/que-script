@@ -2352,7 +2352,6 @@ xs)"#,
     }
 
     #[test]
-    #[ignore = "known remaining issue: returned closures over nested higher-order partials still trap in wasm backend"]
     #[cfg(feature = "runtime")]
     fn test_mapcar_comp_works_with_nested_and_apply_call_forms() {
         let src = r#"(do
@@ -4270,6 +4269,50 @@ xs)"#,
     }
 
     #[test]
+    fn test_lsp_base_environment_includes_stdin_host_externs() {
+        let std_defs = crate::lsp_native_core::load_std_definitions();
+        let (_env, _next_id, signatures, effects) =
+            crate::lsp_native_core::build_base_environment(&std_defs);
+
+        assert_eq!(
+            signatures.get("stdin!").map(String::as_str),
+            Some("() -> [Char]")
+        );
+        assert_eq!(
+            signatures.get("stdin/chunks!").map(String::as_str),
+            Some("Int -> ([Char] -> Bool) -> Bool")
+        );
+        assert_eq!(
+            effects.get("stdin!").copied(),
+            Some(crate::infer::EffectFlags::IO)
+        );
+        assert_eq!(
+            effects.get("stdin/chunks!").copied(),
+            Some(crate::infer::EffectFlags::IO)
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_completions_include_stdin_host_externs() {
+        let completion_json = crate::wasm_api::lsp_completions_at("stdin".to_string(), 0, 5);
+        let items: serde_json::Value = serde_json::from_str(&completion_json)
+            .expect("completion response should be valid JSON");
+        let labels: Vec<String> = items
+            .as_array()
+            .expect("completion response should be an array")
+            .iter()
+            .filter_map(|item| {
+                item.get("label")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+
+        assert!(labels.iter().any(|label| label == "stdin!"));
+        assert!(labels.iter().any(|label| label == "stdin/chunks!"));
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_map_alone_is_generic() {
         let hover_json =
             crate::wasm_api::lsp_hover("(let xs (map reverse [\"G\"]))\nmap".to_string(), 1, 1);
@@ -5530,6 +5573,38 @@ fn"#;
         assert!(
             wat.contains("(import \"host\" \"print\""),
             "used builtin host extern should still emit its import, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_stdin_builtin_host_extern_emits_zero_arg_import() {
+        let expr = crate::parser::build("(stdin!)").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(
+            wat.contains("(import \"host\" \"read_stdin\" (func $v_stdin_bang_ (result i32)))"),
+            "stdin! should emit a zero-arg host import, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_stdin_chunks_builtin_host_extern_emits_callback_apply_runtime() {
+        let expr = crate::parser::build(r#"(stdin/chunks! 4 (lambda chunk false))"#)
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(
+            wat.contains("(import \"host\" \"read_stdin_chunks\""),
+            "stdin/chunks! should emit host import, got:\n{}",
+            wat
+        );
+        assert!(
+            wat.contains("(export \"$apply1_i32\""),
+            "stdin/chunks! callback support should export apply1, got:\n{}",
             wat
         );
     }
@@ -9755,7 +9830,169 @@ the sea shore
         (repeat-encode (encode xs) (+ step 1)))))
 
   (length (repeat-encode "1" 0))
-"#, "6")
+"#, "6"),
+(r#"(let INPUT "seeds: 79 14 55 13
+
+seed-to-soil map:
+50 98 2
+52 50 48
+
+soil-to-fertilizer map:
+0 15 37
+37 52 2
+39 0 15
+
+fertilizer-to-water map:
+49 53 8
+0 11 42
+42 0 7
+57 7 4
+
+water-to-light map:
+88 18 7
+18 25 70
+
+light-to-temperature map:
+45 77 23
+81 45 19
+68 64 13
+
+temperature-to-humidity map:
+0 69 1
+1 0 69
+
+humidity-to-location map:
+60 56 37
+56 93 4")
+
+(let blocks (split [nl nl] INPUT))
+
+(let parse-number
+  (lambda (text) (BigInt/new text)))
+
+(let big-min
+  (lambda (a b)
+    (if (BigInt/lt? a b) a b)))
+
+(let big-max
+  (lambda (a b)
+    (if (BigInt/lt? a b) b a)))
+
+(let parse-seeds
+  (lambda (line)
+    (let words (split/words line))
+    (let out [])
+    (loop/range/exclusive i 1 (length words)
+      (push! out (parse-number (get words i))))
+    out))
+
+(let parse-map
+  (lambda (section)
+    (let lines (split [nl] section))
+    (let out [])
+    (loop/range/exclusive i 1 (length lines)
+      (let line (get lines i))
+      (if (not-empty? line)
+        (block
+          (let [dst src len] (map parse-number (split/words line)))
+          (push! out [dst src len]))))
+    out))
+
+(let seeds (parse-seeds (get blocks 0)))
+
+(let maps [])
+(loop/range/exclusive block-index 1 (length blocks)
+  (push! maps (parse-map (get blocks block-index))))
+
+(let apply-map-to-value
+  (lambda (value rows)
+    (let result [value])
+    (mut found false)
+    (let row-count (length rows))
+    (loop i (and (< i row-count) (not found))
+      (let [dst src len] (get rows i))
+      (if (BigInt/lte? src value)
+        (if (BigInt/lt? value (BigInt/add src len))
+          (do
+            (set! result 0 (BigInt/add dst (BigInt/sub value src)))
+            (alter! found true)))))
+    (car result)))
+
+(let seed-location
+  (lambda (seed)
+    (let value [seed])
+    (loop/range/exclusive i 0 (length maps)
+      (set! value 0 (apply-map-to-value (get value 0) (get maps i))))
+    (car value)))
+
+(let part1
+  (block
+    (let best [(BigInt/new "99999999999999999999")])
+    (loop/range/exclusive i 0 (length seeds)
+      (set! best 0 (big-min (car best) (seed-location (get seeds i)))))
+    (car best)))
+
+(let seed-ranges
+  (block
+    (let out [])
+    (loop/range/exclusive/by i 0 (length seeds) 2
+      (let start (get seeds i))
+      (let len (get seeds (+ i 1)))
+      (push! out [start (BigInt/add start len)]))
+    out))
+
+(let apply-row-to-ranges!
+  (lambda (mapped pending [ dst src len ])
+    (let next [])
+    (let src-end (BigInt/add src len))
+    (loop/range/exclusive i 0 (length pending)
+      (let [start end] (get pending i))
+      (let overlap-start (big-max start src))
+      (let overlap-end (big-min end src-end))
+      (if (BigInt/lt? overlap-start overlap-end)
+        (do
+          (if (BigInt/lt? start overlap-start)
+            (push! next [start overlap-start]))
+          (push! mapped
+            [
+              (BigInt/add dst (BigInt/sub overlap-start src))
+              (BigInt/add dst (BigInt/sub overlap-end src))
+            ])
+          (if (BigInt/lt? overlap-end end)
+            (push! next [overlap-end end])))
+        (push! next [start end])))
+    next))
+
+(let apply-map-to-ranges
+  (lambda (ranges rows)
+    (let mapped [])
+    (let pending [ranges])
+    (loop/range/exclusive row-index 0 (length rows)
+      (set! pending 0
+        (apply-row-to-ranges! mapped (car pending) (get rows row-index))))
+    (loop/range/exclusive i 0 (length (car pending))
+      (push! mapped (get pending 0 i)))
+    mapped))
+
+(let final-ranges
+  (block
+    (let ranges [seed-ranges])
+    (loop/range/exclusive i 0 (length maps)
+      (set! ranges 0 (apply-map-to-ranges (car ranges) (get maps i))))
+    (car ranges)))
+
+(let part2
+  (block
+    (let best [(BigInt/new "99999999999999999999")])
+    (loop/range/exclusive i 0 (length final-ranges)
+      (let start (get final-ranges i 0))
+      (set! best 0 (big-min (car best) start)))
+    (car best)))
+
+[
+  (Digits->Chars part1)
+  (Digits->Chars part2)
+]"#, "[35 46]")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {

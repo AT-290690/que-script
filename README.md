@@ -144,6 +144,29 @@ Run the program:
 que
 ```
 
+Read piped input from stdin:
+
+```bash
+printf '1,2,3\n' | que main.que --allow read
+```
+
+```lisp
+(let input (stdin!))
+input
+```
+
+For large piped input, stream chunks and stop early by returning `true`:
+
+```lisp
+(let total [])
+(stdin/chunks! 65536
+  (lambda (chunk)
+    (do
+      (push! total (length chunk))
+      false)))
+total
+```
+
 Run the tests:
 
 ```bash

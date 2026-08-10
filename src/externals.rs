@@ -247,6 +247,12 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
     },
     BuiltinHostExternSpec {
         module: "host",
+        import: "read_stdin",
+        local_name: "stdin!",
+        typ: || fn1(ty_unit(), ty_char_list()),
+    },
+    BuiltinHostExternSpec {
+        module: "host",
         import: "read_chunks",
         local_name: "read/chunks!",
         typ: || {
@@ -263,6 +269,12 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
         import: "read_lines",
         local_name: "read/lines!",
         typ: || fn2(ty_char_list(), fn1(ty_char_list(), ty_bool()), ty_bool()),
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "read_stdin_chunks",
+        local_name: "stdin/chunks!",
+        typ: || fn2(ty_int(), fn1(ty_char_list(), ty_bool()), ty_bool()),
     },
     BuiltinHostExternSpec {
         module: "host",

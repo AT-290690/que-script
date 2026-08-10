@@ -214,7 +214,10 @@ pub fn build_base_environment(
             .or_insert_with(|| normalize_signature(signature));
     }
 
-    let std_effects = infer_std_effects(&env, next_id, std_defs);
+    let mut std_effects = infer_std_effects(&env, next_id, std_defs);
+    for spec in crate::externals::BUILTIN_HOST_EXTERNS {
+        std_effects.insert(spec.local_name.to_string(), EffectFlags::IO);
+    }
 
     (env, next_id, signatures, std_effects)
 }
@@ -230,6 +233,14 @@ pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<Strin
     let mut names = HashSet::new();
     for expr in std_defs {
         if let Expression::Apply(items) = expr {
+            if let [Expression::Word(keyword), Expression::Word(_module), Expression::Word(_import), Expression::Word(name), _typ, ..] =
+                &items[..]
+            {
+                if keyword == "extern" {
+                    names.insert(name.clone());
+                    continue;
+                }
+            }
             if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
                 if keyword == "let"
                     || keyword == "letrec"
