@@ -335,6 +335,18 @@ pub fn is_builtin_host_extern_symbol(name: &str) -> bool {
         .any(|spec| spec.local_name == name)
 }
 
+pub fn builtin_host_extern_decl(name: &str) -> Option<ExternDecl> {
+    BUILTIN_HOST_EXTERNS
+        .iter()
+        .find(|spec| spec.local_name == name)
+        .map(|spec| ExternDecl {
+            module: spec.module.to_string(),
+            import: spec.import.to_string(),
+            local_name: spec.local_name.to_string(),
+            typ: (spec.typ)(),
+        })
+}
+
 #[cfg(feature = "io")]
 pub fn builtin_host_extern_definitions() -> Result<Vec<Expression>, String> {
     let mut out = Vec::new();

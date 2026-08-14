@@ -816,6 +816,22 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
     }
 }
 
+fn collect_builtin_host_extern_call_heads(expr: &Expression, out: &mut HashSet<String>) {
+    match expr {
+        Expression::Apply(items) => {
+            if let Some(Expression::Word(op)) = items.first() {
+                if crate::externals::is_builtin_host_extern_symbol(op) {
+                    out.insert(op.clone());
+                }
+            }
+            for item in items {
+                collect_builtin_host_extern_call_heads(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn collect_lambda_nodes(node: &TypedExpression, out: &mut Vec<TypedExpression>) {
     if let Expression::Apply(items) = &node.expr {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
@@ -9306,11 +9322,29 @@ fn compile_program_to_wat_build_typed_with_opts(
     for name in top_defs.keys() {
         needed.insert(name.clone());
     }
-    let used_extern_defs: HashMap<String, crate::externals::ExternDecl> = extern_defs
+    let mut used_extern_defs: HashMap<String, crate::externals::ExternDecl> = extern_defs
         .iter()
         .filter(|(name, _)| needed.contains(*name))
         .map(|(name, decl)| (name.clone(), decl.clone()))
         .collect();
+    for name in &needed {
+        if used_extern_defs.contains_key(name) {
+            continue;
+        }
+        if let Some(decl) = crate::externals::builtin_host_extern_decl(name) {
+            used_extern_defs.insert(name.clone(), decl);
+        }
+    }
+    let mut builtin_host_call_heads = HashSet::new();
+    collect_builtin_host_extern_call_heads(&typed_ast.expr, &mut builtin_host_call_heads);
+    for name in builtin_host_call_heads {
+        if used_extern_defs.contains_key(&name) {
+            continue;
+        }
+        if let Some(decl) = crate::externals::builtin_host_extern_decl(&name) {
+            used_extern_defs.insert(name, decl);
+        }
+    }
     let definitely_materialized_top_level_scalar_names =
         collect_definitely_materialized_top_level_scalar_names(&top_defs);
 

@@ -5778,6 +5778,30 @@ fn"#;
     }
 
     #[test]
+    fn test_optimized_chunked_host_externs_keep_imports() {
+        let stdin_expr = crate::parser::build(r#"(stdin/chunks! 4 (lambda chunk false))"#)
+            .expect("stdin/chunks! program should build");
+        let stdin_wat = crate::wat::compile_program_to_wat_with_opts(&stdin_expr, true)
+            .expect("stdin/chunks! program should compile");
+        assert!(
+            stdin_wat.contains("(import \"host\" \"read_stdin_chunks\""),
+            "optimized stdin/chunks! should keep host import, got:\n{}",
+            stdin_wat
+        );
+
+        let read_expr =
+            crate::parser::build(r#"(read/chunks! "input.txt" 4 (lambda chunk false))"#)
+                .expect("read/chunks! program should build");
+        let read_wat = crate::wat::compile_program_to_wat_with_opts(&read_expr, true)
+            .expect("read/chunks! program should compile");
+        assert!(
+            read_wat.contains("(import \"host\" \"read_chunks\""),
+            "optimized read/chunks! should keep host import, got:\n{}",
+            read_wat
+        );
+    }
+
+    #[test]
     fn test_wat_vector_literal_releases_fresh_nested_managed_value() {
         let expr = crate::parser::build("(vector [])").expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
