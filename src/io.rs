@@ -269,11 +269,39 @@ fn take_no_result_flag_from_argv(argv: &mut Vec<String>) -> bool {
     found
 }
 
+fn take_opt_flag_from_argv(argv: &mut Vec<String>) -> bool {
+    let mut found = false;
+    let mut out = Vec::with_capacity(argv.len());
+    for token in argv.iter() {
+        if token == "--opt" {
+            found = true;
+            continue;
+        }
+        out.push(token.clone());
+    }
+    *argv = out;
+    found
+}
+
 fn enable_debug_runtime_guards() {
     env::set_var("QUE_INT_OVERFLOW_CHECK", "1");
     env::set_var("QUE_FLOAT_OVERFLOW_CHECK", "1");
     env::set_var("QUE_DIV_ZERO_CHECK", "1");
     env::set_var("QUE_BOUNDS_CHECK", "1");
+}
+
+fn enable_opt_runtime_flags() {
+    env::set_var("QUE_WASM_OPT", "speed");
+    env::set_var("QUE_DEVIRTUALIZE", "aggressive");
+    env::set_var("QUE_TCO", "aggressive");
+    env::set_var("QUE_SMALL_SCALAR_INLINE_COST", "512");
+    env::set_var("QUE_BOUNDS_CHECK", "0");
+    env::set_var("QUE_INT_OVERFLOW_CHECK", "0");
+    env::set_var("QUE_FLOAT_OVERFLOW_CHECK", "0");
+    env::set_var("QUE_DIV_ZERO_CHECK", "0");
+    env::set_var("QUE_VEC_MIN_CAP", "8");
+    env::set_var("QUE_VEC_GROWTH_NUM", "2");
+    env::set_var("QUE_VEC_GROWTH_DEN", "1");
 }
 
 fn load_project_library_definitions(start_dir: &Path) -> Result<Vec<Expression>, String> {
@@ -1072,8 +1100,8 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
 
 fn native_shell_help(bin_name: &str) -> String {
     format!(
-        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
-         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]] [--allow <read|write|delete|all> [...]]\n\
+        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|write|delete|all> [...]]\n\
+         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|write|delete|all> [...]]\n\
          or:    {bin} test <folder-or-test.que>\n\
          or:    {bin} [<script.que>] [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
          or:    {bin} --eval <source> [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
@@ -1104,11 +1132,13 @@ fn native_shell_help(bin_name: &str) -> String {
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
                          QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
+           --opt          Run with performance flags for this invocation: speed/aggressive opts,\n\
+                         larger scalar inlining, and runtime overflow/div-zero/bounds checks OFF.\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
            --allow        Enable host io permissions (read, write, delete, all).\n\
          \n\
          Notes:\n\
-          - Recommended: run with `--debug` for stronger safety checks and richer diagnostics.\n\
+          - Recommended: run with `--debug` while developing, then `--opt` for trusted benchmark runs.\n\
           - If a nearby `{config}` exists, native CLI and native LSP load its `deps`.\n\
           - If no `{config}` exists, no project config is used.\n\
           - Omitting `<script.que>` uses `entry` from `{config}` when present.\n\
@@ -1125,7 +1155,7 @@ fn native_shell_help(bin_name: &str) -> String {
            - `--emit wasm` prints raw wasm bytes unless you pass `--out`.\n\
            - `--emit types` prints inferred top-level user-form types and final result type.\n\
            - `explain --json` prints a machine-readable optimization/safety report.\n\
-           - --debug, --no-result, --emit, --emit-source and --help can appear after the script path.\n\
+           - --debug, --opt, --no-result, --emit, --emit-source and --help can appear after the script path.\n\
            - `--install` writes/extends an external library file (used by all binaries).\n\
            - `--uninstall` removes the active external library file.\n\
            - Default output path: /usr/local/share/que/que-lib.lisp.\n\
@@ -1160,6 +1190,11 @@ fn native_shell_env_help(bin_name: &str) -> String {
          \n\
          Example:\n\
            QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_SMALL_SCALAR_INLINE_COST=64 QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 QUE_DECIMAL_SCALE=1000 {bin} script.que\n\
+           {bin} script.que --opt\n\
+             Sets QUE_WASM_OPT=speed, QUE_DEVIRTUALIZE=aggressive, QUE_TCO=aggressive,\n\
+             QUE_SMALL_SCALAR_INLINE_COST=512, QUE_BOUNDS_CHECK=0,\n\
+             QUE_INT_OVERFLOW_CHECK=0, QUE_FLOAT_OVERFLOW_CHECK=0, QUE_DIV_ZERO_CHECK=0,\n\
+             QUE_VEC_MIN_CAP=8, QUE_VEC_GROWTH_NUM=2, QUE_VEC_GROWTH_DEN=1.\n\
          \n\
          Setup some env flags:\n\
          \n\
@@ -2583,8 +2618,9 @@ mod tests {
     use super::{
         init_host_project, init_project_config_file, parse_test_results,
         resolve_project_entry_path, take_debug_mode_from_argv, take_emit_request_from_argv,
-        take_help_flag_from_argv, take_no_result_flag_from_argv, take_shell_policy_from_argv,
-        wildcard_match, DebugMode, EmitKind, QueTestCase, ShellPermission, ShellPolicy,
+        take_help_flag_from_argv, take_no_result_flag_from_argv, take_opt_flag_from_argv,
+        take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind, QueTestCase,
+        ShellPermission, ShellPolicy,
     };
     use std::collections::HashSet;
 
@@ -2733,6 +2769,18 @@ mod tests {
         ];
         let mode = take_debug_mode_from_argv(&mut args);
         assert_eq!(mode, DebugMode::Basic);
+        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
+    }
+
+    #[test]
+    fn take_opt_strips_flag() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--opt".to_string(),
+            "user-arg".to_string(),
+        ];
+        let opt = take_opt_flag_from_argv(&mut args);
+        assert!(opt);
         assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
     }
 
@@ -3110,7 +3158,14 @@ pub fn run_native_shell() -> Result<(), String> {
     let suppress_result_output = take_no_result_flag_from_argv(&mut argv);
     let emit_request = take_emit_request_from_argv(&mut argv)?;
     apply_project_env_vars(&script_cwd)?;
+    let opt_mode = take_opt_flag_from_argv(&mut argv);
     let debug_mode = crate::io::take_debug_mode_from_argv(&mut argv);
+    if opt_mode && debug_mode.is_enabled() {
+        return Err("--opt and --debug cannot be used together".to_string());
+    }
+    if opt_mode {
+        enable_opt_runtime_flags();
+    }
     if debug_mode.is_enabled() {
         enable_debug_runtime_guards();
     }
