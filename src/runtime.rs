@@ -328,7 +328,7 @@ fn debug_guard_trap_message<T>(
         3 => "debug.guard_trap: integer overflow on add/inc (QUE_INT_OVERFLOW_CHECK)",
         4 => "debug.guard_trap: integer overflow on sub/dec (QUE_INT_OVERFLOW_CHECK)",
         5 => "debug.guard_trap: integer overflow on mul/square (QUE_INT_OVERFLOW_CHECK)",
-        6 => "debug.guard_trap: dec overflow or NaN/Inf (QUE_FLOAT_OVERFLOW_CHECK)",
+        6 => "debug.guard_trap: dec overflow (QUE_DEC_OVERFLOW_CHECK)",
         _ => "debug.guard_trap: unknown guard trap",
     };
     Some(msg.to_string())

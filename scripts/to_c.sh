@@ -4,7 +4,7 @@ OUTPUT_DIR="build"
 mkdir -p "$OUTPUT_DIR"
 
 # 1. Generate files
-QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=aggressive QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_INT_OVERFLOW_CHECK=0 QUE_FLOAT_OVERFLOW_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=2 QUE_VEC_GROWTH_DEN=1 QUE_DECIMAL_SCALE=1000 que main.que --emit wasm --allow write > "$OUTPUT_DIR/main.wasm"
+QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=aggressive QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_INT_OVERFLOW_CHECK=0 QUE_DEC_OVERFLOW_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=2 QUE_VEC_GROWTH_DEN=1 QUE_DECIMAL_SCALE=1000 que main.que --emit wasm --allow write > "$OUTPUT_DIR/main.wasm"
 wasm2c "$OUTPUT_DIR/main.wasm" -n main -o "$OUTPUT_DIR/main.c"
 
 # 2. Automatically find the allocator

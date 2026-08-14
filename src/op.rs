@@ -4356,7 +4356,9 @@ fn fold_float_bin(
         return node;
     }
     let result = f(a, b);
-    if parse_env_bool_like("QUE_FLOAT_OVERFLOW_CHECK", false) && !result.is_finite() {
+    if parse_env_bool_like("QUE_DEC_OVERFLOW_CHECK", false)
+        && (!result.is_finite() || !decimal_fits_i32_storage(result))
+    {
         return node;
     }
     make_folded_literal(
@@ -4388,6 +4390,12 @@ fn fold_int_to_float(node: TypedExpression, items: &[Expression]) -> TypedExpres
     let Some(a) = items.get(1).and_then(int_literal) else {
         return node;
     };
+    if parse_env_bool_like("QUE_DEC_OVERFLOW_CHECK", false) {
+        let scaled = (a as i64) * decimal_scale_i64();
+        if scaled < i32::MIN as i64 || scaled > i32::MAX as i64 {
+            return node;
+        }
+    }
     make_folded_literal(
         &node,
         Expression::Dec(quantize_float_literal(a as f32)),
@@ -4827,15 +4835,24 @@ fn quantize_float_literal(v: f32) -> f32 {
     (v * scale).round() / scale
 }
 
+fn decimal_fits_i32_storage(v: f32) -> bool {
+    let scaled = ((v as f64) * (decimal_scale_i64() as f64)).round();
+    scaled >= i32::MIN as f64 && scaled <= i32::MAX as f64
+}
+
 fn decimal_scale_f32() -> f32 {
+    decimal_scale_i64() as f32
+}
+
+fn decimal_scale_i64() -> i64 {
     match std::env::var("QUE_DECIMAL_SCALE")
         .ok()
         .and_then(|v| v.trim().parse::<i32>().ok())
     {
         Some(scale) if scale > 0 && is_power_of_ten_i32(scale) && scale <= 1_000_000 => {
-            scale as f32
+            scale as i64
         }
-        _ => 1000.0,
+        _ => 1000,
     }
 }
 

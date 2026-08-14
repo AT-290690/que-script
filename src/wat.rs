@@ -133,15 +133,16 @@ fn emit_i32_locals(out: &mut String, count: usize) {
 #[derive(Clone, Copy)]
 struct ArithmeticCheckConfig {
     int_overflow_check: bool,
-    float_overflow_check: bool,
+    dec_overflow_check: bool,
     div_zero_check: bool,
 }
 
 const DBG_GUARD_TRAP_INT_DIV_ZERO: i32 = 1;
-const DBG_GUARD_TRAP_FLOAT_DIV_ZERO: i32 = 2;
+const DBG_GUARD_TRAP_DEC_DIV_ZERO: i32 = 2;
 const DBG_GUARD_TRAP_INT_OVERFLOW_ADD: i32 = 3;
 const DBG_GUARD_TRAP_INT_OVERFLOW_SUB: i32 = 4;
 const DBG_GUARD_TRAP_INT_OVERFLOW_MUL: i32 = 5;
+const DBG_GUARD_TRAP_DEC_OVERFLOW: i32 = 6;
 fn decimal_scale_i32() -> i32 {
     match std::env::var("QUE_DECIMAL_SCALE")
         .ok()
@@ -186,7 +187,7 @@ fn parse_env_bool_like(name: &str, default: bool) -> bool {
 fn arithmetic_check_config() -> ArithmeticCheckConfig {
     ArithmeticCheckConfig {
         int_overflow_check: parse_env_bool_like("QUE_INT_OVERFLOW_CHECK", false),
-        float_overflow_check: parse_env_bool_like("QUE_FLOAT_OVERFLOW_CHECK", false),
+        dec_overflow_check: parse_env_bool_like("QUE_DEC_OVERFLOW_CHECK", false),
         div_zero_check: parse_env_bool_like("QUE_DIV_ZERO_CHECK", false),
     }
 }
@@ -3508,6 +3509,7 @@ fn emit_vector_runtime(
   )
 
   (func $dec_mul (param $a i32) (param $b i32) (result i32)
+    (local $r i64)
     local.get $a
     i64.extend_i32_s
     local.get $b
@@ -3515,10 +3517,14 @@ fn emit_vector_runtime(
     i64.mul
     i64.const __DECIMAL_SCALE__
     i64.div_s
+    local.set $r
+    ;; __DEC_OVERFLOW_CHECK_R__
+    local.get $r
     i32.wrap_i64
   )
 
   (func $dec_div (param $a i32) (param $b i32) (result i32)
+    (local $r i64)
     local.get $a
     i64.extend_i32_s
     i64.const __DECIMAL_SCALE__
@@ -3526,6 +3532,9 @@ fn emit_vector_runtime(
     local.get $b
     i64.extend_i32_s
     i64.div_s
+    local.set $r
+    ;; __DEC_OVERFLOW_CHECK_R__
+    local.get $r
     i32.wrap_i64
   )
 
@@ -3540,10 +3549,14 @@ fn emit_vector_runtime(
   )
 
   (func $dec_from_int (param $a i32) (result i32)
+    (local $r i64)
     local.get $a
     i64.extend_i32_s
     i64.const __DECIMAL_SCALE__
     i64.mul
+    local.set $r
+    ;; __DEC_OVERFLOW_CHECK_R__
+    local.get $r
     i32.wrap_i64
   )
 
@@ -4650,6 +4663,29 @@ fn emit_vector_runtime(
     out = out.replace("__VEC_GROWTH_NUM__", &vec_growth_num.to_string());
     out = out.replace("__VEC_GROWTH_DEN__", &vec_growth_den.to_string());
     out = out.replace("__DECIMAL_SCALE__", &decimal_scale_i64().to_string());
+    let dec_overflow_check = if arithmetic_check_config().dec_overflow_check {
+        format!(
+            r#"local.get $r
+    i64.const {}
+    i64.gt_s
+    if
+      {}
+    end
+    local.get $r
+    i64.const {}
+    i64.lt_s
+    if
+      {}
+    end"#,
+            i32::MAX,
+            indent_block(&emit_guard_trap_wat(DBG_GUARD_TRAP_DEC_OVERFLOW), 3),
+            i32::MIN,
+            indent_block(&emit_guard_trap_wat(DBG_GUARD_TRAP_DEC_OVERFLOW), 3)
+        )
+    } else {
+        String::new()
+    };
+    out = out.replace(";; __DEC_OVERFLOW_CHECK_R__", &dec_overflow_check);
     out = out.replace(
         ";; __VEC_GET_BOUNDS_CHECK__",
         if vec_bounds_check_enabled {
@@ -5090,13 +5126,8 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     fn emit_float_div_zero_check(rhs_local: usize) -> String {
         format!(
             "local.get {rhs_local}\ni32.eqz\nif\n{}\nend",
-            emit_guard_trap_wat(DBG_GUARD_TRAP_FLOAT_DIV_ZERO)
+            emit_guard_trap_wat(DBG_GUARD_TRAP_DEC_DIV_ZERO)
         )
-    }
-
-    fn emit_float_overflow_or_nan_check(result_local: usize) -> String {
-        let _ = result_local;
-        String::new()
     }
 
     fn emit_int_add_overflow_check(lhs_local: usize, rhs_local: usize, res_local: usize) -> String {
@@ -5211,73 +5242,62 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         "<<" => "i32.shl",
         ">>" => "i32.shr_s",
         "+." => {
-            if checks.float_overflow_check {
+            if checks.dec_overflow_check {
                 return Ok(
                     format!(
                         "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.add\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
-                        emit_float_overflow_or_nan_check(res_local)
+                        emit_int_add_overflow_check(lhs_local, rhs_local, res_local)
                     )
                 );
             }
             return Ok(format!("{a}\n{b}\ni32.add"));
         }
         "-." => {
-            if checks.float_overflow_check {
+            if checks.dec_overflow_check {
                 return Ok(
                     format!(
                         "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.sub\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
-                        emit_float_overflow_or_nan_check(res_local)
+                        emit_int_sub_overflow_check(lhs_local, rhs_local, res_local)
                     )
                 );
             }
             return Ok(format!("{a}\n{b}\ni32.sub"));
         }
         "*." => {
-            if checks.float_overflow_check {
+            if checks.dec_overflow_check {
                 return Ok(
                     format!(
-                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_mul\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
-                        emit_float_overflow_or_nan_check(res_local)
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_mul"
                     )
                 );
             }
             return Ok(format!("{a}\n{b}\ncall $dec_mul"));
         }
         "/." => {
-            if checks.div_zero_check || checks.float_overflow_check {
+            if checks.div_zero_check || checks.dec_overflow_check {
                 let div_zero_check = if checks.div_zero_check {
                     format!("{}\n", emit_float_div_zero_check(rhs_local))
                 } else {
                     String::new()
                 };
-                let overflow_check = if checks.float_overflow_check {
-                    format!("{}\n", emit_float_overflow_or_nan_check(res_local))
-                } else {
-                    String::new()
-                };
                 return Ok(
                     format!(
-                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_div\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_div"
                     )
                 );
             }
             return Ok(format!("{a}\n{b}\ncall $dec_div"));
         }
         "mod." => {
-            if checks.div_zero_check || checks.float_overflow_check {
+            if checks.div_zero_check || checks.dec_overflow_check {
                 let div_zero_check = if checks.div_zero_check {
                     format!("{}\n", emit_float_div_zero_check(rhs_local))
                 } else {
                     String::new()
                 };
-                let overflow_check = if checks.float_overflow_check {
-                    format!("{}\n", emit_float_overflow_or_nan_check(res_local))
-                } else {
-                    String::new()
-                };
                 return Ok(
                     format!(
-                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_mod\nlocal.set {res_local}\n{overflow_check}local.get {res_local}"
+                        "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{div_zero_check}local.get {lhs_local}\nlocal.get {rhs_local}\ncall $dec_mod"
                     )
                 );
             }

@@ -1130,7 +1130,7 @@ xs)"#,
             .lock()
             .expect("runtime test lock should not be poisoned");
         let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
-        let _float_overflow = ScopedEnvVar::set("QUE_FLOAT_OVERFLOW_CHECK", "1");
+        let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
         let _div_zero = ScopedEnvVar::set("QUE_DIV_ZERO_CHECK", "1");
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
         run_program_error_unlocked(src)
@@ -1166,6 +1166,24 @@ xs)"#,
         };
         crate::wat::compile_program_to_wat_with_opts(&expr, enable_optimizer)
             .expect("program should compile")
+    }
+
+    #[cfg(feature = "runtime")]
+    fn run_program_error_with_std_unlocked(src: &str, enable_optimizer: bool) -> String {
+        let wat = compile_std_program_to_wat(src, enable_optimizer);
+        let argv: Vec<String> = Vec::new();
+        #[cfg(feature = "io")]
+        let store_data =
+            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
+                .map_err(|e| e.to_string())
+                .expect("io store should initialize");
+        #[cfg(feature = "io")]
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
+            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
+        });
+        #[cfg(not(feature = "io"))]
+        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
+        run_result.expect_err("program should fail at runtime")
     }
 
     #[cfg(feature = "runtime")]
@@ -2219,6 +2237,38 @@ xs)"#,
         let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "100");
         let output = run_program_output_unlocked(r#"[ 3.141 3.146 (+. 1.11 2.22) ]"#);
         assert_eq!(output, "[3.14 3.15 3.33]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_int_to_dec_overflow_traps_with_debug_guards() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "100000");
+        let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
+        let err = run_program_error_unlocked(r#"(Int->Dec 48000)"#);
+        assert!(
+            err.contains("unreachable"),
+            "expected unreachable trap for Int->Dec overflow, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_string_to_dec_overflow_traps_with_debug_guards() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "100000");
+        let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
+        let err = run_program_error_with_std_unlocked(r#"(String->Dec "48000.00")"#, true);
+        assert!(
+            err.contains("unreachable"),
+            "expected unreachable trap for String->Dec overflow, got: {}",
+            err
+        );
     }
 
     #[test]

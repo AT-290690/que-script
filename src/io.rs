@@ -285,7 +285,7 @@ fn take_opt_flag_from_argv(argv: &mut Vec<String>) -> bool {
 
 fn enable_debug_runtime_guards() {
     env::set_var("QUE_INT_OVERFLOW_CHECK", "1");
-    env::set_var("QUE_FLOAT_OVERFLOW_CHECK", "1");
+    env::set_var("QUE_DEC_OVERFLOW_CHECK", "1");
     env::set_var("QUE_DIV_ZERO_CHECK", "1");
     env::set_var("QUE_BOUNDS_CHECK", "1");
 }
@@ -297,7 +297,7 @@ fn enable_opt_runtime_flags() {
     env::set_var("QUE_SMALL_SCALAR_INLINE_COST", "512");
     env::set_var("QUE_BOUNDS_CHECK", "0");
     env::set_var("QUE_INT_OVERFLOW_CHECK", "0");
-    env::set_var("QUE_FLOAT_OVERFLOW_CHECK", "0");
+    env::set_var("QUE_DEC_OVERFLOW_CHECK", "0");
     env::set_var("QUE_DIV_ZERO_CHECK", "0");
     env::set_var("QUE_VEC_MIN_CAP", "8");
     env::set_var("QUE_VEC_GROWTH_NUM", "2");
@@ -1130,7 +1130,7 @@ fn native_shell_help(bin_name: &str) -> String {
           init-host      Scaffold a custom Rust host binary in `./<name>`.\n\
           explain        Show type/effect and optimized WAT-shape information without running.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
-                         Also forces QUE_INT_OVERFLOW_CHECK, QUE_FLOAT_OVERFLOW_CHECK,\n\
+                         Also forces QUE_INT_OVERFLOW_CHECK, QUE_DEC_OVERFLOW_CHECK,\n\
                          QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
            --opt          Run with performance flags for this invocation: speed/aggressive opts,\n\
                          larger scalar inlining, and runtime overflow/div-zero/bounds checks OFF.\n\
@@ -1186,14 +1186,14 @@ fn native_shell_env_help(bin_name: &str) -> String {
            QUE_DECIMAL_SCALE  Dec fixed-point scale (default: 1000). Must be a power of 10 up to 1000000.\n\
            QUE_DIV_ZERO_CHECK Division/modulo by zero trap check (default: off). Enable with 1|true|on|yes.\n\
            QUE_INT_OVERFLOW_CHECK   Integer overflow trap check for +,-,* and mut ops (default: off).\n\
-           QUE_FLOAT_OVERFLOW_CHECK Dec NaN/Inf trap check for +.,-.,*.,/. and mut ops (default: off).\n\
+           QUE_DEC_OVERFLOW_CHECK Dec fixed-point overflow trap check for +.,-.,*.,/. and mut ops (default: off).\n\
          \n\
          Example:\n\
            QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_SMALL_SCALAR_INLINE_COST=64 QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 QUE_DECIMAL_SCALE=1000 {bin} script.que\n\
            {bin} script.que --opt\n\
              Sets QUE_WASM_OPT=speed, QUE_DEVIRTUALIZE=aggressive, QUE_TCO=aggressive,\n\
              QUE_SMALL_SCALAR_INLINE_COST=512, QUE_BOUNDS_CHECK=0,\n\
-             QUE_INT_OVERFLOW_CHECK=0, QUE_FLOAT_OVERFLOW_CHECK=0, QUE_DIV_ZERO_CHECK=0,\n\
+             QUE_INT_OVERFLOW_CHECK=0, QUE_DEC_OVERFLOW_CHECK=0, QUE_DIV_ZERO_CHECK=0,\n\
              QUE_VEC_MIN_CAP=8, QUE_VEC_GROWTH_NUM=2, QUE_VEC_GROWTH_DEN=1.\n\
          \n\
          Setup some env flags:\n\
