@@ -314,6 +314,12 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
     },
     BuiltinHostExternSpec {
         module: "host",
+        import: "time",
+        local_name: "time!",
+        typ: || fn1(ty_unit(), ty_int()),
+    },
+    BuiltinHostExternSpec {
+        module: "host",
         import: "clear",
         local_name: "clear!",
         typ: || fn1(ty_unit(), ty_unit()),

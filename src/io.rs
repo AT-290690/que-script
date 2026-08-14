@@ -11,7 +11,7 @@ use std::io;
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wasmtime::Linker;
 use wasmtime::{Caller, Extern, Memory, TypedFunc};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
@@ -28,7 +28,10 @@ const VEC_MAGIC: i32 = 1_447_380_017;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShellPermission {
     Read,
+    Stdin,
     Write,
+    Print,
+    Clock,
     Delete,
 }
 
@@ -36,7 +39,10 @@ impl ShellPermission {
     fn as_str(&self) -> &'static str {
         match self {
             ShellPermission::Read => "read",
+            ShellPermission::Stdin => "stdin",
             ShellPermission::Write => "write",
+            ShellPermission::Print => "print",
+            ShellPermission::Clock => "clock",
             ShellPermission::Delete => "delete",
         }
     }
@@ -59,7 +65,10 @@ impl ShellPolicy {
     pub fn allow_all() -> Self {
         let mut permissions = HashSet::new();
         permissions.insert(ShellPermission::Read);
+        permissions.insert(ShellPermission::Stdin);
         permissions.insert(ShellPermission::Write);
+        permissions.insert(ShellPermission::Print);
+        permissions.insert(ShellPermission::Clock);
         permissions.insert(ShellPermission::Delete);
         Self::enabled(permissions)
     }
@@ -84,7 +93,7 @@ impl ShellPolicy {
         if !self.shell_enabled {
             return Err(
                 format!(
-                    "host io is disabled. pass --allow <read|write|delete> [...]. denied operation '{}' for '{}'",
+                    "host io is disabled. pass --allow <read|stdin|write|print|clock|delete> [...]. denied operation '{}' for '{}'",
                     operation,
                     target
                 )
@@ -122,8 +131,17 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
                 "read" => {
                     permissions.insert(ShellPermission::Read);
                 }
+                "stdin" => {
+                    permissions.insert(ShellPermission::Stdin);
+                }
                 "write" => {
                     permissions.insert(ShellPermission::Write);
+                }
+                "print" | "stdout" => {
+                    permissions.insert(ShellPermission::Print);
+                }
+                "clock" => {
+                    permissions.insert(ShellPermission::Clock);
                 }
                 "delete" => {
                     permissions.insert(ShellPermission::Delete);
@@ -133,7 +151,7 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
                 }
                 _ => {
                     return Err(format!(
-                        "unknown shell permission '{}'. expected one of: read, write, delete",
+                        "unknown shell permission '{}'. expected one of: read, stdin, write, print, clock, delete",
                         token
                     ));
                 }
@@ -143,7 +161,10 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
 
     if grant_all {
         permissions.insert(ShellPermission::Read);
+        permissions.insert(ShellPermission::Stdin);
         permissions.insert(ShellPermission::Write);
+        permissions.insert(ShellPermission::Print);
+        permissions.insert(ShellPermission::Clock);
         permissions.insert(ShellPermission::Delete);
     }
 
@@ -1100,8 +1121,8 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
 
 fn native_shell_help(bin_name: &str) -> String {
     format!(
-        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|write|delete|all> [...]]\n\
-         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|write|delete|all> [...]]\n\
+        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
+         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
          or:    {bin} test <folder-or-test.que>\n\
          or:    {bin} [<script.que>] [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
          or:    {bin} --eval <source> [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
@@ -1135,7 +1156,7 @@ fn native_shell_help(bin_name: &str) -> String {
            --opt          Run with performance flags for this invocation: speed/aggressive opts,\n\
                          larger scalar inlining, and runtime overflow/div-zero/bounds checks OFF.\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
-           --allow        Enable host io permissions (read, write, delete, all).\n\
+           --allow        Enable host io permissions (read, stdin, write, print, clock, delete, all).\n\
          \n\
          Notes:\n\
           - Recommended: run with `--debug` while developing, then `--opt` for trusted benchmark runs.\n\
@@ -1292,7 +1313,7 @@ fn native_shell_learn() -> &'static str {
     - set! pop! length get car cdr cons fst snd while block unless when when-not\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
-    ARGV print! sleep! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
+    ARGV print! sleep! time! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
 }
 
 fn binding_name_from_def(expr: &Expression) -> Option<String> {
@@ -1922,7 +1943,7 @@ pub fn host_read_stdin(mut caller: Caller<'_, ShellStoreData>) -> wasmtime::Resu
     caller
         .data()
         .shell_policy
-        .require(ShellPermission::Read, "stdin!", "<stdin>")
+        .require(ShellPermission::Stdin, "stdin!", "<stdin>")
         .map_err(wasmtime::Error::msg)?;
 
     let mut output = String::new();
@@ -2028,7 +2049,7 @@ pub fn host_read_stdin_chunks(
     caller
         .data()
         .shell_policy
-        .require(ShellPermission::Read, "stdin/chunks!", "<stdin>")
+        .require(ShellPermission::Stdin, "stdin/chunks!", "<stdin>")
         .map_err(wasmtime::Error::msg)?;
 
     let apply1 = guest_apply1(&mut caller)?;
@@ -2247,7 +2268,7 @@ pub fn host_print(
     caller
         .data()
         .shell_policy
-        .require(ShellPermission::Write, "print!", "<stdout>")
+        .require(ShellPermission::Print, "print!", "<stdout>")
         .map_err(wasmtime::Error::msg)?;
 
     let mut out = io::stdout();
@@ -2262,7 +2283,7 @@ pub fn host_sleep(caller: Caller<'_, ShellStoreData>, millis: i32) -> wasmtime::
     caller
         .data()
         .shell_policy
-        .require(ShellPermission::Write, "sleep!", "<clock>")
+        .require(ShellPermission::Clock, "sleep!", "<clock>")
         .map_err(wasmtime::Error::msg)?;
 
     if millis < 0 {
@@ -2275,11 +2296,24 @@ pub fn host_sleep(caller: Caller<'_, ShellStoreData>, millis: i32) -> wasmtime::
     Ok(0)
 }
 
+pub fn host_time(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
+    caller
+        .data()
+        .shell_policy
+        .require(ShellPermission::Clock, "time!", "<clock>")
+        .map_err(wasmtime::Error::msg)?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| wasmtime::Error::msg(format!("clock error: {}", e)))?;
+    i32::try_from(now.as_secs()).map_err(|_| wasmtime::Error::msg("time! overflowed i32"))
+}
+
 pub fn host_clear(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
     caller
         .data()
         .shell_policy
-        .require(ShellPermission::Write, "clear!", "<stdout>")
+        .require(ShellPermission::Print, "clear!", "<stdout>")
         .map_err(wasmtime::Error::msg)?;
 
     let mut out = io::stdout();
@@ -2330,6 +2364,9 @@ fn register_builtin_host_import(
         }
         "sleep" => {
             linker.func_wrap(spec.module, spec.import, host_sleep)?;
+        }
+        "time" => {
+            linker.func_wrap(spec.module, spec.import, host_time)?;
         }
         "clear" => {
             linker.func_wrap(spec.module, spec.import, host_clear)?;
@@ -2649,7 +2686,43 @@ mod tests {
             .require(ShellPermission::Write, "mkdir", "./x")
             .is_ok());
         assert!(policy
+            .require(ShellPermission::Stdin, "stdin", "<stdin>")
+            .is_err());
+        assert!(policy
+            .require(ShellPermission::Print, "print", "<stdout>")
+            .is_err());
+        assert!(policy
+            .require(ShellPermission::Clock, "sleep", "<clock>")
+            .is_err());
+        assert!(policy
             .require(ShellPermission::Delete, "delete", "./x")
+            .is_err());
+    }
+
+    #[test]
+    fn parse_policy_with_terminal_and_clock_permissions() {
+        let mut args = vec![
+            "main.que".to_string(),
+            "--allow".to_string(),
+            "stdin,print".to_string(),
+            "clock".to_string(),
+        ];
+        let policy = take_shell_policy_from_argv(&mut args).unwrap();
+        assert_eq!(args, vec!["main.que".to_string()]);
+        assert!(policy
+            .require(ShellPermission::Stdin, "stdin", "<stdin>")
+            .is_ok());
+        assert!(policy
+            .require(ShellPermission::Print, "print", "<stdout>")
+            .is_ok());
+        assert!(policy
+            .require(ShellPermission::Clock, "sleep", "<clock>")
+            .is_ok());
+        assert!(policy
+            .require(ShellPermission::Read, "read", "./x")
+            .is_err());
+        assert!(policy
+            .require(ShellPermission::Write, "write", "./x")
             .is_err());
     }
 

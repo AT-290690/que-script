@@ -4336,11 +4336,19 @@ xs)"#,
             Some("Int -> ([Char] -> Bool) -> Bool")
         );
         assert_eq!(
+            signatures.get("time!").map(String::as_str),
+            Some("() -> Int")
+        );
+        assert_eq!(
             effects.get("stdin!").copied(),
             Some(crate::infer::EffectFlags::IO)
         );
         assert_eq!(
             effects.get("stdin/chunks!").copied(),
+            Some(crate::infer::EffectFlags::IO)
+        );
+        assert_eq!(
+            effects.get("time!").copied(),
             Some(crate::infer::EffectFlags::IO)
         );
     }
@@ -4363,6 +4371,20 @@ xs)"#,
 
         assert!(labels.iter().any(|label| label == "stdin!"));
         assert!(labels.iter().any(|label| label == "stdin/chunks!"));
+        let completion_json = crate::wasm_api::lsp_completions_at("time".to_string(), 0, 4);
+        let items: serde_json::Value = serde_json::from_str(&completion_json)
+            .expect("completion response should be valid JSON");
+        let labels: Vec<String> = items
+            .as_array()
+            .expect("completion response should be an array")
+            .iter()
+            .filter_map(|item| {
+                item.get("label")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+        assert!(labels.iter().any(|label| label == "time!"));
     }
 
     #[test]
@@ -5719,6 +5741,19 @@ fn"#;
         assert!(
             wat.contains("(import \"host\" \"read_stdin\" (func $v_stdin_bang_ (result i32)))"),
             "stdin! should emit a zero-arg host import, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_time_builtin_host_extern_emits_zero_arg_import() {
+        let expr = crate::parser::build("(time!)").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(
+            wat.contains("(import \"host\" \"time\" (func $v_time_bang_ (result i32)))"),
+            "time! should emit a zero-arg host import, got:\n{}",
             wat
         );
     }

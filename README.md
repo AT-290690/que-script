@@ -147,7 +147,7 @@ que
 Read piped input from stdin:
 
 ```bash
-printf '1,2,3\n' | que main.que --allow read
+printf '1,2,3\n' | que main.que --allow stdin
 ```
 
 ```lisp
