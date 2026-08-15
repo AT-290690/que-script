@@ -6897,6 +6897,69 @@ fn emit_constant_scalar_set(
     out
 }
 
+fn emit_dynamic_scalar_set(
+    target_prefix: &str,
+    index: &str,
+    value: &str,
+    target_tmp: usize,
+    index_tmp: usize,
+    value_tmp: usize,
+    release_target_code: &str,
+    target_already_materialized: bool,
+) -> String {
+    let materialize = if target_already_materialized {
+        String::new()
+    } else {
+        format!("local.get {target_tmp}\ncall $vec_materialize_i32\ndrop")
+    };
+    let replacement = format!(
+        "local.get {target_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         local.get {index_tmp}\n\
+         i32.const 4\n\
+         i32.mul\n\
+         i32.add\n\
+         local.get {value_tmp}\n\
+         i32.store\n\
+         i32.const 0"
+    );
+    let fallback = format!(
+        "local.get {target_tmp}\n\
+         local.get {index_tmp}\n\
+         local.get {value_tmp}\n\
+         call $vec_set_scalar_materialized_i32"
+    );
+    let mut out = format!(
+        "{target_prefix}\n\
+         local.set {target_tmp}\n\
+         {index}\n\
+         local.set {index_tmp}\n\
+         {value}\n\
+         local.set {value_tmp}\n\
+         {materialize}\n\
+         local.get {index_tmp}\n\
+         i32.const 0\n\
+         i32.ge_s\n\
+         local.get {index_tmp}\n\
+         local.get {target_tmp}\n\
+         i32.load\n\
+         i32.lt_s\n\
+         i32.and\n\
+         if (result i32)\n\
+           {replacement}\n\
+         else\n\
+           {fallback}\n\
+         end"
+    );
+    if !release_target_code.is_empty() {
+        out.push('\n');
+        out.push_str(release_target_code);
+    }
+    out
+}
+
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs_node = node
         .children
@@ -7142,6 +7205,16 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 definitely_materialized_scalar_target,
             ));
         }
+        return Ok(emit_dynamic_scalar_set(
+            &target_prefix,
+            &idx,
+            &v,
+            target_tmp,
+            ctx.tmp_i32 + 2,
+            ctx.tmp_i32 + 1,
+            &target_release,
+            definitely_materialized_scalar_target,
+        ));
     }
     if release_rhs {
         let tmp_val = ctx.tmp_i32 + 1;

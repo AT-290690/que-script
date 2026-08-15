@@ -6578,6 +6578,43 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_dynamic_scalar_set_emits_direct_store_fast_branch() {
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (mut i 1) (set! xs i 9) xs)")
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("i32.store"),
+            "dynamic-index scalar replacement should emit a direct store fast branch, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "dynamic-index scalar set! should keep runtime fallback for append/out-of-range semantics, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $vec_set_scalar_i32"),
+            "dynamic-index scalar set! should avoid the generic scalar set runtime in main, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_runtime_dynamic_scalar_set_keeps_append_at_length_semantics() {
+        let result =
+            run_program_output("((lambda (do (let xs [1 2]) (mut i (length xs)) (set! xs i 3) xs)))");
+
+        assert_eq!(result, "[1 2 3]");
+    }
+
+    #[test]
     fn test_wat_scalar_set_on_slice_keeps_materializing_runtime() {
         let expr = crate::parser::build(
             "((lambda (do (let xs [1 2]) (let ys (cdr xs 1)) (set! ys 0 3) ys)))",
