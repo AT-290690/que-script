@@ -4684,6 +4684,38 @@ xs)"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_symbol_after_double_quote_char_literal_is_not_string() {
+        let program = r#"(let quote '"')
+(letrec parse-value
+  (lambda (source i)
+    i))
+parse-value"#;
+        let offset = program
+            .rfind("parse-value")
+            .expect("program should contain final parse-value");
+        let pos = crate::lsp_native_core::byte_offset_to_position(program, offset);
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), pos.line, pos.character);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.contains("parse-value :"),
+            "expected symbol hover for parse-value, got: {}",
+            contents
+        );
+        assert!(
+            !contents.contains("[Char] length"),
+            "char literal containing double quote should not start string hover, got: {}",
+            contents
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_numeric_literal_shows_type_without_echo() {
         let hover_json = crate::wasm_api::lsp_hover("123".to_string(), 0, 1);
         let hover: serde_json::Value =

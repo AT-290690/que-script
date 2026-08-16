@@ -2285,6 +2285,11 @@ fn find_enclosing_string_literal(text: &str, offset: usize) -> Option<(usize, us
             continue;
         }
 
+        if !in_string && b == b'\'' {
+            i = skip_char_literal(text, i, bytes.len());
+            continue;
+        }
+
         if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
             if !in_string {
                 in_string = true;
