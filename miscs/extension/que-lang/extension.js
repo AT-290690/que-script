@@ -951,7 +951,7 @@ function createClient(context) {
 
   return new LanguageClient(
     "queLanguageServer",
-    "Que Language Server",
+    "Eclisp language support for Que",
     serverOptions,
     clientOptions
   );
@@ -991,7 +991,7 @@ async function activate(context) {
       for (const doc of vscode.workspace.textDocuments) {
         if (isShellScriptDocument(doc)) scheduleShellHeredocDiagnostics(doc);
       }
-      vscode.window.showInformationMessage("Que language server restarted.");
+      vscode.window.showInformationMessage("Eclisp language server restarted.");
     }
   );
 

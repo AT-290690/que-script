@@ -1,6 +1,12 @@
-# Que Script
+# Que
 
-**A pocket lisp that gives you safety without verbosity**
+**The reference toolchain for Eclisp**
+
+Eclisp is a small, statically typed Lisp with Hindley-Milner inference, macros, explicit mutation, and a minimal core designed for compilation.
+
+Que is the reference toolchain for Eclisp: CLI, standard library, WebAssembly compiler, runtime permissions, LSP, tests, `explain`, and editor integration.
+
+Que still uses `.que` files and the `que` command. The language inside those files is Eclisp.
 
 - **[Lisp](<https://en.wikipedia.org/wiki/Lisp_(programming_language)>)**
 - **[Stack-based bytecode Virtual Machine](https://en.wikipedia.org/wiki/Stack_machine)**
@@ -116,7 +122,7 @@ cargo test
 
 ## Quick Start
 
-Create a new Que project:
+Create a new Que project for Eclisp programs:
 
 ```bash
 mkdir hello-que
@@ -186,7 +192,7 @@ Default `que init` does not create `main.test.que`. Create it when you want fold
 
 ---
 
-### Hindley–Milner Type Inference
+### Eclisp Type Inference
 
 - No type annotations required: the compiler figures everything out.
 - Supports **polymorphism** and **higher-order functions**.

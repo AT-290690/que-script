@@ -1,11 +1,14 @@
 {
   "name": "que-lang",
-  "displayName": "Que Script",
+  "displayName": "Eclisp language support for Que",
   "publisher": "anthony",
-  "description": "Script highlighting and IntelliSense for Que Script.",
+  "description": "Eclisp syntax highlighting and IntelliSense for .que files powered by the Que toolchain.",
   "version": "0.0.3",
   "main": "./extension.js",
   "icon": "logo.png",
+  "scripts": {
+    "package": "vsce package --allow-missing-repository"
+  },
   "activationEvents": [
     "onLanguage:que",
     "onLanguage:shellscript",
@@ -22,6 +25,7 @@
       {
         "id": "que",
         "aliases": [
+          "Eclisp",
           "Que",
           "que"
         ],
@@ -51,11 +55,11 @@
     "commands": [
       {
         "command": "que.restartLanguageServer",
-        "title": "Que: Restart Language Server"
+        "title": "Que: Restart Eclisp Language Server"
       },
       {
         "command": "que.toggleLineComment",
-        "title": "Que: Toggle Line Comment"
+        "title": "Eclisp: Toggle Line Comment"
       }
     ],
     "keybindings": [
@@ -67,7 +71,7 @@
       }
     ],
     "configuration": {
-      "title": "Que Language Server",
+      "title": "Eclisp Language Support for Que",
       "properties": {
         "que.languageServer.path": {
           "type": "string",
@@ -79,5 +83,8 @@
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.9.2"
   }
 }

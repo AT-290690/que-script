@@ -1139,9 +1139,9 @@ fn native_shell_help(bin_name: &str) -> String {
          \n\
          Flags:\n\
            --help, -h     Show this help and exit.\n\
-          --learn        Print Que language quick reference.\n\
+          --learn        Print Eclisp language quick reference.\n\
           --env          Print environment flags and tuning examples.\n\
-           --eval, -e     Execute inline Que source without a script file.\n\
+           --eval, -e     Execute inline Eclisp source without a script file.\n\
           test           Run Que tests. Folder mode appends main.test.que after the folder entry.\n\
            --emit         Output source, wat, split-wat, wasm, or top-level types and exit.\n\
           --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
@@ -1229,7 +1229,7 @@ fn native_shell_env_help(bin_name: &str) -> String {
 }
 
 fn native_shell_learn() -> &'static str {
-    "Que is a functional, expression-only Lisp with S-expressions.\n\
+    "Eclisp is a functional, expression-only Lisp with S-expressions. Que is the reference toolchain that runs and compiles it.\n\
     \n\
     Core:\n\
     - Function call: (f a b)\n\

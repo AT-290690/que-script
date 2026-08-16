@@ -21,16 +21,16 @@ copy_release_artifacts() {
   cp "${source_dir}/que-lib.lisp" "releases/que-lib-${target_suffix}.lisp"
 }
 
-echo "[1/6] Baking std library"
+echo "[1/7] Baking std library"
 ./scripts/bake.sh
 
-echo "[2/6] Building native artifacts"
+echo "[2/7] Building native artifacts"
 ./scripts/build-all.sh
 
-echo "[3/6] Building Linux artifacts"
+echo "[3/7] Building Linux artifacts"
 ./scripts/build-all-linux.sh "${LINUX_TARGET}"
 
-echo "[4/6] Building Windows artifacts"
+echo "[4/7] Building Windows artifacts"
 if [[ -n "${WINDOWS_TARGET}" ]]; then
   ./scripts/build-all-windows.sh "${WINDOWS_TARGET}"
 else
@@ -46,16 +46,19 @@ if [[ -z "${WINDOWS_TARGET}" ]]; then
   fi
 fi
 
-echo "[5/6] Building wasm artifacts"
+echo "[5/7] Building wasm artifacts"
 ./scripts/build-wasm-c.sh
 
-echo "[6/6] Collecting release artifacts"
+echo "[6/7] Collecting release artifacts"
 rm -rf releases
 mkdir -p releases
 
 copy_release_artifacts "./target/release" "${HOST_TARGET}" ""
 copy_release_artifacts "./target/${LINUX_TARGET}/release" "${LINUX_TARGET}" ""
 copy_release_artifacts "./target/${WINDOWS_TARGET}/release" "${WINDOWS_TARGET}" ".exe"
+
+echo "[7/7] Building VS Code extension"
+./scripts/build-extension.sh
 
 echo "All builds completed successfully."
 echo "Release artifacts copied to ./releases"
