@@ -7,7 +7,7 @@ edition = "2021"
 default = ["io"]
 compiler = ["dep:wat"]
 runtime = ["compiler", "dep:wasmtime"]
-io = ["runtime", "dep:wasmtime-wasi"]
+io = ["runtime", "dep:wasmtime-wasi", "eclisp/io"]
 debug-rc = []
 repo-tools = []
 
@@ -50,6 +50,7 @@ path = "src/bin/que_trs.rs"
 required-features = ["repo-tools"]
 
 [dependencies]
+eclisp = { path = "eclisp", default-features = false }
 wasm-bindgen = "0.2"
 flate2 = "1.1.9"
 wasmtime = { version = "42.0.1", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }

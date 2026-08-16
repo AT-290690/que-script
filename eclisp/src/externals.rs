@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::parser::Expression;
 use crate::types::Type;
 
