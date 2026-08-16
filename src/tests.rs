@@ -3173,6 +3173,33 @@ xs)"#,
     }
 
     #[test]
+    fn test_infer_impure_function_mutation_target_inside_block_must_be_first_param() {
+        let exprs = crate::parser::parse(
+            "(do
+                (let extend-env! (lambda env pair (set! env (length env) pair)))
+                (letrec prove-tautology? (lambda expr vars env
+                  (if (= (length vars) 0)
+                      true
+                      ((lambda (do
+                        (let current-var (car vars))
+                        (let next-env (extend-env! env (tuple current-var true)))
+                        (prove-tautology? expr (cdr vars) next-env))))))))",
+        )
+        .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("block should not hide mutation of a non-first parameter");
+        assert!(
+            err.contains("must mutate its first parameter"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_infer_impure_function_mutating_first_param_is_allowed() {
         let exprs = crate::parser::parse("(let sort! (lambda xs fn (set! xs 0 1)))")
             .expect("input should parse");
@@ -10005,8 +10032,8 @@ d -> a")
       (Table/new/capacity 512)
       (map parse-rule (map split/words (split/lines text))))))
 
-(letrec eval-wire
-  (lambda (rules cache wire)
+(letrec eval-wire!
+  (lambda (cache rules wire)
     (if (Table/has? wire cache)
       (Table/get-unsafe wire cache)
       (block
@@ -10018,7 +10045,7 @@ d -> a")
           (lambda (operand)
             (if (fst operand)
               (fst (snd operand))
-              (eval-wire rules cache (snd (snd operand))))))
+              (eval-wire! cache rules (snd (snd operand))))))
         (let value
           (cond
             (match? op "SET") (eval-operand left)
@@ -10035,7 +10062,7 @@ d -> a")
   (lambda (text)
     (let rules (parse-input text))
     (let cache (Table/new/capacity 512))
-    (eval-wire rules cache "a")))
+    (eval-wire! cache rules "a")))
 
 
 (let part2
@@ -10043,7 +10070,7 @@ d -> a")
     (let modified (cons text [nl] "956 -> b"))
     (let rules (parse-input modified))
     (let cache (Table/new/capacity 512))
-    (eval-wire rules cache "a")))
+    (eval-wire! cache rules "a")))
 {(part1 input) (part2 input)}    
 "#, "{ 72 72 }"),
 

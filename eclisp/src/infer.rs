@@ -792,6 +792,30 @@ fn target_non_first_param_index(
     }
 }
 
+fn target_param_binding(
+    expr: &Expression,
+    scopes: &[HashMap<String, MutationBinding>],
+) -> Option<MutationBinding> {
+    match expr {
+        Expression::Word(name) => resolve_mutation_binding(scopes, name),
+        _ => {
+            let mut uses_allowed_param = false;
+            let mut first_non_first_param = None;
+            collect_target_param_usage(
+                expr,
+                scopes,
+                &mut uses_allowed_param,
+                &mut first_non_first_param,
+            );
+            if uses_allowed_param {
+                Some(MutationBinding::Param(0))
+            } else {
+                first_non_first_param.map(MutationBinding::Param)
+            }
+        }
+    }
+}
+
 fn expr_mutates_non_first_param(
     expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
@@ -851,6 +875,48 @@ fn expr_mutates_non_first_param(
                     None
                 }
                 _ => {
+                    if let Expression::Apply(lambda_items) = head {
+                        if matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
+                        {
+                            for item in items.iter().skip(1) {
+                                if let Some(idx) =
+                                    expr_mutates_non_first_param(item, known_requires_bang, scopes)
+                                {
+                                    return Some(idx);
+                                }
+                            }
+
+                            let param_bindings: Vec<(String, MutationBinding)> = lambda_items
+                                .iter()
+                                .skip(1)
+                                .take(lambda_items.len().saturating_sub(2))
+                                .enumerate()
+                                .filter_map(|(idx, param)| {
+                                    let Expression::Word(name) = param else {
+                                        return None;
+                                    };
+                                    let binding = items
+                                        .get(idx + 1)
+                                        .and_then(|arg| target_param_binding(arg, scopes))
+                                        .unwrap_or(MutationBinding::Local);
+                                    Some((name.clone(), binding))
+                                })
+                                .collect();
+
+                            scopes.push(HashMap::new());
+                            if let Some(scope) = scopes.last_mut() {
+                                for (name, binding) in param_bindings {
+                                    scope.insert(name, binding);
+                                }
+                            }
+                            let result = lambda_items.last().and_then(|body| {
+                                expr_mutates_non_first_param(body, known_requires_bang, scopes)
+                            });
+                            scopes.pop();
+                            return result;
+                        }
+                    }
+
                     for item in items.iter().skip(1) {
                         if let Some(idx) =
                             expr_mutates_non_first_param(item, known_requires_bang, scopes)
@@ -1226,6 +1292,57 @@ fn expr_requires_bang(
                         }
                     }
                     false
+                }
+                Expression::Apply(lambda_items)
+                    if matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") =>
+                {
+                    for arg in items.iter().skip(1) {
+                        if expr_requires_bang(
+                            arg,
+                            extern_names,
+                            known_requires_bang,
+                            known_function_arities,
+                            scopes,
+                        ) {
+                            return true;
+                        }
+                    }
+
+                    let Some(body) = lambda_items.last() else {
+                        return false;
+                    };
+                    let param_bindings: Vec<(String, bool)> = lambda_items
+                        .iter()
+                        .skip(1)
+                        .take(lambda_items.len().saturating_sub(2))
+                        .enumerate()
+                        .filter_map(|(idx, param)| {
+                            let Expression::Word(name) = param else {
+                                return None;
+                            };
+                            let aliases_param_or_free = items
+                                .get(idx + 1)
+                                .map(|arg| direct_aliases_param_or_free_var(arg, scopes))
+                                .unwrap_or(false);
+                            Some((name.clone(), aliases_param_or_free))
+                        })
+                        .collect();
+
+                    scopes.push(HashMap::new());
+                    if let Some(scope) = scopes.last_mut() {
+                        for (name, aliases_param_or_free) in param_bindings {
+                            scope.insert(name, aliases_param_or_free);
+                        }
+                    }
+                    let result = expr_requires_bang(
+                        body,
+                        extern_names,
+                        known_requires_bang,
+                        known_function_arities,
+                        scopes,
+                    );
+                    scopes.pop();
+                    result
                 }
                 _ => {
                     for it in items {
