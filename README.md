@@ -2,6 +2,12 @@
 
 **The reference toolchain for Eclisp**
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./que-light.png">
+  <source media="(prefers-color-scheme: light)" srcset="./que.png">
+  <img alt="eclisp" src="./que.png" width="300" style="width: 300px; max-width: 100%;">
+</picture>
+
 Eclisp is a small, statically typed Lisp with Hindley-Milner inference, macros, explicit mutation, and a minimal core designed for compilation.
 
 Que is the reference toolchain for Eclisp: CLI, standard library, WebAssembly compiler, runtime permissions, LSP, tests, `explain`, and editor integration.

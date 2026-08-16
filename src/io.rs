@@ -652,6 +652,7 @@ que init --demo
 ```sh
 que --help
 que --learn
+que --style
 ```
 "#
 }
@@ -1134,12 +1135,14 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
          or:    {bin} --learn\n\
+         or:    {bin} --style\n\
          or:    {bin} --env\n\
          or:    {bin} --uninstall [--out <que-lib.lisp>]\n\
          \n\
          Flags:\n\
            --help, -h     Show this help and exit.\n\
           --learn        Print Eclisp language quick reference.\n\
+          --style        Print Eclisp style and optimization guidance.\n\
           --env          Print environment flags and tuning examples.\n\
            --eval, -e     Execute inline Eclisp source without a script file.\n\
           test           Run Que tests. Folder mode appends main.test.que after the folder entry.\n\
@@ -1314,6 +1317,84 @@ fn native_shell_learn() -> &'static str {
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! time! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
+}
+
+fn native_shell_style() -> &'static str {
+    "Eclisp style guide for humans and AI:\n\
+    \n\
+    Default style:\n\
+    - Prefer clear functional code first. Optimize after you have a correct program.\n\
+    - Prefer vectors, tuples, pure functions, library helpers, and left-to-right pipelines.\n\
+    - Use imperative mutation only when the user asks for mutable/imperative code or when explain/benchmarks show a hot spot.\n\
+    - Write the smallest complete program that solves the request. Do not invent helpers unless they clarify or remove repetition.\n\
+    \n\
+    Functions:\n\
+    - Prefer grouped lambda params: (lambda (a b) body).\n\
+    - Avoid old bare params in new code: prefer (lambda (a b) ...) over (lambda a b ...).\n\
+    - A lambda can have multiple body expressions; the last expression is returned.\n\
+    - Do not wrap every lambda body in do. Use plain multiple body expressions when no explicit grouping is needed.\n\
+    - Use letrec only when the function calls itself by name. Use let for non-recursive functions.\n\
+    \n\
+    Pipelines:\n\
+    - Que pipe syntax is prefix: (|> value stage stage ...).\n\
+    - Each stage after the value is one expression.\n\
+    - Correct: (|> xs (filter odd?) (map square) sum).\n\
+    - Wrong: xs |> filter odd? |> sum.\n\
+    - Wrong: (->> xs (filter odd?) sum).\n\
+    - Wrong: (|> xs filter odd? map square sum).\n\
+    \n\
+    Scope and sequencing:\n\
+    - do sequences expressions but does not create a new scope.\n\
+    - block sequences expressions and creates a new lexical scope.\n\
+    - Use block when branch-local names need to be reused.\n\
+    - Use do only when you need a single branch expression containing multiple effects/results and no fresh scope.\n\
+    \n\
+    Conditionals:\n\
+    - Prefer (if cond then else) for value-producing branches.\n\
+    - For side-effect-only conditionals, omit the else branch: (if cond (push! out x)).\n\
+    - Do not add explicit nil just to satisfy an if branch.\n\
+    - unless is inverted if: (unless cond then) or (unless cond then else). It is not a variadic body form.\n\
+    - For multiple unless effects, write: (unless cond (do effect1 effect2)).\n\
+    - Use block inside branches if you need a fresh scope.\n\
+    \n\
+    Data style:\n\
+    - Use [T] vectors for homogeneous collections and pipelines.\n\
+    - Use {A B C} tuples for fixed-size mixed data.\n\
+    - Use destructuring for readable tuple/vector access: (let {x y} point), (let [a _ c] row).\n\
+    - Use _ to ignore destructured fields.\n\
+    - Check empty vectors with (= (length xs) 0) or empty? when the library is available.\n\
+    \n\
+    File input style:\n\
+    - Use read! for normal small/medium files when loading the whole file is simpler.\n\
+    - Use read/lines! for large text files that are naturally line-oriented, such as logs, CSV rows, or puzzle inputs with one record per line.\n\
+    - Use read/chunks! for very large files, huge single-line files, binary-like streams, or continuous data where line buffering could grow too large.\n\
+    - Use stdin! for small piped input and stdin/chunks! for large piped streams.\n\
+    - Chunk callbacks can return true to stop early once the answer is known.\n\
+    \n\
+    Types and operators:\n\
+    - Let inference work; add sig/letype only when you need an assertion or better documentation.\n\
+    - Use the right operator family: Int + = <, Dec +. =. <., Char =#, Bool =?.\n\
+    - Do not invent generic syntax or foreign forms like define, fn, begin, cond arrows, nil?, null?, ->, ->>.\n\
+    \n\
+    Performance workflow:\n\
+    - First write clear functional code.\n\
+    - Run `que explain file.que` to inspect result type, effects, allocations, dynamic applies, and checked gets.\n\
+    - Optimize hot spots only when explain or benchmarks justify it.\n\
+    - For maximum performance, use `que file.que --opt` after correctness is trusted.\n\
+    - Good hot-spot rewrites include replacing heavy map/reduce chains with while, caching (length xs), avoiding temporary vectors, and avoiding dynamic higher-order calls in inner loops.\n\
+    - Keep pure top-level helpers small and named; the compiler can inline simple scalar helpers when configured.\n\
+    \n\
+    Mutation style:\n\
+    - Prefer pure code by default.\n\
+    - Use mut/alter! for local scalar counters and accumulators.\n\
+    - Use push!, set!, pop! for vector-building hot loops.\n\
+    - Use &mut/&alter! only for shared mutable state across lambda scopes.\n\
+    - Functions with effects must end with !.\n\
+    \n\
+    Testing:\n\
+    - Keep program code in main.que and tests in main.test.que for projects.\n\
+    - Tests should return Bool, [Bool], or named tuples like { \"name\" condition }.\n\
+    - Test the simple functional version before optimizing hot loops."
 }
 
 fn binding_name_from_def(expr: &Expression) -> Option<String> {
@@ -2653,7 +2734,7 @@ fn build_debug_error_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        init_host_project, init_project_config_file, parse_test_results,
+        init_host_project, init_project_config_file, native_shell_help, parse_test_results,
         resolve_project_entry_path, take_debug_mode_from_argv, take_emit_request_from_argv,
         take_help_flag_from_argv, take_no_result_flag_from_argv, take_opt_flag_from_argv,
         take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind, QueTestCase,
@@ -2984,8 +3065,16 @@ mod tests {
         assert!(readme_text.contains("que test ."));
         assert!(readme_text.contains("que init --demo"));
         assert!(readme_text.contains("que --learn"));
+        assert!(readme_text.contains("que --style"));
         let err = init_project_config_file(&base, false).expect_err("second init should fail");
         assert!(err.contains("already exists"));
+    }
+
+    #[test]
+    fn native_shell_help_mentions_style_guide() {
+        let help = native_shell_help("que");
+        assert!(help.contains("que --style"));
+        assert!(help.contains("Print Eclisp style and optimization guidance"));
     }
 
     #[test]
@@ -3166,6 +3255,10 @@ pub fn run_native_shell() -> Result<(), String> {
     }
     if matches!(args.get(1).map(String::as_str), Some("--learn")) {
         println!("{}", native_shell_learn());
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("--style")) {
+        println!("{}", native_shell_style());
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("--env")) {
