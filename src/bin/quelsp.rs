@@ -206,10 +206,7 @@ fn build_lsp_core() -> LspCore {
     let std_defs = load_std_definitions();
     let (base_env, base_next_id, global_signatures, global_effects) =
         build_base_environment(&std_defs);
-    let std_fallback_names = collect_std_top_level_let_names(&std_defs)
-        .into_iter()
-        .filter(|name| !name.starts_with("std/"))
-        .collect();
+    let std_fallback_names = collect_std_top_level_let_names(&std_defs);
     LspCore {
         std_defs,
         base_env,
@@ -541,12 +538,17 @@ impl ServerState {
             .cloned();
         let doc_sig = doc.symbol_types.get(&symbol).cloned();
         let global_sig = self.global_signature(&symbol);
+        let std_fallback_sig = if doc.user_bound_symbols.contains(&symbol) {
+            None
+        } else {
+            self.infer_standalone_std_symbol_signature(&symbol)
+        };
         let type_info = (if doc.user_bound_symbols.contains(&symbol) {
             scoped_sig.or(doc_sig).or(global_sig)
         } else if is_standalone_symbol_expr_at_range(&doc.text, symbol_range, &symbol) {
-            global_sig.or(scoped_sig).or(doc_sig)
+            std_fallback_sig.or(global_sig).or(scoped_sig).or(doc_sig)
         } else {
-            scoped_sig.or(doc_sig).or(global_sig)
+            scoped_sig.or(doc_sig).or(global_sig).or(std_fallback_sig)
         })?;
         let type_info = normalize_signature(&type_info);
         let symbol_effect = self
@@ -813,16 +815,36 @@ impl ServerState {
             .cloned();
         let doc_sig = doc.symbol_types.get(symbol).cloned();
         let global_sig = self.global_signature(symbol);
+        let std_fallback_sig = if doc.user_bound_symbols.contains(symbol) {
+            None
+        } else {
+            self.infer_standalone_std_symbol_signature(symbol)
+        };
 
         if doc.user_bound_symbols.contains(symbol) {
             scoped_sig.or(doc_sig).or(global_sig)
         } else {
-            global_sig.or(scoped_sig).or(doc_sig)
+            global_sig.or(scoped_sig).or(doc_sig).or(std_fallback_sig)
         }
     }
 
     fn global_signature(&self, symbol: &str) -> Option<String> {
         self.with_core(|core| core.global_signatures.get(symbol).cloned())
+    }
+
+    fn infer_standalone_std_symbol_signature(&self, symbol: &str) -> Option<String> {
+        self.with_core(|core| {
+            if !core.std_fallback_names.contains(symbol) {
+                return None;
+            }
+            let program = que::parser::merge_std_and_program(symbol, core.std_defs.clone()).ok()?;
+            let (typ, _typed) = que::infer::infer_with_builtins_typed(
+                &program,
+                (core.base_env.clone(), core.base_next_id),
+            )
+            .ok()?;
+            Some(normalize_signature(&typ.to_string()))
+        })
     }
 
     fn analyze_text(&self, text: &str) -> Vec<Diagnostic> {

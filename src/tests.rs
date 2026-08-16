@@ -4453,6 +4453,58 @@ xs)"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_map_in_incomplete_call_uses_std_signature() {
+        let hover_json = crate::wasm_api::lsp_hover("(map )".to_string(), 0, 2);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert_eq!(
+            contents,
+            "map : (T -> K) -> [T] -> [K] | effects: local-mutate, unknown-call"
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_string_to_integer_in_incomplete_call_uses_std_signature() {
+        let hover_json = crate::wasm_api::lsp_hover("(String->Integer )".to_string(), 0, 8);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert_eq!(
+            contents,
+            "String->Integer : [Char] -> Int | effects: local-mutate"
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_std_namespaced_function_in_incomplete_call_uses_std_signature() {
+        let hover_json = crate::wasm_api::lsp_hover("(std/vector/map )".to_string(), 0, 6);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(
+            contents.starts_with("std/vector/map : [T] -> (T -> K) -> [K]"),
+            "expected std/vector/map fallback hover, got: {}",
+            contents
+        );
+    }
+
+    #[test]
     fn test_lsp_type_var_rendering_preserves_distinct_generic_positions() {
         assert_eq!(
             crate::lsp_native_core::normalize_signature("T12 -> T12 -> T13"),

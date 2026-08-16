@@ -110,10 +110,7 @@ fn build_lsp_core() -> WasmLspCore {
     let std_defs = load_std_definitions();
     let (base_env, base_next_id, global_signatures, global_effects) =
         build_base_environment(&std_defs);
-    let std_fallback_names = collect_std_top_level_let_names(&std_defs)
-        .into_iter()
-        .filter(|name| !name.starts_with("std/"))
-        .collect();
+    let std_fallback_names = collect_std_top_level_let_names(&std_defs);
     WasmLspCore {
         std_defs,
         base_env,
@@ -452,9 +449,9 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             .cloned();
         let doc_sig = analysis.symbol_types.get(&symbol).cloned();
         let global_sig = core.global_signatures.get(&symbol).cloned();
-        let standalone_std_sig = if analysis.user_bound_symbols.contains(&symbol) {
+        let std_fallback_sig = if analysis.user_bound_symbols.contains(&symbol) {
             None
-        } else if is_standalone_symbol_expr_at_range(&text, range, &symbol) {
+        } else if core.std_fallback_names.contains(&symbol) {
             infer_standalone_std_symbol_signature(core, &symbol)
         } else {
             None
@@ -463,9 +460,9 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             scoped_sig.or(doc_sig).or(global_sig)
         } else {
             if is_standalone_symbol_expr_at_range(&text, range, &symbol) {
-                standalone_std_sig.or(global_sig).or(scoped_sig).or(doc_sig)
+                std_fallback_sig.or(global_sig).or(scoped_sig).or(doc_sig)
             } else {
-                scoped_sig.or(doc_sig).or(global_sig)
+                scoped_sig.or(doc_sig).or(global_sig).or(std_fallback_sig)
             }
         };
 
