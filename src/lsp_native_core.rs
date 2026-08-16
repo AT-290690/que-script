@@ -724,6 +724,8 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
     let mut in_comment = false;
     let mut in_string = false;
     let mut in_char = false;
+    let mut string_escape = false;
+    let mut char_escape = false;
 
     for ch in text.chars() {
         if in_comment {
@@ -736,7 +738,11 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
 
         if in_string {
             out.push(ch);
-            if ch == '"' {
+            if string_escape {
+                string_escape = false;
+            } else if ch == '\\' {
+                string_escape = true;
+            } else if ch == '"' {
                 in_string = false;
             }
             continue;
@@ -744,7 +750,11 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
 
         if in_char {
             out.push(ch);
-            if ch == '\'' {
+            if char_escape {
+                char_escape = false;
+            } else if ch == '\\' {
+                char_escape = true;
+            } else if ch == '\'' {
                 in_char = false;
             }
             continue;
@@ -757,10 +767,12 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
             }
             '"' => {
                 in_string = true;
+                string_escape = false;
                 out.push(ch);
             }
             '\'' => {
                 in_char = true;
+                char_escape = false;
                 out.push(ch);
             }
             _ => out.push(ch),
@@ -775,6 +787,8 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
     let mut in_comment = false;
     let mut in_string = false;
     let mut in_char = false;
+    let mut string_escape = false;
+    let mut char_escape = false;
     let mut string_id = 0usize;
     let mut char_id = 0usize;
 
@@ -788,14 +802,22 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
         }
 
         if in_string {
-            if ch == '"' {
+            if string_escape {
+                string_escape = false;
+            } else if ch == '\\' {
+                string_escape = true;
+            } else if ch == '"' {
                 in_string = false;
             }
             continue;
         }
 
         if in_char {
-            if ch == '\'' {
+            if char_escape {
+                char_escape = false;
+            } else if ch == '\\' {
+                char_escape = true;
+            } else if ch == '\'' {
                 in_char = false;
             }
             continue;
@@ -812,6 +834,7 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
                 out.push(' ');
                 string_id += 1;
                 in_string = true;
+                string_escape = false;
             }
             '\'' => {
                 out.push(' ');
@@ -819,6 +842,7 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
                 out.push(' ');
                 char_id += 1;
                 in_char = true;
+                char_escape = false;
             }
             _ => out.push(ch),
         }
@@ -832,6 +856,7 @@ pub fn repair_source_for_analysis(text: &str) -> String {
     let mut stack: Vec<char> = Vec::new();
     let mut in_string = false;
     let mut in_comment = false;
+    let mut string_escape = false;
 
     for ch in text.chars() {
         if in_comment {
@@ -846,12 +871,20 @@ pub fn repair_source_for_analysis(text: &str) -> String {
             continue;
         }
 
-        if ch == '"' {
-            in_string = !in_string;
+        if in_string {
+            if string_escape {
+                string_escape = false;
+            } else if ch == '\\' {
+                string_escape = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
             continue;
         }
 
-        if in_string {
+        if ch == '"' {
+            in_string = !in_string;
+            string_escape = false;
             continue;
         }
 
@@ -1640,7 +1673,7 @@ fn skip_string_literal(text: &str, start: usize, limit: usize) -> usize {
     let bytes = text.as_bytes();
     let mut i = start + 1;
     while i < limit {
-        if bytes[i] == b'"' && bytes[i - 1] != b'\\' {
+        if bytes[i] == b'"' && !is_escaped_byte(bytes, i) {
             return i + 1;
         }
         i += 1;
@@ -1652,7 +1685,7 @@ fn skip_char_literal(text: &str, start: usize, limit: usize) -> usize {
     let bytes = text.as_bytes();
     let mut i = start + 1;
     while i < limit {
-        if bytes[i] == b'\'' {
+        if bytes[i] == b'\'' && !is_escaped_byte(bytes, i) {
             return i + 1;
         }
         if bytes[i] == b'\n' {
@@ -1661,6 +1694,16 @@ fn skip_char_literal(text: &str, start: usize, limit: usize) -> usize {
         i += 1;
     }
     limit
+}
+
+fn is_escaped_byte(bytes: &[u8], pos: usize) -> bool {
+    let mut count = 0usize;
+    let mut i = pos;
+    while i > 0 && bytes[i - 1] == b'\\' {
+        count += 1;
+        i -= 1;
+    }
+    count % 2 == 1
 }
 
 fn skip_token(text: &str, mut i: usize, limit: usize) -> usize {

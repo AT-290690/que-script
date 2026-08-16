@@ -355,6 +355,8 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
     let mut in_comment = false;
     let mut in_string_start = None::<(usize, usize)>;
     let mut in_char_start = None::<(usize, usize)>;
+    let mut string_escape = false;
+    let mut char_escape = false;
 
     for ch in source.chars() {
         ensure_line_delta(&mut line_deltas, line);
@@ -372,7 +374,11 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
         }
 
         if in_string_start.is_some() {
-            if ch == '"' {
+            if string_escape {
+                string_escape = false;
+            } else if ch == '\\' {
+                string_escape = true;
+            } else if ch == '"' {
                 in_string_start = None;
             }
             if ch == '\n' {
@@ -386,7 +392,11 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
         }
 
         if in_char_start.is_some() {
-            if ch == '\'' {
+            if char_escape {
+                char_escape = false;
+            } else if ch == '\\' {
+                char_escape = true;
+            } else if ch == '\'' {
                 in_char_start = None;
             }
             if ch == '\n' {
@@ -406,10 +416,12 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
             }
             '"' => {
                 in_string_start = Some((line, col));
+                string_escape = false;
                 col += 1;
             }
             '\'' => {
                 in_char_start = Some((line, col));
+                char_escape = false;
                 col += 1;
             }
             '\n' => {
@@ -491,6 +503,19 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
     }
 
     None
+}
+
+fn decode_escape_char(ch: char) -> char {
+    match ch {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        '0' => '\0',
+        '\\' => '\\',
+        '"' => '"',
+        '\'' => '\'',
+        other => other,
+    }
 }
 
 fn tokenize(input: &str) -> Vec<String> {
@@ -1488,9 +1513,15 @@ fn preprocess(source: &str) -> Result<String, String> {
             '}' => out.push(')'),
             '"' => {
                 let mut s = String::new();
+                let mut escaped = false;
                 while let Some(&next) = chars.peek() {
                     chars.next();
-                    if next == '"' {
+                    if escaped {
+                        s.push(decode_escape_char(next));
+                        escaped = false;
+                    } else if next == '\\' {
+                        escaped = true;
+                    } else if next == '"' {
                         break;
                     } else {
                         s.push(next);
@@ -1508,9 +1539,15 @@ fn preprocess(source: &str) -> Result<String, String> {
 
             '\'' => {
                 let mut s = String::new();
+                let mut escaped = false;
                 while let Some(&next) = chars.peek() {
                     chars.next();
-                    if next == '\'' {
+                    if escaped {
+                        s.push(decode_escape_char(next));
+                        escaped = false;
+                    } else if next == '\\' {
+                        escaped = true;
+                    } else if next == '\'' {
                         break;
                     } else {
                         s.push(next);

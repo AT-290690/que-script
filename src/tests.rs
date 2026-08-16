@@ -2569,6 +2569,32 @@ xs)"#,
     }
 
     #[test]
+    fn test_string_literal_supports_escaped_quotes() {
+        let expr = crate::parser::build(r#""[1,{\"c\":\"red\",\"b\":2},3]""#)
+            .expect("escaped quote string literal should build");
+        assert_eq!(
+            expr.to_lisp(),
+            "(do (string 91 49 44 123 34 99 34 58 34 114 101 100 34 44 34 98 34 58 50 125 44 51 93))"
+        );
+    }
+
+    #[test]
+    fn test_string_literal_supports_common_escapes() {
+        let expr = crate::parser::build(r#""a\nb\tc\\d""#)
+            .expect("escaped string literal should build");
+        assert_eq!(
+            expr.to_lisp(),
+            "(do (string 97 10 98 9 99 92 100))"
+        );
+    }
+
+    #[test]
+    fn test_char_literal_supports_escaped_quote() {
+        let expr = crate::parser::build(r#"'\''"#).expect("escaped quote char should build");
+        assert_eq!(expr.to_lisp(), "(do (char 39))");
+    }
+
+    #[test]
     fn test_typed_optimization_constant_folds_nested_int_ops() {
         let typed = infer_typed("(+ 2 (* 3 4))");
         let optimized = crate::op::optimize_typed_ast(&typed);
