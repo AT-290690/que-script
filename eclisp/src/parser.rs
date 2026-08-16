@@ -356,7 +356,6 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
     let mut in_string_start = None::<(usize, usize)>;
     let mut in_char_start = None::<(usize, usize)>;
     let mut string_escape = false;
-    let mut char_escape = false;
 
     for ch in source.chars() {
         ensure_line_delta(&mut line_deltas, line);
@@ -392,11 +391,7 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
         }
 
         if in_char_start.is_some() {
-            if char_escape {
-                char_escape = false;
-            } else if ch == '\\' {
-                char_escape = true;
-            } else if ch == '\'' {
+            if ch == '\'' {
                 in_char_start = None;
             }
             if ch == '\n' {
@@ -421,7 +416,6 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
             }
             '\'' => {
                 in_char_start = Some((line, col));
-                char_escape = false;
                 col += 1;
             }
             '\n' => {
@@ -1539,15 +1533,9 @@ fn preprocess(source: &str) -> Result<String, String> {
 
             '\'' => {
                 let mut s = String::new();
-                let mut escaped = false;
                 while let Some(&next) = chars.peek() {
                     chars.next();
-                    if escaped {
-                        s.push(decode_escape_char(next));
-                        escaped = false;
-                    } else if next == '\\' {
-                        escaped = true;
-                    } else if next == '\'' {
+                    if next == '\'' {
                         break;
                     } else {
                         s.push(next);

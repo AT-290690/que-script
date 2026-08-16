@@ -725,7 +725,6 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
     let mut in_string = false;
     let mut in_char = false;
     let mut string_escape = false;
-    let mut char_escape = false;
 
     for ch in text.chars() {
         if in_comment {
@@ -750,11 +749,7 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
 
         if in_char {
             out.push(ch);
-            if char_escape {
-                char_escape = false;
-            } else if ch == '\\' {
-                char_escape = true;
-            } else if ch == '\'' {
+            if ch == '\'' {
                 in_char = false;
             }
             continue;
@@ -772,7 +767,6 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
             }
             '\'' => {
                 in_char = true;
-                char_escape = false;
                 out.push(ch);
             }
             _ => out.push(ch),
@@ -788,7 +782,6 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
     let mut in_string = false;
     let mut in_char = false;
     let mut string_escape = false;
-    let mut char_escape = false;
     let mut string_id = 0usize;
     let mut char_id = 0usize;
 
@@ -813,11 +806,7 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
         }
 
         if in_char {
-            if char_escape {
-                char_escape = false;
-            } else if ch == '\\' {
-                char_escape = true;
-            } else if ch == '\'' {
+            if ch == '\'' {
                 in_char = false;
             }
             continue;
@@ -842,7 +831,6 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
                 out.push(' ');
                 char_id += 1;
                 in_char = true;
-                char_escape = false;
             }
             _ => out.push(ch),
         }
@@ -1685,7 +1673,7 @@ fn skip_char_literal(text: &str, start: usize, limit: usize) -> usize {
     let bytes = text.as_bytes();
     let mut i = start + 1;
     while i < limit {
-        if bytes[i] == b'\'' && !is_escaped_byte(bytes, i) {
+        if bytes[i] == b'\'' {
             return i + 1;
         }
         if bytes[i] == b'\n' {

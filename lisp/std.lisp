@@ -1695,6 +1695,66 @@ q)))
 (let std/vector/char/lines (lambda xs (std/convert/string->vector xs std/char/new-line)))
 (let std/vector/char/words (lambda xs (std/convert/string->vector xs std/char/space)))
 (let std/vector/char/commas (lambda xs (std/convert/string->vector xs std/char/comma)))
+
+(let std/parse/bool (lambda text
+  (or (std/vector/char/equal? text "true")
+      (std/vector/char/equal? text "1")
+      (std/vector/char/equal? text "yes"))))
+
+(let std/parse/words/as (lambda reader text
+  (std/vector/map (std/vector/char/words text) reader)))
+
+(let std/parse/lines/as (lambda reader text
+  (std/vector/map (std/vector/char/lines text) reader)))
+
+(let std/parse/int/words (lambda text
+  (std/parse/words/as std/convert/chars->integer text)))
+
+(let std/parse/dec/words (lambda text
+  (std/parse/words/as std/convert/chars->dec text)))
+
+(let std/parse/bool/words (lambda text
+  (std/parse/words/as std/parse/bool text)))
+
+(let std/parse/string/words std/vector/char/words)
+
+(let std/parse/int/lines (lambda text
+  (std/parse/lines/as std/convert/chars->integer text)))
+
+(let std/parse/dec/lines (lambda text
+  (std/parse/lines/as std/convert/chars->dec text)))
+
+(let std/parse/bool/lines (lambda text
+  (std/parse/lines/as std/parse/bool text)))
+
+(let std/parse/string/lines std/vector/char/lines)
+
+(let std/parse/int/matrix (lambda text
+  (std/vector/map (std/vector/char/lines text) std/parse/int/words)))
+
+(let std/parse/dec/matrix (lambda text
+  (std/vector/map (std/vector/char/lines text) std/parse/dec/words)))
+
+(let std/parse/row2 (lambda f1 f2 text (do
+  (let parts (std/vector/char/words text))
+  { (f1 (get parts 0)) (f2 (get parts 1)) })))
+
+(let std/parse/row3 (lambda f1 f2 f3 text (do
+  (let parts (std/vector/char/words text))
+  { (f1 (get parts 0)) (f2 (get parts 1)) (f3 (get parts 2)) })))
+
+(let std/parse/row4 (lambda f1 f2 f3 f4 text (do
+  (let parts (std/vector/char/words text))
+  { (f1 (get parts 0)) (f2 (get parts 1)) (f3 (get parts 2)) (f4 (get parts 3)) })))
+
+(let std/parse/row5 (lambda f1 f2 f3 f4 f5 text (do
+  (let parts (std/vector/char/words text))
+  { (f1 (get parts 0)) (f2 (get parts 1)) (f3 (get parts 2)) (f4 (get parts 3)) (f5 (get parts 4)) })))
+
+(let std/parse/row6 (lambda f1 f2 f3 f4 f5 f6 text (do
+  (let parts (std/vector/char/words text))
+  { (f1 (get parts 0)) (f2 (get parts 1)) (f3 (get parts 2)) (f4 (get parts 3)) (f5 (get parts 4)) (f6 (get parts 5)) })))
+
 (let std/vector/int/pair/sub (lambda xs (- (get xs 0) (get xs 1))))
 (let std/vector/int/pair/add (lambda xs (+ (get xs 0) (get xs 1))))
 (let std/vector/int/pair/mult (lambda xs (* (get xs 0) (get xs 1))))

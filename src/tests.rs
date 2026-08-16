@@ -2109,6 +2109,40 @@ xs)"#,
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_runtime_parse_int_words_from_baked_library() {
+        let output = run_program_output_with_std_and_opts(r#"(sum (parse/int/words "10 20 30"))"#, true);
+        assert_eq!(output, "60");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_parse_bool_words_from_baked_library() {
+        let output =
+            run_program_output_with_std_and_opts(r#"(sum (map Bool->Int (parse/bool/words "yes false 1 true no")))"#, true);
+        assert_eq!(output, "3");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_parse_row3_from_baked_library() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(let {a b c} (parse/row3 String->Integer String->Integer String->Integer "4 5 6"))
+(+ a b c)"#,
+            true,
+        );
+        assert_eq!(output, "15");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_parse_int_matrix_from_baked_library() {
+        let output =
+            run_program_output_with_std_and_opts(r#"(sum (map sum (parse/int/matrix "1 2\n3 4")))"#, true);
+        assert_eq!(output, "10");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_cons_builtin_works_as_higher_order_function_value() {
         let output =
             run_program_output_with_std_and_opts(r#"(reduce cons [] [[1 2] [3] [4 5]])"#, true);
@@ -2586,12 +2620,6 @@ xs)"#,
             expr.to_lisp(),
             "(do (string 97 10 98 9 99 92 100))"
         );
-    }
-
-    #[test]
-    fn test_char_literal_supports_escaped_quote() {
-        let expr = crate::parser::build(r#"'\''"#).expect("escaped quote char should build");
-        assert_eq!(expr.to_lisp(), "(do (char 39))");
     }
 
     #[test]
@@ -10314,7 +10342,84 @@ humidity-to-location map:
       (let idx (find (lambda (id) (zero? (get out id))) ids))
       (get ids idx)))
 (let PARSED (parse INPUT))
-[(part1 PARSED) (part2 PARSED)]"#, "[4 3]")
+[(part1 PARSED) (part2 PARSED)]"#, "[4 3]"),
+
+(r#"; Validates if a single character matches 'i', 'o', or 'l'
+(let forbidden?
+  (lambda (c)
+    (or (=# c 'i') (or (=# c 'o') (=# c 'l')))))
+
+; Evaluates whether a vector contains an increasing straight of 3 characters
+(letrec has-straight?
+  (lambda (chs i len)
+    (if (>= i (- len 2))
+        false
+        (block
+          (let c1 (get chs i))
+          (let c2 (get chs (+ i 1)))
+          (let c3 (get chs (+ i 2)))
+          ; Use character subtraction to find the relative character distance
+          (let dist1 (-# c2 c1))
+          (let dist2 (-# c3 c2))
+          ; A distance of 1 character unit is exactly (-# 'b' 'a')
+          (let unit-one (-# 'b' 'a'))
+          (if (and (=# dist1 unit-one) (=# dist2 unit-one))
+              true
+              (has-straight? chs (+ i 1) len))))))
+
+; Counts distinct, non-overlapping character pairs
+(letrec count-pairs
+  (lambda (chs i len last-pair-char found-count)
+    (if (>= i (- len 1))
+        found-count
+        (block
+          (let c1 (get chs i))
+          (let c2 (get chs (+ i 1)))
+          (if (and (=# c1 c2) (not (=# c1 last-pair-char)))
+              (count-pairs chs (+ i 2) len c1 (+ found-count 1))
+              (count-pairs chs (+ i 1) len last-pair-char found-count))))))
+
+; Scans a vector for forbidden characters
+(letrec has-forbidden?
+  (lambda (chs i len)
+    (if (>= i len)
+        false
+        (if (forbidden? (get chs i))
+            true
+            (has-forbidden? chs (+ i 1) len)))))
+
+; Aggregates rule validation steps into a unified conditional gate
+(let valid-password?
+  (lambda (chs)
+    (let len (length chs))
+    ; Replaced leaky 'unless' with explicit value-matching 'if' branches
+    (if (has-forbidden? chs 0 len)
+        false
+        (if (has-straight? chs 0 len)
+            (>= (count-pairs chs 0 len ' ' 0) 2)
+            false))))
+
+; Increments a mutable character vector at index tracking z-wrapping behavior
+(letrec increment-at!
+  (lambda (chs idx)
+    (let current (get chs idx))
+    (if (=# current 'z')
+        (do
+          (set! chs idx 'a')
+          (increment-at! chs (- idx 1)))
+        ; Correct use of character operator: adding character unit distance 1
+        (set! chs idx (+# current (-# 'b' 'a'))))))
+
+; Mutates a copy of the password using local mutators inside an optimization block
+(let next-password!
+  (lambda (current-chs)
+    (let last-idx (- (length current-chs) 1))
+    (increment-at! current-chs last-idx)
+    (while (not (valid-password? current-chs))
+      (increment-at! current-chs last-idx))
+    current-chs))
+
+(|> "vzbxkghb" (next-password!) (next-password!))"#, "vzcaabcc")
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
