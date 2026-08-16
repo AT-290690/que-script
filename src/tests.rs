@@ -298,7 +298,7 @@ xs)"#,
     }
 
     #[test]
-    fn test_merge_std_rejects_forbidden_fusion_name_shadowing() {
+    fn test_merge_std_allows_std_name_shadowing() {
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => {
@@ -306,16 +306,11 @@ xs)"#,
             }
             _ => panic!("std ast should be (do ...)"),
         };
-        assert_eq!(
-            wrapped
-                .err()
-                .unwrap_or_else(|| "expected error".to_string()),
-            "Variable 'map' is forbidden"
-        );
+        assert!(wrapped.is_ok(), "std name shadowing should be allowed");
     }
 
     #[test]
-    fn test_merge_std_rejects_reserved_lambda_param_name() {
+    fn test_merge_std_allows_library_helper_name_as_lambda_param() {
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
             crate::parser::Expression::Apply(items) => crate::parser::merge_std_and_program(
@@ -324,11 +319,9 @@ xs)"#,
             ),
             _ => panic!("std ast should be (do ...)"),
         };
-        assert_eq!(
-            wrapped
-                .err()
-                .unwrap_or_else(|| "expected error".to_string()),
-            "Variable 'char' is forbidden"
+        assert!(
+            wrapped.is_ok(),
+            "library helper names should be allowed as local binders"
         );
     }
 
