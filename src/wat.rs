@@ -816,6 +816,21 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
     }
 }
 
+fn top_level_binding_rhs_refs_main_only_names(
+    kw: &str,
+    name: &str,
+    rhs: &Expression,
+    main_only_names: &HashSet<String>,
+) -> bool {
+    let mut bound = HashSet::new();
+    if kw == "letrec" {
+        bound.insert(name.to_string());
+    }
+    let mut refs = HashSet::new();
+    collect_refs(rhs, &mut bound, &mut refs);
+    refs.iter().any(|r| main_only_names.contains(r))
+}
+
 fn collect_builtin_host_extern_call_heads(expr: &Expression, out: &mut HashSet<String>) {
     match expr {
         Expression::Apply(items) => {
@@ -9297,6 +9312,16 @@ fn compile_program_to_wat_build_typed_with_opts(
             let mut externs = HashMap::new();
             let mut main_items_expr = vec![Expression::Word("do".to_string())];
             let mut main_items_nodes: Vec<TypedExpression> = Vec::new();
+            let mut main_only_names = HashSet::new();
+            for i in 1..items.len() {
+                if let Expression::Apply(let_items) = &items[i] {
+                    if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
+                        if kw == "mut" {
+                            main_only_names.insert(name.clone());
+                        }
+                    }
+                }
+            }
             for i in 1..items.len() {
                 if let Expression::Apply(let_items) = &items[i] {
                     if let Ok(Some(extern_decl)) = crate::externals::parse_extern_decl(&items[i]) {
@@ -9307,15 +9332,30 @@ fn compile_program_to_wat_build_typed_with_opts(
                         if kw == "let" || kw == "letrec" {
                             if let Some(node) = child_at(i).and_then(|n| n.children.get(2)).cloned()
                             {
-                                defs.insert(
-                                    name.clone(),
-                                    TopDef {
-                                        expr: rhs.clone(),
-                                        node,
-                                    },
-                                );
-                                // Top-level bindings are canonicalized as defs and referenced by name.
-                                // Do not also keep duplicate let expressions in main.
+                                if top_level_binding_rhs_refs_main_only_names(
+                                    kw,
+                                    name,
+                                    rhs,
+                                    &main_only_names,
+                                ) {
+                                    main_only_names.insert(name.clone());
+                                    main_items_expr.push(items[i].clone());
+                                    let node = child_at(i).cloned().ok_or_else(|| {
+                                        "Missing typed top-level expression while building wasm main"
+                                            .to_string()
+                                    })?;
+                                    main_items_nodes.push(node);
+                                } else {
+                                    defs.insert(
+                                        name.clone(),
+                                        TopDef {
+                                            expr: rhs.clone(),
+                                            node,
+                                        },
+                                    );
+                                    // Top-level bindings are canonicalized as defs and referenced by name.
+                                    // Do not also keep duplicate let expressions in main.
+                                }
                                 continue;
                             }
                         }

@@ -5586,6 +5586,32 @@ fn"#;
     }
 
     #[test]
+    fn test_top_level_let_referencing_mut_stays_in_main() {
+        let expr = crate::parser::build(
+            r#"(do
+                    (mut x 10)
+                    (let y (+ x 1))
+                    (alter! x (+ x y))
+                    x)"#,
+        )
+        .expect("program should build");
+
+        crate::infer::infer_with_builtins_typed(
+            &expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("program should infer");
+
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        assert!(
+            !wat.contains("Unsupported free word"),
+            "top-level let referencing mut should stay in main, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_sig_macro_name_is_reserved() {
         let err = crate::parser::build("(letmacro sig (lambda () 1))")
             .expect_err("sig macro name should be reserved");
