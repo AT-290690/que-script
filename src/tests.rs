@@ -2962,7 +2962,9 @@ xs)"#,
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
             .expect("program should compile");
-        let use_pair_start = wat.find("(func $v_use_dash_pair").expect("use-pair should exist");
+        let use_pair_start = wat
+            .find("(func $v_use_dash_pair")
+            .expect("use-pair should exist");
         let use_pair_wat = &wat[use_pair_start..];
 
         assert!(
@@ -3024,6 +3026,50 @@ xs)"#,
             !wat.contains("call $v_wrap1"),
             "tiny pure repeated args should be duplicated instead of blocking inlining, got:\n{}",
             wat
+        );
+    }
+
+    #[test]
+    fn test_wat_unrolls_small_constant_loop_under_opt() {
+        let typed = infer_typed(
+            r#"(do
+                (mut acc 0)
+                (mut i -1)
+                (while (<= i 1)
+                  (do
+                    (alter! acc (+ acc i))
+                    (alter! i (+ i 1))))
+                acc)"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            !optimized_lisp.contains("while"),
+            "small constant loop should unroll away its loop form, got:\n{}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
+    fn test_wat_unroll_keeps_loop_when_index_used_afterward() {
+        let typed = infer_typed(
+            r#"(do
+                (mut acc 0)
+                (mut i -1)
+                (while (<= i 1)
+                  (do
+                    (alter! acc (+ acc i))
+                    (alter! i (+ i 1))))
+                (+ acc i))"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            optimized_lisp.contains("while"),
+            "loop index used after loop must preserve the loop, got:\n{}",
+            optimized_lisp
         );
     }
 

@@ -6,6 +6,10 @@ use std::collections::{HashMap, HashSet};
 const MAX_INLINE_BODY_COST: usize = 16;
 const DEFAULT_SMALL_SCALAR_HELPER_INLINE_BODY_COST: usize = 32;
 const MAX_SMALL_SCALAR_HELPER_INLINE_BODY_COST: usize = 512;
+const DEFAULT_LOOP_UNROLL_MAX: usize = 4;
+const DEFAULT_LOOP_UNROLL_COST: usize = 120;
+const MAX_LOOP_UNROLL_MAX: usize = 16;
+const MAX_LOOP_UNROLL_COST: usize = 2000;
 const MAX_INLINE_FIXPOINT_PASSES: usize = 16;
 const MAX_OPT_FIXPOINT_PASSES: usize = 8;
 
@@ -123,6 +127,8 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
             let next = optimize_typed_ast_once(&next);
             let next = run_tuple_return_destructuring_env_pass(&next);
             let next = optimize_typed_ast_once(&next);
+            let next = run_loop_unroll_pass(&next);
+            let next = optimize_typed_ast_once(&next);
             return dead_code_eliminate_top_level_defs(&next);
         }
         cur = next;
@@ -130,6 +136,8 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     let cur = run_small_scalar_helper_env_fixpoint(&cur);
     let cur = optimize_typed_ast_once(&cur);
     let cur = run_tuple_return_destructuring_env_pass(&cur);
+    let cur = optimize_typed_ast_once(&cur);
+    let cur = run_loop_unroll_pass(&cur);
     let cur = optimize_typed_ast_once(&cur);
     dead_code_eliminate_top_level_defs(&cur)
 }
@@ -140,6 +148,22 @@ fn small_scalar_helper_inline_body_cost_limit() -> usize {
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .map(|value| value.clamp(0, MAX_SMALL_SCALAR_HELPER_INLINE_BODY_COST))
         .unwrap_or(DEFAULT_SMALL_SCALAR_HELPER_INLINE_BODY_COST)
+}
+
+fn loop_unroll_max() -> usize {
+    std::env::var("QUE_LOOP_UNROLL_MAX")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(0, MAX_LOOP_UNROLL_MAX))
+        .unwrap_or(DEFAULT_LOOP_UNROLL_MAX)
+}
+
+fn loop_unroll_cost_limit() -> usize {
+    std::env::var("QUE_LOOP_UNROLL_COST")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .map(|value| value.clamp(0, MAX_LOOP_UNROLL_COST))
+        .unwrap_or(DEFAULT_LOOP_UNROLL_COST)
 }
 
 fn run_small_scalar_helper_env_pass(node: &TypedExpression) -> TypedExpression {
@@ -156,6 +180,45 @@ fn run_small_scalar_helper_env_fixpoint(node: &TypedExpression) -> TypedExpressi
         cur = optimize_typed_ast_once(&next);
     }
     cur
+}
+
+fn run_loop_unroll_pass(node: &TypedExpression) -> TypedExpression {
+    let mut cur = node.clone();
+    for _ in 0..MAX_INLINE_FIXPOINT_PASSES {
+        let next = unroll_small_loops_typed(&cur);
+        if next.expr.to_lisp() == cur.expr.to_lisp() {
+            return next;
+        }
+        cur = next;
+    }
+    cur
+}
+
+fn unroll_small_loops_typed(node: &TypedExpression) -> TypedExpression {
+    let children = node
+        .children
+        .iter()
+        .map(unroll_small_loops_typed)
+        .collect::<Vec<_>>();
+    let rebuilt = TypedExpression {
+        expr: rebuild_expr_from_children(&node.expr, &children),
+        typ: node.typ.clone(),
+        effect: node.effect,
+        children,
+    };
+    let Expression::Apply(items) = &rebuilt.expr else {
+        return rebuilt;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do" || w == "block") {
+        return rebuilt;
+    }
+    let (items, children) = unroll_small_loops_in_do(items.clone(), rebuilt.children.clone());
+    TypedExpression {
+        expr: Expression::Apply(items),
+        typ: rebuilt.typ,
+        effect: rebuilt.effect,
+        children,
+    }
 }
 
 fn rewrite_small_scalar_helpers_with_env(
@@ -5396,6 +5459,235 @@ fn eliminate_tuple_projection_lets(
     (items, children)
 }
 
+fn unroll_small_loops_in_do(
+    mut items: Vec<Expression>,
+    mut children: Vec<TypedExpression>,
+) -> (Vec<Expression>, Vec<TypedExpression>) {
+    if items.len() != children.len() || items.len() <= 3 {
+        return (items, children);
+    }
+
+    for _ in 0..MAX_INLINE_FIXPOINT_PASSES {
+        let mut changed = false;
+        let mut i = 1usize;
+        while i + 1 < items.len() {
+            let Some((var_name, start)) = small_loop_mut_init(&items[i]) else {
+                i += 1;
+                continue;
+            };
+            if count_word_uses_in_slice(&items[i + 2..], &var_name) != 0 {
+                i += 1;
+                continue;
+            }
+            let Some(unrolled) = unroll_small_loop_after_mut(&children[i + 1], &var_name, start)
+            else {
+                i += 1;
+                continue;
+            };
+
+            let replacement_exprs = unrolled
+                .iter()
+                .map(|node| node.expr.clone())
+                .collect::<Vec<_>>();
+            items.splice(i..i + 2, replacement_exprs);
+            children.splice(i..i + 2, unrolled);
+            changed = true;
+            break;
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    (items, children)
+}
+
+fn small_loop_mut_init(expr: &Expression) -> Option<(String, i32)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(kw), Expression::Word(name), Expression::Int(start)] = &items[..] else {
+        return None;
+    };
+    if kw == "mut" {
+        Some((name.clone(), *start))
+    } else {
+        None
+    }
+}
+
+fn unroll_small_loop_after_mut(
+    while_node: &TypedExpression,
+    var_name: &str,
+    start: i32,
+) -> Option<Vec<TypedExpression>> {
+    let Expression::Apply(items) = &while_node.expr else {
+        return None;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "while")
+        || items.len() != 3
+        || while_node.children.len() != 3
+    {
+        return None;
+    }
+    if while_node.effect.contains(EffectFlags::IO)
+        || while_node.effect.contains(EffectFlags::UNKNOWN_CALL)
+    {
+        return None;
+    }
+
+    let end = small_loop_condition_end(&items[1], var_name)?;
+    let inclusive = small_loop_condition_inclusive(&items[1], var_name)?;
+    let stop = if inclusive { end.checked_add(1)? } else { end };
+    if stop < start {
+        return None;
+    }
+    let trip_count = (stop - start) as usize;
+    if trip_count == 0 {
+        return Some(Vec::new());
+    }
+    if trip_count > loop_unroll_max() {
+        return None;
+    }
+
+    let body = while_node.children.get(2)?;
+    let body_without_increment = remove_trailing_loop_increment(body, var_name)?;
+    if contains_nested_lambda_or_letrec(&body_without_increment.expr)
+        || binds_name_expr(&body_without_increment.expr, var_name)
+        || mutates_name_expr(&body_without_increment.expr, var_name)
+        || word_used_as_call_head(&body_without_increment.expr, var_name)
+    {
+        return None;
+    }
+    let body_cost = inline_body_cost(&body_without_increment.expr);
+    if body_cost.saturating_mul(trip_count) > loop_unroll_cost_limit() {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(trip_count);
+    for value in start..stop {
+        let replacement = TypedExpression {
+            expr: Expression::Int(value),
+            typ: Some(Type::Int),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        };
+        out.push(substitute_word_with_typed(
+            &body_without_increment,
+            var_name,
+            &replacement,
+        ));
+    }
+    Some(out)
+}
+
+fn small_loop_condition_end(expr: &Expression, var_name: &str) -> Option<i32> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    match &items[..] {
+        [Expression::Word(op), Expression::Word(name), Expression::Int(end)]
+            if (op == "<" || op == "<=") && name == var_name =>
+        {
+            Some(*end)
+        }
+        _ => None,
+    }
+}
+
+fn small_loop_condition_inclusive(expr: &Expression, var_name: &str) -> Option<bool> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    match &items[..] {
+        [Expression::Word(op), Expression::Word(name), Expression::Int(_)]
+            if (op == "<" || op == "<=") && name == var_name =>
+        {
+            Some(op == "<=")
+        }
+        _ => None,
+    }
+}
+
+fn remove_trailing_loop_increment(
+    node: &TypedExpression,
+    var_name: &str,
+) -> Option<TypedExpression> {
+    if is_loop_increment_expr(&node.expr, var_name) {
+        return Some(TypedExpression {
+            expr: Expression::Word("nil".to_string()),
+            typ: Some(Type::Unit),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        });
+    }
+
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do" || w == "block")
+        || items.len() != node.children.len()
+        || items.len() < 2
+    {
+        return None;
+    }
+
+    let mut effective_len = node.children.len();
+    while effective_len > 1
+        && matches!(
+            node.children.get(effective_len - 1).map(|child| &child.expr),
+            Some(Expression::Word(w)) if w == "nil"
+        )
+    {
+        effective_len -= 1;
+    }
+
+    let last = node.children.get(effective_len - 1)?;
+    if !is_loop_increment_expr(&last.expr, var_name) {
+        return None;
+    }
+    let mut children = node.children[..effective_len - 1].to_vec();
+    if children.len() == 1 {
+        children.push(TypedExpression {
+            expr: Expression::Word("nil".to_string()),
+            typ: Some(Type::Unit),
+            effect: EffectFlags::PURE,
+            children: Vec::new(),
+        });
+    }
+    Some(TypedExpression {
+        expr: Expression::Apply(children.iter().map(|child| child.expr.clone()).collect()),
+        typ: node.typ.clone(),
+        effect: children
+            .iter()
+            .fold(EffectFlags::PURE, |acc, child| acc | child.effect),
+        children,
+    })
+}
+
+fn is_loop_increment_expr(expr: &Expression, var_name: &str) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    matches!(
+        &items[..],
+        [
+            Expression::Word(op),
+            Expression::Word(name),
+            Expression::Apply(rhs)
+        ] if op == "alter!"
+            && name == var_name
+            && matches!(
+                &rhs[..],
+                [
+                    Expression::Word(add),
+                    Expression::Word(rhs_name),
+                    Expression::Int(1)
+                ] if add == "+" && rhs_name == var_name
+            )
+    )
+}
+
 fn tuple_projection_let(
     expr: &Expression,
     node: &TypedExpression,
@@ -5452,6 +5744,36 @@ fn binding_name(expr: &Expression) -> Option<&str> {
         Some(name.as_str())
     } else {
         None
+    }
+}
+
+fn binds_name_expr(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.as_slice(),
+                [Expression::Word(kw), Expression::Word(bound), ..]
+                if (kw == "let" || kw == "letrec" || kw == "mut") && bound == name)
+            {
+                return true;
+            }
+            items.iter().any(|item| binds_name_expr(item, name))
+        }
+        _ => false,
+    }
+}
+
+fn mutates_name_expr(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.as_slice(),
+                [Expression::Word(kw), Expression::Word(target), ..]
+                if (kw == "alter!" || kw == "&alter!") && target == name)
+            {
+                return true;
+            }
+            items.iter().any(|item| mutates_name_expr(item, name))
+        }
+        _ => false,
     }
 }
 
@@ -5609,7 +5931,11 @@ fn replace_tuple_projection_typed_any(
         }
         if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
             let mut scoped_aliases = aliases.clone();
-            let mut new_children = vec![node.children.first().cloned().unwrap_or_else(|| pure_word("do"))];
+            let mut new_children = vec![node
+                .children
+                .first()
+                .cloned()
+                .unwrap_or_else(|| pure_word("do"))];
             for (idx, child) in node.children.iter().enumerate().skip(1) {
                 if idx + 1 < node.children.len() {
                     if let Some(alias_name) = tuple_alias_binding(&child.expr, &scoped_aliases) {

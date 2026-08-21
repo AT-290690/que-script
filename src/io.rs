@@ -316,6 +316,8 @@ fn enable_opt_runtime_flags() {
     env::set_var("QUE_DEVIRTUALIZE", "aggressive");
     env::set_var("QUE_TCO", "aggressive");
     env::set_var("QUE_SMALL_SCALAR_INLINE_COST", "512");
+    env::set_var("QUE_LOOP_UNROLL_MAX", "16");
+    env::set_var("QUE_LOOP_UNROLL_COST", "2000");
     env::set_var("QUE_BOUNDS_CHECK", "0");
     env::set_var("QUE_INT_OVERFLOW_CHECK", "0");
     env::set_var("QUE_DEC_OVERFLOW_CHECK", "0");
@@ -1203,6 +1205,8 @@ fn native_shell_env_help(bin_name: &str) -> String {
            QUE_TCO            Tail-call optimization mode (default: conservative).\n\
                               Allowed: conservative | aggressive.\n\
            QUE_SMALL_SCALAR_INLINE_COST Pure scalar helper inline cost limit (default: 32, max: 512).\n\
+           QUE_LOOP_UNROLL_MAX Maximum constant small-loop trip count to unroll (default: 4, max: 16).\n\
+           QUE_LOOP_UNROLL_COST Maximum body_cost * trip_count unroll budget (default: 120, max: 2000).\n\
            QUE_BOUNDS_CHECK   Vector get() bounds check (default: on). Disable with 0|false|off|no.\n\
            QUE_VEC_MIN_CAP    Minimum initial vector capacity (default: 2, range: 1..4096).\n\
            QUE_VEC_GROWTH_NUM Vector growth numerator (default: 2, range: 1..64).\n\
@@ -1213,10 +1217,11 @@ fn native_shell_env_help(bin_name: &str) -> String {
            QUE_DEC_OVERFLOW_CHECK Dec fixed-point overflow trap check for +.,-.,*.,/. and mut ops (default: off).\n\
          \n\
          Example:\n\
-           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_SMALL_SCALAR_INLINE_COST=64 QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 QUE_DECIMAL_SCALE=1000 {bin} script.que\n\
+           QUE_WASM_OPT=speed QUE_DEVIRTUALIZE=aggressive QUE_TCO=conservative QUE_SMALL_SCALAR_INLINE_COST=64 QUE_LOOP_UNROLL_MAX=8 QUE_LOOP_UNROLL_COST=200 QUE_BOUNDS_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=3 QUE_VEC_GROWTH_DEN=2 QUE_DECIMAL_SCALE=1000 {bin} script.que\n\
            {bin} script.que --opt\n\
              Sets QUE_WASM_OPT=speed, QUE_DEVIRTUALIZE=aggressive, QUE_TCO=aggressive,\n\
-             QUE_SMALL_SCALAR_INLINE_COST=512, QUE_BOUNDS_CHECK=0,\n\
+             QUE_SMALL_SCALAR_INLINE_COST=512, QUE_LOOP_UNROLL_MAX=16,\n\
+             QUE_LOOP_UNROLL_COST=2000, QUE_BOUNDS_CHECK=0,\n\
              QUE_INT_OVERFLOW_CHECK=0, QUE_DEC_OVERFLOW_CHECK=0, QUE_DIV_ZERO_CHECK=0,\n\
              QUE_VEC_MIN_CAP=8, QUE_VEC_GROWTH_NUM=2, QUE_VEC_GROWTH_DEN=1.\n\
          \n\
