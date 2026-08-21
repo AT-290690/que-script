@@ -194,6 +194,8 @@
      xs))))
 (let std/vector/not-empty? (lambda xs (not (= (length xs) 0))))
 (let std/vector/in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
+(let std/vector/overwrite! (lambda (xs ys) (std/vector/empty! xs) (loop i (< i (length ys)) (set! xs i (get ys i)))))
+
 (let std/vector/for (lambda xs fn (do
   (mut i 0)
   (let len (length xs))
@@ -2737,6 +2739,8 @@ q)))
 (let scan! (lambda xs fn (std/vector/adjacent-difference! xs fn)))
 (let empty! (lambda xs (do (std/vector/empty! xs) nil)))
 (let reverse! std/vector/reverse!)
+(let overwrite! std/vector/overwrite!)
+
 (let sort! std/vector/sort!)
 
 (let emod std/int/euclidean-mod)

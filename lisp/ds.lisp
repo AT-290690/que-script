@@ -182,7 +182,7 @@
 (let Vector/get* (lambda idx xs (if (and (>= idx 0) (< idx (length xs))) { true [(get xs idx)] } { false [] })))
 (let Vector/at! (lambda idx xs (std/vector/at xs idx)))
 (let Vector/at* (lambda idx xs (if (< idx (length xs)) { true [(std/vector/at xs idx)] } { false [] })))
-
+(let Vector/overwrite! std/vector/overwrite!)
 (let Vector/set! (lambda xs i v (set! xs i v)))
 (let Vector/length std/vector/length)
 (let Vector/append! (lambda xs x (std/vector/append! xs x)))

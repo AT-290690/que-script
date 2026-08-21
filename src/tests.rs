@@ -2110,15 +2110,18 @@ xs)"#,
     #[test]
     #[cfg(feature = "runtime")]
     fn test_runtime_parse_int_words_from_baked_library() {
-        let output = run_program_output_with_std_and_opts(r#"(sum (parse/int/words "10 20 30"))"#, true);
+        let output =
+            run_program_output_with_std_and_opts(r#"(sum (parse/int/words "10 20 30"))"#, true);
         assert_eq!(output, "60");
     }
 
     #[test]
     #[cfg(feature = "runtime")]
     fn test_runtime_parse_bool_words_from_baked_library() {
-        let output =
-            run_program_output_with_std_and_opts(r#"(sum (map Bool->Int (parse/bool/words "yes false 1 true no")))"#, true);
+        let output = run_program_output_with_std_and_opts(
+            r#"(sum (map Bool->Int (parse/bool/words "yes false 1 true no")))"#,
+            true,
+        );
         assert_eq!(output, "3");
     }
 
@@ -2136,8 +2139,10 @@ xs)"#,
     #[test]
     #[cfg(feature = "runtime")]
     fn test_runtime_parse_int_matrix_from_baked_library() {
-        let output =
-            run_program_output_with_std_and_opts(r#"(sum (map sum (parse/int/matrix "1 2\n3 4")))"#, true);
+        let output = run_program_output_with_std_and_opts(
+            r#"(sum (map sum (parse/int/matrix "1 2\n3 4")))"#,
+            true,
+        );
         assert_eq!(output, "10");
     }
 
@@ -2614,12 +2619,9 @@ xs)"#,
 
     #[test]
     fn test_string_literal_supports_common_escapes() {
-        let expr = crate::parser::build(r#""a\nb\tc\\d""#)
-            .expect("escaped string literal should build");
-        assert_eq!(
-            expr.to_lisp(),
-            "(do (string 97 10 98 9 99 92 100))"
-        );
+        let expr =
+            crate::parser::build(r#""a\nb\tc\\d""#).expect("escaped string literal should build");
+        assert_eq!(expr.to_lisp(), "(do (string 97 10 98 9 99 92 100))");
     }
 
     #[test]
@@ -2910,6 +2912,63 @@ xs)"#,
         let typed = infer_typed("(do (let p (tuple 10 32)) (+ (fst p) (snd p)))");
         let optimized = crate::op::optimize_typed_ast(&typed);
         assert_eq!(optimized.expr.to_lisp(), "42");
+    }
+
+    #[test]
+    fn test_typed_optimization_scalar_replaces_nested_do_tuple_alias_projections() {
+        let typed = infer_typed(
+            r#"(do
+                (let pair (tuple 10 32))
+                (do
+                  (let alias pair)
+                  (+ (fst alias) (snd alias))))"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            !optimized_lisp.contains("tuple"),
+            "nested do tuple alias projections should not keep tuple allocation, got: {}",
+            optimized_lisp
+        );
+        assert_eq!(optimized_lisp, "42");
+    }
+
+    #[test]
+    fn test_wat_tuple_sroa_handles_do_rhs_tuple_bindings() {
+        let expr = crate::parser::build(
+            r#"(do
+                (let pair-scale (lambda x k
+                  (do
+                    (let {a b} x)
+                    {(* a k) (* b k)})))
+                (let pair-add (lambda x y
+                  (do
+                    (let {a b} x)
+                    (let {c d} y)
+                    {(+ a c) (+ b d)})))
+                (let use-pair (lambda n
+                  (do
+                    (let base {1 2})
+                    (let scaled (pair-scale base n))
+                    (let added (pair-add scaled base))
+                    (let {x y} added)
+                    (+ x y))))
+                (use-pair 10))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let use_pair_start = wat.find("(func $v_use_dash_pair").expect("use-pair should exist");
+        let use_pair_wat = &wat[use_pair_start..];
+
+        assert!(
+            !use_pair_wat.contains("call $tuple_new")
+                && !use_pair_wat.contains("call $tuple_fst")
+                && !use_pair_wat.contains("call $tuple_snd"),
+            "tuple SROA should eliminate do-RHS tuple materialization, got:\n{}",
+            use_pair_wat
+        );
     }
 
     #[test]
@@ -6574,6 +6633,75 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_delayed_tuple_return_call_destructure_avoids_tuple_allocation() {
+        let expr = crate::parser::build(
+            r#"(do
+                    (let pair-score (lambda x (do
+                      (let y (+ x 1))
+                      { y (+ y 1) })))
+                    (let use-score (lambda x (do
+                      (let result (pair-score x))
+                      (let unrelated (* x 3))
+                      (let alias result)
+                      (let a (fst alias))
+                      (let b (snd alias))
+                      (+ unrelated a b))))
+                    (use-score 10))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let use_score_start = wat
+            .find("(func $v_use_dash_score")
+            .expect("use-score should exist");
+        let use_score_wat = &wat[use_score_start..];
+
+        assert!(
+            !use_score_wat.contains("call $tuple_new"),
+            "delayed tuple-return call destructure should avoid tuple allocation, got:\n{}",
+            use_score_wat
+        );
+        assert!(
+            !use_score_wat.contains("call $tuple_fst")
+                && !use_score_wat.contains("call $tuple_snd"),
+            "delayed tuple-return call destructure should avoid tuple projections, got:\n{}",
+            use_score_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_nested_tuple_helper_chain_destructure_inlines_helper_calls() {
+        let expr = crate::parser::build(
+            r#"(do
+                    (let padd (lambda x y (do
+                      (let {a b} x)
+                      (let {c d} y)
+                      { (+ a c) (+ b d) })))
+                    (let p2 (lambda x (padd x x)))
+                    (let p4 (lambda x (p2 (p2 x))))
+                    (let use-score (lambda x (do
+                      (let result (p4 {x (+ x 1)}))
+                      (let unrelated (* x 3))
+                      (let {a b} result)
+                      (+ unrelated a b))))
+                    (use-score 10))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let use_score_start = wat
+            .find("(func $v_use_dash_score")
+            .expect("use-score should exist");
+        let use_score_wat = &wat[use_score_start..];
+
+        assert!(
+            !use_score_wat.contains("call $v_p4") && !use_score_wat.contains("call $v_padd"),
+            "nested tuple-helper chain destructure should inline helper calls, got:\n{}",
+            use_score_wat
+        );
+    }
+
+    #[test]
     fn test_wat_branch_tuple_return_call_destructure_avoids_tuple_allocation() {
         let expr = crate::parser::build(
             r#"(do
@@ -6792,8 +6920,9 @@ fn"#;
     #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_dynamic_scalar_set_keeps_append_at_length_semantics() {
-        let result =
-            run_program_output("((lambda (do (let xs [1 2]) (mut i (length xs)) (set! xs i 3) xs)))");
+        let result = run_program_output(
+            "((lambda (do (let xs [1 2]) (mut i (length xs)) (set! xs i 3) xs)))",
+        );
 
         assert_eq!(result, "[1 2 3]");
     }
