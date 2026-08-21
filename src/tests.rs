@@ -2800,9 +2800,12 @@ xs)"#,
 
     #[test]
     fn test_typed_optimization_inline_skips_large_lambda_body() {
-        let typed = infer_typed(
-            "(do (let f (lambda x (+ (+ (+ (+ (+ (+ (+ (+ x 1) 2) 3) 4) 5) 6) 7) 8))) (f 1))",
-        );
+        let mut body = "x".to_string();
+        for i in 1..180 {
+            body = format!("(+ {} {})", body, i);
+        }
+        let source = format!("(do (let f (lambda x {})) (f 1))", body);
+        let typed = infer_typed(&source);
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
 
@@ -2968,6 +2971,59 @@ xs)"#,
                 && !use_pair_wat.contains("call $tuple_snd"),
             "tuple SROA should eliminate do-RHS tuple materialization, got:\n{}",
             use_pair_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_inlines_local_mutate_scalar_helper() {
+        let expr = crate::parser::build(
+            r#"(do
+                (let sum3
+                  (lambda a b c
+                    (do
+                      (mut acc 0)
+                      (alter! acc (+ acc a))
+                      (alter! acc (+ acc b))
+                      (alter! acc (+ acc c))
+                      acc)))
+                (let use-sum
+                  (lambda x
+                    (+ (sum3 x (+ x 1) (+ x 2)) 10)))
+                (use-sum 5))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+
+        assert!(
+            !wat.contains("call $v_sum3"),
+            "local-mutate scalar helper should inline into caller, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_wat_inlines_small_scalar_helper_with_tiny_pure_repeated_arg() {
+        let expr = crate::parser::build(
+            r#"(do
+                (let wrap1
+                  (lambda v n
+                    (if (< v 0)
+                      (+ v n)
+                      (if (>= v n) (- v n) v))))
+                (let use-wrap
+                  (lambda x dx
+                    (wrap1 (+ x dx) 96)))
+                (use-wrap 95 1))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+
+        assert!(
+            !wat.contains("call $v_wrap1"),
+            "tiny pure repeated args should be duplicated instead of blocking inlining, got:\n{}",
+            wat
         );
     }
 

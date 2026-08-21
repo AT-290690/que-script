@@ -119,7 +119,7 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     for _ in 0..MAX_OPT_FIXPOINT_PASSES {
         let next = optimize_typed_ast_once(&cur);
         if next.expr.to_lisp() == cur.expr.to_lisp() {
-            let next = run_small_scalar_helper_env_pass(&next);
+            let next = run_small_scalar_helper_env_fixpoint(&next);
             let next = optimize_typed_ast_once(&next);
             let next = run_tuple_return_destructuring_env_pass(&next);
             let next = optimize_typed_ast_once(&next);
@@ -127,7 +127,7 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
         }
         cur = next;
     }
-    let cur = run_small_scalar_helper_env_pass(&cur);
+    let cur = run_small_scalar_helper_env_fixpoint(&cur);
     let cur = optimize_typed_ast_once(&cur);
     let cur = run_tuple_return_destructuring_env_pass(&cur);
     let cur = optimize_typed_ast_once(&cur);
@@ -144,6 +144,18 @@ fn small_scalar_helper_inline_body_cost_limit() -> usize {
 
 fn run_small_scalar_helper_env_pass(node: &TypedExpression) -> TypedExpression {
     rewrite_small_scalar_helpers_with_env(node, &HashMap::new(), false)
+}
+
+fn run_small_scalar_helper_env_fixpoint(node: &TypedExpression) -> TypedExpression {
+    let mut cur = node.clone();
+    for _ in 0..MAX_INLINE_FIXPOINT_PASSES {
+        let next = run_small_scalar_helper_env_pass(&cur);
+        if next.expr.to_lisp() == cur.expr.to_lisp() {
+            return next;
+        }
+        cur = optimize_typed_ast_once(&next);
+    }
+    cur
 }
 
 fn rewrite_small_scalar_helpers_with_env(
@@ -220,11 +232,7 @@ fn rewrite_small_scalar_helpers_with_env(
         effect: node.effect,
         children: new_children,
     };
-    if inside_lambda {
-        try_inline_small_scalar_helper_call(&rebuilt_node, inherited_defs).unwrap_or(rebuilt_node)
-    } else {
-        rebuilt_node
-    }
+    try_inline_small_scalar_helper_call(&rebuilt_node, inherited_defs).unwrap_or(rebuilt_node)
 }
 
 fn run_tuple_return_destructuring_env_pass(node: &TypedExpression) -> TypedExpression {
@@ -5916,7 +5924,10 @@ fn extract_small_scalar_helper_inline_def(
     }
     let body_expr = lambda_items.last()?.clone();
     let body_typed = lambda_typed.children.last()?.clone();
-    if contains_word(&body_expr, name) || !body_typed.effect.is_pure() {
+    if contains_word(&body_expr, name)
+        || !is_externally_pure_inline_effect(body_typed.effect)
+        || !is_local_mutate_inline_safe_body(&body_expr, &[])
+    {
         return None;
     }
     if body_typed
@@ -5927,9 +5938,10 @@ fn extract_small_scalar_helper_inline_def(
     {
         return None;
     }
-    if !is_inline_safe_body(&body_expr)
-        || inline_body_cost(&body_expr) > small_scalar_helper_inline_body_cost_limit()
-    {
+    if body_typed.effect.is_pure() && !is_inline_safe_body(&body_expr) {
+        return None;
+    }
+    if inline_body_cost(&body_expr) > small_scalar_helper_inline_body_cost_limit() {
         return None;
     }
     let params = lambda_items[1..lambda_items.len() - 1]
@@ -5939,6 +5951,9 @@ fn extract_small_scalar_helper_inline_def(
             _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
+    if !is_local_mutate_inline_safe_body(&body_expr, &params) {
+        return None;
+    }
     Some((
         expr.clone(),
         node.clone(),
@@ -6497,6 +6512,85 @@ fn is_inline_safe_body(expr: &Expression) -> bool {
     }
 }
 
+fn is_externally_pure_inline_effect(effect: EffectFlags) -> bool {
+    effect.is_pure()
+        || (effect.contains(EffectFlags::MUTATE)
+            && !effect.contains(EffectFlags::IO)
+            && !effect.contains(EffectFlags::UNKNOWN_CALL))
+}
+
+fn is_local_mutate_inline_safe_body(expr: &Expression, params: &[String]) -> bool {
+    let mut locals = HashSet::new();
+    let params = params.iter().cloned().collect::<HashSet<_>>();
+    local_mutate_expr_safe(expr, &mut locals, &params)
+}
+
+fn local_mutate_expr_safe(
+    expr: &Expression,
+    locals: &mut HashSet<String>,
+    params: &HashSet<String>,
+) -> bool {
+    match expr {
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => true,
+        Expression::Apply(items) => {
+            let Some(Expression::Word(head)) = items.first() else {
+                return items
+                    .iter()
+                    .all(|item| local_mutate_expr_safe(item, &mut locals.clone(), params));
+            };
+
+            match head.as_str() {
+                "lambda" | "letrec" | "extern" => false,
+                "do" | "block" => {
+                    let mut scoped = locals.clone();
+                    for item in items.iter().skip(1) {
+                        if !local_mutate_expr_safe(item, &mut scoped, params) {
+                            return false;
+                        }
+                    }
+                    true
+                }
+                "let" => {
+                    let [_, Expression::Word(name), rhs] = &items[..] else {
+                        return false;
+                    };
+                    if params.contains(name) || !local_mutate_expr_safe(rhs, locals, params) {
+                        return false;
+                    }
+                    locals.insert(name.clone());
+                    true
+                }
+                "mut" => {
+                    let [_, Expression::Word(name), rhs] = &items[..] else {
+                        return false;
+                    };
+                    if params.contains(name) || !local_mutate_expr_safe(rhs, locals, params) {
+                        return false;
+                    }
+                    locals.insert(name.clone());
+                    true
+                }
+                "alter!" => {
+                    let [_, Expression::Word(name), rhs] = &items[..] else {
+                        return false;
+                    };
+                    locals.contains(name) && local_mutate_expr_safe(rhs, locals, params)
+                }
+                "while" | "if" | "cond" | "and" | "or" => items
+                    .iter()
+                    .skip(1)
+                    .all(|item| local_mutate_expr_safe(item, &mut locals.clone(), params)),
+                "set!" | "push!" | "pop!" | "&alter!" | "set" | "=!" => false,
+                _ if head.ends_with('!') => false,
+                _ => items
+                    .iter()
+                    .skip(1)
+                    .all(|item| local_mutate_expr_safe(item, &mut locals.clone(), params)),
+            }
+        }
+    }
+}
+
 fn inline_body_cost(expr: &Expression) -> usize {
     match expr {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => 1,
@@ -6741,7 +6835,8 @@ fn try_inline_small_scalar_helper_call(
         .as_ref()
         .map(is_no_temp_inline_scalar_type)
         != Some(true)
-        || !def.body_typed.effect.is_pure()
+        || !is_externally_pure_inline_effect(def.body_typed.effect)
+        || !is_local_mutate_inline_safe_body(&def.body_expr, &def.params)
     {
         return None;
     }
@@ -6784,7 +6879,10 @@ fn is_atomic_inline_arg_expr(expr: &Expression) -> bool {
 }
 
 fn can_no_temp_inline_arg(arg_expr: &Expression, arg_node: &TypedExpression, uses: usize) -> bool {
-    if uses > 1 && !is_atomic_inline_arg_expr(arg_expr) {
+    if uses > 1
+        && !is_atomic_inline_arg_expr(arg_expr)
+        && !(arg_node.effect.is_pure() && inline_body_cost(arg_expr) <= 8)
+    {
         return false;
     }
 
