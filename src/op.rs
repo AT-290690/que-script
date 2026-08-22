@@ -3004,7 +3004,7 @@ fn alpha_rename_local_bindings_typed(
                 node.clone()
             }
         }
-        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do") =>
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "do" || w == "while") =>
         {
             let mut scoped = env.clone();
             let children = node
@@ -5365,6 +5365,10 @@ fn eliminate_single_use_let_bindings(
                 continue;
             };
             let rhs_expr = rhs_typed.expr.clone();
+            if !let_rhs_is_stable_until_use(&rhs_expr, &items[i + 1..], &name) {
+                i += 1;
+                continue;
+            }
 
             for j in i + 1..items.len() {
                 items[j] = substitute_word_with_expr(&items[j], &name, &rhs_expr);
@@ -5380,6 +5384,51 @@ fn eliminate_single_use_let_bindings(
         }
     }
     (items, children)
+}
+
+fn let_rhs_is_stable_until_use(rhs: &Expression, following: &[Expression], name: &str) -> bool {
+    let Some(first_use) = following
+        .iter()
+        .position(|expr| count_word_uses_expr(expr, name) > 0)
+    else {
+        return true;
+    };
+    let mut deps = HashSet::new();
+    collect_word_names(rhs, &mut deps);
+    !following[..first_use]
+        .iter()
+        .any(|expr| mutates_or_binds_any_word(expr, &deps))
+}
+
+fn mutates_or_binds_any_word(expr: &Expression, names: &HashSet<String>) -> bool {
+    if names.is_empty() {
+        return false;
+    }
+    match expr {
+        Expression::Apply(items) => {
+            if let Some(Expression::Word(kw)) = items.first() {
+                match kw.as_str() {
+                    "let" | "letrec" | "mut" | "alter!" | "&alter!" | "set" | "=!" => {
+                        if matches!(items.get(1), Some(Expression::Word(target)) if names.contains(target))
+                        {
+                            return true;
+                        }
+                    }
+                    "set!" | "push!" | "pop!" => {
+                        if matches!(items.get(1), Some(Expression::Word(target)) if names.contains(target))
+                        {
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            items
+                .iter()
+                .any(|item| mutates_or_binds_any_word(item, names))
+        }
+        _ => false,
+    }
 }
 
 fn eliminate_tuple_projection_lets(

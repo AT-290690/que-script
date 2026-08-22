@@ -3031,6 +3031,32 @@ xs)"#,
     }
 
     #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_single_use_let_not_inlined_across_mutated_dependency() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        let _inline_budget = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "512");
+        let output = run_program_output_unlocked(
+            r#"(do
+                (let gcd
+                  (lambda (a b)
+                    (do
+                      (mut x a)
+                      (mut y b)
+                      (while (> y 0)
+                        (do
+                          (let r (mod x y))
+                          (alter! x y)
+                          (alter! y r)))
+                      x)))
+                (gcd 4 3))"#,
+        );
+
+        assert_eq!(output.trim(), "1");
+    }
+
+    #[test]
     fn test_wat_inlines_small_scalar_helper_with_tiny_pure_repeated_arg() {
         let expr = crate::parser::build(
             r#"(do

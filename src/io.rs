@@ -1133,7 +1133,7 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} init [--demo]\n\
          or:    {bin} init-host <name>\n\
-         or:    {bin} explain [script.que] [--json] [--out <file>]\n\
+         or:    {bin} explain [script.que] [--json] [--out <file>] [--debug [basic|code|types|all]|--opt]\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
          or:    {bin} --learn\n\
@@ -1643,16 +1643,24 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
 }
 
 fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+    let mut args = args.to_vec();
+    if take_help_flag_from_argv(&mut args) {
         println!(
-            "Usage: {bin} explain [script.que] [--json] [--out <file>]\n\
+            "Usage: {bin} explain [script.que] [--json] [--out <file>] [--debug [basic|code|types|all]|--opt]\n\
              \n\
              Explains the optimized Wasm shape of a Que program without running it.\n\
+             --opt applies the same aggressive optimization/runtime flags as a normal run.\n\
+             --debug applies the same runtime safety guard flags as a normal run.\n\
              Omitting script.que uses entry from {config} when present.",
             bin = bin_name,
             config = crate::project::PROJECT_CONFIG_FILE
         );
         return Ok(());
+    }
+    let opt_mode = take_opt_flag_from_argv(&mut args);
+    let debug_mode = take_debug_mode_from_argv(&mut args);
+    if opt_mode && debug_mode.is_enabled() {
+        return Err("--opt and --debug cannot be used together".to_string());
     }
 
     let mut json = false;
@@ -1690,6 +1698,12 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
         resolve_project_entry_path(&cwd, script_path.as_deref())
             .map_err(|message| format!("{}\n{}", message, native_shell_help(bin_name)))?;
     apply_project_env_vars(&script_cwd)?;
+    if opt_mode {
+        enable_opt_runtime_flags();
+    }
+    if debug_mode.is_enabled() {
+        enable_debug_runtime_guards();
+    }
 
     let analysis_source = crate::lsp_native_core::strip_comment_bodies_preserve_newlines(&program);
     let user_form_count =
