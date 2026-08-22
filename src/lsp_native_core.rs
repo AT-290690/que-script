@@ -51,6 +51,10 @@ pub fn normalize_signature(signature: &str) -> String {
     strip_type_var_numbers(without_quantifier)
 }
 
+pub fn normalize_diagnostic_message(message: &str) -> String {
+    strip_numbered_type_var_names(message)
+}
+
 fn is_quantifier_prefix(prefix: &str) -> bool {
     if prefix.is_empty() {
         return false;
@@ -140,6 +144,50 @@ pub fn strip_type_var_numbers(input: &str) -> String {
             out.push_str(&canonical);
             i += 1;
             continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+fn strip_numbered_type_var_names(input: &str) -> String {
+    const CANONICAL_TYPE_VAR_NAMES: [&str; 24] = [
+        "T", "K", "V", "R", "S", "U", "W", "X", "Y", "Z", "A", "B", "C", "D", "E", "F", "G", "H",
+        "I", "J", "L", "M", "N", "P",
+    ];
+
+    let chars: Vec<char> = input.chars().collect();
+    let mut out = String::with_capacity(input.len());
+    let mut seen: HashMap<String, String> = HashMap::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == 'T' {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            let digit_start = j;
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > digit_start {
+                let raw_name: String = chars[i..j].iter().collect();
+                let canonical = if let Some(existing) = seen.get(&raw_name) {
+                    existing.clone()
+                } else {
+                    let next_name = if seen.len() < CANONICAL_TYPE_VAR_NAMES.len() {
+                        CANONICAL_TYPE_VAR_NAMES[seen.len()].to_string()
+                    } else {
+                        format!("T{}", seen.len() + 1)
+                    };
+                    seen.insert(raw_name, next_name.clone());
+                    next_name
+                };
+                out.push_str(&canonical);
+                i = j;
+                continue;
+            }
         }
         out.push(chars[i]);
         i += 1;

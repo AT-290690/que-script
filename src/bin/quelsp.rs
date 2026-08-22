@@ -1058,10 +1058,6 @@ fn normalize_signature(signature: &str) -> String {
     native_core::normalize_signature(signature)
 }
 
-fn strip_type_var_numbers(input: &str) -> String {
-    native_core::strip_type_var_numbers(input)
-}
-
 fn build_base_environment(
     std_defs: &[Expression],
 ) -> (
@@ -1562,7 +1558,7 @@ fn make_error_diagnostic(
     message: String,
     scope: Option<&InferErrorScope>,
 ) -> Vec<Diagnostic> {
-    let normalized_message = strip_type_var_numbers(&message);
+    let normalized_message = native_core::normalize_diagnostic_message(&message);
     let inferred_ranges = infer_error_ranges(text, &message, scope);
     let display_message = if !inferred_ranges.is_empty() {
         diagnostic_summary_without_snippet(&normalized_message)

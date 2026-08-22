@@ -4775,6 +4775,49 @@ xs)"#,
     }
 
     #[test]
+    fn test_lsp_diagnostic_normalization_preserves_plain_uppercase_function_name() {
+        assert_eq!(
+            crate::lsp_native_core::normalize_diagnostic_message(
+                "Impure function 'J' must end with '!'"
+            ),
+            "Impure function 'J' must end with '!'"
+        );
+        assert_eq!(
+            crate::lsp_native_core::normalize_diagnostic_message("Cannot unify T15 with T16"),
+            "Cannot unify T with K"
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_diagnostics_preserve_impure_uppercase_function_name() {
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(
+            r#"(let J
+  (lambda (xs)
+    (push! xs 1)
+    xs))"#
+                .to_string(),
+        );
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        let first_message = diagnostics
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("message"))
+            .and_then(|message| message.as_str())
+            .expect("diagnostic should include a message");
+        assert!(
+            first_message.contains("Impure function 'J' must end with '!'"),
+            "expected diagnostic to preserve function name J, got: {}",
+            diagnostics_json
+        );
+        assert!(
+            !first_message.contains("Impure function 'T'"),
+            "diagnostic should not normalize function name J as a type variable, got: {}",
+            diagnostics_json
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_let_binding_uses_rhs_type_without_extra_usage() {
         let hover_json =
             crate::wasm_api::lsp_hover(r#"(let xs (map reverse ["G"]))"#.to_string(), 0, 5);
