@@ -3005,6 +3005,32 @@ xs)"#,
     }
 
     #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_inlined_local_mutate_helper_alpha_renames_bindings() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        let _inline_budget = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "512");
+        let output = run_program_output_unlocked(
+            r#"(do
+                (let bump
+                  (lambda a
+                    (do
+                      (mut z a)
+                      (alter! z (+ z 1))
+                      z)))
+                (let use-bump
+                  (lambda a
+                    (do
+                      (mut z 100)
+                      (+ (bump a) z))))
+                (use-bump 5))"#,
+        );
+
+        assert_eq!(output.trim(), "106");
+    }
+
+    #[test]
     fn test_wat_inlines_small_scalar_helper_with_tiny_pure_repeated_arg() {
         let expr = crate::parser::build(
             r#"(do

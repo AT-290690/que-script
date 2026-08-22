@@ -167,7 +167,8 @@ fn loop_unroll_cost_limit() -> usize {
 }
 
 fn run_small_scalar_helper_env_pass(node: &TypedExpression) -> TypedExpression {
-    rewrite_small_scalar_helpers_with_env(node, &HashMap::new(), false)
+    let mut state = InlineState::new(&node.expr);
+    rewrite_small_scalar_helpers_with_env(node, &HashMap::new(), false, &mut state)
 }
 
 fn run_small_scalar_helper_env_fixpoint(node: &TypedExpression) -> TypedExpression {
@@ -225,13 +226,14 @@ fn rewrite_small_scalar_helpers_with_env(
     node: &TypedExpression,
     inherited_defs: &HashMap<String, InlineLambdaDef>,
     inside_lambda: bool,
+    state: &mut InlineState,
 ) -> TypedExpression {
     let Expression::Apply(items) = &node.expr else {
         let new_children = node
             .children
             .iter()
             .map(|child| {
-                rewrite_small_scalar_helpers_with_env(child, inherited_defs, inside_lambda)
+                rewrite_small_scalar_helpers_with_env(child, inherited_defs, inside_lambda, state)
             })
             .collect::<Vec<_>>();
         return TypedExpression {
@@ -260,7 +262,7 @@ fn rewrite_small_scalar_helpers_with_env(
                 .cloned()
                 .unwrap_or_else(|| normalized_do.children[0].clone());
             let rewritten_child =
-                rewrite_small_scalar_helpers_with_env(&child, &scoped_defs, inside_lambda);
+                rewrite_small_scalar_helpers_with_env(&child, &scoped_defs, inside_lambda, state);
             let rewritten_expr = rewritten_child.expr.clone();
             if let Some((_, _, (name, def))) =
                 extract_small_scalar_helper_inline_def(&rewritten_expr, &rewritten_child)
@@ -285,7 +287,7 @@ fn rewrite_small_scalar_helpers_with_env(
         .map(|child| {
             let child_inside_lambda = inside_lambda
                 || matches!(items.first(), Some(Expression::Word(w)) if w == "lambda");
-            rewrite_small_scalar_helpers_with_env(child, inherited_defs, child_inside_lambda)
+            rewrite_small_scalar_helpers_with_env(child, inherited_defs, child_inside_lambda, state)
         })
         .collect::<Vec<_>>();
     let rebuilt_expr = rebuild_expr_from_children(&node.expr, &new_children);
@@ -295,7 +297,8 @@ fn rewrite_small_scalar_helpers_with_env(
         effect: node.effect,
         children: new_children,
     };
-    try_inline_small_scalar_helper_call(&rebuilt_node, inherited_defs).unwrap_or(rebuilt_node)
+    try_inline_small_scalar_helper_call(&rebuilt_node, inherited_defs, state)
+        .unwrap_or(rebuilt_node)
 }
 
 fn run_tuple_return_destructuring_env_pass(node: &TypedExpression) -> TypedExpression {
@@ -6149,7 +6152,8 @@ fn inline_do_simple_calls_once(
             continue;
         }
 
-        let (nested_expr, nested_child, nested_changed) = inline_nested_calls(child_i, &defs);
+        let (nested_expr, nested_child, nested_changed) =
+            inline_nested_calls(child_i, &defs, state);
         if nested_changed {
             changed = true;
             out_items.push(nested_expr);
@@ -7058,19 +7062,22 @@ fn inline_call_with_def(
         prep.push((let_expr, let_typed));
     }
 
-    let inlined_expr = substitute_params_expr(&def.body_expr, &expr_subst);
-    let inlined_typed = substitute_params_typed(&def.body_typed, &expr_subst, &typed_subst);
+    let renamed_body =
+        alpha_rename_local_bindings_typed(&def.body_typed, &mut HashMap::new(), state);
+    let inlined_expr = substitute_params_expr(&renamed_body.expr, &expr_subst);
+    let inlined_typed = substitute_params_typed(&renamed_body, &expr_subst, &typed_subst);
     Some((prep, inlined_expr, inlined_typed))
 }
 
 fn inline_nested_calls(
     node: &TypedExpression,
     defs: &HashMap<String, InlineLambdaDef>,
+    state: &mut InlineState,
 ) -> (Expression, TypedExpression, bool) {
     let mut changed = false;
     let mut rewritten_children = Vec::with_capacity(node.children.len());
     for child in &node.children {
-        let (_expr, rewritten_child, child_changed) = inline_nested_calls(child, defs);
+        let (_expr, rewritten_child, child_changed) = inline_nested_calls(child, defs, state);
         if child_changed {
             changed = true;
         }
@@ -7085,7 +7092,7 @@ fn inline_nested_calls(
         children: rewritten_children,
     };
 
-    if let Some(inlined) = try_inline_call_no_temps(&rewritten_node, defs) {
+    if let Some(inlined) = try_inline_call_no_temps(&rewritten_node, defs, state) {
         return (inlined.expr.clone(), inlined, true);
     }
 
@@ -7095,6 +7102,7 @@ fn inline_nested_calls(
 fn try_inline_call_no_temps(
     node: &TypedExpression,
     defs: &HashMap<String, InlineLambdaDef>,
+    state: &mut InlineState,
 ) -> Option<TypedExpression> {
     let Expression::Apply(call_items) = &node.expr else {
         return None;
@@ -7131,8 +7139,10 @@ fn try_inline_call_no_temps(
         typed_subst.insert(param.clone(), arg_node);
     }
 
+    let renamed_body =
+        alpha_rename_local_bindings_typed(&def.body_typed, &mut HashMap::new(), state);
     Some(substitute_params_typed(
-        &def.body_typed,
+        &renamed_body,
         &expr_subst,
         &typed_subst,
     ))
@@ -7141,6 +7151,7 @@ fn try_inline_call_no_temps(
 fn try_inline_small_scalar_helper_call(
     node: &TypedExpression,
     defs: &HashMap<String, InlineLambdaDef>,
+    state: &mut InlineState,
 ) -> Option<TypedExpression> {
     let Expression::Apply(call_items) = &node.expr else {
         return None;
@@ -7190,8 +7201,11 @@ fn try_inline_small_scalar_helper_call(
         typed_subst.insert(param.clone(), arg_node);
     }
 
+    let renamed_body =
+        alpha_rename_local_bindings_typed(&def.body_typed, &mut HashMap::new(), state);
+
     Some(substitute_params_typed(
-        &def.body_typed,
+        &renamed_body,
         &expr_subst,
         &typed_subst,
     ))
