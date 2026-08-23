@@ -76,7 +76,7 @@
         default
         (String->Dec cell))))
 
-(let csv/as-bool
+(let csv/as-bool?
   (lambda cell default
     (if (csv/empty-cell? cell)
         default
@@ -111,7 +111,7 @@
 
 (let csv/column/bool
   (lambda parsed header-name default
-    (csv/column/by parsed header-name csv/as-bool default)))
+    (csv/column/by parsed header-name csv/as-bool? default)))
 
 (letmacro with-csv-columns/from
   ((parsed body)

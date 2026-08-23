@@ -844,7 +844,7 @@ out)))
 (let std/struct-dec/one { false 1 0 })
 (let std/struct-dec/pi { false 3 142 })
 (let std/struct-dec/e { false 2 718 })
-(let std/struct-dec/negative? fst)
+(let std/struct-dec/negative? (lambda n (if (fst n) true false)))
 (let std/struct-dec/whole (lambda n (fst (snd n))))
 (let std/struct-dec/fraction (lambda n (snd (snd n))))
 (let std/struct-dec/normalize (lambda n (do
@@ -1698,7 +1698,7 @@ q)))
 (let std/vector/char/words (lambda xs (std/convert/string->vector xs std/char/space)))
 (let std/vector/char/commas (lambda xs (std/convert/string->vector xs std/char/comma)))
 
-(let std/parse/bool (lambda text
+(let std/parse/bool? (lambda text
   (or (std/vector/char/equal? text "true")
       (std/vector/char/equal? text "1")
       (std/vector/char/equal? text "yes"))))
@@ -1716,7 +1716,7 @@ q)))
   (std/parse/words/as std/convert/chars->dec text)))
 
 (let std/parse/bool/words (lambda text
-  (std/parse/words/as std/parse/bool text)))
+  (std/parse/words/as std/parse/bool? text)))
 
 (let std/parse/string/words std/vector/char/words)
 
@@ -1727,7 +1727,7 @@ q)))
   (std/parse/lines/as std/convert/chars->dec text)))
 
 (let std/parse/bool/lines (lambda text
-  (std/parse/lines/as std/parse/bool text)))
+  (std/parse/lines/as std/parse/bool? text)))
 
 (let std/parse/string/lines std/vector/char/lines)
 
@@ -2291,7 +2291,7 @@ q)))
 
 (let std/int/big/signed/zero { false [0] })
 (let std/int/big/signed/one { false [1] })
-(let std/int/big/signed/negative? fst)
+(let std/int/big/signed/negative? (lambda n (if (fst n) true false)))
 (let std/int/big/signed/digits snd)
 (let std/int/big/signed/abs snd)
 (let std/int/big/signed/zero? (lambda n (std/int/big/equal? (snd n) [0])))

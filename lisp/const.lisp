@@ -19,7 +19,7 @@
 (let Bool false)
 (let Nil nil)
 (let as (lambda _ t t))
-(let eq (lambda a b (cond 
+(let eq? (lambda a b (cond 
           (and a b) true 
           (and (not a) (not b)) true
           false)))

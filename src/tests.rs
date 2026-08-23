@@ -11,7 +11,7 @@ mod tests {
             ("(do (let xs (vector (vector 1))) (let x (get (get xs 0) 0)) x)", "Int"),
             ("(lambda x (+ x 1))", "Int -> Int"),
             ("(lambda x (and x (or x x)))", "Bool -> Bool"),
-            ("(do (let fn (lambda a b (and a b))) (fn (= 1 1) (= 1 2)))", "Bool"),
+            ("(do (let fn? (lambda a b (and a b))) (fn? (= 1 1) (= 1 2)))", "Bool"),
             ("(do (let process (lambda xs (get xs 0))) (process (vector 1 2 3 )))", "Int"),
             (
                 "(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (vector (= 1 1))))",
@@ -719,10 +719,10 @@ xs)"#,
     fn test_runtime_grouped_param_lambda_multiple_body_forms_execute_without_explicit_do() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                (let f! (lambda (x)
+                (let f (lambda (x)
                   (+ x 1)
                   (+ x 2)))
-                (f! 4))"#,
+                (f 4))"#,
             true,
         );
         assert_eq!(output.trim(), "6");
@@ -733,10 +733,10 @@ xs)"#,
     ) {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                (let f! (lambda (x)
+                (let f (lambda (x)
                   (let { a b } { 1 2 })
                   (+ a b x)))
-                (f! 4))"#,
+                (f 4))"#,
             true,
         );
         assert_eq!(output.trim(), "7");
@@ -2339,7 +2339,7 @@ xs)"#,
      out)))
      (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) nil)))
 
-                (let valid-path (lambda n edges source destination (do
+                (let build-graph (lambda n edges source destination (do
                   (let graph (std/vector/map (std/vector/int/zeroes n) (lambda _ [])))
                   (std/vector/for edges (lambda edge (do
                     (let u (get edge 0))
@@ -2348,8 +2348,8 @@ xs)"#,
                     (std/vector/push! (get graph v) u))))
                   graph)))
 
-                [(valid-path 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2)
-                 (valid-path 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)])"#,
+                [(build-graph 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2)
+                 (build-graph 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)])"#,
             true,
         );
         assert_eq!(
@@ -3255,6 +3255,78 @@ xs)"#,
             err.contains("Impure function 'fn' must end with '!'"),
             "unexpected error: {}",
             err
+        );
+    }
+
+    #[test]
+    fn test_infer_bang_function_must_have_caller_visible_effect() {
+        let exprs =
+            crate::parser::parse("(let f! (lambda x (+ x 1)))").expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("pure function with ! should fail");
+        assert!(
+            err.contains("Function 'f!' ends with '!' but has no caller-visible effect"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_bool_returning_function_requires_question_suffix() {
+        let exprs = crate::parser::parse("(let even (lambda x (= (mod x 2) 0)))")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("Bool-returning function without ? should fail");
+        assert!(
+            err.contains("Bool-returning function 'even' must end with '?'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_question_function_must_return_bool() {
+        let exprs = crate::parser::parse("(let count? (lambda xs (length xs)))")
+            .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("non-Bool function with ? should fail");
+        assert!(
+            err.contains("Function 'count?' ends with '?' but returns Int, expected Bool"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_bool_predicate_and_impure_bang_contracts_pass() {
+        let exprs = crate::parser::parse(
+            "(do
+                (let even? (lambda x (= (mod x 2) 0)))
+                (let put! (lambda xs x (set! xs 0 x)))
+                (even? 2))",
+        )
+        .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        assert!(
+            inferred.is_ok(),
+            "valid ?/! contracts should pass, got: {:?}",
+            inferred
         );
     }
 
@@ -6499,9 +6571,8 @@ fn"#;
 
     #[test]
     fn test_wat_top_level_scalar_vector_get_uses_borrowed_global_cache_path() {
-        let expr =
-            crate::parser::build("(do (let xs [1 2 3]) (let f! (lambda () (get xs 1))) (f!))")
-                .expect("program should build");
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (let f (lambda () (get xs 1))) (f))")
+            .expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
         let main_start = wat
             .find("(func (export \"main\")")
@@ -7550,11 +7621,11 @@ fn"#;
 (let set-box! (lambda vrbl x (set! vrbl 0 x)))
 (let =! (lambda vrbl x (set! vrbl 0 x)))
 (let &alter! (lambda vrbl x (set! vrbl 0 x)))
-(let &mut! (lambda value [value]))
+(let make-ref (lambda value [value]))
 (let &get (lambda vrbl (get vrbl 0)))
 
 (let boole-set! (lambda vrbl x (set! vrbl 0 (if x true false))))
-(let boole-eqv (lambda a b (=? (get a) (get b))))
+(let boole-eqv? (lambda a b (=? (get a) (get b))))
 (let true? (lambda vrbl (if (get vrbl) true false)))
 (let false? (lambda vrbl (if (get vrbl) false true)))
 (let += (lambda vrbl n (&alter! vrbl (+ (get vrbl) n))))
@@ -7868,7 +7939,7 @@ fn"#;
                 "[1 1]",
             ),
             (
-                r#"(let has-groups (lambda deck
+                r#"(let has-groups? (lambda deck
   (do
     (let chars (<| deck
                     (std/vector/map std/convert/integer->string)
@@ -7881,8 +7952,8 @@ fn"#;
     )))
 
 [
-    (has-groups [ 1 2 3 4 4 3 2 1 ]) ; Output/ true
-    (has-groups [ 1 1 1 2 2 2 3 3 ]) ; Output/ false
+    (has-groups? [ 1 2 3 4 4 3 2 1 ]) ; Output/ true
+    (has-groups? [ 1 1 1 2 2 2 3 3 ]) ; Output/ false
 ]
 "#,
                 "[true false]",
@@ -7905,12 +7976,12 @@ fn"#;
                 "[[5 6] [2]]",
             ),
             (
-                r#"(let has-trailing-zeros (lambda nums (>= (std/vector/count-of nums (lambda x (= (mod x 2) 0))) 2)))
+                r#"(let has-trailing-zeros? (lambda nums (>= (std/vector/count-of nums (lambda x (= (mod x 2) 0))) 2)))
 
-[(has-trailing-zeros [ 1 2 3 4 5 ]) ; Should return true
- (has-trailing-zeros [ 2 4 8 16 ]) ; Should return true
- (has-trailing-zeros [ 1 3 5 7 9 ]) ; Should return false
- (has-trailing-zeros [ 1 2 ])]  ; Should return false
+[(has-trailing-zeros? [ 1 2 3 4 5 ]) ; Should return true
+ (has-trailing-zeros? [ 2 4 8 16 ]) ; Should return true
+ (has-trailing-zeros? [ 1 3 5 7 9 ]) ; Should return false
+ (has-trailing-zeros? [ 1 2 ])]  ; Should return false
 "#,
                 "[true true false false]",
             ),
@@ -7985,7 +8056,7 @@ image
                 "[[2 2 2] [2 2 0] [2 0 1]]",
             ),
             (
-                r#"(let valid-path (lambda n edges source destination (do
+                r#"(let valid-path? (lambda n edges source destination (do
   (if (= source destination) true
     (do
       (let graph (std/vector/map (std/vector/int/zeroes n) (lambda _ [])))
@@ -8011,8 +8082,8 @@ image
                 nil))))))))
       (true? found))))))
 
-[(valid-path 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2) ; Should return true
- (valid-path 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)] ; Should return false"#,
+[(valid-path? 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2) ; Should return true
+ (valid-path? 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)] ; Should return false"#,
                 "[true false]",
             ),
             (
@@ -8404,7 +8475,7 @@ D:=,=,=,+,=,=,=,+,=,=")
      (std/vector/filter/i (lambda _ i (std/int/even? i)))
      (std/vector/map std/convert/chars->integer))))
  (std/vector/map (lambda [ a b c ] (= (+ a b) c)))
- (std/vector/count-of (lambda x (eq x true))))"#,
+ (std/vector/count-of (lambda x (eq? x true))))"#,
                 "4",
             ),
             (
@@ -9861,7 +9932,7 @@ bbrgwb")
             (
                 r#"; SRM 727: Problem 1 - MakeTwoConsecutive
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
-(let solve (lambda s (and (> (length s) 2) (do
+(let solve? (lambda s (and (> (length s) 2) (do
   (let n (length s))
   (integer c 0)
   (loop/range/exclusive i 0 (- n 1) (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1))))
@@ -9869,12 +9940,12 @@ bbrgwb")
   (> (get c) 0)))))
 
 [
-  (solve "BCAB")
-  (solve "BB")
-  (solve "A")
-  (solve "AABB")
-  (solve "BAB")
-  (solve "KEEP")
+  (solve? "BCAB")
+  (solve? "BB")
+  (solve? "A")
+  (solve? "AABB")
+  (solve? "BAB")
+  (solve? "KEEP")
 ]"#,
                 "[false false false true true true]",
             ),
@@ -10158,7 +10229,7 @@ SECRET = SANTA")
                 r#"
   (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 
-    (let solve (lambda s 
+    (let solve? (lambda s 
   (and (> (length s) 2) (do
     (let n (length s))
     (integer c 0)
@@ -10166,7 +10237,7 @@ SECRET = SANTA")
     (loop/range/exclusive j 0 (- n 2) (if (=# (get s j) (get s (+ j 2))) (&alter! c (+ (&get c) 1))))
     (> (get c) 0)))))
 
-(map solve ["BCAB" "BB" "A" "AABB" "BAB" "KEEP"])"#,
+(map solve? ["BCAB" "BB" "A" "AABB" "BAB" "KEEP"])"#,
                 "[false false false true true true]",
             ),
 
@@ -10381,14 +10452,14 @@ nil))
 
 (add32 a0 (get A)))))
 
-(let has-five-leading-zeroes! (lambda n (do
+(let has-five-leading-zeroes?! (lambda n (do
 (let a (md5-a0! n))
 (and (= (& a 255) 0)
  (= (& (>> a 8) 255) 0)
  (< (& (>> a 16) 255) 16)))))
 
 (integer answer 0)
-(loop/range/exclusive candidate 1 500001 (if (and (= (get answer) 0) (has-five-leading-zeroes! candidate))
+(loop/range/exclusive candidate 1 500001 (if (and (= (get answer) 0) (has-five-leading-zeroes?! candidate))
 (&alter! answer candidate)
 nil))
 (get answer)

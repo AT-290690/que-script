@@ -697,18 +697,69 @@ fn check_impure_binding_name(
             );
         }
     }
-    if !requires_bang
-        || is_impure_bang_exception_name(&name)
-        || name.ends_with('!')
-        || name.starts_with('_')
-    {
+
+    if name.starts_with('_') || is_impure_bang_exception_name(&name) {
         return None;
     }
-    Some(format!(
-        "Impure function '{}' must end with '!'\n{}",
-        name,
-        item_expr.to_lisp()
-    ))
+
+    if requires_bang && !name.ends_with('!') {
+        return Some(format!(
+            "Impure function '{}' must end with '!'\n{}",
+            name,
+            item_expr.to_lisp()
+        ));
+    }
+
+    let rhs_effect = let_node
+        .children
+        .get(2)
+        .map(|rhs| rhs.effect)
+        .unwrap_or(EffectFlags::PURE);
+    if !requires_bang && rhs_effect.is_pure() && name.ends_with('!') {
+        return Some(format!(
+            "Function '{}' ends with '!' but has no caller-visible effect\n{}",
+            name,
+            item_expr.to_lisp()
+        ));
+    }
+
+    if let Some(ret) = let_node
+        .children
+        .get(2)
+        .and_then(|rhs| rhs.typ.as_ref())
+        .map(function_return_type)
+    {
+        let returns_bool = matches!(ret, Type::Bool);
+        if returns_bool && !has_predicate_suffix(&name) {
+            return Some(format!(
+                "Bool-returning function '{}' must end with '?'\n{}",
+                name,
+                item_expr.to_lisp()
+            ));
+        }
+        if !returns_bool && has_predicate_suffix(&name) {
+            return Some(format!(
+                "Function '{}' ends with '?' but returns {}, expected Bool\n{}",
+                name,
+                ret,
+                item_expr.to_lisp()
+            ));
+        }
+    }
+
+    None
+}
+
+fn function_return_type(typ: &Type) -> &Type {
+    let mut cur = typ;
+    while let Type::Function(_, ret) = cur {
+        cur = ret;
+    }
+    cur
+}
+
+fn has_predicate_suffix(name: &str) -> bool {
+    name.ends_with('?') || name.ends_with("?!")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1058,7 +1109,9 @@ fn eval_function_binding_requires_bang(
 
     let requires_bang = match rhs {
         Expression::Word(alias_target) => {
-            if alias_target.contains('/') {
+            if alias_target.ends_with('!') && !is_impure_bang_exception_name(alias_target) {
+                true
+            } else if alias_target.contains('/') {
                 false
             } else {
                 known_requires_bang
