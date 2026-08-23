@@ -655,6 +655,7 @@ que init --demo
 que --help
 que --learn
 que --style
+que --pitfalls
 ```
 "#
 }
@@ -1061,6 +1062,7 @@ fn take_install_output_path_from_argv(argv: &mut Vec<String>) -> Result<Option<S
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EmitKind {
     Source,
+    OptSource,
     Wat,
     SplitWat,
     Wasm,
@@ -1078,12 +1080,14 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
     if let Some(pos) = argv.iter().position(|arg| arg == "--emit") {
         if pos + 1 >= argv.len() || argv[pos + 1].starts_with("--") {
             return Err(
-                "--emit requires one of: source | wat | split-wat | wasm | types".to_string(),
+                "--emit requires one of: source | opt-source | wat | split-wat | wasm | types"
+                    .to_string(),
             );
         }
         let value = argv[pos + 1].clone();
         kind = Some(match value.as_str() {
             "source" => EmitKind::Source,
+            "opt-source" => EmitKind::OptSource,
             "wat" => EmitKind::Wat,
             "split-wat" => EmitKind::SplitWat,
             "wasm" => EmitKind::Wasm,
@@ -1127,8 +1131,8 @@ fn native_shell_help(bin_name: &str) -> String {
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
          or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
          or:    {bin} test <folder-or-test.que>\n\
-         or:    {bin} [<script.que>] [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
-         or:    {bin} --eval <source> [arg ...] --emit <source|wat|split-wat|wasm|types> [--out <file>]\n\
+         or:    {bin} [<script.que>] [arg ...] --emit <source|opt-source|wat|split-wat|wasm|types> [--out <file>]\n\
+         or:    {bin} --eval <source> [arg ...] --emit <source|opt-source|wat|split-wat|wasm|types> [--out <file>]\n\
          or:    {bin} [<script.que>] [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} init [--demo]\n\
@@ -1138,6 +1142,7 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
          or:    {bin} --learn\n\
          or:    {bin} --style\n\
+         or:    {bin} --pitfalls\n\
          or:    {bin} --env\n\
          or:    {bin} --uninstall [--out <que-lib.lisp>]\n\
          \n\
@@ -1145,10 +1150,11 @@ fn native_shell_help(bin_name: &str) -> String {
            --help, -h     Show this help and exit.\n\
           --learn        Print Eclisp language quick reference.\n\
           --style        Print Eclisp style and optimization guidance.\n\
+          --pitfalls     Print common Eclisp gotchas and debugging rules.\n\
           --env          Print environment flags and tuning examples.\n\
            --eval, -e     Execute inline Eclisp source without a script file.\n\
           test           Run Que tests. Folder mode appends main.test.que after the folder entry.\n\
-           --emit         Output source, wat, split-wat, wasm, or top-level types and exit.\n\
+           --emit         Output source, opt-source, wat, split-wat, wasm, or top-level types and exit.\n\
           --emit-source  Print merged/tree-shaken/desugared Lisp source and exit.\n\
                          Use with --out <file> to write it instead of printing.\n\
           init           Write a default `{config}`, empty main.que, and README.md.\n\
@@ -1176,6 +1182,7 @@ fn native_shell_help(bin_name: &str) -> String {
             - Inline eval example: `{bin} --eval '(+ 1 2)'`.\n\
             - Wildcards in pattern: `*` any sequence, `?` single char.\n\
            - `--emit source` prints merged/tree-shaken/desugared Lisp.\n\
+           - `--emit opt-source` prints typed source after op.rs optimizations.\n\
            - `--emit wat` prints WAT text.\n\
            - `--emit split-wat` writes/prints separate runtime and user WAT modules.\n\
            - `--emit wasm` prints raw wasm bytes unless you pass `--out`.\n\
@@ -1313,15 +1320,91 @@ fn native_shell_learn() -> &'static str {
     - Low-level mutation forms such as alter!, set!, push!, and pop! are effect-oriented; use their result only when the specific function documents one.\n\
     \n\
     Pitfalls:\n\
-    - Use block when branch-local bindings need reusable names; do alone will leak names into the surrounding scope.\n\
-    - Use letrec only when a function calls itself by name; otherwise use let.\n\
-    - Use explicit type suffixes: Int ops use +, =, <; Dec ops use +., =., <.; Char equality uses =#; Bool equality uses =?.\n\
+    - Run `que --pitfalls` for common Eclisp gotchas around scope, mutation, numbers, macros, and optimization.\n\
     \n\
     Built-ins:\n\
     - set! pop! length get car cdr cons fst snd while block unless when when-not\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! time! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
+}
+
+fn native_shell_pitfalls() -> &'static str {
+    "Eclisp pitfalls and gotchas:\n\
+    \n\
+    Scoping:\n\
+    - do sequences expressions, returns the last expression, and does NOT create a lexical scope.\n\
+    - Reusing a let name in the same do collides: (do (let x 1) (let x 2)) is invalid.\n\
+    - Use block when branch-local or temporary bindings need reusable names.\n\
+    - block creates a fresh lexical scope and returns its last expression.\n\
+    - block is effectively an IIFE/lambda boundary, not just a scoped spelling of do.\n\
+    - If mutation needs to cross a block/lambda boundary, use the appropriate shared mutable representation such as &mut/&alter!.\n\
+    \n\
+    Control flow:\n\
+    - while accepts multiple body expressions directly: (while cond e1 e2 e3).\n\
+    - while returns unit; use it for effects, not as a value-producing loop.\n\
+    - (if cond then) is valid; the missing else branch is implicit unit/nil.\n\
+    - One-sided if is best for side effects: (if cond (push! out x)). Do not add explicit nil just to satisfy the branch.\n\
+    - Branches must still type-check. If a one-sided if body returns a real value, it may conflict with implicit unit.\n\
+    - unless is inverted if: (unless cond then) or (unless cond then else). It is not a variadic body form.\n\
+    - For multiple unless effects, write (unless cond (do e1 e2)) or (unless cond (block e1 e2)).\n\
+    - when is variadic and wraps its body in do.\n\
+    \n\
+    Mutation and effects:\n\
+    - Local mut/alter! inside a function does not automatically require a ! suffix.\n\
+    - ! means the function has caller-visible mutation/effects, not merely internal mutable implementation.\n\
+    - An impure function with caller-visible mutation must end with !.\n\
+    - In an impure ! function, the caller-visible mutated argument must be argument 1.\n\
+    - Put the thing being mutated first, matching set!, push!, and pop!.\n\
+    - If a function mutates multiple caller-visible values, group them into the first argument.\n\
+    - mut/alter! are for local primitive scalar mutation in the same lambda scope.\n\
+    - &mut/&alter! are for shared mutable state across lambda/block boundaries.\n\
+    \n\
+    Bindings and recursion:\n\
+    - Use let for normal non-recursive bindings.\n\
+    - Use letrec only when a function calls itself by name.\n\
+    - Destructuring is binding syntax and is usually clearer than manual accessors:\n\
+      (let {x y} pair)\n\
+      (let [a _ c . rest] xs)\n\
+    - _ ignores a destructured field.\n\
+    \n\
+    Macros and names:\n\
+    - Macro names such as loop, when, unless, cond, let*, and pipeline helpers should not be reused casually as local names.\n\
+    - Shadowing macro names can produce confusing expansion or compiler errors.\n\
+    - Prefer grouped lambda params in new code: (lambda (a b) body).\n\
+    - The older bare form (lambda a b body) works, but is easier for humans and AI to misread.\n\
+    \n\
+    Function calls:\n\
+    - Function application supports partial/curried semantics.\n\
+    - (f a b) behaves conceptually like ((f a) b).\n\
+    - Calling with fewer arguments returns a partially applied function.\n\
+    - Grouped lambda params are source syntax convenience, not a separate runtime calling convention.\n\
+    \n\
+    Types and operators:\n\
+    - Int, Dec, Char, and Bool operators are intentionally separate.\n\
+    - Int examples: +, -, *, /, mod, =, <, <=, >, >=.\n\
+    - Dec examples: +., -., *., /., mod., =., <., <=., >., >=.\n\
+    - Char equality uses =#.\n\
+    - Bool equality uses =?.\n\
+    - String is [Char]. Vectors are homogeneous. Tuples can hold mixed fixed-shape data.\n\
+    - Dec is fixed-scale decimal, not arbitrary precision.\n\
+    - Primitive Int is currently i32; intermediate overflow matters before mod can reduce a result.\n\
+    - BigInt solves range, not performance. Giant BigInt temporaries in hot loops can dominate runtime or memory.\n\
+    - WASM32 linear memory is a separate ceiling from integer width.\n\
+    \n\
+    Performance and debugging:\n\
+    - Write clear functional code first, then inspect hot spots with que explain.\n\
+    - que explain reports useful clues such as dynamic apply calls, closure allocations, tuple allocations, vector allocations, direct user calls, and WAT size.\n\
+    - Tuples are convenient source-level data, but hot-loop tuples may still matter unless optimized away.\n\
+    - Run with --debug while developing to catch overflow, bounds, div-zero, and traps earlier.\n\
+    - Run with --opt only after correctness is trusted.\n\
+    - If normal/debug output differs from --opt output, suspect an optimizer/runtime assumption and minimize the case.\n\
+    - Optimized and unoptimized runs are useful semantic cross-checks for compiler bugs.\n\
+    \n\
+    Compiler-development reminders:\n\
+    - Inlining must alpha-rename every bound local before substituting arguments.\n\
+    - Do not move or inline a saved expression across mutation of variables it reads.\n\
+    - Mutation, inlining, tuple destructuring, and loop lowering deserve dedicated opt-equivalence tests.\n"
 }
 
 fn native_shell_style() -> &'static str {
@@ -3032,6 +3115,20 @@ mod tests {
     }
 
     #[test]
+    fn take_emit_request_parses_opt_source_kind() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--emit".to_string(),
+            "opt-source".to_string(),
+        ];
+        let request = take_emit_request_from_argv(&mut args).expect("emit should parse");
+        assert_eq!(args, vec!["script.que".to_string()]);
+        let request = request.expect("emit request should exist");
+        assert_eq!(request.kind, EmitKind::OptSource);
+        assert_eq!(request.out_path, None);
+    }
+
+    #[test]
     fn take_emit_request_parses_legacy_emit_source_flag() {
         let mut args = vec!["script.que".to_string(), "--emit-source".to_string()];
         let request = take_emit_request_from_argv(&mut args).expect("legacy emit should parse");
@@ -3045,7 +3142,9 @@ mod tests {
     fn take_emit_request_rejects_missing_kind() {
         let mut args = vec!["script.que".to_string(), "--emit".to_string()];
         let err = take_emit_request_from_argv(&mut args).expect_err("missing kind should fail");
-        assert!(err.contains("--emit requires one of: source | wat | split-wat | wasm | types"));
+        assert!(err.contains(
+            "--emit requires one of: source | opt-source | wat | split-wat | wasm | types"
+        ));
     }
 
     #[test]
@@ -3085,6 +3184,7 @@ mod tests {
         assert!(readme_text.contains("que init --demo"));
         assert!(readme_text.contains("que --learn"));
         assert!(readme_text.contains("que --style"));
+        assert!(readme_text.contains("que --pitfalls"));
         let err = init_project_config_file(&base, false).expect_err("second init should fail");
         assert!(err.contains("already exists"));
     }
@@ -3094,6 +3194,8 @@ mod tests {
         let help = native_shell_help("que");
         assert!(help.contains("que --style"));
         assert!(help.contains("Print Eclisp style and optimization guidance"));
+        assert!(help.contains("que --pitfalls"));
+        assert!(help.contains("Print common Eclisp gotchas and debugging rules"));
     }
 
     #[test]
@@ -3280,6 +3382,10 @@ pub fn run_native_shell() -> Result<(), String> {
         println!("{}", native_shell_style());
         return Ok(());
     }
+    if matches!(args.get(1).map(String::as_str), Some("--pitfalls")) {
+        println!("{}", native_shell_pitfalls());
+        return Ok(());
+    }
     if matches!(args.get(1).map(String::as_str), Some("--env")) {
         println!("{}", native_shell_env_help(bin_name));
         return Ok(());
@@ -3360,7 +3466,7 @@ pub fn run_native_shell() -> Result<(), String> {
     let needs_user_form_count = debug_mode.is_enabled()
         || matches!(
             emit_request.as_ref().map(|req| req.kind),
-            Some(EmitKind::Types)
+            Some(EmitKind::OptSource | EmitKind::Types)
         );
     let user_form_count = if needs_user_form_count {
         crate::lsp_native_core::parse_user_exprs_for_symbol_collection(&analysis_source)
@@ -3403,6 +3509,39 @@ pub fn run_native_shell() -> Result<(), String> {
         match request.kind {
             EmitKind::Source => {
                 emit_text_output(request.out_path.as_deref(), &wrapped_ast.to_lisp())?;
+                return Ok(());
+            }
+            EmitKind::OptSource => {
+                let (base_env, base_next_id) =
+                    crate::types::create_builtin_environment(crate::types::TypeEnv::new());
+                let inferred = crate::infer::infer_with_builtins_typed_lsp(
+                    &wrapped_ast,
+                    (base_env, base_next_id),
+                    user_form_count,
+                );
+                let optimized = match inferred {
+                    Ok((_typ, typed_ast)) => crate::op::optimize_typed_ast(&typed_ast),
+                    Err(InferErrorInfo {
+                        message,
+                        scope,
+                        partial_typed_ast,
+                    }) => {
+                        if debug_mode.is_enabled() {
+                            return Err(build_debug_error_report(
+                                debug_mode,
+                                "type-inference",
+                                &program,
+                                &message,
+                                scope.as_ref(),
+                                user_desugared.as_ref(),
+                                user_form_count,
+                                partial_typed_ast.as_ref(),
+                            ));
+                        }
+                        return Err(message);
+                    }
+                };
+                emit_text_output(request.out_path.as_deref(), &optimized.expr.to_lisp())?;
                 return Ok(());
             }
             EmitKind::Types => {
@@ -3548,7 +3687,7 @@ pub fn run_native_shell() -> Result<(), String> {
                 emit_bytes_output(request.out_path.as_deref(), &bytes)?;
                 return Ok(());
             }
-            EmitKind::Source | EmitKind::SplitWat | EmitKind::Types => {
+            EmitKind::Source | EmitKind::OptSource | EmitKind::SplitWat | EmitKind::Types => {
                 unreachable!("handled earlier")
             }
         }

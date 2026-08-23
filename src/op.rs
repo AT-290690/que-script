@@ -3442,6 +3442,7 @@ fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
         effect: node.effect,
         children: optimized_children,
     };
+    let rebuilt_node = canonicalize_push_to_set_append(rebuilt_node);
     fold_constants(rebuilt_node)
 }
 
@@ -3452,6 +3453,53 @@ fn rebuild_expr_from_children(expr: &Expression, children: &[TypedExpression]) -
         }
         _ => expr.clone(),
     }
+}
+
+fn canonicalize_push_to_set_append(node: TypedExpression) -> TypedExpression {
+    let Expression::Apply(items) = &node.expr else {
+        return node;
+    };
+    if !matches!(items.first(), Some(Expression::Word(op)) if is_vector_push_name(op))
+        || items.len() != 3
+        || node.children.len() != 3
+    {
+        return node;
+    }
+
+    let xs = node.children[1].clone();
+    let value = node.children[2].clone();
+    let length_word = TypedExpression {
+        expr: Expression::Word("length".to_string()),
+        typ: None,
+        effect: EffectFlags::PURE,
+        children: Vec::new(),
+    };
+    let length_call = TypedExpression {
+        expr: Expression::Apply(vec![
+            Expression::Word("length".to_string()),
+            xs.expr.clone(),
+        ]),
+        typ: Some(Type::Int),
+        effect: EffectFlags::PURE,
+        children: vec![length_word, xs.clone()],
+    };
+    let set_word = TypedExpression {
+        expr: Expression::Word("set!".to_string()),
+        typ: None,
+        effect: EffectFlags::PURE,
+        children: Vec::new(),
+    };
+    let children = vec![set_word, xs, length_call, value];
+    TypedExpression {
+        expr: Expression::Apply(children.iter().map(|child| child.expr.clone()).collect()),
+        typ: node.typ,
+        effect: node.effect,
+        children,
+    }
+}
+
+fn is_vector_push_name(name: &str) -> bool {
+    matches!(name, "push!" | "std/vector/push!" | "Vector/push!")
 }
 
 fn fold_constants(node: TypedExpression) -> TypedExpression {

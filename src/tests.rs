@@ -2911,6 +2911,25 @@ xs)"#,
     }
 
     #[test]
+    fn test_typed_optimization_canonicalizes_push_to_set_append() {
+        let typed = infer_typed_built(
+            "(do (let push! (lambda (xs x) (set! xs (length xs) x))) (let xs []) (push! xs 1) xs)",
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+        assert!(
+            optimized_lisp.contains("(set! xs (length xs) 1)"),
+            "push! should canonicalize to append-at-length set!, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            !optimized_lisp.contains("(push! xs 1)"),
+            "optimized lisp should not keep direct push!, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_scalar_replaces_local_tuple_projections() {
         let typed = infer_typed("(do (let p (tuple 10 32)) (+ (fst p) (snd p)))");
         let optimized = crate::op::optimize_typed_ast(&typed);
@@ -6287,6 +6306,41 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_direct_scalar_push_uses_set_append_fast_path() {
+        let wat = compile_std_program_to_wat("(do (let xs []) (push! xs 1) (push! xs 2) xs)", true);
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !main_wat.contains("call $v_push_bang_"),
+            "direct push! should be canonicalized before WAT lowering, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "direct scalar push! should reuse scalar set append fast path, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_push_canonicalization_preserves_unit_and_managed_values() {
+        let result = run_program_output_with_std_and_opts(
+            r#"(do
+                (let scalar [])
+                (let managed [])
+                (let unit (push! scalar 1))
+                (push! managed "hi")
+                {unit scalar (get managed 0)})"#,
+            true,
+        );
+        assert_eq!(result, "{ 0 { [1] hi } }");
+    }
+
+    #[test]
     fn test_wat_scalar_get_inlines_without_vec_get_runtime_call() {
         let expr = crate::parser::build("(get [1 2 3] 1)").expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
@@ -7421,8 +7475,8 @@ fn"#;
         let err = crate::wat::compile_program_to_wat(&wrapped)
             .expect_err("cycle-forming push! should fail at compile time");
         assert!(
-            err.contains("compile-time RC cycle check") && err.contains("push!"),
-            "expected RC cycle compile error for push!, got: {}",
+            err.contains("compile-time RC cycle check") && err.contains("set!"),
+            "expected RC cycle compile error after push! canonicalizes to set!, got: {}",
             err
         );
     }
