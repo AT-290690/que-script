@@ -1129,6 +1129,7 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
 fn native_shell_help(bin_name: &str) -> String {
     format!(
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
+         Guides: run `{bin} --learn`, `{bin} --style`, or `{bin} --pitfalls` for language, style, and gotcha notes.\n\
          or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
          or:    {bin} test <folder-or-test.que>\n\
          or:    {bin} [<script.que>] [arg ...] --emit <source|opt-source|wat|split-wat|wasm|types> [--out <file>]\n\
@@ -1650,6 +1651,125 @@ fn infer_library_symbol_type(name: &str, lib_defs: &[Expression]) -> Result<Stri
     Ok(normalize_signature(&typ.to_string()))
 }
 
+#[derive(Clone)]
+enum LibraryExploreSymbol {
+    Source(Expression),
+    Builtin {
+        typ: Option<String>,
+        description: &'static str,
+    },
+}
+
+fn builtin_special_forms() -> Vec<(&'static str, &'static str, &'static str)> {
+    vec![
+        (
+            "if",
+            "Bool -> T -> T -> T",
+            "built-in special form: (if cond then else), or (if cond then) with implicit nil",
+        ),
+        (
+            "cond",
+            "<special form>",
+            "built-in special form: alternating condition/value clauses with a final fallback",
+        ),
+        (
+            "lambda",
+            "<special form>",
+            "built-in special form: (lambda (a b) body...) creates a function",
+        ),
+        (
+            "let",
+            "<special form>",
+            "built-in binding form: (let name value) or destructuring let",
+        ),
+        (
+            "letrec",
+            "<special form>",
+            "built-in recursive binding form for self-recursive functions",
+        ),
+        ("letype", "<special form>", "built-in type alias form"),
+        (
+            "sig",
+            "<special form>",
+            "built-in signature declaration form",
+        ),
+        (
+            "do",
+            "<special form>",
+            "built-in sequencing form; does not create a new scope",
+        ),
+        (
+            "block",
+            "<special form>",
+            "built-in scoped sequencing form; creates a lambda/IIFE boundary",
+        ),
+        (
+            "while",
+            "<special form>",
+            "built-in loop form: (while condition body...)",
+        ),
+        (
+            "mut",
+            "<special form>",
+            "built-in local scalar mutable binding form",
+        ),
+        (
+            "alter!",
+            "<special form>",
+            "built-in local scalar mutation form",
+        ),
+        (
+            "extern",
+            "<special form>",
+            "built-in host import declaration form",
+        ),
+        (
+            "vector",
+            "<literal constructor>",
+            "built-in vector constructor, usually written with [] syntax",
+        ),
+        (
+            "tuple",
+            "<literal constructor>",
+            "built-in tuple constructor, usually written with {} syntax",
+        ),
+        (
+            "string",
+            "<literal constructor>",
+            "built-in string/vector-of-char constructor",
+        ),
+    ]
+}
+
+fn builtin_explore_symbols() -> BTreeMap<String, LibraryExploreSymbol> {
+    let (env, _next_id) = crate::types::create_builtin_environment(crate::types::TypeEnv::new());
+    let mut out = BTreeMap::new();
+
+    if let Some(scope) = env.scopes.first() {
+        for (name, scheme) in scope {
+            out.insert(
+                name.clone(),
+                LibraryExploreSymbol::Builtin {
+                    typ: Some(normalize_signature(&scheme.typ.to_string())),
+                    description: "built-in value/function implemented by the compiler or runtime",
+                },
+            );
+        }
+    }
+
+    for (name, typ, description) in builtin_special_forms() {
+        out.insert(
+            name.to_string(),
+            LibraryExploreSymbol::Builtin {
+                typ: Some(typ.to_string()),
+                description,
+            },
+        );
+    }
+
+    out
+}
+
 fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         println!(
@@ -1670,10 +1790,10 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
     }
 
     let lib_defs = active_library_definitions()?;
-    let mut by_name: BTreeMap<String, Expression> = BTreeMap::new();
+    let mut by_name = builtin_explore_symbols();
     for def in &lib_defs {
         if let Some(name) = binding_name_from_def(def) {
-            by_name.insert(name, def.clone());
+            by_name.insert(name, LibraryExploreSymbol::Source(def.clone()));
         }
     }
     let all_names = by_name.keys().cloned().collect::<Vec<_>>();
@@ -1701,9 +1821,20 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
                 .iter()
                 .filter(|name| wildcard_match(pattern, name))
             {
-                match infer_library_symbol_type(name, &lib_defs) {
-                    Ok(typ) => println!("{} : {}", name, typ),
-                    Err(err) => println!("{} : <type error: {}>", name, err),
+                match by_name.get(name.as_str()) {
+                    Some(LibraryExploreSymbol::Builtin { typ: Some(typ), .. }) => {
+                        println!("{} : {}", name, typ)
+                    }
+                    Some(LibraryExploreSymbol::Builtin { typ: None, .. }) => {
+                        println!("{} : <built-in>", name)
+                    }
+                    Some(LibraryExploreSymbol::Source(_)) => {
+                        match infer_library_symbol_type(name, &lib_defs) {
+                            Ok(typ) => println!("{} : {}", name, typ),
+                            Err(err) => println!("{} : <type error: {}>", name, err),
+                        }
+                    }
+                    None => {}
                 }
             }
             Ok(())
@@ -1713,12 +1844,25 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
                 return Err("Usage: queio --lib source <name>".to_string());
             }
             let name = &args[1];
-            let Some(expr) = by_name.get(name) else {
+            let Some(symbol) = by_name.get(name) else {
                 return Err(format!("library symbol '{}' not found", name));
             };
             println!("name: {}", name);
-            println!("source:");
-            println!("{}", expr.to_lisp());
+            match symbol {
+                LibraryExploreSymbol::Source(expr) => {
+                    println!("kind: library");
+                    println!("source:");
+                    println!("{}", expr.to_lisp());
+                }
+                LibraryExploreSymbol::Builtin { typ, description } => {
+                    println!("kind: built-in");
+                    if let Some(typ) = typ {
+                        println!("type: {}", typ);
+                    }
+                    println!("source:");
+                    println!("<{}>", description);
+                }
+            }
             Ok(())
         }
         other => Err(format!("unknown --lib command '{}'", other)),
@@ -2935,8 +3079,8 @@ mod tests {
         init_host_project, init_project_config_file, native_shell_help, parse_test_results,
         resolve_project_entry_path, take_debug_mode_from_argv, take_emit_request_from_argv,
         take_help_flag_from_argv, take_no_result_flag_from_argv, take_opt_flag_from_argv,
-        take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind, QueTestCase,
-        ShellPermission, ShellPolicy,
+        take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol,
+        QueTestCase, ShellPermission, ShellPolicy,
     };
     use std::collections::HashSet;
 
@@ -3036,6 +3180,25 @@ mod tests {
         assert!(policy
             .require(ShellPermission::Write, "mkdir", "./x")
             .is_err());
+    }
+
+    #[test]
+    fn lib_explore_includes_core_builtins() {
+        let symbols = super::builtin_explore_symbols();
+        assert!(matches!(
+            symbols.get("+"),
+            Some(LibraryExploreSymbol::Builtin {
+                typ: Some(typ),
+                ..
+            }) if typ == "Int -> Int -> Int"
+        ));
+        assert!(matches!(
+            symbols.get("if"),
+            Some(LibraryExploreSymbol::Builtin {
+                typ: Some(typ),
+                ..
+            }) if typ == "Bool -> T -> T -> T"
+        ));
     }
 
     #[test]
