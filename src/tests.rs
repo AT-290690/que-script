@@ -1200,6 +1200,25 @@ xs)"#,
         run_result.expect("program should run without trap")
     }
 
+    #[cfg(all(feature = "runtime", feature = "io"))]
+    fn run_program_error_with_std_io_root(src: &str, root: std::path::PathBuf) -> String {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        let wat = compile_std_program_to_wat(src, false);
+        let argv: Vec<String> = Vec::new();
+        let store_data = crate::io::ShellStoreData::new_with_security(
+            Some(root),
+            crate::io::ShellPolicy::allow_all(),
+        )
+        .map_err(|e| e.to_string())
+        .expect("io store should initialize");
+        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
+            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
+        });
+        run_result.expect_err("program should fail at runtime")
+    }
+
     #[cfg(feature = "runtime")]
     fn assert_std_program_output_matches_with_and_without_optimizer(src: &str) {
         let output_no_opts = run_program_output_with_std_and_opts(src, false);
@@ -2144,6 +2163,103 @@ xs)"#,
             true,
         );
         assert_eq!(output, "10");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_json_parser_macro_parses_typed_flat_object() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(let User/parse
+  (json/parse
+    "id" json/int
+    "name" json/chars
+    "active" json/bool?))
+
+(let { id name active } (User/parse "{ \"active\": true, \"name\": \"Anthony\", \"id\": 12 }"))
+{ id name active }"#,
+            true,
+        );
+        assert_eq!(output, "{ 12 { Anthony true } }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_json_array_reader_parses_bool_vector() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(let Root/parse
+  (json/parse
+    "bools" (json/array json/bool?)))
+
+(let bools (Root/parse "{ \"bools\": [true,false,true] }"))
+(map Bool->Int bools)"#,
+            true,
+        );
+        assert_eq!(output, "[1 0 1]");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_json_array_reader_parses_nested_objects() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(let Is/parse?
+  (json/parse
+    "is" json/bool?))
+
+(let Root/parse
+  (json/parse
+    "bools" (json/array Is/parse?)))
+
+(let bools (Root/parse "{ \"bools\": [{\"is\": true}, {\"is\": false}] }"))
+(map Bool->Int bools)"#,
+            true,
+        );
+        assert_eq!(output, "[1 0]");
+    }
+
+    #[test]
+    #[cfg(all(feature = "runtime", feature = "io"))]
+    fn test_runtime_io_rejects_parent_directory_escape_even_with_read_permission() {
+        let base = std::env::temp_dir().join(format!(
+            "que-io-sandbox-parent-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        let sandbox = base.join("sandbox");
+        std::fs::create_dir_all(&sandbox).expect("sandbox should be created");
+        std::fs::write(base.join("secret.txt"), "secret").expect("secret should be written");
+
+        let err = run_program_error_with_std_io_root(r#"(read! "../secret.txt")"#, sandbox);
+        assert!(
+            err.contains("escapes io sandbox root"),
+            "expected sandbox escape error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "runtime", feature = "io"))]
+    fn test_runtime_io_rejects_absolute_path_outside_sandbox_even_with_read_permission() {
+        let base = std::env::temp_dir().join(format!(
+            "que-io-sandbox-absolute-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        let sandbox = base.join("sandbox");
+        std::fs::create_dir_all(&sandbox).expect("sandbox should be created");
+        let secret = base.join("secret.txt");
+        std::fs::write(&secret, "secret").expect("secret should be written");
+
+        let src = format!(r#"(read! "{}")"#, secret.display());
+        let err = run_program_error_with_std_io_root(&src, sandbox);
+        assert!(
+            err.contains("escapes io sandbox root"),
+            "expected sandbox escape error, got: {}",
+            err
+        );
     }
 
     #[test]

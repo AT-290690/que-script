@@ -27,6 +27,7 @@
 (let std/char/ampersand (get "&" 0))
 (let std/char/at (get "@" 0))
 (let std/char/backtick (get "`" 0))
+(let std/char/backslash (char 92))
 (let std/char/carriage-return (char 13))
 
 (let nl std/char/new-line)
@@ -1730,6 +1731,160 @@ q)))
   (std/parse/lines/as std/parse/bool? text)))
 
 (let std/parse/string/lines std/vector/char/lines)
+
+(let std/json/skip-space
+  (lambda text start
+    (do
+      (let len (length text))
+      (mut i start)
+      (while (and (< i len) (std/char/space? (get text i)))
+        (alter! i (+ i 1)))
+      i)))
+
+(let std/json/trim
+  (lambda text
+    (do
+      (let len (length text))
+      (mut start 0)
+      (while (and (< start len) (std/char/space? (get text start)))
+        (alter! start (+ start 1)))
+      (mut end len)
+      (while (and (> end start) (std/char/space? (get text (- end 1))))
+        (alter! end (- end 1)))
+      (std/vector/slice text start end))))
+
+(let std/json/skip-string
+  (lambda text start
+    (do
+      (let len (length text))
+      (mut i (+ start 1))
+      (mut done false)
+      (while (and (< i len) (not done))
+        (do
+          (let ch (get text i))
+          (if (=# ch std/char/backslash)
+              (alter! i (+ i 2))
+              (if (=# ch std/char/double-quote)
+                  (do
+                    (alter! done true)
+                    (alter! i (+ i 1)))
+                  (alter! i (+ i 1))))))
+      i)))
+
+(let std/json/read-string
+  (lambda text start
+    (do
+      (let i (std/json/skip-space text start))
+      (let end (std/json/skip-string text i))
+      { end (std/vector/slice text (+ i 1) (- end 1)) })))
+
+(let std/json/skip-value
+  (lambda text start
+    (do
+      (let len (length text))
+      (mut i (std/json/skip-space text start))
+      (mut depth 0)
+      (mut done false)
+      (while (and (< i len) (not done))
+        (do
+          (let ch (get text i))
+          (cond
+            (=# ch std/char/double-quote)
+              (alter! i (std/json/skip-string text i))
+            (or (=# ch std/char/curly-left-brace) (=# ch std/char/left-bracket))
+              (do
+                (alter! depth (+ depth 1))
+                (alter! i (+ i 1)))
+            (or (=# ch std/char/curly-right-brace) (=# ch std/char/right-bracket))
+              (if (= depth 0)
+                  (alter! done true)
+                  (do
+                    (alter! depth (- depth 1))
+                    (alter! i (+ i 1))))
+            (and (=# ch std/char/comma) (= depth 0))
+              (alter! done true)
+            (alter! i (+ i 1)))))
+      i)))
+
+(let std/json/field
+  (lambda text target
+    (do
+      (let len (length text))
+      (mut i (std/json/skip-space text 0))
+      (if (and (< i len) (=# (get text i) std/char/curly-left-brace))
+          (alter! i (+ i 1)))
+      (let out [[]])
+      (mut found false)
+      (while (and (< i len) (not found))
+        (do
+          (alter! i (std/json/skip-space text i))
+          (if (and (< i len) (=# (get text i) std/char/curly-right-brace))
+              (alter! i len)
+              (do
+                (let { after-key key } (std/json/read-string text i))
+                (alter! i (std/json/skip-space text after-key))
+                (if (and (< i len) (=# (get text i) std/char/colon))
+                    (alter! i (+ i 1)))
+                (alter! i (std/json/skip-space text i))
+                (let value-start i)
+                (let value-end (std/json/skip-value text value-start))
+                (if (std/vector/char/equal? key target)
+                    (do
+                      (set! out 0 (std/json/trim (std/vector/slice text value-start value-end)))
+                      (alter! found true))
+                    (alter! i value-end))
+                (alter! i (std/json/skip-space text i))
+                (if (and (< i len) (=# (get text i) std/char/comma))
+                    (alter! i (+ i 1)))))))
+      (get out 0))))
+
+(let std/json/int
+  (lambda raw
+    (std/convert/chars->integer (std/json/trim raw))))
+
+(let std/json/dec
+  (lambda raw
+    (std/convert/chars->dec (std/json/trim raw))))
+
+(let std/json/bool?
+  (lambda raw
+    (std/parse/bool? (std/json/trim raw))))
+
+(let std/json/chars
+  (lambda raw
+    (do
+      (let text (std/json/trim raw))
+      (let len (length text))
+      (if (and (>= len 2) (and (=# (get text 0) std/char/double-quote) (=# (get text (- len 1)) std/char/double-quote)))
+          (std/vector/slice text 1 (- len 1))
+          text))))
+
+(let std/json/array/values
+  (lambda raw
+    (do
+      (let text (std/json/trim raw))
+      (let len (length text))
+      (mut i 0)
+      (if (and (< i len) (=# (get text i) std/char/left-bracket))
+          (alter! i (+ i 1)))
+      (let out [])
+      (while (< i len)
+        (do
+          (alter! i (std/json/skip-space text i))
+          (if (and (< i len) (=# (get text i) std/char/right-bracket))
+              (alter! i len)
+              (do
+                (let value-start i)
+                (let value-end (std/json/skip-value text value-start))
+                (set! out (length out) (std/json/trim (std/vector/slice text value-start value-end)))
+                (alter! i (std/json/skip-space text value-end))
+                (if (and (< i len) (=# (get text i) std/char/comma))
+                    (alter! i (+ i 1)))))))
+      out)))
+
+(let std/json/array
+  (lambda reader raw
+    (std/vector/map (std/json/array/values raw) reader)))
 
 (let std/parse/int/matrix (lambda text
   (std/vector/map (std/vector/char/lines text) std/parse/int/words)))

@@ -300,3 +300,55 @@
 (letmacro test-suite/static
   (lambda name . tests
     (qq [(uqs tests)])))
+
+(letmacro json/parse
+  ((k1 r1)
+    (do
+      (let source (gensym))
+      (qq (lambda (uq source)
+            ((uq r1) (std/json/field (uq source) (uq k1)))))))
+  ((k1 r1 k2 r2)
+    (do
+      (let source (gensym))
+      (qq (lambda (uq source)
+            (tuple
+              ((uq r1) (std/json/field (uq source) (uq k1)))
+              ((uq r2) (std/json/field (uq source) (uq k2))))))))
+  ((k1 r1 k2 r2 k3 r3)
+    (do
+      (let source (gensym))
+      (qq (lambda (uq source)
+            (tuple
+              ((uq r1) (std/json/field (uq source) (uq k1)))
+              ((uq r2) (std/json/field (uq source) (uq k2)))
+              ((uq r3) (std/json/field (uq source) (uq k3))))))))
+  ((k1 r1 k2 r2 k3 r3 k4 r4)
+    (do
+      (let source (gensym))
+      (qq (lambda (uq source)
+            (tuple
+              ((uq r1) (std/json/field (uq source) (uq k1)))
+              ((uq r2) (std/json/field (uq source) (uq k2)))
+              ((uq r3) (std/json/field (uq source) (uq k3)))
+              ((uq r4) (std/json/field (uq source) (uq k4))))))))
+  ((k1 r1 k2 r2 k3 r3 k4 r4 k5 r5)
+    (do
+      (let source (gensym))
+      (qq (lambda (uq source)
+            (tuple
+              ((uq r1) (std/json/field (uq source) (uq k1)))
+              ((uq r2) (std/json/field (uq source) (uq k2)))
+              ((uq r3) (std/json/field (uq source) (uq k3)))
+              ((uq r4) (std/json/field (uq source) (uq k4)))
+              ((uq r5) (std/json/field (uq source) (uq k5))))))))
+  ((k1 r1 k2 r2 k3 r3 k4 r4 k5 r5 k6 r6)
+    (do
+      (let source (gensym))
+      (qq (lambda (uq source)
+            (tuple
+              ((uq r1) (std/json/field (uq source) (uq k1)))
+              ((uq r2) (std/json/field (uq source) (uq k2)))
+              ((uq r3) (std/json/field (uq source) (uq k3)))
+              ((uq r4) (std/json/field (uq source) (uq k4)))
+              ((uq r5) (std/json/field (uq source) (uq k5)))
+              ((uq r6) (std/json/field (uq source) (uq k6)))))))))

@@ -9,7 +9,7 @@ use std::env;
 use std::fs;
 use std::io;
 use std::io::{BufRead as _, Read as _, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wasmtime::Linker;
@@ -2059,17 +2059,96 @@ pub fn write_lisp_string(
     write_lisp_vector(caller, &codes)
 }
 
-fn resolve_target_path(caller: &Caller<'_, ShellStoreData>, raw: &str) -> PathBuf {
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(part) => out.push(part),
+        }
+    }
+    out
+}
+
+fn sandbox_root(caller: &Caller<'_, ShellStoreData>) -> Result<PathBuf, String> {
+    let root = caller
+        .data()
+        .script_cwd
+        .clone()
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    fs::canonicalize(&root).map_err(|e| {
+        format!(
+            "failed to resolve io sandbox root '{}': {}",
+            root.display(),
+            e
+        )
+    })
+}
+
+fn resolve_target_path(caller: &Caller<'_, ShellStoreData>, raw: &str) -> Result<PathBuf, String> {
     let candidate = Path::new(raw);
-    if candidate.is_absolute() {
-        return candidate.to_path_buf();
+    let root = sandbox_root(caller)?;
+    let target = if candidate.is_absolute() {
+        normalize_lexical_path(candidate)
+    } else {
+        normalize_lexical_path(&root.join(candidate))
+    };
+
+    if !target.starts_with(&root) {
+        return Err(format!(
+            "path '{}' escapes io sandbox root '{}'",
+            raw,
+            root.display()
+        ));
     }
 
-    if let Some(script_cwd) = caller.data().script_cwd.as_ref() {
-        return script_cwd.join(candidate);
-    }
+    Ok(target)
+}
 
-    candidate.to_path_buf()
+fn ensure_existing_path_in_sandbox(
+    caller: &Caller<'_, ShellStoreData>,
+    raw: &str,
+    target: &Path,
+) -> Result<(), String> {
+    let root = sandbox_root(caller)?;
+    let real = fs::canonicalize(target)
+        .map_err(|e| format!("failed to resolve '{}': {}", target.display(), e))?;
+    if !real.starts_with(&root) {
+        return Err(format!(
+            "path '{}' resolves outside io sandbox root '{}'",
+            raw,
+            root.display()
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_parent_in_sandbox(
+    caller: &Caller<'_, ShellStoreData>,
+    raw: &str,
+    target: &Path,
+) -> Result<(), String> {
+    let root = sandbox_root(caller)?;
+    let parent = target.parent().unwrap_or(&root);
+    let mut existing = parent;
+    while !existing.exists() {
+        existing = existing.parent().unwrap_or(&root);
+    }
+    let real = fs::canonicalize(existing)
+        .map_err(|e| format!("failed to resolve '{}': {}", existing.display(), e))?;
+    if !real.starts_with(&root) {
+        return Err(format!(
+            "path '{}' parent resolves outside io sandbox root '{}'",
+            raw,
+            root.display()
+        ));
+    }
+    Ok(())
 }
 
 fn list_dir_text(path: &Path) -> Result<String, String> {
@@ -2099,7 +2178,8 @@ pub fn host_list_dir(
         .require(ShellPermission::Read, "list-dir!", &path)
         .map_err(wasmtime::Error::msg)?;
 
-    let target = resolve_target_path(&caller, &path);
+    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
+    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
     let output = list_dir_text(&target).map_err(wasmtime::Error::msg)?;
     write_lisp_string(&mut caller, &output)
 }
@@ -2115,7 +2195,8 @@ pub fn host_read_file(
         .require(ShellPermission::Read, "read!", &path)
         .map_err(wasmtime::Error::msg)?;
 
-    let target = resolve_target_path(&caller, &path);
+    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
+    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
     let output = fs::read_to_string(&target).map_err(|e| {
         wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
     })?;
@@ -2186,7 +2267,8 @@ pub fn host_read_chunks(
         .require(ShellPermission::Read, "read/chunks!", &path)
         .map_err(wasmtime::Error::msg)?;
 
-    let target = resolve_target_path(&caller, &path);
+    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
+    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
     let mut file = fs::File::open(&target).map_err(|e| {
         wasmtime::Error::msg(format!("failed to open '{}': {}", target.display(), e))
     })?;
@@ -2275,7 +2357,8 @@ pub fn host_read_lines(
         .require(ShellPermission::Read, "read/lines!", &path)
         .map_err(wasmtime::Error::msg)?;
 
-    let target = resolve_target_path(&caller, &path);
+    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
+    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
     let file = fs::File::open(&target).map_err(|e| {
         wasmtime::Error::msg(format!("failed to open '{}': {}", target.display(), e))
     })?;
@@ -2325,7 +2408,12 @@ pub fn host_write_file(
         .require(ShellPermission::Write, "write!", &path)
         .map_err(wasmtime::Error::msg)?;
 
-    let target = resolve_target_path(&caller, &path);
+    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
+    if target.exists() {
+        ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
+    } else {
+        ensure_parent_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
+    }
     if let Some(parent) = target.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -2355,7 +2443,12 @@ pub fn host_mkdir_p(
         .require(ShellPermission::Write, "mkdir!", &path)
         .map_err(wasmtime::Error::msg)?;
 
-    let target = resolve_target_path(&caller, &path);
+    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
+    if target.exists() {
+        ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
+    } else {
+        ensure_parent_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
+    }
     fs::create_dir_all(&target).map_err(|e| {
         wasmtime::Error::msg(format!("failed to mkdir '{}': {}", target.display(), e))
     })?;
@@ -2373,7 +2466,8 @@ pub fn host_delete(
         .require(ShellPermission::Delete, "delete!", &path)
         .map_err(wasmtime::Error::msg)?;
 
-    let target = resolve_target_path(&caller, &path);
+    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
+    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
     let meta = fs::symlink_metadata(&target).map_err(|e| {
         wasmtime::Error::msg(format!(
             "failed to inspect path '{}' for delete: {}",
@@ -2418,8 +2512,10 @@ pub fn host_move(
         )
         .map_err(wasmtime::Error::msg)?;
 
-    let src_path = resolve_target_path(&caller, &src);
-    let dst_path = resolve_target_path(&caller, &dst);
+    let src_path = resolve_target_path(&caller, &src).map_err(wasmtime::Error::msg)?;
+    ensure_existing_path_in_sandbox(&caller, &src, &src_path).map_err(wasmtime::Error::msg)?;
+    let dst_path = resolve_target_path(&caller, &dst).map_err(wasmtime::Error::msg)?;
+    ensure_parent_in_sandbox(&caller, &dst, &dst_path).map_err(wasmtime::Error::msg)?;
     if let Some(parent) = dst_path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|e| {

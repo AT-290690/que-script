@@ -408,7 +408,9 @@ fn user_metric_wat(wat: &str) -> String {
     let mut i = 0usize;
     while i < lines.len() {
         let trimmed = lines[i].trim_start();
-        if trimmed.starts_with("(func (export \"main\")") || trimmed.starts_with("(func $v_") {
+        if trimmed.starts_with("(func (export \"main\")")
+            || (trimmed.starts_with("(func $v_") && !trimmed.starts_with("(func $v___partial_dyn_"))
+        {
             let mut depth = 0i32;
             while i < lines.len() {
                 let line = lines[i];
@@ -537,6 +539,16 @@ mod tests {
         let json = render_json(&report).expect("json should render");
         assert!(json.contains("\"result_type\": \"Int\""));
         assert!(json.contains("\"metrics\""));
+    }
+
+    #[test]
+    fn explain_does_not_count_internal_partial_dynamic_helpers_as_user_apply() {
+        let report = explain_source("(let add (lambda (a b) (+ a b)))\n(add 1 2)");
+        assert_eq!(report.metrics.dynamic_apply_calls, 0);
+        assert!(report
+            .warnings
+            .iter()
+            .all(|warning| warning.kind != "dynamic_apply"));
     }
 
     #[test]
