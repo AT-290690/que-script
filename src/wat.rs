@@ -5908,7 +5908,7 @@ fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
                         | "bools"
                         | "decimals"
                         | "strings"
-                );
+                ) || !is_special_word(op);
             }
             false
         }
@@ -7884,10 +7884,19 @@ fn compile_fast_cell_helper(
 }
 
 fn managed_local_slots(ctx: &Ctx<'_>) -> Vec<usize> {
-    // Name-based local maps drop shadowed bindings, which can make alias checks
-    // miss live refs and incorrectly release them. Be conservative: scan all
-    // non-temp slots in the current function frame.
-    (0..ctx.tmp_i32).collect()
+    let mut slots: Vec<usize> = ctx
+        .locals
+        .iter()
+        .filter_map(|(name, slot)| {
+            ctx.local_types
+                .get(name)
+                .filter(|typ| is_managed_local_type(typ))
+                .map(|_| *slot)
+        })
+        .collect();
+    slots.sort_unstable();
+    slots.dedup();
+    slots
 }
 
 fn emit_release_managed_temp_if_not_local_alias(

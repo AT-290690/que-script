@@ -7659,6 +7659,22 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_set_releases_fresh_managed_call_rhs_after_vector_retain() {
+        let expr = crate::parser::build(
+            "(do (let make (lambda a (lambda x (+ x a)))) (let xs []) (set! xs 0 (make 1)) 0)",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+
+        assert!(
+            wat.contains("call $vec_set_i32") && wat.contains("call $rc_release"),
+            "managed set! RHS should be released after vector retain, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_wat_immediate_destructure_of_tuple_returning_local_lambda_avoids_tuple_allocation() {
         let expr = crate::parser
             ::build(
