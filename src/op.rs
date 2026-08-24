@@ -6354,6 +6354,7 @@ fn extract_small_scalar_helper_inline_def(
     if contains_word(&body_expr, name)
         || !is_externally_pure_inline_effect(body_typed.effect)
         || !is_local_mutate_inline_safe_body(&body_expr, &[])
+        || expr_contains_managed_constructor(&body_expr)
     {
         return None;
     }
@@ -7022,6 +7023,30 @@ fn inline_body_cost(expr: &Expression) -> usize {
     match expr {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => 1,
         Expression::Apply(items) => 1 + items.iter().map(inline_body_cost).sum::<usize>(),
+    }
+}
+
+fn expr_contains_managed_constructor(expr: &Expression) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if let Some(Expression::Word(head)) = items.first() {
+                if matches!(
+                    head.as_str(),
+                    "vector"
+                        | "string"
+                        | "tuple"
+                        | "__vec_new_zeroed_i32"
+                        | "__vec_new_uninit_i32"
+                        | "integers"
+                        | "bools"
+                        | "decimals"
+                ) {
+                    return true;
+                }
+            }
+            items.iter().any(expr_contains_managed_constructor)
+        }
+        _ => false,
     }
 }
 

@@ -3030,6 +3030,21 @@ xs)"#,
     }
 
     #[test]
+    fn test_typed_optimization_small_scalar_helper_skips_managed_allocating_body() {
+        let typed = infer_typed(
+            "(do (let f (lambda x (do (let xs (vector x x)) (get xs 0)))) (let g (lambda n (f n))) (g 7))",
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            optimized_lisp.contains("(f "),
+            "scalar helper with managed allocation should stay callable, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_inlines_small_scalar_helper_into_later_lambda_body() {
         let typed = infer_typed_built(
             r#"(do
