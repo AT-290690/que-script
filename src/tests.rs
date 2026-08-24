@@ -1363,6 +1363,39 @@ xs)"#,
     }
 
     #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_pop_val_returns_last_and_mutates_vector() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(let xs [1 2 3])
+{ (pop-val! xs) xs }"#,
+            true,
+        );
+        assert_eq!(output, "{ 3 [1 2] }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_pull_remains_pop_val_alias() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(let xs [1 2 3])
+{ (pop-val! xs) xs }"#,
+            true,
+        );
+        assert_eq!(output, "{ 3 [1 2] }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_vector_pop_val_aliases_work() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(let xs [1 2 3])
+{ (Vector/pop-val! xs) (Vector/pull! xs) xs }"#,
+            true,
+        );
+        assert_eq!(output, "{ 3 { 2 [1] } }");
+    }
+
+    #[test]
     #[ignore = "manual benchmark"]
     #[cfg(feature = "runtime")]
     fn bench_runtime_map_filter_reduce_pipeline() {
@@ -4882,6 +4915,34 @@ xs)"#,
     }
 
     #[test]
+    fn test_wasm_lsp_completions_include_core_builtin_pop_helpers() {
+        let completion_json = crate::wasm_api::lsp_completions_at("pop".to_string(), 0, 3);
+        let items: serde_json::Value = serde_json::from_str(&completion_json)
+            .expect("completion response should be valid JSON");
+        let labels: Vec<String> = items
+            .as_array()
+            .expect("completion response should be an array")
+            .iter()
+            .filter_map(|item| {
+                item.get("label")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+
+        assert!(
+            labels.iter().any(|label| label == "pop!"),
+            "expected pop! completion, got: {:?}",
+            labels
+        );
+        assert!(
+            labels.iter().any(|label| label == "pop-val!"),
+            "expected pop-val! completion, got: {:?}",
+            labels
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_map_alone_is_generic() {
         let hover_json =
             crate::wasm_api::lsp_hover("(let xs (map reverse [\"G\"]))\nmap".to_string(), 1, 1);
@@ -7565,6 +7626,24 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_pop_val_builtin_compiles_to_runtime_call() {
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (pop-val! xs))")
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_pop_val_i32"),
+            "pop-val! vector builtin should compile to runtime call, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
     fn test_wat_immediate_destructure_of_tuple_returning_local_lambda_avoids_tuple_allocation() {
         let expr = crate::parser
             ::build(
@@ -8952,7 +9031,7 @@ b
                 "{ false 12 }",
             ),
             (
-                r#"(let factorial! (lambda N (snd (pull! (Rec { N 1 } (lambda { n acc }
+                r#"(let factorial! (lambda N (snd (pop-val! (Rec { N 1 } (lambda { n acc }
                   (if (= n 0)
                       { Rec/return [ { n acc } ]}
                       { Rec/push [ { (- n 1) (* acc n) } ] })))))))
@@ -8962,7 +9041,7 @@ b
                     { Rec/return [ { n acc } ] }
                     { Rec/push [ { (- n 1) (+ acc n) } ] })))))))
 
-            (let factorialVec! (lambda N (first (pull! (Rec [ 1 N ] (lambda [ acc n ]
+            (let factorialVec! (lambda N (first (pop-val! (Rec [ 1 N ] (lambda [ acc n ]
                   (if (= n 0)
                       { Rec/return [ [ acc n ] ]}
                       { Rec/push [ [ (* acc n) (- n 1) ] ] })))))))

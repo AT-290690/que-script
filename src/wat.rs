@@ -246,6 +246,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "length" => Some(20),
         "set!" => Some(21),
         "pop!" => Some(22),
+        "pop-val!" => Some(38),
         "fst" => Some(23),
         "snd" => Some(24),
         "+." => Some(25),
@@ -270,7 +271,7 @@ fn builtin_tag_arity(tag: i32) -> Option<usize> {
         1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 25 | 26
         | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 37 => Some(2),
         21 => Some(3),
-        18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 => Some(1),
+        18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 | 38 => Some(1),
         _ => None,
     }
 }
@@ -373,7 +374,7 @@ fn expr_is_definitely_materialized_scalar_vector(
             .unwrap_or_else(|| definitely_materialized_top_level_scalar_names.contains(name)),
         Expression::Apply(items) => matches!(
             items.first(),
-            Some(Expression::Word(op))
+                Some(Expression::Word(op))
                 if matches!(
                     op.as_str(),
                     "vector" | "string" | "__vec_new_zeroed_i32" | "__vec_new_uninit_i32" | "integers" | "bools" | "decimals"
@@ -665,6 +666,7 @@ fn is_special_word(w: &str) -> bool {
             | "set!"
             | "alter!"
             | "pop!"
+            | "pop-val!"
             | "while"
             | "+"
             | "+#"
@@ -3920,6 +3922,44 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
+  (func $vec_pop_val_i32 (param $ptr i32) (result i32)
+    (local $len i32)
+    (local $addr i32)
+    (local $v i32)
+    local.get $ptr
+    call $vec_materialize_i32
+    drop
+    local.get $ptr
+    i32.load
+    local.set $len
+    local.get $len
+    i32.const 0
+    i32.le_s
+    if
+      unreachable
+    end
+    local.get $ptr
+    i32.const 16
+    i32.add
+    i32.load
+    local.get $len
+    i32.const 1
+    i32.sub
+    i32.const 4
+    i32.mul
+    i32.add
+    local.set $addr
+    local.get $addr
+    i32.load
+    local.set $v
+    local.get $ptr
+    local.get $len
+    i32.const 1
+    i32.sub
+    i32.store
+    local.get $v
+  )
+
   (func $vec_slice_i32 (param $ptr i32) (param $start i32) (result i32)
     (local $len i32)
     (local $new_len i32)
@@ -4188,6 +4228,13 @@ fn emit_vector_runtime(
       call $vec_pop_i32
     else
     local.get $f
+    i32.const 38
+    i32.eq
+    if (result i32)
+      local.get $a
+      call $vec_pop_val_i32
+    else
+    local.get $f
     i32.const 23
     i32.eq
     if (result i32)
@@ -4234,6 +4281,7 @@ fn emit_vector_runtime(
           end
         end
       end
+    end
     end
     end
     end
@@ -7402,7 +7450,11 @@ fn expr_mutates_vector_name(expr: &Expression, name: &str) -> bool {
     match expr {
         Expression::Apply(items) => {
             if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
-                if matches!(op.as_str(), "set!" | "push!" | "pop!" | "pull!") && target == name {
+                if matches!(
+                    op.as_str(),
+                    "set!" | "push!" | "pop!" | "pop-val!" | "pull!"
+                ) && target == name
+                {
                     return true;
                 }
                 if op.ends_with('!') && target == name {
@@ -7425,6 +7477,16 @@ fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         ctx,
     )?;
     Ok(format!("{xs}\ncall $vec_pop_i32"))
+}
+
+fn compile_pop_val(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let xs = compile_expr(
+        node.children
+            .get(1)
+            .ok_or_else(|| "pop-val! missing vector".to_string())?,
+        ctx,
+    )?;
+    Ok(format!("{xs}\ncall $vec_pop_val_i32"))
 }
 
 fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -8408,6 +8470,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "set!" => compile_set(node, ctx),
                         "alter!" => compile_alter(node, ctx),
                         "pop!" => compile_pop(node, ctx),
+                        "pop-val!" => compile_pop_val(node, ctx),
                         "while" => compile_loop_while(node, ctx),
                         "not" => {
                             let a = compile_expr(

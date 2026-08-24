@@ -175,9 +175,10 @@
 
 (let Vector/push! std/vector/push!)
 (let Vector/pop! std/vector/pop!)
+(let Vector/pop-val! pop-val!)
 (let Vector/last std/vector/last)
 (let Vector/first std/vector/first)
-(let Vector/pull! std/vector/pop-and-get!)
+(let Vector/pull! pop-val!)
 (let Vector/get-unsafe (lambda idx xs (get xs idx)))
 (let Vector/get* (lambda idx xs (if (and (>= idx 0) (< idx (length xs))) { true [(get xs idx)] } { false [] })))
 (let Vector/at! (lambda idx xs (std/vector/at xs idx)))

@@ -158,7 +158,7 @@ fn run() -> io::Result<()> {
         .and_then(|p| Path::new(p).file_name())
         .and_then(|p| p.to_str())
         .unwrap_or("quebake");
-    if args.iter().any(|arg| (arg == "--help" || arg == "-h")) {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!("{}", usage(bin_name));
         return Ok(());
     }

@@ -110,7 +110,8 @@ fn build_lsp_core() -> WasmLspCore {
     let std_defs = load_std_definitions();
     let (base_env, base_next_id, global_signatures, global_effects) =
         build_base_environment(&std_defs);
-    let std_fallback_names = collect_std_top_level_let_names(&std_defs);
+    let mut std_fallback_names = collect_std_top_level_let_names(&std_defs);
+    std_fallback_names.extend(global_signatures.keys().cloned());
     WasmLspCore {
         std_defs,
         base_env,

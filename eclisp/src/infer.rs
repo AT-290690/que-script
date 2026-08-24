@@ -124,7 +124,10 @@ fn collect_top_level_extern_names(root: &TypedExpression) -> HashSet<String> {
 }
 
 fn is_mutating_op(op: &str) -> bool {
-    matches!(op, "set!" | "alter!" | "&alter!" | "pop!")
+    matches!(
+        op,
+        "set!" | "alter!" | "&alter!" | "pop!" | "pop-val!"
+    )
 }
 
 fn is_bang_contract_op(op: &str, known_requires_bang: &HashMap<String, bool>) -> bool {
@@ -1028,6 +1031,7 @@ fn builtin_bang_contract_min_arity(op: &str) -> Option<usize> {
         "set!" => Some(3),
         "alter!" => Some(2),
         "pop!" => Some(1),
+        "pop-val!" => Some(1),
         "push!" => Some(2),
         _ => None,
     }
