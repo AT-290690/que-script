@@ -6994,6 +6994,37 @@ fn emit_dynamic_scalar_set(
          local.get {value_tmp}\n\
          call $vec_set_scalar_materialized_i32"
     );
+    let body = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        format!(
+            "local.get {index_tmp}\n\
+             i32.const 0\n\
+             i32.ge_s\n\
+             local.get {index_tmp}\n\
+             local.get {target_tmp}\n\
+             i32.load\n\
+             i32.lt_s\n\
+             i32.and\n\
+             if (result i32)\n\
+               {replacement}\n\
+             else\n\
+               {fallback}\n\
+             end"
+        )
+    } else {
+        // set! also supports appending at idx == length. Keep that case on the
+        // runtime helper, but let trusted replacement stores go straight to memory.
+        format!(
+            "local.get {index_tmp}\n\
+             local.get {target_tmp}\n\
+             i32.load\n\
+             i32.eq\n\
+             if (result i32)\n\
+               {fallback}\n\
+             else\n\
+               {replacement}\n\
+             end"
+        )
+    };
     let mut out = format!(
         "{target_prefix}\n\
          local.set {target_tmp}\n\
@@ -7002,19 +7033,7 @@ fn emit_dynamic_scalar_set(
          {value}\n\
          local.set {value_tmp}\n\
          {materialize}\n\
-         local.get {index_tmp}\n\
-         i32.const 0\n\
-         i32.ge_s\n\
-         local.get {index_tmp}\n\
-         local.get {target_tmp}\n\
-         i32.load\n\
-         i32.lt_s\n\
-         i32.and\n\
-         if (result i32)\n\
-           {replacement}\n\
-         else\n\
-           {fallback}\n\
-         end"
+         {body}"
     );
     if !release_target_code.is_empty() {
         out.push('\n');
@@ -7469,6 +7488,61 @@ fn expr_mutates_vector_name(expr: &Expression, name: &str) -> bool {
     }
 }
 
+fn collect_loop_materialized_scalar_set_slots(
+    expr: &Expression,
+    ctx: &Ctx<'_>,
+    out: &mut HashSet<usize>,
+) {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "while")
+            {
+                return;
+            }
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if op == "set!" {
+                    if let Some(slot) = ctx.locals.get(target) {
+                        if ctx
+                            .local_types
+                            .get(target)
+                            .map(is_scalar_vector_type)
+                            .unwrap_or(false)
+                        {
+                            out.insert(*slot);
+                        }
+                    }
+                }
+            }
+            for item in items {
+                collect_loop_materialized_scalar_set_slots(item, ctx, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn loop_materialize_once_plan(body: &TypedExpression, ctx: &Ctx<'_>) -> (HashSet<usize>, String) {
+    if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        return (ctx.materialized_scalar_local_slots.clone(), String::new());
+    }
+    let mut slots = HashSet::new();
+    collect_loop_materialized_scalar_set_slots(&body.expr, ctx, &mut slots);
+    slots.retain(|slot| !ctx.materialized_scalar_local_slots.contains(slot));
+    if slots.is_empty() {
+        return (ctx.materialized_scalar_local_slots.clone(), String::new());
+    }
+    let mut sorted: Vec<usize> = slots.iter().copied().collect();
+    sorted.sort_unstable();
+    let prelude = sorted
+        .iter()
+        .map(|slot| format!("local.get {slot}\ncall $vec_materialize_i32\ndrop"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut materialized = ctx.materialized_scalar_local_slots.clone();
+    materialized.extend(sorted);
+    (materialized, prelude)
+}
+
 fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs = compile_expr(
         node.children
@@ -7529,6 +7603,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
         {
             let mut proven = ctx.proven_scalar_index_loads.clone();
             proven.insert((xs_name, idx_name));
+            let (materialized_slots, materialize_once) = loop_materialize_once_plan(body_node, ctx);
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
@@ -7538,7 +7613,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
                 lambda_bindings: ctx.lambda_bindings,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
-                materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                materialized_scalar_local_slots: materialized_slots,
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: &proven,
@@ -7546,27 +7621,84 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
                 tmp_i32: ctx.tmp_i32 + 1,
             };
             let body_and_drop = compile_expr_discarding_result(body_node, &nested_ctx)?;
+            if materialize_once.is_empty() {
+                return Ok(format!(
+                    "local.get {xs_slot}\n\
+                     call $vec_len\n\
+                     local.set {}\n\
+                     block\n\
+                       loop\n\
+                         local.get {idx_slot}\n\
+                         local.get {}\n\
+                         i32.ge_s\n\
+                         br_if 1\n\
+                         {body_and_drop}\n\
+                         br 0\n\
+                       end\n\
+                     end\n\
+                     i32.const 0",
+                    ctx.tmp_i32, ctx.tmp_i32
+                ));
+            }
             return Ok(format!(
                 "local.get {xs_slot}\n\
                  call $vec_len\n\
                  local.set {}\n\
                  block\n\
+                   local.get {idx_slot}\n\
+                   local.get {}\n\
+                   i32.ge_s\n\
+                   br_if 0\n\
+                   {materialize_once}\n\
                    loop\n\
+                     {body_and_drop}\n\
                      local.get {idx_slot}\n\
                      local.get {}\n\
-                     i32.ge_s\n\
-                     br_if 1\n\
-                     {body_and_drop}\n\
-                     br 0\n\
+                     i32.lt_s\n\
+                     br_if 0\n\
                    end\n\
                  end\n\
                  i32.const 0",
-                ctx.tmp_i32, ctx.tmp_i32
+                ctx.tmp_i32, ctx.tmp_i32, ctx.tmp_i32
             ));
         }
     }
     let cond = compile_expr(cond_node, ctx)?;
-    let body_and_drop = compile_expr_discarding_result(body_node, ctx)?;
+    let (materialized_slots, materialize_once) = loop_materialize_once_plan(body_node, ctx);
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        extern_names: ctx.extern_names,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: materialized_slots,
+        definitely_materialized_top_level_scalar_names: ctx
+            .definitely_materialized_top_level_scalar_names,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
+        tmp_i32: ctx.tmp_i32,
+    };
+    let body_and_drop = compile_expr_discarding_result(body_node, &nested_ctx)?;
+
+    if !materialize_once.is_empty() {
+        return Ok(format!(
+            "block\n\
+             {cond}\n\
+             i32.eqz\n\
+             br_if 0\n\
+             {materialize_once}\n\
+             loop\n\
+               {body_and_drop}\n\
+               {cond}\n\
+               br_if 0\n\
+             end\n\
+             end\n\
+             i32.const 0"
+        ));
+    }
 
     Ok(format!(
         "block\n  loop\n    {cond}\n    i32.eqz\n    br_if 1\n    {body_and_drop}\n    br 0\n  end\nend\ni32.const 0"
