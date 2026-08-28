@@ -66,6 +66,7 @@ struct Ctx<'a> {
     locals: HashMap<String, usize>,
     local_types: HashMap<String, Type>,
     materialized_scalar_local_slots: HashSet<usize>,
+    hoisted_scalar_vec_data_slots: HashMap<usize, usize>,
     definitely_materialized_top_level_scalar_names: &'a HashSet<String>,
     proven_scalar_index_loads: &'a HashSet<(String, String)>,
     nonnegative_int_locals: &'a HashSet<String>,
@@ -6254,6 +6255,7 @@ fn compile_do(
                                 locals: ctx.locals.clone(),
                                 local_types: ctx.local_types.clone(),
                                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
+                                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
                                 definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
                                 nonnegative_int_locals: &scoped_nonnegative_int_locals,
@@ -6340,6 +6342,7 @@ fn compile_do(
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
+                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6412,6 +6415,7 @@ fn compile_do(
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
+                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6463,6 +6467,7 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+            hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
             proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6521,6 +6526,7 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+            hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
             proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6609,6 +6615,7 @@ fn compile_trusted_typed_vector_literal(
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+            hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
             definitely_materialized_top_level_scalar_names: ctx
                 .definitely_materialized_top_level_scalar_names,
             proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6656,6 +6663,7 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6716,6 +6724,7 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6779,6 +6788,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6835,6 +6845,14 @@ fn scalar_get_is_proven_in_bounds(node: &TypedExpression, ctx: &Ctx<'_>) -> Opti
     Some((xs_slot, idx_slot))
 }
 
+fn hoisted_scalar_vec_data_slot(node: &TypedExpression, ctx: &Ctx<'_>) -> Option<usize> {
+    let Expression::Word(name) = &node.expr else {
+        return None;
+    };
+    let slot = *ctx.locals.get(name)?;
+    ctx.hoisted_scalar_vec_data_slots.get(&slot).copied()
+}
+
 fn emit_unchecked_scalar_get_from_slots(xs_slot: usize, idx_slot: usize) -> String {
     format!(
         "local.get {xs_slot}\n\
@@ -6847,6 +6865,40 @@ fn emit_unchecked_scalar_get_from_slots(xs_slot: usize, idx_slot: usize) -> Stri
          i32.add\n\
          i32.load"
     )
+}
+
+fn emit_unchecked_scalar_get_from_data_slot(data_slot: usize, idx_slot: usize) -> String {
+    format!(
+        "local.get {data_slot}\n\
+         local.get {idx_slot}\n\
+         i32.const 4\n\
+         i32.mul\n\
+         i32.add\n\
+         i32.load"
+    )
+}
+
+fn emit_dynamic_scalar_get_from_data_slot(index: &str, data_slot: usize, idx_tmp: usize) -> String {
+    format!(
+        "{index}\n\
+         local.set {idx_tmp}\n\
+         local.get {data_slot}\n\
+         local.get {idx_tmp}\n\
+         i32.const 4\n\
+         i32.mul\n\
+         i32.add\n\
+         i32.load"
+    )
+}
+
+fn emit_constant_scalar_get_from_data_slot(data_slot: usize, index: i32) -> String {
+    let offset = index.saturating_mul(4);
+    let offset_code = if offset == 0 {
+        String::new()
+    } else {
+        format!("\ni32.const {offset}\ni32.add")
+    };
+    format!("local.get {data_slot}{offset_code}\ni32.load")
 }
 
 fn emit_constant_scalar_get(
@@ -7057,6 +7109,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -7091,9 +7144,17 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     };
     if node.typ.as_ref().map(|t| !is_ref_type(t)).unwrap_or(false) {
         if let Some((xs_slot, idx_slot)) = scalar_get_is_proven_in_bounds(node, ctx) {
+            if let Some(data_slot) = ctx.hoisted_scalar_vec_data_slots.get(&xs_slot).copied() {
+                return Ok(emit_unchecked_scalar_get_from_data_slot(
+                    data_slot, idx_slot,
+                ));
+            }
             return Ok(emit_unchecked_scalar_get_from_slots(xs_slot, idx_slot));
         }
         if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
+            if let Some(data_slot) = hoisted_scalar_vec_data_slot(xs_node, ctx) {
+                return Ok(emit_constant_scalar_get_from_data_slot(data_slot, *index));
+            }
             return Ok(emit_constant_scalar_get(
                 &xs,
                 *index,
@@ -7162,6 +7223,15 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 ctx.tmp_i32 + 1
             )
         };
+        if !parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+            if let Some(data_slot) = hoisted_scalar_vec_data_slot(xs_node, ctx) {
+                return Ok(emit_dynamic_scalar_get_from_data_slot(
+                    &idx,
+                    data_slot,
+                    ctx.tmp_i32 + 1,
+                ));
+            }
+        }
         if release_xs_after {
             return Ok(format!(
                 "{bounds}\nlocal.get {}\ncall $rc_release\ndrop",
@@ -7200,6 +7270,7 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -7543,6 +7614,91 @@ fn loop_materialize_once_plan(body: &TypedExpression, ctx: &Ctx<'_>) -> (HashSet
     (materialized, prelude)
 }
 
+fn collect_loop_scalar_get_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut HashSet<usize>) {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "while")
+            {
+                return;
+            }
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if op == "get" {
+                    if let Some(slot) = ctx.locals.get(target) {
+                        if ctx
+                            .local_types
+                            .get(target)
+                            .map(is_scalar_vector_type)
+                            .unwrap_or(false)
+                        {
+                            out.insert(*slot);
+                        }
+                    }
+                }
+            }
+            for item in items {
+                collect_loop_scalar_get_slots(item, ctx, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn loop_hoisted_data_pointer_plan(
+    body: &TypedExpression,
+    ctx: &Ctx<'_>,
+    base_tmp: usize,
+) -> (HashMap<usize, usize>, String, usize) {
+    if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        return (
+            ctx.hoisted_scalar_vec_data_slots.clone(),
+            String::new(),
+            base_tmp,
+        );
+    }
+
+    let mut slots = HashSet::new();
+    collect_loop_scalar_get_slots(&body.expr, ctx, &mut slots);
+    slots.retain(|slot| !ctx.hoisted_scalar_vec_data_slots.contains_key(slot));
+    slots.retain(|slot| {
+        let names = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, local_slot)| (local_slot == slot).then_some(name));
+        names.clone().next().is_some_and(|_| {
+            names
+                .into_iter()
+                .all(|name| !expr_mutates_vector_name(&body.expr, name))
+        })
+    });
+
+    if slots.is_empty() {
+        return (
+            ctx.hoisted_scalar_vec_data_slots.clone(),
+            String::new(),
+            base_tmp,
+        );
+    }
+
+    let mut sorted: Vec<usize> = slots.into_iter().collect();
+    sorted.sort_unstable();
+    let mut hoisted = ctx.hoisted_scalar_vec_data_slots.clone();
+    let mut next_tmp = base_tmp;
+    let mut prelude = Vec::new();
+    for slot in sorted {
+        let data_slot = next_tmp;
+        next_tmp += 1;
+        hoisted.insert(slot, data_slot);
+        prelude.push(format!(
+            "local.get {slot}\n\
+             i32.const 16\n\
+             i32.add\n\
+             i32.load\n\
+             local.set {data_slot}"
+        ));
+    }
+    (hoisted, prelude.join("\n"), next_tmp)
+}
+
 fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs = compile_expr(
         node.children
@@ -7604,6 +7760,8 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
             let mut proven = ctx.proven_scalar_index_loads.clone();
             proven.insert((xs_name, idx_name));
             let (materialized_slots, materialize_once) = loop_materialize_once_plan(body_node, ctx);
+            let (hoisted_data_slots, hoist_data_pointers, next_tmp_i32) =
+                loop_hoisted_data_pointer_plan(body_node, ctx, ctx.tmp_i32 + 1);
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
@@ -7614,14 +7772,20 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: materialized_slots,
+                hoisted_scalar_vec_data_slots: hoisted_data_slots,
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: &proven,
                 nonnegative_int_locals: ctx.nonnegative_int_locals,
-                tmp_i32: ctx.tmp_i32 + 1,
+                tmp_i32: next_tmp_i32,
             };
             let body_and_drop = compile_expr_discarding_result(body_node, &nested_ctx)?;
-            if materialize_once.is_empty() {
+            let loop_prelude = [materialize_once.as_str(), hoist_data_pointers.as_str()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if loop_prelude.is_empty() {
                 return Ok(format!(
                     "local.get {xs_slot}\n\
                      call $vec_len\n\
@@ -7649,7 +7813,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
                    local.get {}\n\
                    i32.ge_s\n\
                    br_if 0\n\
-                   {materialize_once}\n\
+                  {loop_prelude}\n\
                    loop\n\
                      {body_and_drop}\n\
                      local.get {idx_slot}\n\
@@ -7665,6 +7829,8 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
     }
     let cond = compile_expr(cond_node, ctx)?;
     let (materialized_slots, materialize_once) = loop_materialize_once_plan(body_node, ctx);
+    let (hoisted_data_slots, hoist_data_pointers, next_tmp_i32) =
+        loop_hoisted_data_pointer_plan(body_node, ctx, ctx.tmp_i32);
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
@@ -7675,21 +7841,27 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: materialized_slots,
+        hoisted_scalar_vec_data_slots: hoisted_data_slots,
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
         nonnegative_int_locals: ctx.nonnegative_int_locals,
-        tmp_i32: ctx.tmp_i32,
+        tmp_i32: next_tmp_i32,
     };
     let body_and_drop = compile_expr_discarding_result(body_node, &nested_ctx)?;
 
-    if !materialize_once.is_empty() {
+    let loop_prelude = [materialize_once.as_str(), hoist_data_pointers.as_str()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !loop_prelude.is_empty() {
         return Ok(format!(
             "block\n\
              {cond}\n\
              i32.eqz\n\
              br_if 0\n\
-             {materialize_once}\n\
+             {loop_prelude}\n\
              loop\n\
                {body_and_drop}\n\
                {cond}\n\
@@ -7727,6 +7899,7 @@ fn compile_fast_box_ctor(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -7787,6 +7960,7 @@ fn compile_fast_cell_set(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -7848,6 +8022,7 @@ fn compile_fast_truthy(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -7959,6 +8134,7 @@ fn compile_extern_direct_call(
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -8039,6 +8215,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                     locals: ctx.locals.clone(),
                     local_types: ctx.local_types.clone(),
                     materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                    hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
                     definitely_materialized_top_level_scalar_names: ctx
                         .definitely_materialized_top_level_scalar_names,
                     proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -8141,6 +8318,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -8272,6 +8450,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -9041,6 +9220,7 @@ fn compile_lambda_func(
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        hoisted_scalar_vec_data_slots: HashMap::new(),
         definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: &empty_proven_scalar_index_loads,
         nonnegative_int_locals: &empty_nonnegative_int_locals,
@@ -9195,6 +9375,7 @@ fn compile_closure_func(
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        hoisted_scalar_vec_data_slots: HashMap::new(),
         definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: &empty_proven_scalar_index_loads,
         nonnegative_int_locals: &empty_nonnegative_int_locals,
@@ -9325,6 +9506,7 @@ fn compile_value_func(
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        hoisted_scalar_vec_data_slots: HashMap::new(),
         definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: &empty_proven_scalar_index_loads,
         nonnegative_int_locals: &empty_nonnegative_int_locals,
@@ -9436,6 +9618,7 @@ fn compile_partial_helper_func(
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        hoisted_scalar_vec_data_slots: HashMap::new(),
         definitely_materialized_top_level_scalar_names: &empty_top_level_materialized,
         proven_scalar_index_loads: &empty_proven_scalar_index_loads,
         nonnegative_int_locals: &empty_nonnegative_int_locals,
@@ -10033,6 +10216,7 @@ fn compile_program_to_wat_build_typed_with_opts(
         locals: main_locals,
         local_types: main_local_types,
         materialized_scalar_local_slots: HashSet::new(),
+        hoisted_scalar_vec_data_slots: HashMap::new(),
         definitely_materialized_top_level_scalar_names:
             &definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: &main_proven_scalar_index_loads,
