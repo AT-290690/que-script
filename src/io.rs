@@ -1211,7 +1211,7 @@ fn native_shell_env_help(bin_name: &str) -> String {
            QUE_DEVIRTUALIZE   Call-head devirtualization mode (default: aggressive).\n\
                               Allowed: off | known-heads | aggressive.\n\
            QUE_TCO            Tail-call optimization mode (default: conservative).\n\
-                              Allowed: conservative | aggressive.\n\
+                              Allowed: off | conservative | aggressive.\n\
            QUE_SMALL_SCALAR_INLINE_COST Pure scalar helper inline cost limit (default: 32, max: 512).\n\
            QUE_LOOP_UNROLL_MAX Maximum constant small-loop trip count to unroll (default: 4, max: 16).\n\
            QUE_LOOP_UNROLL_COST Maximum body_cost * trip_count unroll budget (default: 120, max: 2000).\n\

@@ -82,6 +82,7 @@ enum DevirtualizeMode {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TailCallMode {
+    Off,
     Conservative,
     Aggressive,
 }
@@ -209,10 +210,11 @@ fn devirtualize_mode_from_env() -> Result<DevirtualizeMode, String> {
 fn tail_call_mode_from_env() -> Result<TailCallMode, String> {
     let raw = std::env::var("QUE_TCO").unwrap_or_else(|_| "conservative".to_string());
     match raw.trim().to_ascii_lowercase().as_str() {
+        "off" | "none" | "0" | "false" => Ok(TailCallMode::Off),
         "conservative" | "safe" | "default" => Ok(TailCallMode::Conservative),
         "aggressive" => Ok(TailCallMode::Aggressive),
         other => Err(format!(
-            "invalid QUE_TCO='{}'. expected one of: conservative, aggressive",
+            "invalid QUE_TCO='{}'. expected one of: off, conservative, aggressive",
             other
         )),
     }
@@ -9290,6 +9292,7 @@ fn compile_lambda_func(
     }
     let has_managed_locals = local_defs.iter().any(|(_, t)| is_managed_local_type(t));
     let tco_safe = match tail_call_mode {
+        TailCallMode::Off => false,
         TailCallMode::Conservative => !is_managed_local_type(&ret_ty) && !has_managed_locals,
         TailCallMode::Aggressive => !has_managed_locals,
     };
