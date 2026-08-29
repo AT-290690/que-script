@@ -1548,35 +1548,38 @@ heap)))
 (let std/convert/vector->deque (lambda initial (do
  (let q (std/vector/deque/new))
  (let half (/ (length initial) 2))
- (letrec tail-call/left/from/vector->deque (lambda index (do
-    (std/vector/deque/add-to-left! q (get initial index))
-   (if (> index 0) (tail-call/left/from/vector->deque (- index 1)) Int))))
- (tail-call/left/from/vector->deque (- half 1))
-(letrec tail-call/right/from/vector->deque (lambda index bounds (do
-   (std/vector/deque/add-to-right! q (get initial index))
-   (if (< index bounds) (tail-call/right/from/vector->deque (+ index 1) bounds) Int))))
- (tail-call/right/from/vector->deque half (- (length initial) 1))
+ (mut left (- half 1))
+ (while (>= left 0) (do
+    (std/vector/deque/add-to-left! q (get initial left))
+    (alter! left (- left 1))))
+ (mut right half)
+ (let len (length initial))
+ (while (< right len) (do
+   (std/vector/deque/add-to-right! q (get initial right))
+   (alter! right (+ right 1))))
     q)))
 (let std/convert/deque->vector (lambda q (if (std/vector/deque/empty? q) [(get q 0 0)] (do
   (let out [])
-  (letrec tail-call/from/deque->vector (lambda index bounds (do
+  (mut index 0)
+  (let len (std/vector/deque/length q))
+  (while (< index len) (do
       (set! out (length out) (std/vector/deque/get q index))
-      (if (< index bounds) (tail-call/from/deque->vector (+ index 1) bounds) Int))))
-    (tail-call/from/deque->vector 0 (- (std/vector/deque/length q) 1))
+      (alter! index (+ index 1))))
     out))))
 (let std/vector/deque/balance! (lambda q
     (if (std/vector/deque/balance? q) q (do
       (let initial (std/convert/deque->vector q))
       (std/vector/deque/empty! q)
       (let half (/ (length initial) 2))
-      (letrec tail-call/left/std/vector/deque/balance! (lambda index (do
-        (std/vector/deque/add-to-left! q (get initial index))
-        (if (> index 0) (tail-call/left/std/vector/deque/balance! (- index 1)) Int))))
-      (letrec tail-call/right/std/vector/deque/balance! (lambda index bounds (do
-        (std/vector/deque/add-to-right! q (get initial index))
-        (if (< index bounds) (tail-call/right/std/vector/deque/balance! (+ index 1) bounds) Int))))
-      (tail-call/right/std/vector/deque/balance! half (- (length initial) 1))
-      (if (> (length initial) 1) (tail-call/left/std/vector/deque/balance! (- half 1)) Int)
+      (mut right half)
+      (let len (length initial))
+      (while (< right len) (do
+        (std/vector/deque/add-to-right! q (get initial right))
+        (alter! right (+ right 1))))
+      (mut left (- half 1))
+      (while (>= left 0) (do
+        (std/vector/deque/add-to-left! q (get initial left))
+        (alter! left (- left 1))))
     q))))
 (let std/vector/deque/append! (lambda q item (do (std/vector/deque/add-to-right! q item) q)))
 (let std/vector/deque/prepend! (lambda q item (do (std/vector/deque/add-to-left! q item) q)))

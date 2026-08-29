@@ -1336,6 +1336,39 @@ xs)"#,
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_runtime_managed_call_return_may_alias_argument() {
+        let src = r#"(do
+          (let pick-small (lambda a b (if (BigInt/lt? a b) a b)))
+          (let best [(BigInt/new "99")])
+          (set! best 0 (pick-small (BigInt/new "35") (car best)))
+          (Digits->Chars (car best)))"#;
+
+        assert_eq!(run_program_output_with_std_and_opts(src, false), "35");
+        assert_eq!(run_program_output_with_std_and_opts(src, true), "35");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_runtime_projected_managed_return_survives_local_cleanup() {
+        let src = r#"(do
+          (let keep (lambda value (do (let result [value]) (car result))))
+          (let v (keep (BigInt/new "81")))
+          (let before (Digits->Chars v))
+          (let u (keep v))
+          [before (Digits->Chars v) (Digits->Chars u)])"#;
+
+        assert_eq!(
+            run_program_output_with_std_and_opts(src, false),
+            "[81 81 81]"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(src, true),
+            "[81 81 81]"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_loop_range_runtime_produces_expected_sequence() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -3068,6 +3101,45 @@ xs)"#,
     }
 
     #[test]
+    fn test_typed_optimization_inlines_branchy_vector_read_scalar_helper() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        let _inline_cost = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "64");
+        let typed = infer_typed_built(
+            r#"(do
+                (let line-score
+                  (lambda board a b c
+                    (do
+                      (let v (get board a))
+                      (if (= v 0)
+                        0
+                        (if (and (= v (get board b)) (= v (get board c)))
+                          v
+                          0)))))
+                (let winner
+                  (lambda board
+                    (do
+                      (let w0 (line-score board 0 1 2))
+                      (if (not (= w0 0)) w0 0))))
+                (winner [1 1 1 0 0 0 0 0 0]))"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            !optimized_lisp.contains("(line-score board 0 1 2)"),
+            "branchy scalar helper with vector reads should inline, got: {}",
+            optimized_lisp
+        );
+        assert!(
+            optimized_lisp.contains("(let "),
+            "inlined helper should preserve/rename local let safely, got: {}",
+            optimized_lisp
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_eliminates_single_use_literal_let_binding() {
         let typed = infer_typed("(do (let res -74975) res)");
         let optimized = crate::op::optimize_typed_ast(&typed);
@@ -4589,7 +4661,10 @@ xs)"#,
 
         let wat =
             crate::wat::compile_program_to_wat(&wrapped).expect("wat compilation should succeed");
-        let run_start = wat.find("(func $v_run").expect("run function should exist");
+        let run_start = wat
+            .find("(func $v_run")
+            .or_else(|| wat.find("(func (export \"main\")"))
+            .expect("run or main function should exist");
         let run_end = wat[run_start + 1..]
             .find("\n  (func ")
             .map(|offset| run_start + 1 + offset)
@@ -6548,7 +6623,7 @@ fn"#;
     }
 
     #[test]
-    fn test_wat_scalar_vector_literal_uses_scalar_push_runtime() {
+    fn test_wat_scalar_vector_literal_uses_direct_store_construction() {
         let expr = crate::parser::build("(vector 1 2 3)").expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
@@ -6558,14 +6633,58 @@ fn"#;
         let main_wat = &wat[main_start..];
 
         assert!(
-            main_wat.contains("call $vec_push_scalar_i32"),
-            "scalar vector literal should use scalar push runtime, got:\n{}",
+            main_wat.contains("i32.const 3")
+                && main_wat.contains("i32.const 0")
+                && main_wat.contains("call $vec_new_i32"),
+            "scalar vector literal should allocate exact-size scalar backing storage, got:\n{}",
             main_wat
         );
         assert!(
-            !main_wat.contains("call $vec_push_i32"),
-            "scalar vector literal should avoid generic ref-aware push runtime, got:\n{}",
+            main_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "scalar vector literal should fill exact-size storage through materialized scalar set, got:\n{}",
             main_wat
+        );
+        assert!(
+            !main_wat.contains("call $vec_push_scalar_i32")
+                && !main_wat.contains("call $vec_push_i32"),
+            "scalar vector literal should avoid generic push runtimes, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_scalar_vector_clone_literal_uses_direct_store_construction() {
+        let expr = crate::parser::build(
+            "(do
+               (let clone3 (lambda xs [(+ (get xs 0) 0) (+ (get xs 1) 0) (+ (get xs 2) 0)]))
+               (clone3 [4 5 6]))",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let clone_start = wat
+            .find("(func $v_clone3")
+            .or_else(|| wat.find("(func (export \"main\")"))
+            .expect("clone3 or main should exist");
+        let clone_wat = &wat[clone_start..];
+
+        assert!(
+            clone_wat.contains("i32.const 3")
+                && clone_wat.contains("i32.const 0")
+                && clone_wat.contains("call $vec_new_i32"),
+            "scalar clone literal should allocate exact-size scalar backing storage, got:\n{}",
+            clone_wat
+        );
+        assert!(
+            clone_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "scalar clone literal should fill exact-size storage through materialized scalar set, got:\n{}",
+            clone_wat
+        );
+        assert!(
+            !clone_wat.contains("call $vec_push_scalar_i32")
+                && !clone_wat.contains("call $vec_push_i32"),
+            "scalar clone literal should avoid push runtimes, got:\n{}",
+            clone_wat
         );
     }
 
@@ -6974,6 +7093,9 @@ fn"#;
 
     #[test]
     fn test_wat_branchy_scalar_helper_inlines_into_later_lambda_body() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
         let _inline_cost = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "64");
         let expr = crate::parser::build(
             r#"(do
@@ -7130,7 +7252,8 @@ fn"#;
             .expect("program should compile");
         let use_score_start = wat
             .find("(func $v_use_dash_score")
-            .expect("use-score should exist");
+            .or_else(|| wat.find("(func (export \"main\")"))
+            .expect("use-score or main should exist");
         let use_score_wat = &wat[use_score_start..];
 
         assert!(
@@ -7167,7 +7290,8 @@ fn"#;
             .expect("program should compile");
         let use_score_start = wat
             .find("(func $v_use_dash_score")
-            .expect("use-score should exist");
+            .or_else(|| wat.find("(func (export \"main\")"))
+            .expect("use-score or main should exist");
         let use_score_wat = &wat[use_score_start..];
 
         assert!(
@@ -7235,7 +7359,8 @@ fn"#;
             .expect("program should compile");
         let use_choice_start = wat
             .find("(func $v_use_dash_choice")
-            .expect("use-choice should exist");
+            .or_else(|| wat.find("(func (export \"main\")"))
+            .expect("use-choice or main should exist");
         let use_choice_wat = &wat[use_choice_start..];
 
         assert!(

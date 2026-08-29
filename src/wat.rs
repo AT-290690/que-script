@@ -5909,7 +5909,7 @@ fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
                         | "bools"
                         | "decimals"
                         | "strings"
-                ) || !is_special_word(op);
+                );
             }
             false
         }
@@ -6447,6 +6447,9 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         Some(Type::List(inner)) if matches!(inner.as_ref(), Type::Var(_)) => 1,
         _ => 0,
     };
+    if elem_ref_flag == 0 && !args.is_empty() {
+        return compile_scalar_vector_literal_direct(args, elem_kind, ctx);
+    }
     let mut out = Vec::new();
     let push_op = vec_push_runtime_for_elem_ref(elem_ref_flag);
     out.push(format!(
@@ -6496,6 +6499,52 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         }
     }
     out.push(format!("local.get {}", ctx.tmp_i32));
+    Ok(out.join("\n"))
+}
+
+fn compile_scalar_vector_literal_direct(
+    args: &[TypedExpression],
+    elem_kind: VecElemKind,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
+    let vec_tmp = ctx.tmp_i32;
+    let val_tmp = ctx.tmp_i32 + 1;
+    let mut out = Vec::new();
+    out.push(format!(
+        "i32.const {}\ni32.const 0\ncall $vec_new_{}\nlocal.set {}",
+        args.len(),
+        elem_kind.suffix(),
+        vec_tmp
+    ));
+    for (idx, arg) in args.iter().enumerate() {
+        let nested_ctx = Ctx {
+            fn_sigs: ctx.fn_sigs,
+            fn_ids: ctx.fn_ids,
+            extern_names: ctx.extern_names,
+            lambda_ids: ctx.lambda_ids,
+            closure_defs: ctx.closure_defs,
+            lambda_bindings: ctx.lambda_bindings,
+            locals: ctx.locals.clone(),
+            local_types: ctx.local_types.clone(),
+            materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+            hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
+            definitely_materialized_top_level_scalar_names: ctx
+                .definitely_materialized_top_level_scalar_names,
+            proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+            nonnegative_int_locals: ctx.nonnegative_int_locals,
+            tmp_i32: ctx.tmp_i32 + 2,
+        };
+        let value = compile_expr(arg, &nested_ctx)?;
+        out.push(format!(
+            "{value}\nlocal.set {val_tmp}\n\
+             local.get {vec_tmp}\n\
+             i32.const {idx}\n\
+             local.get {val_tmp}\n\
+             call $vec_set_scalar_materialized_i32\n\
+             drop"
+        ));
+    }
+    out.push(format!("local.get {vec_tmp}"));
     Ok(out.join("\n"))
 }
 
@@ -9275,6 +9324,16 @@ fn compile_lambda_func(
     let ret_slot = base_local_count + scratch_i32_locals;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
+    if ret_is_ref
+        && returns_projected_ref_from_managed_local(
+            &body_node.expr,
+            &managed_ref_slot_names(&ctx.locals, &ref_slots),
+        )
+    {
+        out.push_str(&format!("    local.get {}\n", ret_slot));
+        out.push_str("    call $rc_retain\n");
+        out.push_str("    drop\n");
+    }
     let scratch_slot = base_local_count;
     out.push_str(&emit_release_unique_refs(
         &ref_slots,
@@ -9412,6 +9471,16 @@ fn compile_closure_func(
     let ret_slot = base_local_count + scratch_i32_locals;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
+    if ret_is_ref
+        && returns_projected_ref_from_managed_local(
+            &body_node.expr,
+            &managed_ref_slot_names(&ctx.locals, &ref_slots),
+        )
+    {
+        out.push_str(&format!("    local.get {}\n", ret_slot));
+        out.push_str("    call $rc_retain\n");
+        out.push_str("    drop\n");
+    }
     let scratch_slot = base_local_count;
     out.push_str(&emit_release_unique_refs(
         &ref_slots,
@@ -9463,6 +9532,70 @@ fn emit_release_unique_refs(
         out.push_str("    end\n");
     }
     out
+}
+
+fn managed_ref_slot_names(locals: &HashMap<String, usize>, ref_slots: &[usize]) -> HashSet<String> {
+    ref_slots
+        .iter()
+        .filter_map(|slot| {
+            locals
+                .iter()
+                .find_map(|(name, local_slot)| (local_slot == slot).then(|| name.clone()))
+        })
+        .collect()
+}
+
+fn returns_projected_ref_from_managed_local(
+    expr: &Expression,
+    managed_names: &HashSet<String>,
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    let Some(Expression::Word(head)) = items.first() else {
+        return false;
+    };
+    match head.as_str() {
+        "do" | "block" => items
+            .last()
+            .map(|last| returns_projected_ref_from_managed_local(last, managed_names))
+            .unwrap_or(false),
+        "if" => items
+            .iter()
+            .skip(2)
+            .any(|branch| returns_projected_ref_from_managed_local(branch, managed_names)),
+        "cond" => items
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .any(|branch| returns_projected_ref_from_managed_local(branch, managed_names)),
+        "car" | "cdr" | "fst" | "snd" => items
+            .get(1)
+            .map(|target| expr_reads_from_managed_local(target, managed_names))
+            .unwrap_or(false),
+        "get" => items
+            .get(1)
+            .map(|target| expr_reads_from_managed_local(target, managed_names))
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn expr_reads_from_managed_local(expr: &Expression, managed_names: &HashSet<String>) -> bool {
+    match expr {
+        Expression::Word(name) => managed_names.contains(name),
+        Expression::Apply(items) => {
+            let Some(Expression::Word(head)) = items.first() else {
+                return false;
+            };
+            matches!(head.as_str(), "car" | "cdr" | "fst" | "snd" | "get")
+                && items
+                    .get(1)
+                    .map(|target| expr_reads_from_managed_local(target, managed_names))
+                    .unwrap_or(false)
+        }
+        _ => false,
+    }
 }
 
 fn compile_value_func(

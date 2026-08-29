@@ -3285,7 +3285,28 @@ fn parse_zip_pair_expr(expr: &Expression) -> Option<(Expression, Expression)> {
 fn is_fusion_safe_callable(expr: &Expression) -> bool {
     match expr {
         Expression::Word(_) => true,
-        Expression::Apply(_) => true,
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") => {
+            !expression_contains_fusion_unsafe_effect(expr)
+        }
+        Expression::Apply(_) => !expression_contains_fusion_unsafe_effect(expr),
+        _ => false,
+    }
+}
+
+fn expression_contains_fusion_unsafe_effect(expr: &Expression) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if let Some(Expression::Word(head)) = items.first() {
+                if matches!(
+                    head.as_str(),
+                    "set!" | "push!" | "pop!" | "pop-val!" | "pull!" | "&alter!"
+                ) || head.ends_with('!')
+                {
+                    return true;
+                }
+            }
+            items.iter().any(expression_contains_fusion_unsafe_effect)
+        }
         _ => false,
     }
 }
@@ -6366,7 +6387,11 @@ fn extract_small_scalar_helper_inline_def(
     {
         return None;
     }
-    if body_typed.effect.is_pure() && !is_inline_safe_body(&body_expr) {
+    if body_typed.effect.is_pure()
+        && !is_inline_safe_body(&body_expr)
+        && small_scalar_helper_inline_body_cost_limit()
+            <= DEFAULT_SMALL_SCALAR_HELPER_INLINE_BODY_COST
+    {
         return None;
     }
     if inline_body_cost(&body_expr) > small_scalar_helper_inline_body_cost_limit() {
