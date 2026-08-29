@@ -126,12 +126,12 @@ fn collect_top_level_extern_names(root: &TypedExpression) -> HashSet<String> {
 fn is_mutating_op(op: &str) -> bool {
     matches!(
         op,
-        "set!" | "alter!" | "&alter!" | "pop!" | "pop-val!"
+        "set!" | "alter!" | "&alter!" | "push!" | "pop!" | "pop-val!"
     )
 }
 
 fn is_bang_contract_op(op: &str, known_requires_bang: &HashMap<String, bool>) -> bool {
-    if is_mutating_op(op) || op == "push!" {
+    if is_mutating_op(op) {
         return true;
     }
     if known_requires_bang.get(op).copied().unwrap_or(false) {
@@ -144,6 +144,10 @@ fn is_bang_contract_op(op: &str, known_requires_bang: &HashMap<String, bool>) ->
         return true;
     }
     false
+}
+
+fn is_mutation_contract_call_op(op: &str, known_mutates_first_arg: &HashSet<String>) -> bool {
+    is_mutating_op(op) || op == "push!" || known_mutates_first_arg.contains(op)
 }
 
 fn is_intrinsic_pure_op(op: &str) -> bool {
@@ -626,6 +630,7 @@ fn annotate_effects(root: &mut TypedExpression) {
 fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), String> {
     let extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
+    let mut known_mutates_first_arg: HashSet<String> = HashSet::new();
     let known_function_arities = top_level_function_arities(root);
     if let Expression::Apply(items) = &root.expr {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
@@ -651,6 +656,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                     let_node,
                     &extern_names,
                     &mut known_requires_bang,
+                    &mut known_mutates_first_arg,
                     &known_function_arities,
                 ) {
                     return Err(message);
@@ -663,6 +669,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
             root,
             &extern_names,
             &mut known_requires_bang,
+            &mut known_mutates_first_arg,
             &known_function_arities,
         ) {
             return Err(message);
@@ -677,6 +684,7 @@ fn check_impure_binding_name(
     let_node: &TypedExpression,
     extern_names: &HashSet<String>,
     known_requires_bang: &mut HashMap<String, bool>,
+    known_mutates_first_arg: &mut HashSet<String>,
     known_function_arities: &HashMap<String, usize>,
 ) -> Option<String> {
     let (name, requires_bang) = eval_function_binding_requires_bang(
@@ -687,8 +695,11 @@ fn check_impure_binding_name(
         known_function_arities,
     )?;
     if requires_bang {
-        if let Some(offending_idx) =
-            eval_function_binding_non_first_mutation_target(item_expr, known_requires_bang)
+        if let Some(offending_idx) = eval_function_binding_non_first_mutation_target(
+            item_expr,
+            known_requires_bang,
+            known_mutates_first_arg,
+        )
         {
             return Some(
                 format!(
@@ -699,6 +710,13 @@ fn check_impure_binding_name(
                 )
             );
         }
+    }
+    if eval_function_binding_mutates_first_arg(
+        item_expr,
+        known_requires_bang,
+        known_mutates_first_arg,
+    ) {
+        known_mutates_first_arg.insert(name.clone());
     }
 
     if name.starts_with('_') || is_impure_bang_exception_name(&name) {
@@ -873,6 +891,7 @@ fn target_param_binding(
 fn expr_mutates_non_first_param(
     expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
+    known_mutates_first_arg: &HashSet<String>,
     scopes: &mut Vec<HashMap<String, MutationBinding>>,
 ) -> Option<usize> {
     match expr {
@@ -890,7 +909,12 @@ fn expr_mutates_non_first_param(
                     scopes.push(HashMap::new());
                     for item in items.iter().skip(1) {
                         if let Some(idx) =
-                            expr_mutates_non_first_param(item, known_requires_bang, scopes)
+                            expr_mutates_non_first_param(
+                                item,
+                                known_requires_bang,
+                                known_mutates_first_arg,
+                                scopes,
+                            )
                         {
                             scopes.pop();
                             return Some(idx);
@@ -912,8 +936,15 @@ fn expr_mutates_non_first_param(
                 }
                 Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => items
                     .get(2)
-                    .and_then(|rhs| expr_mutates_non_first_param(rhs, known_requires_bang, scopes)),
-                Expression::Word(op) if is_bang_contract_op(op, known_requires_bang) => {
+                    .and_then(|rhs| {
+                        expr_mutates_non_first_param(
+                            rhs,
+                            known_requires_bang,
+                            known_mutates_first_arg,
+                            scopes,
+                        )
+                    }),
+                Expression::Word(op) if is_mutation_contract_call_op(op, known_mutates_first_arg) => {
                     if let Some(target) = items.get(1) {
                         if let Some(idx) = target_non_first_param_index(target, scopes) {
                             return Some(idx);
@@ -921,7 +952,12 @@ fn expr_mutates_non_first_param(
                     }
                     for item in items.iter().skip(1) {
                         if let Some(idx) =
-                            expr_mutates_non_first_param(item, known_requires_bang, scopes)
+                            expr_mutates_non_first_param(
+                                item,
+                                known_requires_bang,
+                                known_mutates_first_arg,
+                                scopes,
+                            )
                         {
                             return Some(idx);
                         }
@@ -934,7 +970,12 @@ fn expr_mutates_non_first_param(
                         {
                             for item in items.iter().skip(1) {
                                 if let Some(idx) =
-                                    expr_mutates_non_first_param(item, known_requires_bang, scopes)
+                                    expr_mutates_non_first_param(
+                                        item,
+                                        known_requires_bang,
+                                        known_mutates_first_arg,
+                                        scopes,
+                                    )
                                 {
                                     return Some(idx);
                                 }
@@ -964,7 +1005,12 @@ fn expr_mutates_non_first_param(
                                 }
                             }
                             let result = lambda_items.last().and_then(|body| {
-                                expr_mutates_non_first_param(body, known_requires_bang, scopes)
+                                expr_mutates_non_first_param(
+                                    body,
+                                    known_requires_bang,
+                                    known_mutates_first_arg,
+                                    scopes,
+                                )
                             });
                             scopes.pop();
                             return result;
@@ -973,7 +1019,12 @@ fn expr_mutates_non_first_param(
 
                     for item in items.iter().skip(1) {
                         if let Some(idx) =
-                            expr_mutates_non_first_param(item, known_requires_bang, scopes)
+                            expr_mutates_non_first_param(
+                                item,
+                                known_requires_bang,
+                                known_mutates_first_arg,
+                                scopes,
+                            )
                         {
                             return Some(idx);
                         }
@@ -988,6 +1039,7 @@ fn expr_mutates_non_first_param(
 fn eval_function_binding_non_first_mutation_target(
     item_expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
+    known_mutates_first_arg: &HashSet<String>,
 ) -> Option<usize> {
     let Expression::Apply(let_items) = item_expr else {
         return None;
@@ -1023,7 +1075,195 @@ fn eval_function_binding_non_first_mutation_target(
             }
         }
     }
-    expr_mutates_non_first_param(body, known_requires_bang, &mut scopes)
+    expr_mutates_non_first_param(
+        body,
+        known_requires_bang,
+        known_mutates_first_arg,
+        &mut scopes,
+    )
+}
+
+fn expr_mutates_first_param(
+    expr: &Expression,
+    known_requires_bang: &HashMap<String, bool>,
+    known_mutates_first_arg: &HashSet<String>,
+    scopes: &mut Vec<HashMap<String, MutationBinding>>,
+) -> bool {
+    match expr {
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => false,
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return false;
+            }
+            let Some(head) = items.first() else {
+                return false;
+            };
+            match head {
+                Expression::Word(op) if op == "lambda" => false,
+                Expression::Word(op) if op == "do" => {
+                    scopes.push(HashMap::new());
+                    for item in items.iter().skip(1) {
+                        if expr_mutates_first_param(
+                            item,
+                            known_requires_bang,
+                            known_mutates_first_arg,
+                            scopes,
+                        ) {
+                            scopes.pop();
+                            return true;
+                        }
+                        if let Expression::Apply(form_items) = item {
+                            if let [Expression::Word(kw), Expression::Word(name), _rhs] =
+                                &form_items[..]
+                            {
+                                if kw == "let" || kw == "letrec" || kw == "mut" {
+                                    if let Some(scope) = scopes.last_mut() {
+                                        scope.insert(name.clone(), MutationBinding::Local);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    scopes.pop();
+                    false
+                }
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => items
+                    .get(2)
+                    .map(|rhs| {
+                        expr_mutates_first_param(
+                            rhs,
+                            known_requires_bang,
+                            known_mutates_first_arg,
+                            scopes,
+                        )
+                    })
+                    .unwrap_or(false),
+                Expression::Word(op) if is_mutation_contract_call_op(op, known_mutates_first_arg) => {
+                    if let Some(target) = items.get(1) {
+                        if matches!(target_param_binding(target, scopes), Some(MutationBinding::Param(0)))
+                        {
+                            return true;
+                        }
+                    }
+                    items.iter().skip(1).any(|item| {
+                        expr_mutates_first_param(
+                            item,
+                            known_requires_bang,
+                            known_mutates_first_arg,
+                            scopes,
+                        )
+                    })
+                }
+                _ => {
+                    if let Expression::Apply(lambda_items) = head {
+                        if matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
+                        {
+                            for item in items.iter().skip(1) {
+                                if expr_mutates_first_param(
+                                    item,
+                                    known_requires_bang,
+                                    known_mutates_first_arg,
+                                    scopes,
+                                ) {
+                                    return true;
+                                }
+                            }
+
+                            let param_bindings: Vec<(String, MutationBinding)> = lambda_items
+                                .iter()
+                                .skip(1)
+                                .take(lambda_items.len().saturating_sub(2))
+                                .enumerate()
+                                .filter_map(|(idx, param)| {
+                                    let Expression::Word(name) = param else {
+                                        return None;
+                                    };
+                                    let binding = items
+                                        .get(idx + 1)
+                                        .and_then(|arg| target_param_binding(arg, scopes))
+                                        .unwrap_or(MutationBinding::Local);
+                                    Some((name.clone(), binding))
+                                })
+                                .collect();
+
+                            scopes.push(HashMap::new());
+                            if let Some(scope) = scopes.last_mut() {
+                                for (name, binding) in param_bindings {
+                                    scope.insert(name, binding);
+                                }
+                            }
+                            let result = lambda_items.last().is_some_and(|body| {
+                                expr_mutates_first_param(
+                                    body,
+                                    known_requires_bang,
+                                    known_mutates_first_arg,
+                                    scopes,
+                                )
+                            });
+                            scopes.pop();
+                            return result;
+                        }
+                    }
+
+                    items.iter().skip(1).any(|item| {
+                        expr_mutates_first_param(
+                            item,
+                            known_requires_bang,
+                            known_mutates_first_arg,
+                            scopes,
+                        )
+                    })
+                }
+            }
+        }
+    }
+}
+
+fn eval_function_binding_mutates_first_arg(
+    item_expr: &Expression,
+    known_requires_bang: &HashMap<String, bool>,
+    known_mutates_first_arg: &HashSet<String>,
+) -> bool {
+    let Expression::Apply(let_items) = item_expr else {
+        return false;
+    };
+    let [Expression::Word(keyword), Expression::Word(_name), rhs] = &let_items[..] else {
+        return false;
+    };
+    if keyword != "let" && keyword != "letrec" && keyword != "mut" {
+        return false;
+    }
+    let Expression::Apply(lambda_items) = rhs else {
+        return false;
+    };
+    if lambda_items.len() < 2
+        || !matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
+    {
+        return false;
+    }
+    let Some(body) = lambda_items.last() else {
+        return false;
+    };
+
+    let mut scopes: Vec<HashMap<String, MutationBinding>> = vec![HashMap::new()];
+    if let Some(scope) = scopes.last_mut() {
+        for (idx, param) in lambda_items
+            .iter()
+            .skip(1)
+            .take(lambda_items.len().saturating_sub(2))
+            .enumerate()
+        {
+            if let Expression::Word(name) = param {
+                scope.insert(name.clone(), MutationBinding::Param(idx));
+            }
+        }
+    }
+    expr_mutates_first_param(
+        body,
+        known_requires_bang,
+        known_mutates_first_arg,
+        &mut scopes,
+    )
 }
 
 fn builtin_bang_contract_min_arity(op: &str) -> Option<usize> {

@@ -3773,6 +3773,34 @@ xs)"#,
     }
 
     #[test]
+    fn test_infer_io_only_bang_function_does_not_need_mutated_first_param() {
+        let exprs = crate::parser::parse(
+            r#"(do
+                (extern env log log! (Int -> ()))
+                (let hanoi-move! (lambda x y (log! x)))
+                (letrec hanoi! (lambda n a b c
+                  (if (= n 1)
+                      (hanoi-move! a c)
+                      (do
+                        (hanoi! (- n 1) a c b)
+                        (hanoi-move! a c)
+                        (hanoi! (- n 1) b a c)))))
+                1)"#,
+        )
+        .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        assert!(
+            inferred.is_ok(),
+            "io-only ! functions should not require mutating arg1, got: {:?}",
+            inferred
+        );
+    }
+
+    #[test]
     fn test_infer_impure_nested_mutation_target_rooted_in_first_param_is_allowed() {
         let exprs = crate::parser
             ::parse(
