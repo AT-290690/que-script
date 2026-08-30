@@ -11,6 +11,7 @@ pub struct ExplainReport {
     pub host_imports: Vec<String>,
     pub metrics: ExplainMetrics,
     pub optimized_user_calls: Vec<String>,
+    pub compiled_functions: Vec<ExplainCompiledFunction>,
     pub forms: Vec<ExplainForm>,
     pub warnings: Vec<ExplainWarning>,
 }
@@ -27,6 +28,21 @@ pub struct ExplainMetrics {
     pub unchecked_vector_gets: usize,
     pub direct_user_function_calls: usize,
     pub wat_bytes: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExplainCompiledFunction {
+    pub name: String,
+    pub wat_name: String,
+    pub metrics: ExplainMetrics,
+    pub calls: Vec<ExplainCall>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExplainCall {
+    pub name: String,
+    pub kind: String,
+    pub count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,6 +78,7 @@ pub fn explain_program_with_effects(
     let metrics = collect_wat_metrics(wat);
     let host_imports = collect_host_imports(wat);
     let optimized_user_calls = collect_prefixed_call_targets(&user_metric_wat(wat), "call $v_");
+    let compiled_functions = collect_compiled_functions(wat);
     let user_nodes = user_form_nodes(typed_ast, user_form_count);
     let effect_scope = collect_user_effect_scope(&user_nodes, known_effects);
     let forms = collect_user_forms(&user_nodes, &effect_scope);
@@ -144,6 +161,7 @@ pub fn explain_program_with_effects(
         host_imports,
         metrics,
         optimized_user_calls,
+        compiled_functions,
         forms,
         warnings,
     }
@@ -207,6 +225,71 @@ pub fn render_text(report: &ExplainReport) -> String {
             "  optimized user calls: {}",
             report.optimized_user_calls.join(", ")
         ));
+    }
+
+    let interesting_functions = report
+        .compiled_functions
+        .iter()
+        .filter(|function| function_has_interesting_explain_details(function))
+        .collect::<Vec<_>>();
+    if !interesting_functions.is_empty() {
+        lines.push(String::new());
+        lines.push("Compiled function details:".to_string());
+        for function in interesting_functions {
+            lines.push(format!("  {}:", function.name));
+            let mut detail_parts = Vec::new();
+            if function.metrics.vector_allocations > 0 {
+                detail_parts.push(format!("vector {}", function.metrics.vector_allocations));
+            }
+            if function.metrics.zeroed_vector_allocations > 0 {
+                detail_parts.push(format!(
+                    "zeroed-vector {}",
+                    function.metrics.zeroed_vector_allocations
+                ));
+            }
+            if function.metrics.uninit_vector_allocations > 0 {
+                detail_parts.push(format!(
+                    "uninit-vector {}",
+                    function.metrics.uninit_vector_allocations
+                ));
+            }
+            if function.metrics.tuple_allocations > 0 {
+                detail_parts.push(format!("tuple {}", function.metrics.tuple_allocations));
+            }
+            if function.metrics.closure_allocations > 0 {
+                detail_parts.push(format!("closure {}", function.metrics.closure_allocations));
+            }
+            if !detail_parts.is_empty() {
+                lines.push(format!("    allocations: {}", detail_parts.join(", ")));
+            }
+            if function.metrics.dynamic_apply_calls > 0 {
+                lines.push(format!(
+                    "    dynamic apply calls: {}",
+                    function.metrics.dynamic_apply_calls
+                ));
+            }
+            if function.metrics.checked_vector_gets > 0 {
+                lines.push(format!(
+                    "    checked vector gets: {}",
+                    function.metrics.checked_vector_gets
+                ));
+            }
+            if function.metrics.direct_user_function_calls > 0 {
+                lines.push(format!(
+                    "    direct user function calls: {}",
+                    function.metrics.direct_user_function_calls
+                ));
+            }
+            if !function.calls.is_empty() {
+                let calls = function
+                    .calls
+                    .iter()
+                    .map(|call| format!("{} x{}", call.name, call.count))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.push(format!("    calls: {}", calls));
+            }
+        }
     }
 
     if !report.forms.is_empty() {
@@ -384,7 +467,10 @@ fn is_special_form_or_literal_constructor(name: &str) -> bool {
 
 fn collect_wat_metrics(wat: &str) -> ExplainMetrics {
     let metric_wat = user_metric_wat(wat);
-    let wat = metric_wat.as_str();
+    collect_wat_metrics_from_slice(metric_wat.as_str())
+}
+
+fn collect_wat_metrics_from_slice(wat: &str) -> ExplainMetrics {
     ExplainMetrics {
         vector_allocations: count_occurrences(wat, "call $vec_new_i32"),
         zeroed_vector_allocations: count_occurrences(wat, "call $vec_new_zeroed_i32"),
@@ -400,6 +486,155 @@ fn collect_wat_metrics(wat: &str) -> ExplainMetrics {
         direct_user_function_calls: count_prefixed_calls(wat, "call $v_"),
         wat_bytes: wat.len(),
     }
+}
+
+fn collect_compiled_functions(wat: &str) -> Vec<ExplainCompiledFunction> {
+    split_user_metric_functions(wat)
+        .into_iter()
+        .map(|function| ExplainCompiledFunction {
+            name: function.display_name,
+            wat_name: function.wat_name,
+            metrics: collect_wat_metrics_from_slice(&function.body),
+            calls: collect_call_counts(&function.body),
+        })
+        .collect()
+}
+
+struct WatFunctionSlice {
+    display_name: String,
+    wat_name: String,
+    body: String,
+}
+
+fn split_user_metric_functions(wat: &str) -> Vec<WatFunctionSlice> {
+    let lines = wat.lines().collect::<Vec<_>>();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+        let names = if trimmed.starts_with("(func (export \"main\")") {
+            Some(("main".to_string(), "main".to_string()))
+        } else if trimmed.starts_with("(func $v_")
+            && !trimmed.starts_with("(func $v___partial_dyn_")
+        {
+            let wat_name = trimmed
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("$v_<unknown>")
+                .trim_start_matches('$')
+                .to_string();
+            let display_name = wat_name
+                .strip_prefix("v_")
+                .map(demangle_wat_user_symbol)
+                .unwrap_or_else(|| wat_name.clone());
+            Some((display_name, wat_name))
+        } else {
+            None
+        };
+
+        if let Some((display_name, wat_name)) = names {
+            let mut depth = 0i32;
+            let mut body = Vec::new();
+            while i < lines.len() {
+                let line = lines[i];
+                depth += line.matches('(').count() as i32;
+                depth -= line.matches(')').count() as i32;
+                body.push(line);
+                i += 1;
+                if depth <= 0 {
+                    break;
+                }
+            }
+            out.push(WatFunctionSlice {
+                display_name,
+                wat_name,
+                body: body.join("\n"),
+            });
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+fn collect_call_counts(wat: &str) -> Vec<ExplainCall> {
+    let mut counts: HashMap<(String, String), usize> = HashMap::new();
+    for line in wat.lines() {
+        let trimmed = line.trim_start();
+        let target = trimmed
+            .strip_prefix("call $")
+            .or_else(|| trimmed.strip_prefix("return_call $"));
+        let Some(target) = target else {
+            continue;
+        };
+        let target = target.split_whitespace().next().unwrap_or("");
+        if target.is_empty() {
+            continue;
+        }
+        let (name, kind) = explain_call_name_and_kind(target);
+        *counts.entry((name, kind)).or_insert(0) += 1;
+    }
+
+    let mut calls = counts
+        .into_iter()
+        .map(|((name, kind), count)| ExplainCall { name, kind, count })
+        .collect::<Vec<_>>();
+    calls.sort_by(|a, b| {
+        call_kind_rank(&a.kind)
+            .cmp(&call_kind_rank(&b.kind))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    calls
+}
+
+fn explain_call_name_and_kind(target: &str) -> (String, String) {
+    if let Some(user_name) = target.strip_prefix("v_") {
+        return (
+            demangle_wat_user_symbol(user_name),
+            "user-function".to_string(),
+        );
+    }
+    if target.starts_with("apply") {
+        return (target.to_string(), "dynamic-apply".to_string());
+    }
+    if target.starts_with("host_") {
+        return (
+            target.trim_start_matches("host_").to_string(),
+            "host-import".to_string(),
+        );
+    }
+    if matches!(
+        target,
+        "vec_new_i32" | "vec_new_zeroed_i32" | "vec_new_uninit_i32" | "tuple_new" | "closure_new"
+    ) {
+        return (target.to_string(), "allocation".to_string());
+    }
+    if target.starts_with("vec_") || target.starts_with("tuple_") || target.starts_with("closure_")
+    {
+        return (target.to_string(), "runtime".to_string());
+    }
+    (target.to_string(), "runtime".to_string())
+}
+
+fn call_kind_rank(kind: &str) -> usize {
+    match kind {
+        "user-function" => 0,
+        "dynamic-apply" => 1,
+        "allocation" => 2,
+        "host-import" => 3,
+        _ => 4,
+    }
+}
+
+fn function_has_interesting_explain_details(function: &ExplainCompiledFunction) -> bool {
+    function.metrics.vector_allocations > 0
+        || function.metrics.zeroed_vector_allocations > 0
+        || function.metrics.uninit_vector_allocations > 0
+        || function.metrics.tuple_allocations > 0
+        || function.metrics.closure_allocations > 0
+        || function.metrics.dynamic_apply_calls > 0
+        || function.metrics.checked_vector_gets > 0
+        || function.metrics.direct_user_function_calls > 0
 }
 
 fn user_metric_wat(wat: &str) -> String {
@@ -549,6 +784,36 @@ mod tests {
             .warnings
             .iter()
             .all(|warning| warning.kind != "dynamic_apply"));
+    }
+
+    #[test]
+    fn explain_reports_compiled_function_details_for_allocations_and_calls() {
+        let report = explain_source(
+            r#"(let make (lambda (a b) [a b]))
+(make 40 2)"#,
+        );
+        let text = render_text(&report);
+
+        assert!(
+            text.contains("Compiled function details:"),
+            "expected function detail section, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("make:"),
+            "expected make function detail, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("allocations: vector"),
+            "expected vector allocation attribution, got:\n{}",
+            text
+        );
+        assert!(
+            text.contains("calls: make x1"),
+            "expected direct user call attribution, got:\n{}",
+            text
+        );
     }
 
     #[test]
