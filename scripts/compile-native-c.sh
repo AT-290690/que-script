@@ -54,10 +54,10 @@ fi
 
 result_type="$("$type_probe_bin" "$input_file" --emit types | sed -n 's/^result : //p' | tail -n 1)"
 case "$result_type" in
-  "Int" | "{Int * Int}")
+  "Int" | "{Int * Int}" | "{Bool * [Int]}")
     ;;
   *)
-    echo "error: native C runner currently supports result Int or {Int * Int}, got: $result_type" >&2
+    echo "error: native C runner currently supports result Int, {Int * Int}, or {Bool * [Int]}, got: $result_type" >&2
     exit 1
     ;;
 esac
@@ -102,6 +102,28 @@ static void print_int_tuple2(w2c_main* instance, uint32_t tuple_ptr) {
     printf("{ %d %d }\n", first, second);
 }
 
+static void print_int_vector(w2c_main* instance, uint32_t vec_ptr) {
+    uint32_t len = load_u32(instance, vec_ptr);
+    uint32_t data_ptr = load_u32(instance, vec_ptr + 16);
+    putchar('[');
+    for (uint32_t i = 0; i < len; i++) {
+        if (i != 0) {
+            putchar(' ');
+        }
+        printf("%d", (int32_t)load_u32(instance, data_ptr + i * 4));
+    }
+    putchar(']');
+}
+
+static void print_bool_int_vector_tuple(w2c_main* instance, uint32_t tuple_ptr) {
+    uint32_t data_ptr = load_u32(instance, tuple_ptr + 16);
+    uint32_t ok = load_u32(instance, data_ptr);
+    uint32_t vec_ptr = load_u32(instance, data_ptr + 4);
+    printf("{ %s ", ok ? "true" : "false");
+    print_int_vector(instance, vec_ptr);
+    printf(" }\n");
+}
+
 int main(void) {
     wasm_rt_init();
 
@@ -126,6 +148,11 @@ EOF
   "{Int * Int}")
     cat >> "$host_file" <<'EOF'
     print_int_tuple2(&instance, result);
+EOF
+    ;;
+  "{Bool * [Int]}")
+    cat >> "$host_file" <<'EOF'
+    print_bool_int_vector_tuple(&instance, result);
 EOF
     ;;
 esac

@@ -7728,6 +7728,64 @@ fn"#;
         );
     }
 
+    #[test]
+    fn test_wat_guarded_constant_scalar_param_sets_use_raw_fast_branch() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let expr = crate::parser::build(
+            "(let fill! (lambda (xs)
+                (do
+                  (set! xs 0 1)
+                  (set! xs 1 2)
+                  xs)))
+             fill!",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let fn_start = wat
+            .find("(func $v_fill_bang_")
+            .expect("fill! function should exist");
+        let fn_end = wat[fn_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| fn_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let fn_wat = &wat[fn_start..fn_end];
+        let fast_start = fn_wat
+            .rfind("\n    else\n")
+            .expect("guarded fast branch should exist");
+        let fast_wat = &fn_wat[fast_start..];
+
+        assert!(
+            fn_wat.contains("call $vec_len"),
+            "guarded param fast path should check vector length once, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            fast_wat.contains("i32.store"),
+            "guarded param fast path should raw-store scalar replacements, got:\n{}",
+            fast_wat
+        );
+        assert!(
+            !fast_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "guarded param fast path should not call scalar set helper, got:\n{}",
+            fast_wat
+        );
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_runtime_guarded_constant_scalar_param_set_keeps_short_vector_append_semantics() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let result = run_program_output_unlocked(
+            "(let fill! (lambda (xs) (do (set! xs 0 1) (set! xs 1 2) xs)))
+             (fill! [])",
+        );
+
+        assert_eq!(result, "[1 2]");
+    }
+
     #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_dynamic_scalar_set_keeps_append_at_length_semantics() {
