@@ -163,7 +163,7 @@ fn compile_call(children: &[TypedExpression], mut_vars: &HashSet<String>) -> Str
             let t = arg_src.trim();
             t.starts_with('-')
                 && t.len() > 1
-                && t[1..].chars().all(|c| (c.is_ascii_digit() || c == '.'))
+                && t[1..].chars().all(|c| c.is_ascii_digit() || c == '.')
         };
         let arg_src = if needs_wrap {
             format!("({})", arg_src)
@@ -179,7 +179,7 @@ fn wrap_call_arg(arg_src: String) -> String {
     let t = arg_src.trim();
     let needs_wrap = t.starts_with('-')
         && t.len() > 1
-        && t[1..].chars().all(|c| (c.is_ascii_digit() || c == '.'));
+        && t[1..].chars().all(|c| c.is_ascii_digit() || c == '.');
     if needs_wrap {
         format!("({})", arg_src)
     } else {
@@ -237,6 +237,29 @@ fn compile_do(
     }
 }
 
+fn compile_typed_body(
+    children: &[TypedExpression],
+    start: usize,
+    mut_vars: &HashSet<String>,
+) -> String {
+    if start >= children.len() {
+        return "0".to_string();
+    }
+    if start + 1 == children.len() {
+        return compile_expr_inner(&children[start], mut_vars);
+    }
+    let mut bindings = Vec::new();
+    for (offset, child) in children[start..children.len() - 1].iter().enumerate() {
+        bindings.push(format!(
+            "let __unused_body{} = {}",
+            offset,
+            compile_expr_inner(child, mut_vars)
+        ));
+    }
+    let last = compile_expr_inner(children.last().unwrap(), mut_vars);
+    format!("({} in {})", bindings.join(" in "), last)
+}
+
 fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> String {
     match &node.expr {
         Expression::Int(n) => format!("{}", n),
@@ -262,7 +285,7 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
             }
             match &items[0] {
                 Expression::Word(op) => match op.as_str() {
-                    "do" => compile_do(items, &node.children, mut_vars),
+                    "do" | "block" => compile_do(items, &node.children, mut_vars),
                     "vector" | "string" | "integers" | "bools" | "decimals" | "strings" => {
                         let args = node.children[1..]
                             .iter()
@@ -390,6 +413,19 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
                             .unwrap_or_else(|| "0".to_string());
                         format!("(vec_set {} {} {}; 0)", a, i, v)
                     }
+                    "push!" => {
+                        let a = node
+                            .children
+                            .get(1)
+                            .map(|n| compile_expr_inner(n, mut_vars))
+                            .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                        let v = node
+                            .children
+                            .get(2)
+                            .map(|n| compile_expr_inner(n, mut_vars))
+                            .unwrap_or_else(|| "0".to_string());
+                        format!("(vec_push {} {}; 0)", a, v)
+                    }
                     "pop!" => {
                         let a = node
                             .children
@@ -397,6 +433,14 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                         format!("(vec_pop {}; 0)", a)
+                    }
+                    "pop-val!" => {
+                        let a = node
+                            .children
+                            .get(1)
+                            .map(|n| compile_expr_inner(n, mut_vars))
+                            .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                        format!("(vec_pop_val {})", a)
                     }
                     "alter!" => {
                         let name = match items.get(1) {
@@ -425,7 +469,7 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
                             .children
                             .get(3)
                             .map(|n| compile_expr_inner(n, mut_vars))
-                            .unwrap_or_else(|| "()".to_string());
+                            .unwrap_or_else(|| "0".to_string());
                         let t_ty = node.children.get(2).and_then(|n| n.typ.as_ref());
                         let e_ty = node.children.get(3).and_then(|n| n.typ.as_ref());
                         if let (Some(Type::Function(t_arg, t_ret)), Some(e_t)) = (t_ty, e_ty) {
@@ -446,32 +490,44 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
                             .get(1)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "false".to_string());
-                        let b = node
-                            .children
-                            .get(2)
-                            .map(|n| compile_expr_inner(n, mut_vars))
-                            .unwrap_or_else(|| "()".to_string());
+                        let b = compile_typed_body(&node.children, 2, mut_vars);
                         format!("(while {} do ignore ({}) done; 0)", c, b)
                     }
                     "lambda" => {
-                        let body_idx = items.len() - 1;
                         let mut lambda_mut_vars = mut_vars.clone();
-                        let params = items[1..body_idx]
-                            .iter()
-                            .filter_map(|p| {
-                                if let Expression::Word(w) = p {
-                                    lambda_mut_vars.remove(w);
-                                    Some(ident(w))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        let body = node
-                            .children
-                            .get(body_idx)
-                            .map(|n| compile_expr_inner(n, &lambda_mut_vars))
-                            .unwrap_or_else(|| "()".to_string());
+                        let (params, body_start) = if items.len() >= 3 {
+                            if let Expression::Apply(param_items) = &items[1] {
+                                let params = param_items
+                                    .iter()
+                                    .filter_map(|p| {
+                                        if let Expression::Word(w) = p {
+                                            lambda_mut_vars.remove(w);
+                                            Some(ident(w))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect::<Vec<_>>();
+                                (params, 2)
+                            } else {
+                                let body_idx = items.len() - 1;
+                                let params = items[1..body_idx]
+                                    .iter()
+                                    .filter_map(|p| {
+                                        if let Expression::Word(w) = p {
+                                            lambda_mut_vars.remove(w);
+                                            Some(ident(w))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect::<Vec<_>>();
+                                (params, body_idx)
+                            }
+                        } else {
+                            (Vec::new(), items.len())
+                        };
+                        let body = compile_typed_body(&node.children, body_start, &lambda_mut_vars);
                         if params.is_empty() {
                             format!("(fun () -> {})", body)
                         } else {
@@ -627,10 +683,22 @@ let vec_set (v: 'a vec) (i: int) (x: 'a) : unit =
   else if i >= 0 && i < n then a.(i) <- x
   else failwith "set!: index out of bounds"
 
+let vec_push (v: 'a vec) (x: 'a) : unit =
+  v.data <- Array.append v.data [|x|]
+
 let vec_pop (v: 'a vec) : unit =
   let a = v.data in
   let n = Array.length a in
   if n > 0 then v.data <- Array.sub a 0 (n - 1)
+
+let vec_pop_val (v: 'a vec) : 'a =
+  let a = v.data in
+  let n = Array.length a in
+  if n <= 0 then failwith "pop-val!: empty vector"
+  else
+    let x = a.(n - 1) in
+    v.data <- Array.sub a 0 (n - 1);
+    x
 
 let auto_int (x : int) : int = x
 

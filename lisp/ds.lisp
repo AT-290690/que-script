@@ -192,6 +192,8 @@
 
 (let Vector/new (lambda fn n (std/vector/2d/fill n fn)))
 (let Matrix/new (lambda fn w h (std/vector/3d/fill w h fn)))
+(let Vector/in-bounds? (lambda (index xs) (std/vector/in-bounds? xs index)))
+(let Matrix/in-bounds? (lambda (y x xs) (std/vector/3d/in-bounds? xs y x)))
 (let String/equal? std/vector/char/equal?)
 (let String/lte? std/vector/char/lesser-or-equal?)
 (let String/gte? std/vector/char/greater-or-equal?)

@@ -2181,6 +2181,48 @@ pub fn write_lisp_vector(
     Ok(header_ptr)
 }
 
+pub fn write_lisp_byte_vector(
+    caller: &mut Caller<'_, ShellStoreData>,
+    bytes: &[u8],
+) -> wasmtime::Result<i32> {
+    let alloc = guest_alloc(caller)?;
+    let vec_len = i32::try_from(bytes.len())
+        .map_err(|_| wasmtime::Error::msg("output too large for i32 vector length"))?;
+    let data_bytes_len = vec_len
+        .checked_mul(4)
+        .ok_or_else(|| wasmtime::Error::msg("output byte length overflow"))?;
+    let header_ptr = alloc.call(&mut *caller, VEC_HEADER_SIZE)?;
+    let data_ptr = alloc.call(&mut *caller, data_bytes_len)?;
+    let memory = memory_export(caller)?;
+
+    let data_offset = usize::try_from(data_ptr)
+        .map_err(|_| wasmtime::Error::msg(format!("invalid write address: {}", data_ptr)))?;
+    let data_len = usize::try_from(data_bytes_len)
+        .map_err(|_| wasmtime::Error::msg("output byte length overflow"))?;
+    let data_end = data_offset
+        .checked_add(data_len)
+        .ok_or_else(|| wasmtime::Error::msg("output write address overflow"))?;
+
+    {
+        let data = memory.data_mut(&mut *caller);
+        let output = data
+            .get_mut(data_offset..data_end)
+            .ok_or_else(|| wasmtime::Error::msg(format!("out of bounds write at {}", data_ptr)))?;
+        for (i, byte) in bytes.iter().copied().enumerate() {
+            let offset = i * 4;
+            output[offset..offset + 4].copy_from_slice(&i32::from(byte).to_le_bytes());
+        }
+    }
+
+    write_i32(&memory, caller, header_ptr + VEC_LEN_OFFSET, vec_len)?;
+    write_i32(&memory, caller, header_ptr + VEC_CAP_OFFSET, vec_len)?;
+    write_i32(&memory, caller, header_ptr + VEC_RC_OFFSET, 1)?;
+    write_i32(&memory, caller, header_ptr + VEC_ELEM_REF_OFFSET, 0)?;
+    write_i32(&memory, caller, header_ptr + VEC_DATA_PTR_OFFSET, data_ptr)?;
+    write_i32(&memory, caller, header_ptr + VEC_MAGIC_OFFSET, VEC_MAGIC)?;
+    Ok(header_ptr)
+}
+
 pub fn read_lisp_string(
     caller: &mut Caller<'_, ShellStoreData>,
     vec_ptr: i32,
@@ -2428,11 +2470,7 @@ pub fn host_read_chunks(
             break;
         }
 
-        let chars = buffer[..n]
-            .iter()
-            .map(|byte| i32::from(*byte))
-            .collect::<Vec<_>>();
-        let chunk_ptr = write_lisp_vector(&mut caller, &chars)?;
+        let chunk_ptr = write_lisp_byte_vector(&mut caller, &buffer[..n])?;
         let should_stop = apply1.call(&mut caller, (callback, chunk_ptr))?;
         let _ = rc_release.call(&mut caller, chunk_ptr)?;
         if should_stop != 0 {
@@ -2474,11 +2512,7 @@ pub fn host_read_stdin_chunks(
             break;
         }
 
-        let chars = buffer[..n]
-            .iter()
-            .map(|byte| i32::from(*byte))
-            .collect::<Vec<_>>();
-        let chunk_ptr = write_lisp_vector(&mut caller, &chars)?;
+        let chunk_ptr = write_lisp_byte_vector(&mut caller, &buffer[..n])?;
         let should_stop = apply1.call(&mut caller, (callback, chunk_ptr))?;
         let _ = rc_release.call(&mut caller, chunk_ptr)?;
         if should_stop != 0 {
@@ -2527,8 +2561,7 @@ pub fn host_read_lines(
             }
         }
 
-        let chars = line.iter().map(|byte| i32::from(*byte)).collect::<Vec<_>>();
-        let line_ptr = write_lisp_vector(&mut caller, &chars)?;
+        let line_ptr = write_lisp_byte_vector(&mut caller, &line)?;
         let should_stop = apply1.call(&mut caller, (callback, line_ptr))?;
         let _ = rc_release.call(&mut caller, line_ptr)?;
         if should_stop != 0 {

@@ -300,3 +300,8 @@
       (alter! n (+ n 1)))
     (alter! i (+ i 1)))
   out))
+
+(let UTF8/continuation? (lambda (b) (= (& b 192) 128)))
+(let UTF8/start-2? (lambda (b) (= (& b 224) 192)))
+(let UTF8/start-3? (lambda (b) (= (& b 240) 224)))
+(let UTF8/start-4? (lambda (b) (= (& b 248) 240)))

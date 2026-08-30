@@ -100,6 +100,34 @@ pub fn compile_expr_to_js(expr: &Expression) -> String {
     compile_expr_to_js_inner(expr, false)
 }
 
+fn lambda_parts(items: &[Expression]) -> (Vec<&Expression>, Vec<&Expression>) {
+    if items.len() >= 3 {
+        if let Expression::Apply(params) = &items[1] {
+            return (params.iter().collect(), items[2..].iter().collect());
+        }
+    }
+    if items.len() < 2 {
+        return (Vec::new(), Vec::new());
+    }
+    (
+        items[1..items.len() - 1].iter().collect(),
+        vec![items.last().unwrap()],
+    )
+}
+
+fn compile_body_exprs_to_js(body_exprs: &[&Expression], in_lambda_body: bool) -> String {
+    if body_exprs.is_empty() {
+        return "0".to_string();
+    }
+    if body_exprs.len() == 1 {
+        return compile_expr_to_js_inner(body_exprs[0], in_lambda_body);
+    }
+    let items = std::iter::once(Expression::Word("do".to_string()))
+        .chain(body_exprs.iter().map(|expr| (*expr).clone()))
+        .collect::<Vec<_>>();
+    compile_expr_to_js_inner(&Expression::Apply(items), in_lambda_body)
+}
+
 fn compile_curried_call(func_js: String, args_js: &[String]) -> String {
     if args_js.is_empty() {
         return format!("({})()", func_js);
@@ -123,9 +151,9 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
             // head must be an expression (usually Word)
             match &items[0] {
                 Expression::Word(op) => match op.as_str() {
-                    "do" => {
+                    "do" | "block" => {
                         if items.len() < 2 {
-                            panic!("do requires at least one body expression");
+                            return "0".to_string();
                         }
                         let mut compiled: Vec<String> = items[1..]
                             .iter()
@@ -189,7 +217,13 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[2]),
                         compile_expr_to_js(&items[3])
                     ),
+                    "push!" => format!(
+                        "({}.push({}),0)",
+                        compile_expr_to_js(&items[1]),
+                        compile_expr_to_js(&items[2])
+                    ),
                     "pop!" => format!("({}.pop(),0)", compile_expr_to_js(&items[1])),
+                    "pop-val!" => format!("({}.pop())", compile_expr_to_js(&items[1])),
                     "alter!" => {
                         let name = match &items[1] {
                             Expression::Word(n) => ident(n, 0),
@@ -292,20 +326,24 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[2])
                     ),
                     "if" => {
-                        if items.len() != 4 {
-                            panic!("if expects exactly 3 arguments: (if cond then else)");
+                        if items.len() != 3 && items.len() != 4 {
+                            panic!("if expects 2 or 3 arguments: (if cond then [else])");
                         }
                         let cond_js = compile_expr_to_js(&items[1]);
                         let then_js = compile_expr_to_js(&items[2]);
-                        let else_js = compile_expr_to_js(&items[3]);
+                        let else_js = items
+                            .get(3)
+                            .map(compile_expr_to_js)
+                            .unwrap_or_else(|| "0".to_string());
                         format!("({} ? {} : {})", cond_js, then_js, else_js)
                     }
                     "while" => {
-                        if items.len() != 3 {
-                            panic!("while expects 2 arguments: condition and body");
+                        if items.len() < 2 {
+                            panic!("while expects condition and optional body expressions");
                         }
                         let cond_js = compile_expr_to_js(&items[1]);
-                        let body_js = compile_expr_to_js(&items[2]);
+                        let body_exprs = items[2..].iter().collect::<Vec<_>>();
+                        let body_js = compile_body_exprs_to_js(&body_exprs, false);
                         format!("(()=>{{while({}){{{};}}return 0}})()", cond_js, body_js)
                     }
                     "loop-finish" => {
@@ -331,12 +369,12 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             start_js, end_js, func_js
                         )
                     }
-                    // lambda: (lambda p1 p2 ... body) -> JS arrow function
+                    // lambda: (lambda (p1 p2 ...) body...) -> JS arrow function
                     "lambda" => {
                         if items.len() < 2 {
                             panic!("lambda expects at least a body");
                         }
-                        let params_exprs = &items[1..items.len() - 1];
+                        let (params_exprs, body_exprs) = lambda_parts(items);
                         let params: Vec<String> = params_exprs
                             .iter()
                             .enumerate()
@@ -346,8 +384,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                             })
                             .collect();
 
-                        let body_expr = &items[items.len() - 1];
-                        let body_js = compile_expr_to_js_inner(body_expr, true);
+                        let body_js = compile_body_exprs_to_js(&body_exprs, true);
 
                         if params.is_empty() {
                             format!("() => {}", body_js)

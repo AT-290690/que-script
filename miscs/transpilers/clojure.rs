@@ -36,13 +36,45 @@ fn compile_curried_call(func_src: String, args_src: &[String]) -> String {
         .fold(func_src, |acc, arg| format!("({} {})", acc, arg))
 }
 
+fn lambda_parts(items: &[Expression]) -> (Vec<&Expression>, Vec<&Expression>) {
+    if items.len() >= 3 {
+        if let Expression::Apply(params) = &items[1] {
+            return (params.iter().collect(), items[2..].iter().collect());
+        }
+    }
+    if items.len() < 2 {
+        return (Vec::new(), Vec::new());
+    }
+    (
+        items[1..items.len() - 1].iter().collect(),
+        vec![items.last().unwrap()],
+    )
+}
+
+fn compile_body_exprs(
+    body_exprs: &[&Expression],
+    mut_vars: &HashSet<String>,
+    in_fn_body: bool,
+) -> String {
+    if body_exprs.is_empty() {
+        return "0".to_string();
+    }
+    if body_exprs.len() == 1 {
+        return compile_expr_inner(body_exprs[0], mut_vars, in_fn_body);
+    }
+    let items = std::iter::once(Expression::Word("do".to_string()))
+        .chain(body_exprs.iter().map(|expr| (*expr).clone()))
+        .collect::<Vec<_>>();
+    compile_expr_inner(&Expression::Apply(items), mut_vars, in_fn_body)
+}
+
 fn compile_lambda(items: &[Expression], mut_vars: &HashSet<String>) -> String {
     if items.len() < 2 {
         return "(fn [] 0)".to_string();
     }
-    let body_idx = items.len() - 1;
     let mut scoped_mut = mut_vars.clone();
-    let params = items[1..body_idx]
+    let (params_exprs, body_exprs) = lambda_parts(items);
+    let params = params_exprs
         .iter()
         .filter_map(|p| {
             if let Expression::Word(w) = p {
@@ -53,7 +85,7 @@ fn compile_lambda(items: &[Expression], mut_vars: &HashSet<String>) -> String {
             }
         })
         .collect::<Vec<_>>();
-    let body = compile_expr_inner(&items[body_idx], &scoped_mut, true);
+    let body = compile_body_exprs(&body_exprs, &scoped_mut, true);
     if params.is_empty() {
         format!("(fn [] {})", body)
     } else {
@@ -171,7 +203,7 @@ fn compile_expr_inner(expr: &Expression, mut_vars: &HashSet<String>, in_fn_body:
             }
             match &items[0] {
                 Expression::Word(op) => match op.as_str() {
-                    "do" => compile_do_tail(items, mut_vars, in_fn_body),
+                    "do" | "block" => compile_do_tail(items, mut_vars, in_fn_body),
                     "let" => {
                         let name = match items.get(1) {
                             Some(Expression::Word(w)) => ident(w),
@@ -262,8 +294,17 @@ fn compile_expr_inner(expr: &Expression, mut_vars: &HashSet<String>, in_fn_body:
                         compile_expr_inner(&items[2], mut_vars, false),
                         compile_expr_inner(&items[3], mut_vars, false)
                     ),
+                    "push!" => format!(
+                        "(do (q-push! {} {}) 0)",
+                        compile_expr_inner(&items[1], mut_vars, false),
+                        compile_expr_inner(&items[2], mut_vars, false)
+                    ),
                     "pop!" => format!(
                         "(do (q-pop! {}) 0)",
+                        compile_expr_inner(&items[1], mut_vars, false)
+                    ),
+                    "pop-val!" => format!(
+                        "(q-pop-val! {})",
                         compile_expr_inner(&items[1], mut_vars, false)
                     ),
                     "alter!" => {
@@ -384,16 +425,22 @@ fn compile_expr_inner(expr: &Expression, mut_vars: &HashSet<String>, in_fn_body:
                         compile_expr_inner(&items[1], mut_vars, false),
                         compile_expr_inner(&items[2], mut_vars, false)
                     ),
-                    "if" => format!(
-                        "(if {} {} {})",
-                        compile_expr_inner(&items[1], mut_vars, false),
-                        compile_expr_inner(&items[2], mut_vars, false),
-                        compile_expr_inner(&items[3], mut_vars, false)
-                    ),
+                    "if" => {
+                        let else_src = items
+                            .get(3)
+                            .map(|e| compile_expr_inner(e, mut_vars, false))
+                            .unwrap_or_else(|| "0".to_string());
+                        format!(
+                            "(if {} {} {})",
+                            compile_expr_inner(&items[1], mut_vars, false),
+                            compile_expr_inner(&items[2], mut_vars, false),
+                            else_src
+                        )
+                    }
                     "while" => format!(
                         "(do (while {} {}) 0)",
                         compile_expr_inner(&items[1], mut_vars, false),
-                        compile_expr_inner(&items[2], mut_vars, false)
+                        compile_body_exprs(&items[2..].iter().collect::<Vec<_>>(), mut_vars, false)
                     ),
                     "lambda" => compile_lambda(items, mut_vars),
                     "as" | "char" | "Int->Dec" => compile_expr_inner(&items[1], mut_vars, false),
@@ -463,10 +510,19 @@ const CLOJURE_PRELUDE: &str = r#"(defn q-vec
       (and (>= i 0) (< i cnt)) (.set ^java.util.List xs i v)
       :else (throw (ex-info "set!: index out of bounds" {:index i :count cnt})))))
 
+(defn q-push! [xs v]
+  (.add ^java.util.List xs v))
+
 (defn q-pop! [xs]
   (let [cnt (.size ^java.util.List xs)]
     (when (> cnt 0)
       (.remove ^java.util.List xs (dec cnt)))))
+
+(defn q-pop-val! [xs]
+  (let [cnt (.size ^java.util.List xs)]
+    (if (> cnt 0)
+      (.remove ^java.util.List xs (dec cnt))
+      0)))
 
 (defn q-show [x]
   (cond
