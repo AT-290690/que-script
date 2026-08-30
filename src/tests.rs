@@ -7586,6 +7586,59 @@ fn"#;
 
     #[cfg(feature = "runtime")]
     #[test]
+    fn test_wat_counted_replacement_loop_hoists_scalar_data_pointer_for_set() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let expr = crate::parser::build(
+            "((lambda (do
+                (let xs [1 2 3])
+                (mut i 0)
+                (while (< i (length xs))
+                  (do
+                    (set! xs i (+ (get xs i) 1))
+                    (alter! i (+ i 1))))
+                xs)))",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_end = wat[main_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| main_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let main_wat = &wat[main_start..main_end];
+        let loop_start = main_wat
+            .find("loop\n    local.get 1")
+            .expect("counted loop should exist");
+        let loop_wat = &main_wat[loop_start..];
+
+        assert!(
+            main_wat.contains("call $vec_len\n    local.set"),
+            "counted loop should cache vector length, got:\n{}",
+            main_wat
+        );
+        assert!(
+            loop_wat.contains("i32.store"),
+            "counted replacement set! should lower to a raw store, got:\n{}",
+            loop_wat
+        );
+        assert!(
+            !loop_wat.contains("call $vec_materialize_i32"),
+            "stable counted replacement loop should not materialize inside the loop, got:\n{}",
+            loop_wat
+        );
+        assert!(
+            !loop_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "stable counted replacement loop should not call scalar set helper inside the loop, got:\n{}",
+            loop_wat
+        );
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
     fn test_runtime_dynamic_scalar_set_keeps_append_at_length_semantics() {
         let result = run_program_output(
             "((lambda (do (let xs [1 2]) (mut i (length xs)) (set! xs i 3) xs)))",

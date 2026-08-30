@@ -7145,6 +7145,29 @@ fn emit_dynamic_scalar_set(
     out
 }
 
+fn emit_dynamic_scalar_set_from_data_slot(
+    index: &str,
+    value: &str,
+    data_slot: usize,
+    index_tmp: usize,
+    value_tmp: usize,
+) -> String {
+    format!(
+        "{index}\n\
+         local.set {index_tmp}\n\
+         {value}\n\
+         local.set {value_tmp}\n\
+         local.get {data_slot}\n\
+         local.get {index_tmp}\n\
+         i32.const 4\n\
+         i32.mul\n\
+         i32.add\n\
+         local.get {value_tmp}\n\
+         i32.store\n\
+         i32.const 0"
+    )
+}
+
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs_node = node
         .children
@@ -7409,6 +7432,27 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 definitely_materialized_scalar_target,
             ));
         }
+        if let (Expression::Word(xs_name), Some(Expression::Word(idx_name))) =
+            (&xs_node.expr, node.children.get(2).map(|n| &n.expr))
+        {
+            if ctx
+                .proven_scalar_index_loads
+                .contains(&(xs_name.clone(), idx_name.clone()))
+            {
+                if let Some(xs_slot) = ctx.locals.get(xs_name) {
+                    if let Some(data_slot) = ctx.hoisted_scalar_vec_data_slots.get(xs_slot).copied()
+                    {
+                        return Ok(emit_dynamic_scalar_set_from_data_slot(
+                            &idx,
+                            &v,
+                            data_slot,
+                            ctx.tmp_i32 + 2,
+                            ctx.tmp_i32 + 1,
+                        ));
+                    }
+                }
+            }
+        }
         return Ok(emit_dynamic_scalar_set(
             &target_prefix,
             &idx,
@@ -7514,9 +7558,7 @@ fn extract_less_than_length_loop_bound(
     let Expression::Apply(cond_items) = &cond_node.expr else {
         return None;
     };
-    if !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<")
-        || cond_node.children.len() != 3
-    {
+    if !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<") {
         return None;
     }
     let (Some(Expression::Word(idx_name)), Some(Expression::Apply(len_items))) =
@@ -7539,16 +7581,18 @@ fn body_has_only_final_positive_increment(body_node: &TypedExpression, idx_name:
     let Expression::Apply(items) = &body_node.expr else {
         return false;
     };
-    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do")
-        || body_node.children.len() != items.len()
-        || items.len() < 2
-    {
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") || items.len() < 2 {
         return false;
     }
-    if !is_positive_index_increment_expr(items.last().expect("do has final item"), idx_name) {
+    let increment_idx = if matches!(items.last(), Some(Expression::Word(w)) if w == "nil") {
+        items.len().saturating_sub(2)
+    } else {
+        items.len().saturating_sub(1)
+    };
+    if increment_idx == 0 || !is_positive_index_increment_expr(&items[increment_idx], idx_name) {
         return false;
     }
-    items[1..items.len() - 1]
+    items[1..increment_idx]
         .iter()
         .all(|expr| !expr_mutates_scalar_name(expr, idx_name))
 }
@@ -7607,6 +7651,44 @@ fn expr_mutates_vector_name(expr: &Expression, name: &str) -> bool {
                 .any(|item| expr_mutates_vector_name(item, name))
         }
         _ => false,
+    }
+}
+
+fn vector_mutations_are_loop_replacement_sets(
+    expr: &Expression,
+    vector_name: &str,
+    idx_name: &str,
+) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "while")
+            {
+                return true;
+            }
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if target == vector_name {
+                    if op == "set!" {
+                        return matches!(items.get(2), Some(Expression::Word(i)) if i == idx_name)
+                            && items.iter().all(|item| {
+                                vector_mutations_are_loop_replacement_sets(
+                                    item,
+                                    vector_name,
+                                    idx_name,
+                                )
+                            });
+                    }
+                    if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
+                        || op.ends_with('!')
+                    {
+                        return false;
+                    }
+                }
+            }
+            items
+                .iter()
+                .all(|item| vector_mutations_are_loop_replacement_sets(item, vector_name, idx_name))
+        }
+        _ => true,
     }
 }
 
@@ -7805,14 +7887,41 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
     if let Some((idx_name, xs_name, idx_slot, xs_slot)) =
         extract_less_than_length_loop_bound(cond_node, ctx)
     {
+        let vector_mutations_are_replacement_sets =
+            vector_mutations_are_loop_replacement_sets(&body_node.expr, &xs_name, &idx_name);
         if body_has_only_final_positive_increment(body_node, &idx_name)
-            && !expr_mutates_vector_name(&body_node.expr, &xs_name)
+            && (!expr_mutates_vector_name(&body_node.expr, &xs_name)
+                || vector_mutations_are_replacement_sets)
         {
             let mut proven = ctx.proven_scalar_index_loads.clone();
-            proven.insert((xs_name, idx_name));
+            proven.insert((xs_name.clone(), idx_name));
             let (materialized_slots, materialize_once) = loop_materialize_once_plan(body_node, ctx);
-            let (hoisted_data_slots, hoist_data_pointers, next_tmp_i32) =
+            let (mut hoisted_data_slots, mut hoist_data_pointers, mut next_tmp_i32) =
                 loop_hoisted_data_pointer_plan(body_node, ctx, ctx.tmp_i32 + 1);
+            if vector_mutations_are_replacement_sets
+                && !hoisted_data_slots.contains_key(&xs_slot)
+                && ctx
+                    .local_types
+                    .iter()
+                    .any(|(name, typ)| name == &xs_name && is_scalar_vector_type(typ))
+            {
+                let data_slot = next_tmp_i32;
+                next_tmp_i32 += 1;
+                hoisted_data_slots.insert(xs_slot, data_slot);
+                let data_prelude = format!(
+                    "local.get {xs_slot}\n\
+                     i32.const 16\n\
+                     i32.add\n\
+                     i32.load\n\
+                     local.set {data_slot}"
+                );
+                if hoist_data_pointers.is_empty() {
+                    hoist_data_pointers = data_prelude;
+                } else {
+                    hoist_data_pointers.push('\n');
+                    hoist_data_pointers.push_str(&data_prelude);
+                }
+            }
             let nested_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,

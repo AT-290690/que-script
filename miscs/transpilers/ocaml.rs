@@ -177,9 +177,8 @@ fn compile_call(children: &[TypedExpression], mut_vars: &HashSet<String>) -> Str
 
 fn wrap_call_arg(arg_src: String) -> String {
     let t = arg_src.trim();
-    let needs_wrap = t.starts_with('-')
-        && t.len() > 1
-        && t[1..].chars().all(|c| c.is_ascii_digit() || c == '.');
+    let needs_wrap =
+        t.starts_with('-') && t.len() > 1 && t[1..].chars().all(|c| c.is_ascii_digit() || c == '.');
     if needs_wrap {
         format!("({})", arg_src)
     } else {
