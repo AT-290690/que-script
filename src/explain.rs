@@ -12,6 +12,7 @@ pub struct ExplainReport {
     pub metrics: ExplainMetrics,
     pub optimized_user_calls: Vec<String>,
     pub compiled_functions: Vec<ExplainCompiledFunction>,
+    pub optimization_targets: Vec<ExplainOptimizationTarget>,
     pub forms: Vec<ExplainForm>,
     pub warnings: Vec<ExplainWarning>,
 }
@@ -43,6 +44,14 @@ pub struct ExplainCall {
     pub name: String,
     pub kind: String,
     pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExplainOptimizationTarget {
+    pub function: String,
+    pub kind: String,
+    pub count: usize,
+    pub note: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,6 +88,7 @@ pub fn explain_program_with_effects(
     let host_imports = collect_host_imports(wat);
     let optimized_user_calls = collect_prefixed_call_targets(&user_metric_wat(wat), "call $v_");
     let compiled_functions = collect_compiled_functions(wat);
+    let optimization_targets = collect_optimization_targets(&compiled_functions);
     let user_nodes = user_form_nodes(typed_ast, user_form_count);
     let effect_scope = collect_user_effect_scope(&user_nodes, known_effects);
     let forms = collect_user_forms(&user_nodes, &effect_scope);
@@ -162,6 +172,7 @@ pub fn explain_program_with_effects(
         metrics,
         optimized_user_calls,
         compiled_functions,
+        optimization_targets,
         forms,
         warnings,
     }
@@ -225,6 +236,18 @@ pub fn render_text(report: &ExplainReport) -> String {
             "  optimized user calls: {}",
             report.optimized_user_calls.join(", ")
         ));
+    }
+
+    if !report.optimization_targets.is_empty() {
+        lines.push(String::new());
+        lines.push("Optimization targets (static WAT shape, not runtime profile):".to_string());
+        for target in &report.optimization_targets {
+            lines.push(format!(
+                "  {}: {} x{}",
+                target.function, target.kind, target.count
+            ));
+            lines.push(format!("    note: {}", target.note));
+        }
     }
 
     let interesting_functions = report
@@ -637,6 +660,133 @@ fn function_has_interesting_explain_details(function: &ExplainCompiledFunction) 
         || function.metrics.direct_user_function_calls > 0
 }
 
+fn collect_optimization_targets(
+    functions: &[ExplainCompiledFunction],
+) -> Vec<ExplainOptimizationTarget> {
+    let mut targets = Vec::new();
+    for function in functions {
+        push_optimization_target(
+            &mut targets,
+            function,
+            "dynamic apply",
+            function.metrics.dynamic_apply_calls,
+            "Runtime function dispatch remains here; prefer direct calls or inlinable let-bound lambdas in hot code.",
+        );
+        push_optimization_target(
+            &mut targets,
+            function,
+            "closure allocation",
+            function.metrics.closure_allocations,
+            "Function values or partial application allocate closures here.",
+        );
+        push_optimization_target(
+            &mut targets,
+            function,
+            "tuple allocation",
+            function.metrics.tuple_allocations,
+            "Tuple values materialize here; destructure immediately or avoid tuple results in hot paths.",
+        );
+        push_optimization_target(
+            &mut targets,
+            function,
+            "checked vector get",
+            function.metrics.checked_vector_gets,
+            "Bounds checks remain here; counted loops or known indexes may help.",
+        );
+
+        for call in &function.calls {
+            match call.name.as_str() {
+                "vec_set_scalar_materialized_i32" => push_optimization_target(
+                    &mut targets,
+                    function,
+                    "scalar vector set helper",
+                    call.count,
+                    "Replacement writes still use a runtime set helper or fallback here; a raw-store proof could help.",
+                ),
+                "vec_materialize_i32" => push_optimization_target(
+                    &mut targets,
+                    function,
+                    "vector materialization",
+                    call.count,
+                    "Vector representation is being normalized before access; proving stable materialized vectors could remove this.",
+                ),
+                "vec_get_i32" => push_optimization_target(
+                    &mut targets,
+                    function,
+                    "checked vector get helper",
+                    call.count,
+                    "Runtime vector reads remain here; prove bounds or use simpler counted access patterns.",
+                ),
+                "vec_push_i32" | "vec_push_scalar_i32" => push_optimization_target(
+                    &mut targets,
+                    function,
+                    "vector push helper",
+                    call.count,
+                    "Append growth remains here; builder/fill lowering may help when final length is predictable.",
+                ),
+                "vec_new_i32" => push_optimization_target(
+                    &mut targets,
+                    function,
+                    "generic vector allocation",
+                    call.count,
+                    "Generic vector allocation remains here; zeroed, uninit, or fixed-builder lowering may help.",
+                ),
+                "rc_retain" | "rc_release" if call.count >= 10 => push_optimization_target(
+                    &mut targets,
+                    function,
+                    "reference counting",
+                    call.count,
+                    "Reference retain/release traffic is visible here; ownership transfer or scalarization may help.",
+                ),
+                _ => {}
+            }
+        }
+    }
+
+    targets.sort_by(|a, b| {
+        optimization_target_score(b)
+            .cmp(&optimization_target_score(a))
+            .then_with(|| a.function.cmp(&b.function))
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
+    targets.truncate(8);
+    targets
+}
+
+fn push_optimization_target(
+    targets: &mut Vec<ExplainOptimizationTarget>,
+    function: &ExplainCompiledFunction,
+    kind: &str,
+    count: usize,
+    note: &str,
+) {
+    if count == 0 {
+        return;
+    }
+    targets.push(ExplainOptimizationTarget {
+        function: function.name.clone(),
+        kind: kind.to_string(),
+        count,
+        note: note.to_string(),
+    });
+}
+
+fn optimization_target_score(target: &ExplainOptimizationTarget) -> usize {
+    let weight = match target.kind.as_str() {
+        "dynamic apply" => 1000,
+        "scalar vector set helper" => 800,
+        "vector materialization" => 600,
+        "checked vector get" | "checked vector get helper" => 500,
+        "closure allocation" => 450,
+        "tuple allocation" => 350,
+        "vector push helper" => 250,
+        "generic vector allocation" => 200,
+        "reference counting" => 50,
+        _ => 10,
+    };
+    target.count.saturating_mul(weight)
+}
+
 fn user_metric_wat(wat: &str) -> String {
     let lines = wat.lines().collect::<Vec<_>>();
     let mut out = Vec::new();
@@ -813,6 +963,28 @@ mod tests {
             text.contains("calls: make x1"),
             "expected direct user call attribution, got:\n{}",
             text
+        );
+    }
+
+    #[test]
+    fn explain_reports_ranked_optimization_targets() {
+        let report = explain_source(
+            r#"(let make (lambda (a b) [a b]))
+(make 40 2)"#,
+        );
+        let text = render_text(&report);
+
+        assert!(
+            text.contains("Optimization targets (static WAT shape, not runtime profile):"),
+            "expected optimization target section, got:\n{}",
+            text
+        );
+        assert!(
+            report.optimization_targets.iter().any(|target| {
+                target.function == "make" && target.kind == "generic vector allocation"
+            }),
+            "expected generic vector allocation target, got: {:?}",
+            report.optimization_targets
         );
     }
 
