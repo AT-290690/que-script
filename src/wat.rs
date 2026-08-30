@@ -6395,6 +6395,9 @@ fn compile_do(
                     parts.push(c);
                 }
             }
+            if let Some(slot) = scalar_vector_set_target_slot(&n.expr, ctx) {
+                scoped_materialized_scalar_local_slots.insert(slot);
+            }
         }
         append_last_use_releases_for_do_expr(
             &mut parts,
@@ -7577,6 +7580,28 @@ fn extract_less_than_length_loop_bound(
     Some((idx_name.clone(), xs_name.clone(), idx_slot, xs_slot))
 }
 
+fn extract_less_than_const_loop_bound(
+    cond_node: &TypedExpression,
+    ctx: &Ctx<'_>,
+) -> Option<(String, i32, usize)> {
+    let Expression::Apply(cond_items) = &cond_node.expr else {
+        return None;
+    };
+    if !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<") {
+        return None;
+    }
+    let (Some(Expression::Word(idx_name)), Some(Expression::Int(bound))) =
+        (cond_items.get(1), cond_items.get(2))
+    else {
+        return None;
+    };
+    if *bound < 0 || !ctx.nonnegative_int_locals.contains(idx_name) {
+        return None;
+    }
+    let idx_slot = *ctx.locals.get(idx_name)?;
+    Some((idx_name.clone(), *bound, idx_slot))
+}
+
 fn body_has_only_final_positive_increment(body_node: &TypedExpression, idx_name: &str) -> bool {
     let Expression::Apply(items) = &body_node.expr else {
         return false;
@@ -7689,6 +7714,77 @@ fn vector_mutations_are_loop_replacement_sets(
                 .all(|item| vector_mutations_are_loop_replacement_sets(item, vector_name, idx_name))
         }
         _ => true,
+    }
+}
+
+fn collect_loop_replacement_set_vector_slots(
+    expr: &Expression,
+    ctx: &Ctx<'_>,
+    idx_name: &str,
+    out: &mut HashMap<String, usize>,
+) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "while")
+            {
+                return true;
+            }
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if op == "set!" {
+                    if !matches!(items.get(2), Some(Expression::Word(i)) if i == idx_name) {
+                        return false;
+                    }
+                    if let Some(slot) = ctx.locals.get(target) {
+                        if ctx
+                            .local_types
+                            .get(target)
+                            .map(is_scalar_vector_type)
+                            .unwrap_or(false)
+                        {
+                            out.insert(target.clone(), *slot);
+                        }
+                    }
+                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
+                    || op.ends_with('!')
+                {
+                    if ctx
+                        .local_types
+                        .get(target)
+                        .map(is_scalar_vector_type)
+                        .unwrap_or(false)
+                    {
+                        return false;
+                    }
+                }
+            }
+            items
+                .iter()
+                .all(|item| collect_loop_replacement_set_vector_slots(item, ctx, idx_name, out))
+        }
+        _ => true,
+    }
+}
+
+fn scalar_vector_set_target_slot(expr: &Expression, ctx: &Ctx<'_>) -> Option<usize> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(op), Expression::Word(target), ..] = &items[..] else {
+        return None;
+    };
+    if op != "set!" {
+        return None;
+    }
+    let slot = *ctx.locals.get(target)?;
+    if ctx
+        .local_types
+        .get(target)
+        .map(is_scalar_vector_type)
+        .unwrap_or(false)
+    {
+        Some(slot)
+    } else {
+        None
     }
 }
 
@@ -7875,6 +7971,61 @@ fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     Ok(format!("{xs}\n{start}\ncall $vec_slice_{}", elem.suffix()))
 }
 
+fn compile_generic_while_loop(
+    cond_node: &TypedExpression,
+    body_node: &TypedExpression,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
+    let cond = compile_expr(cond_node, ctx)?;
+    let (materialized_slots, materialize_once) = loop_materialize_once_plan(body_node, ctx);
+    let (hoisted_data_slots, hoist_data_pointers, next_tmp_i32) =
+        loop_hoisted_data_pointer_plan(body_node, ctx, ctx.tmp_i32);
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        extern_names: ctx.extern_names,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: materialized_slots,
+        hoisted_scalar_vec_data_slots: hoisted_data_slots,
+        definitely_materialized_top_level_scalar_names: ctx
+            .definitely_materialized_top_level_scalar_names,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
+        tmp_i32: next_tmp_i32,
+    };
+    let body_and_drop = compile_expr_discarding_result(body_node, &nested_ctx)?;
+
+    let loop_prelude = [materialize_once.as_str(), hoist_data_pointers.as_str()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !loop_prelude.is_empty() {
+        return Ok(format!(
+            "block\n\
+             {cond}\n\
+             i32.eqz\n\
+             br_if 0\n\
+             {loop_prelude}\n\
+             loop\n\
+               {body_and_drop}\n\
+               {cond}\n\
+               br_if 0\n\
+             end\n\
+             end\n\
+             i32.const 0"
+        ));
+    }
+
+    Ok(format!(
+        "block\n  loop\n    {cond}\n    i32.eqz\n    br_if 1\n    {body_and_drop}\n    br 0\n  end\nend\ni32.const 0"
+    ))
+}
+
 fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let cond_node = node
         .children
@@ -7987,54 +8138,107 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
             ));
         }
     }
-    let cond = compile_expr(cond_node, ctx)?;
-    let (materialized_slots, materialize_once) = loop_materialize_once_plan(body_node, ctx);
-    let (hoisted_data_slots, hoist_data_pointers, next_tmp_i32) =
-        loop_hoisted_data_pointer_plan(body_node, ctx, ctx.tmp_i32);
-    let nested_ctx = Ctx {
-        fn_sigs: ctx.fn_sigs,
-        fn_ids: ctx.fn_ids,
-        extern_names: ctx.extern_names,
-        lambda_ids: ctx.lambda_ids,
-        closure_defs: ctx.closure_defs,
-        lambda_bindings: ctx.lambda_bindings,
-        locals: ctx.locals.clone(),
-        local_types: ctx.local_types.clone(),
-        materialized_scalar_local_slots: materialized_slots,
-        hoisted_scalar_vec_data_slots: hoisted_data_slots,
-        definitely_materialized_top_level_scalar_names: ctx
-            .definitely_materialized_top_level_scalar_names,
-        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-        nonnegative_int_locals: ctx.nonnegative_int_locals,
-        tmp_i32: next_tmp_i32,
-    };
-    let body_and_drop = compile_expr_discarding_result(body_node, &nested_ctx)?;
-
-    let loop_prelude = [materialize_once.as_str(), hoist_data_pointers.as_str()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if !loop_prelude.is_empty() {
-        return Ok(format!(
-            "block\n\
-             {cond}\n\
-             i32.eqz\n\
-             br_if 0\n\
-             {loop_prelude}\n\
-             loop\n\
-               {body_and_drop}\n\
-               {cond}\n\
-               br_if 0\n\
-             end\n\
-             end\n\
-             i32.const 0"
-        ));
+    if !parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        if let Some((idx_name, bound, idx_slot)) =
+            extract_less_than_const_loop_bound(cond_node, ctx)
+        {
+            let mut replacement_set_slots = HashMap::new();
+            if body_has_only_final_positive_increment(body_node, &idx_name)
+                && collect_loop_replacement_set_vector_slots(
+                    &body_node.expr,
+                    ctx,
+                    &idx_name,
+                    &mut replacement_set_slots,
+                )
+                && !replacement_set_slots.is_empty()
+            {
+                let generic_loop = compile_generic_while_loop(cond_node, body_node, ctx)?;
+                let mut proven = ctx.proven_scalar_index_loads.clone();
+                let mut hoisted_data_slots = ctx.hoisted_scalar_vec_data_slots.clone();
+                let (materialized_slots, materialize_once) =
+                    loop_materialize_once_plan(body_node, ctx);
+                let guard_tmp = ctx.tmp_i32;
+                let mut next_tmp_i32 = ctx.tmp_i32 + 1;
+                let mut guard_parts = Vec::new();
+                let mut hoist_parts = Vec::new();
+                let mut sorted_slots: Vec<(String, usize)> =
+                    replacement_set_slots.into_iter().collect();
+                sorted_slots.sort_by(|a, b| a.0.cmp(&b.0));
+                for (xs_name, xs_slot) in sorted_slots {
+                    proven.insert((xs_name, idx_name.clone()));
+                    if !hoisted_data_slots.contains_key(&xs_slot) {
+                        let data_slot = next_tmp_i32;
+                        next_tmp_i32 += 1;
+                        hoisted_data_slots.insert(xs_slot, data_slot);
+                        hoist_parts.push(format!(
+                            "local.get {xs_slot}\n\
+                             i32.const 16\n\
+                             i32.add\n\
+                             i32.load\n\
+                             local.set {data_slot}"
+                        ));
+                    }
+                    guard_parts.push(format!(
+                        "local.get {xs_slot}\n\
+                         call $vec_len\n\
+                         i32.const {bound}\n\
+                         i32.lt_s\n\
+                         if\n\
+                           i32.const 1\n\
+                           local.set {guard_tmp}\n\
+                         end"
+                    ));
+                }
+                let nested_ctx = Ctx {
+                    fn_sigs: ctx.fn_sigs,
+                    fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
+                    lambda_ids: ctx.lambda_ids,
+                    closure_defs: ctx.closure_defs,
+                    lambda_bindings: ctx.lambda_bindings,
+                    locals: ctx.locals.clone(),
+                    local_types: ctx.local_types.clone(),
+                    materialized_scalar_local_slots: materialized_slots,
+                    hoisted_scalar_vec_data_slots: hoisted_data_slots,
+                    definitely_materialized_top_level_scalar_names: ctx
+                        .definitely_materialized_top_level_scalar_names,
+                    proven_scalar_index_loads: &proven,
+                    nonnegative_int_locals: ctx.nonnegative_int_locals,
+                    tmp_i32: next_tmp_i32,
+                };
+                let body_and_drop = compile_expr_discarding_result(body_node, &nested_ctx)?;
+                let loop_prelude = [materialize_once.as_str(), &hoist_parts.join("\n")]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return Ok(format!(
+                    "i32.const 0\n\
+                     local.set {guard_tmp}\n\
+                     {}\n\
+                     local.get {guard_tmp}\n\
+                     if (result i32)\n\
+                       {generic_loop}\n\
+                     else\n\
+                       {loop_prelude}\n\
+                       block\n\
+                         loop\n\
+                           local.get {idx_slot}\n\
+                           i32.const {bound}\n\
+                           i32.ge_s\n\
+                           br_if 1\n\
+                           {body_and_drop}\n\
+                           br 0\n\
+                         end\n\
+                       end\n\
+                       i32.const 0\n\
+                     end",
+                    guard_parts.join("\n")
+                ));
+            }
+        }
     }
-
-    Ok(format!(
-        "block\n  loop\n    {cond}\n    i32.eqz\n    br_if 1\n    {body_and_drop}\n    br 0\n  end\nend\ni32.const 0"
-    ))
+    compile_generic_while_loop(cond_node, body_node, ctx)
 }
 
 fn compile_fast_box_ctor(

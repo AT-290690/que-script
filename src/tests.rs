@@ -7203,6 +7203,8 @@ fn"#;
 
     #[test]
     fn test_wat_loop_get_keeps_checked_path_without_nonnegative_index_proof() {
+        #[cfg(feature = "runtime")]
+        let _lock = runtime_exec_lock().lock().unwrap();
         let expr = crate::parser::build(
             r#"(do
                     (let xs [1 2 3 4])
@@ -7634,6 +7636,95 @@ fn"#;
             !loop_wat.contains("call $vec_set_scalar_materialized_i32"),
             "stable counted replacement loop should not call scalar set helper inside the loop, got:\n{}",
             loop_wat
+        );
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_wat_constant_bound_replacement_loop_hoists_scalar_data_pointer_for_set() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let expr = crate::parser::build(
+            "(let bump! (lambda (xs)
+                (do
+                  (mut i 0)
+                  (while (< i 32)
+                    (do
+                      (set! xs i (+ (get xs i) 1))
+                      (alter! i (+ i 1))))
+                  xs)))
+             (bump! [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16
+                     17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32])",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let fn_start = wat
+            .find("(func $v_bump_bang_")
+            .expect("bump! function should exist");
+        let fn_end = wat[fn_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| fn_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let fn_wat = &wat[fn_start..fn_end];
+        let fast_start = fn_wat
+            .rfind("\n    else\n")
+            .expect("fast branch should exist");
+        let fast_wat = &fn_wat[fast_start..];
+        let loop_start = fast_wat
+            .find("loop\n    local.get 1")
+            .expect("constant-bound fast loop should exist");
+        let loop_wat = &fast_wat[loop_start..];
+
+        assert!(
+            fn_wat.contains("call $vec_len"),
+            "constant-bound fast path should guard vector length once, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            loop_wat.contains("i32.store"),
+            "constant-bound replacement set! should lower to a raw store, got:\n{}",
+            loop_wat
+        );
+        assert!(
+            !loop_wat.contains("call $vec_materialize_i32"),
+            "constant-bound replacement loop should not materialize inside the loop, got:\n{}",
+            loop_wat
+        );
+        assert!(
+            !loop_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "constant-bound replacement loop should not call scalar set helper inside the loop, got:\n{}",
+            loop_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_repeated_scalar_set_materializes_local_once_in_do_sequence() {
+        let expr = crate::parser::build(
+            "(let fill! (lambda (xs)
+                (do
+                  (set! xs 0 1)
+                  (set! xs 1 2)
+                  xs)))
+             fill!",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let fn_start = wat
+            .find("(func $v_fill_bang_")
+            .expect("fill! function should exist");
+        let fn_end = wat[fn_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| fn_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let fn_wat = &wat[fn_start..fn_end];
+
+        assert_eq!(
+            fn_wat.matches("call $vec_materialize_i32").count(),
+            1,
+            "repeated scalar set! on the same local should materialize once, got:\n{}",
+            fn_wat
         );
     }
 
