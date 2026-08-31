@@ -37,6 +37,7 @@ pub struct ExplainCompiledFunction {
     pub wat_name: String,
     pub metrics: ExplainMetrics,
     pub calls: Vec<ExplainCall>,
+    pub guarded_fallback_calls: Vec<ExplainCall>,
 }
 
 #[derive(Debug, Serialize)]
@@ -312,6 +313,15 @@ pub fn render_text(report: &ExplainReport) -> String {
                     .join(", ");
                 lines.push(format!("    calls: {}", calls));
             }
+            if !function.guarded_fallback_calls.is_empty() {
+                let calls = function
+                    .guarded_fallback_calls
+                    .iter()
+                    .map(|call| format!("{} x{}", call.name, call.count))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.push(format!("    guarded fallback calls: {}", calls));
+            }
         }
     }
 
@@ -519,6 +529,9 @@ fn collect_compiled_functions(wat: &str) -> Vec<ExplainCompiledFunction> {
             wat_name: function.wat_name,
             metrics: collect_wat_metrics_from_slice(&function.body),
             calls: collect_call_counts(&function.body),
+            guarded_fallback_calls: extract_guarded_fallback_region(&function.body)
+                .map(|fallback| collect_call_counts(&fallback))
+                .unwrap_or_default(),
         })
         .collect()
 }
@@ -610,6 +623,50 @@ fn collect_call_counts(wat: &str) -> Vec<ExplainCall> {
     calls
 }
 
+fn extract_guarded_fallback_region(wat: &str) -> Option<String> {
+    let lines = wat.lines().collect::<Vec<_>>();
+    let mut guard_candidates = Vec::new();
+    for window in lines.windows(2) {
+        if window[0].trim() == "i32.const 0" {
+            let trimmed = window[1].trim();
+            if let Some(local) = trimmed.strip_prefix("local.set ") {
+                guard_candidates.push(local);
+            }
+        }
+    }
+    for guard_local in guard_candidates {
+        let local_get = format!("local.get {guard_local}");
+        let mut if_idx = None;
+        for (i, window) in lines.windows(2).enumerate() {
+            if window[0].trim() == local_get && window[1].trim_start().starts_with("if (result") {
+                if_idx = Some(i + 1);
+                break;
+            }
+        }
+        let Some(if_idx) = if_idx else {
+            continue;
+        };
+        let mut depth = 1i32;
+        let mut fallback = Vec::new();
+        for line in lines.iter().skip(if_idx + 1) {
+            let trimmed = line.trim();
+            if trimmed == "else" && depth == 1 {
+                return Some(fallback.join("\n"));
+            }
+            if trimmed == "if" || trimmed.starts_with("if ") {
+                depth += 1;
+            } else if trimmed == "end" {
+                depth -= 1;
+                if depth <= 0 {
+                    break;
+                }
+            }
+            fallback.push(*line);
+        }
+    }
+    None
+}
+
 fn explain_call_name_and_kind(target: &str) -> (String, String) {
     if let Some(user_name) = target.strip_prefix("v_") {
         return (
@@ -658,6 +715,7 @@ fn function_has_interesting_explain_details(function: &ExplainCompiledFunction) 
         || function.metrics.dynamic_apply_calls > 0
         || function.metrics.checked_vector_gets > 0
         || function.metrics.direct_user_function_calls > 0
+        || !function.guarded_fallback_calls.is_empty()
 }
 
 fn collect_optimization_targets(
@@ -695,33 +753,35 @@ fn collect_optimization_targets(
         );
 
         for call in &function.calls {
+            let fallback_count = call_count_by_name(&function.guarded_fallback_calls, &call.name);
+            let hot_count = call.count.saturating_sub(fallback_count);
             match call.name.as_str() {
                 "vec_set_scalar_materialized_i32" => push_optimization_target(
                     &mut targets,
                     function,
                     "scalar vector set helper",
-                    call.count,
-                    "Replacement writes still use a runtime set helper or fallback here; a raw-store proof could help.",
+                    hot_count,
+                    "Replacement writes still use a runtime set helper on the main path here; a raw-store proof could help.",
                 ),
                 "vec_materialize_i32" => push_optimization_target(
                     &mut targets,
                     function,
                     "vector materialization",
-                    call.count,
+                    hot_count,
                     "Vector representation is being normalized before access; proving stable materialized vectors could remove this.",
                 ),
                 "vec_get_i32" => push_optimization_target(
                     &mut targets,
                     function,
                     "checked vector get helper",
-                    call.count,
+                    hot_count,
                     "Runtime vector reads remain here; prove bounds or use simpler counted access patterns.",
                 ),
                 "vec_push_i32" | "vec_push_scalar_i32" => push_optimization_target(
                     &mut targets,
                     function,
                     "vector push helper",
-                    call.count,
+                    hot_count,
                     "Append growth remains here; builder/fill lowering may help when final length is predictable.",
                 ),
                 "vec_new_i32" => push_optimization_target(
@@ -735,7 +795,7 @@ fn collect_optimization_targets(
                     &mut targets,
                     function,
                     "reference counting",
-                    call.count,
+                    hot_count,
                     "Reference retain/release traffic is visible here; ownership transfer or scalarization may help.",
                 ),
                 _ => {}
@@ -769,6 +829,14 @@ fn push_optimization_target(
         count,
         note: note.to_string(),
     });
+}
+
+fn call_count_by_name(calls: &[ExplainCall], name: &str) -> usize {
+    calls
+        .iter()
+        .filter(|call| call.name == name)
+        .map(|call| call.count)
+        .sum()
 }
 
 fn optimization_target_score(target: &ExplainOptimizationTarget) -> usize {

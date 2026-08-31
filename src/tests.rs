@@ -6668,14 +6668,15 @@ fn"#;
             main_wat
         );
         assert!(
-            main_wat.contains("call $vec_set_scalar_materialized_i32"),
-            "scalar vector literal should fill exact-size storage through materialized scalar set, got:\n{}",
+            main_wat.matches("i32.store").count() >= 3,
+            "scalar vector literal should fill exact-size storage through raw stores, got:\n{}",
             main_wat
         );
         assert!(
-            !main_wat.contains("call $vec_push_scalar_i32")
+            !main_wat.contains("call $vec_set_scalar_materialized_i32")
+                && !main_wat.contains("call $vec_push_scalar_i32")
                 && !main_wat.contains("call $vec_push_i32"),
-            "scalar vector literal should avoid generic push runtimes, got:\n{}",
+            "scalar vector literal should avoid set/push helper runtimes, got:\n{}",
             main_wat
         );
     }
@@ -6704,14 +6705,15 @@ fn"#;
             clone_wat
         );
         assert!(
-            clone_wat.contains("call $vec_set_scalar_materialized_i32"),
-            "scalar clone literal should fill exact-size storage through materialized scalar set, got:\n{}",
+            clone_wat.matches("i32.store").count() >= 3,
+            "scalar clone literal should fill exact-size storage through raw stores, got:\n{}",
             clone_wat
         );
         assert!(
-            !clone_wat.contains("call $vec_push_scalar_i32")
+            !clone_wat.contains("call $vec_set_scalar_materialized_i32")
+                && !clone_wat.contains("call $vec_push_scalar_i32")
                 && !clone_wat.contains("call $vec_push_i32"),
-            "scalar clone literal should avoid push runtimes, got:\n{}",
+            "scalar clone literal should avoid set/push helper runtimes, got:\n{}",
             clone_wat
         );
     }
@@ -7699,6 +7701,54 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_inclusive_constant_bound_replacement_loop_hoists_scalar_data_pointer_for_set() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let expr = crate::parser::build(
+            "(do
+              (let fill (lambda ()
+                (do
+                  (let xs [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0])
+                  (mut i 0)
+                  (while (<= i 32)
+                    (do
+                      (set! xs i 1)
+                      (alter! i (+ i 1))))
+                  xs)))
+              (fill))",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let fn_start = wat
+            .find("(func $v_fill")
+            .expect("fill function should exist");
+        let fn_wat = &wat[fn_start..];
+        let fast_start = fn_wat
+            .rfind("\n    else\n")
+            .expect("guarded fast branch should exist");
+        let fast_wat = &fn_wat[fast_start..];
+        let loop_start = fast_wat.find("loop").expect("loop should exist");
+        let loop_wat = &fast_wat[loop_start..];
+
+        assert!(
+            loop_wat.contains("i32.store"),
+            "inclusive constant-bound replacement set! should lower to a raw store, got:\n{}",
+            loop_wat
+        );
+        assert!(
+            !loop_wat.contains("call $vec_materialize_i32"),
+            "inclusive constant-bound replacement loop should not materialize inside the loop, got:\n{}",
+            loop_wat
+        );
+        assert!(
+            !loop_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "inclusive constant-bound replacement loop should not call scalar set helper inside the loop, got:\n{}",
+            loop_wat
+        );
+    }
+
+    #[test]
     fn test_wat_repeated_scalar_set_materializes_local_once_in_do_sequence() {
         let expr = crate::parser::build(
             "(let fill! (lambda (xs)
@@ -7764,6 +7814,12 @@ fn"#;
         assert!(
             fast_wat.contains("i32.store"),
             "guarded param fast path should raw-store scalar replacements, got:\n{}",
+            fast_wat
+        );
+        assert_eq!(
+            fast_wat.matches("call $vec_materialize_i32").count(),
+            1,
+            "guarded param fast path should materialize once before raw stores, got:\n{}",
             fast_wat
         );
         assert!(

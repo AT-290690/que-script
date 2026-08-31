@@ -63,6 +63,7 @@ struct Ctx<'a> {
     lambda_ids: &'a HashMap<String, i32>,
     closure_defs: &'a HashMap<String, ClosureDef>,
     lambda_bindings: &'a HashMap<String, TypedExpression>,
+    current_function: Option<&'a str>,
     locals: HashMap<String, usize>,
     local_types: HashMap<String, Type>,
     materialized_scalar_local_slots: HashSet<usize>,
@@ -6255,6 +6256,7 @@ fn compile_do(
                                 lambda_ids: ctx.lambda_ids,
                                 closure_defs: ctx.closure_defs,
                                 lambda_bindings: &scoped_lambda_bindings,
+                                current_function: ctx.current_function,
                                 locals: ctx.locals.clone(),
                                 local_types: ctx.local_types.clone(),
                                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
@@ -6343,6 +6345,7 @@ fn compile_do(
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: &scoped_lambda_bindings,
+                current_function: ctx.current_function,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
@@ -6420,6 +6423,7 @@ fn compile_do(
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: &scoped_lambda_bindings,
+                current_function: ctx.current_function,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
@@ -6476,6 +6480,7 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             lambda_ids: ctx.lambda_ids,
             closure_defs: ctx.closure_defs,
             lambda_bindings: ctx.lambda_bindings,
+            current_function: ctx.current_function,
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -6519,12 +6524,23 @@ fn compile_scalar_vector_literal_direct(
 ) -> Result<String, String> {
     let vec_tmp = ctx.tmp_i32;
     let val_tmp = ctx.tmp_i32 + 1;
+    let data_tmp = ctx.tmp_i32 + 2;
     let mut out = Vec::new();
     out.push(format!(
-        "i32.const {}\ni32.const 0\ncall $vec_new_{}\nlocal.set {}",
+        "i32.const {}\n\
+         i32.const 0\n\
+         call $vec_new_{}\n\
+         local.set {}\n\
+         local.get {}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         local.set {}",
         args.len(),
         elem_kind.suffix(),
-        vec_tmp
+        vec_tmp,
+        vec_tmp,
+        data_tmp
     ));
     for (idx, arg) in args.iter().enumerate() {
         let nested_ctx = Ctx {
@@ -6534,6 +6550,7 @@ fn compile_scalar_vector_literal_direct(
             lambda_ids: ctx.lambda_ids,
             closure_defs: ctx.closure_defs,
             lambda_bindings: ctx.lambda_bindings,
+            current_function: ctx.current_function,
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -6543,16 +6560,20 @@ fn compile_scalar_vector_literal_direct(
                 .definitely_materialized_top_level_scalar_names,
             proven_scalar_index_loads: ctx.proven_scalar_index_loads,
             nonnegative_int_locals: ctx.nonnegative_int_locals,
-            tmp_i32: ctx.tmp_i32 + 2,
+            tmp_i32: ctx.tmp_i32 + 3,
         };
         let value = compile_expr(arg, &nested_ctx)?;
+        let offset = idx.saturating_mul(4);
+        let offset_code = if offset == 0 {
+            String::new()
+        } else {
+            format!("\n             i32.const {offset}\n             i32.add")
+        };
         out.push(format!(
             "{value}\nlocal.set {val_tmp}\n\
-             local.get {vec_tmp}\n\
-             i32.const {idx}\n\
+             local.get {data_tmp}{offset_code}\n\
              local.get {val_tmp}\n\
-             call $vec_set_scalar_materialized_i32\n\
-             drop"
+             i32.store"
         ));
     }
     out.push(format!("local.get {vec_tmp}"));
@@ -6583,6 +6604,7 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             lambda_ids: ctx.lambda_ids,
             closure_defs: ctx.closure_defs,
             lambda_bindings: ctx.lambda_bindings,
+            current_function: ctx.current_function,
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -6673,6 +6695,7 @@ fn compile_trusted_typed_vector_literal(
             lambda_ids: ctx.lambda_ids,
             closure_defs: ctx.closure_defs,
             lambda_bindings: ctx.lambda_bindings,
+            current_function: ctx.current_function,
             locals: ctx.locals.clone(),
             local_types: ctx.local_types.clone(),
             materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -6722,6 +6745,7 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -6784,6 +6808,7 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
+                current_function: ctx.current_function,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -6849,6 +6874,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
+                current_function: ctx.current_function,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -7257,6 +7283,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -7419,6 +7446,7 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -7710,6 +7738,32 @@ fn extract_less_than_const_loop_bound(
     Some((idx_name.clone(), *bound, idx_slot))
 }
 
+fn extract_const_exclusive_loop_bound(
+    cond_node: &TypedExpression,
+    ctx: &Ctx<'_>,
+) -> Option<(String, i32, usize)> {
+    if let Some(bound) = extract_less_than_const_loop_bound(cond_node, ctx) {
+        return Some(bound);
+    }
+    let Expression::Apply(cond_items) = &cond_node.expr else {
+        return None;
+    };
+    if !matches!(cond_items.first(), Some(Expression::Word(w)) if w == "<=") {
+        return None;
+    }
+    let (Some(Expression::Word(idx_name)), Some(Expression::Int(bound))) =
+        (cond_items.get(1), cond_items.get(2))
+    else {
+        return None;
+    };
+    if *bound < 0 || !ctx.nonnegative_int_locals.contains(idx_name) {
+        return None;
+    }
+    let exclusive = bound.checked_add(1)?;
+    let idx_slot = *ctx.locals.get(idx_name)?;
+    Some((idx_name.clone(), exclusive, idx_slot))
+}
+
 fn body_has_only_final_positive_increment(body_node: &TypedExpression, idx_name: &str) -> bool {
     let Expression::Apply(items) = &body_node.expr else {
         return false;
@@ -7764,7 +7818,11 @@ fn expr_mutates_scalar_name(expr: &Expression, name: &str) -> bool {
     }
 }
 
-fn expr_mutates_vector_name(expr: &Expression, name: &str) -> bool {
+fn expr_mutates_vector_name_except_self(
+    expr: &Expression,
+    name: &str,
+    current_function: Option<&str>,
+) -> bool {
     match expr {
         Expression::Apply(items) => {
             if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
@@ -7775,13 +7833,18 @@ fn expr_mutates_vector_name(expr: &Expression, name: &str) -> bool {
                 {
                     return true;
                 }
+                if current_function.is_some_and(|self_name| op == self_name) && target == name {
+                    return items.iter().any(|item| {
+                        expr_mutates_vector_name_except_self(item, name, current_function)
+                    });
+                }
                 if op.ends_with('!') && target == name {
                     return true;
                 }
             }
             items
                 .iter()
-                .any(|item| expr_mutates_vector_name(item, name))
+                .any(|item| expr_mutates_vector_name_except_self(item, name, current_function))
         }
         _ => false,
     }
@@ -7791,6 +7854,7 @@ fn vector_mutations_are_loop_replacement_sets(
     expr: &Expression,
     vector_name: &str,
     idx_name: &str,
+    current_function: Option<&str>,
 ) -> bool {
     match expr {
         Expression::Apply(items) => {
@@ -7807,8 +7871,19 @@ fn vector_mutations_are_loop_replacement_sets(
                                     item,
                                     vector_name,
                                     idx_name,
+                                    current_function,
                                 )
                             });
+                    }
+                    if current_function.is_some_and(|self_name| op == self_name) {
+                        return items.iter().all(|item| {
+                            vector_mutations_are_loop_replacement_sets(
+                                item,
+                                vector_name,
+                                idx_name,
+                                current_function,
+                            )
+                        });
                     }
                     if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
                         || op.ends_with('!')
@@ -7817,9 +7892,14 @@ fn vector_mutations_are_loop_replacement_sets(
                     }
                 }
             }
-            items
-                .iter()
-                .all(|item| vector_mutations_are_loop_replacement_sets(item, vector_name, idx_name))
+            items.iter().all(|item| {
+                vector_mutations_are_loop_replacement_sets(
+                    item,
+                    vector_name,
+                    idx_name,
+                    current_function,
+                )
+            })
         }
         _ => true,
     }
@@ -7855,6 +7935,14 @@ fn collect_loop_replacement_set_vector_slots(
                 } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
                     || op.ends_with('!')
                 {
+                    if ctx
+                        .current_function
+                        .is_some_and(|self_name| op == self_name)
+                    {
+                        return items.iter().all(|item| {
+                            collect_loop_replacement_set_vector_slots(item, ctx, idx_name, out)
+                        });
+                    }
                     if ctx
                         .local_types
                         .get(target)
@@ -7999,6 +8087,36 @@ fn compile_guarded_scalar_param_replacement_body(
             .and_modify(|existing| *existing = (*existing).max(*min_len))
             .or_insert(*min_len);
     }
+    let guard_tmp = ctx.tmp_i32;
+    let mut next_tmp_i32 = ctx.tmp_i32 + 1;
+    let mut hoisted_data_slots = ctx.hoisted_scalar_vec_data_slots.clone();
+    let mut materialized_slots = ctx.materialized_scalar_local_slots.clone();
+    let mut sorted_requirements = requirements.iter().collect::<Vec<_>>();
+    sorted_requirements.sort_by_key(|(slot, _)| **slot);
+    let fast_prelude = sorted_requirements
+        .iter()
+        .filter_map(|(slot, _)| {
+            materialized_slots.insert(**slot);
+            if hoisted_data_slots.contains_key(*slot) {
+                return None;
+            }
+            let data_slot = next_tmp_i32;
+            next_tmp_i32 += 1;
+            hoisted_data_slots.insert(**slot, data_slot);
+            Some(format!(
+                "local.get {slot}\n\
+                 call $vec_materialize_i32\n\
+                 drop\n\
+                 local.get {slot}\n\
+                 i32.const 16\n\
+                 i32.add\n\
+                 i32.load\n\
+                 local.set {data_slot}",
+                slot = **slot
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let fast_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
@@ -8006,16 +8124,17 @@ fn compile_guarded_scalar_param_replacement_body(
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
-        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
-        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
+        materialized_scalar_local_slots: materialized_slots,
+        hoisted_scalar_vec_data_slots: hoisted_data_slots,
         proven_scalar_vec_min_lengths: proven_min_lengths,
         definitely_materialized_top_level_scalar_names: ctx
             .definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: ctx.proven_scalar_index_loads,
         nonnegative_int_locals: ctx.nonnegative_int_locals,
-        tmp_i32: ctx.tmp_i32,
+        tmp_i32: next_tmp_i32,
     };
     let fast_code = compile_expr(body, &fast_ctx)?;
     let result_ty = body
@@ -8023,7 +8142,6 @@ fn compile_guarded_scalar_param_replacement_body(
         .as_ref()
         .ok_or_else(|| "guarded scalar replacement body missing type".to_string())
         .and_then(wasm_val_type)?;
-    let guard_tmp = ctx.tmp_i32;
     let mut sorted_requirements = requirements.into_iter().collect::<Vec<_>>();
     sorted_requirements.sort_by_key(|(slot, _)| *slot);
     let guard_code = sorted_requirements
@@ -8051,6 +8169,7 @@ fn compile_guarded_scalar_param_replacement_body(
          if (result {result_ty})\n\
            {fallback_code}\n\
          else\n\
+           {fast_prelude}\n\
            {fast_code}\n\
          end"
     )))
@@ -8162,9 +8281,9 @@ fn loop_hoisted_data_pointer_plan(
             .iter()
             .filter_map(|(name, local_slot)| (local_slot == slot).then_some(name));
         names.clone().next().is_some_and(|_| {
-            names
-                .into_iter()
-                .all(|name| !expr_mutates_vector_name(&body.expr, name))
+            names.into_iter().all(|name| {
+                !expr_mutates_vector_name_except_self(&body.expr, name, ctx.current_function)
+            })
         })
     });
 
@@ -8255,6 +8374,7 @@ fn compile_generic_while_loop(
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: materialized_slots,
@@ -8307,11 +8427,18 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
     if let Some((idx_name, xs_name, idx_slot, xs_slot)) =
         extract_less_than_length_loop_bound(cond_node, ctx)
     {
-        let vector_mutations_are_replacement_sets =
-            vector_mutations_are_loop_replacement_sets(&body_node.expr, &xs_name, &idx_name);
+        let vector_mutations_are_replacement_sets = vector_mutations_are_loop_replacement_sets(
+            &body_node.expr,
+            &xs_name,
+            &idx_name,
+            ctx.current_function,
+        );
         if body_has_only_final_positive_increment(body_node, &idx_name)
-            && (!expr_mutates_vector_name(&body_node.expr, &xs_name)
-                || vector_mutations_are_replacement_sets)
+            && (!expr_mutates_vector_name_except_self(
+                &body_node.expr,
+                &xs_name,
+                ctx.current_function,
+            ) || vector_mutations_are_replacement_sets)
         {
             let mut proven = ctx.proven_scalar_index_loads.clone();
             proven.insert((xs_name.clone(), idx_name));
@@ -8349,6 +8476,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
+                current_function: ctx.current_function,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: materialized_slots,
@@ -8410,7 +8538,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
     }
     if !parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
         if let Some((idx_name, bound, idx_slot)) =
-            extract_less_than_const_loop_bound(cond_node, ctx)
+            extract_const_exclusive_loop_bound(cond_node, ctx)
         {
             let mut replacement_set_slots = HashMap::new();
             if body_has_only_final_positive_increment(body_node, &idx_name)
@@ -8466,6 +8594,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
                     lambda_ids: ctx.lambda_ids,
                     closure_defs: ctx.closure_defs,
                     lambda_bindings: ctx.lambda_bindings,
+                    current_function: ctx.current_function,
                     locals: ctx.locals.clone(),
                     local_types: ctx.local_types.clone(),
                     materialized_scalar_local_slots: materialized_slots,
@@ -8531,6 +8660,7 @@ fn compile_fast_box_ctor(
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -8593,6 +8723,7 @@ fn compile_fast_cell_set(
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -8656,6 +8787,7 @@ fn compile_fast_truthy(
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -8769,6 +8901,7 @@ fn compile_extern_direct_call(
         lambda_ids: ctx.lambda_ids,
         closure_defs: ctx.closure_defs,
         lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
         locals: ctx.locals.clone(),
         local_types: ctx.local_types.clone(),
         materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -8851,6 +8984,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                     lambda_ids: ctx.lambda_ids,
                     closure_defs: ctx.closure_defs,
                     lambda_bindings: ctx.lambda_bindings,
+                    current_function: ctx.current_function,
                     locals: ctx.locals.clone(),
                     local_types: ctx.local_types.clone(),
                     materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -8955,6 +9089,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
+                current_function: ctx.current_function,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -9088,6 +9223,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                 lambda_ids: ctx.lambda_ids,
                 closure_defs: ctx.closure_defs,
                 lambda_bindings: ctx.lambda_bindings,
+                current_function: ctx.current_function,
                 locals: ctx.locals.clone(),
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
@@ -9859,6 +9995,7 @@ fn compile_lambda_func(
         lambda_ids,
         closure_defs,
         lambda_bindings: &scoped_lambda_bindings,
+        current_function: Some(name),
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
@@ -10032,6 +10169,7 @@ fn compile_closure_func(
         lambda_ids,
         closure_defs,
         lambda_bindings: &scoped_lambda_bindings,
+        current_function: Some(name),
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
@@ -10238,6 +10376,7 @@ fn compile_value_func(
         lambda_ids,
         closure_defs,
         lambda_bindings: &scoped_lambda_bindings,
+        current_function: Some(name),
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
@@ -10351,6 +10490,7 @@ fn compile_partial_helper_func(
         lambda_ids,
         closure_defs,
         lambda_bindings,
+        current_function: None,
         locals,
         local_types,
         materialized_scalar_local_slots: HashSet::new(),
@@ -10950,6 +11090,7 @@ fn compile_program_to_wat_build_typed_with_opts(
         lambda_ids: &lambda_ids,
         closure_defs: &closure_defs,
         lambda_bindings: &lambda_bindings,
+        current_function: None,
         locals: main_locals,
         local_types: main_local_types,
         materialized_scalar_local_slots: HashSet::new(),
