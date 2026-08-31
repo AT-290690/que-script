@@ -225,7 +225,7 @@ impl ServerState {
             Err(message) => {
                 return DocAnalysis {
                     text: text.to_string(),
-                    diagnostics: make_error_diagnostic(text, message, None),
+                    diagnostics: make_error_diagnostic(text, message, None, None),
                     symbol_types: HashMap::new(),
                     let_binding_types: HashMap::new(),
                     let_binding_effects: HashMap::new(),
@@ -1213,7 +1213,7 @@ fn analyze_document_text(
             match que::parser::merge_std_and_program(&repaired, lib_defs) {
                 Ok(expr) => expr,
                 Err(_) => {
-                    diagnostics.extend(make_error_diagnostic(text, primary_err, None));
+                    diagnostics.extend(make_error_diagnostic(text, primary_err, None, None));
                     return DocAnalysis {
                         text: text.to_string(),
                         diagnostics,
@@ -1256,6 +1256,7 @@ fn analyze_document_text(
                 text,
                 message_with_suggestions,
                 err.scope.as_ref(),
+                err.snippet.as_deref(),
             ));
         }
     }
@@ -1319,7 +1320,7 @@ fn analyze_document_text_safe(
             );
             DocAnalysis {
                 text: text.to_string(),
-                diagnostics: make_error_diagnostic(text, message, None),
+                diagnostics: make_error_diagnostic(text, message, None, None),
                 symbol_types: HashMap::new(),
                 let_binding_types: HashMap::new(),
                 let_binding_effects: HashMap::new(),
@@ -1558,9 +1559,10 @@ fn make_error_diagnostic(
     text: &str,
     message: String,
     scope: Option<&InferErrorScope>,
+    snippet: Option<&str>,
 ) -> Vec<Diagnostic> {
     let normalized_message = native_core::normalize_diagnostic_message(&message);
-    let inferred_ranges = infer_error_ranges(text, &message, scope);
+    let inferred_ranges = infer_error_ranges(text, &message, scope, snippet);
     let display_message = if !inferred_ranges.is_empty() {
         diagnostic_summary_without_snippet(&normalized_message)
     } else {
@@ -1589,8 +1591,13 @@ fn diagnostic_summary_without_snippet(message: &str) -> String {
     native_core::diagnostic_summary_without_snippet(message)
 }
 
-fn infer_error_ranges(text: &str, message: &str, scope: Option<&InferErrorScope>) -> Vec<Range> {
-    native_core::infer_error_ranges(text, message, scope)
+fn infer_error_ranges(
+    text: &str,
+    message: &str,
+    scope: Option<&InferErrorScope>,
+    snippet: Option<&str>,
+) -> Vec<Range> {
+    native_core::infer_error_ranges(text, message, scope, snippet)
         .into_iter()
         .map(from_core_range)
         .collect()

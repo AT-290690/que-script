@@ -32,6 +32,7 @@ pub fn check_with_error_info(source: &str) -> Result<(Type, TypedExpression), In
     let expr = build(source).map_err(|message| InferErrorInfo {
         message,
         scope: None,
+        snippet: None,
         partial_typed_ast: None,
     })?;
     infer::infer_with_builtins_typed_lsp(&expr, core_environment(), 1)

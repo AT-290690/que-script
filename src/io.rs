@@ -2904,7 +2904,7 @@ fn push_location_lines(
         return;
     }
 
-    let ranges = infer_error_ranges(source_text, message, scope);
+    let ranges = infer_error_ranges(source_text, message, scope, None);
     if ranges.is_empty() {
         out.push("location: <unresolved>".to_string());
         return;
@@ -3816,6 +3816,7 @@ pub fn run_native_shell() -> Result<(), String> {
                     Err(InferErrorInfo {
                         message,
                         scope,
+                        snippet: _,
                         partial_typed_ast,
                     }) => {
                         if debug_mode.is_enabled() {
@@ -3849,6 +3850,7 @@ pub fn run_native_shell() -> Result<(), String> {
                     Err(InferErrorInfo {
                         message,
                         scope,
+                        snippet: _,
                         partial_typed_ast,
                     }) => {
                         if debug_mode.is_enabled() {
@@ -3898,6 +3900,7 @@ pub fn run_native_shell() -> Result<(), String> {
                         Err(InferErrorInfo {
                             message,
                             scope,
+                            snippet: _,
                             partial_typed_ast,
                         }) => {
                             return Err(build_debug_error_report(
@@ -3949,6 +3952,7 @@ pub fn run_native_shell() -> Result<(), String> {
             Err(InferErrorInfo {
                 message,
                 scope,
+                snippet: _,
                 partial_typed_ast,
             }) => {
                 return Err(build_debug_error_report(

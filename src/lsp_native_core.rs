@@ -1034,14 +1034,20 @@ pub fn infer_error_ranges(
     text: &str,
     message: &str,
     scope: Option<&InferErrorScope>,
+    snippet: Option<&str>,
 ) -> Vec<CoreRange> {
+    if let Some(range) = extract_parse_error_range(text, message) {
+        return vec![range];
+    }
+
     if message.contains("Char should be of length 1") {
         if let Some(range) = find_invalid_char_literal_range(text) {
             return vec![range];
         }
     }
 
-    if let Some(snippet) = extract_error_snippet(message) {
+    let fallback_snippet = extract_error_snippet(message);
+    if let Some(snippet) = snippet.or(fallback_snippet.as_deref()) {
         let mut ranges = find_snippet_ranges(text, &snippet);
         if ranges.is_empty() {
             ranges = find_call_prefix_ranges(text, &snippet);
@@ -1101,7 +1107,51 @@ pub fn infer_error_ranges(
 }
 
 pub fn infer_error_range(text: &str, message: &str) -> Option<CoreRange> {
-    infer_error_ranges(text, message, None).into_iter().next()
+    infer_error_ranges(text, message, None, None)
+        .into_iter()
+        .next()
+}
+
+fn extract_parse_error_range(text: &str, message: &str) -> Option<CoreRange> {
+    let (line1, col1) = extract_line_col_after_prefix(message, "parse.found: '")
+        .or_else(|| extract_line_col_after_prefix(message, "parse.unclosed: '"))
+        .or_else(|| extract_line_col_after_prefix(message, "parse.unclosed_string_literal: opened at "))
+        .or_else(|| extract_line_col_after_prefix(message, "parse.unclosed_char_literal: opened at "))?;
+    line_col_to_single_char_range(text, line1, col1)
+}
+
+fn extract_line_col_after_prefix(message: &str, prefix: &str) -> Option<(usize, usize)> {
+    for line in message.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            let at_idx = rest.rfind(" at ")?;
+            let coords = &rest[at_idx + 4..];
+            let (line_s, col_s) = coords.split_once(':')?;
+            let line_no = line_s.trim().parse::<usize>().ok()?;
+            let col_no = col_s.trim().parse::<usize>().ok()?;
+            return Some((line_no, col_no));
+        }
+    }
+    None
+}
+
+fn line_col_to_single_char_range(text: &str, line1: usize, col1: usize) -> Option<CoreRange> {
+    if line1 == 0 || col1 == 0 {
+        return None;
+    }
+    let start = CorePosition {
+        line: (line1 - 1) as u32,
+        character: (col1 - 1) as u32,
+    };
+    let start_offset = position_to_byte_offset(text, start)?;
+    let end_offset = if let Some(ch) = text.get(start_offset..)?.chars().next() {
+        start_offset + ch.len_utf8()
+    } else {
+        start_offset
+    };
+    Some(CoreRange {
+        start,
+        end: byte_offset_to_position(text, end_offset),
+    })
 }
 
 pub fn extract_error_snippet(message: &str) -> Option<String> {

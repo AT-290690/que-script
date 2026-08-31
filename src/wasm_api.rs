@@ -185,7 +185,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             match parser::merge_std_and_program(&repaired, core.std_defs.clone()) {
                 Ok(expr) => expr,
                 Err(_) => {
-                    diagnostics.extend(make_error_diagnostic(text, primary_err, None));
+                    diagnostics.extend(make_error_diagnostic(text, primary_err, None, None));
                     return DocAnalysis {
                         diagnostics,
                         symbol_types: HashMap::new(),
@@ -242,6 +242,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                 text,
                 message_with_suggestions,
                 err.scope.as_ref(),
+                err.snippet.as_deref(),
             ));
         }
     }
@@ -664,9 +665,10 @@ fn make_error_diagnostic(
     text: &str,
     message: String,
     scope: Option<&InferErrorScope>,
+    snippet: Option<&str>,
 ) -> Vec<JsonDiagnostic> {
     let normalized_message = native_core::normalize_diagnostic_message(&message);
-    let inferred_ranges = infer_error_ranges(text, &message, scope);
+    let inferred_ranges = infer_error_ranges(text, &message, scope, snippet);
     let display_message = if !inferred_ranges.is_empty() {
         diagnostic_summary_without_snippet(&normalized_message)
     } else {
@@ -696,8 +698,9 @@ fn infer_error_ranges(
     text: &str,
     message: &str,
     scope: Option<&InferErrorScope>,
+    snippet: Option<&str>,
 ) -> Vec<TextRange> {
-    native_core::infer_error_ranges(text, message, scope)
+    native_core::infer_error_ranges(text, message, scope, snippet)
         .into_iter()
         .map(from_core_range)
         .collect()
@@ -768,7 +771,7 @@ fn format_basic_debug_error_report(
         "debug.location_explainer: location[i] ranges are in the original source file (not desugared), 1-based line:column; i=0 is the primary match.".to_string()
     );
 
-    let ranges = infer_error_ranges(source_text, message, scope);
+    let ranges = infer_error_ranges(source_text, message, scope, None);
     if ranges.is_empty() {
         out.push("location: <unresolved>".to_string());
     } else {

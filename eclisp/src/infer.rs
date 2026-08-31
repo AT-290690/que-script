@@ -36,6 +36,7 @@ pub struct InferErrorScope {
 pub struct InferErrorInfo {
     pub message: String,
     pub scope: Option<InferErrorScope>,
+    pub snippet: Option<String>,
     pub partial_typed_ast: Option<TypedExpression>,
 }
 
@@ -1736,6 +1737,15 @@ fn with_src(message: String, src: &TypeError) -> String {
     }
 }
 
+fn src_snippet(src: &TypeError) -> Option<String> {
+    let snippet = src_to_pretty(src);
+    if snippet.trim().is_empty() {
+        None
+    } else {
+        Some(snippet)
+    }
+}
+
 fn mismatch_shape_phrase(expected: &Type, actual: &Type) -> Option<String> {
     match (expected, actual) {
         (Type::List(_), Type::Tuple(_)) => Some(format!(
@@ -1873,6 +1883,7 @@ fn with_variant(src: &TypeError, variant: TypeErrorVariant) -> TypeError {
 pub struct SolveError {
     pub message: String,
     pub scope: Option<InferErrorScope>,
+    pub snippet: Option<String>,
 }
 
 pub struct InferenceContext {
@@ -2721,6 +2732,7 @@ pub fn solve_constraints_list(
                     return Err(SolveError {
                         message: with_src(e, &src),
                         scope: src.scope.clone(),
+                        snippet: src_snippet(&src),
                     });
                 }
             }
@@ -2743,6 +2755,7 @@ pub fn solve_constraints_list(
                             &src,
                         ),
                         scope: src.scope.clone(),
+                        snippet: src_snippet(&src),
                     });
                 }
                 for (field_idx, (ai, bi)) in
@@ -2760,6 +2773,7 @@ pub fn solve_constraints_list(
                 return Err(SolveError {
                     message: with_src(format_type_mismatch(&a2, &b2, &src), &src),
                     scope: src.scope.clone(),
+                    snippet: src_snippet(&src),
                 });
             }
         }
@@ -3454,6 +3468,7 @@ fn infer_with_builtins_typed_internal(
             return Err(InferErrorInfo {
                 message,
                 scope: ctx.last_error_scope.clone(),
+                snippet: None,
                 partial_typed_ast,
             });
         }
@@ -3474,6 +3489,7 @@ fn infer_with_builtins_typed_internal(
             return Err(InferErrorInfo {
                 message: e.message,
                 scope: e.scope,
+                snippet: e.snippet,
                 partial_typed_ast,
             });
         }
@@ -3493,6 +3509,7 @@ fn infer_with_builtins_typed_internal(
         return Err(InferErrorInfo {
             message,
             scope: None,
+            snippet: None,
             partial_typed_ast: Some(typed_expr),
         });
     }

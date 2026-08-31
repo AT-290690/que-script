@@ -641,13 +641,13 @@ xs)"#,
                 {xs ys})"#,
             true,
         );
-        assert_eq!(output.trim(), "{ [a b] [1 2 3] }");
+        assert_eq!(output.trim(), "{ [\"a\" \"b\"] [1 2 3] }");
     }
 
     #[test]
     fn test_runtime_std_split_handles_multi_char_delimiters_with_while_scan() {
         let output = run_program_output_with_std_and_opts(r#"(split "--" "ab--cd--ef")"#, true);
-        assert_eq!(output.trim(), "[ab cd ef]");
+        assert_eq!(output.trim(), "[\"ab\" \"cd\" \"ef\"]");
     }
 
     #[test]
@@ -871,7 +871,7 @@ xs)"#,
         );
         assert_eq!(
             output.trim(),
-            "[3.14 3.141592653589793 12345678901234567893.487 -12345678901234567888.487 6.25 1.250000 true]"
+            "[\"3.14\" \"3.141592653589793\" \"12345678901234567893.487\" \"-12345678901234567888.487\" \"6.25\" \"1.250000\" true]"
         );
     }
 
@@ -967,12 +967,38 @@ xs)"#,
     fn test_lsp_infer_error_ranges_unresolved_returns_empty_for_whole_file_fallback() {
         let text = "(map (lambda x x) [1 2 3])";
         let message = "Cannot unify Int with Bool";
-        let ranges = crate::lsp_native_core::infer_error_ranges(text, message, None);
+        let ranges = crate::lsp_native_core::infer_error_ranges(text, message, None, None);
         assert!(
             ranges.is_empty(),
             "expected unresolved location to return empty ranges, got: {:?}",
             ranges
         );
+    }
+
+    #[test]
+    fn test_lsp_infer_error_ranges_use_explicit_snippet_when_message_has_no_form() {
+        let text = "(let INPUT 1)\n(let out (String->Integer INPUT))";
+        let ranges = crate::lsp_native_core::infer_error_ranges(
+            text,
+            "String->Integer expected [Char] but got Int",
+            None,
+            Some("(String->Integer INPUT)"),
+        );
+        assert_eq!(ranges.len(), 1, "expected one range, got: {:?}", ranges);
+        let range = ranges[0];
+        assert_eq!(range.start.line, 1);
+        assert_eq!(range.end.line, 1);
+    }
+
+    #[test]
+    fn test_lsp_infer_error_ranges_use_parse_line_col() {
+        let text = "(let x 1]\n";
+        let message = "parse.delimiter_error: unexpected_closer\nparse.found: ']' at 1:9";
+        let ranges = crate::lsp_native_core::infer_error_ranges(text, message, None, None);
+        assert_eq!(ranges.len(), 1, "expected one range, got: {:?}", ranges);
+        let range = ranges[0];
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 8);
     }
 
     #[test]
@@ -1372,11 +1398,11 @@ xs)"#,
 
         assert_eq!(
             run_program_output_with_std_and_opts(src, false),
-            "[81 81 81]"
+            "[\"81\" \"81\" \"81\"]"
         );
         assert_eq!(
             run_program_output_with_std_and_opts(src, true),
-            "[81 81 81]"
+            "[\"81\" \"81\" \"81\"]"
         );
     }
 
@@ -1552,7 +1578,7 @@ xs)"#,
                 { (Table/get-unsafe "blue" groups) (Table/get-unsafe "red" groups) })"#,
             true,
         );
-        assert_eq!(output, "{ [A B] [C] }");
+        assert_eq!(output, "{ [\"A\" \"B\"] [\"C\"] }");
     }
 
     #[test]
@@ -1617,7 +1643,7 @@ xs)"#,
                   (SignedBigInt->String (SignedBigInt/new "-0")) })"#,
             true,
         );
-        assert_eq!(output, "{ -25 { 7 0 } }");
+        assert_eq!(output, "{ \"-25\" { \"7\" \"0\" } }");
     }
 
     #[test]
@@ -1642,7 +1668,7 @@ xs)"#,
                   (SignedBigInt->String (SignedBigInt/mod (SignedBigInt/new "-7") (SignedBigInt/new "-3"))) })"#,
             true,
         );
-        assert_eq!(output, "{ -1 { 1 -1 } }");
+        assert_eq!(output, "{ \"-1\" { \"1\" \"-1\" } }");
     }
 
     #[test]
@@ -1656,7 +1682,7 @@ xs)"#,
                   (SignedBigInt->String (SignedBigInt/div/floor (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
             true,
         );
-        assert_eq!(output, "[-3 -3 2 2]");
+        assert_eq!(output, "[\"-3\" \"-3\" \"2\" \"2\"]");
     }
 
     #[test]
@@ -1670,7 +1696,7 @@ xs)"#,
                   (SignedBigInt->String (SignedBigInt/div/ceil (SignedBigInt/new "7") (SignedBigInt/new "3"))) ])"#,
             true,
         );
-        assert_eq!(output, "[-2 -2 3 3]");
+        assert_eq!(output, "[\"-2\" \"-2\" \"3\" \"3\"]");
     }
 
     #[test]
@@ -1683,7 +1709,7 @@ xs)"#,
                   (SignedBigInt->String (SignedBigInt/pow (SignedBigInt/new "-2") 0)) ])"#,
             true,
         );
-        assert_eq!(output, "[-32 16 1]");
+        assert_eq!(output, "[\"-32\" \"16\" \"1\"]");
     }
 
     #[test]
@@ -1696,7 +1722,7 @@ xs)"#,
                   (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") [0])) ])"#,
             true,
         );
-        assert_eq!(output, "[-32 16 1]");
+        assert_eq!(output, "[\"-32\" \"16\" \"1\"]");
     }
 
     #[test]
@@ -1716,7 +1742,7 @@ xs)"#,
             r#"(map SignedBigInt->String (SignedBigInt/range (SignedBigInt/new "-2") (SignedBigInt/new "2")))"#,
             true,
         );
-        assert_eq!(output, "[-2 -1 0 1 2]");
+        assert_eq!(output, "[\"-2\" \"-1\" \"0\" \"1\" \"2\"]");
     }
 
     #[test]
@@ -1729,7 +1755,7 @@ xs)"#,
                   (SignedBigInt->String (SignedBigInt/product xs)) ])"#,
             true,
         );
-        assert_eq!(output, "[5 -24]");
+        assert_eq!(output, "[\"5\" \"-24\"]");
     }
 
     #[test]
@@ -1794,7 +1820,7 @@ xs)"#,
         );
         assert_eq!(
             output,
-            r#"[{ 123 Python } { 123 Tableau } { 123 PostgreSQL } { 234 R } { 234 PowerBI } { 234 SQL Server } { 345 Python } { 345 Tableau }]"#
+            r#"[{ 123 "Python" } { 123 "Tableau" } { 123 "PostgreSQL" } { 234 "R" } { 234 "PowerBI" } { 234 "SQL Server" } { 345 "Python" } { 345 "Tableau" }]"#
         );
     }
 
@@ -1847,7 +1873,7 @@ xs)"#,
         );
         assert_eq!(
             output,
-            r#"[{ 123 Python } { 123 Tableau } { 123 PostgreSQL } { 234 R } { 234 PowerBI } { 234 SQL Server } { 345 Python } { 345 Tableau }]"#
+            r#"[{ 123 "Python" } { 123 "Tableau" } { 123 "PostgreSQL" } { 234 "R" } { 234 "PowerBI" } { 234 "SQL Server" } { 345 "Python" } { 345 "Tableau" }]"#
         );
     }
 
@@ -1966,7 +1992,7 @@ xs)"#,
         );
         assert_eq!(
             expand_output,
-            "[(unless false (+ 1 2)) (if false nil (+ 1 2))]"
+            "[\"(unless false (+ 1 2))\" \"(if false nil (+ 1 2))\"]"
         );
 
         let when_output = run_program_output(
@@ -2258,7 +2284,7 @@ xs)"#,
 { id name active }"#,
             true,
         );
-        assert_eq!(output, "{ 12 { Anthony true } }");
+        assert_eq!(output, "{ 12 { \"Anthony\" true } }");
     }
 
     #[test]
@@ -6763,7 +6789,7 @@ fn"#;
                 {unit scalar (get managed 0)})"#,
             true,
         );
-        assert_eq!(result, "{ 0 { [1] hi } }");
+        assert_eq!(result, "{ 0 { [1] \"hi\" } }");
     }
 
     #[test]
@@ -9326,7 +9352,7 @@ D:=,=,=,+,=,=,=,+,=,=")
  (interleave [ "a" "b" "c" ] (ints [ 1 2 3 ])) ; [ "a" 1 "b" 2 "c" 3 ]
  (interleave (ints [ 1 2 ]) [ "x" "y" "z" ])  ; [ 1 "x" 2 "y" "z" ]
 ]"#,
-                "[[a 1 b 2 c 3] [1 x 2 y]]",
+                "[[\"a\" \"1\" \"b\" \"2\" \"c\" \"3\"] [\"1\" \"x\" \"2\" \"y\"]]",
             ),
             (
                 r#"(let fn (lambda [ a b ] [ x y ] (std/int/manhattan-distance a b x y)))
@@ -10112,7 +10138,7 @@ UUUUD")
                  (set! start 1 (clamp-range 0 len x))))
               (get pad (get start 0) (get start 1)))) '0'))))))))
 [(part1 (parse INPUT)) (part2 (parse INPUT))]"#,
-                "[1985 5DB3]",
+                "[\"1985\" \"5DB3\"]",
             ),
             (
                 r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter digit? x))) (filter not-empty?) (map String->Integer)))))))
