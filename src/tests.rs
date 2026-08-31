@@ -11591,7 +11591,7 @@ humidity-to-location map:
 [
   (Digits->Chars part1)
   (Digits->Chars part2)
-]"#, "[35 46]"),
+]"#, "[\"35\" \"46\"]"),
 (r#"(let INPUT "\#1 @ 1,3: 4x4
 #2 @ 3,1: 4x4
 #3 @ 5,5: 2x2")
