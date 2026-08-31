@@ -30,3 +30,4 @@ node_modules
 
 scripts/deprecated/
 miscs/extension/que-lang/*.vsix
+examples
