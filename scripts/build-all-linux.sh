@@ -38,11 +38,11 @@ fi
 export "AR_${TARGET_ENV_KEY}=${LINUX_AR}"
 export "CARGO_TARGET_${TARGET_ENV_KEY_UPPER}_AR=${LINUX_AR}"
 
-cargo zigbuild --release --target "${TARGET}" --no-default-features --features io --bin queio
+cargo zigbuild --release --target "${TARGET}" --no-default-features --features shell-runtime --bin queio
 cargo zigbuild --release --target "${TARGET}" --no-default-features --features compiler --bin quec
 cargo zigbuild --release --target "${TARGET}" --no-default-features --features runtime --bin quer
 cargo zigbuild --release --target "${TARGET}" --bin quewat
-cargo zigbuild --release --target "${TARGET}" --features io --bin quelsp
+cargo zigbuild --release --target "${TARGET}" --no-default-features --features io --bin quelsp
 
 mkdir -p "${OUT_DIR}"
 cp "${OUT_DIR}/queio" "${OUT_DIR}/que"

@@ -4981,6 +4981,10 @@ xs)"#,
             Some("Int -> ([Char] -> Bool) -> Bool")
         );
         assert_eq!(
+            signatures.get("read/buffer!").map(String::as_str),
+            Some("[Int] -> [Char] -> (Int -> Bool) -> Bool")
+        );
+        assert_eq!(
             signatures.get("time!").map(String::as_str),
             Some("() -> Int")
         );
@@ -4990,6 +4994,10 @@ xs)"#,
         );
         assert_eq!(
             effects.get("stdin/chunks!").copied(),
+            Some(crate::infer::EffectFlags::IO)
+        );
+        assert_eq!(
+            effects.get("read/buffer!").copied(),
             Some(crate::infer::EffectFlags::IO)
         );
         assert_eq!(
@@ -5016,6 +5024,20 @@ xs)"#,
 
         assert!(labels.iter().any(|label| label == "stdin!"));
         assert!(labels.iter().any(|label| label == "stdin/chunks!"));
+        let completion_json = crate::wasm_api::lsp_completions_at("read/b".to_string(), 0, 6);
+        let items: serde_json::Value = serde_json::from_str(&completion_json)
+            .expect("completion response should be valid JSON");
+        let labels: Vec<String> = items
+            .as_array()
+            .expect("completion response should be an array")
+            .iter()
+            .filter_map(|item| {
+                item.get("label")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+        assert!(labels.iter().any(|label| label == "read/buffer!"));
         let completion_json = crate::wasm_api::lsp_completions_at("time".to_string(), 0, 4);
         let items: serde_json::Value = serde_json::from_str(&completion_json)
             .expect("completion response should be valid JSON");
@@ -6624,6 +6646,23 @@ fn"#;
             read_wat.contains("(import \"host\" \"read_chunks\""),
             "optimized read/chunks! should keep host import, got:\n{}",
             read_wat
+        );
+
+        let buffer_expr = crate::parser::build(
+            r#"(read/buffer! [0 0 0 0] "input.txt" (lambda n false))"#,
+        )
+        .expect("read/buffer! program should build");
+        let buffer_wat = crate::wat::compile_program_to_wat_with_opts(&buffer_expr, true)
+            .expect("read/buffer! program should compile");
+        assert!(
+            buffer_wat.contains("(import \"host\" \"read_buffer\""),
+            "optimized read/buffer! should keep host import, got:\n{}",
+            buffer_wat
+        );
+        assert!(
+            buffer_wat.contains("(export \"$apply1_i32\""),
+            "read/buffer! callback support should export apply1, got:\n{}",
+            buffer_wat
         );
     }
 

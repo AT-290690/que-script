@@ -8,9 +8,9 @@ BUILD=1
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/install-lsp-local-apple.sh [--no-build]
+Usage: ./scripts/install-lsp-local-linux.sh [--no-build]
 
-Builds the local macOS Que LSP executable and installs it on this machine.
+Builds the local Linux Que LSP executable and installs it on this machine.
 
 Installs:
   /usr/local/bin/quelsp
@@ -39,14 +39,14 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ "$(uname -s)" != "Darwin" ]; then
-  echo "This local LSP installer is intended for macOS only." >&2
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "This local LSP installer is intended for Linux only." >&2
   exit 1
 fi
 
 if [ "$BUILD" -eq 1 ]; then
   echo "Building local ${APP_NAME} release binary..."
-  cargo build --release --no-default-features --features io --bin "$APP_NAME"
+  cargo build --release --no-default-features --bin "$APP_NAME"
 fi
 
 if [ ! -x "$BIN_SOURCE" ]; then
@@ -65,5 +65,5 @@ echo "Installing binary: ${BIN_PATH}"
 sudo mkdir -p "$(dirname "$BIN_PATH")"
 sudo mv "$tmp_bin" "$BIN_PATH"
 
-echo "Installed local macOS ${APP_NAME}."
+echo "Installed local Linux ${APP_NAME}."
 echo "Check with: ${APP_NAME} --help"

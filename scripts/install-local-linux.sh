@@ -10,9 +10,9 @@ BUILD=1
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/install-local-apple.sh [--no-build]
+Usage: ./scripts/install-local-linux.sh [--no-build]
 
-Builds the local macOS Que executable and installs it on this machine.
+Builds the local Linux Que executable and installs it on this machine.
 
 Installs:
   /usr/local/bin/que
@@ -42,8 +42,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ "$(uname -s)" != "Darwin" ]; then
-  echo "This local installer is intended for macOS only." >&2
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "This local installer is intended for Linux only." >&2
   exit 1
 fi
 
@@ -76,5 +76,5 @@ echo "Installing library: ${LIB_PATH}"
 sudo mkdir -p "$LIB_DIR"
 sudo mv "$tmp_lib" "$LIB_PATH"
 
-echo "Installed local macOS ${APP_NAME}."
+echo "Installed local Linux ${APP_NAME}."
 echo "Check with: ${APP_NAME} --version"

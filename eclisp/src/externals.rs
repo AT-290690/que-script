@@ -179,6 +179,10 @@ fn ty_int() -> Type {
     Type::Int
 }
 
+fn ty_int_list() -> Type {
+    Type::List(Box::new(Type::Int))
+}
+
 fn ty_bool() -> Type {
     Type::Bool
 }
@@ -262,6 +266,19 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
                 ty_char_list(),
                 ty_int(),
                 fn1(ty_char_list(), ty_bool()),
+                ty_bool(),
+            )
+        },
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "read_buffer",
+        local_name: "read/buffer!",
+        typ: || {
+            fn3(
+                ty_int_list(),
+                ty_char_list(),
+                fn1(ty_int(), ty_bool()),
                 ty_bool(),
             )
         },

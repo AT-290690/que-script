@@ -8,21 +8,40 @@ use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs;
 use std::io;
+#[cfg(not(feature = "shell-runtime"))]
+use std::io::Write as _;
+#[cfg(feature = "shell-runtime")]
 use std::io::{BufRead as _, Read as _, Write as _};
-use std::path::{Component, Path, PathBuf};
+#[cfg(feature = "shell-runtime")]
+use std::path::Component;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+#[cfg(feature = "shell-runtime")]
 use std::thread;
+#[cfg(feature = "shell-runtime")]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(feature = "shell-runtime")]
 use wasmtime::Linker;
+#[cfg(feature = "shell-runtime")]
 use wasmtime::{Caller, Extern, Memory, TypedFunc};
+#[cfg(feature = "shell-runtime")]
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
+#[cfg(feature = "shell-runtime")]
 const VEC_LEN_OFFSET: i32 = 0;
+#[cfg(feature = "shell-runtime")]
 const VEC_CAP_OFFSET: i32 = 4;
+#[cfg(feature = "shell-runtime")]
 const VEC_RC_OFFSET: i32 = 8;
+#[cfg(feature = "shell-runtime")]
 const VEC_ELEM_REF_OFFSET: i32 = 12;
+#[cfg(feature = "shell-runtime")]
 const VEC_DATA_PTR_OFFSET: i32 = 16;
+#[cfg(feature = "shell-runtime")]
 const VEC_MAGIC_OFFSET: i32 = 20;
+#[cfg(feature = "shell-runtime")]
 const VEC_HEADER_SIZE: i32 = 24;
+#[cfg(feature = "shell-runtime")]
 const VEC_MAGIC: i32 = 1_447_380_017;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -376,12 +395,14 @@ fn resolve_project_entry_path(
     Ok((script_path, program, project.root_dir))
 }
 
+#[cfg(any(feature = "shell-runtime", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct QueTestCase {
     name: Option<String>,
     passed: bool,
 }
 
+#[cfg(any(feature = "shell-runtime", test))]
 fn resolve_test_program(cwd: &Path, target: &str) -> Result<(String, PathBuf), String> {
     let target_path = Path::new(target);
     if target_path.is_dir() {
@@ -425,6 +446,7 @@ fn resolve_test_program(cwd: &Path, target: &str) -> Result<(String, PathBuf), S
     Ok((test_source, script_cwd))
 }
 
+#[cfg(any(feature = "shell-runtime", test))]
 fn split_top_level_items(inner: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut start = None;
@@ -466,6 +488,7 @@ fn split_top_level_items(inner: &str) -> Vec<String> {
     out
 }
 
+#[cfg(any(feature = "shell-runtime", test))]
 fn parse_test_tuple(item: &str) -> Option<QueTestCase> {
     let inner = item.strip_prefix('{')?.strip_suffix('}')?.trim();
     let passed = if let Some(name) = inner.strip_suffix(" true") {
@@ -481,6 +504,7 @@ fn parse_test_tuple(item: &str) -> Option<QueTestCase> {
     })
 }
 
+#[cfg(any(feature = "shell-runtime", test))]
 fn parse_test_results(decoded: &str) -> Result<Vec<QueTestCase>, String> {
     let trimmed = decoded.trim();
     if trimmed == "true" || trimmed == "false" {
@@ -523,6 +547,7 @@ fn parse_test_results(decoded: &str) -> Result<Vec<QueTestCase>, String> {
     Ok(tests)
 }
 
+#[cfg(any(feature = "shell-runtime", test))]
 fn print_test_report(tests: &[QueTestCase]) -> bool {
     let mut passed = 0usize;
     let mut failed = 0usize;
@@ -551,6 +576,7 @@ fn print_test_report(tests: &[QueTestCase]) -> bool {
     }
 }
 
+#[cfg(feature = "shell-runtime")]
 fn run_test_command(args: &[String], bin_name: &str) -> Result<(), String> {
     let Some(target) = args.first() else {
         return Err(format!(
@@ -582,6 +608,11 @@ fn run_test_command(args: &[String], bin_name: &str) -> Result<(), String> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(not(feature = "shell-runtime"))]
+fn run_test_command(_args: &[String], _bin_name: &str) -> Result<(), String> {
+    Err("test requires a runtime-enabled build of queio. rebuild with `--features shell-runtime` or use the installed `que` command.".to_string())
 }
 
 fn default_main_source_text() -> &'static str {
@@ -708,7 +739,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-que = {{ path = "{que_path}", features = ["io"] }}
+que = {{ path = "{que_path}", features = ["shell-runtime"] }}
 wasmtime = {{ version = "42.0.1", default-features = false, features = ["cranelift", "runtime", "std"] }}
 "#
     )
@@ -943,7 +974,7 @@ que::io::add_shell_to_linker(linker)?;
 2. Change the Que dependency in `Cargo.toml` from:
 
 ```toml
-que = {{ path = "...", features = ["io"] }}
+que = {{ path = "...", features = ["shell-runtime"] }}
 ```
 
 to:
@@ -1138,6 +1169,7 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} init [--demo]\n\
          or:    {bin} init-host <name>\n\
+         or:    {bin} native-c <script.que> [output-dir]\n\
          or:    {bin} explain [script.que] [--json] [--out <file>] [--debug [basic|code|types|all]|--opt]\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
@@ -1161,6 +1193,8 @@ fn native_shell_help(bin_name: &str) -> String {
           init           Write a default `{config}`, empty main.que, and README.md.\n\
                          Use `init --demo` for runnable sample code and tests.\n\
           init-host      Scaffold a custom Rust host binary in `./<name>`.\n\
+         native-c       Compile a standalone native executable via wasm2c + a local C compiler.\n\
+                         External tools are required and checked at runtime; they are not bundled.\n\
           explain        Show type/effect and optimized WAT-shape information without running.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_DEC_OVERFLOW_CHECK,\n\
@@ -1171,6 +1205,10 @@ fn native_shell_help(bin_name: &str) -> String {
            --allow        Enable host io permissions (read, stdin, write, print, clock, delete, all).\n\
          \n\
          Notes:\n\
+          - Build modes:\n\
+            - `queio --no-default-features --features io`: utility-only build, no `wasmtime` dependency.\n\
+            - `queio --no-default-features --features shell-runtime`: full script runner with `wasmtime`.\n\
+            - Installed `que`/`queio` builds normally use the runtime-enabled mode.\n\
           - Recommended: run with `--debug` while developing, then `--opt` for trusted benchmark runs.\n\
           - If a nearby `{config}` exists, native CLI and native LSP load its `deps`.\n\
           - If no `{config}` exists, no project config is used.\n\
@@ -1188,6 +1226,9 @@ fn native_shell_help(bin_name: &str) -> String {
            - `--emit split-wat` writes/prints separate runtime and user WAT modules.\n\
            - `--emit wasm` prints raw wasm bytes unless you pass `--out`.\n\
            - `--emit types` prints inferred top-level user-form types and final result type.\n\
+           - `native-c` currently supports result types `()`, `Int`, `{{Int * Int}}`, and `{{Bool * [Int]}}`.\n\
+           - `native-c` does not need `wasmtime`; it requires `wasm2c` plus `clang` or `cc`.\n\
+           - Script execution and `test` require a runtime-enabled build with `wasmtime`.\n\
            - `explain --json` prints a machine-readable optimization/safety report.\n\
            - --debug, --opt, --no-result, --emit, --emit-source and --help can appear after the script path.\n\
            - `--install` writes/extends an external library file (used by all binaries).\n\
@@ -1200,6 +1241,282 @@ fn native_shell_help(bin_name: &str) -> String {
         bin = bin_name,
         config = crate::project::PROJECT_CONFIG_FILE
     )
+}
+
+fn native_c_help(bin_name: &str) -> String {
+    format!(
+        "Usage: {bin} native-c <script.que> [output-dir]\n\
+         \n\
+         Builds a standalone native executable through:\n\
+           1. Que -> optimized Wasm\n\
+           2. wasm2c -> C\n\
+           3. clang/cc -> native executable\n\
+         \n\
+         Requirements:\n\
+           - `wasm2c` in PATH\n\
+           - WABT wasm2c runtime files installed beside it\n\
+           - `clang` or `cc` in PATH\n\
+         \n\
+         Notes:\n\
+           - `native-c` does not use `wasmtime`.\n\
+           - These dependencies are not bundled with Que.\n\
+           - Project env from `que.toml` is loaded first.\n\
+           - Native-C defaults enable aggressive compile settings unless you override env vars.\n\
+           - Currently supported result types: `()`, `Int`, `{{Int * Int}}`, `{{Bool * [Int]}}`.\n\
+           - Builtin host IO imports are supported in the generated runner.\n\
+           - Custom non-builtin host imports still require a custom host binary.\n\
+         \n\
+         Example:\n\
+           {bin} native-c examples/fann.que build/native",
+        bin = bin_name
+    )
+}
+
+fn set_env_default(key: &str, value: &str) {
+    if env::var_os(key).is_none() {
+        // SAFETY: this CLI is single-threaded while configuring process env for the current run.
+        unsafe { env::set_var(key, value) };
+    }
+}
+
+fn enable_native_c_default_flags() {
+    set_env_default("QUE_WASM_OPT", "speed");
+    set_env_default("QUE_DEVIRTUALIZE", "aggressive");
+    set_env_default("QUE_TCO", "off");
+    set_env_default("QUE_SMALL_SCALAR_INLINE_COST", "512");
+    set_env_default("QUE_LOOP_UNROLL_MAX", "16");
+    set_env_default("QUE_LOOP_UNROLL_COST", "2000");
+    set_env_default("QUE_BOUNDS_CHECK", "0");
+    set_env_default("QUE_INT_OVERFLOW_CHECK", "0");
+    set_env_default("QUE_DEC_OVERFLOW_CHECK", "0");
+    set_env_default("QUE_DIV_ZERO_CHECK", "0");
+    set_env_default("QUE_VEC_MIN_CAP", "8");
+}
+
+fn find_command_in_path(name: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn collect_host_imports_from_wat(wat: &str) -> Vec<String> {
+    let mut imports = Vec::new();
+    for line in wat.lines() {
+        let line = line.trim();
+        if !line.starts_with("(import \"host\"") {
+            continue;
+        }
+        let parts = line.split('"').collect::<Vec<_>>();
+        if parts.len() >= 4 {
+            imports.push(parts[3].to_string());
+        }
+    }
+    imports.sort();
+    imports.dedup();
+    imports
+}
+
+fn write_native_c_host_file(
+    path: &Path,
+    module_name: &str,
+    result_type: &str,
+    host_imports: &[String],
+) -> Result<(), String> {
+    let builtin_host_imports = crate::externals::BUILTIN_HOST_EXTERNS
+        .iter()
+        .map(|spec| spec.import)
+        .collect::<HashSet<_>>();
+    let unsupported = host_imports
+        .iter()
+        .filter(|name| !builtin_host_imports.contains(name.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unsupported.is_empty() {
+        return Err(format!(
+            "native-c only supports builtin host imports. unsupported imports: {}",
+            unsupported.join(", ")
+        ));
+    }
+
+    let instantiate = if host_imports.is_empty() {
+        format!("  wasm2c_{module_name}_instantiate(&instance);")
+    } else {
+        format!("  wasm2c_{module_name}_instantiate(&instance, &host);")
+    };
+
+    let result_print = match result_type {
+        "()" => "  (void)result;",
+        "Int" => "  printf(\"%d\\n\", (int32_t)result);",
+        "{Int * Int}" => "  print_int_tuple2(&instance, result);",
+        "{Bool * [Int]}" => "  print_bool_int_vector_tuple(&instance, result);",
+        other => {
+            return Err(format!(
+                "native C runner currently supports result (), Int, {{Int * Int}}, or {{Bool * [Int]}}, got: {}",
+                other
+            ))
+        }
+    };
+
+    let text = include_str!("native_c_host_template.c")
+        .replace("__HEADER__", &format!("{module_name}.h"))
+        .replace("__MODULE__", module_name)
+        .replace("__INSTANTIATE__", &instantiate)
+        .replace("__RESULT_PRINT__", result_print);
+    fs::write(path, text).map_err(|e| format!("failed to write '{}': {}", path.display(), e))
+}
+
+fn run_command_capture(command: &mut Command, description: &str) -> Result<(), String> {
+    let output = command
+        .output()
+        .map_err(|e| format!("failed to run {}: {}", description, e))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let details = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        format!("process exited with status {}", output.status)
+    };
+    Err(format!("{} failed: {}", description, details))
+}
+
+fn run_native_c_command(args: &[String], bin_name: &str) -> Result<(), String> {
+    let mut args = args.to_vec();
+    if take_help_flag_from_argv(&mut args) || args.is_empty() {
+        println!("{}", native_c_help(bin_name));
+        return Ok(());
+    }
+    if args.len() > 2 {
+        return Err(native_c_help(bin_name));
+    }
+
+    let input_arg = &args[0];
+    let output_dir = args
+        .get(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("build"));
+
+    let wasm2c_bin = find_command_in_path("wasm2c").ok_or_else(|| {
+        "missing dependency: `wasm2c` was not found in PATH.\ninstall WABT first, for example on macOS: `brew install wabt`".to_string()
+    })?;
+    let cc_bin = find_command_in_path("clang")
+        .or_else(|| find_command_in_path("cc"))
+        .ok_or_else(|| {
+            "missing dependency: `clang` or `cc` was not found in PATH.\ninstall a C toolchain first, for example Xcode Command Line Tools on macOS.".to_string()
+        })?;
+
+    let wabt_prefix = wasm2c_bin.parent().and_then(Path::parent).ok_or_else(|| {
+        format!(
+            "failed to derive WABT prefix from '{}'",
+            wasm2c_bin.display()
+        )
+    })?;
+    let wasm2c_runtime_dir = wabt_prefix.join("share").join("wabt").join("wasm2c");
+    let wasm2c_include_dir = wabt_prefix.join("include");
+    for required in ["wasm-rt-impl.c", "wasm-rt-mem-impl.c"] {
+        let path = wasm2c_runtime_dir.join(required);
+        if !path.is_file() {
+            return Err(format!(
+                "missing wasm2c runtime file '{}'. expected it under '{}'.\nreinstall WABT so the wasm2c runtime sources are available.",
+                required,
+                wasm2c_runtime_dir.display()
+            ));
+        }
+    }
+
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let (_script_path, program, script_cwd) = resolve_project_entry_path(&cwd, Some(input_arg))
+        .map_err(|message| format!("{}\n{}", message, native_c_help(bin_name)))?;
+    apply_project_env_vars(&script_cwd)?;
+    enable_native_c_default_flags();
+
+    let std_ast = crate::baked::load_ast();
+    let mut lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")?;
+    crate::externals::extend_with_builtin_host_externs(&mut lib_defs)?;
+    lib_defs.extend(load_project_library_definitions(&script_cwd)?);
+    let wrapped_ast = crate::parser::merge_std_and_program(&program, lib_defs)?;
+    let wrapped_with_externs = crate::externals::prepend_builtin_host_externs(&wrapped_ast)?;
+    let (base_env, base_next_id) =
+        crate::types::create_builtin_environment(crate::types::TypeEnv::new());
+    let (_typ, typed_ast) =
+        infer_with_builtins_typed(&wrapped_with_externs, (base_env, base_next_id))?;
+    let result_type = typed_ast
+        .children
+        .last()
+        .and_then(|form| form.typ.as_ref())
+        .or(typed_ast.typ.as_ref())
+        .map(|typ| normalize_signature(&typ.to_string()))
+        .unwrap_or_else(|| "_".to_string());
+
+    match result_type.as_str() {
+        "()" | "Int" | "{Int * Int}" | "{Bool * [Int]}" => {}
+        _ => {
+            return Err(format!(
+                "native C runner currently supports result (), Int, {{Int * Int}}, or {{Bool * [Int]}}, got: {}",
+                result_type
+            ))
+        }
+    }
+
+    let split_wat = crate::wat::compile_program_to_split_wat_typed(&typed_ast)?;
+    let mut host_imports = collect_host_imports_from_wat(&split_wat.runtime_wat);
+    host_imports.extend(collect_host_imports_from_wat(&split_wat.user_wat));
+    host_imports.sort();
+    host_imports.dedup();
+    let wasm_text = crate::wat::compile_program_to_wat_typed(&typed_ast)?;
+    let wasm_bytes = wat::parse_str(&wasm_text).map_err(|e| e.to_string())?;
+
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("failed to create '{}': {}", output_dir.display(), e))?;
+    let module_name = "main";
+    let wasm_path = output_dir.join(format!("{module_name}.wasm"));
+    let c_path = output_dir.join(format!("{module_name}.c"));
+    let host_path = output_dir.join(format!("{module_name}.host.c"));
+    let exe_path = output_dir.join(module_name);
+
+    fs::write(&wasm_path, wasm_bytes)
+        .map_err(|e| format!("failed to write '{}': {}", wasm_path.display(), e))?;
+    run_command_capture(
+        Command::new(&wasm2c_bin)
+            .arg(&wasm_path)
+            .arg("-n")
+            .arg(module_name)
+            .arg("-o")
+            .arg(&c_path),
+        "wasm2c",
+    )?;
+    write_native_c_host_file(&host_path, module_name, &result_type, &host_imports)?;
+    run_command_capture(
+        Command::new(&cc_bin)
+            .arg("-O3")
+            .arg("-DNDEBUG")
+            .arg("-flto")
+            .arg("-march=native")
+            .arg("-fno-math-errno")
+            .arg("-fno-trapping-math")
+            .arg("-I")
+            .arg(&output_dir)
+            .arg("-I")
+            .arg(&wasm2c_include_dir)
+            .arg("-I")
+            .arg(&wasm2c_runtime_dir)
+            .arg(&host_path)
+            .arg(&c_path)
+            .arg(wasm2c_runtime_dir.join("wasm-rt-impl.c"))
+            .arg(wasm2c_runtime_dir.join("wasm-rt-mem-impl.c"))
+            .arg("-o")
+            .arg(&exe_path),
+        "native C compilation",
+    )?;
+
+    println!("{}", exe_path.display());
+    println!("run it with: {}", exe_path.display());
+    Ok(())
 }
 
 fn native_shell_env_help(bin_name: &str) -> String {
@@ -1314,7 +1631,7 @@ fn native_shell_learn() -> &'static str {
     Mutation and effects:\n\
     - mut/alter! are for local primitive scalar mutation only (Int/Dec/Bool/Char), same lambda scope.\n\
     - &mut/&alter! are for shared mutation across lambda scopes via boxed references.\n\
-    - Vector/state mutation uses set!, push!, pop!.\n\
+    - Vector/state mutation uses set!, push!, pop!, read/buffer!.\n\
     - Functions with side effects (mutation or I/O) must end with !.\n\
     - If a function mutates args, the mutated arg must be the first arg.\n\
     - If mutating multiple values, pass them inside the first arg (typically a tuple).\n\
@@ -1327,7 +1644,7 @@ fn native_shell_learn() -> &'static str {
     - set! pop! length get car cdr cons fst snd while block unless when when-not\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
-    ARGV print! sleep! time! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
+    ARGV print! sleep! time! clear! list-dir! mkdir! read! stdin! read/chunks! read/buffer! stdin/chunks! read/lines! delete! write! move!"
 }
 
 fn native_shell_pitfalls() -> &'static str {
@@ -1456,7 +1773,8 @@ fn native_shell_style() -> &'static str {
     File input style:\n\
     - Use read! for normal small/medium files when loading the whole file is simpler.\n\
     - Use read/lines! for large text files that are naturally line-oriented, such as logs, CSV rows, or puzzle inputs with one record per line.\n\
-    - Use read/chunks! for very large files, huge single-line files, binary-like streams, or continuous data where line buffering could grow too large.\n\
+    - Use read/chunks! when you want each chunk as a fresh [Char] value.\n\
+    - Use read/buffer! when you want to reuse one caller-owned [Int] byte buffer and process only the first n bytes each round.\n\
     - Use stdin! for small piped input and stdin/chunks! for large piped streams.\n\
     - Chunk callbacks can return true to stop early once the answer is known.\n\
     \n\
@@ -1576,6 +1894,11 @@ fn emit_bytes_output(out_path: Option<&str>, bytes: &[u8]) -> Result<(), String>
             .map_err(|e| format!("failed to flush stdout: {}", e))?;
     }
     Ok(())
+}
+
+#[cfg(not(feature = "shell-runtime"))]
+fn shell_runtime_required_message() -> String {
+    "script execution requires a runtime-enabled build of queio. rebuild with `--features shell-runtime` or use the installed `que` command.".to_string()
 }
 
 fn format_top_level_type_lines(typed: &TypedExpression, user_form_count: usize) -> String {
@@ -2045,806 +2368,15 @@ fn run_library_install_via_io(mode: LibraryInstallMode, args: &[String]) -> Resu
     Ok(())
 }
 
-pub struct ShellStoreData {
-    pub wasi_ctx: WasiCtx,
-    pub resource_table: ResourceTable,
-    wasi_p1_ctx: wasmtime_wasi::p1::WasiP1Ctx,
-    pub script_cwd: Option<PathBuf>,
-    pub shell_policy: ShellPolicy,
-}
-
-impl ShellStoreData {
-    pub fn new_with_security(
-        script_cwd: Option<PathBuf>,
-        shell_policy: ShellPolicy,
-    ) -> wasmtime::Result<Self> {
-        let mut p2_builder = WasiCtxBuilder::new();
-        p2_builder.inherit_stdio();
-        p2_builder.inherit_args();
-        p2_builder.inherit_env();
-
-        let mut p1_builder = WasiCtxBuilder::new();
-        p1_builder.inherit_stdio();
-        p1_builder.inherit_args();
-        p1_builder.inherit_env();
-
-        Ok(Self {
-            wasi_ctx: p2_builder.build(),
-            resource_table: ResourceTable::new(),
-            wasi_p1_ctx: p1_builder.build_p1(),
-            script_cwd,
-            shell_policy,
-        })
-    }
-}
-
-impl WasiView for ShellStoreData {
-    fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView {
-            ctx: &mut self.wasi_ctx,
-            table: &mut self.resource_table,
-        }
-    }
-}
-
-fn memory_export(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<Memory> {
-    caller
-        .get_export("memory")
-        .and_then(Extern::into_memory)
-        .ok_or_else(|| wasmtime::Error::msg("guest export 'memory' not found"))
-}
-
-fn read_i32(
-    memory: &Memory,
-    caller: &Caller<'_, ShellStoreData>,
-    addr: i32,
-) -> wasmtime::Result<i32> {
-    let offset = usize::try_from(addr)
-        .map_err(|_| wasmtime::Error::msg(format!("invalid read address: {}", addr)))?;
-    let mut bytes = [0u8; 4];
-    memory
-        .read(caller, offset, &mut bytes)
-        .map_err(|_| wasmtime::Error::msg(format!("out of bounds read at {}", addr)))?;
-    Ok(i32::from_le_bytes(bytes))
-}
-
-fn write_i32(
-    memory: &Memory,
-    caller: &mut Caller<'_, ShellStoreData>,
-    addr: i32,
-    value: i32,
-) -> wasmtime::Result<()> {
-    let offset = usize::try_from(addr)
-        .map_err(|_| wasmtime::Error::msg(format!("invalid write address: {}", addr)))?;
-    memory
-        .write(caller, offset, &value.to_le_bytes())
-        .map_err(|_| wasmtime::Error::msg(format!("out of bounds write at {}", addr)))
-}
-
-fn guest_alloc(caller: &mut Caller<'_, ShellStoreData>) -> wasmtime::Result<TypedFunc<i32, i32>> {
-    for name in ["$alloc", "alloc"] {
-        if let Some(func) = caller.get_export(name).and_then(Extern::into_func) {
-            if let Ok(typed) = func.typed::<i32, i32>(&mut *caller) {
-                return Ok(typed);
-            }
-        }
-    }
-    Err(wasmtime::Error::msg(
-        "guest export '$alloc'/'alloc' not found",
-    ))
-}
-
-pub fn read_lisp_vector(
-    caller: &mut Caller<'_, ShellStoreData>,
-    vec_ptr: i32,
-) -> wasmtime::Result<Vec<i32>> {
-    let memory = memory_export(caller)?;
-    let len = read_i32(&memory, &*caller, vec_ptr + VEC_LEN_OFFSET)?;
-    let data_ptr = read_i32(&memory, &*caller, vec_ptr + VEC_DATA_PTR_OFFSET)?;
-    if len < 0 {
-        return Err(wasmtime::Error::msg(format!(
-            "negative vector len: {}",
-            len
-        )));
-    }
-
-    let mut values = Vec::with_capacity(len as usize);
-    for i in 0..len {
-        values.push(read_i32(&memory, &*caller, data_ptr + i * 4)?);
-    }
-    Ok(values)
-}
-
-pub fn write_lisp_vector(
-    caller: &mut Caller<'_, ShellStoreData>,
-    values: &[i32],
-) -> wasmtime::Result<i32> {
-    let alloc = guest_alloc(caller)?;
-    let vec_len = i32::try_from(values.len())
-        .map_err(|_| wasmtime::Error::msg("output too large for i32 vector length"))?;
-    let header_ptr = alloc.call(&mut *caller, VEC_HEADER_SIZE)?;
-    let data_ptr = alloc.call(&mut *caller, vec_len * 4)?;
-    let memory = memory_export(caller)?;
-
-    for (i, value) in values.iter().copied().enumerate() {
-        let offset =
-            i32::try_from(i).map_err(|_| wasmtime::Error::msg("output index overflow"))? * 4;
-        write_i32(&memory, caller, data_ptr + offset, value)?;
-    }
-
-    write_i32(&memory, caller, header_ptr + VEC_LEN_OFFSET, vec_len)?;
-    write_i32(&memory, caller, header_ptr + VEC_CAP_OFFSET, vec_len)?;
-    write_i32(&memory, caller, header_ptr + VEC_RC_OFFSET, 1)?;
-    write_i32(&memory, caller, header_ptr + VEC_ELEM_REF_OFFSET, 0)?;
-    write_i32(&memory, caller, header_ptr + VEC_DATA_PTR_OFFSET, data_ptr)?;
-    write_i32(&memory, caller, header_ptr + VEC_MAGIC_OFFSET, VEC_MAGIC)?;
-    Ok(header_ptr)
-}
-
-pub fn write_lisp_byte_vector(
-    caller: &mut Caller<'_, ShellStoreData>,
-    bytes: &[u8],
-) -> wasmtime::Result<i32> {
-    let alloc = guest_alloc(caller)?;
-    let vec_len = i32::try_from(bytes.len())
-        .map_err(|_| wasmtime::Error::msg("output too large for i32 vector length"))?;
-    let data_bytes_len = vec_len
-        .checked_mul(4)
-        .ok_or_else(|| wasmtime::Error::msg("output byte length overflow"))?;
-    let header_ptr = alloc.call(&mut *caller, VEC_HEADER_SIZE)?;
-    let data_ptr = alloc.call(&mut *caller, data_bytes_len)?;
-    let memory = memory_export(caller)?;
-
-    let data_offset = usize::try_from(data_ptr)
-        .map_err(|_| wasmtime::Error::msg(format!("invalid write address: {}", data_ptr)))?;
-    let data_len = usize::try_from(data_bytes_len)
-        .map_err(|_| wasmtime::Error::msg("output byte length overflow"))?;
-    let data_end = data_offset
-        .checked_add(data_len)
-        .ok_or_else(|| wasmtime::Error::msg("output write address overflow"))?;
-
-    {
-        let data = memory.data_mut(&mut *caller);
-        let output = data
-            .get_mut(data_offset..data_end)
-            .ok_or_else(|| wasmtime::Error::msg(format!("out of bounds write at {}", data_ptr)))?;
-        for (i, byte) in bytes.iter().copied().enumerate() {
-            let offset = i * 4;
-            output[offset..offset + 4].copy_from_slice(&i32::from(byte).to_le_bytes());
-        }
-    }
-
-    write_i32(&memory, caller, header_ptr + VEC_LEN_OFFSET, vec_len)?;
-    write_i32(&memory, caller, header_ptr + VEC_CAP_OFFSET, vec_len)?;
-    write_i32(&memory, caller, header_ptr + VEC_RC_OFFSET, 1)?;
-    write_i32(&memory, caller, header_ptr + VEC_ELEM_REF_OFFSET, 0)?;
-    write_i32(&memory, caller, header_ptr + VEC_DATA_PTR_OFFSET, data_ptr)?;
-    write_i32(&memory, caller, header_ptr + VEC_MAGIC_OFFSET, VEC_MAGIC)?;
-    Ok(header_ptr)
-}
-
-pub fn read_lisp_string(
-    caller: &mut Caller<'_, ShellStoreData>,
-    vec_ptr: i32,
-) -> wasmtime::Result<String> {
-    let codes = read_lisp_vector(caller, vec_ptr)?;
-    Ok(codes
-        .into_iter()
-        .map(|n| char::from_u32(n as u32).unwrap_or('\u{FFFD}'))
-        .collect::<String>())
-}
-
-pub fn write_lisp_string(
-    caller: &mut Caller<'_, ShellStoreData>,
-    value: &str,
-) -> wasmtime::Result<i32> {
-    let codes = value
-        .chars()
-        .map(|c| i32::try_from(u32::from(c)).unwrap_or(0))
-        .collect::<Vec<_>>();
-    write_lisp_vector(caller, &codes)
-}
-
-fn normalize_lexical_path(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
-            Component::RootDir => out.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::Normal(part) => out.push(part),
-        }
-    }
-    out
-}
-
-fn sandbox_root(caller: &Caller<'_, ShellStoreData>) -> Result<PathBuf, String> {
-    let root = caller
-        .data()
-        .script_cwd
-        .clone()
-        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    fs::canonicalize(&root).map_err(|e| {
-        format!(
-            "failed to resolve io sandbox root '{}': {}",
-            root.display(),
-            e
-        )
-    })
-}
-
-fn resolve_target_path(caller: &Caller<'_, ShellStoreData>, raw: &str) -> Result<PathBuf, String> {
-    let candidate = Path::new(raw);
-    let root = sandbox_root(caller)?;
-    let target = if candidate.is_absolute() {
-        normalize_lexical_path(candidate)
-    } else {
-        normalize_lexical_path(&root.join(candidate))
-    };
-
-    if !target.starts_with(&root) {
-        return Err(format!(
-            "path '{}' escapes io sandbox root '{}'",
-            raw,
-            root.display()
-        ));
-    }
-
-    Ok(target)
-}
-
-fn ensure_existing_path_in_sandbox(
-    caller: &Caller<'_, ShellStoreData>,
-    raw: &str,
-    target: &Path,
-) -> Result<(), String> {
-    let root = sandbox_root(caller)?;
-    let real = fs::canonicalize(target)
-        .map_err(|e| format!("failed to resolve '{}': {}", target.display(), e))?;
-    if !real.starts_with(&root) {
-        return Err(format!(
-            "path '{}' resolves outside io sandbox root '{}'",
-            raw,
-            root.display()
-        ));
-    }
-    Ok(())
-}
-
-fn ensure_parent_in_sandbox(
-    caller: &Caller<'_, ShellStoreData>,
-    raw: &str,
-    target: &Path,
-) -> Result<(), String> {
-    let root = sandbox_root(caller)?;
-    let parent = target.parent().unwrap_or(&root);
-    let mut existing = parent;
-    while !existing.exists() {
-        existing = existing.parent().unwrap_or(&root);
-    }
-    let real = fs::canonicalize(existing)
-        .map_err(|e| format!("failed to resolve '{}': {}", existing.display(), e))?;
-    if !real.starts_with(&root) {
-        return Err(format!(
-            "path '{}' parent resolves outside io sandbox root '{}'",
-            raw,
-            root.display()
-        ));
-    }
-    Ok(())
-}
-
-fn list_dir_text(path: &Path) -> Result<String, String> {
-    let entries = fs::read_dir(path)
-        .map_err(|e: io::Error| format!("failed to read directory '{}': {}", path.display(), e))?;
-    let mut names = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e: io::Error| format!("failed to read dir entry: {}", e))?;
-        names.push(entry.file_name().to_string_lossy().into_owned());
-    }
-    names.sort();
-    if names.is_empty() {
-        Ok(String::new())
-    } else {
-        Ok(format!("{}\n", names.join("\n")))
-    }
-}
-
-pub fn host_list_dir(
-    mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
-) -> wasmtime::Result<i32> {
-    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Read, "list-dir!", &path)
-        .map_err(wasmtime::Error::msg)?;
-
-    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
-    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    let output = list_dir_text(&target).map_err(wasmtime::Error::msg)?;
-    write_lisp_string(&mut caller, &output)
-}
-
-pub fn host_read_file(
-    mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
-) -> wasmtime::Result<i32> {
-    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Read, "read!", &path)
-        .map_err(wasmtime::Error::msg)?;
-
-    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
-    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    let output = fs::read_to_string(&target).map_err(|e| {
-        wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
-    })?;
-    write_lisp_string(&mut caller, &output)
-}
-
-pub fn host_read_stdin(mut caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Stdin, "stdin!", "<stdin>")
-        .map_err(wasmtime::Error::msg)?;
-
-    let mut output = String::new();
-    io::stdin()
-        .read_to_string(&mut output)
-        .map_err(|e| wasmtime::Error::msg(format!("failed to read stdin: {}", e)))?;
-    write_lisp_string(&mut caller, &output)
-}
-
-fn guest_apply1(
-    caller: &mut Caller<'_, ShellStoreData>,
-) -> wasmtime::Result<TypedFunc<(i32, i32), i32>> {
-    for name in ["$apply1_i32", "apply1_i32"] {
-        if let Some(func) = caller.get_export(name).and_then(Extern::into_func) {
-            if let Ok(typed) = func.typed::<(i32, i32), i32>(&mut *caller) {
-                return Ok(typed);
-            }
-        }
-    }
-    Err(wasmtime::Error::msg(
-        "guest export '$apply1_i32'/'apply1_i32' not found",
-    ))
-}
-
-fn guest_rc_release(
-    caller: &mut Caller<'_, ShellStoreData>,
-) -> wasmtime::Result<TypedFunc<i32, i32>> {
-    for name in ["$rc_release", "rc_release", "release"] {
-        if let Some(func) = caller.get_export(name).and_then(Extern::into_func) {
-            if let Ok(typed) = func.typed::<i32, i32>(&mut *caller) {
-                return Ok(typed);
-            }
-        }
-    }
-    Err(wasmtime::Error::msg(
-        "guest export '$rc_release'/'rc_release' not found",
-    ))
-}
-
-pub fn host_read_chunks(
-    mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
-    chunk_size: i32,
-    callback: i32,
-) -> wasmtime::Result<i32> {
-    if chunk_size <= 0 {
-        return Err(wasmtime::Error::msg(format!(
-            "read/chunks! chunk size must be positive, got {}",
-            chunk_size
-        )));
-    }
-
-    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Read, "read/chunks!", &path)
-        .map_err(wasmtime::Error::msg)?;
-
-    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
-    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    let mut file = fs::File::open(&target).map_err(|e| {
-        wasmtime::Error::msg(format!("failed to open '{}': {}", target.display(), e))
-    })?;
-    let apply1 = guest_apply1(&mut caller)?;
-    let rc_release = guest_rc_release(&mut caller)?;
-    let mut buffer = vec![0u8; chunk_size as usize];
-
-    loop {
-        let n = file.read(&mut buffer).map_err(|e| {
-            wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
-        })?;
-        if n == 0 {
-            break;
-        }
-
-        let chunk_ptr = write_lisp_byte_vector(&mut caller, &buffer[..n])?;
-        let should_stop = apply1.call(&mut caller, (callback, chunk_ptr))?;
-        let _ = rc_release.call(&mut caller, chunk_ptr)?;
-        if should_stop != 0 {
-            return Ok(1);
-        }
-    }
-
-    Ok(0)
-}
-
-pub fn host_read_stdin_chunks(
-    mut caller: Caller<'_, ShellStoreData>,
-    chunk_size: i32,
-    callback: i32,
-) -> wasmtime::Result<i32> {
-    if chunk_size <= 0 {
-        return Err(wasmtime::Error::msg(format!(
-            "stdin/chunks! chunk size must be positive, got {}",
-            chunk_size
-        )));
-    }
-
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Stdin, "stdin/chunks!", "<stdin>")
-        .map_err(wasmtime::Error::msg)?;
-
-    let apply1 = guest_apply1(&mut caller)?;
-    let rc_release = guest_rc_release(&mut caller)?;
-    let mut input = io::stdin().lock();
-    let mut buffer = vec![0u8; chunk_size as usize];
-
-    loop {
-        let n = input
-            .read(&mut buffer)
-            .map_err(|e| wasmtime::Error::msg(format!("failed to read stdin: {}", e)))?;
-        if n == 0 {
-            break;
-        }
-
-        let chunk_ptr = write_lisp_byte_vector(&mut caller, &buffer[..n])?;
-        let should_stop = apply1.call(&mut caller, (callback, chunk_ptr))?;
-        let _ = rc_release.call(&mut caller, chunk_ptr)?;
-        if should_stop != 0 {
-            return Ok(1);
-        }
-    }
-
-    Ok(0)
-}
-
-pub fn host_read_lines(
-    mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
-    callback: i32,
-) -> wasmtime::Result<i32> {
-    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Read, "read/lines!", &path)
-        .map_err(wasmtime::Error::msg)?;
-
-    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
-    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    let file = fs::File::open(&target).map_err(|e| {
-        wasmtime::Error::msg(format!("failed to open '{}': {}", target.display(), e))
-    })?;
-    let mut reader = io::BufReader::new(file);
-    let apply1 = guest_apply1(&mut caller)?;
-    let rc_release = guest_rc_release(&mut caller)?;
-    let mut line = Vec::new();
-
-    loop {
-        line.clear();
-        let n = reader.read_until(b'\n', &mut line).map_err(|e| {
-            wasmtime::Error::msg(format!("failed to read '{}': {}", target.display(), e))
-        })?;
-        if n == 0 {
-            break;
-        }
-
-        if line.last() == Some(&b'\n') {
-            line.pop();
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-        }
-
-        let line_ptr = write_lisp_byte_vector(&mut caller, &line)?;
-        let should_stop = apply1.call(&mut caller, (callback, line_ptr))?;
-        let _ = rc_release.call(&mut caller, line_ptr)?;
-        if should_stop != 0 {
-            return Ok(1);
-        }
-    }
-
-    Ok(0)
-}
-
-pub fn host_write_file(
-    mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
-    data_vec_ptr: i32,
-) -> wasmtime::Result<i32> {
-    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
-    let data = read_lisp_string(&mut caller, data_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Write, "write!", &path)
-        .map_err(wasmtime::Error::msg)?;
-
-    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
-    if target.exists() {
-        ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    } else {
-        ensure_parent_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    }
-    if let Some(parent) = target.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| {
-                wasmtime::Error::msg(format!(
-                    "failed to create parent dirs '{}': {}",
-                    parent.display(),
-                    e
-                ))
-            })?;
-        }
-    }
-    fs::write(&target, data.as_bytes()).map_err(|e| {
-        wasmtime::Error::msg(format!("failed to write '{}': {}", target.display(), e))
-    })?;
-
-    Ok(0)
-}
-
-pub fn host_mkdir_p(
-    mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
-) -> wasmtime::Result<i32> {
-    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Write, "mkdir!", &path)
-        .map_err(wasmtime::Error::msg)?;
-
-    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
-    if target.exists() {
-        ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    } else {
-        ensure_parent_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    }
-    fs::create_dir_all(&target).map_err(|e| {
-        wasmtime::Error::msg(format!("failed to mkdir '{}': {}", target.display(), e))
-    })?;
-    Ok(0)
-}
-
-pub fn host_delete(
-    mut caller: Caller<'_, ShellStoreData>,
-    path_vec_ptr: i32,
-) -> wasmtime::Result<i32> {
-    let path = read_lisp_string(&mut caller, path_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Delete, "delete!", &path)
-        .map_err(wasmtime::Error::msg)?;
-
-    let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
-    ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    let meta = fs::symlink_metadata(&target).map_err(|e| {
-        wasmtime::Error::msg(format!(
-            "failed to inspect path '{}' for delete: {}",
-            target.display(),
-            e
-        ))
-    })?;
-    if meta.is_dir() {
-        fs::remove_dir_all(&target).map_err(|e| {
-            wasmtime::Error::msg(format!(
-                "failed to delete directory '{}': {}",
-                target.display(),
-                e
-            ))
-        })?;
-    } else {
-        fs::remove_file(&target).map_err(|e| {
-            wasmtime::Error::msg(format!(
-                "failed to delete file '{}': {}",
-                target.display(),
-                e
-            ))
-        })?;
-    }
-    Ok(0)
-}
-
-pub fn host_move(
-    mut caller: Caller<'_, ShellStoreData>,
-    src_vec_ptr: i32,
-    dst_vec_ptr: i32,
-) -> wasmtime::Result<i32> {
-    let src = read_lisp_string(&mut caller, src_vec_ptr)?;
-    let dst = read_lisp_string(&mut caller, dst_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(
-            ShellPermission::Write,
-            "move!",
-            &format!("{} -> {}", src, dst),
-        )
-        .map_err(wasmtime::Error::msg)?;
-
-    let src_path = resolve_target_path(&caller, &src).map_err(wasmtime::Error::msg)?;
-    ensure_existing_path_in_sandbox(&caller, &src, &src_path).map_err(wasmtime::Error::msg)?;
-    let dst_path = resolve_target_path(&caller, &dst).map_err(wasmtime::Error::msg)?;
-    ensure_parent_in_sandbox(&caller, &dst, &dst_path).map_err(wasmtime::Error::msg)?;
-    if let Some(parent) = dst_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| {
-                wasmtime::Error::msg(format!(
-                    "failed to create destination dirs '{}': {}",
-                    parent.display(),
-                    e
-                ))
-            })?;
-        }
-    }
-    fs::rename(&src_path, &dst_path).map_err(|e| {
-        wasmtime::Error::msg(format!(
-            "failed to move '{}' to '{}': {}",
-            src_path.display(),
-            dst_path.display(),
-            e
-        ))
-    })?;
-
-    Ok(0)
-}
-
-pub fn host_print(
-    mut caller: Caller<'_, ShellStoreData>,
-    text_vec_ptr: i32,
-) -> wasmtime::Result<i32> {
-    let text = read_lisp_string(&mut caller, text_vec_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Print, "print!", "<stdout>")
-        .map_err(wasmtime::Error::msg)?;
-
-    let mut out = io::stdout();
-    out.write_all(text.as_bytes())
-        .map_err(|e| wasmtime::Error::msg(format!("failed to write stdout: {}", e)))?;
-    out.flush()
-        .map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
-    Ok(0)
-}
-
-pub fn host_sleep(caller: Caller<'_, ShellStoreData>, millis: i32) -> wasmtime::Result<i32> {
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Clock, "sleep!", "<clock>")
-        .map_err(wasmtime::Error::msg)?;
-
-    if millis < 0 {
-        return Err(wasmtime::Error::msg(format!(
-            "sleep! expects non-negative ms, got {}",
-            millis
-        )));
-    }
-    thread::sleep(Duration::from_millis(millis as u64));
-    Ok(0)
-}
-
-pub fn host_time(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Clock, "time!", "<clock>")
-        .map_err(wasmtime::Error::msg)?;
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| wasmtime::Error::msg(format!("clock error: {}", e)))?;
-    i32::try_from(now.as_secs()).map_err(|_| wasmtime::Error::msg("time! overflowed i32"))
-}
-
-pub fn host_clear(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Print, "clear!", "<stdout>")
-        .map_err(wasmtime::Error::msg)?;
-
-    let mut out = io::stdout();
-    out.write_all(b"\x1b[2J\x1b[H")
-        .map_err(|e| wasmtime::Error::msg(format!("failed to clear stdout: {}", e)))?;
-    out.flush()
-        .map_err(|e| wasmtime::Error::msg(format!("failed to flush stdout: {}", e)))?;
-    Ok(0)
-}
-
-fn register_builtin_host_import(
-    linker: &mut Linker<ShellStoreData>,
-    spec: &crate::externals::BuiltinHostExternSpec,
-) -> wasmtime::Result<()> {
-    match spec.import {
-        "list_dir" => {
-            linker.func_wrap(spec.module, spec.import, host_list_dir)?;
-        }
-        "read_file" => {
-            linker.func_wrap(spec.module, spec.import, host_read_file)?;
-        }
-        "read_stdin" => {
-            linker.func_wrap(spec.module, spec.import, host_read_stdin)?;
-        }
-        "read_chunks" => {
-            linker.func_wrap(spec.module, spec.import, host_read_chunks)?;
-        }
-        "read_stdin_chunks" => {
-            linker.func_wrap(spec.module, spec.import, host_read_stdin_chunks)?;
-        }
-        "read_lines" => {
-            linker.func_wrap(spec.module, spec.import, host_read_lines)?;
-        }
-        "write_file" => {
-            linker.func_wrap(spec.module, spec.import, host_write_file)?;
-        }
-        "mkdir_p" => {
-            linker.func_wrap(spec.module, spec.import, host_mkdir_p)?;
-        }
-        "delete" => {
-            linker.func_wrap(spec.module, spec.import, host_delete)?;
-        }
-        "move" => {
-            linker.func_wrap(spec.module, spec.import, host_move)?;
-        }
-        "print" => {
-            linker.func_wrap(spec.module, spec.import, host_print)?;
-        }
-        "sleep" => {
-            linker.func_wrap(spec.module, spec.import, host_sleep)?;
-        }
-        "time" => {
-            linker.func_wrap(spec.module, spec.import, host_time)?;
-        }
-        "clear" => {
-            linker.func_wrap(spec.module, spec.import, host_clear)?;
-        }
-        other => {
-            return Err(wasmtime::Error::msg(format!(
-                "unsupported builtin host extern registration: {}::{}",
-                spec.module, other
-            )));
-        }
-    }
-    Ok(())
-}
-
-pub fn add_shell_to_linker(linker: &mut Linker<ShellStoreData>) -> wasmtime::Result<()> {
-    // Core wasm modules (like this backend) use WASIp1 imports.
-    wasmtime_wasi::p1::add_to_linker_sync(linker, |state| &mut state.wasi_p1_ctx)?;
-    for spec in crate::externals::BUILTIN_HOST_EXTERNS {
-        register_builtin_host_import(linker, spec)?;
-    }
-    Ok(())
-}
+#[cfg(feature = "shell-runtime")]
+#[path = "io_runtime.rs"]
+mod shell_runtime_io;
+
+#[cfg(feature = "shell-runtime")]
+pub use shell_runtime_io::{
+    add_shell_to_linker, read_lisp_string, read_lisp_vector, write_lisp_byte_vector,
+    write_lisp_string, write_lisp_vector, ShellStoreData,
+};
 
 fn user_form_nodes<'a>(
     typed: &'a TypedExpression,
@@ -3109,11 +2641,12 @@ fn build_debug_error_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        init_host_project, init_project_config_file, native_shell_help, parse_test_results,
-        resolve_project_entry_path, take_debug_mode_from_argv, take_emit_request_from_argv,
-        take_help_flag_from_argv, take_no_result_flag_from_argv, take_opt_flag_from_argv,
-        take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol,
-        QueTestCase, ShellPermission, ShellPolicy,
+        collect_host_imports_from_wat, init_host_project, init_project_config_file, native_c_help,
+        native_shell_help, parse_test_results, resolve_project_entry_path,
+        take_debug_mode_from_argv, take_emit_request_from_argv, take_help_flag_from_argv,
+        take_no_result_flag_from_argv, take_opt_flag_from_argv, take_shell_policy_from_argv,
+        wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol, QueTestCase, ShellPermission,
+        ShellPolicy,
     };
     use std::collections::HashSet;
 
@@ -3488,6 +3021,23 @@ mod tests {
         assert!(help.contains("Print Eclisp style and optimization guidance"));
         assert!(help.contains("que --pitfalls"));
         assert!(help.contains("Print common Eclisp gotchas and debugging rules"));
+        assert!(help.contains("que native-c <script.que> [output-dir]"));
+    }
+
+    #[test]
+    fn native_c_help_mentions_external_dependencies() {
+        let help = native_c_help("que");
+        assert!(help.contains("wasm2c"));
+        assert!(help.contains("clang` or `cc`"));
+        assert!(help.contains("not bundled with Que"));
+    }
+
+    #[test]
+    fn collect_host_imports_from_wat_reads_host_import_names() {
+        let imports = collect_host_imports_from_wat(
+            "(module\n  (import \"host\" \"read!\" (func $host_read))\n  (import \"host\" \"print!\" (func $host_print)))",
+        );
+        assert_eq!(imports, vec!["print!".to_string(), "read!".to_string()]);
     }
 
     #[test]
@@ -3627,6 +3177,47 @@ mod tests {
     }
 }
 
+#[cfg(not(feature = "shell-runtime"))]
+fn execute_native_shell_program(
+    shell_policy: ShellPolicy,
+    suppress_result_output: bool,
+    wat_src: String,
+    argv: Vec<String>,
+    script_cwd: PathBuf,
+) -> Result<(), String> {
+    let _ = (
+        shell_policy,
+        suppress_result_output,
+        wat_src,
+        argv,
+        script_cwd,
+    );
+    Err(shell_runtime_required_message())
+}
+
+#[cfg(feature = "shell-runtime")]
+fn execute_native_shell_program(
+    shell_policy: ShellPolicy,
+    suppress_result_output: bool,
+    wat_src: String,
+    argv: Vec<String>,
+    script_cwd: PathBuf,
+) -> Result<(), String> {
+    let store_data = ShellStoreData::new_with_security(Some(script_cwd), shell_policy)
+        .map_err(|e| e.to_string())?;
+    if suppress_result_output {
+        crate::runtime::run_wat_text_no_result(&wat_src, store_data, &argv, |linker| {
+            add_shell_to_linker(linker).map_err(|e| e.to_string())
+        })?;
+    } else {
+        let decoded = crate::runtime::run_wat_text(&wat_src, store_data, &argv, |linker| {
+            add_shell_to_linker(linker).map_err(|e| e.to_string())
+        })?;
+        println!("\x1b[32m{}\x1b[0m", decoded);
+    }
+    Ok(())
+}
+
 pub fn run_native_shell() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     let bin_name = args
@@ -3656,6 +3247,10 @@ pub fn run_native_shell() -> Result<(), String> {
         let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let path = init_host_project(&cwd, name)?;
         println!("wrote {}", path.display());
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("native-c")) {
+        run_native_c_command(&args.iter().skip(2).cloned().collect::<Vec<_>>(), bin_name)?;
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("test")) {
@@ -3985,18 +3580,11 @@ pub fn run_native_shell() -> Result<(), String> {
         }
     }
 
-    let store_data = ShellStoreData::new_with_security(Some(script_cwd), shell_policy)
-        .map_err(|e| e.to_string())?;
-    if suppress_result_output {
-        crate::runtime::run_wat_text_no_result(&wat_src, store_data, &argv, |linker| {
-            add_shell_to_linker(linker).map_err(|e| e.to_string())
-        })?;
-    } else {
-        let decoded = crate::runtime::run_wat_text(&wat_src, store_data, &argv, |linker| {
-            add_shell_to_linker(linker).map_err(|e| e.to_string())
-        })?;
-        println!("\x1b[32m{}\x1b[0m", decoded);
-    }
-
-    Ok(())
+    execute_native_shell_program(
+        shell_policy,
+        suppress_result_output,
+        wat_src,
+        argv,
+        script_cwd,
+    )
 }

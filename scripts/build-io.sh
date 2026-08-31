@@ -1,2 +1,2 @@
 #!/bin/bash
-cargo build --release --no-default-features --features io
+cargo build --release --no-default-features --features shell-runtime

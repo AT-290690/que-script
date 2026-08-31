@@ -54,10 +54,10 @@ fi
 
 result_type="$("$type_probe_bin" "$input_file" --emit types | sed -n 's/^result : //p' | tail -n 1)"
 case "$result_type" in
-  "Int" | "{Int * Int}" | "{Bool * [Int]}")
+  "()" | "Int" | "{Int * Int}" | "{Bool * [Int]}")
     ;;
   *)
-    echo "error: native C runner currently supports result Int, {Int * Int}, or {Bool * [Int]}, got: $result_type" >&2
+    echo "error: native C runner currently supports result (), Int, {Int * Int}, or {Bool * [Int]}, got: $result_type" >&2
     exit 1
     ;;
 esac
@@ -140,6 +140,11 @@ int main(void) {
 EOF
 
 case "$result_type" in
+  "()")
+    cat >> "$host_file" <<'EOF'
+    (void)result;
+EOF
+    ;;
   "Int")
     cat >> "$host_file" <<'EOF'
     printf("%d\n", (int32_t)result);

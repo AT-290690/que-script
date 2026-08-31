@@ -11613,6 +11613,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     }
     collect_apply_arities_from_code(&main_code, &mut apply_arities);
     if extern_names.contains("read/chunks!")
+        || extern_names.contains("read/buffer!")
         || extern_names.contains("stdin/chunks!")
         || extern_names.contains("read/lines!")
     {
