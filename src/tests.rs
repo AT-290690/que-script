@@ -6933,7 +6933,7 @@ fn"#;
     }
 
     #[test]
-    fn test_wat_top_level_scalar_vector_set_uses_borrowed_global_cache_path() {
+    fn test_wat_top_level_scalar_vector_set_avoids_per_access_retain() {
         let expr = crate::parser::build(
             "(do (let xs [1 2 3]) (let f! (lambda () (do (set! xs 1 9) (get xs 1)))) (f!))",
         )
@@ -6945,13 +6945,8 @@ fn"#;
         let func_wat = &wat[main_start..];
 
         assert!(
-            func_wat.contains("global.get $g_val_v_xs"),
-            "top-level scalar vector set should borrow the cached global value directly, got:\n{}",
-            func_wat
-        );
-        assert!(
             !func_wat.contains("call $rc_retain"),
-            "borrowed top-level scalar vector set path should avoid per-access rc_retain, got:\n{}",
+            "top-level scalar vector set path should avoid per-access rc_retain, got:\n{}",
             func_wat
         );
     }
@@ -6982,6 +6977,68 @@ fn"#;
         assert!(
             main_wat.contains("call $vec_set_scalar_materialized_i32"),
             "top-level helper-built scalar vector set should use materialized fast path, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_top_level_let_mutated_by_main_stays_local_to_main() {
+        let expr = crate::parser::build(
+            r#"(do
+                (let xs [1 2 3])
+                (set! xs 1 9)
+                (get xs 1))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let before_main = &wat[..main_start];
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            !before_main.contains("(func $v_xs "),
+            "main-mutated top-level let should not be compiled as cached global def, got:\n{}",
+            before_main
+        );
+        assert!(
+            !main_wat.contains("global.get $g_val_v_xs"),
+            "main-mutated top-level let should be a local main value, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_append_fill_loop_uses_filled_scalar_vector_constructor() {
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let expr = crate::parser::build(
+            r#"(do
+                (let xs [])
+                (mut i 0)
+                (while (<= i 10) (do
+                  (set! xs (length xs) 1)
+                  (alter! i (+ i 1))))
+                (set! xs 3 0)
+                (get xs 3))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_new_filled_i32"),
+            "append-fill loop should become a filled scalar vector constructor, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "constant replacement after append-fill should use proven length, got:\n{}",
             main_wat
         );
     }
@@ -7750,6 +7807,8 @@ fn"#;
 
     #[test]
     fn test_wat_repeated_scalar_set_materializes_local_once_in_do_sequence() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
         let expr = crate::parser::build(
             "(let fill! (lambda (xs)
                 (do

@@ -838,6 +838,77 @@ fn top_level_binding_rhs_refs_main_only_names(
     refs.iter().any(|r| main_only_names.contains(r))
 }
 
+fn collect_top_level_let_names(items: &[Expression]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for item in items.iter().skip(1) {
+        if let Expression::Apply(let_items) = item {
+            if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
+                if kw == "let" {
+                    names.insert(name.clone());
+                }
+            }
+        }
+    }
+    names
+}
+
+fn collect_main_mutated_top_level_let_names(items: &[Expression]) -> HashSet<String> {
+    let top_level_let_names = collect_top_level_let_names(items);
+    let mut out = HashSet::new();
+    for item in items.iter().skip(1) {
+        if is_top_level_binding_form(item) || is_extern_decl_form(item) {
+            continue;
+        }
+        collect_main_mutated_top_level_let_names_in_expr(item, &top_level_let_names, &mut out);
+    }
+    out
+}
+
+fn is_top_level_binding_form(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Apply(items)
+            if matches!(
+                &items[..],
+                [Expression::Word(kw), Expression::Word(_), _] if kw == "let" || kw == "letrec" || kw == "mut"
+            )
+    )
+}
+
+fn is_extern_decl_form(expr: &Expression) -> bool {
+    matches!(expr, Expression::Apply(_))
+        && crate::externals::parse_extern_decl(expr)
+            .ok()
+            .flatten()
+            .is_some()
+}
+
+fn collect_main_mutated_top_level_let_names_in_expr(
+    expr: &Expression,
+    top_level_let_names: &HashSet<String>,
+    out: &mut HashSet<String>,
+) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda") {
+        return;
+    }
+    if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+        if top_level_let_names.contains(target)
+            && (matches!(
+                op.as_str(),
+                "set!" | "push!" | "pop!" | "pop-val!" | "pull!" | "alter!" | "&alter!"
+            ) || op.ends_with('!'))
+        {
+            out.insert(target.clone());
+        }
+    }
+    for item in items {
+        collect_main_mutated_top_level_let_names_in_expr(item, top_level_let_names, out);
+    }
+}
+
 fn collect_builtin_host_extern_call_heads(expr: &Expression, out: &mut HashSet<String>) {
     match expr {
         Expression::Apply(items) => {
@@ -3068,6 +3139,81 @@ fn emit_vector_runtime(
         i32.add
         local.set $i
         br $zero
+      end
+    end
+    local.get $ptr
+  )
+
+  (func $vec_new_filled_i32 (param $len i32) (param $value i32) (result i32)
+    (local $cap i32)
+    (local $ptr i32)
+    (local $data i32)
+    (local $i i32)
+    local.get $len
+    i32.const 1
+    i32.lt_s
+    if (result i32)
+      i32.const 1
+    else
+      local.get $len
+    end
+    local.set $cap
+    i32.const 24
+    call $alloc
+    local.set $ptr
+    local.get $cap
+    i32.const 4
+    i32.mul
+    call $alloc
+    local.set $data
+    local.get $ptr
+    local.get $len
+    i32.store
+    local.get $ptr
+    i32.const 4
+    i32.add
+    local.get $cap
+    i32.store
+    local.get $ptr
+    i32.const 8
+    i32.add
+    i32.const 1
+    i32.store
+    local.get $ptr
+    i32.const 12
+    i32.add
+    i32.const 0
+    i32.store
+    local.get $ptr
+    i32.const 16
+    i32.add
+    local.get $data
+    i32.store
+    local.get $ptr
+    i32.const 20
+    i32.add
+    i32.const 1447380017
+    i32.store
+    i32.const 0
+    local.set $i
+    block $done
+      loop $fill
+        local.get $i
+        local.get $len
+        i32.ge_s
+        br_if $done
+        local.get $data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        local.get $value
+        i32.store
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $fill
       end
     end
     local.get $ptr
@@ -6166,6 +6312,8 @@ fn compile_do(
     let mut scoped_lambda_bindings = ctx.lambda_bindings.clone();
     let mut scoped_materialized_scalar_local_slots = ctx.materialized_scalar_local_slots.clone();
     let mut scoped_nonnegative_int_locals = ctx.nonnegative_int_locals.clone();
+    let mut scoped_proven_scalar_vec_min_lengths = ctx.proven_scalar_vec_min_lengths.clone();
+    let mut scoped_exact_int_locals: HashMap<String, i32> = HashMap::new();
     let managed_do_locals: Vec<(String, usize)> = items
         .iter()
         .filter_map(|expr| {
@@ -6191,7 +6339,11 @@ fn compile_do(
             }
         })
         .collect();
+    let mut skip_until = 0usize;
     for i in 1..items.len() - 1 {
+        if i < skip_until {
+            continue;
+        }
         if let Expression::Apply(let_items) = &items[i] {
             if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
                 if kw == "let" || kw == "letrec" || kw == "mut" {
@@ -6246,6 +6398,83 @@ fn compile_do(
                     if can_elide_lambda_value {
                         continue;
                     }
+                    if kw == "let"
+                        && val_node.and_then(scalar_vector_literal_len) == Some(0)
+                        && i + 2 < items.len()
+                    {
+                        if let (
+                            Some(Expression::Apply(next_mut_items)),
+                            Some(fill_node),
+                            Some(local_idx),
+                        ) = (items.get(i + 1), child_at(i + 2), ctx.locals.get(name))
+                        {
+                            if let [Expression::Word(next_kw), Expression::Word(idx_name), Expression::Int(start)] =
+                                &next_mut_items[..]
+                            {
+                                if next_kw == "mut" && *start >= 0 {
+                                    let mut fill_nonnegative =
+                                        scoped_nonnegative_int_locals.clone();
+                                    fill_nonnegative.insert(idx_name.clone());
+                                    let mut fill_exact = scoped_exact_int_locals.clone();
+                                    fill_exact.insert(idx_name.clone(), *start);
+                                    let fill_ctx = Ctx {
+                                        fn_sigs: ctx.fn_sigs,
+                                        fn_ids: ctx.fn_ids,
+                                        extern_names: ctx.extern_names,
+                                        lambda_ids: ctx.lambda_ids,
+                                        closure_defs: ctx.closure_defs,
+                                        lambda_bindings: &scoped_lambda_bindings,
+                                        current_function: ctx.current_function,
+                                        locals: ctx.locals.clone(),
+                                        local_types: ctx.local_types.clone(),
+                                        materialized_scalar_local_slots:
+                                            scoped_materialized_scalar_local_slots.clone(),
+                                        hoisted_scalar_vec_data_slots: ctx
+                                            .hoisted_scalar_vec_data_slots
+                                            .clone(),
+                                        proven_scalar_vec_min_lengths:
+                                            scoped_proven_scalar_vec_min_lengths.clone(),
+                                        definitely_materialized_top_level_scalar_names: ctx
+                                            .definitely_materialized_top_level_scalar_names,
+                                        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                                        nonnegative_int_locals: &fill_nonnegative,
+                                        tmp_i32: ctx.tmp_i32,
+                                    };
+                                    if let Some((slot, len, value, idx_name)) =
+                                        append_fill_loop_const_i32(
+                                            fill_node,
+                                            &fill_ctx,
+                                            &fill_exact,
+                                        )
+                                    {
+                                        if slot == *local_idx {
+                                            parts.push(format!(
+                                                "i32.const {len}\n\
+                                                 i32.const {value}\n\
+                                                 call $vec_new_filled_i32\n\
+                                                 local.set {local_idx}"
+                                            ));
+                                            scoped_materialized_scalar_local_slots
+                                                .insert(*local_idx);
+                                            scoped_proven_scalar_vec_min_lengths
+                                                .insert(*local_idx, len);
+                                            if let Some(idx_slot) = ctx.locals.get(&idx_name) {
+                                                let final_idx = start.saturating_add(len);
+                                                parts.push(format!(
+                                                    "i32.const {final_idx}\nlocal.set {idx_slot}"
+                                                ));
+                                                scoped_nonnegative_int_locals
+                                                    .insert(idx_name.clone());
+                                                scoped_exact_int_locals.insert(idx_name, final_idx);
+                                            }
+                                            skip_until = i + 3;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let value = val_node
                         .ok_or_else(|| format!("Missing let value for {}", name))
                         .and_then(|n| {
@@ -6261,7 +6490,7 @@ fn compile_do(
                                 local_types: ctx.local_types.clone(),
                                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
                                 hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
-                                proven_scalar_vec_min_lengths: ctx.proven_scalar_vec_min_lengths.clone(),
+                                proven_scalar_vec_min_lengths: scoped_proven_scalar_vec_min_lengths.clone(),
                                 definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
                                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
                                 nonnegative_int_locals: &scoped_nonnegative_int_locals,
@@ -6307,6 +6536,9 @@ fn compile_do(
                         {
                             scoped_materialized_scalar_local_slots.insert(*local_idx);
                         }
+                        if let Some(len) = val_node.and_then(scalar_vector_literal_len) {
+                            scoped_proven_scalar_vec_min_lengths.insert(*local_idx, len);
+                        }
                         if let Some(cap_idx) = self_capture_idx {
                             // Recursive local lambda: fill self-capture after binding is assigned.
                             // Use non-ref capture to avoid RC self-cycles.
@@ -6316,12 +6548,19 @@ fn compile_do(
                             ));
                         }
                         if val_node
-                            .map(|n| typed_expr_is_nonnegative_int_literal(n))
+                            .map(|n| {
+                                typed_expr_is_nonnegative_int(n, &scoped_nonnegative_int_locals)
+                            })
                             .unwrap_or(false)
                         {
                             scoped_nonnegative_int_locals.insert(name.clone());
                         } else if kw == "mut" {
                             scoped_nonnegative_int_locals.remove(name);
+                        }
+                        if let Some(Expression::Int(value)) = val_node.map(|n| &n.expr) {
+                            scoped_exact_int_locals.insert(name.clone(), *value);
+                        } else {
+                            scoped_exact_int_locals.remove(name);
                         }
                     } else {
                         return Err(format!("Unknown local '{}'", name));
@@ -6350,7 +6589,7 @@ fn compile_do(
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
                 hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
-                proven_scalar_vec_min_lengths: ctx.proven_scalar_vec_min_lengths.clone(),
+                proven_scalar_vec_min_lengths: scoped_proven_scalar_vec_min_lengths.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6404,6 +6643,15 @@ fn compile_do(
             if let Some(slot) = scalar_vector_set_target_slot(&n.expr, ctx) {
                 scoped_materialized_scalar_local_slots.insert(slot);
             }
+            if let Some((slot, added_len)) =
+                append_fill_loop_min_length(n, &scoped_ctx, &scoped_exact_int_locals)
+            {
+                scoped_proven_scalar_vec_min_lengths
+                    .entry(slot)
+                    .and_modify(|len| *len = len.saturating_add(added_len))
+                    .or_insert(added_len);
+            }
+            collect_altered_int_locals(&n.expr, &mut scoped_exact_int_locals);
         }
         append_last_use_releases_for_do_expr(
             &mut parts,
@@ -6428,7 +6676,7 @@ fn compile_do(
                 local_types: ctx.local_types.clone(),
                 materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
                 hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
-                proven_scalar_vec_min_lengths: ctx.proven_scalar_vec_min_lengths.clone(),
+                proven_scalar_vec_min_lengths: scoped_proven_scalar_vec_min_lengths.clone(),
                 definitely_materialized_top_level_scalar_names: ctx
                     .definitely_materialized_top_level_scalar_names,
                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
@@ -6910,9 +7158,47 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     Ok(format!("{p}\ncall $tuple_snd"))
 }
 
-fn typed_expr_is_nonnegative_int_literal(node: &TypedExpression) -> bool {
-    matches!(node.typ.as_ref(), Some(Type::Int))
-        && matches!(&node.expr, Expression::Int(n) if *n >= 0)
+fn typed_expr_is_nonnegative_int(
+    node: &TypedExpression,
+    nonnegative_locals: &HashSet<String>,
+) -> bool {
+    if !matches!(node.typ.as_ref(), Some(Type::Int)) {
+        return false;
+    }
+    match &node.expr {
+        Expression::Int(n) => *n >= 0,
+        Expression::Word(name) => nonnegative_locals.contains(name),
+        Expression::Apply(items) => {
+            let Some(Expression::Word(op)) = items.first() else {
+                return false;
+            };
+            match op.as_str() {
+                "+" | "*" => node
+                    .children
+                    .iter()
+                    .skip(1)
+                    .all(|child| typed_expr_is_nonnegative_int(child, nonnegative_locals)),
+                "/" => {
+                    node.children
+                        .get(1)
+                        .map(|child| typed_expr_is_nonnegative_int(child, nonnegative_locals))
+                        .unwrap_or(false)
+                        && node
+                            .children
+                            .get(2)
+                            .map(|child| typed_expr_is_nonnegative_int(child, nonnegative_locals))
+                            .unwrap_or(false)
+                }
+                "if" | "cond" => node
+                    .children
+                    .iter()
+                    .skip(2)
+                    .all(|child| typed_expr_is_nonnegative_int(child, nonnegative_locals)),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
 }
 
 fn scalar_get_is_proven_in_bounds(node: &TypedExpression, ctx: &Ctx<'_>) -> Option<(usize, usize)> {
@@ -7764,7 +8050,11 @@ fn extract_const_exclusive_loop_bound(
     Some((idx_name.clone(), exclusive, idx_slot))
 }
 
-fn body_has_only_final_positive_increment(body_node: &TypedExpression, idx_name: &str) -> bool {
+fn body_has_only_final_positive_increment(
+    body_node: &TypedExpression,
+    idx_name: &str,
+    ctx: &Ctx<'_>,
+) -> bool {
     let Expression::Apply(items) = &body_node.expr else {
         return false;
     };
@@ -7776,7 +8066,8 @@ fn body_has_only_final_positive_increment(body_node: &TypedExpression, idx_name:
     } else {
         items.len().saturating_sub(1)
     };
-    if increment_idx == 0 || !is_positive_index_increment_expr(&items[increment_idx], idx_name) {
+    if increment_idx == 0 || !is_positive_index_increment_expr(&items[increment_idx], idx_name, ctx)
+    {
         return false;
     }
     items[1..increment_idx]
@@ -7784,7 +8075,7 @@ fn body_has_only_final_positive_increment(body_node: &TypedExpression, idx_name:
         .all(|expr| !expr_mutates_scalar_name(expr, idx_name))
 }
 
-fn is_positive_index_increment_expr(expr: &Expression, idx_name: &str) -> bool {
+fn is_positive_index_increment_expr(expr: &Expression, idx_name: &str, ctx: &Ctx<'_>) -> bool {
     let Expression::Apply(items) = expr else {
         return false;
     };
@@ -7795,11 +8086,219 @@ fn is_positive_index_increment_expr(expr: &Expression, idx_name: &str) -> bool {
     if op != "alter!" || target != idx_name {
         return false;
     }
-    let [Expression::Word(add_op), Expression::Word(lhs), Expression::Int(step)] = &add_items[..]
-    else {
+    let [Expression::Word(add_op), Expression::Word(lhs), step] = &add_items[..] else {
         return false;
     };
-    add_op == "+" && lhs == idx_name && *step > 0
+    if add_op != "+" || lhs != idx_name {
+        return false;
+    }
+    match step {
+        Expression::Int(step) => *step > 0,
+        Expression::Word(step_name) => ctx.nonnegative_int_locals.contains(step_name),
+        _ => false,
+    }
+}
+
+fn scalar_vector_literal_len(node: &TypedExpression) -> Option<i32> {
+    if !node
+        .typ
+        .as_ref()
+        .map(is_scalar_vector_type)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "vector") {
+        return None;
+    }
+    i32::try_from(items.len().saturating_sub(1)).ok()
+}
+
+fn append_fill_loop_min_length(
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    exact_int_locals: &HashMap<String, i32>,
+) -> Option<(usize, i32)> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "while") {
+        return None;
+    }
+    let cond_node = node.children.get(1)?;
+    let body_node = node.children.get(2)?;
+    let (idx_name, exclusive_bound, _) = extract_const_exclusive_loop_bound(cond_node, ctx)?;
+    let start = *exact_int_locals.get(&idx_name)?;
+    if start < 0 || exclusive_bound <= start {
+        return None;
+    }
+    if !body_has_only_final_positive_increment(body_node, &idx_name, ctx) {
+        return None;
+    }
+    let mut append_slots = HashMap::new();
+    if !collect_loop_append_by_length_set_vector_slots(&body_node.expr, ctx, &mut append_slots)
+        || append_slots.len() != 1
+    {
+        return None;
+    }
+    let (_, slot) = append_slots.into_iter().next()?;
+    Some((slot, exclusive_bound.saturating_sub(start)))
+}
+
+fn append_fill_loop_const_i32(
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    exact_int_locals: &HashMap<String, i32>,
+) -> Option<(usize, i32, i32, String)> {
+    let cond_node = node.children.get(1)?;
+    let body_node = node.children.get(2)?;
+    let (idx_name, _, idx_slot) = extract_const_exclusive_loop_bound(cond_node, ctx)?;
+    let (slot, len) = append_fill_loop_min_length(node, ctx, exact_int_locals)?;
+    if !body_has_final_literal_one_increment(body_node, &idx_name) {
+        return None;
+    }
+    let value = append_by_length_const_i32_value(&body_node.expr)?;
+    Some((slot, len, value, idx_name_from_slot(idx_slot, ctx)?))
+}
+
+fn idx_name_from_slot(slot: usize, ctx: &Ctx<'_>) -> Option<String> {
+    ctx.locals
+        .iter()
+        .find_map(|(name, local_slot)| (*local_slot == slot).then(|| name.clone()))
+}
+
+fn body_has_final_literal_one_increment(body_node: &TypedExpression, idx_name: &str) -> bool {
+    let Expression::Apply(items) = &body_node.expr else {
+        return false;
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") || items.len() < 2 {
+        return false;
+    }
+    let increment_idx = if matches!(items.last(), Some(Expression::Word(w)) if w == "nil") {
+        items.len().saturating_sub(2)
+    } else {
+        items.len().saturating_sub(1)
+    };
+    let Some(Expression::Apply(increment)) = items.get(increment_idx) else {
+        return false;
+    };
+    matches!(
+        &increment[..],
+        [
+            Expression::Word(op),
+            Expression::Word(target),
+            Expression::Apply(add_items)
+        ] if op == "alter!"
+            && target == idx_name
+            && matches!(
+                &add_items[..],
+                [Expression::Word(add), Expression::Word(lhs), Expression::Int(1)]
+                    if add == "+" && lhs == idx_name
+            )
+    )
+}
+
+fn append_by_length_const_i32_value(expr: &Expression) -> Option<i32> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "do") {
+        return items
+            .iter()
+            .skip(1)
+            .find_map(append_by_length_const_i32_value);
+    }
+    let [Expression::Word(op), Expression::Word(target), Expression::Apply(index_items), Expression::Int(value)] =
+        &items[..]
+    else {
+        return None;
+    };
+    if op == "set!"
+        && matches!(
+            &index_items[..],
+            [Expression::Word(len_op), Expression::Word(len_target)]
+                if len_op == "length" && len_target == target
+        )
+    {
+        Some(*value)
+    } else {
+        None
+    }
+}
+
+fn collect_loop_append_by_length_set_vector_slots(
+    expr: &Expression,
+    ctx: &Ctx<'_>,
+    out: &mut HashMap<String, usize>,
+) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "while")
+            {
+                return true;
+            }
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if op == "set!" {
+                    let is_append_index = matches!(
+                        items.get(2),
+                        Some(Expression::Apply(index_items))
+                            if matches!(
+                                &index_items[..],
+                                [Expression::Word(len_op), Expression::Word(len_target)]
+                                    if len_op == "length" && len_target == target
+                            )
+                    );
+                    if !is_append_index {
+                        return false;
+                    }
+                    if let Some(slot) = ctx.locals.get(target) {
+                        if ctx
+                            .local_types
+                            .get(target)
+                            .map(is_scalar_vector_type)
+                            .unwrap_or(false)
+                        {
+                            out.insert(target.clone(), *slot);
+                        }
+                    }
+                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
+                    || op.ends_with('!')
+                {
+                    if ctx
+                        .local_types
+                        .get(target)
+                        .map(is_scalar_vector_type)
+                        .unwrap_or(false)
+                    {
+                        return false;
+                    }
+                }
+            }
+            items
+                .iter()
+                .all(|item| collect_loop_append_by_length_set_vector_slots(item, ctx, out))
+        }
+        _ => true,
+    }
+}
+
+fn collect_altered_int_locals(expr: &Expression, exact_int_locals: &mut HashMap<String, i32>) {
+    match expr {
+        Expression::Apply(items) => {
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if op == "alter!" || op == "&alter!" {
+                    exact_int_locals.remove(target);
+                }
+            }
+            for item in items {
+                collect_altered_int_locals(item, exact_int_locals);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn expr_mutates_scalar_name(expr: &Expression, name: &str) -> bool {
@@ -8007,7 +8506,7 @@ fn collect_scalar_param_constant_set_requirements(
                             .map(is_scalar_vector_type)
                             .unwrap_or(false);
                     if is_scalar_param {
-                        if op == "set!" {
+                        if op == "get" || op == "set!" {
                             match items.get(2) {
                                 Some(Expression::Int(index)) if *index >= 0 => {
                                     let needed = index.saturating_add(1);
@@ -8017,7 +8516,9 @@ fn collect_scalar_param_constant_set_requirements(
                                         .or_insert(needed);
                                 }
                                 _ => {
-                                    invalid_slots.insert(slot);
+                                    if op == "set!" {
+                                        invalid_slots.insert(slot);
+                                    }
                                 }
                             }
                         } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
@@ -8433,7 +8934,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
             &idx_name,
             ctx.current_function,
         );
-        if body_has_only_final_positive_increment(body_node, &idx_name)
+        if body_has_only_final_positive_increment(body_node, &idx_name, ctx)
             && (!expr_mutates_vector_name_except_self(
                 &body_node.expr,
                 &xs_name,
@@ -8541,7 +9042,7 @@ fn compile_loop_while(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, S
             extract_const_exclusive_loop_bound(cond_node, ctx)
         {
             let mut replacement_set_slots = HashMap::new();
-            if body_has_only_final_positive_increment(body_node, &idx_name)
+            if body_has_only_final_positive_increment(body_node, &idx_name, ctx)
                 && collect_loop_replacement_set_vector_slots(
                     &body_node.expr,
                     ctx,
@@ -10577,6 +11078,7 @@ fn compile_program_to_wat_build_typed_with_opts(
             let mut main_items_expr = vec![Expression::Word("do".to_string())];
             let mut main_items_nodes: Vec<TypedExpression> = Vec::new();
             let mut main_only_names = HashSet::new();
+            main_only_names.extend(collect_main_mutated_top_level_let_names(items));
             for i in 1..items.len() {
                 if let Expression::Apply(let_items) = &items[i] {
                     if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
@@ -10596,12 +11098,14 @@ fn compile_program_to_wat_build_typed_with_opts(
                         if kw == "let" || kw == "letrec" {
                             if let Some(node) = child_at(i).and_then(|n| n.children.get(2)).cloned()
                             {
-                                if top_level_binding_rhs_refs_main_only_names(
-                                    kw,
-                                    name,
-                                    rhs,
-                                    &main_only_names,
-                                ) {
+                                if main_only_names.contains(name)
+                                    || top_level_binding_rhs_refs_main_only_names(
+                                        kw,
+                                        name,
+                                        rhs,
+                                        &main_only_names,
+                                    )
+                                {
                                     main_only_names.insert(name.clone());
                                     main_items_expr.push(items[i].clone());
                                     let node = child_at(i).cloned().ok_or_else(|| {

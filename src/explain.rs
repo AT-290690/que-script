@@ -505,7 +505,8 @@ fn collect_wat_metrics(wat: &str) -> ExplainMetrics {
 
 fn collect_wat_metrics_from_slice(wat: &str) -> ExplainMetrics {
     ExplainMetrics {
-        vector_allocations: count_occurrences(wat, "call $vec_new_i32"),
+        vector_allocations: count_occurrences(wat, "call $vec_new_i32")
+            + count_occurrences(wat, "call $vec_new_filled_i32"),
         zeroed_vector_allocations: count_occurrences(wat, "call $vec_new_zeroed_i32"),
         uninit_vector_allocations: count_occurrences(wat, "call $vec_new_uninit_i32"),
         tuple_allocations: count_occurrences(wat, "call $tuple_new"),
@@ -653,7 +654,13 @@ fn extract_guarded_fallback_region(wat: &str) -> Option<String> {
             if trimmed == "else" && depth == 1 {
                 return Some(fallback.join("\n"));
             }
-            if trimmed == "if" || trimmed.starts_with("if ") {
+            if trimmed == "if"
+                || trimmed.starts_with("if ")
+                || trimmed == "block"
+                || trimmed.starts_with("block ")
+                || trimmed == "loop"
+                || trimmed.starts_with("loop ")
+            {
                 depth += 1;
             } else if trimmed == "end" {
                 depth -= 1;
@@ -685,7 +692,12 @@ fn explain_call_name_and_kind(target: &str) -> (String, String) {
     }
     if matches!(
         target,
-        "vec_new_i32" | "vec_new_zeroed_i32" | "vec_new_uninit_i32" | "tuple_new" | "closure_new"
+        "vec_new_i32"
+            | "vec_new_filled_i32"
+            | "vec_new_zeroed_i32"
+            | "vec_new_uninit_i32"
+            | "tuple_new"
+            | "closure_new"
     ) {
         return (target.to_string(), "allocation".to_string());
     }
