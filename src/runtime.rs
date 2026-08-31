@@ -166,11 +166,28 @@ fn strip_outer_type(t: &str, open: char, close: char) -> Option<String> {
     Some(s[inner_start..inner_end].trim().to_string())
 }
 
-pub fn decode_value<T>(
+fn escape_string_for_display(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn decode_value_with_context<T>(
     ptr: i32,
     typ: &str,
     memory: &Memory,
     store: &Store<T>,
+    nested: bool,
 ) -> Result<String, String> {
     let t = typ.trim();
 
@@ -192,8 +209,10 @@ pub fn decode_value<T>(
             .into_iter()
             .map(|x| char::from_u32(x as u32).unwrap_or('?'))
             .collect();
+        if nested {
+            return Ok(format!("\"{}\"", escape_string_for_display(&s)));
+        }
         return Ok(s);
-        // return Ok(format!("\"{}\"",s));
     }
     if let Some(inner) = strip_outer_type(t, '[', ']') {
         let inner = inner.trim();
@@ -201,7 +220,7 @@ pub fn decode_value<T>(
         let items = read_vec_items(memory, store, &hdr)?;
         let mut decoded = Vec::with_capacity(items.len());
         for item_ptr in items {
-            decoded.push(decode_value(item_ptr, inner, memory, store)?);
+            decoded.push(decode_value_with_context(item_ptr, inner, memory, store, true)?);
         }
         return Ok(format!("[{}]", decoded.join(" ")));
     }
@@ -212,12 +231,21 @@ pub fn decode_value<T>(
         let mut decoded = Vec::with_capacity(raw_items.len());
         for (i, item_ptr) in raw_items.into_iter().enumerate() {
             let typ = parts.get(i).map(|s| s.as_str()).unwrap_or("Int");
-            decoded.push(decode_value(item_ptr, typ, memory, store)?);
+            decoded.push(decode_value_with_context(item_ptr, typ, memory, store, true)?);
         }
         return Ok(format!("{{ {} }}", decoded.join(" ")));
     }
 
     Ok(ptr.to_string())
+}
+
+pub fn decode_value<T>(
+    ptr: i32,
+    typ: &str,
+    memory: &Memory,
+    store: &Store<T>,
+) -> Result<String, String> {
+    decode_value_with_context(ptr, typ, memory, store, false)
 }
 
 fn set_argv_strings<T>(

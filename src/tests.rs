@@ -692,6 +692,19 @@ xs)"#,
     }
 
     #[test]
+    fn test_runtime_nested_strings_render_with_quotes_to_preserve_spaces() {
+        let output = run_program_output_with_std_and_opts(
+            r#"{ (join "   " ["aa" "bb" "cc"])
+                (split "      " "  sada       dsdasd ") }"#,
+            true,
+        );
+        assert_eq!(
+            output.trim(),
+            r#"{ "aa   bb   cc" ["  sada" " dsdasd "] }"#
+        );
+    }
+
+    #[test]
     fn test_lambda_grouped_params_multiple_body_forms_wrap_implicit_do() {
         let expr = crate::parser::build("(lambda (x) (print! x) (+ x 1))")
             .expect("grouped-param lambda with multiple body forms should build");
