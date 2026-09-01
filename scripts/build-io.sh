@@ -1,2 +1,4 @@
 #!/bin/bash
-cargo build --release --no-default-features --features io
+set -euo pipefail
+
+cargo build --release --no-default-features --features shell-runtime --bin queio

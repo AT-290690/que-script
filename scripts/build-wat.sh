@@ -1,4 +1,4 @@
 #!/bin/bash
 set -euo pipefail
 
-cargo build --release --bin quewat
+cargo build --release --no-default-features --features compiler --bin quewat

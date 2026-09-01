@@ -11,11 +11,11 @@ fi
 TARGET="${1:-${DEFAULT_TARGET}}"
 OUT_DIR="./target/${TARGET}/release"
 
-cargo build --release --target "${TARGET}" --no-default-features --features io --bin queio
+cargo build --release --target "${TARGET}" --no-default-features --features shell-runtime --bin queio
 cargo build --release --target "${TARGET}" --no-default-features --features compiler --bin quec
 cargo build --release --target "${TARGET}" --no-default-features --features runtime --bin quer
 cargo build --release --target "${TARGET}" --bin quewat
-cargo build --release --target "${TARGET}" --features io --bin quelsp
+cargo build --release --target "${TARGET}" --no-default-features --features io --bin quelsp
 
 mkdir -p "${OUT_DIR}"
 cp "${OUT_DIR}/queio.exe" "${OUT_DIR}/que.exe"

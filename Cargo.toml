@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["io"]
+default = ["shell-runtime"]
 compiler = ["dep:wat"]
 runtime = ["compiler", "dep:wasmtime"]
-io = ["runtime", "dep:wasmtime-wasi", "eclisp/io"]
+io = ["compiler", "eclisp/io"]
+shell-runtime = ["io", "runtime", "dep:wasmtime-wasi"]
 debug-rc = []
 repo-tools = []
 
