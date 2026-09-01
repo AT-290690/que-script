@@ -6689,6 +6689,401 @@ fn compile_do(
     Ok(parts.join("\n"))
 }
 
+fn compile_tail_do(
+    items: &[Expression],
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    self_name: &str,
+    arity: usize,
+    releasable_ref_slots: &[usize],
+) -> Result<Option<String>, String> {
+    if items.len() <= 1 {
+        return Ok(None);
+    }
+    let child_offset = if node.children.len() + 1 == items.len() {
+        1
+    } else {
+        0
+    };
+    let child_at = |item_idx: usize| -> Option<&TypedExpression> {
+        if item_idx < child_offset {
+            None
+        } else {
+            node.children.get(item_idx - child_offset)
+        }
+    };
+    let managed_local_slots: Vec<usize> = (0..ctx.tmp_i32).collect();
+    let mut parts = Vec::new();
+    let mut scoped_lambda_bindings = ctx.lambda_bindings.clone();
+    let mut scoped_materialized_scalar_local_slots = ctx.materialized_scalar_local_slots.clone();
+    let mut scoped_nonnegative_int_locals = ctx.nonnegative_int_locals.clone();
+    let mut scoped_proven_scalar_vec_min_lengths = ctx.proven_scalar_vec_min_lengths.clone();
+    let mut scoped_exact_int_locals: HashMap<String, i32> = HashMap::new();
+    let managed_do_locals: Vec<(String, usize)> = items
+        .iter()
+        .filter_map(|expr| {
+            let Expression::Apply(let_items) = expr else {
+                return None;
+            };
+            let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] else {
+                return None;
+            };
+            if kw != "let" && kw != "letrec" && kw != "mut" {
+                return None;
+            }
+            let slot = *ctx.locals.get(name)?;
+            let managed = ctx
+                .local_types
+                .get(name)
+                .map(is_managed_local_type)
+                .unwrap_or(false);
+            if managed {
+                Some((name.clone(), slot))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let mut skip_until = 0usize;
+    for i in 1..items.len() - 1 {
+        if i < skip_until {
+            continue;
+        }
+        if let Expression::Apply(let_items) = &items[i] {
+            if let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] {
+                if kw == "let" || kw == "letrec" || kw == "mut" {
+                    let val_node = child_at(i).and_then(|n| n.children.get(2));
+                    let self_capture_idx = val_node.and_then(|n| {
+                        if kw != "mut"
+                            && matches!(&n.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
+                        {
+                            let key = n.expr.to_lisp();
+                            ctx.closure_defs
+                                .get(&key)
+                                .and_then(|d| d.captures.iter().position(|c| c == name))
+                        } else {
+                            None
+                        }
+                    });
+                    let can_elide_lambda_value =
+                        devirtualize_mode_from_env()? != DevirtualizeMode::Off &&
+                        self_capture_idx.is_none() &&
+                        !items_bind_name(name, &items[1..i]) &&
+                        val_node
+                            .map(|n| {
+                                matches!(
+                                    &n.expr,
+                                    Expression::Apply(xs)
+                                        if kw != "mut"
+                                            && matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")
+                                )
+                            })
+                            .unwrap_or(false) &&
+                        !local_lambda_binding_needs_runtime_value(name, &items[i + 1..]);
+                    if let Some(n) = val_node {
+                        match &n.expr {
+                            Expression::Apply(xs)
+                                if kw != "mut"
+                                    && matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda") =>
+                            {
+                                scoped_lambda_bindings.insert(name.clone(), n.clone());
+                            }
+                            Expression::Word(alias) => {
+                                if kw != "mut" {
+                                    if let Some(target) = scoped_lambda_bindings.get(alias).cloned()
+                                    {
+                                        scoped_lambda_bindings.insert(name.clone(), target);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if can_elide_lambda_value {
+                        continue;
+                    }
+                    if kw == "let"
+                        && val_node.and_then(scalar_vector_literal_len) == Some(0)
+                        && i + 2 < items.len()
+                    {
+                        if let (
+                            Some(Expression::Apply(next_mut_items)),
+                            Some(fill_node),
+                            Some(local_idx),
+                        ) = (items.get(i + 1), child_at(i + 2), ctx.locals.get(name))
+                        {
+                            if let [Expression::Word(next_kw), Expression::Word(idx_name), Expression::Int(start)] =
+                                &next_mut_items[..]
+                            {
+                                if next_kw == "mut" && *start >= 0 {
+                                    let mut fill_nonnegative =
+                                        scoped_nonnegative_int_locals.clone();
+                                    fill_nonnegative.insert(idx_name.clone());
+                                    let mut fill_exact = scoped_exact_int_locals.clone();
+                                    fill_exact.insert(idx_name.clone(), *start);
+                                    let fill_ctx = Ctx {
+                                        fn_sigs: ctx.fn_sigs,
+                                        fn_ids: ctx.fn_ids,
+                                        extern_names: ctx.extern_names,
+                                        lambda_ids: ctx.lambda_ids,
+                                        closure_defs: ctx.closure_defs,
+                                        lambda_bindings: &scoped_lambda_bindings,
+                                        current_function: ctx.current_function,
+                                        locals: ctx.locals.clone(),
+                                        local_types: ctx.local_types.clone(),
+                                        materialized_scalar_local_slots:
+                                            scoped_materialized_scalar_local_slots.clone(),
+                                        hoisted_scalar_vec_data_slots: ctx
+                                            .hoisted_scalar_vec_data_slots
+                                            .clone(),
+                                        proven_scalar_vec_min_lengths:
+                                            scoped_proven_scalar_vec_min_lengths.clone(),
+                                        definitely_materialized_top_level_scalar_names: ctx
+                                            .definitely_materialized_top_level_scalar_names,
+                                        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                                        nonnegative_int_locals: &fill_nonnegative,
+                                        tmp_i32: ctx.tmp_i32,
+                                    };
+                                    if let Some((slot, len, value, idx_name)) =
+                                        append_fill_loop_const_i32(
+                                            fill_node,
+                                            &fill_ctx,
+                                            &fill_exact,
+                                        )
+                                    {
+                                        if slot == *local_idx {
+                                            parts.push(format!(
+                                                "i32.const {len}\n\
+                                                 i32.const {value}\n\
+                                                 call $vec_new_filled_i32\n\
+                                                 local.set {local_idx}"
+                                            ));
+                                            scoped_materialized_scalar_local_slots
+                                                .insert(*local_idx);
+                                            scoped_proven_scalar_vec_min_lengths
+                                                .insert(*local_idx, len);
+                                            if let Some(idx_slot) = ctx.locals.get(&idx_name) {
+                                                let final_idx = start.saturating_add(len);
+                                                parts.push(format!(
+                                                    "i32.const {final_idx}\nlocal.set {idx_slot}"
+                                                ));
+                                                scoped_nonnegative_int_locals
+                                                    .insert(idx_name.clone());
+                                                scoped_exact_int_locals.insert(idx_name, final_idx);
+                                            }
+                                            skip_until = i + 3;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let value = val_node
+                        .ok_or_else(|| format!("Missing let value for {}", name))
+                        .and_then(|n| {
+                            let scoped_ctx = Ctx {
+                                fn_sigs: ctx.fn_sigs,
+                                fn_ids: ctx.fn_ids,
+                                extern_names: ctx.extern_names,
+                                lambda_ids: ctx.lambda_ids,
+                                closure_defs: ctx.closure_defs,
+                                lambda_bindings: &scoped_lambda_bindings,
+                                current_function: ctx.current_function,
+                                locals: ctx.locals.clone(),
+                                local_types: ctx.local_types.clone(),
+                                materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
+                                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
+                                proven_scalar_vec_min_lengths: scoped_proven_scalar_vec_min_lengths.clone(),
+                                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
+                                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                                nonnegative_int_locals: &scoped_nonnegative_int_locals,
+                                tmp_i32: ctx.tmp_i32,
+                            };
+                            compile_expr(n, &scoped_ctx)
+                        })?;
+                    if let Some(local_idx) = ctx.locals.get(name) {
+                        let managed_local = ctx
+                            .local_types
+                            .get(name)
+                            .map(is_managed_local_type)
+                            .unwrap_or(false);
+                        let borrowed_rhs = val_node
+                            .map(|n| is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings))
+                            .unwrap_or(false);
+                        let value = if managed_local && borrowed_rhs {
+                            let tmp_owned = ctx.tmp_i32 + 2;
+                            format!(
+                                "{value}\nlocal.tee {}\ncall $rc_retain\ndrop\nlocal.get {}",
+                                tmp_owned, tmp_owned
+                            )
+                        } else {
+                            value
+                        };
+                        parts.push(format!("{value}\nlocal.set {}", local_idx));
+                        if val_node
+                            .map(|n| {
+                                expr_is_definitely_materialized_scalar_vector(
+                                    n,
+                                    &scoped_materialized_scalar_local_slots,
+                                    &ctx.locals,
+                                    ctx.definitely_materialized_top_level_scalar_names,
+                                )
+                            })
+                            .unwrap_or(false)
+                        {
+                            scoped_materialized_scalar_local_slots.insert(*local_idx);
+                        }
+                        if let Some(len) = val_node.and_then(scalar_vector_literal_len) {
+                            scoped_proven_scalar_vec_min_lengths.insert(*local_idx, len);
+                        }
+                        if let Some(cap_idx) = self_capture_idx {
+                            parts.push(format!(
+                                "local.get {}\ni32.const {}\nlocal.get {}\ncall $closure_set\ndrop",
+                                local_idx, cap_idx, local_idx
+                            ));
+                        }
+                        if val_node
+                            .map(|n| {
+                                typed_expr_is_nonnegative_int(n, &scoped_nonnegative_int_locals)
+                            })
+                            .unwrap_or(false)
+                        {
+                            scoped_nonnegative_int_locals.insert(name.clone());
+                        } else if kw == "mut" {
+                            scoped_nonnegative_int_locals.remove(name);
+                        }
+                        if let Some(Expression::Int(value)) = val_node.map(|n| &n.expr) {
+                            scoped_exact_int_locals.insert(name.clone(), *value);
+                        } else {
+                            scoped_exact_int_locals.remove(name);
+                        }
+                    } else {
+                        return Err(format!("Unknown local '{}'", name));
+                    }
+                    append_last_use_releases_for_do_expr(
+                        &mut parts,
+                        &managed_do_locals,
+                        &items[i],
+                        &items[i + 1..],
+                        &scoped_lambda_bindings,
+                    );
+                    continue;
+                }
+            }
+        }
+        if let Some(n) = child_at(i) {
+            let scoped_ctx = Ctx {
+                fn_sigs: ctx.fn_sigs,
+                fn_ids: ctx.fn_ids,
+                extern_names: ctx.extern_names,
+                lambda_ids: ctx.lambda_ids,
+                closure_defs: ctx.closure_defs,
+                lambda_bindings: &scoped_lambda_bindings,
+                current_function: ctx.current_function,
+                locals: ctx.locals.clone(),
+                local_types: ctx.local_types.clone(),
+                materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
+                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
+                proven_scalar_vec_min_lengths: scoped_proven_scalar_vec_min_lengths.clone(),
+                definitely_materialized_top_level_scalar_names: ctx
+                    .definitely_materialized_top_level_scalar_names,
+                proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                nonnegative_int_locals: &scoped_nonnegative_int_locals,
+                tmp_i32: ctx.tmp_i32,
+            };
+            let managed = n.typ.as_ref().map(is_managed_local_type).unwrap_or(false);
+            let borrowed = if managed {
+                is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings)
+            } else {
+                false
+            };
+            if managed && !borrowed {
+                let c = compile_expr(n, &scoped_ctx)?;
+                let tmp_val = ctx.tmp_i32;
+                let tmp_keep = ctx.tmp_i32 + 1;
+                let mut blk = Vec::new();
+                if managed_local_slots.is_empty() {
+                    blk.push(format!("{c}\ncall $rc_release\ndrop"));
+                } else {
+                    blk.push(format!("{c}\nlocal.set {}", tmp_val));
+                    blk.push(format!("i32.const 0\nlocal.set {}", tmp_keep));
+                    for slot in &managed_local_slots {
+                        blk.push(
+                            format!(
+                                "local.get {}\nlocal.get {}\ni32.eq\nif\n  i32.const 1\n  local.set {}\nend",
+                                tmp_val,
+                                slot,
+                                tmp_keep
+                            )
+                        );
+                    }
+                    blk.push(
+                        format!(
+                            "local.get {}\ni32.eqz\nif\n  local.get {}\n  call $rc_release\n  drop\nend",
+                            tmp_keep,
+                            tmp_val
+                        )
+                    );
+                }
+                parts.push(blk.join("\n"));
+            } else {
+                let c = compile_expr_discarding_result(n, &scoped_ctx)?;
+                if !c.is_empty() {
+                    parts.push(c);
+                }
+            }
+            if let Some(slot) = scalar_vector_set_target_slot(&n.expr, ctx) {
+                scoped_materialized_scalar_local_slots.insert(slot);
+            }
+            if let Some((slot, added_len)) =
+                append_fill_loop_min_length(n, &scoped_ctx, &scoped_exact_int_locals)
+            {
+                scoped_proven_scalar_vec_min_lengths
+                    .entry(slot)
+                    .and_modify(|len| *len = len.saturating_add(added_len))
+                    .or_insert(added_len);
+            }
+            collect_altered_int_locals(&n.expr, &mut scoped_exact_int_locals);
+        }
+        append_last_use_releases_for_do_expr(
+            &mut parts,
+            &managed_do_locals,
+            &items[i],
+            &items[i + 1..],
+            &scoped_lambda_bindings,
+        );
+    }
+    let last_node = child_at(items.len() - 1)
+        .ok_or_else(|| "Missing final do expression".to_string())?;
+    let scoped_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        extern_names: ctx.extern_names,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: &scoped_lambda_bindings,
+        current_function: ctx.current_function,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
+        proven_scalar_vec_min_lengths: scoped_proven_scalar_vec_min_lengths.clone(),
+        definitely_materialized_top_level_scalar_names: ctx
+            .definitely_materialized_top_level_scalar_names,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: &scoped_nonnegative_int_locals,
+        tmp_i32: ctx.tmp_i32,
+    };
+    let Some(last) =
+        compile_tail_expr(last_node, &scoped_ctx, self_name, arity, releasable_ref_slots)?
+    else {
+        return Ok(None);
+    };
+    parts.push(last);
+    Ok(Some(parts.join("\n")))
+}
+
 fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let elem_kind = match node.typ.as_ref() {
         Some(Type::List(inner)) => vec_elem_kind_from_type(inner)?,
@@ -10330,6 +10725,7 @@ fn compile_tail_expr(
     ctx: &Ctx<'_>,
     self_name: &str,
     arity: usize,
+    releasable_ref_slots: &[usize],
 ) -> Result<Option<String>, String> {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() => match &items[0] {
@@ -10338,12 +10734,43 @@ fn compile_tail_expr(
                 if args.len() != arity {
                     return Ok(None);
                 }
+                let managed_param_flags: Vec<bool> = ctx
+                    .fn_sigs
+                    .get(self_name)
+                    .map(|(params, _)| {
+                        params
+                            .iter()
+                            .take(arity)
+                            .map(is_managed_local_type)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| vec![false; arity]);
+                let arg_base_tmp = ctx.tmp_i32;
+                let release_scratch_slot = arg_base_tmp + args.len();
                 let mut out = Vec::new();
-                for a in args {
+                let mut managed_arg_tmp_slots = Vec::new();
+                for (i, a) in args.iter().enumerate() {
                     out.push(compile_expr(a, ctx)?);
+                    out.push(format!("local.set {}", arg_base_tmp + i));
+                    if managed_param_flags.get(i).copied().unwrap_or(false) {
+                        managed_arg_tmp_slots.push(arg_base_tmp + i);
+                    }
+                }
+                if !releasable_ref_slots.is_empty() {
+                    out.push(emit_release_unique_refs_except(
+                        releasable_ref_slots,
+                        &managed_arg_tmp_slots,
+                        release_scratch_slot,
+                    ));
+                }
+                for i in 0..args.len() {
+                    out.push(format!("local.get {}", arg_base_tmp + i));
                 }
                 out.push(format!("return_call ${}", ident(self_name)));
                 Ok(Some(out.join("\n")))
+            }
+            Expression::Word(op) if op == "do" => {
+                compile_tail_do(items, node, ctx, self_name, arity, releasable_ref_slots)
             }
             Expression::Word(op) if op == "if" => {
                 let cond_node = node
@@ -10364,14 +10791,16 @@ fn compile_tail_expr(
                     .as_ref()
                     .ok_or_else(|| "if missing type".to_string())
                     .and_then(wasm_val_type)?;
-                let then_code =
-                    if let Some(tc) = compile_tail_expr(then_node, ctx, self_name, arity)? {
+                let then_code = if let Some(tc) =
+                    compile_tail_expr(then_node, ctx, self_name, arity, releasable_ref_slots)?
+                {
                         tc
                     } else {
                         compile_expr(then_node, ctx)?
                     };
-                let else_code =
-                    if let Some(tc) = compile_tail_expr(else_node, ctx, self_name, arity)? {
+                let else_code = if let Some(tc) =
+                    compile_tail_expr(else_node, ctx, self_name, arity, releasable_ref_slots)?
+                {
                         tc
                     } else {
                         compile_expr(else_node, ctx)?
@@ -10530,10 +10959,10 @@ fn compile_lambda_func(
     let tco_safe = match tail_call_mode {
         TailCallMode::Off => false,
         TailCallMode::Conservative => !is_managed_local_type(&ret_ty) && !has_managed_locals,
-        TailCallMode::Aggressive => !has_managed_locals,
+        TailCallMode::Aggressive => true,
     };
     let tail_body_code = if tco_safe {
-        compile_tail_expr(body_node, &ctx, name, params.len())?
+        compile_tail_expr(body_node, &ctx, name, params.len(), &ref_slots)?
     } else {
         None
     };
@@ -10740,13 +11169,25 @@ fn emit_release_unique_refs(
     ret_is_ref: bool,
     scratch_slot: usize,
 ) -> String {
+    let mut except_slots = Vec::new();
+    if ret_is_ref {
+        except_slots.push(ret_slot);
+    }
+    emit_release_unique_refs_except(ref_slots, &except_slots, scratch_slot)
+}
+
+fn emit_release_unique_refs_except(
+    ref_slots: &[usize],
+    except_slots: &[usize],
+    scratch_slot: usize,
+) -> String {
     let mut out = String::new();
     for (i, slot) in ref_slots.iter().enumerate() {
         out.push_str("    i32.const 1\n");
         out.push_str(&format!("    local.set {}\n", scratch_slot));
-        if ret_is_ref {
+        for except_slot in except_slots {
             out.push_str(&format!("    local.get {}\n", slot));
-            out.push_str(&format!("    local.get {}\n", ret_slot));
+            out.push_str(&format!("    local.get {}\n", except_slot));
             out.push_str("    i32.eq\n");
             out.push_str("    if\n");
             out.push_str("      i32.const 0\n");
@@ -10962,6 +11403,45 @@ fn compile_value_func_fn_ptr(name: &str, fn_id: i32) -> String {
         ident(name),
         fn_id
     )
+}
+
+fn top_level_value_fn_ptr(
+    expr: &Expression,
+    top_defs: &HashMap<String, TopDef>,
+    fn_ids: &HashMap<String, i32>,
+) -> Option<i32> {
+    fn resolve_word_fn_ptr(
+        word: &str,
+        top_defs: &HashMap<String, TopDef>,
+        fn_ids: &HashMap<String, i32>,
+        seen: &mut HashSet<String>,
+    ) -> Option<i32> {
+        if let Some(def) = top_defs.get(word) {
+            if !seen.insert(word.to_string()) {
+                return None;
+            }
+            match &def.expr {
+                Expression::Apply(items)
+                    if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") =>
+                {
+                    return fn_ids.get(word).copied();
+                }
+                Expression::Word(alias) => {
+                    return resolve_word_fn_ptr(alias, top_defs, fn_ids, seen);
+                }
+                _ => {}
+            }
+        }
+        if let Some(fn_id) = fn_ids.get(word).copied() {
+            return Some(fn_id);
+        };
+        builtin_fn_tag(word)
+    }
+
+    let Expression::Word(word) = expr else {
+        return None;
+    };
+    resolve_word_fn_ptr(word, top_defs, fn_ids, &mut HashSet::new())
 }
 
 fn compile_partial_helper_func(
@@ -11499,6 +11979,11 @@ fn compile_program_to_wat_build_typed_with_opts(
                     &definitely_materialized_top_level_scalar_names,
                     tail_call_mode,
                 )?);
+            }
+            expr if top_level_value_fn_ptr(expr, &top_defs, &fn_ids).is_some() => {
+                let fn_id = top_level_value_fn_ptr(expr, &top_defs, &fn_ids)
+                    .ok_or_else(|| format!("Missing function pointer for top-level value '{}'", name))?;
+                emitted_funcs.push(compile_value_func_fn_ptr(name, fn_id));
             }
             _ => {
                 cached_value_defs.push(name.clone());

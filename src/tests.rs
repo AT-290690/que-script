@@ -7504,6 +7504,53 @@ fn"#;
         );
     }
 
+    #[test]
+    fn test_wat_tail_call_recognizes_do_wrapped_self_recursion() {
+        let prev_tco = std::env::var("QUE_TCO").ok();
+        std::env::set_var("QUE_TCO", "aggressive");
+        let expr = crate::parser::build(
+            r#"(do
+                    (letrec rev (lambda ([head . tail] ys)
+                      (let next (cons [head] ys))
+                      (if (= (length tail) 0)
+                          next
+                          (rev tail next))))
+                    (length (rev [1 2 3 4 5 6 7 8 9 10] [])))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        if let Some(prev) = prev_tco {
+            std::env::set_var("QUE_TCO", prev);
+        } else {
+            std::env::remove_var("QUE_TCO");
+        }
+        let rev_start = wat.find("(func $v_rev").expect("rev should exist");
+        let rev_wat = &wat[rev_start..];
+
+        assert!(
+            rev_wat.contains("return_call $v_rev"),
+            "do-wrapped tail recursion should compile to return_call, got:\n{}",
+            rev_wat
+        );
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_runtime_opt_builtin_function_alias_call_works() {
+        let _guard = runtime_exec_lock().lock().unwrap();
+        let prev_tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let result = run_program_output_unlocked(
+            r#"(do
+                (let base (lambda a b [a (+ a 1) b]))
+                (let alias1 base)
+                (let f alias1)
+                (f 1 10))"#,
+        );
+        drop(prev_tco);
+        assert_eq!(result, "[1 2 10]");
+    }
+
     #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_impure_branch_tuple_return_destructure_preserves_effects() {

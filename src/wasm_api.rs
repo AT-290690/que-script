@@ -96,6 +96,21 @@ thread_local! {
     static STD: RefCell<parser::Expression> = RefCell::new(crate::baked::load_ast());
 }
 
+#[cfg(feature = "compiler")]
+fn compile_browser_wat(typed_ast: &TypedExpression) -> Result<String, String> {
+    // Keep browser execution semantics close to the default path while still
+    // enabling tail-call lowering for deep self-recursive programs.
+    let prev_tco = std::env::var("QUE_TCO").ok();
+    std::env::set_var("QUE_TCO", "aggressive");
+    let result = wat::compile_program_to_wat_typed(typed_ast);
+    if let Some(prev) = prev_tco {
+        std::env::set_var("QUE_TCO", prev);
+    } else {
+        std::env::remove_var("QUE_TCO");
+    }
+    result
+}
+
 fn with_lsp_core<R>(f: impl FnOnce(&WasmLspCore) -> R) -> R {
     LSP_CORE.with(|cell| {
         if cell.borrow().is_none() {
@@ -829,7 +844,7 @@ pub fn wat(program: String) -> *const u8 {
 
                     match infer_result {
                         Ok((_typ, typed_ast)) => {
-                            match wat::compile_program_to_wat_typed(&typed_ast) {
+                            match compile_browser_wat(&typed_ast) {
                                 Ok(wat_src) => wat_src,
                                 Err(err) => format!(
                                     "3\n{}",
