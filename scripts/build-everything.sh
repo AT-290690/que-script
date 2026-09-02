@@ -49,16 +49,19 @@ fi
 echo "[5/7] Building wasm artifacts"
 ./scripts/build-wasm-c.sh
 
-echo "[6/7] Collecting release artifacts"
+echo "[6/8] Collecting release artifacts"
 rm -rf releases
 mkdir -p releases
 
 copy_release_artifacts "./target/release" "${HOST_TARGET}" ""
 copy_release_artifacts "./target/${LINUX_TARGET}/release" "${LINUX_TARGET}" ""
 copy_release_artifacts "./target/${WINDOWS_TARGET}/release" "${WINDOWS_TARGET}" ".exe"
+cp -R "miscs/neovim" "releases/que-nvim"
 
-echo "[7/7] Building VS Code extension"
+echo "[7/8] Building VS Code extension"
 ./scripts/build-extension.sh
+
+echo "[8/8] Neovim plugin staged"
 
 echo "All builds completed successfully."
 echo "Release artifacts copied to ./releases"
