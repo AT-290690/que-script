@@ -29,10 +29,10 @@ mod tests {
                 "(do (let Int 0) (let as (lambda _ t t)) (let xs (as (vector) (vector Int))) xs)",
                 "[Int]",
             ),
-            ("(tuple 0 true)", "{Int * Bool}"),
-            ("(vector (tuple 0 true) (tuple 1 false))", "[{Int * Bool}]"),
+            ("(tuple 0 true)", "{Int Bool}"),
+            ("(vector (tuple 0 true) (tuple 1 false))", "[{Int Bool}]"),
             ("(+. 1.23 2.112)", "Dec"),
-            ("(tuple (Int->Dec 5) (Dec->Int 5.2))", "{Dec * Int}"),
+            ("(tuple (Int->Dec 5) (Dec->Int 5.2))", "{Dec Int}"),
             (
                 r#"(do 
 (let xs (vector (vector (vector))))
@@ -223,7 +223,7 @@ xs)"#,
 
         assert!(err.contains("Expected vector ["));
         assert!(
-            err.contains("got tuple {Int * Int}"),
+            err.contains("got tuple {Int Int}"),
             "unexpected error: {}",
             err
         );
@@ -5180,12 +5180,12 @@ out"#,
             "(T -> K) -> [T] -> [K]"
         );
         assert_eq!(
-            crate::lsp_native_core::normalize_signature("Int -> T17 -> Int -> {Int * T}"),
-            "Int -> T -> Int -> {Int * T}"
+            crate::lsp_native_core::normalize_signature("Int -> T17 -> Int -> {Int T}"),
+            "Int -> T -> Int -> {Int T}"
         );
         assert_eq!(
-            crate::lsp_native_core::normalize_signature("Int -> T17 -> Int -> {Int * K}"),
-            "Int -> T -> Int -> {Int * K}"
+            crate::lsp_native_core::normalize_signature("Int -> T17 -> Int -> {Int K}"),
+            "Int -> T -> Int -> {Int K}"
         );
         assert_eq!(
             crate::lsp_native_core::strip_type_var_numbers(
@@ -6159,7 +6159,7 @@ add"#;
                 .expect("hover response should include string contents");
 
             assert!(
-                contents.contains("add : Int -> T -> Int -> {Int * T}"),
+                contents.contains("add : Int -> T -> Int -> {Int T}"),
                 "expected sig hover to preserve shared generic variable at {line}:{character}, got: {}",
                 contents
             );

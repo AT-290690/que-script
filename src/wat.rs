@@ -9866,8 +9866,23 @@ fn contains_unresolved_type(typ: &Type) -> bool {
     }
 }
 
+fn abi_type_descriptor(typ: &Type) -> String {
+    match typ {
+        Type::List(inner) => format!("[{}]", abi_type_descriptor(inner)),
+        Type::Tuple(items) => format!(
+            "{{{}}}",
+            items
+                .iter()
+                .map(abi_type_descriptor)
+                .collect::<Vec<_>>()
+                .join(" * ")
+        ),
+        other => other.to_string(),
+    }
+}
+
 fn emit_type_descriptor(typ: &Type, vec_slot: usize, data_slot: usize) -> String {
-    let text = typ.to_string();
+    let text = abi_type_descriptor(typ);
     let mut out = vec![format!(
         "i32.const {}\ni32.const 0\ncall $vec_new_i32\nlocal.set {vec_slot}\nlocal.get {vec_slot}\ni32.const 16\ni32.add\ni32.load\nlocal.set {data_slot}",
         text.chars().count()
@@ -12232,7 +12247,10 @@ fn compile_program_to_wat_build_typed_with_opts(
         scratch_i32_locals_needed(main_local_defs.len(), &[&main_code], false);
 
     let mut main_func = String::new();
-    main_func.push_str(&format!("  ;; Type: {}\n", main_ret_ty));
+    main_func.push_str(&format!(
+        "  ;; Type: {}\n",
+        abi_type_descriptor(main_ret_ty)
+    ));
     main_func.push_str(&format!(
         "  (func (export \"main\") (result {main_wasm_ty})\n"
     ));
@@ -12298,7 +12316,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     }
 
     let mut monolithic_wat = String::new();
-    monolithic_wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
+    monolithic_wat.push_str(&format!(";; Type: {}\n", abi_type_descriptor(main_ret_ty)));
     monolithic_wat.push_str("(module\n");
     monolithic_wat.push_str(&extern_imports);
     monolithic_wat.push_str(&cached_globals);
@@ -12320,7 +12338,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     user_body.push_str(&main_func);
 
     let mut user_wat = String::new();
-    user_wat.push_str(&format!(";; Type: {}\n", main_ret_ty));
+    user_wat.push_str(&format!(";; Type: {}\n", abi_type_descriptor(main_ret_ty)));
     user_wat.push_str(";; Que user module; imports runtime helpers from module \"que_runtime\".\n");
     user_wat.push_str("(module\n");
     user_wat.push_str(&extern_imports);

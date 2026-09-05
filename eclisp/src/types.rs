@@ -51,7 +51,7 @@ impl fmt::Display for Type {
                     .iter()
                     .map(|t| t.to_string())
                     .collect::<Vec<_>>()
-                    .join(" * ");
+                    .join(" ");
                 write!(f, "{{{}}}", inner)
             }
         }
