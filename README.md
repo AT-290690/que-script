@@ -189,6 +189,7 @@ Explain the optimized Wasm shape without running:
 
 ```bash
 que explain
+que explain "(+ 1 2)"
 que explain --json
 ```
 

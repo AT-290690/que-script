@@ -1115,8 +1115,12 @@ pub fn infer_error_range(text: &str, message: &str) -> Option<CoreRange> {
 fn extract_parse_error_range(text: &str, message: &str) -> Option<CoreRange> {
     let (line1, col1) = extract_line_col_after_prefix(message, "parse.found: '")
         .or_else(|| extract_line_col_after_prefix(message, "parse.unclosed: '"))
-        .or_else(|| extract_line_col_after_prefix(message, "parse.unclosed_string_literal: opened at "))
-        .or_else(|| extract_line_col_after_prefix(message, "parse.unclosed_char_literal: opened at "))?;
+        .or_else(|| {
+            extract_line_col_after_prefix(message, "parse.unclosed_string_literal: opened at ")
+        })
+        .or_else(|| {
+            extract_line_col_after_prefix(message, "parse.unclosed_char_literal: opened at ")
+        })?;
     line_col_to_single_char_range(text, line1, col1)
 }
 

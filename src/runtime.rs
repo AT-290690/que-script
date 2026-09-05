@@ -220,7 +220,9 @@ fn decode_value_with_context<T>(
         let items = read_vec_items(memory, store, &hdr)?;
         let mut decoded = Vec::with_capacity(items.len());
         for item_ptr in items {
-            decoded.push(decode_value_with_context(item_ptr, inner, memory, store, true)?);
+            decoded.push(decode_value_with_context(
+                item_ptr, inner, memory, store, true,
+            )?);
         }
         return Ok(format!("[{}]", decoded.join(" ")));
     }
@@ -231,7 +233,9 @@ fn decode_value_with_context<T>(
         let mut decoded = Vec::with_capacity(raw_items.len());
         for (i, item_ptr) in raw_items.into_iter().enumerate() {
             let typ = parts.get(i).map(|s| s.as_str()).unwrap_or("Int");
-            decoded.push(decode_value_with_context(item_ptr, typ, memory, store, true)?);
+            decoded.push(decode_value_with_context(
+                item_ptr, typ, memory, store, true,
+            )?);
         }
         return Ok(format!("{{ {} }}", decoded.join(" ")));
     }

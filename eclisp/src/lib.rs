@@ -44,8 +44,8 @@ mod tests {
 
     #[test]
     fn checks_simple_program() {
-        let (typ, typed) = check("(let add (lambda (a b) (+ a b))) (add 1 2)")
-            .expect("program should type-check");
+        let (typ, typed) =
+            check("(let add (lambda (a b) (+ a b))) (add 1 2)").expect("program should type-check");
 
         assert_eq!(typ, Type::Int);
         assert!(typed.effect.is_pure());

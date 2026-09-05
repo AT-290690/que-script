@@ -1873,9 +1873,10 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     let mut args = args.to_vec();
     if take_help_flag_from_argv(&mut args) {
         println!(
-            "Usage: {bin} explain [script.que] [--json] [--out <file>] [--debug [basic|code|types|all]|--opt]\n\
+            "Usage: {bin} explain [script.que | source] [--json] [--out <file>] [--debug [basic|code|types|all]|--opt]\n\
              \n\
              Explains the optimized Wasm shape of a Que program without running it.\n\
+             A parenthesized source argument, such as \"(+ 1 2)\", is explained directly.\n\
              --opt applies the same aggressive optimization/runtime flags as a normal run.\n\
              --debug applies the same runtime safety guard flags as a normal run.\n\
              Omitting script.que uses entry from {config} when present.",
@@ -1921,9 +1922,8 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     }
 
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let (_resolved_path, program, script_cwd) =
-        resolve_project_entry_path(&cwd, script_path.as_deref())
-            .map_err(|message| format!("{}\n{}", message, native_shell_help(bin_name)))?;
+    let (_resolved_path, program, script_cwd) = resolve_explain_input(&cwd, script_path.as_deref())
+        .map_err(|message| format!("{}\n{}", message, native_shell_help(bin_name)))?;
     apply_project_env_vars(&script_cwd)?;
     if opt_mode {
         enable_opt_runtime_flags();
@@ -1962,6 +1962,16 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
         crate::explain::render_text(&report)
     };
     emit_text_output(out_path.as_deref(), &rendered)
+}
+
+fn resolve_explain_input(
+    cwd: &Path,
+    input: Option<&str>,
+) -> Result<(PathBuf, String, PathBuf), String> {
+    if let Some(source) = input.filter(|value| value.trim_start().starts_with('(')) {
+        return Ok((cwd.join("<inline>"), source.to_string(), cwd.to_path_buf()));
+    }
+    resolve_project_entry_path(cwd, input)
 }
 
 enum LibraryInstallMode {
@@ -3110,12 +3120,13 @@ fn build_debug_error_report(
 mod tests {
     use super::{
         init_host_project, init_project_config_file, native_shell_help, parse_test_results,
-        resolve_project_entry_path, take_debug_mode_from_argv, take_emit_request_from_argv,
-        take_help_flag_from_argv, take_no_result_flag_from_argv, take_opt_flag_from_argv,
-        take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol,
-        QueTestCase, ShellPermission, ShellPolicy,
+        resolve_explain_input, resolve_project_entry_path, take_debug_mode_from_argv,
+        take_emit_request_from_argv, take_help_flag_from_argv, take_no_result_flag_from_argv,
+        take_opt_flag_from_argv, take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind,
+        LibraryExploreSymbol, QueTestCase, ShellPermission, ShellPolicy,
     };
     use std::collections::HashSet;
+    use std::path::PathBuf;
 
     #[test]
     fn parse_policy_empty_permissions() {
@@ -3586,6 +3597,17 @@ mod tests {
             std::fs::canonicalize(&root).expect("root should canonicalize"),
             std::fs::canonicalize(&base).expect("base should canonicalize")
         );
+    }
+
+    #[test]
+    fn resolve_explain_input_accepts_parenthesized_source() {
+        let cwd = PathBuf::from("/tmp/que-explain-inline-test");
+        let (path, program, script_cwd) = resolve_explain_input(&cwd, Some("  (+ 1 2)"))
+            .expect("inline source should resolve without reading a file");
+
+        assert_eq!(path, cwd.join("<inline>"));
+        assert_eq!(program, "  (+ 1 2)");
+        assert_eq!(script_cwd, cwd);
     }
 
     #[test]

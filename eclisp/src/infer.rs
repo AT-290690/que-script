@@ -700,8 +700,7 @@ fn check_impure_binding_name(
             item_expr,
             known_requires_bang,
             known_mutates_first_arg,
-        )
-        {
+        ) {
             return Some(
                 format!(
                     "Impure function '{}' must mutate its first parameter (argument 1); found mutation target using argument {}\n{}",
@@ -909,14 +908,12 @@ fn expr_mutates_non_first_param(
                 Expression::Word(op) if op == "do" => {
                     scopes.push(HashMap::new());
                     for item in items.iter().skip(1) {
-                        if let Some(idx) =
-                            expr_mutates_non_first_param(
-                                item,
-                                known_requires_bang,
-                                known_mutates_first_arg,
-                                scopes,
-                            )
-                        {
+                        if let Some(idx) = expr_mutates_non_first_param(
+                            item,
+                            known_requires_bang,
+                            known_mutates_first_arg,
+                            scopes,
+                        ) {
                             scopes.pop();
                             return Some(idx);
                         }
@@ -935,31 +932,31 @@ fn expr_mutates_non_first_param(
                     scopes.pop();
                     None
                 }
-                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => items
-                    .get(2)
-                    .and_then(|rhs| {
+                Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => {
+                    items.get(2).and_then(|rhs| {
                         expr_mutates_non_first_param(
                             rhs,
                             known_requires_bang,
                             known_mutates_first_arg,
                             scopes,
                         )
-                    }),
-                Expression::Word(op) if is_mutation_contract_call_op(op, known_mutates_first_arg) => {
+                    })
+                }
+                Expression::Word(op)
+                    if is_mutation_contract_call_op(op, known_mutates_first_arg) =>
+                {
                     if let Some(target) = items.get(1) {
                         if let Some(idx) = target_non_first_param_index(target, scopes) {
                             return Some(idx);
                         }
                     }
                     for item in items.iter().skip(1) {
-                        if let Some(idx) =
-                            expr_mutates_non_first_param(
-                                item,
-                                known_requires_bang,
-                                known_mutates_first_arg,
-                                scopes,
-                            )
-                        {
+                        if let Some(idx) = expr_mutates_non_first_param(
+                            item,
+                            known_requires_bang,
+                            known_mutates_first_arg,
+                            scopes,
+                        ) {
                             return Some(idx);
                         }
                     }
@@ -970,14 +967,12 @@ fn expr_mutates_non_first_param(
                         if matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
                         {
                             for item in items.iter().skip(1) {
-                                if let Some(idx) =
-                                    expr_mutates_non_first_param(
-                                        item,
-                                        known_requires_bang,
-                                        known_mutates_first_arg,
-                                        scopes,
-                                    )
-                                {
+                                if let Some(idx) = expr_mutates_non_first_param(
+                                    item,
+                                    known_requires_bang,
+                                    known_mutates_first_arg,
+                                    scopes,
+                                ) {
                                     return Some(idx);
                                 }
                             }
@@ -1019,14 +1014,12 @@ fn expr_mutates_non_first_param(
                     }
 
                     for item in items.iter().skip(1) {
-                        if let Some(idx) =
-                            expr_mutates_non_first_param(
-                                item,
-                                known_requires_bang,
-                                known_mutates_first_arg,
-                                scopes,
-                            )
-                        {
+                        if let Some(idx) = expr_mutates_non_first_param(
+                            item,
+                            known_requires_bang,
+                            known_mutates_first_arg,
+                            scopes,
+                        ) {
                             return Some(idx);
                         }
                     }
@@ -1139,10 +1132,14 @@ fn expr_mutates_first_param(
                         )
                     })
                     .unwrap_or(false),
-                Expression::Word(op) if is_mutation_contract_call_op(op, known_mutates_first_arg) => {
+                Expression::Word(op)
+                    if is_mutation_contract_call_op(op, known_mutates_first_arg) =>
+                {
                     if let Some(target) = items.get(1) {
-                        if matches!(target_param_binding(target, scopes), Some(MutationBinding::Param(0)))
-                        {
+                        if matches!(
+                            target_param_binding(target, scopes),
+                            Some(MutationBinding::Param(0))
+                        ) {
                             return true;
                         }
                     }
@@ -1591,8 +1588,7 @@ fn expr_requires_bang(
                     }
                     false
                 }
-                Expression::Apply(lambda_items)
-                    if matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") =>
+                Expression::Apply(lambda_items) if matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda") =>
                 {
                     for arg in items.iter().skip(1) {
                         if expr_requires_bang(

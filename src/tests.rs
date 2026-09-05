@@ -698,10 +698,7 @@ xs)"#,
                 (split "      " "  sada       dsdasd ") }"#,
             true,
         );
-        assert_eq!(
-            output.trim(),
-            r#"{ "aa   bb   cc" ["  sada" " dsdasd "] }"#
-        );
+        assert_eq!(output.trim(), r#"{ "aa   bb   cc" ["  sada" " dsdasd "] }"#);
     }
 
     #[test]
@@ -2542,35 +2539,17 @@ xs)"#,
     #[cfg(feature = "runtime")]
     fn test_regression_graph_build_two_calls_preserves_first_result() {
         let output = run_program_output_with_std_and_opts(
-            r#"(do
-        (let std/vector/empty? (lambda xs (= (length xs) 0)))
-            (let std/vector/for (lambda xs fn (do
-  (mut i 0)
-  (let len (length xs))
-  (while (< i len) (do (fn (get xs i)) (alter! i (+ i 1)))))))
-            (let std/vector/map (lambda xs fn (if (std/vector/empty? xs) [] (do
-     (let out [(fn (get xs 0))])
-     (mut i 1)
-     (while (< i (length xs)) (do (set! out (length out) (fn (get xs i))) (alter! i (+ i 1))))
-     out))))
-     (let std/vector/int/zeroes (lambda n (do
-     (let out [ 0 ])
-     (let process (lambda i (set! out (length out) 0)))
-     (loop/range/exclusive i 1 n (process i))
-     out)))
-     (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) nil)))
+            r#"(let build-graph (lambda n edges source destination (do
+  (let graph (map  (lambda _ []) (zeroes n)))
+  (loop/in edge edges (do
+    (let u (get edge 0))
+    (let v (get edge 1))
+    (push! (get graph u) v)
+    (push! (get graph v) u)))
+  graph)))
 
-                (let build-graph (lambda n edges source destination (do
-                  (let graph (std/vector/map (std/vector/int/zeroes n) (lambda _ [])))
-                  (std/vector/for edges (lambda edge (do
-                    (let u (get edge 0))
-                    (let v (get edge 1))
-                    (std/vector/push! (get graph u) v)
-                    (std/vector/push! (get graph v) u))))
-                  graph)))
-
-                [(build-graph 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2)
-                 (build-graph 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)])"#,
+[(build-graph 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2)
+  (build-graph 6 [[ 0 1 ] [ 0 2 ] [ 3 5 ] [ 5 4 ] [ 4 3 ]] 0 5)]"#,
             true,
         );
         assert_eq!(
@@ -2757,37 +2736,12 @@ xs)"#,
     #[cfg(feature = "runtime")]
     fn test_regression_std_vector_for_isolated_behavior() {
         let output = run_program_output_with_std_and_opts(
-            r#"(do
-                (let std/vector/for (lambda xs fn (loop/range/exclusive i 0 (length xs) (fn (get xs i)))))
-                (let out [])
-                (std/vector/for [1 2 3 4] (lambda x (set! out (length out) (* x 2))))
-                out)"#,
+            r#"(let out [])
+(loop/in x [1 2 3 4] (set! out (length out) (* x 2)))
+out"#,
             true,
         );
         assert_eq!(output, "[2 4 6 8]");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_regression_std_vector_3d_rotate_isolated_behavior() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(do
-                (let std/vector/empty? (lambda xs (= (length xs) 0)))
-                (let std/vector/push! (lambda xs x (do (set! xs (length xs) x) nil)))
-                (let std/vector/at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
-                (let std/vector/3d/rotate (lambda matrix (if (std/vector/empty? matrix) matrix (do 
-                    (let H (length matrix))
-                    (let W (length (get matrix 0)))
-                    (let out [])
-                    (loop/range/exclusive i 0 W (do
-                        (std/vector/push! out [])
-                        (loop/range/exclusive j 0 H
-                            (std/vector/push! (std/vector/at out -1) (get matrix j i)))))
-                    out))))
-                (std/vector/3d/rotate [[1 2 3] [4 5 6]]))"#,
-            true,
-        );
-        assert_eq!(output, "[[1 4] [2 5] [3 6]]");
     }
 
     fn infer_typed(input: &str) -> crate::infer::TypedExpression {
@@ -3841,11 +3795,10 @@ xs)"#,
 
     #[test]
     fn test_infer_impure_nested_mutation_target_rooted_in_first_param_is_allowed() {
-        let exprs = crate::parser
-            ::parse(
-                "(let std/vector/3d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))"
-            )
-            .expect("input should parse");
+        let exprs = crate::parser::parse(
+            "(let vector/3d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))",
+        )
+        .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
@@ -8675,7 +8628,7 @@ fn"#;
         let test_cases = [
             ("nil", "0"),
             ("(+ 1 2)", "3"),
-            ("(std/vector/int/sum [ 1 2 ])", "3"),
+            ("(sum [ 1 2 ])", "3"),
             ("\"Hello world\"", "Hello world"),
             (
                 r#"(let A [false (and (= 1 2) (> 3 3))]) ; => [false false] Correct
@@ -8695,8 +8648,8 @@ fn"#;
         ")))"     ; result in floor -3.
         ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (std/vector/char/count input std/char/left-brace) (std/vector/char/count input std/char/right-brace))))
-(std/vector/map samples solve)"#,
+(let solve (lambda input (- (count input '(') (count input ')'))))
+(map samples solve)"#,
                 "[0 0 3 3 3 -1 -1 -3 -3]",
             ),
             (

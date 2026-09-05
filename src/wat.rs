@@ -6892,10 +6892,15 @@ fn compile_tail_do(
                                 current_function: ctx.current_function,
                                 locals: ctx.locals.clone(),
                                 local_types: ctx.local_types.clone(),
-                                materialized_scalar_local_slots: scoped_materialized_scalar_local_slots.clone(),
-                                hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
-                                proven_scalar_vec_min_lengths: scoped_proven_scalar_vec_min_lengths.clone(),
-                                definitely_materialized_top_level_scalar_names: ctx.definitely_materialized_top_level_scalar_names,
+                                materialized_scalar_local_slots:
+                                    scoped_materialized_scalar_local_slots.clone(),
+                                hoisted_scalar_vec_data_slots: ctx
+                                    .hoisted_scalar_vec_data_slots
+                                    .clone(),
+                                proven_scalar_vec_min_lengths: scoped_proven_scalar_vec_min_lengths
+                                    .clone(),
+                                definitely_materialized_top_level_scalar_names: ctx
+                                    .definitely_materialized_top_level_scalar_names,
                                 proven_scalar_index_loads: ctx.proven_scalar_index_loads,
                                 nonnegative_int_locals: &scoped_nonnegative_int_locals,
                                 tmp_i32: ctx.tmp_i32,
@@ -7054,8 +7059,8 @@ fn compile_tail_do(
             &scoped_lambda_bindings,
         );
     }
-    let last_node = child_at(items.len() - 1)
-        .ok_or_else(|| "Missing final do expression".to_string())?;
+    let last_node =
+        child_at(items.len() - 1).ok_or_else(|| "Missing final do expression".to_string())?;
     let scoped_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,
@@ -7075,8 +7080,13 @@ fn compile_tail_do(
         nonnegative_int_locals: &scoped_nonnegative_int_locals,
         tmp_i32: ctx.tmp_i32,
     };
-    let Some(last) =
-        compile_tail_expr(last_node, &scoped_ctx, self_name, arity, releasable_ref_slots)?
+    let Some(last) = compile_tail_expr(
+        last_node,
+        &scoped_ctx,
+        self_name,
+        arity,
+        releasable_ref_slots,
+    )?
     else {
         return Ok(None);
     };
@@ -10794,17 +10804,17 @@ fn compile_tail_expr(
                 let then_code = if let Some(tc) =
                     compile_tail_expr(then_node, ctx, self_name, arity, releasable_ref_slots)?
                 {
-                        tc
-                    } else {
-                        compile_expr(then_node, ctx)?
-                    };
+                    tc
+                } else {
+                    compile_expr(then_node, ctx)?
+                };
                 let else_code = if let Some(tc) =
                     compile_tail_expr(else_node, ctx, self_name, arity, releasable_ref_slots)?
                 {
-                        tc
-                    } else {
-                        compile_expr(else_node, ctx)?
-                    };
+                    tc
+                } else {
+                    compile_expr(else_node, ctx)?
+                };
                 Ok(
                         Some(
                             format!(
@@ -11421,8 +11431,7 @@ fn top_level_value_fn_ptr(
                 return None;
             }
             match &def.expr {
-                Expression::Apply(items)
-                    if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") =>
+                Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") =>
                 {
                     return fn_ids.get(word).copied();
                 }
@@ -11981,8 +11990,9 @@ fn compile_program_to_wat_build_typed_with_opts(
                 )?);
             }
             expr if top_level_value_fn_ptr(expr, &top_defs, &fn_ids).is_some() => {
-                let fn_id = top_level_value_fn_ptr(expr, &top_defs, &fn_ids)
-                    .ok_or_else(|| format!("Missing function pointer for top-level value '{}'", name))?;
+                let fn_id = top_level_value_fn_ptr(expr, &top_defs, &fn_ids).ok_or_else(|| {
+                    format!("Missing function pointer for top-level value '{}'", name)
+                })?;
                 emitted_funcs.push(compile_value_func_fn_ptr(name, fn_id));
             }
             _ => {
