@@ -7004,6 +7004,10 @@ fn"#;
 
     #[test]
     fn test_wat_append_fill_loop_uses_filled_scalar_vector_constructor() {
+        #[cfg(feature = "runtime")]
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             r#"(do
@@ -8648,8 +8652,8 @@ fn"#;
         ")))"     ; result in floor -3.
         ")())())" ; result in floor -3.
 ])
-(let solve (lambda input (- (count input '(') (count input ')'))))
-(map samples solve)"#,
+(let solve (lambda input (- (count/char '(' input) (count/char ')' input))))
+(map solve samples)"#,
                 "[0 0 3 3 3 -1 -1 -3 -3]",
             ),
             (
