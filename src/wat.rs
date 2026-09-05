@@ -9957,30 +9957,9 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
     Ok(out.join("\n"))
 }
 
-fn compile_eval_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
-    if node.children.len() != 2 {
-        return Err("eval! requires exactly one argument".to_string());
-    }
-    let arg = &node.children[1];
-    let arg_slot = ctx.tmp_i32;
-    let result_slot = ctx.tmp_i32 + 1;
-    let arg_code = compile_expr(arg, ctx)?;
-    let mut out = vec![format!(
-        "{arg_code}\nlocal.set {arg_slot}\nlocal.get {arg_slot}\ncall $__que_eval\nlocal.set {result_slot}"
-    )];
-    if should_release_set_rhs(arg) {
-        out.push(format!("local.get {arg_slot}\ncall $rc_release\ndrop"));
-    }
-    out.push(format!("local.get {result_slot}"));
-    Ok(out.join("\n"))
-}
-
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
     if op == "serialize" || op == "deserialize" {
         return compile_serde_call(node, op, ctx);
-    }
-    if op == "eval!" {
-        return compile_eval_call(node, ctx);
     }
     if let Some(fast) = compile_fast_cell_helper(op, node, ctx) {
         return fast;
@@ -12296,10 +12275,6 @@ fn compile_program_to_wat_build_typed_with_opts(
         extern_imports.push_str(
             "  (import \"host\" \"deserialize\" (func $__que_deserialize (param i32 i32) (result i32)))\n",
         );
-    }
-    if generated_code.contains("call $__que_eval") {
-        extern_imports
-            .push_str("  (import \"host\" \"eval\" (func $__que_eval (param i32) (result i32)))\n");
     }
 
     let mut cached_globals = String::new();

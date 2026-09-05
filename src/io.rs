@@ -33,7 +33,6 @@ pub enum ShellPermission {
     Print,
     Clock,
     Delete,
-    Eval,
 }
 
 impl ShellPermission {
@@ -45,7 +44,6 @@ impl ShellPermission {
             ShellPermission::Print => "print",
             ShellPermission::Clock => "clock",
             ShellPermission::Delete => "delete",
-            ShellPermission::Eval => "eval",
         }
     }
 }
@@ -72,7 +70,6 @@ impl ShellPolicy {
         permissions.insert(ShellPermission::Print);
         permissions.insert(ShellPermission::Clock);
         permissions.insert(ShellPermission::Delete);
-        permissions.insert(ShellPermission::Eval);
         Self::enabled(permissions)
     }
 
@@ -96,7 +93,7 @@ impl ShellPolicy {
         if !self.shell_enabled {
             return Err(
                 format!(
-                    "host io is disabled. pass --allow <read|stdin|write|print|clock|delete|eval> [...]. denied operation '{}' for '{}'",
+                    "host io is disabled. pass --allow <read|stdin|write|print|clock|delete> [...]. denied operation '{}' for '{}'",
                     operation,
                     target
                 )
@@ -149,15 +146,12 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
                 "delete" => {
                     permissions.insert(ShellPermission::Delete);
                 }
-                "eval" => {
-                    permissions.insert(ShellPermission::Eval);
-                }
                 "all" | "*" => {
                     grant_all = true;
                 }
                 _ => {
                     return Err(format!(
-                        "unknown shell permission '{}'. expected one of: read, stdin, write, print, clock, delete, eval",
+                        "unknown shell permission '{}'. expected one of: read, stdin, write, print, clock, delete",
                         token
                     ));
                 }
@@ -172,7 +166,6 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
         permissions.insert(ShellPermission::Print);
         permissions.insert(ShellPermission::Clock);
         permissions.insert(ShellPermission::Delete);
-        permissions.insert(ShellPermission::Eval);
     }
 
     Ok(ShellPolicy::enabled(permissions))
@@ -1135,9 +1128,9 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
 
 fn native_shell_help(bin_name: &str) -> String {
     format!(
-        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|eval|all> [...]]\n\
+        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
          Guides: run `{bin} --learn`, `{bin} --style`, or `{bin} --pitfalls` for language, style, and gotcha notes.\n\
-         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|eval|all> [...]]\n\
+         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
          or:    {bin} test <folder-or-test.que>\n\
          or:    {bin} [<script.que>] [arg ...] --emit <source|opt-source|wat|split-wat|wasm|types> [--out <file>]\n\
          or:    {bin} --eval <source> [arg ...] --emit <source|opt-source|wat|split-wat|wasm|types> [--out <file>]\n\
@@ -1175,7 +1168,7 @@ fn native_shell_help(bin_name: &str) -> String {
            --opt          Run with performance flags for this invocation: speed/aggressive opts,\n\
                          larger scalar inlining, and runtime overflow/div-zero/bounds checks OFF.\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
-           --allow        Enable host io permissions (read, stdin, write, print, clock, delete, eval, all).\n\
+           --allow        Enable host io permissions (read, stdin, write, print, clock, delete, all).\n\
          \n\
          Notes:\n\
           - Recommended: run with `--debug` while developing, then `--opt` for trusted benchmark runs.\n\
@@ -2918,35 +2911,6 @@ pub fn host_deserialize(
     build_que_value(&mut caller, expr, &typ)
 }
 
-pub fn host_eval(mut caller: Caller<'_, ShellStoreData>, source_ptr: i32) -> wasmtime::Result<i32> {
-    let source = read_lisp_string(&mut caller, source_ptr)?;
-    caller
-        .data()
-        .shell_policy
-        .require(ShellPermission::Eval, "eval!", "<source>")
-        .map_err(wasmtime::Error::msg)?;
-    let script_cwd = caller.data().script_cwd.clone();
-    let policy = caller.data().shell_policy.clone();
-
-    let std_ast = crate::baked::load_ast();
-    let mut defs = crate::baked::ast_to_definitions(std_ast, "active library")
-        .map_err(wasmtime::Error::msg)?;
-    crate::externals::extend_with_builtin_host_externs(&mut defs).map_err(wasmtime::Error::msg)?;
-    if let Some(project_dir) = script_cwd.as_deref() {
-        defs.extend(load_project_library_definitions(project_dir).map_err(wasmtime::Error::msg)?);
-    }
-    let wrapped_source = format!("(serialize (do {source}))");
-    let wrapped = crate::parser::merge_std_and_program(&wrapped_source, defs)
-        .map_err(wasmtime::Error::msg)?;
-    let wat = crate::wat::compile_program_to_wat(&wrapped).map_err(wasmtime::Error::msg)?;
-    let store_data = ShellStoreData::new_with_security(script_cwd, policy)?;
-    let decoded = crate::runtime::run_wat_text(&wat, store_data, &[], |linker| {
-        add_shell_to_linker(linker).map_err(|e| e.to_string())
-    })
-    .map_err(wasmtime::Error::msg)?;
-    write_lisp_string(&mut caller, &decoded)
-}
-
 pub fn host_mkdir_p(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32,
@@ -3170,9 +3134,6 @@ fn register_builtin_host_import(
         }
         "deserialize" => {
             linker.func_wrap(spec.module, spec.import, host_deserialize)?;
-        }
-        "eval" => {
-            linker.func_wrap(spec.module, spec.import, host_eval)?;
         }
         other => {
             return Err(wasmtime::Error::msg(format!(
@@ -3500,23 +3461,6 @@ mod tests {
             .is_err());
         assert!(policy
             .require(ShellPermission::Delete, "delete", "./x")
-            .is_err());
-    }
-
-    #[test]
-    fn parse_policy_with_eval_permission() {
-        let mut args = vec![
-            "main.que".to_string(),
-            "--allow".to_string(),
-            "eval".to_string(),
-        ];
-        let policy = take_shell_policy_from_argv(&mut args).unwrap();
-        assert_eq!(args, vec!["main.que".to_string()]);
-        assert!(policy
-            .require(ShellPermission::Eval, "eval!", "<source>")
-            .is_ok());
-        assert!(policy
-            .require(ShellPermission::Read, "read!", "./x")
             .is_err());
     }
 

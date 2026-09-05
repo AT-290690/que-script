@@ -2910,20 +2910,6 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         let value_type = infer_expr(value_expr, ctx)?;
         let declared_type = ctx.declared_type_in_current_scope(var_name);
 
-        // A preceding `sig` is an inference constraint as well as a check. Keep it
-        // in the shared constraint set so nested expression nodes receive the
-        // resolved type used by later compiler phases.
-        if let Some(declared_type) = declared_type.as_ref() {
-            ctx.add_constraint(
-                value_type.clone(),
-                declared_type.clone(),
-                ctx.type_error(
-                    TypeErrorVariant::Source,
-                    vec![Expression::Apply(exprs.to_vec())],
-                ),
-            );
-        }
-
         let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
             .constraints
             .iter()
@@ -2946,6 +2932,17 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
                 &Expression::Apply(exprs.to_vec()),
                 ctx.current_error_scope(),
             )?;
+            // Once the signature-specific check has produced its normal
+            // diagnostic, retain the successful match in the shared constraint
+            // set so nested nodes receive the concrete type during final solving.
+            ctx.add_constraint(
+                value_type.clone(),
+                declared_type.clone(),
+                ctx.type_error(
+                    TypeErrorVariant::Source,
+                    vec![Expression::Apply(exprs.to_vec())],
+                ),
+            );
             ctx.mark_declared_type_used(var_name);
             if is_nonexpansive(value_expr) {
                 generalize(&ctx.env, solved_declared_type)

@@ -249,12 +249,6 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
     },
     BuiltinHostExternSpec {
         module: "host",
-        import: "eval",
-        local_name: "eval!",
-        typ: || fn1(ty_char_list(), ty_char_list()),
-    },
-    BuiltinHostExternSpec {
-        module: "host",
         import: "list_dir",
         local_name: "list-dir!",
         typ: || fn1(ty_char_list(), ty_char_list()),
@@ -365,7 +359,7 @@ pub fn builtin_host_extern_type_scheme(spec: &BuiltinHostExternSpec) -> TypeSche
 }
 
 pub fn builtin_host_extern_decl(name: &str) -> Option<ExternDecl> {
-    if matches!(name, "serialize" | "deserialize" | "eval!") {
+    if matches!(name, "serialize" | "deserialize") {
         return None;
     }
     BUILTIN_HOST_EXTERNS
@@ -383,7 +377,7 @@ pub fn builtin_host_extern_decl(name: &str) -> Option<ExternDecl> {
 pub fn builtin_host_extern_definitions() -> Result<Vec<Expression>, String> {
     let mut out = Vec::new();
     for spec in BUILTIN_HOST_EXTERNS {
-        if matches!(spec.local_name, "serialize" | "deserialize" | "eval!") {
+        if matches!(spec.local_name, "serialize" | "deserialize") {
             continue;
         }
         out.push(Expression::Apply(vec![

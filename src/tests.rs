@@ -1182,23 +1182,6 @@ xs)"#,
     }
 
     #[cfg(all(feature = "runtime", feature = "io"))]
-    fn run_program_output_with_all_permissions(src: &str) -> String {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .expect("runtime test lock should not be poisoned");
-        let expr = crate::parser::build(src).expect("program should build");
-        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
-            .expect("program should compile");
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::allow_all())
-                .expect("io store should initialize");
-        crate::runtime::run_wat_text(&wat, store_data, &[], |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        })
-        .expect("program should run")
-    }
-
-    #[cfg(all(feature = "runtime", feature = "io"))]
     #[test]
     fn test_serialize_preserves_nested_que_data_as_source_text() {
         let output = run_program_output(r#"(serialize { [1 2 3] { "hello\nworld" true } })"#);
@@ -1239,23 +1222,6 @@ xs)"#,
                 (+ (get xs 0) 0))"#,
         );
         assert!(error.contains("expected vector literal"), "{error}");
-    }
-
-    #[cfg(all(feature = "runtime", feature = "io"))]
-    #[test]
-    fn test_eval_requires_explicit_permission() {
-        let error = run_program_error(r#"(eval! "(+ 1 2)")"#);
-        assert!(error.contains("host io is disabled"), "{error}");
-        assert!(error.contains("eval"), "{error}");
-    }
-
-    #[cfg(all(feature = "runtime", feature = "io"))]
-    #[test]
-    fn test_eval_returns_serialized_result_when_allowed() {
-        assert_eq!(
-            run_program_output_with_all_permissions(r#"(eval! "{ (+ 1 2) [true false] }")"#),
-            "{ 3 [true false] }"
-        );
     }
 
     #[cfg(feature = "runtime")]
