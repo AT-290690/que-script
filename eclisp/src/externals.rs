@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::parser::Expression;
-use crate::types::Type;
+use crate::types::{Type, TypeScheme, TypeVar};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinHostExternSpec {
@@ -237,6 +237,24 @@ pub fn parse_letype_decl(expr: &Expression) -> Result<Option<LetypeDecl>, String
 pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
     BuiltinHostExternSpec {
         module: "host",
+        import: "serialize",
+        local_name: "serialize",
+        typ: || fn1(Type::Var(TypeVar { id: u64::MAX - 1 }), ty_char_list()),
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "deserialize",
+        local_name: "deserialize",
+        typ: || fn1(ty_char_list(), Type::Var(TypeVar { id: u64::MAX - 2 })),
+    },
+    BuiltinHostExternSpec {
+        module: "host",
+        import: "eval",
+        local_name: "eval!",
+        typ: || fn1(ty_char_list(), ty_char_list()),
+    },
+    BuiltinHostExternSpec {
+        module: "host",
         import: "list_dir",
         local_name: "list-dir!",
         typ: || fn1(ty_char_list(), ty_char_list()),
@@ -337,7 +355,19 @@ pub fn is_builtin_host_extern_symbol(name: &str) -> bool {
         .any(|spec| spec.local_name == name)
 }
 
+pub fn builtin_host_extern_type_scheme(spec: &BuiltinHostExternSpec) -> TypeScheme {
+    let typ = (spec.typ)();
+    let vars = match spec.local_name {
+        "serialize" | "deserialize" => typ.free_vars().into_iter().collect(),
+        _ => Vec::new(),
+    };
+    TypeScheme::new(vars, typ)
+}
+
 pub fn builtin_host_extern_decl(name: &str) -> Option<ExternDecl> {
+    if matches!(name, "serialize" | "deserialize" | "eval!") {
+        return None;
+    }
     BUILTIN_HOST_EXTERNS
         .iter()
         .find(|spec| spec.local_name == name)
@@ -353,6 +383,9 @@ pub fn builtin_host_extern_decl(name: &str) -> Option<ExternDecl> {
 pub fn builtin_host_extern_definitions() -> Result<Vec<Expression>, String> {
     let mut out = Vec::new();
     for spec in BUILTIN_HOST_EXTERNS {
+        if matches!(spec.local_name, "serialize" | "deserialize" | "eval!") {
+            continue;
+        }
         out.push(Expression::Apply(vec![
             Expression::Word("extern".to_string()),
             Expression::Word(spec.module.to_string()),

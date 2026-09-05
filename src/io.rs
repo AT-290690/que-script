@@ -33,6 +33,7 @@ pub enum ShellPermission {
     Print,
     Clock,
     Delete,
+    Eval,
 }
 
 impl ShellPermission {
@@ -44,6 +45,7 @@ impl ShellPermission {
             ShellPermission::Print => "print",
             ShellPermission::Clock => "clock",
             ShellPermission::Delete => "delete",
+            ShellPermission::Eval => "eval",
         }
     }
 }
@@ -70,6 +72,7 @@ impl ShellPolicy {
         permissions.insert(ShellPermission::Print);
         permissions.insert(ShellPermission::Clock);
         permissions.insert(ShellPermission::Delete);
+        permissions.insert(ShellPermission::Eval);
         Self::enabled(permissions)
     }
 
@@ -93,7 +96,7 @@ impl ShellPolicy {
         if !self.shell_enabled {
             return Err(
                 format!(
-                    "host io is disabled. pass --allow <read|stdin|write|print|clock|delete> [...]. denied operation '{}' for '{}'",
+                    "host io is disabled. pass --allow <read|stdin|write|print|clock|delete|eval> [...]. denied operation '{}' for '{}'",
                     operation,
                     target
                 )
@@ -146,12 +149,15 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
                 "delete" => {
                     permissions.insert(ShellPermission::Delete);
                 }
+                "eval" => {
+                    permissions.insert(ShellPermission::Eval);
+                }
                 "all" | "*" => {
                     grant_all = true;
                 }
                 _ => {
                     return Err(format!(
-                        "unknown shell permission '{}'. expected one of: read, stdin, write, print, clock, delete",
+                        "unknown shell permission '{}'. expected one of: read, stdin, write, print, clock, delete, eval",
                         token
                     ));
                 }
@@ -166,6 +172,7 @@ fn parse_shell_policy_permissions(parts: &[String]) -> Result<ShellPolicy, Strin
         permissions.insert(ShellPermission::Print);
         permissions.insert(ShellPermission::Clock);
         permissions.insert(ShellPermission::Delete);
+        permissions.insert(ShellPermission::Eval);
     }
 
     Ok(ShellPolicy::enabled(permissions))
@@ -1128,9 +1135,9 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
 
 fn native_shell_help(bin_name: &str) -> String {
     format!(
-        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
+        "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|eval|all> [...]]\n\
          Guides: run `{bin} --learn`, `{bin} --style`, or `{bin} --pitfalls` for language, style, and gotcha notes.\n\
-         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
+         or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|eval|all> [...]]\n\
          or:    {bin} test <folder-or-test.que>\n\
          or:    {bin} [<script.que>] [arg ...] --emit <source|opt-source|wat|split-wat|wasm|types> [--out <file>]\n\
          or:    {bin} --eval <source> [arg ...] --emit <source|opt-source|wat|split-wat|wasm|types> [--out <file>]\n\
@@ -1168,7 +1175,7 @@ fn native_shell_help(bin_name: &str) -> String {
            --opt          Run with performance flags for this invocation: speed/aggressive opts,\n\
                          larger scalar inlining, and runtime overflow/div-zero/bounds checks OFF.\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
-           --allow        Enable host io permissions (read, stdin, write, print, clock, delete, all).\n\
+           --allow        Enable host io permissions (read, stdin, write, print, clock, delete, eval, all).\n\
          \n\
          Notes:\n\
           - Recommended: run with `--debug` while developing, then `--opt` for trusted benchmark runs.\n\
@@ -2619,6 +2626,327 @@ pub fn host_write_file(
     Ok(0)
 }
 
+#[derive(Clone, Debug)]
+enum QueDataType {
+    Int,
+    Dec,
+    Bool,
+    Char,
+    Unit,
+    Vector(Box<QueDataType>),
+    Tuple(Vec<QueDataType>),
+}
+
+fn split_que_tuple_types(source: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (idx, ch) in source.char_indices() {
+        match ch {
+            '[' | '{' | '(' => depth += 1,
+            ']' | '}' | ')' => depth -= 1,
+            '*' if depth == 0 => {
+                out.push(source[start..idx].trim());
+                start = idx + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(source[start..].trim());
+    out
+}
+
+fn parse_que_data_type(source: &str) -> Result<QueDataType, String> {
+    let source = source.trim();
+    match source {
+        "Int" => Ok(QueDataType::Int),
+        "Dec" => Ok(QueDataType::Dec),
+        "Bool" => Ok(QueDataType::Bool),
+        "Char" => Ok(QueDataType::Char),
+        "()" => Ok(QueDataType::Unit),
+        _ if source.starts_with('[') && source.ends_with(']') => Ok(QueDataType::Vector(Box::new(
+            parse_que_data_type(&source[1..source.len() - 1])?,
+        ))),
+        _ if source.starts_with('{') && source.ends_with('}') => {
+            let inner = &source[1..source.len() - 1];
+            split_que_tuple_types(inner)
+                .into_iter()
+                .map(parse_que_data_type)
+                .collect::<Result<Vec<_>, _>>()
+                .map(QueDataType::Tuple)
+        }
+        _ => Err(format!("unsupported serialization type '{source}'")),
+    }
+}
+
+fn que_type_is_managed(typ: &QueDataType) -> bool {
+    matches!(typ, QueDataType::Vector(_) | QueDataType::Tuple(_))
+}
+
+fn escape_que_string(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn render_que_value(
+    caller: &mut Caller<'_, ShellStoreData>,
+    value: i32,
+    typ: &QueDataType,
+) -> wasmtime::Result<String> {
+    match typ {
+        QueDataType::Int => Ok(value.to_string()),
+        QueDataType::Dec => {
+            let scale = env::var("QUE_DECIMAL_SCALE")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(1000);
+            let negative = value < 0;
+            let absolute = i64::from(value).abs();
+            let mut fraction = format!(
+                "{:0width$}",
+                absolute % scale,
+                width = scale.to_string().len() - 1
+            );
+            while fraction.ends_with('0') {
+                fraction.pop();
+            }
+            let sign = if negative { "-" } else { "" };
+            if fraction.is_empty() {
+                Ok(format!("{sign}{}", absolute / scale))
+            } else {
+                Ok(format!("{sign}{}.{}", absolute / scale, fraction))
+            }
+        }
+        QueDataType::Bool => Ok(if value == 0 { "false" } else { "true" }.to_string()),
+        QueDataType::Char => {
+            let ch = char::from_u32(value as u32).unwrap_or('\u{fffd}');
+            Ok(format!("(char {})", u32::from(ch)))
+        }
+        QueDataType::Unit => Ok("nil".to_string()),
+        QueDataType::Vector(inner) if matches!(inner.as_ref(), QueDataType::Char) => {
+            let text = read_lisp_string(caller, value)?;
+            Ok(format!("\"{}\"", escape_que_string(&text)))
+        }
+        QueDataType::Vector(inner) => {
+            let values = read_lisp_vector(caller, value)?;
+            let mut rendered = Vec::with_capacity(values.len());
+            for value in values {
+                rendered.push(render_que_value(caller, value, inner)?);
+            }
+            Ok(format!("[{}]", rendered.join(" ")))
+        }
+        QueDataType::Tuple(parts) => {
+            let values = read_lisp_vector(caller, value)?;
+            if values.len() != parts.len() {
+                return Err(wasmtime::Error::msg(
+                    "serialized tuple shape does not match its inferred type",
+                ));
+            }
+            let mut rendered = Vec::with_capacity(values.len());
+            for (value, part) in values.into_iter().zip(parts) {
+                rendered.push(render_que_value(caller, value, part)?);
+            }
+            Ok(format!("{{ {} }}", rendered.join(" ")))
+        }
+    }
+}
+
+pub fn host_serialize(
+    mut caller: Caller<'_, ShellStoreData>,
+    value: i32,
+    type_ptr: i32,
+) -> wasmtime::Result<i32> {
+    let type_text = read_lisp_string(&mut caller, type_ptr)?;
+    let typ = parse_que_data_type(&type_text).map_err(wasmtime::Error::msg)?;
+    let rendered = render_que_value(&mut caller, value, &typ)?;
+    write_lisp_string(&mut caller, &rendered)
+}
+
+fn guest_make_vec(
+    caller: &mut Caller<'_, ShellStoreData>,
+) -> wasmtime::Result<TypedFunc<i32, i32>> {
+    caller
+        .get_export("make_vec")
+        .and_then(Extern::into_func)
+        .ok_or_else(|| wasmtime::Error::msg("guest export 'make_vec' not found"))?
+        .typed::<i32, i32>(&mut *caller)
+}
+
+fn guest_vec_push(
+    caller: &mut Caller<'_, ShellStoreData>,
+) -> wasmtime::Result<TypedFunc<(i32, i32), i32>> {
+    caller
+        .get_export("vec_push")
+        .and_then(Extern::into_func)
+        .ok_or_else(|| wasmtime::Error::msg("guest export 'vec_push' not found"))?
+        .typed::<(i32, i32), i32>(&mut *caller)
+}
+
+fn expression_items<'a>(
+    expr: &'a Expression,
+    expected_head: &str,
+) -> Result<&'a [Expression], String> {
+    let Expression::Apply(items) = expr else {
+        return Err(format!("expected {expected_head} literal"));
+    };
+    if !matches!(items.first(), Some(Expression::Word(head)) if head == expected_head) {
+        return Err(format!("expected {expected_head} literal"));
+    }
+    Ok(&items[1..])
+}
+
+fn build_que_value(
+    caller: &mut Caller<'_, ShellStoreData>,
+    expr: &Expression,
+    typ: &QueDataType,
+) -> wasmtime::Result<i32> {
+    match typ {
+        QueDataType::Int => match expr {
+            Expression::Int(value) => Ok(*value),
+            _ => Err(wasmtime::Error::msg("deserialize expected Int literal")),
+        },
+        QueDataType::Dec => {
+            let value = match expr {
+                Expression::Dec(value) => f64::from(*value),
+                Expression::Int(value) => f64::from(*value),
+                _ => return Err(wasmtime::Error::msg("deserialize expected Dec literal")),
+            };
+            let scale = env::var("QUE_DECIMAL_SCALE")
+                .ok()
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| *v > 0.0)
+                .unwrap_or(1000.0);
+            Ok((value * scale).round() as i32)
+        }
+        QueDataType::Bool => match expr {
+            Expression::Word(value) if value == "true" => Ok(1),
+            Expression::Word(value) if value == "false" => Ok(0),
+            _ => Err(wasmtime::Error::msg("deserialize expected Bool literal")),
+        },
+        QueDataType::Unit => match expr {
+            Expression::Word(value) if value == "nil" => Ok(0),
+            Expression::Apply(items) if items.is_empty() => Ok(0),
+            _ => Err(wasmtime::Error::msg("deserialize expected nil")),
+        },
+        QueDataType::Char => {
+            let items = expression_items(expr, "char").map_err(wasmtime::Error::msg)?;
+            match items {
+                [Expression::Int(value)] => Ok(*value),
+                _ => Err(wasmtime::Error::msg("deserialize expected Char literal")),
+            }
+        }
+        QueDataType::Vector(inner) => {
+            let head = if matches!(inner.as_ref(), QueDataType::Char) {
+                "string"
+            } else {
+                "vector"
+            };
+            let items = expression_items(expr, head).map_err(wasmtime::Error::msg)?;
+            let make_vec = guest_make_vec(caller)?;
+            let push = guest_vec_push(caller)?;
+            let release = guest_rc_release(caller)?;
+            let elem_ref = i32::from(que_type_is_managed(inner));
+            let out = make_vec.call(&mut *caller, elem_ref)?;
+            for item in items {
+                let value = build_que_value(caller, item, inner)?;
+                push.call(&mut *caller, (out, value))?;
+                if que_type_is_managed(inner) {
+                    release.call(&mut *caller, value)?;
+                }
+            }
+            Ok(out)
+        }
+        QueDataType::Tuple(parts) => {
+            let items = expression_items(expr, "tuple").map_err(wasmtime::Error::msg)?;
+            if items.len() != parts.len() {
+                return Err(wasmtime::Error::msg(
+                    "deserialize tuple shape does not match expected type",
+                ));
+            }
+            let make_vec = guest_make_vec(caller)?;
+            let push = guest_vec_push(caller)?;
+            let release = guest_rc_release(caller)?;
+            let out = make_vec.call(&mut *caller, 1)?;
+            for (item, part) in items.iter().zip(parts) {
+                let value = build_que_value(caller, item, part)?;
+                push.call(&mut *caller, (out, value))?;
+                if que_type_is_managed(part) {
+                    release.call(&mut *caller, value)?;
+                }
+            }
+            Ok(out)
+        }
+    }
+}
+
+pub fn host_deserialize(
+    mut caller: Caller<'_, ShellStoreData>,
+    source_ptr: i32,
+    type_ptr: i32,
+) -> wasmtime::Result<i32> {
+    let source = read_lisp_string(&mut caller, source_ptr)?;
+    let type_text = read_lisp_string(&mut caller, type_ptr)?;
+    let typ = parse_que_data_type(&type_text).map_err(wasmtime::Error::msg)?;
+    let parsed = crate::parser::build(&source).map_err(wasmtime::Error::msg)?;
+    let Expression::Apply(expressions) = &parsed else {
+        return Err(wasmtime::Error::msg(
+            "deserialize expects exactly one literal",
+        ));
+    };
+    let [Expression::Word(head), expr] = expressions.as_slice() else {
+        return Err(wasmtime::Error::msg(
+            "deserialize expects exactly one literal",
+        ));
+    };
+    if head != "do" {
+        return Err(wasmtime::Error::msg(
+            "deserialize expects exactly one literal",
+        ));
+    }
+    build_que_value(&mut caller, expr, &typ)
+}
+
+pub fn host_eval(mut caller: Caller<'_, ShellStoreData>, source_ptr: i32) -> wasmtime::Result<i32> {
+    let source = read_lisp_string(&mut caller, source_ptr)?;
+    caller
+        .data()
+        .shell_policy
+        .require(ShellPermission::Eval, "eval!", "<source>")
+        .map_err(wasmtime::Error::msg)?;
+    let script_cwd = caller.data().script_cwd.clone();
+    let policy = caller.data().shell_policy.clone();
+
+    let std_ast = crate::baked::load_ast();
+    let mut defs = crate::baked::ast_to_definitions(std_ast, "active library")
+        .map_err(wasmtime::Error::msg)?;
+    crate::externals::extend_with_builtin_host_externs(&mut defs).map_err(wasmtime::Error::msg)?;
+    if let Some(project_dir) = script_cwd.as_deref() {
+        defs.extend(load_project_library_definitions(project_dir).map_err(wasmtime::Error::msg)?);
+    }
+    let wrapped_source = format!("(serialize (do {source}))");
+    let wrapped = crate::parser::merge_std_and_program(&wrapped_source, defs)
+        .map_err(wasmtime::Error::msg)?;
+    let wat = crate::wat::compile_program_to_wat(&wrapped).map_err(wasmtime::Error::msg)?;
+    let store_data = ShellStoreData::new_with_security(script_cwd, policy)?;
+    let decoded = crate::runtime::run_wat_text(&wat, store_data, &[], |linker| {
+        add_shell_to_linker(linker).map_err(|e| e.to_string())
+    })
+    .map_err(wasmtime::Error::msg)?;
+    write_lisp_string(&mut caller, &decoded)
+}
+
 pub fn host_mkdir_p(
     mut caller: Caller<'_, ShellStoreData>,
     path_vec_ptr: i32,
@@ -2836,6 +3164,15 @@ fn register_builtin_host_import(
         }
         "clear" => {
             linker.func_wrap(spec.module, spec.import, host_clear)?;
+        }
+        "serialize" => {
+            linker.func_wrap(spec.module, spec.import, host_serialize)?;
+        }
+        "deserialize" => {
+            linker.func_wrap(spec.module, spec.import, host_deserialize)?;
+        }
+        "eval" => {
+            linker.func_wrap(spec.module, spec.import, host_eval)?;
         }
         other => {
             return Err(wasmtime::Error::msg(format!(
@@ -3163,6 +3500,23 @@ mod tests {
             .is_err());
         assert!(policy
             .require(ShellPermission::Delete, "delete", "./x")
+            .is_err());
+    }
+
+    #[test]
+    fn parse_policy_with_eval_permission() {
+        let mut args = vec![
+            "main.que".to_string(),
+            "--allow".to_string(),
+            "eval".to_string(),
+        ];
+        let policy = take_shell_policy_from_argv(&mut args).unwrap();
+        assert_eq!(args, vec!["main.que".to_string()]);
+        assert!(policy
+            .require(ShellPermission::Eval, "eval!", "<source>")
+            .is_ok());
+        assert!(policy
+            .require(ShellPermission::Read, "read!", "./x")
             .is_err());
     }
 

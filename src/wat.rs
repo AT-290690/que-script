@@ -9845,7 +9845,143 @@ fn compile_extern_direct_call(
     Ok(out.join("\n"))
 }
 
+fn contains_function_type(typ: &Type) -> bool {
+    match typ {
+        Type::Function(_, _) => true,
+        Type::List(inner) => contains_function_type(inner),
+        Type::Tuple(items) => items.iter().any(contains_function_type),
+        _ => false,
+    }
+}
+
+fn contains_unresolved_type(typ: &Type) -> bool {
+    match typ {
+        Type::Var(_) => true,
+        Type::List(inner) => contains_unresolved_type(inner),
+        Type::Tuple(items) => items.iter().any(contains_unresolved_type),
+        Type::Function(arg, result) => {
+            contains_unresolved_type(arg) || contains_unresolved_type(result)
+        }
+        _ => false,
+    }
+}
+
+fn emit_type_descriptor(typ: &Type, vec_slot: usize, data_slot: usize) -> String {
+    let text = typ.to_string();
+    let mut out = vec![format!(
+        "i32.const {}\ni32.const 0\ncall $vec_new_i32\nlocal.set {vec_slot}\nlocal.get {vec_slot}\ni32.const 16\ni32.add\ni32.load\nlocal.set {data_slot}",
+        text.chars().count()
+    )];
+    for (idx, ch) in text.chars().enumerate() {
+        out.push(format!(
+            "local.get {data_slot}\ni32.const {}\ni32.add\ni32.const {}\ni32.store",
+            idx * 4,
+            u32::from(ch)
+        ));
+    }
+    out.push(format!("local.get {vec_slot}"));
+    out.join("\n")
+}
+
+fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
+    let arg = node
+        .children
+        .get(1)
+        .ok_or_else(|| format!("{op} requires exactly one argument"))?;
+    if node.children.len() != 2 {
+        return Err(format!("{op} requires exactly one argument"));
+    }
+    let value_type = if op == "serialize" {
+        arg.typ
+            .as_ref()
+            .ok_or_else(|| "serialize argument is missing its inferred type".to_string())?
+    } else {
+        node.typ
+            .as_ref()
+            .ok_or_else(|| "deserialize result is missing its inferred type".to_string())?
+    };
+    if contains_function_type(value_type) {
+        return Err(format!("{op} does not support function values"));
+    }
+    if contains_unresolved_type(value_type) {
+        return Err(if op == "deserialize" {
+            "deserialize requires a concrete expected type; use it in a typed context or annotate it with `as`".to_string()
+        } else {
+            "serialize requires a concrete value type".to_string()
+        });
+    }
+
+    let arg_slot = ctx.tmp_i32;
+    let type_slot = ctx.tmp_i32 + 1;
+    let type_data_slot = ctx.tmp_i32 + 2;
+    let result_slot = ctx.tmp_i32 + 3;
+    let nested_ctx = Ctx {
+        fn_sigs: ctx.fn_sigs,
+        fn_ids: ctx.fn_ids,
+        extern_names: ctx.extern_names,
+        lambda_ids: ctx.lambda_ids,
+        closure_defs: ctx.closure_defs,
+        lambda_bindings: ctx.lambda_bindings,
+        current_function: ctx.current_function,
+        locals: ctx.locals.clone(),
+        local_types: ctx.local_types.clone(),
+        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
+        proven_scalar_vec_min_lengths: ctx.proven_scalar_vec_min_lengths.clone(),
+        definitely_materialized_top_level_scalar_names: ctx
+            .definitely_materialized_top_level_scalar_names,
+        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+        nonnegative_int_locals: ctx.nonnegative_int_locals,
+        tmp_i32: ctx.tmp_i32 + 4,
+    };
+    let arg_code = compile_expr(arg, &nested_ctx)?;
+    let type_code = emit_type_descriptor(value_type, type_slot, type_data_slot);
+    let host_name = if op == "serialize" {
+        "$__que_serialize"
+    } else {
+        "$__que_deserialize"
+    };
+    let release_arg = should_release_set_rhs(arg);
+    let mut out = vec![
+        format!("{arg_code}\nlocal.set {arg_slot}"),
+        format!("{type_code}\nlocal.set {type_slot}"),
+        format!(
+            "local.get {arg_slot}\nlocal.get {type_slot}\ncall {host_name}\nlocal.set {result_slot}"
+        ),
+        format!("local.get {type_slot}\ncall $rc_release\ndrop"),
+    ];
+    if release_arg {
+        out.push(format!("local.get {arg_slot}\ncall $rc_release\ndrop"));
+    }
+    out.push(format!("local.get {result_slot}"));
+    Ok(out.join("\n"))
+}
+
+fn compile_eval_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if node.children.len() != 2 {
+        return Err("eval! requires exactly one argument".to_string());
+    }
+    let arg = &node.children[1];
+    let arg_slot = ctx.tmp_i32;
+    let result_slot = ctx.tmp_i32 + 1;
+    let arg_code = compile_expr(arg, ctx)?;
+    let mut out = vec![format!(
+        "{arg_code}\nlocal.set {arg_slot}\nlocal.get {arg_slot}\ncall $__que_eval\nlocal.set {result_slot}"
+    )];
+    if should_release_set_rhs(arg) {
+        out.push(format!("local.get {arg_slot}\ncall $rc_release\ndrop"));
+    }
+    out.push(format!("local.get {result_slot}"));
+    Ok(out.join("\n"))
+}
+
 fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
+    if op == "serialize" || op == "deserialize" {
+        return compile_serde_call(node, op, ctx);
+    }
+    if op == "eval!" {
+        return compile_eval_call(node, ctx);
+    }
     if let Some(fast) = compile_fast_cell_helper(op, node, ctx) {
         return fast;
     }
@@ -12144,6 +12280,26 @@ fn compile_program_to_wat_build_typed_with_opts(
             extern_imports.push_str(&format!(" (param {})", param));
         }
         extern_imports.push_str(&format!(" (result {})))\n", wasm_val_type(ret)?));
+    }
+    let generated_code = emitted_funcs
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(main_code.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if generated_code.contains("call $__que_serialize") {
+        extern_imports.push_str(
+            "  (import \"host\" \"serialize\" (func $__que_serialize (param i32 i32) (result i32)))\n",
+        );
+    }
+    if generated_code.contains("call $__que_deserialize") {
+        extern_imports.push_str(
+            "  (import \"host\" \"deserialize\" (func $__que_deserialize (param i32 i32) (result i32)))\n",
+        );
+    }
+    if generated_code.contains("call $__que_eval") {
+        extern_imports
+            .push_str("  (import \"host\" \"eval\" (func $__que_eval (param i32) (result i32)))\n");
     }
 
     let mut cached_globals = String::new();
