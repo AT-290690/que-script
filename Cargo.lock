@@ -1159,6 +1159,7 @@ version = "0.1.0"
 dependencies = [
  "eclisp",
  "flate2",
+ "getrandom 0.3.4",
  "lsp-server",
  "lsp-types",
  "reqwest",

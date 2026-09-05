@@ -5020,6 +5020,10 @@ out"#,
             Some("() -> Int")
         );
         assert_eq!(
+            signatures.get("random!").map(String::as_str),
+            Some("() -> Int")
+        );
+        assert_eq!(
             effects.get("stdin!").copied(),
             Some(crate::infer::EffectFlags::IO)
         );
@@ -5029,6 +5033,10 @@ out"#,
         );
         assert_eq!(
             effects.get("time!").copied(),
+            Some(crate::infer::EffectFlags::IO)
+        );
+        assert_eq!(
+            effects.get("random!").copied(),
             Some(crate::infer::EffectFlags::IO)
         );
     }
@@ -6615,6 +6623,19 @@ fn"#;
         assert!(
             wat.contains("(import \"host\" \"time\" (func $v_time_bang_ (result i32)))"),
             "time! should emit a zero-arg host import, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_random_builtin_host_extern_emits_zero_arg_import() {
+        let expr = crate::parser::build("(random!)").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(
+            wat.contains("(import \"host\" \"random\" (func $v_random_bang_ (result i32)))"),
+            "random! should emit a zero-arg host import, got:\n{}",
             wat
         );
     }

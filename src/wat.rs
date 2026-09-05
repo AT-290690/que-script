@@ -9906,7 +9906,7 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
     if node.children.len() != 2 {
         return Err(format!("{op} requires exactly one argument"));
     }
-    let value_type = if op == "serialize" {
+    let inferred_value_type = if op == "serialize" {
         arg.typ
             .as_ref()
             .ok_or_else(|| "serialize argument is missing its inferred type".to_string())?
@@ -9915,6 +9915,19 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
             .as_ref()
             .ok_or_else(|| "deserialize result is missing its inferred type".to_string())?
     };
+    let resolved_binding_type =
+        if op == "serialize" && contains_unresolved_type(inferred_value_type) {
+            match &arg.expr {
+                Expression::Word(name) => ctx
+                    .local_types
+                    .get(name)
+                    .filter(|typ| !contains_unresolved_type(typ)),
+                _ => None,
+            }
+        } else {
+            None
+        };
+    let value_type = resolved_binding_type.unwrap_or(inferred_value_type);
     if contains_function_type(value_type) {
         return Err(format!("{op} does not support function values"));
     }

@@ -1327,7 +1327,7 @@ fn native_shell_learn() -> &'static str {
     - set! pop! length get car cdr cons fst snd while block unless when when-not\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
-    ARGV print! sleep! time! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
+    ARGV print! sleep! time! random! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
 }
 
 fn native_shell_pitfalls() -> &'static str {
@@ -3067,6 +3067,19 @@ pub fn host_time(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
     i32::try_from(now.as_secs()).map_err(|_| wasmtime::Error::msg("time! overflowed i32"))
 }
 
+pub fn host_random(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
+    caller
+        .data()
+        .shell_policy
+        .require(ShellPermission::Clock, "random!", "<random>")
+        .map_err(wasmtime::Error::msg)?;
+
+    let mut bytes = [0u8; 4];
+    getrandom::fill(&mut bytes)
+        .map_err(|e| wasmtime::Error::msg(format!("random! failed: {e}")))?;
+    Ok(i32::from_ne_bytes(bytes))
+}
+
 pub fn host_clear(caller: Caller<'_, ShellStoreData>) -> wasmtime::Result<i32> {
     caller
         .data()
@@ -3125,6 +3138,9 @@ fn register_builtin_host_import(
         }
         "time" => {
             linker.func_wrap(spec.module, spec.import, host_time)?;
+        }
+        "random" => {
+            linker.func_wrap(spec.module, spec.import, host_random)?;
         }
         "clear" => {
             linker.func_wrap(spec.module, spec.import, host_clear)?;
