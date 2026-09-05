@@ -1218,6 +1218,20 @@ xs)"#,
 
     #[cfg(all(feature = "runtime", feature = "io"))]
     #[test]
+    fn test_sig_propagates_concrete_type_into_deserialize() {
+        let output = run_program_output(
+            r#"(do
+                (let xs [ { true false 1 2 3 [false] } ])
+                (let encoded (serialize xs))
+                (sig decoded [{Bool {Bool {Int {Int {Int [Bool]}}}}}])
+                (let decoded (deserialize encoded))
+                decoded)"#,
+        );
+        assert_eq!(output, "[{ true { false { 1 { 2 { 3 [false] } } } } }]");
+    }
+
+    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[test]
     fn test_deserialize_rejects_non_literal_code() {
         let error = run_program_error(
             r#"(do

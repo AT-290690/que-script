@@ -2910,6 +2910,20 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         let value_type = infer_expr(value_expr, ctx)?;
         let declared_type = ctx.declared_type_in_current_scope(var_name);
 
+        // A preceding `sig` is an inference constraint as well as a check. Keep it
+        // in the shared constraint set so nested expression nodes receive the
+        // resolved type used by later compiler phases.
+        if let Some(declared_type) = declared_type.as_ref() {
+            ctx.add_constraint(
+                value_type.clone(),
+                declared_type.clone(),
+                ctx.type_error(
+                    TypeErrorVariant::Source,
+                    vec![Expression::Apply(exprs.to_vec())],
+                ),
+            );
+        }
+
         let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
             .constraints
             .iter()
