@@ -8249,6 +8249,18 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         }
         return Ok(bounds);
     }
+    if !parse_env_bool_like("QUE_BOUNDS_CHECK", true) && !release_xs_after {
+        if let Some(data_slot) = hoisted_scalar_vec_data_slot(xs_node, ctx) {
+            if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
+                return Ok(emit_constant_scalar_get_from_data_slot(data_slot, *index));
+            }
+            return Ok(emit_dynamic_scalar_get_from_data_slot(
+                &idx,
+                data_slot,
+                ctx.tmp_i32 + 1,
+            ));
+        }
+    }
     if release_xs_after {
         Ok(format!(
             "{xs}\nlocal.set {}\n{idx}\nlocal.get {}\ncall $vec_get_{}\nlocal.set {}\nlocal.get {}\ncall $rc_release\ndrop\nlocal.get {}",
@@ -9275,7 +9287,7 @@ fn loop_materialize_once_plan(body: &TypedExpression, ctx: &Ctx<'_>) -> (HashSet
     (materialized, prelude)
 }
 
-fn collect_loop_scalar_get_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut HashSet<usize>) {
+fn collect_loop_vector_get_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut HashSet<usize>) {
     match expr {
         Expression::Apply(items) => {
             if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "while")
@@ -9285,22 +9297,36 @@ fn collect_loop_scalar_get_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut Has
             if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
                 if op == "get" {
                     if let Some(slot) = ctx.locals.get(target) {
-                        if ctx
-                            .local_types
-                            .get(target)
-                            .map(is_scalar_vector_type)
-                            .unwrap_or(false)
-                        {
+                        if matches!(ctx.local_types.get(target), Some(Type::List(_))) {
                             out.insert(*slot);
                         }
                     }
                 }
             }
             for item in items {
-                collect_loop_scalar_get_slots(item, ctx, out);
+                collect_loop_vector_get_slots(item, ctx, out);
             }
         }
         _ => {}
+    }
+}
+
+fn expr_mutates_any_local_vector(expr: &Expression, ctx: &Ctx<'_>) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda") {
+                return false;
+            }
+            if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
+                if op.ends_with('!') && matches!(ctx.local_types.get(target), Some(Type::List(_))) {
+                    return true;
+                }
+            }
+            items
+                .iter()
+                .any(|item| expr_mutates_any_local_vector(item, ctx))
+        }
+        _ => false,
     }
 }
 
@@ -9318,8 +9344,9 @@ fn loop_hoisted_data_pointer_plan(
     }
 
     let mut slots = HashSet::new();
-    collect_loop_scalar_get_slots(&body.expr, ctx, &mut slots);
+    collect_loop_vector_get_slots(&body.expr, ctx, &mut slots);
     slots.retain(|slot| !ctx.hoisted_scalar_vec_data_slots.contains_key(slot));
+    let mutating_local_vector = expr_mutates_any_local_vector(&body.expr, ctx);
     slots.retain(|slot| {
         let names = ctx
             .locals
@@ -9327,7 +9354,12 @@ fn loop_hoisted_data_pointer_plan(
             .filter_map(|(name, local_slot)| (local_slot == slot).then_some(name));
         names.clone().next().is_some_and(|_| {
             names.into_iter().all(|name| {
-                !expr_mutates_vector_name_except_self(&body.expr, name, ctx.current_function)
+                let managed_elements = ctx
+                    .local_types
+                    .get(name)
+                    .is_some_and(|typ| matches!(typ, Type::List(inner) if is_ref_type(inner)));
+                (!managed_elements || !mutating_local_vector)
+                    && !expr_mutates_vector_name_except_self(&body.expr, name, ctx.current_function)
             })
         })
     });

@@ -4683,8 +4683,12 @@ out"#,
             "main should not call v_reduce after direct loop fusion, got:\n{}",
             main_wat
         );
-        assert!(
-            main_wat.contains("\n    block\n      loop\n"),
+        assert_eq!(
+            main_wat
+                .lines()
+                .filter(|line| line.trim() == "loop")
+                .count(),
+            1,
             "main should contain a single lowered loop after fusion, got:\n{}",
             main_wat
         );
@@ -7857,6 +7861,87 @@ fn"#;
             !loop_wat.contains("call $vec_set_scalar_materialized_i32"),
             "stable counted replacement loop should not call scalar set helper inside the loop, got:\n{}",
             loop_wat
+        );
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_wat_read_only_managed_vector_loop_hoists_data_pointer_for_get() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let source = r#"((lambda (do
+                (let xs ["a" "bb" "ccc"])
+                (mut i 0)
+                (mut total 0)
+                (while (< i (length xs))
+                  (do
+                    (alter! total (+ total (length (get xs i))))
+                    (alter! i (+ i 1))))
+                total)))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_end = wat[main_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| main_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let main_wat = &wat[main_start..main_end];
+        let loop_start = main_wat.find("loop").expect("counted loop should exist");
+        let loop_wat = &main_wat[loop_start..];
+
+        assert!(
+            !loop_wat.contains("call $vec_get_i32"),
+            "read-only managed-vector get should be a direct load, got:\n{}",
+            main_wat
+        );
+        assert!(
+            loop_wat.contains("i32.load"),
+            "managed-vector loop should directly load the element, got:\n{}",
+            main_wat
+        );
+        assert!(
+            main_wat[..loop_start]
+                .contains("i32.const 16\n    i32.add\n    i32.load\n    local.set"),
+            "managed-vector data pointer should be cached before the loop, got:\n{}",
+            main_wat
+        );
+        assert_eq!(run_program_output_unlocked(source), "6");
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_wat_managed_vector_loop_with_alias_mutation_keeps_get_helper() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let expr = crate::parser::build(
+            r#"((lambda (do
+                (let xs ["a" "bb"])
+                (let alias xs)
+                (mut i 0)
+                (while (< i (length xs))
+                  (do
+                    (length (get xs i))
+                    (set! alias i "changed")
+                    (alter! i (+ i 1))))
+                xs)))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+        let loop_start = main_wat.find("loop").expect("counted loop should exist");
+        let loop_wat = &main_wat[loop_start..];
+
+        assert!(
+            loop_wat.contains("call $vec_get_i32"),
+            "a possible alias mutation must keep the managed get helper, got:\n{}",
+            main_wat
         );
     }
 
