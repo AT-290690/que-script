@@ -2619,8 +2619,9 @@ pub fn host_write_file(
     Ok(0)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum QueDataType {
+    Unknown,
     Int,
     Dec,
     Bool,
@@ -2657,6 +2658,12 @@ fn parse_que_data_type(source: &str) -> Result<QueDataType, String> {
         "Bool" => Ok(QueDataType::Bool),
         "Char" => Ok(QueDataType::Char),
         "()" => Ok(QueDataType::Unit),
+        _ if source
+            .strip_prefix('T')
+            .is_some_and(|id| !id.is_empty() && id.chars().all(|ch| ch.is_ascii_digit())) =>
+        {
+            Ok(QueDataType::Unknown)
+        }
         _ if source.starts_with('[') && source.ends_with(']') => Ok(QueDataType::Vector(Box::new(
             parse_que_data_type(&source[1..source.len() - 1])?,
         ))),
@@ -2698,6 +2705,9 @@ fn render_que_value(
     typ: &QueDataType,
 ) -> wasmtime::Result<String> {
     match typ {
+        QueDataType::Unknown => Err(wasmtime::Error::msg(
+            "serialize cannot encode an unresolved value type",
+        )),
         QueDataType::Int => Ok(value.to_string()),
         QueDataType::Dec => {
             let scale = env::var("QUE_DECIMAL_SCALE")
@@ -2800,12 +2810,54 @@ fn expression_items<'a>(
     Ok(&items[1..])
 }
 
+fn infer_literal_data_type(expr: &Expression) -> Result<QueDataType, String> {
+    match expr {
+        Expression::Int(_) => Ok(QueDataType::Int),
+        Expression::Dec(_) => Ok(QueDataType::Dec),
+        Expression::Word(value) if value == "true" || value == "false" => Ok(QueDataType::Bool),
+        Expression::Word(value) if value == "nil" => Ok(QueDataType::Unit),
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(head)) if head == "char") => {
+            Ok(QueDataType::Char)
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(head)) if head == "string") => {
+            Ok(QueDataType::Vector(Box::new(QueDataType::Char)))
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(head)) if head == "vector") =>
+        {
+            let inner = match items.get(1) {
+                Some(first) => infer_literal_data_type(first)?,
+                None => QueDataType::Unknown,
+            };
+            for item in items.iter().skip(2) {
+                let item_type = infer_literal_data_type(item)?;
+                if item_type != inner {
+                    return Err("deserialize vector literal contains mixed value types".to_string());
+                }
+            }
+            Ok(QueDataType::Vector(Box::new(inner)))
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(head)) if head == "tuple") => {
+            items
+                .iter()
+                .skip(1)
+                .map(infer_literal_data_type)
+                .collect::<Result<Vec<_>, _>>()
+                .map(QueDataType::Tuple)
+        }
+        _ => Err("deserialize could not infer the type of literal data".to_string()),
+    }
+}
+
 fn build_que_value(
     caller: &mut Caller<'_, ShellStoreData>,
     expr: &Expression,
     typ: &QueDataType,
 ) -> wasmtime::Result<i32> {
     match typ {
+        QueDataType::Unknown => {
+            let inferred = infer_literal_data_type(expr).map_err(wasmtime::Error::msg)?;
+            build_que_value(caller, expr, &inferred)
+        }
         QueDataType::Int => match expr {
             Expression::Int(value) => Ok(*value),
             _ => Err(wasmtime::Error::msg("deserialize expected Int literal")),
@@ -2841,7 +2893,27 @@ fn build_que_value(
             }
         }
         QueDataType::Vector(inner) => {
-            let head = if matches!(inner.as_ref(), QueDataType::Char) {
+            let inferred_inner;
+            let inner = if matches!(inner.as_ref(), QueDataType::Unknown) {
+                let items = if matches!(expr, Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(head)) if head == "string"))
+                {
+                    inferred_inner = QueDataType::Char;
+                    &inferred_inner
+                } else {
+                    let items = expression_items(expr, "vector").map_err(wasmtime::Error::msg)?;
+                    inferred_inner = match items.first() {
+                        Some(first) => {
+                            infer_literal_data_type(first).map_err(wasmtime::Error::msg)?
+                        }
+                        None => QueDataType::Unknown,
+                    };
+                    &inferred_inner
+                };
+                items
+            } else {
+                inner.as_ref()
+            };
+            let head = if matches!(inner, QueDataType::Char) {
                 "string"
             } else {
                 "vector"

@@ -9932,11 +9932,9 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
         return Err(format!("{op} does not support function values"));
     }
     if contains_unresolved_type(value_type) {
-        return Err(if op == "deserialize" {
-            "deserialize requires a concrete expected type; use it in a typed context or annotate it with `as`".to_string()
-        } else {
-            "serialize requires a concrete value type".to_string()
-        });
+        if op == "serialize" {
+            return Err("serialize requires a concrete value type".to_string());
+        }
     }
 
     let arg_slot = ctx.tmp_i32;

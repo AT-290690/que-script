@@ -1201,6 +1201,18 @@ xs)"#,
 
     #[cfg(all(feature = "runtime", feature = "io"))]
     #[test]
+    fn test_deserialize_infers_unconstrained_stored_fields_from_literal_data() {
+        let output = run_program_output(
+            r#"(do
+                (let saved (deserialize "{ [4 5] [6 7] }"))
+                (let {used unused} saved)
+                (+ (get used 0) (get used 1)))"#,
+        );
+        assert_eq!(output, "9");
+    }
+
+    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[test]
     fn test_sig_propagates_concrete_type_into_deserialize() {
         let output = run_program_output(
             r#"(do
