@@ -10900,10 +10900,29 @@ fn compile_tail_expr(
                     .unwrap_or_else(|| vec![false; arity]);
                 let arg_base_tmp = ctx.tmp_i32;
                 let release_scratch_slot = arg_base_tmp + args.len();
+                let arg_ctx = Ctx {
+                    fn_sigs: ctx.fn_sigs,
+                    fn_ids: ctx.fn_ids,
+                    extern_names: ctx.extern_names,
+                    lambda_ids: ctx.lambda_ids,
+                    closure_defs: ctx.closure_defs,
+                    lambda_bindings: ctx.lambda_bindings,
+                    current_function: ctx.current_function,
+                    locals: ctx.locals.clone(),
+                    local_types: ctx.local_types.clone(),
+                    materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+                    hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
+                    proven_scalar_vec_min_lengths: ctx.proven_scalar_vec_min_lengths.clone(),
+                    definitely_materialized_top_level_scalar_names: ctx
+                        .definitely_materialized_top_level_scalar_names,
+                    proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+                    nonnegative_int_locals: ctx.nonnegative_int_locals,
+                    tmp_i32: release_scratch_slot + 1,
+                };
                 let mut out = Vec::new();
                 let mut managed_arg_tmp_slots = Vec::new();
                 for (i, a) in args.iter().enumerate() {
-                    out.push(compile_expr(a, ctx)?);
+                    out.push(compile_expr(a, &arg_ctx)?);
                     out.push(format!("local.set {}", arg_base_tmp + i));
                     if managed_param_flags.get(i).copied().unwrap_or(false) {
                         managed_arg_tmp_slots.push(arg_base_tmp + i);

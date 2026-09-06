@@ -7558,6 +7558,30 @@ fn"#;
 
     #[cfg(feature = "runtime")]
     #[test]
+    fn test_tail_recursive_mutating_call_preserves_all_managed_arguments() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        let _tco = ScopedEnvVar::set("QUE_TCO", "conservative");
+        let output = run_program_output_unlocked(
+            r#"(do
+                (letrec expand-token!
+                  (lambda (out token merge-left merge-right)
+                    (if (< token 256)
+                        (set! out (length out) token)
+                        (do
+                          (let i (- token 256))
+                          (expand-token! out (get merge-left i) merge-left merge-right)
+                          (expand-token! out (get merge-right i) merge-left merge-right)))))
+                (let out [0])
+                (expand-token! out 256 [65] [66])
+                out)"#,
+        );
+        assert_eq!(output, "[0 65 66]");
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
     fn test_runtime_opt_builtin_function_alias_call_works() {
         let _guard = runtime_exec_lock().lock().unwrap();
         let prev_tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
