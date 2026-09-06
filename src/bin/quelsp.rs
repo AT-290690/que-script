@@ -43,6 +43,7 @@ struct DocAnalysis {
 struct FormScopedAnalysis {
     range: Range,
     symbol_types: HashMap<String, String>,
+    symbol_occurrence_types: HashMap<String, Vec<String>>,
     let_binding_types: HashMap<String, String>,
     let_binding_effects: HashMap<String, EffectFlags>,
     let_binding_external_impure: HashMap<String, bool>,
@@ -489,8 +490,11 @@ impl ServerState {
         let (symbol, symbol_range) = symbol_at_position(&doc.text, position)?;
         if is_let_binding_name_at_position(&doc.text, symbol_range, &symbol) {
             let declaration_type = self
-                .form_let_signatures_at(doc, position)
-                .and_then(|m| m.get(&symbol).cloned())
+                .occurrence_signature_at(doc, &symbol, symbol_range, position)
+                .or_else(|| {
+                    self.form_let_signatures_at(doc, position)
+                        .and_then(|m| m.get(&symbol).cloned())
+                })
                 .or_else(|| doc.let_binding_types.get(&symbol).cloned())
                 .or_else(|| self.global_signature(&symbol))?;
             let declaration_type = normalize_signature(&declaration_type);
@@ -533,6 +537,7 @@ impl ServerState {
             });
         }
 
+        let occurrence_sig = self.occurrence_signature_at(doc, &symbol, symbol_range, position);
         let scoped_sig = self
             .form_signatures_at(doc, position)
             .and_then(|symbols| symbols.get(&symbol))
@@ -545,11 +550,15 @@ impl ServerState {
             self.infer_standalone_std_symbol_signature(&symbol)
         };
         let type_info = (if doc.user_bound_symbols.contains(&symbol) {
-            scoped_sig.or(doc_sig).or(global_sig)
+            occurrence_sig.or(scoped_sig).or(doc_sig).or(global_sig)
         } else if is_standalone_symbol_expr_at_range(&doc.text, symbol_range, &symbol) {
             std_fallback_sig.or(global_sig).or(scoped_sig).or(doc_sig)
         } else {
-            scoped_sig.or(doc_sig).or(global_sig).or(std_fallback_sig)
+            occurrence_sig
+                .or(scoped_sig)
+                .or(doc_sig)
+                .or(global_sig)
+                .or(std_fallback_sig)
         })?;
         let type_info = normalize_signature(&type_info);
         let symbol_effect = self
@@ -861,6 +870,29 @@ impl ServerState {
             .iter()
             .find(|form| range_contains_position(&form.range, position))
             .map(|form| &form.symbol_types)
+    }
+
+    fn occurrence_signature_at(
+        &self,
+        doc: &DocAnalysis,
+        symbol: &str,
+        symbol_range: Range,
+        position: Position,
+    ) -> Option<String> {
+        let form = doc
+            .form_scoped_symbols
+            .iter()
+            .find(|form| range_contains_position(&form.range, position))?;
+        let index = native_core::symbol_occurrence_index_in_range(
+            &doc.text,
+            symbol,
+            to_core_range(symbol_range),
+            to_core_range(form.range),
+        )?;
+        form.symbol_occurrence_types
+            .get(symbol)?
+            .get(index)
+            .cloned()
     }
 
     fn form_let_signatures_at<'a>(
@@ -1362,10 +1394,12 @@ fn build_form_scoped_analyses(
     let mut out = Vec::with_capacity(count);
     for idx in 0..count {
         let mut raw_symbols: HashMap<String, Type> = HashMap::new();
+        let mut raw_occurrences: HashMap<String, Vec<Type>> = HashMap::new();
         let mut raw_let_bindings: HashMap<String, Type> = HashMap::new();
         let mut let_binding_effects = HashMap::new();
         let mut let_binding_external_impure = HashMap::new();
         collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
+        native_core::collect_symbol_type_occurrences(typed_user_forms[idx], &mut raw_occurrences);
         collect_let_binding_types(typed_user_forms[idx], &mut raw_let_bindings);
         collect_let_binding_effects(
             typed_user_forms[idx],
@@ -1387,6 +1421,18 @@ fn build_form_scoped_analyses(
         out.push(FormScopedAnalysis {
             range: form_ranges[idx],
             symbol_types,
+            symbol_occurrence_types: raw_occurrences
+                .into_iter()
+                .map(|(name, types)| {
+                    (
+                        name,
+                        types
+                            .into_iter()
+                            .map(|typ| normalize_signature(&typ.to_string()))
+                            .collect(),
+                    )
+                })
+                .collect(),
             let_binding_types,
             let_binding_effects,
             let_binding_external_impure,

@@ -76,6 +76,7 @@ struct CachedDocAnalysis {
 struct FormScopedAnalysis {
     range: TextRange,
     symbol_types: HashMap<String, String>,
+    symbol_occurrence_types: HashMap<String, Vec<String>>,
 }
 
 struct WasmLspCore {
@@ -217,12 +218,29 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             form_scoped_symbols = Vec::with_capacity(count);
             for idx in 0..count {
                 let mut raw_symbols: HashMap<String, Type> = HashMap::new();
+                let mut raw_occurrences: HashMap<String, Vec<Type>> = HashMap::new();
                 collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
+                native_core::collect_symbol_type_occurrences(
+                    typed_user_forms[idx],
+                    &mut raw_occurrences,
+                );
                 form_scoped_symbols.push(FormScopedAnalysis {
                     range: form_ranges[idx],
                     symbol_types: raw_symbols
                         .into_iter()
                         .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
+                        .collect(),
+                    symbol_occurrence_types: raw_occurrences
+                        .into_iter()
+                        .map(|(name, types)| {
+                            (
+                                name,
+                                types
+                                    .into_iter()
+                                    .map(|typ| normalize_signature(&typ.to_string()))
+                                    .collect(),
+                            )
+                        })
                         .collect(),
                 });
             }
@@ -443,10 +461,23 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             return "null".to_string();
         };
 
-        let scoped_sig = analysis
+        let scoped_form = analysis
             .form_scoped_symbols
             .iter()
-            .find(|form| range_contains_position(form.range, position))
+            .find(|form| range_contains_position(form.range, position));
+        let occurrence_sig = scoped_form.and_then(|form| {
+            let index = native_core::symbol_occurrence_index_in_range(
+                &text,
+                &symbol,
+                to_core_range(range),
+                to_core_range(form.range),
+            )?;
+            form.symbol_occurrence_types
+                .get(&symbol)?
+                .get(index)
+                .cloned()
+        });
+        let scoped_sig = scoped_form
             .and_then(|form| form.symbol_types.get(&symbol))
             .cloned();
         let doc_sig = analysis.symbol_types.get(&symbol).cloned();
@@ -459,12 +490,16 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             None
         };
         let type_info = if analysis.user_bound_symbols.contains(&symbol) {
-            scoped_sig.or(doc_sig).or(global_sig)
+            occurrence_sig.or(scoped_sig).or(doc_sig).or(global_sig)
         } else {
             if is_standalone_symbol_expr_at_range(&text, range, &symbol) {
                 std_fallback_sig.or(global_sig).or(scoped_sig).or(doc_sig)
             } else {
-                scoped_sig.or(doc_sig).or(global_sig).or(std_fallback_sig)
+                occurrence_sig
+                    .or(scoped_sig)
+                    .or(doc_sig)
+                    .or(global_sig)
+                    .or(std_fallback_sig)
             }
         };
 

@@ -5274,6 +5274,25 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_distinguishes_same_named_locals_in_if_branches() {
+        let program = r#"(if true
+  (block
+    (let s { 1 2 }) nil)
+  (block
+    (let s { true false }) nil))"#;
+
+        let int_hover: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_hover(program.to_string(), 2, 9))
+                .expect("integer-branch hover should be valid JSON");
+        let bool_hover: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_hover(program.to_string(), 4, 9))
+                .expect("boolean-branch hover should be valid JSON");
+
+        assert_eq!(int_hover["contents"], "s : {Int Int}");
+        assert_eq!(bool_hover["contents"], "s : {Bool Bool}");
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_user_fn_includes_effects_for_mutation() {
         let hover_json = crate::wasm_api::lsp_hover(
             "(let touch! (lambda xs (do (set! xs 0 1) nil)))\ntouch!".to_string(),

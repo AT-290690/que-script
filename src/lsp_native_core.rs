@@ -734,6 +734,56 @@ pub fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String
     }
 }
 
+pub fn collect_symbol_type_occurrences(
+    node: &TypedExpression,
+    symbols: &mut HashMap<String, Vec<Type>>,
+) {
+    if let Expression::Apply(items) = &node.expr {
+        if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
+            if matches!(keyword.as_str(), "let" | "letrec" | "mut") {
+                if let Some(rhs_type) = node.children.get(2).and_then(|child| child.typ.as_ref()) {
+                    symbols
+                        .entry(name.clone())
+                        .or_default()
+                        .push(rhs_type.clone());
+                }
+                for (index, child) in node.children.iter().enumerate() {
+                    if index != 1 {
+                        collect_symbol_type_occurrences(child, symbols);
+                    }
+                }
+                return;
+            }
+        }
+    }
+    if let Expression::Word(name) = &node.expr {
+        if let Some(typ) = &node.typ {
+            symbols.entry(name.clone()).or_default().push(typ.clone());
+        }
+    }
+    for child in &node.children {
+        collect_symbol_type_occurrences(child, symbols);
+    }
+}
+
+pub fn symbol_occurrence_index_in_range(
+    text: &str,
+    symbol: &str,
+    target: CoreRange,
+    scope: CoreRange,
+) -> Option<usize> {
+    let at_or_after = |a: CorePosition, b: CorePosition| {
+        a.line > b.line || (a.line == b.line && a.character >= b.character)
+    };
+    let at_or_before = |a: CorePosition, b: CorePosition| {
+        a.line < b.line || (a.line == b.line && a.character <= b.character)
+    };
+    find_symbol_ranges(text, symbol)
+        .into_iter()
+        .filter(|range| at_or_after(range.start, scope.start) && at_or_before(range.end, scope.end))
+        .position(|range| range.start == target.start)
+}
+
 fn type_specificity_score(typ: &Type) -> i32 {
     match typ {
         Type::Var(_) => 0,
