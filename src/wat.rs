@@ -6284,6 +6284,124 @@ fn append_last_use_releases_for_do_expr(
     }
 }
 
+fn cached_length_vector_before_loop(
+    items: &[Expression],
+    loop_index: usize,
+    bound_name: &str,
+    current_function: Option<&str>,
+) -> Option<String> {
+    for binding_index in (1..loop_index).rev() {
+        let Expression::Apply(binding) = &items[binding_index] else {
+            continue;
+        };
+        if matches!(binding.as_slice(), [Expression::Word(op), Expression::Word(name), ..]
+            if name == bound_name && op != "let")
+        {
+            return None;
+        }
+        let [Expression::Word(op), Expression::Word(name), Expression::Apply(rhs)] =
+            binding.as_slice()
+        else {
+            continue;
+        };
+        if name != bound_name {
+            continue;
+        }
+        if op != "let" {
+            return None;
+        }
+        let [Expression::Word(length), Expression::Word(vector_name)] = rhs.as_slice() else {
+            return None;
+        };
+        if length != "length" {
+            return None;
+        }
+        let stable = items[binding_index + 1..loop_index].iter().all(|expr| {
+            !expr_mutates_scalar_name(expr, bound_name)
+                && !expr_mutates_vector_name_except_self(expr, vector_name, current_function)
+        });
+        return stable.then(|| vector_name.clone());
+    }
+    None
+}
+
+fn rewrite_cached_length_while(
+    node: &TypedExpression,
+    vector_name: &str,
+    ctx: &Ctx<'_>,
+) -> Option<TypedExpression> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let [Expression::Word(while_op), condition, body] = items.as_slice() else {
+        return None;
+    };
+    if while_op != "while" {
+        return None;
+    }
+    let Expression::Apply(condition_items) = condition else {
+        return None;
+    };
+    let [Expression::Word(compare), Expression::Word(index), Expression::Word(_bound)] =
+        condition_items.as_slice()
+    else {
+        return None;
+    };
+    if compare != "<" {
+        return None;
+    }
+    let body_node = node.children.get(2)?;
+    if !body_has_only_final_positive_increment(body_node, index, ctx)
+        || !vector_mutations_are_loop_replacement_sets(
+            &body_node.expr,
+            vector_name,
+            index,
+            ctx.current_function,
+        )
+    {
+        return None;
+    }
+    let vector_type = ctx.local_types.get(vector_name)?.clone();
+    let length_expr = Expression::Apply(vec![
+        Expression::Word("length".to_string()),
+        Expression::Word(vector_name.to_string()),
+    ]);
+    let length_node = TypedExpression {
+        expr: length_expr.clone(),
+        typ: Some(Type::Int),
+        effect: EffectFlags::PURE,
+        children: vec![
+            TypedExpression {
+                expr: Expression::Word("length".to_string()),
+                typ: None,
+                effect: EffectFlags::PURE,
+                children: Vec::new(),
+            },
+            TypedExpression {
+                expr: Expression::Word(vector_name.to_string()),
+                typ: Some(vector_type),
+                effect: EffectFlags::PURE,
+                children: Vec::new(),
+            },
+        ],
+    };
+    let mut condition_node = node.children.get(1)?.clone();
+    condition_node.expr = Expression::Apply(vec![
+        Expression::Word(compare.clone()),
+        Expression::Word(index.clone()),
+        length_expr,
+    ]);
+    *condition_node.children.get_mut(2)? = length_node;
+    let mut rewritten = node.clone();
+    rewritten.expr = Expression::Apply(vec![
+        Expression::Word("while".to_string()),
+        condition_node.expr.clone(),
+        body.clone(),
+    ]);
+    *rewritten.children.get_mut(1)? = condition_node;
+    Some(rewritten)
+}
+
 fn compile_do(
     items: &[Expression],
     node: &TypedExpression,
@@ -6577,6 +6695,27 @@ fn compile_do(
             }
         }
         if let Some(n) = child_at(i) {
+            let rewritten_loop = match &n.expr {
+                Expression::Apply(loop_items)
+                    if matches!(loop_items.as_slice(), [Expression::Word(op), Expression::Apply(condition), _]
+                        if op == "while" && matches!(condition.as_slice(), [Expression::Word(compare), _, Expression::Word(_)] if compare == "<")) =>
+                {
+                    let bound_name = match &loop_items[1] {
+                        Expression::Apply(condition) => match condition.get(2) {
+                            Some(Expression::Word(name)) => Some(name.as_str()),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    bound_name
+                        .and_then(|bound| {
+                            cached_length_vector_before_loop(items, i, bound, ctx.current_function)
+                        })
+                        .and_then(|vector| rewrite_cached_length_while(n, &vector, ctx))
+                }
+                _ => None,
+            };
+            let n = rewritten_loop.as_ref().unwrap_or(n);
             let scoped_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,

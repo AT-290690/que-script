@@ -7862,6 +7862,63 @@ fn"#;
 
     #[cfg(feature = "runtime")]
     #[test]
+    fn test_wat_cached_length_replacement_loop_hoists_scalar_data_pointer() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let expr = crate::parser::build(
+            "((lambda (do
+                (let xs [1 2 3])
+                (let n (length xs))
+                (mut i 0)
+                (while (< i n)
+                  (do
+                    (set! xs i (+ (get xs i) 1))
+                    (alter! i (+ i 1))))
+                xs)))",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+        let loop_start = main_wat
+            .find("loop")
+            .expect("cached-length loop should exist");
+        let loop_wat = &main_wat[loop_start..];
+
+        assert!(loop_wat.contains("i32.load"), "{main_wat}");
+        assert!(loop_wat.contains("i32.store"), "{main_wat}");
+        assert!(
+            !loop_wat.contains("call $vec_materialize_i32"),
+            "{main_wat}"
+        );
+        assert!(
+            !loop_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "{main_wat}"
+        );
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_cached_length_loop_with_resize_keeps_snapshot_semantics() {
+        let result = run_program_output(
+            r#"(do
+                (let xs [1])
+                (let n (length xs))
+                (mut i 0)
+                (while (< i n) (do
+                  (set! xs i 2)
+                  (set! xs (length xs) 9)
+                  (alter! i (+ i 1))))
+                xs)"#,
+        );
+        assert_eq!(result, "[2 9]");
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
     fn test_wat_constant_bound_replacement_loop_hoists_scalar_data_pointer_for_set() {
         let _lock = runtime_exec_lock().lock().unwrap();
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
