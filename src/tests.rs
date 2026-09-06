@@ -7023,6 +7023,49 @@ fn"#;
         );
     }
 
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_wat_top_level_managed_vector_is_borrowed_once_per_function() {
+        let source = r#"(do
+            (let xs ["a" "bb" "ccc"])
+            (let total-length (lambda () (do
+              (mut i 0)
+              (mut total 0)
+              (while (< i (length xs)) (do
+                (alter! total (+ total (length (get xs i))))
+                (alter! i (+ i 1))))
+              total)))
+            (total-length))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let function_start = wat
+            .find("(func $v_total_dash_length")
+            .expect("total-length function should exist");
+        let function_end = wat[function_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| function_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let function_wat = &wat[function_start..function_end];
+        let loop_start = function_wat.find("loop").expect("loop should exist");
+        let loop_wat = &function_wat[loop_start..];
+
+        assert_eq!(
+            function_wat.matches("call $v_xs").count(),
+            1,
+            "top-level accessor should run at most once on function entry, got:\n{}",
+            function_wat
+        );
+        assert!(
+            !loop_wat.contains("call $v_xs")
+                && !loop_wat.contains("global.get $g_val_v_xs")
+                && !loop_wat.contains("call $rc_release"),
+            "hot loop should use the function-scoped borrowed local, got:\n{}",
+            function_wat
+        );
+        assert_eq!(run_program_output(source), "6");
+    }
+
     #[test]
     fn test_wat_top_level_scalar_vector_set_avoids_per_access_retain() {
         let expr = crate::parser::build(

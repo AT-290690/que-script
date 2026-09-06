@@ -580,6 +580,9 @@ fn compile_borrowed_top_level_cached_ref(
     if ctx.locals.contains_key(name) || name == "ARGV" {
         return None;
     }
+    if let Some(slot) = ctx.locals.get(&format!("__borrowed_top_level::{name}")) {
+        return Some(format!("local.get {slot}"));
+    }
     let (params, ret_ty) = ctx.fn_sigs.get(name)?;
     if !params.is_empty()
         || !is_managed_local_type(ret_ty)
@@ -595,6 +598,74 @@ fn compile_borrowed_top_level_cached_ref(
             ident(name)
         )
     )
+}
+
+fn collect_top_level_managed_refs(
+    expr: &Expression,
+    locals: &HashMap<String, usize>,
+    fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
+    cached_top_level_names: &HashSet<String>,
+    out: &mut HashSet<String>,
+) {
+    match expr {
+        Expression::Word(name) => {
+            if locals.contains_key(name) || name == "ARGV" {
+                return;
+            }
+            if cached_top_level_names.contains(name)
+                && fn_sigs.get(name).is_some_and(|(params, ret)| {
+                    params.is_empty()
+                        && is_managed_local_type(ret)
+                        && !matches!(ret, Type::Function(_, _))
+                })
+            {
+                out.insert(name.clone());
+            }
+        }
+        Expression::Apply(items) => {
+            for item in items {
+                collect_top_level_managed_refs(item, locals, fn_sigs, cached_top_level_names, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn top_level_borrow_plan(
+    expr: &Expression,
+    locals: &mut HashMap<String, usize>,
+    fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
+    cached_top_level_names: &HashSet<String>,
+    first_slot: usize,
+) -> (usize, String) {
+    let mut names = HashSet::new();
+    collect_top_level_managed_refs(expr, locals, fn_sigs, cached_top_level_names, &mut names);
+    let mut names = names.into_iter().collect::<Vec<_>>();
+    names.sort();
+    let scratch_slot = first_slot + names.len();
+    let mut prelude = Vec::new();
+    for (offset, name) in names.iter().enumerate() {
+        let slot = first_slot + offset;
+        locals.insert(format!("__borrowed_top_level::{name}"), slot);
+        let g_init = cache_init_global(name);
+        let g_val = cache_value_global(name);
+        prelude.push(format!(
+            "global.get ${g_init}\n\
+             if (result i32)\n\
+               global.get ${g_val}\n\
+             else\n\
+               call ${}\n\
+               local.set {scratch_slot}\n\
+               local.get {scratch_slot}\n\
+               call $rc_release\n\
+               drop\n\
+               global.get ${g_val}\n\
+             end\n\
+             local.set {slot}",
+            ident(name)
+        ));
+    }
+    (names.len(), prelude.join("\n"))
 }
 
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
@@ -11172,6 +11243,7 @@ fn compile_lambda_func(
     closure_defs: &HashMap<String, ClosureDef>,
     lambda_bindings: &HashMap<String, TypedExpression>,
     definitely_materialized_top_level_scalar_names: &HashSet<String>,
+    cached_top_level_names: &HashSet<String>,
     tail_call_mode: TailCallMode,
 ) -> Result<String, String> {
     let items = match lambda_expr {
@@ -11242,7 +11314,15 @@ fn compile_lambda_func(
         locals.insert(n.clone(), params.len() + i);
     }
 
-    let tmp_i32 = params.len() + local_defs.len();
+    let ordinary_local_count = params.len() + local_defs.len();
+    let (borrowed_top_level_count, borrowed_top_level_prelude) = top_level_borrow_plan(
+        &body_node.expr,
+        &mut locals,
+        fn_sigs,
+        cached_top_level_names,
+        ordinary_local_count,
+    );
+    let tmp_i32 = ordinary_local_count + borrowed_top_level_count;
     let mut scoped_lambda_bindings = lambda_bindings.clone();
     // Function params shadow outer lambda bindings with the same name.
     for (pname, _) in &params {
@@ -11307,10 +11387,14 @@ fn compile_lambda_func(
     } else {
         None
     };
-    let base_local_count = params.len() + local_defs.len();
+    let base_local_count = ordinary_local_count + borrowed_top_level_count;
     let scratch_i32_locals = scratch_i32_locals_needed(
         base_local_count,
-        &[&body_code, tail_body_code.as_deref().unwrap_or("")],
+        &[
+            &borrowed_top_level_prelude,
+            &body_code,
+            tail_body_code.as_deref().unwrap_or(""),
+        ],
         !ref_slots.is_empty(),
     );
     let mut out = String::new();
@@ -11322,14 +11406,27 @@ fn compile_lambda_func(
     for (_n, t) in &local_defs {
         out.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
+    emit_i32_locals(&mut out, borrowed_top_level_count);
     emit_i32_locals(&mut out, scratch_i32_locals);
     if let Some(tail_code) = tail_body_code {
+        if !borrowed_top_level_prelude.is_empty() {
+            out.push_str(&format!(
+                "    {}\n",
+                borrowed_top_level_prelude.replace('\n', "\n    ")
+            ));
+        }
         out.push_str(&format!("    {}\n", tail_code.replace('\n', "\n    ")));
         out.push_str("    unreachable\n");
         out.push_str("  )\n");
         return Ok(out);
     }
     out.push_str(&format!("    (local {})\n", wasm_val_type(&ret_ty)?));
+    if !borrowed_top_level_prelude.is_empty() {
+        out.push_str(&format!(
+            "    {}\n",
+            borrowed_top_level_prelude.replace('\n', "\n    ")
+        ));
+    }
     let ret_slot = base_local_count + scratch_i32_locals;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
@@ -12299,6 +12396,21 @@ fn compile_program_to_wat_build_typed_with_opts(
         .ok_or_else(|| "Missing main expression type".to_string())?;
     let mut emitted_funcs: Vec<String> = Vec::new();
     let mut cached_value_defs: Vec<String> = Vec::new();
+    let cached_top_level_names = top_defs
+        .iter()
+        .filter_map(|(name, def)| {
+            let is_partial = partial_helpers.iter().any(|h| h.binding_name == *name);
+            let is_lambda = matches!(
+                &def.expr,
+                Expression::Apply(items)
+                    if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda")
+            );
+            (!is_partial
+                && !is_lambda
+                && top_level_value_fn_ptr(&def.expr, &top_defs, &fn_ids).is_none())
+            .then(|| name.clone())
+        })
+        .collect::<HashSet<_>>();
 
     for (name, def) in &top_defs {
         if partial_helpers.iter().any(|h| h.binding_name == *name) {
@@ -12317,6 +12429,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                     &closure_defs,
                     &lambda_bindings,
                     &definitely_materialized_top_level_scalar_names,
+                    &cached_top_level_names,
                     tail_call_mode,
                 )?);
             }
@@ -12378,6 +12491,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                 &closure_defs,
                 &lambda_bindings,
                 &definitely_materialized_top_level_scalar_names,
+                &cached_top_level_names,
                 tail_call_mode,
             )?);
         }
@@ -12406,6 +12520,13 @@ fn compile_program_to_wat_build_typed_with_opts(
     for (i, (n, _)) in main_local_defs.iter().enumerate() {
         main_locals.insert(n.clone(), i);
     }
+    let (main_borrowed_top_level_count, main_borrowed_top_level_prelude) = top_level_borrow_plan(
+        &main_node.expr,
+        &mut main_locals,
+        &fn_sigs,
+        &cached_top_level_names,
+        main_local_defs.len(),
+    );
 
     let mut main_local_types = HashMap::new();
     for (n, t) in &main_local_defs {
@@ -12430,7 +12551,7 @@ fn compile_program_to_wat_build_typed_with_opts(
             &definitely_materialized_top_level_scalar_names,
         proven_scalar_index_loads: &main_proven_scalar_index_loads,
         nonnegative_int_locals: &main_nonnegative_int_locals,
-        tmp_i32: main_local_defs.len(),
+        tmp_i32: main_local_defs.len() + main_borrowed_top_level_count,
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;
     let mut apply_arities: HashSet<usize> = HashSet::new();
@@ -12444,8 +12565,12 @@ fn compile_program_to_wat_build_typed_with_opts(
     {
         apply_arities.insert(1);
     }
-    let main_scratch_i32_locals =
-        scratch_i32_locals_needed(main_local_defs.len(), &[&main_code], false);
+    let main_base_local_count = main_local_defs.len() + main_borrowed_top_level_count;
+    let main_scratch_i32_locals = scratch_i32_locals_needed(
+        main_base_local_count,
+        &[&main_borrowed_top_level_prelude, &main_code],
+        false,
+    );
 
     let mut main_func = String::new();
     main_func.push_str(&format!(
@@ -12458,7 +12583,14 @@ fn compile_program_to_wat_build_typed_with_opts(
     for (_n, t) in &main_local_defs {
         main_func.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
     }
+    emit_i32_locals(&mut main_func, main_borrowed_top_level_count);
     emit_i32_locals(&mut main_func, main_scratch_i32_locals);
+    if !main_borrowed_top_level_prelude.is_empty() {
+        main_func.push_str(&format!(
+            "    {}\n",
+            main_borrowed_top_level_prelude.replace('\n', "\n    ")
+        ));
+    }
     main_func.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
     main_func.push_str("  )\n");
 
