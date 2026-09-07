@@ -17,8 +17,8 @@
 (let each (lambda xs fn (do (std/vector/for xs fn) xs)))
 (let each/i (lambda xs fn (do (std/vector/for/i xs fn) xs)))
 
-(let transpose std/vector/3d/rotate)
-(let interleave std/vector/2d/interleave)
+(let transpose std/vector/three-d/rotate)
+(let interleave std/vector/two-d/interleave)
 (let intersperse (lambda xs x (std/vector/intersperse x xs)))
 (let every? (lambda fn? xs (std/vector/every? xs fn?)))
 (let some? (lambda fn? xs (std/vector/some? xs fn?)))
@@ -126,7 +126,7 @@
 (let match? std/vector/char/equal?)
 
 (let digit? std/char/digit?)
-(let fill std/vector/2d/fill)
+(let fill std/vector/two-d/fill)
 
 (let max std/int/max)
 (let min std/int/min)
@@ -236,7 +236,7 @@
 
 (let count (lambda fn? xs (std/vector/count-of xs fn?)))
 
-(let points (lambda fn? xs (std/vector/3d/points xs fn?)))
+(let points (lambda fn? xs (std/vector/three-d/points xs fn?)))
 
 (let unique/int std/vector/int/unique)
 (let unique/char std/vector/char/unique)
@@ -299,11 +299,11 @@
         (++ i))
       out)))
 
-(let neighborhood (lambda directions y x fn xs (std/vector/3d/adjacent xs directions y x fn)))
-(let neighborhood/moore std/vector/3d/moore-neighborhood)
-(let neighborhood/diagonal std/vector/3d/diagonal-neighborhood)
-(let neighborhood/kernel std/vector/3d/kernel-neighborhood)
-(let neighborhood/von-neumann std/vector/3d/von-neumann-neighborhood)
+(let neighborhood (lambda directions y x fn xs (std/vector/three-d/adjacent xs directions y x fn)))
+(let neighborhood/moore std/vector/three-d/moore-neighborhood)
+(let neighborhood/diagonal std/vector/three-d/diagonal-neighborhood)
+(let neighborhood/kernel std/vector/three-d/kernel-neighborhood)
+(let neighborhood/von-neumann std/vector/three-d/von-neumann-neighborhood)
 
 (let group (lambda fn xs (std/vector/hash/table/group-by xs fn)))
 

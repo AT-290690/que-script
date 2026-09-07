@@ -190,10 +190,10 @@
 (let Vector/cons! (lambda xs x (std/vector/cons! xs x)))
 (let Vector/cons (lambda x xs (std/vector/cons xs x)))
 
-(let Vector/new (lambda fn n (std/vector/2d/fill n fn)))
-(let Matrix/new (lambda fn w h (std/vector/3d/fill w h fn)))
+(let Vector/new (lambda fn n (std/vector/two-d/fill n fn)))
+(let Matrix/new (lambda fn w h (std/vector/three-d/fill w h fn)))
 (let Vector/in-bounds? (lambda (index xs) (std/vector/in-bounds? xs index)))
-(let Matrix/in-bounds? (lambda (y x xs) (std/vector/3d/in-bounds? xs y x)))
+(let Matrix/in-bounds? (lambda (y x xs) (std/vector/three-d/in-bounds? xs y x)))
 (let String/equal? std/vector/char/equal?)
 (let String/lte? std/vector/char/lesser-or-equal?)
 (let String/gte? std/vector/char/greater-or-equal?)

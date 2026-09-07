@@ -11,17 +11,25 @@ syn region queChar start=/'/ skip=/\\'/ end=/'/
 
 syn match queNumber /\v<[-+]?\d+(\.\d+)?>/
 
+" --- Keywords (Control Flow & Structure) ---
 syn keyword queKeyword
       \ lambda if let letrec letmacro mut do block while
-      \ cond unless and or not quote qq uq uqs gensym
-      \ macroexpand macroexpand-1 as
+      \ cond unless when when-not loop and or not quote qq uq uqs gensym
+      \ macroexpand macroexpand-1 as sig
 
+" --- Builtins (Functions, Core Operations & Mutations) ---
+syn keyword queBuiltin
+      \ length mod mod. car cdr cons get fst snd
+
+" Regexp matching for builtins containing symbols like ! & |
 syn match queBuiltin /\v(\&alter!|\&get|\&mut|alter!|set!|push!|pop!|pop-val!)/
 syn match queBuiltin /\v(<\||\|>)/
 
+" --- Literals & Delimiters ---
 syn match queBoolean /\v<(true|false|nil)>/
 syn match queDelimiter /[()\[\]{}]/
 
+" --- Highlighting Links ---
 hi def link queComment Comment
 hi def link queString String
 hi def link queChar Character

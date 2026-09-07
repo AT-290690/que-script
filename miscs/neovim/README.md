@@ -8,7 +8,9 @@ It provides:
 - a basic syntax file
 - comment settings for `;`
 - `quelsp` setup through `nvim-lspconfig`
-- completion kind icons through `nvim-cmp` when installed, with Neovim's built-in LSP completion as a fallback
+- completion kind icons through `blink.cmp` or `nvim-cmp`, with Neovim's built-in LSP completion as a fallback
+- live function signatures and active-argument tracking while typing applications
+- clean Neovim hover text without Markdown language-fence markers
 
 ## Requirements
 
@@ -83,8 +85,10 @@ require("que").setup({
 require("que").setup({ completion_icons = false })
 ```
 
-The default glyphs expect a Nerd Font. Existing `on_attach` callbacks and
-`nvim-cmp` formatting are preserved and then decorated for Que buffers.
+The default glyphs use ordinary Unicode symbols and do not require a Nerd Font.
+Existing `on_attach` callbacks and `nvim-cmp` formatting are preserved and then decorated for Que buffers.
+Inferred completion types are displayed alongside candidates by default; use
+`completion_type_hints = false` to hide that column.
 
 Default root markers:
 

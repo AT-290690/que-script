@@ -4,14 +4,15 @@ use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, PublishDiagnostics,
 };
 use lsp_types::request::Request as LspRequest;
-use lsp_types::request::{Completion, HoverRequest};
+use lsp_types::request::{Completion, HoverRequest, SignatureHelpRequest};
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    CompletionTextEdit, Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, Hover, HoverContents, HoverParams,
-    HoverProviderCapability, InitializeParams, MarkupContent, MarkupKind, Position,
-    PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextEdit, Uri,
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionOptions,
+    CompletionParams, CompletionResponse, CompletionTextEdit, Diagnostic, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, Hover,
+    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, MarkupContent,
+    MarkupKind, ParameterInformation, ParameterLabel, Position, PublishDiagnosticsParams, Range,
+    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
 };
 use que::infer::{infer_with_builtins_typed_lsp, EffectFlags, InferErrorScope, TypedExpression};
 use que::lsp_native_core as native_core;
@@ -148,6 +149,11 @@ fn run() -> Result<(), String> {
                 ".".to_string(),
             ]),
             ..CompletionOptions::default()
+        }),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec![" ".to_string(), "(".to_string()]),
+            retrigger_characters: Some(vec![" ".to_string()]),
+            ..SignatureHelpOptions::default()
         }),
         ..ServerCapabilities::default()
     };
@@ -334,6 +340,11 @@ impl ServerState {
                 let params: CompletionParams = parse_params(req.params)?;
                 let items = self.completion_items_for_document(&params);
                 self.reply_ok(req.id, Some(CompletionResponse::Array(items)))
+            }
+            SignatureHelpRequest::METHOD => {
+                let params: SignatureHelpParams = parse_params(req.params)?;
+                let result = self.signature_help_for_document(&params);
+                self.reply_ok(req.id, result)
             }
             "que/getSignature" => {
                 let params: GetSignatureParams = parse_params(req.params)?;
@@ -606,6 +617,26 @@ impl ServerState {
             .and_then(|doc| completion_prefix_and_range(&doc.text, position));
 
         for keyword in [
+            "sig",
+            "loop",
+            "set!",
+            "pop!",
+            "pop-val!",
+            "length",
+            "block",
+            "unless",
+            "when",
+            "when-not",
+            "and",
+            "not",
+            "mod",
+            "mod.",
+            "car",
+            "cdr",
+            "cons",
+            "get",
+            "fst",
+            "snd",
             "lambda",
             "if",
             "let",
@@ -614,7 +645,6 @@ impl ServerState {
             "mut",
             "do",
             "as",
-            "alter!",
             "quote",
             "qq",
             "uq",
@@ -623,16 +653,9 @@ impl ServerState {
             "macroexpand",
             "macroexpand-1",
             "while",
-            "vector",
-            "string",
-            "integers",
-            "bools",
-            "decimals",
-            "strings",
-            "tuple",
         ] {
             let insert_text = match keyword {
-                "mut" | "alter!" => Some(format!("{} ", keyword)),
+                "mut" => Some(format!("{} ", keyword)),
                 _ => None,
             };
             items.push(CompletionItem {
@@ -663,6 +686,26 @@ impl ServerState {
         let mut items = Vec::new();
         let prefix = completion_prefix_and_range(text, position);
         for keyword in [
+            "sig",
+            "loop",
+            "set!",
+            "pop!",
+            "pop-val!",
+            "length",
+            "block",
+            "unless",
+            "when",
+            "when-not",
+            "and",
+            "not",
+            "mod",
+            "mod.",
+            "car",
+            "cdr",
+            "cons",
+            "get",
+            "fst",
+            "snd",
             "lambda",
             "if",
             "let",
@@ -671,7 +714,6 @@ impl ServerState {
             "mut",
             "do",
             "as",
-            "alter!",
             "quote",
             "qq",
             "uq",
@@ -680,16 +722,9 @@ impl ServerState {
             "macroexpand",
             "macroexpand-1",
             "while",
-            "vector",
-            "string",
-            "integers",
-            "bools",
-            "decimals",
-            "strings",
-            "tuple",
         ] {
             let insert_text = match keyword {
-                "mut" | "alter!" => Some(format!("{} ", keyword)),
+                "mut" => Some(format!("{} ", keyword)),
                 _ => None,
             };
             items.push(CompletionItem {
@@ -708,6 +743,30 @@ impl ServerState {
             apply_completion_replace_range(&mut items, replace_range);
         }
         items
+    }
+
+    fn signature_help_for_document(&self, params: &SignatureHelpParams) -> Option<SignatureHelp> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let doc = self.documents.get(uri)?;
+        let (symbol, active_parameter) = application_signature_context(&doc.text, position)?;
+        let signature = self.resolve_signature_for_doc(doc, &symbol, Some(position))?;
+        let signature = normalize_signature(&signature);
+        if !signature.contains("->") {
+            return None;
+        }
+        let (label, parameters) = signature_label_and_parameters(&symbol, &signature);
+        let active_parameter = active_parameter.min(parameters.len().saturating_sub(1)) as u32;
+        Some(SignatureHelp {
+            signatures: vec![SignatureInformation {
+                label,
+                documentation: None,
+                parameters: Some(parameters),
+                active_parameter: Some(active_parameter),
+            }],
+            active_signature: Some(0),
+            active_parameter: Some(active_parameter),
+        })
     }
 
     fn extend_completion_items_for_analysis(
@@ -739,9 +798,14 @@ impl ServerState {
         }
 
         for (name, signature) in &inferred_signatures {
+            let detail = normalize_signature(signature);
             items.push(CompletionItem {
                 label: name.clone(),
-                detail: Some(normalize_signature(signature)),
+                detail: Some(detail.clone()),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: None,
+                    description: Some(detail),
+                }),
                 kind: Some(kind_for_signature(signature)),
                 ..CompletionItem::default()
             });
@@ -780,6 +844,10 @@ impl ServerState {
                 items.push(CompletionItem {
                     label: name.clone(),
                     detail: detail.as_ref().map(|sig| normalize_signature(sig)),
+                    label_details: detail.as_ref().map(|sig| CompletionItemLabelDetails {
+                        detail: None,
+                        description: Some(normalize_signature(sig)),
+                    }),
                     kind: Some(kind),
                     ..CompletionItem::default()
                 });
@@ -1879,6 +1947,145 @@ fn skip_ws_and_comments(text: &str, mut i: usize, end: usize) -> usize {
     i
 }
 
+fn application_signature_context(text: &str, position: Position) -> Option<(String, usize)> {
+    let cursor = position_to_byte_offset(text, position)?;
+    let open = find_enclosing_open_paren_before(text, cursor)?;
+    let (head, _start, head_end, after_head) =
+        read_top_level_atom_token_in_list(text, open + 1, cursor)?;
+    if cursor < head_end {
+        return None;
+    }
+    Some((head, active_application_argument(text, after_head, cursor)))
+}
+
+fn signature_label_and_parameters(
+    symbol: &str,
+    signature: &str,
+) -> (String, Vec<ParameterInformation>) {
+    let label = format!("{symbol} : {signature}");
+    let signature_offset = label.len() - signature.len();
+    let mut start = 0usize;
+    let mut end = signature.len();
+    if signature.starts_with('(') && signature.ends_with(')') {
+        start += 1;
+        end -= 1;
+    }
+
+    let bytes = signature.as_bytes();
+    let mut depth = 0i32;
+    let mut segment_start = start;
+    let mut ranges = Vec::new();
+    let mut i = start;
+    while i + 1 < end {
+        match bytes[i] {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b'-' if bytes[i + 1] == b'>' && depth == 0 => {
+                let mut left = segment_start;
+                let mut right = i;
+                while left < right && bytes[left].is_ascii_whitespace() {
+                    left += 1;
+                }
+                while right > left && bytes[right - 1].is_ascii_whitespace() {
+                    right -= 1;
+                }
+                ranges.push((left, right));
+                segment_start = i + 2;
+                i += 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let parameters = ranges
+        .into_iter()
+        .map(|(start, end)| {
+            let label_start = signature_offset + start;
+            let label_end = signature_offset + end;
+            ParameterInformation {
+                label: ParameterLabel::LabelOffsets([
+                    label[..label_start].encode_utf16().count() as u32,
+                    label[..label_end].encode_utf16().count() as u32,
+                ]),
+                documentation: None,
+            }
+        })
+        .collect();
+    (label, parameters)
+}
+
+fn active_application_argument(text: &str, mut i: usize, end: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut forms = 0usize;
+    let mut last_end = i;
+    while i < end {
+        i = skip_ws_and_comments(text, i, end);
+        if i >= end {
+            break;
+        }
+        let start = i;
+        let mut stack = Vec::new();
+        let mut in_string = false;
+        let mut in_char = false;
+        let mut in_comment = false;
+        while i < end {
+            let b = bytes[i];
+            if in_comment {
+                if b == b'\n' {
+                    in_comment = false;
+                }
+                i += 1;
+                continue;
+            }
+            if !in_string && !in_char && b == b';' {
+                in_comment = true;
+                i += 1;
+                continue;
+            }
+            if !in_char && b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = !in_string;
+                i += 1;
+                continue;
+            }
+            if !in_string && b == b'\'' && (i == 0 || bytes[i - 1] != b'\\') {
+                in_char = !in_char;
+                i += 1;
+                continue;
+            }
+            if in_string || in_char {
+                i += 1;
+                continue;
+            }
+            match b {
+                b'(' | b'[' | b'{' => stack.push(b),
+                b')' | b']' | b'}' if !stack.is_empty() => {
+                    stack.pop();
+                    i += 1;
+                    if stack.is_empty() {
+                        break;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            if stack.is_empty() && i > start && b.is_ascii_whitespace() {
+                break;
+            }
+            i += 1;
+        }
+        forms += 1;
+        last_end = i;
+    }
+    if forms == 0 {
+        0
+    } else if skip_ws_and_comments(text, last_end, end) > last_end {
+        forms
+    } else {
+        forms - 1
+    }
+}
+
 fn literal_type_at_position(text: &str, position: Position) -> Option<(String, Range)> {
     native_core::literal_type_at_position(text, to_core_position(position))
         .map(|(literal_type, range)| (literal_type, from_core_range(range)))
@@ -1891,6 +2098,50 @@ fn format_literal_hover(text: &str, range: Range, literal_type: &str) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signature_context_tracks_lisp_application_arguments() {
+        let text = "(+ 1 (* 2 3) value)";
+        assert_eq!(
+            application_signature_context(text, Position::new(0, 3)),
+            Some(("+".to_string(), 0))
+        );
+        assert_eq!(
+            application_signature_context(text, Position::new(0, 5)),
+            Some(("+".to_string(), 1))
+        );
+        assert_eq!(
+            application_signature_context(text, Position::new(0, 8)),
+            Some(("*".to_string(), 0))
+        );
+        assert_eq!(
+            application_signature_context(text, Position::new(0, 13)),
+            Some(("+".to_string(), 2))
+        );
+    }
+
+    #[test]
+    fn signature_parameters_have_distinct_highlight_ranges() {
+        let (label, parameters) = signature_label_and_parameters("+", "(Int -> Int -> Int)");
+        assert_eq!(label, "+ : (Int -> Int -> Int)");
+        assert_eq!(parameters.len(), 2);
+        let ranges = parameters
+            .iter()
+            .map(|parameter| match parameter.label {
+                ParameterLabel::LabelOffsets(offsets) => offsets,
+                _ => panic!("parameter should use unambiguous offsets"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(&label[ranges[0][0] as usize..ranges[0][1] as usize], "Int");
+        assert_eq!(&label[ranges[1][0] as usize..ranges[1][1] as usize], "Int");
+        assert_ne!(ranges[0], ranges[1]);
+
+        let (label, parameters) = signature_label_and_parameters("map", "((a -> b) -> [a] -> [b])");
+        let ParameterLabel::LabelOffsets(first) = parameters[0].label else {
+            panic!("parameter should use offsets");
+        };
+        assert_eq!(&label[first[0] as usize..first[1] as usize], "(a -> b)");
+    }
 
     #[test]
     fn test_file_analysis_can_see_project_entry_definitions() {

@@ -3851,7 +3851,7 @@ out"#,
     #[test]
     fn test_infer_impure_nested_mutation_target_rooted_in_first_param_is_allowed() {
         let exprs = crate::parser::parse(
-            "(let vector/3d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))",
+            "(let vector/three-d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))",
         )
         .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -9194,7 +9194,7 @@ fn"#;
                 (let i (std/vector/first t))
                 (let j (std/vector/second t))
                 (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get image i j) old)) (do
-                    (std/vector/3d/set! image i j color)
+                    (std/vector/three-d/set! image i j color)
                     (std/vector/push! stack [(+ i 1) j])
                     (std/vector/push! stack [(- i 1) j])
                     (std/vector/push! stack [i (+ j 1)])
@@ -9282,7 +9282,7 @@ image
 (let yx->key (lambda y x (std/vector/concat/with (std/vector/map [ (as y Char) (as x Char) ] (lambda c [ c ])) std/char/dash)))
 (let parse (lambda input (<| input (std/convert/string->vector std/char/new-line) (std/vector/map std/convert/chars->digits))))
 (let part1 (lambda matrix (do
-  (let coords (std/vector/3d/points matrix std/int/zero?))
+  (let coords (std/vector/three-d/points matrix std/int/zero?))
   (std/vector/reduce coords (lambda a xs (do
         (integer score 0)
         (let y (std/vector/first xs))
@@ -9298,7 +9298,7 @@ image
             (std/vector/queue/dequeue! queue )
             (let y (std/vector/first element))
             (let x (std/vector/second element))  
-            (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
+            (std/vector/three-d/adjacent matrix std/vector/three-d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
                  (if (and (= (- cell (get matrix y x)) 1) (not (std/vector/hash/set/has? visited key))) (do
                     (if (= cell 9) (do (&alter! score  (+ (&get score) 1)) nil) (do (std/vector/queue/enqueue! queue [ dy dx ]) nil))
@@ -9308,7 +9308,7 @@ image
         (+ a (get score)))) 0))))
 
 (let part2 (lambda matrix (do
-  (let coords (std/vector/3d/points matrix std/int/zero?))
+  (let coords (std/vector/three-d/points matrix std/int/zero?))
   (std/vector/reduce coords (lambda a xs (do
         (integer score 0)
         (let y (std/vector/first xs))
@@ -9325,7 +9325,7 @@ image
             (let x (std/vector/second element))  
             (if (= (get matrix y x) 9) (&alter! score (+ (&get score) (snd (get (std/vector/hash/table/get visited root-key))))))
             (std/vector/queue/dequeue! queue)
-            (std/vector/3d/adjacent matrix std/vector/3d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
+            (std/vector/three-d/adjacent matrix std/vector/three-d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
                  (if (= (- cell (get matrix y x)) 1) (do
                     (std/vector/queue/enqueue! queue [ dy dx ])
@@ -9828,7 +9828,7 @@ D:=,=,=,+,=,=,=,+,=,=")
 (let gof (lambda matrix (do
   (std/vector/map/i matrix (lambda arr y (do
     (std/vector/map/i arr (lambda cell x (do
-      (let score (std/vector/3d/sliding-adjacent-sum matrix std/vector/3d/moore-neighborhood y x N +))
+      (let score (std/vector/three-d/sliding-adjacent-sum matrix std/vector/three-d/moore-neighborhood y x N +))
       (cond 
         (and (= cell 1) (or (< score 2) (> score 3))) 0
         (and (= cell 1) (or (= score 2) (= score 3))) 1
@@ -9841,7 +9841,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                                                 (= x 0) "." 
                                                 (= x 1) "*"
                                                 ""))))) 
-                              (std/convert/vector/3d->string std/char/new-line std/char/space)))))
+                              (std/convert/vector/three-d->string std/char/new-line std/char/space)))))
 (<| matrix (gof) (gof) (gof) (gof) (gof) (gof) (gof) (gof))"#,
                 "[[0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 1 0 0 0 0] [0 0 0 0 0 1 0 0 0] [0 0 0 1 1 1 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0]]",
             ),
@@ -9875,7 +9875,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                                     (= x 0) "." 
                                     (= x 1) "*"
                                     "")))))
-                (std/convert/vector/3d->string std/char/new-line std/char/space))
+                (std/convert/vector/three-d->string std/char/new-line std/char/space))
 out                
                 
                 "#,
@@ -10326,7 +10326,7 @@ L82")
     (Que/deque! queue)
     (let [ y x ] current)
     (let key (cons (Integer->String y) "-" (Integer->String x)))
-    (if (and (std/vector/3d/in-bounds? input y x) (not (Set/has? key visited))) (do
+    (if (and (std/vector/three-d/in-bounds? input y x) (not (Set/has? key visited))) (do
         (Set/add! visited key)
         (if (=# (get input y x) '^') (do 
           (&alter! total (+ (&get total) 1))
@@ -10342,7 +10342,7 @@ L82")
     (let current (Que/peek queue))
     (Que/deque! queue)
     (let [ y x c ] current)
-    (if (std/vector/3d/in-bounds? input y x) (do
+    (if (std/vector/three-d/in-bounds? input y x) (do
         (if (=# (get input y x) '^') (do 
             (Que/enque! queue [ y (+ x 1) c ])
             (Que/enque! queue [ y (- x 1) c ])) 
@@ -10421,14 +10421,14 @@ L82")
 862,61,35
 984,92,344
 425,690,689")
-(let distance/3d (lambda [ x1 y1 z1 ] [ x2 y2 z2 ] (+ (square (- x2 x1)) (square (- y2 y1)) (square (- z2 z1)))))
+(let distance/three-d (lambda [ x1 y1 z1 ] [ x2 y2 z2 ] (+ (square (- x2 x1)) (square (- y2 y1)) (square (- z2 z1)))))
 (let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
 (let part1 (lambda input (do
   (let len (length input))
   (let dist [])
   (loop/range/exclusive i 0 len (do 
     (loop/range/exclusive j i len (if (<> i j)
-      (push! dist { [ i j ] (abs (distance/3d (get input i) (get input j))) })))))
+      (push! dist { [ i j ] (abs (distance/three-d (get input i) (get input j))) })))))
   (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2)))
   (let edges (map fst dist))
   (let parent (range 0 (- (length input) 1)))
@@ -10453,7 +10453,7 @@ L82")
   ; compute all pairwise distances
   (loop/range/exclusive i 0 len
     (loop/range/exclusive j (+ i 1) len
-      (push! dist { [i j] (distance/3d (get input i) (get input j)) })))
+      (push! dist { [i j] (distance/three-d (get input i) (get input j)) })))
 
   ; sort edges by distance
   (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2))) 
@@ -10581,7 +10581,7 @@ UUUUD")
             (reduce (lambda a dir (do 
               (let y (+ (get dir 0) (get start 0)))
               (let x (+ (get dir 1) (get start 1)))
-              (unless (and (std/vector/3d/in-bounds? pad y x) (=# (get pad y x) '*')) (do 
+              (unless (and (std/vector/three-d/in-bounds? pad y x) (=# (get pad y x) '*')) (do 
                  (set! start 0 (clamp-range 0 len y))
                  (set! start 1 (clamp-range 0 len x))))
               (get pad (get start 0) (get start 1)))) '0'))))))))
@@ -10713,7 +10713,7 @@ image
 
 (let part1 (lambda input (do 
   (let Matrix->Count (lambda sig matrix (|> matrix (map (lambda xs (> (count/int (- 1 (- 1 sig)) xs) (count/int (- 1 sig) xs)))) (map Bool->Int) (std/convert/bits->integer))))
-  (let matrix (std/vector/3d/rotate input))
+  (let matrix (std/vector/three-d/rotate input))
   (let gamma (Matrix->Count 1 matrix))
   (let epsilon (Matrix->Count 0 matrix))
   (* gamma epsilon))))

@@ -49,9 +49,9 @@
 (let std/vector/length (lambda xs (length xs)))
 (let std/vector/get (lambda xs i (get xs i)))
 (let get/default (lambda xs i def (if (< i (length xs)) (get xs i) def)))
-(let std/vector/2d/length std/vector/length)
-(let std/vector/2d/get get)
-(let std/vector/2d/get/default get/default)
+(let std/vector/two-d/length std/vector/length)
+(let std/vector/two-d/get get)
+(let std/vector/two-d/get/default get/default)
 (let std/vector/pop! (lambda xs (pop! xs)))
 (let std/vector/set! (lambda xs i x (set! xs i x)))
 (let std/vector/swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp))))
@@ -96,37 +96,6 @@
 
 (let std/int/safe? (lambda value (and (>= value const/int/min-safe) (<= value const/int/max-safe))))
 (let std/int/get-safe (lambda vrbl (if (std/int/safe? (&get vrbl)) (&get vrbl) Int)))
-
-
-; Extra keywords
-(let std/fn/apply/0 (lambda fn (fn)))
-(let std/fn/apply/1 (lambda x fn (fn x)))
-(let std/fn/apply/2 (lambda x y fn (fn x y)))
-(let std/fn/apply/3 (lambda x y z fn (fn x y z)))
-(let std/fn/apply/4 (lambda a b c d fn (fn a b c d)))
-(let std/fn/apply/5 (lambda a b c d e fn (fn a b c d e)))
-(let std/fn/apply/6 (lambda a b c d e f fn (fn a b c d e f)))
-
-
-(let std/fn/combinator/1 (lambda a x (a x)))
-(let std/fn/combinator/2 (lambda a b x (a (b x))))
-(let std/fn/combinator/3 (lambda a b c x (a (b (c x)))))
-(let std/fn/combinator/4 (lambda a b c d x (a (b (c (d x))))))
-(let std/fn/combinator/5 (lambda a b c d e x (a (b (c (d (e x)))))))
-(let std/fn/combinator/6 (lambda a b c d e f x (a (b (c (d (e (f x))))))))
-(let std/fn/combinator/7 (lambda a b c d e f g x (a (b (c (d (e (f (g x)))))))))
-(let std/fn/combinator/8 (lambda a b c d e f g h x (a (b (c (d (e (f (g (h x))))))))))
-(let std/fn/combinator/9 (lambda a b c d e f g h i x (a (b (c (d (e (f (g (h (i x)))))))))))
-
-(let std/fn/rev/combinator/1 (lambda a x (a x)))
-(let std/fn/rev/combinator/2 (lambda a b x (b (a x))))
-(let std/fn/rev/combinator/3 (lambda a b c x (c (b (a x)))))
-(let std/fn/rev/combinator/4 (lambda a b c d x (d (c (b (a x))))))
-(let std/fn/rev/combinator/5 (lambda a b c d e x (e (d (c (b (a x)))))))
-(let std/fn/rev/combinator/6 (lambda a b c d e f x (f (e (d (c (b (a x))))))))
-(let std/fn/rev/combinator/7 (lambda a b c d e f g x (g (f (e (d (c (b (a x)))))))))
-(let std/fn/rev/combinator/8 (lambda a b c d e f g h x (h (g (f (e (d (c (b (a x))))))))))
-(let std/fn/rev/combinator/9 (lambda a b c d e f g h i x (i (h (g (f (e (d (c (b (a x)))))))))))
 
 (let std/fn/combinator/i (lambda x x))
 (let std/fn/combinator/k (lambda x y x))
@@ -381,7 +350,7 @@ out)))
         (alter! i (+ i 1))))
      out))) 
 
-(let std/vector/3d/int/range (lambda s w h (do 
+(let std/vector/three-d/int/range (lambda s w h (do 
   (mut i s)
   (let matrix [])
   (mut j 0)
@@ -396,8 +365,8 @@ out)))
     (alter! j (+ j 1))))
     matrix)))
 
-(let std/vector/2d/int/range std/vector/int/range)
-(let std/vector/2d/dec/range std/vector/dec/range)
+(let std/vector/two-d/int/range std/vector/int/range)
+(let std/vector/two-d/dec/range std/vector/dec/range)
 
 (let std/vector/char/blanks (lambda n (do
     (let out [ std/char/empty ])
@@ -423,41 +392,41 @@ out)))
 (let std/vector/char/count (lambda xs item (std/vector/count-of xs (lambda x (=# x item)))))
 (let std/vector/bool/count (lambda xs item (std/vector/count-of xs (lambda x (=? x item)))))
 
-(let std/vector/2d/count-of std/vector/count-of)
-(let std/vector/2d/int/count std/vector/int/count)
-(let std/vector/2d/char/count std/vector/char/count)
-(let std/vector/2d/bool/count std/vector/bool/count)
+(let std/vector/two-d/count-of std/vector/count-of)
+(let std/vector/two-d/int/count std/vector/int/count)
+(let std/vector/two-d/char/count std/vector/char/count)
+(let std/vector/two-d/bool/count std/vector/bool/count)
 
-(let std/vector/3d/count-of (lambda xs fn? (do
+(let std/vector/three-d/count-of (lambda xs fn? (do
     (mut total 0)
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (alter! total (+ total (std/vector/2d/count-of (get xs i) fn?)))
+      (alter! total (+ total (std/vector/two-d/count-of (get xs i) fn?)))
       (alter! i (+ i 1))))
     total)))
-(let std/vector/3d/int/count (lambda xs x (do
+(let std/vector/three-d/int/count (lambda xs x (do
     (mut total 0)
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (alter! total (+ total (std/vector/2d/int/count (get xs i) x)))
+      (alter! total (+ total (std/vector/two-d/int/count (get xs i) x)))
       (alter! i (+ i 1))))
     total)))
-(let std/vector/3d/char/count (lambda xs x (do
+(let std/vector/three-d/char/count (lambda xs x (do
     (mut total 0)
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (alter! total (+ total (std/vector/2d/char/count (get xs i) x)))
+      (alter! total (+ total (std/vector/two-d/char/count (get xs i) x)))
       (alter! i (+ i 1))))
     total)))
-(let std/vector/3d/bool/count (lambda xs x (do
+(let std/vector/three-d/bool/count (lambda xs x (do
     (mut total 0)
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (alter! total (+ total (std/vector/2d/bool/count (get xs i) x)))
+      (alter! total (+ total (std/vector/two-d/bool/count (get xs i) x)))
       (alter! i (+ i 1))))
     total)))
 
@@ -1341,27 +1310,27 @@ out)))
         xs 
         (<| xs (std/vector/map (lambda x [x])) (std/convert/vector->set) (std/convert/set->vector) (std/vector/map (lambda x (get x 0)))))))
 
-(let std/vector/3d/dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
-(let std/vector/3d/in-bounds? (lambda matrix y x (and (std/vector/in-bounds? matrix y) (std/vector/in-bounds? (get matrix y) x))))
-(let std/vector/3d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))
-(let std/vector/3d/diagonal-neighborhood [ [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
-(let std/vector/3d/kernel-neighborhood [ [ 0 0 ] [ 0 1 ] [ 1 0 ] [ -1 0 ] [ 0 -1 ] [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ]])
-(let std/vector/3d/moore-neighborhood [ [ 0 1 ] [ 1 0 ] [ -1 0 ] [ 0 -1 ] [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
-(let std/vector/3d/von-neumann-neighborhood [ [ 1 0 ] [ 0 -1 ] [ 0 1 ] [ -1 0 ] ])
+(let std/vector/three-d/dimensions (lambda matrix [ (length matrix) (length (get matrix 0)) ]))
+(let std/vector/three-d/in-bounds? (lambda matrix y x (and (std/vector/in-bounds? matrix y) (std/vector/in-bounds? (get matrix y) x))))
+(let std/vector/three-d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))
+(let std/vector/three-d/diagonal-neighborhood [ [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
+(let std/vector/three-d/kernel-neighborhood [ [ 0 0 ] [ 0 1 ] [ 1 0 ] [ -1 0 ] [ 0 -1 ] [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ]])
+(let std/vector/three-d/moore-neighborhood [ [ 0 1 ] [ 1 0 ] [ -1 0 ] [ 0 -1 ] [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
+(let std/vector/three-d/von-neumann-neighborhood [ [ 1 0 ] [ 0 -1 ] [ 0 1 ] [ -1 0 ] ])
 
-(let std/vector/3d/adjacent (lambda xs directions y x fn (do
+(let std/vector/three-d/adjacent (lambda xs directions y x fn (do
     (let len (length directions))
     (mut i 0)
     (while (< i len) (do
       (let dir (get directions i))
       (let dy (+ (std/vector/first dir) y))
       (let dx (+ (std/vector/second dir) x))
-      (if (std/vector/3d/in-bounds? xs dy dx)
+      (if (std/vector/three-d/in-bounds? xs dy dx)
           (fn (get xs dy dx) dir dy dx))
       (alter! i (+ i 1))))
     nil)))
 
-(let std/vector/3d/sliding-adjacent-sum (lambda xs directions y x N fn
+(let std/vector/three-d/sliding-adjacent-sum (lambda xs directions y x N fn
     (do
       (mut total 0)
       (let len (length directions))
@@ -1652,7 +1621,7 @@ q)))
 (let std/vector/stack/peek (lambda stack (std/vector/deque/last stack)))
 
 
-(let std/vector/3d/for (lambda matrix fn (do
+(let std/vector/three-d/for (lambda matrix fn (do
   (let width (length (std/vector/first matrix)))
   (let height (length matrix))
   (mut y 0)
@@ -1664,7 +1633,7 @@ q)))
     (alter! y (+ y 1))))
    matrix)))
 
-(let std/vector/3d/for/i (lambda matrix fn (do
+(let std/vector/three-d/for/i (lambda matrix fn (do
   (let width (length (std/vector/first matrix)))
   (let height (length matrix))
   (mut y 0)
@@ -1676,9 +1645,9 @@ q)))
     (alter! y (+ y 1))))
    matrix)))
 
-(let std/vector/3d/points (lambda matrix fn? (do 
+(let std/vector/three-d/points (lambda matrix fn? (do 
    (let coords [])
-   (std/vector/3d/for/i matrix (lambda cell y x (if (fn? cell) (do (std/vector/push! coords [ y x ]) nil)))) 
+   (std/vector/three-d/for/i matrix (lambda cell y x (if (fn? cell) (do (std/vector/push! coords [ y x ]) nil)))) 
     coords)))
 
 (let std/vector/concat/with (lambda xs ch (do
@@ -2064,14 +2033,14 @@ q)))
 (let std/int/reduce (lambda n fn acc (do 
     (letrec tail-call/fold-n (lambda i out (if (< i n) (tail-call/fold-n (+ i 1) (fn out i)) out)))
     (tail-call/fold-n 0 acc))))
-(let std/vector/2d/fill (lambda n fn (do 
+(let std/vector/two-d/fill (lambda n fn (do 
   (let out [])
   (mut i n)
   (while (> i 0) (do
     (std/vector/append! out (fn i))
     (alter! i (- i 1))))
   out)))
-(let std/vector/3d/fill (lambda W H fn 
+(let std/vector/three-d/fill (lambda W H fn 
   (cond 
     (or (= W 0) (= H 0)) [] 
     (and (= W 1) (= H 1)) [[(fn 0 0)]] (do
@@ -2081,26 +2050,26 @@ q)))
           (std/vector/push! matrix [])
           (mut j 0)
           (while (< j H) (do
-            (std/vector/3d/set! matrix i j (fn i j))
+            (std/vector/three-d/set! matrix i j (fn i j))
             (alter! j (+ j 1))))
           (alter! i (+ i 1))))
       matrix))))
-(let std/vector/3d/product (lambda A B (do
-  (let dimsA (std/vector/3d/dimensions A))
-  (let dimsB (std/vector/3d/dimensions B))
+(let std/vector/three-d/product (lambda A B (do
+  (let dimsA (std/vector/three-d/dimensions A))
+  (let dimsB (std/vector/three-d/dimensions B))
   (let rowsA (get dimsA 0))
   (let colsA (get dimsA 1))
   (let rowsB (get dimsB 0))
   (let colsB (get dimsB 1))
-  (if (= colsA rowsB) (std/vector/3d/fill rowsA colsB (lambda i j
+  (if (= colsA rowsB) (std/vector/three-d/fill rowsA colsB (lambda i j
       (std/int/reduce colsA (lambda sm k (+ sm (* (get A i k) (get B k j)))) 0))) []))))
-(let std/vector/3d/dot-product (lambda a b (do
+(let std/vector/three-d/dot-product (lambda a b (do
   (let lenA (length a))
   (let lenB (length b))
   (if (= lenA lenB)
     (std/int/reduce lenA (lambda sm i (+ sm (* (get a i) (get b i)))) 0) Int))))
 
-(let std/vector/3d/rotate (lambda matrix (if (std/vector/empty? matrix) matrix (do 
+(let std/vector/three-d/rotate (lambda matrix (if (std/vector/empty? matrix) matrix (do 
     (let H (length matrix))
     (let W (length (get matrix 0)))
     (let out [])
@@ -2114,7 +2083,7 @@ q)))
         (alter! i (+ i 1))))
     out))))
 
-(let std/vector/2d/interleave (lambda xs ys (do 
+(let std/vector/two-d/interleave (lambda xs ys (do 
   (let out [])
   (let len (std/int/min (length xs) (length ys)))
   (mut i 0)
@@ -2722,7 +2691,7 @@ q)))
       nil)))))
 
 
-(let std/convert/vector/3d->string (lambda xs a b (do
+(let std/convert/vector/three-d->string (lambda xs a b (do
     (let out [])
     (let rows (length xs))
     (mut y 0)
@@ -2765,8 +2734,8 @@ q)))
 
 (let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
 (let get* (lambda xs i some none (if (std/vector/in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
-(let std/vector/2d/get* get*)
-(let std/vector/3d/get* (lambda xs i j some none (if (std/vector/3d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))
+(let std/vector/two-d/get* get*)
+(let std/vector/three-d/get* (lambda xs i j some none (if (std/vector/three-d/in-bounds? xs i j) (do (some (get xs i j)) nil) (do (none) nil))))
 (let std/vector/enumerate (lambda xs (std/vector/tuple/zip { (std/vector/int/range 0 (- (length xs) 1)) xs })))
 
 (let std/int/factorial (lambda n (do 
@@ -3354,9 +3323,9 @@ q)))
     (alter! i (+ i 1))))
   out)))
 
-(let std/int/min/3 (lambda a b c (std/int/min (std/int/min a b) c)))
-(let std/int/min/4 (lambda a b c d (std/int/min (std/int/min a b) (std/int/min c d))))
-(let std/int/min/2 std/int/min)
+(let std/int/min/three (lambda a b c (std/int/min (std/int/min a b) c)))
+(let std/int/min/four (lambda a b c d (std/int/min (std/int/min a b) (std/int/min c d))))
+(let std/int/min/two std/int/min)
 
 (let std/vector/char/damerau-levenshtein (lambda a b (do
   (let n (length a))
@@ -3388,7 +3357,7 @@ q)))
       (let delete-cost (+ (get prev-row j) 1))
       (let insert-cost (+ (get current-row (- j 1)) 1))
       (let subst-cost (+ (get prev-row (- j 1)) replace-cost))
-      (let best (std/int/min/3 delete-cost insert-cost subst-cost))
+      (let best (std/int/min/three delete-cost insert-cost subst-cost))
 
       (let with-transpose
         (if (and (> i 1)
