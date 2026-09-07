@@ -6552,7 +6552,7 @@ fn compile_do(
                 .get(name)
                 .map(is_managed_local_type)
                 .unwrap_or(false);
-            if managed {
+            if managed && !is_borrowed_projection_local(name, ctx) {
                 Some((name.clone(), slot))
             } else {
                 None
@@ -6733,7 +6733,10 @@ fn compile_do(
                         let borrowed_rhs = val_node
                             .map(|n| is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings))
                             .unwrap_or(false);
-                        let value = if managed_local && borrowed_rhs {
+                        let value = if managed_local
+                            && borrowed_rhs
+                            && !is_borrowed_projection_local(name, ctx)
+                        {
                             let tmp_owned = ctx.tmp_i32 + 2;
                             let retain = ctx
                                 .local_types
@@ -6985,7 +6988,7 @@ fn compile_tail_do(
                 .get(name)
                 .map(is_managed_local_type)
                 .unwrap_or(false);
-            if managed {
+            if managed && !is_borrowed_projection_local(name, ctx) {
                 Some((name.clone(), slot))
             } else {
                 None
@@ -7164,7 +7167,10 @@ fn compile_tail_do(
                         let borrowed_rhs = val_node
                             .map(|n| is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings))
                             .unwrap_or(false);
-                        let value = if managed_local && borrowed_rhs {
+                        let value = if managed_local
+                            && borrowed_rhs
+                            && !is_borrowed_projection_local(name, ctx)
+                        {
                             let tmp_owned = ctx.tmp_i32 + 2;
                             let retain = ctx
                                 .local_types
@@ -11059,6 +11065,104 @@ fn collect_current_scope_let_locals(node: &TypedExpression, out: &mut Vec<(Strin
     }
 }
 
+fn projection_root_name(expr: &Expression) -> Option<&str> {
+    match expr {
+        Expression::Word(name) => Some(name),
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if matches!(op.as_str(), "fst" | "snd" | "get" | "car" | "cdr")) => {
+            items.get(1).and_then(projection_root_name)
+        }
+        _ => None,
+    }
+}
+
+fn expr_returns_name(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Word(word) => word == name,
+        Expression::Apply(items) => match items.first() {
+            Some(Expression::Word(op)) if matches!(op.as_str(), "do" | "block") => items
+                .last()
+                .is_some_and(|last| expr_returns_name(last, name)),
+            Some(Expression::Word(op)) if op == "if" => items
+                .iter()
+                .skip(2)
+                .any(|branch| expr_returns_name(branch, name)),
+            Some(Expression::Word(op)) if op == "cond" => items
+                .iter()
+                .skip(2)
+                .step_by(2)
+                .any(|branch| expr_returns_name(branch, name)),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn expr_captures_name(expr: &Expression, name: &str) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda") {
+        return items
+            .last()
+            .is_some_and(|body| expr_uses_name_as_value(name, body, false));
+    }
+    items.iter().any(|item| expr_captures_name(item, name))
+}
+
+fn collect_projection_bindings<'a>(
+    node: &'a TypedExpression,
+    out: &mut Vec<(&'a str, &'a TypedExpression)>,
+) {
+    if let Expression::Apply(items) = &node.expr {
+        if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda") {
+            return;
+        }
+        if let [Expression::Word(kw), Expression::Word(name), ..] = &items[..] {
+            if kw == "let" {
+                if let Some(rhs) = node.children.get(2) {
+                    out.push((name, rhs));
+                }
+            }
+        }
+    }
+    for child in &node.children {
+        collect_projection_bindings(child, out);
+    }
+}
+
+fn borrowed_projection_names(body: &TypedExpression, params: &[(String, Type)]) -> HashSet<String> {
+    let mut live_roots = params
+        .iter()
+        .filter(|(_, typ)| is_managed_local_type(typ))
+        .map(|(name, _)| name.clone())
+        .collect::<HashSet<_>>();
+    let mut borrowed = HashSet::new();
+    let mut bindings = Vec::new();
+    collect_projection_bindings(body, &mut bindings);
+    for (name, rhs) in bindings {
+        let concrete_managed = rhs
+            .typ
+            .as_ref()
+            .is_some_and(|typ| is_managed_local_type(typ) && !matches!(typ, Type::Var(_)));
+        let projection_from_live_root = projection_root_name(&rhs.expr)
+            .is_some_and(|root| live_roots.contains(root) && root != name);
+        if concrete_managed
+            && projection_from_live_root
+            && !expr_returns_name(&body.expr, name)
+            && !expr_captures_name(&body.expr, name)
+        {
+            borrowed.insert(name.to_string());
+            live_roots.insert(name.to_string());
+        }
+    }
+    borrowed
+}
+
+fn is_borrowed_projection_local(name: &str, ctx: &Ctx<'_>) -> bool {
+    ctx.locals
+        .contains_key(&format!("__borrowed_projection::{name}"))
+}
+
 fn collect_call_specializations(
     node: &TypedExpression,
     top_def_names: &HashSet<String>,
@@ -11379,6 +11483,12 @@ fn compile_lambda_func(
     for (i, (n, _)) in local_defs.iter().enumerate() {
         locals.insert(n.clone(), params.len() + i);
     }
+    let borrowed_projection_names = borrowed_projection_names(body_node, &params);
+    for borrowed_name in &borrowed_projection_names {
+        if let Some(slot) = locals.get(borrowed_name).copied() {
+            locals.insert(format!("__borrowed_projection::{borrowed_name}"), slot);
+        }
+    }
 
     let ordinary_local_count = params.len() + local_defs.len();
     let (borrowed_top_level_count, borrowed_top_level_prelude) = top_level_borrow_plan(
@@ -11436,7 +11546,7 @@ fn compile_lambda_func(
     collect_current_scope_let_locals(body_node, &mut cleanup_local_defs);
     let mut ref_slots: Vec<usize> = Vec::new();
     for (name, t) in cleanup_local_defs {
-        if is_managed_local_type(&t) {
+        if is_managed_local_type(&t) && !is_borrowed_projection_local(&name, &ctx) {
             if let Some(slot) = ctx.locals.get(&name) {
                 ref_slots.push(*slot);
             }
@@ -11621,7 +11731,7 @@ fn compile_closure_func(
     collect_current_scope_let_locals(body_node, &mut cleanup_local_defs);
     let mut ref_slots: Vec<usize> = Vec::new();
     for (name, t) in cleanup_local_defs {
-        if is_managed_local_type(&t) {
+        if is_managed_local_type(&t) && !is_borrowed_projection_local(&name, &ctx) {
             if let Some(slot) = ctx.locals.get(&name) {
                 ref_slots.push(*slot);
             }

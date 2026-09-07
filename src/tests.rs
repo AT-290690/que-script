@@ -7068,7 +7068,7 @@ fn"#;
 
     #[cfg(feature = "runtime")]
     #[test]
-    fn test_wat_concrete_destructured_refs_use_specialized_vector_rc() {
+    fn test_wat_non_escaping_destructured_refs_are_borrowed() {
         let source = r#"(do
             (let sum-model (lambda model (do
               (let {left right} model)
@@ -7088,18 +7088,64 @@ fn"#;
         let function_wat = &wat[function_start..function_end];
 
         assert!(
-            function_wat.contains("call $rc_retain_vec"),
-            "concrete borrowed projections should use vector retain, got:\n{}",
+            !function_wat
+                .lines()
+                .any(|line| line.trim().starts_with("call $rc_retain")),
+            "non-escaping projections should not be retained, got:\n{}",
             function_wat
         );
         assert!(
             !function_wat
                 .lines()
-                .any(|line| line.trim() == "call $rc_retain"),
-            "concrete destructured refs should avoid generic retain classification, got:\n{}",
+                .any(|line| line.trim().starts_with("call $rc_release")),
+            "borrowed projection locals should not be released, got:\n{}",
             function_wat
         );
         assert_eq!(run_program_output(source), "6");
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_borrowed_destructured_vector_mutation_updates_owner() {
+        let source = r#"(do
+            (let update! (lambda model (do
+              (let {xs ignored} model)
+              (set! xs 0 9)
+              nil)))
+            (let model {[1 2] [3]})
+            (update! model)
+            (get (fst model) 0))"#;
+        assert_eq!(run_program_output(source), "9");
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_returned_destructured_ref_keeps_owned_lifetime() {
+        let source = r#"(do
+            (let first-part (lambda model (do
+              (let {left ignored} model)
+              left)))
+            (first-part {[1 2] [3]}))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let function_start = wat
+            .find("(func $v_first_dash_part")
+            .expect("first-part function should exist");
+        let function_end = wat[function_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| function_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let function_wat = &wat[function_start..function_end];
+
+        assert!(
+            function_wat
+                .lines()
+                .any(|line| line.trim().starts_with("call $rc_retain")),
+            "escaping projection should retain ownership, got:\n{}",
+            function_wat
+        );
+        assert_eq!(run_program_output(source), "[1 2]");
     }
 
     #[test]
