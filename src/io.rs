@@ -656,6 +656,7 @@ que --help
 que --learn
 que --style
 que --pitfalls
+que --examples
 ```
 "#
 }
@@ -1129,7 +1130,7 @@ fn take_emit_request_from_argv(argv: &mut Vec<String>) -> Result<Option<EmitRequ
 fn native_shell_help(bin_name: &str) -> String {
     format!(
         "Usage: {bin} <script.que> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
-         Guides: run `{bin} --learn`, `{bin} --style`, or `{bin} --pitfalls` for language, style, and gotcha notes.\n\
+         Guides: run `{bin} --learn`, `{bin} --examples`, `{bin} --style`, or `{bin} --pitfalls`.\n\
          or:    {bin} --eval <source> [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <read|stdin|write|print|clock|delete|all> [...]]\n\
          or:    {bin} test <folder-or-test.que>\n\
          or:    {bin} [<script.que>] [arg ...] --emit <source|opt-source|wat|split-wat|wasm|types> [--out <file>]\n\
@@ -1144,6 +1145,7 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --learn\n\
          or:    {bin} --style\n\
          or:    {bin} --pitfalls\n\
+         or:    {bin} --examples\n\
          or:    {bin} --env\n\
          or:    {bin} --uninstall [--out <que-lib.lisp>]\n\
          \n\
@@ -1152,6 +1154,7 @@ fn native_shell_help(bin_name: &str) -> String {
           --learn        Print Eclisp language quick reference.\n\
           --style        Print Eclisp style and optimization guidance.\n\
           --pitfalls     Print common Eclisp gotchas and debugging rules.\n\
+          --examples     Print small functional, imperative, and mixed Que examples.\n\
           --env          Print environment flags and tuning examples.\n\
            --eval, -e     Execute inline Eclisp source without a script file.\n\
           test           Run Que tests. Folder mode appends main.test.que after the folder entry.\n\
@@ -1328,6 +1331,74 @@ fn native_shell_learn() -> &'static str {
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! time! random! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
+}
+
+fn native_shell_examples() -> &'static str {
+    r#"Que examples
+
+FUNCTIONAL
+
+; Recursion uses letrec.
+(letrec factorial
+  (lambda (n)
+    (if (<= n 1)
+        1
+        (* n (factorial (- n 1))))))
+
+(factorial 6)
+; => 720
+
+; Pipelines pass the value through each stage from left to right.
+(|> [1 2 3 4 5]
+    (select (lambda (x) (> x 2)))
+    (map (lambda (x) (* x x))))
+; => [9 16 25]
+
+; Tuples are fixed-shape values and can be destructured.
+(let point {10 20})
+(let {x y} point)
+(+ x y)
+; => 30
+
+IMPERATIVE
+
+; Local mutation can implement a pure function efficiently.
+(let sum
+  (lambda (xs)
+    (mut total 0)
+    (loop i (< i (length xs))
+      (alter! total (+ total (get xs i))))
+    total))
+
+(sum [10 20 30])
+; => 60
+
+; A function with caller-visible effects ends in !.
+; Put the value it mutates first.
+(let squares!
+  (lambda (out n)
+    (loop i (< i n)
+      (push! out (* i i)))
+    out))
+
+(let xs [])
+(squares! xs 5)
+; => [0 1 4 9 16]
+
+SEQUENCING AND SCOPE
+
+; do sequences expressions and returns the last one.
+; It does not create a lexical scope; block does.
+(let greet!
+  (lambda (name)
+    (do
+      (println! "hello")
+      (println! name)
+      name)))
+
+Que supports functional interfaces, imperative hot loops, and mixtures of both.
+Use `que --learn` for syntax, `que --style` for conventions, and
+`que --pitfalls` for common mistakes."#
 }
 
 fn native_shell_pitfalls() -> &'static str {
@@ -3505,11 +3576,12 @@ fn build_debug_error_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        init_host_project, init_project_config_file, native_shell_help, parse_test_results,
-        resolve_explain_input, resolve_project_entry_path, take_debug_mode_from_argv,
-        take_emit_request_from_argv, take_help_flag_from_argv, take_no_result_flag_from_argv,
-        take_opt_flag_from_argv, take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind,
-        LibraryExploreSymbol, QueTestCase, ShellPermission, ShellPolicy,
+        init_host_project, init_project_config_file, native_shell_examples, native_shell_help,
+        parse_test_results, resolve_explain_input, resolve_project_entry_path,
+        take_debug_mode_from_argv, take_emit_request_from_argv, take_help_flag_from_argv,
+        take_no_result_flag_from_argv, take_opt_flag_from_argv, take_shell_policy_from_argv,
+        wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol, QueTestCase, ShellPermission,
+        ShellPolicy,
     };
     use std::collections::HashSet;
     use std::path::PathBuf;
@@ -3874,6 +3946,7 @@ mod tests {
         assert!(readme_text.contains("que --learn"));
         assert!(readme_text.contains("que --style"));
         assert!(readme_text.contains("que --pitfalls"));
+        assert!(readme_text.contains("que --examples"));
         let err = init_project_config_file(&base, false).expect_err("second init should fail");
         assert!(err.contains("already exists"));
     }
@@ -3885,6 +3958,21 @@ mod tests {
         assert!(help.contains("Print Eclisp style and optimization guidance"));
         assert!(help.contains("que --pitfalls"));
         assert!(help.contains("Print common Eclisp gotchas and debugging rules"));
+        assert!(help.contains("que --examples"));
+        assert!(help.contains("Print small functional, imperative, and mixed Que examples"));
+    }
+
+    #[test]
+    fn native_shell_examples_cover_core_language_styles() {
+        let examples = native_shell_examples();
+        assert!(examples.contains("FUNCTIONAL"));
+        assert!(examples.contains("IMPERATIVE"));
+        assert!(examples.contains("SEQUENCING AND SCOPE"));
+        assert!(examples.contains("(letrec factorial"));
+        assert!(examples.contains("(|> [1 2 3 4 5]"));
+        assert!(examples.contains("(mut total 0)"));
+        assert!(examples.contains("(let squares!"));
+        assert!(examples.contains("do sequences expressions"));
     }
 
     #[test]
@@ -4084,6 +4172,10 @@ pub fn run_native_shell() -> Result<(), String> {
     }
     if matches!(args.get(1).map(String::as_str), Some("--pitfalls")) {
         println!("{}", native_shell_pitfalls());
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("--examples")) {
+        println!("{}", native_shell_examples());
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("--env")) {
