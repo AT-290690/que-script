@@ -665,6 +665,7 @@ impl ServerState {
                 ..CompletionItem::default()
             });
         }
+        extend_literal_completion_items(&mut items);
 
         if let Some(doc) = self.documents.get(uri) {
             self.extend_completion_items_for_analysis(doc, position, &mut items);
@@ -734,6 +735,7 @@ impl ServerState {
                 ..CompletionItem::default()
             });
         }
+        extend_literal_completion_items(&mut items);
         self.extend_completion_items_for_analysis(&analysis, position, &mut items);
 
         items.sort_by(|a, b| a.label.cmp(&b.label));
@@ -1753,6 +1755,17 @@ fn kind_for_signature(signature: &str) -> CompletionItemKind {
     }
 }
 
+fn extend_literal_completion_items(items: &mut Vec<CompletionItem>) {
+    for (label, detail) in [("true", "Bool"), ("false", "Bool"), ("nil", "()")] {
+        items.push(CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::CONSTANT),
+            detail: Some(detail.to_string()),
+            ..CompletionItem::default()
+        });
+    }
+}
+
 fn completion_matches_prefix(label: &str, prefix: &str) -> bool {
     if prefix.is_empty() {
         return true;
@@ -2098,6 +2111,21 @@ fn format_literal_hover(text: &str, range: Range, literal_type: &str) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_completions_have_concrete_constant_types() {
+        let mut items = Vec::new();
+        extend_literal_completion_items(&mut items);
+
+        for (label, detail) in [("true", "Bool"), ("false", "Bool"), ("nil", "()")] {
+            let item = items
+                .iter()
+                .find(|item| item.label == label)
+                .expect("literal should be offered as a completion");
+            assert_eq!(item.kind, Some(CompletionItemKind::CONSTANT));
+            assert_eq!(item.detail.as_deref(), Some(detail));
+        }
+    }
 
     #[test]
     fn signature_context_tracks_lisp_application_arguments() {

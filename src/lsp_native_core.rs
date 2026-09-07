@@ -778,10 +778,100 @@ pub fn symbol_occurrence_index_in_range(
     let at_or_before = |a: CorePosition, b: CorePosition| {
         a.line < b.line || (a.line == b.line && a.character <= b.character)
     };
-    find_symbol_ranges(text, symbol)
+    let ranges = find_symbol_ranges(text, symbol)
         .into_iter()
         .filter(|range| at_or_after(range.start, scope.start) && at_or_before(range.end, scope.end))
-        .position(|range| range.start == target.start)
+        .collect::<Vec<_>>();
+    let source_index = ranges
+        .iter()
+        .position(|range| range.start == target.start)?;
+
+    let Some(target_byte) = position_to_byte_offset(text, target.start) else {
+        return Some(source_index);
+    };
+    let Some((pipe_open, pipe_close)) = direct_pipeline_stage_parent(text, target_byte) else {
+        return Some(source_index);
+    };
+    let mut pipeline_indices = Vec::new();
+    for (index, range) in ranges.iter().enumerate() {
+        let Some(byte) = position_to_byte_offset(text, range.start) else {
+            continue;
+        };
+        if byte > pipe_open
+            && byte < pipe_close
+            && direct_pipeline_stage_parent(text, byte) == Some((pipe_open, pipe_close))
+        {
+            pipeline_indices.push(index);
+        }
+    }
+    let Some(pipeline_position) = pipeline_indices
+        .iter()
+        .position(|index| *index == source_index)
+    else {
+        return Some(source_index);
+    };
+    Some(pipeline_indices[pipeline_indices.len() - 1 - pipeline_position])
+}
+
+fn direct_pipeline_stage_parent(text: &str, target: usize) -> Option<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut stack = Vec::new();
+    let mut in_string = false;
+    let mut in_comment = false;
+    let mut i = 0usize;
+    while i < target.min(bytes.len()) {
+        let byte = bytes[i];
+        if in_comment {
+            if byte == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+        if !in_string && byte == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+        if byte == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_string = !in_string;
+            i += 1;
+            continue;
+        }
+        if !in_string {
+            match byte {
+                b'(' => stack.push(i),
+                b')' => {
+                    stack.pop();
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    let stage_open = *stack.last()?;
+    let pipe_open = *stack.get(stack.len().checked_sub(2)?)?;
+    if list_head_at(text, pipe_open)? != "|>" || list_head_at(text, stage_open)? == "|>" {
+        return None;
+    }
+    let pipe_close = find_matching_paren_byte(text, pipe_open)?;
+    Some((pipe_open, pipe_close))
+}
+
+fn list_head_at(text: &str, open: usize) -> Option<&str> {
+    let bytes = text.as_bytes();
+    let mut start = open + 1;
+    while start < bytes.len() && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    let mut end = start;
+    while end < bytes.len()
+        && !bytes[end].is_ascii_whitespace()
+        && !matches!(bytes[end], b'(' | b')' | b'[' | b']' | b'{' | b'}')
+    {
+        end += 1;
+    }
+    text.get(start..end)
 }
 
 fn type_specificity_score(typ: &Type) -> i32 {

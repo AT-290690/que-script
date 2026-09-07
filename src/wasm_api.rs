@@ -386,6 +386,13 @@ fn lsp_completions_with_prefix(
                 kind: "keyword".to_string(),
             });
         }
+        for (label, detail) in [("true", "Bool"), ("false", "Bool"), ("nil", "()")] {
+            items.push(JsonCompletionItem {
+                label: label.to_string(),
+                detail: Some(detail.to_string()),
+                kind: "constant".to_string(),
+            });
+        }
         for (label, detail) in &inferred_signatures {
             let kind = if detail.contains("->") {
                 "function"

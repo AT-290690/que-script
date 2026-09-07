@@ -13,7 +13,7 @@ syn match queNumber /\v<[-+]?\d+(\.\d+)?>/
 
 " --- Keywords (Control Flow & Structure) ---
 syn keyword queKeyword
-      \ lambda if let letrec letmacro mut do block while
+      \ lambda comp if let letrec letmacro mut do block while
       \ cond unless when when-not loop and or not quote qq uq uqs gensym
       \ macroexpand macroexpand-1 as sig
 

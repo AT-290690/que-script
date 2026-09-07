@@ -10,7 +10,8 @@ It provides:
 - `quelsp` setup through `nvim-lspconfig`
 - completion kind icons through `blink.cmp` or `nvim-cmp`, with Neovim's built-in LSP completion as a fallback
 - live function signatures and active-argument tracking while typing applications
-- clean Neovim hover text without Markdown language-fence markers
+- theme-native plain-text hover windows with borders and no Markdown colouring or markers
+- automatic signature help, without duplicating Blink's signature window
 
 ## Requirements
 

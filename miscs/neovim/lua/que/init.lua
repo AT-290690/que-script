@@ -3,7 +3,7 @@ local M = {}
 M.completion_icons = {
   Text = "≡",
   Method = "ƒ",
-  Function = "ƒ",
+  Function = "λ",
   Constructor = "+",
   Field = "·",
   Variable = "α",
@@ -14,7 +14,7 @@ M.completion_icons = {
   Unit = "()",
   Value = "◇",
   Enum = "E",
-  Keyword = "◆",
+  Keyword = "β",
   Snippet = "⋯",
   Color = "■",
   File = "#",
@@ -117,8 +117,16 @@ local function setup_completion(client, bufnr, opts)
   end
 end
 
-local function setup_signature_help(client, bufnr)
+local function blink_handles_signature_help()
+  local ok, config = pcall(require, "blink.cmp.config")
+  return ok and config.signature and config.signature.enabled == true
+end
+
+local function setup_signature_help(client, bufnr, opts)
   if not client.server_capabilities.signatureHelpProvider then
+    return
+  end
+  if opts.signature_help == false or (opts.signature_help == nil and blink_handles_signature_help()) then
     return
   end
   local group = vim.api.nvim_create_augroup("QueSignatureHelp" .. bufnr, { clear = true })
@@ -138,15 +146,40 @@ local function setup_signature_help(client, bufnr)
   })
 end
 
-local function strip_que_hover_fences(result)
+local function clean_que_hover(result)
   if not (result and type(result.contents) == "table") then
     return result
   end
   if result.contents.kind ~= "markdown" or type(result.contents.value) ~= "string" then
     return result
   end
-  result.contents.value = result.contents.value:gsub("```que\r?\n(.-)\r?\n```", "%1")
+  local value = result.contents.value
+  value = value:gsub("```que\r?\n(.-)\r?\n```", "%1")
+  value = value:gsub("`([^`\r\n]+)`", "%1")
+  value = value:gsub("\r?\n%s*\r?\n", "\n")
+  value = value:gsub("^%s+", ""):gsub("%s+$", "")
+  value = value:gsub("([^\r\n]+)", " %1 ")
+  result.contents.value = value
+  result.contents.kind = "plaintext"
   return result
+end
+
+local function setup_hover(client, bufnr, hover_handler, opts)
+  vim.keymap.set("n", "K", function()
+    local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
+    client:request("textDocument/hover", params, function(err, result, ctx, config)
+      config = vim.tbl_extend("force", config or {}, {
+        border = opts.hover_border or "single",
+      })
+      local hover_buf, hover_win = hover_handler(err, clean_que_hover(result), ctx, config)
+      if hover_buf and vim.api.nvim_buf_is_valid(hover_buf) then
+        vim.bo[hover_buf].syntax = ""
+      end
+      if hover_win and vim.api.nvim_win_is_valid(hover_win) then
+        vim.wo[hover_win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder"
+      end
+    end, bufnr)
+  end, { buffer = bufnr, desc = "Que hover" })
 end
 
 function M.setup(opts)
@@ -179,14 +212,17 @@ function M.setup(opts)
   local lsp_opts = vim.deepcopy(opts)
   lsp_opts.completion_icons = nil
   lsp_opts.completion_type_hints = nil
+  lsp_opts.signature_help = nil
+  lsp_opts.hover_border = nil
   lsp_opts.handlers = vim.tbl_extend("force", user_handlers, {
     ["textDocument/hover"] = function(err, result, ctx, config)
-      return hover_handler(err, strip_que_hover_fences(result), ctx, config)
+      return hover_handler(err, clean_que_hover(result), ctx, config)
     end,
   })
   lsp_opts.on_attach = function(client, bufnr)
     setup_completion(client, bufnr, opts)
-    setup_signature_help(client, bufnr)
+    setup_signature_help(client, bufnr, opts)
+    setup_hover(client, bufnr, hover_handler, opts)
     if user_on_attach then
       user_on_attach(client, bufnr)
     end

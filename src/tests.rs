@@ -4991,6 +4991,32 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_distinguishes_repeated_pipeline_stages() {
+        let source = "(|> (range 1 10) (map square) (map Integer->String))";
+        let first: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_hover(source.to_string(), 0, 19))
+                .expect("first hover should be valid JSON");
+        let second: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_hover(source.to_string(), 0, 32))
+                .expect("second hover should be valid JSON");
+        let first_text = first["contents"]
+            .as_str()
+            .expect("first hover should exist");
+        let second_text = second["contents"]
+            .as_str()
+            .expect("second hover should exist");
+
+        assert!(
+            first_text.contains("(Int -> Int) -> [Int] -> [Int]"),
+            "first map should use square's type, got: {first_text}"
+        );
+        assert!(
+            second_text.contains("(Int -> [Char]) -> [Int] -> [[Char]]"),
+            "second map should use Integer->String's type, got: {second_text}"
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_completions_at_matches_namespaced_prefix_with_slash() {
         let completion_json = crate::wasm_api::lsp_completions_at(
             "(let data/manager_id 1)\n(let data/department_id 2)\ndata/".to_string(),
@@ -5015,6 +5041,29 @@ out"#,
             "expected namespaced symbol after data/, got: {:?}",
             labels
         );
+    }
+
+    #[test]
+    fn test_wasm_lsp_completions_include_typed_literals() {
+        for (prefix, expected_label, expected_detail) in [
+            ("tr", "true", "Bool"),
+            ("fa", "false", "Bool"),
+            ("ni", "nil", "()"),
+        ] {
+            let completion_json =
+                crate::wasm_api::lsp_completions_at(prefix.to_string(), 0, prefix.len() as u32);
+            let items: serde_json::Value = serde_json::from_str(&completion_json)
+                .expect("completion response should be valid JSON");
+            let item = items
+                .as_array()
+                .expect("completion response should be an array")
+                .iter()
+                .find(|item| item["label"] == expected_label)
+                .expect("literal should be offered as a completion");
+
+            assert_eq!(item["kind"], "constant");
+            assert_eq!(item["detail"], expected_detail);
+        }
     }
 
     #[test]
