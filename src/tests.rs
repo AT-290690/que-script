@@ -6995,7 +6995,7 @@ fn"#;
             main_wat
         );
         assert!(
-            main_flat.contains("local.get 0\ncall $rc_release\ndrop"),
+            main_flat.contains("local.get 0\ncall $rc_release_vec\ndrop"),
             "tuple lowering should still release the fresh-owned side after construction, got:\n{}",
             main_wat
         );
@@ -7061,6 +7061,42 @@ fn"#;
                 && !loop_wat.contains("global.get $g_val_v_xs")
                 && !loop_wat.contains("call $rc_release"),
             "hot loop should use the function-scoped borrowed local, got:\n{}",
+            function_wat
+        );
+        assert_eq!(run_program_output(source), "6");
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_wat_concrete_destructured_refs_use_specialized_vector_rc() {
+        let source = r#"(do
+            (let sum-model (lambda model (do
+              (let {left right} model)
+              (let {xs ys} left)
+              (+ (length xs) (+ (length ys) (length right))))))
+            (sum-model {{[1 2] [3]} [4 5 6]}))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let function_start = wat
+            .find("(func $v_sum_dash_model")
+            .expect("sum-model function should exist");
+        let function_end = wat[function_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| function_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let function_wat = &wat[function_start..function_end];
+
+        assert!(
+            function_wat.contains("call $rc_retain_vec"),
+            "concrete borrowed projections should use vector retain, got:\n{}",
+            function_wat
+        );
+        assert!(
+            !function_wat
+                .lines()
+                .any(|line| line.trim() == "call $rc_retain"),
+            "concrete destructured refs should avoid generic retain classification, got:\n{}",
             function_wat
         );
         assert_eq!(run_program_output(source), "6");
@@ -7778,7 +7814,8 @@ fn"#;
         let wat_flat = wat.replace("    ", "");
 
         assert!(
-            !wat_flat.contains("local.get 0\ncall $rc_release\ndrop\nlocal.set 0"),
+            !wat_flat.contains("local.get 0\ncall $rc_release\ndrop\nlocal.set 0")
+                && !wat_flat.contains("local.get 0\ncall $rc_release_vec\ndrop\nlocal.set 0"),
             "initial managed local binding should not release a zero-initialized slot, got:\n{}",
             wat
         );
@@ -8367,14 +8404,15 @@ fn"#;
         let wat_flat = wat.replace("    ", "");
 
         assert!(
-            wat_flat
-                .contains("call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop"),
+            wat_flat.contains(
+                "call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release_vec\ndrop"
+            ),
             "discarded managed do expr should reuse the constructor temp for release, got:\n{}",
             wat
         );
         assert!(
             !wat_flat.contains(
-                "call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release\ndrop\nlocal.set 1"
+                "call $vec_new_i32\nlocal.set 0\nlocal.get 0\ncall $rc_release_vec\ndrop\nlocal.set 1"
             ),
             "discarded managed do expr should not add an extra spill temp when no managed locals can alias, got:\n{}",
             wat
@@ -8485,7 +8523,7 @@ fn"#;
             .expect("program should compile");
 
         assert!(
-            wat.contains("call $vec_set_i32") && wat.contains("call $rc_release"),
+            wat.contains("call $vec_set_i32") && wat.contains("call $closure_release"),
             "managed set! RHS should be released after vector retain, got:\n{}",
             wat
         );

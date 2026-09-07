@@ -314,6 +314,28 @@ fn is_managed_local_type(t: &Type) -> bool {
     )
 }
 
+fn rc_retain_for_type(t: &Type) -> &'static str {
+    match t {
+        Type::List(_) | Type::Tuple(_) => "$rc_retain_vec",
+        Type::Function(_, _) => "$closure_retain",
+        Type::Var(_) => "$rc_retain",
+        _ => "$rc_retain",
+    }
+}
+
+fn rc_release_for_type(t: &Type) -> &'static str {
+    match t {
+        Type::List(_) | Type::Tuple(_) => "$rc_release_vec",
+        Type::Function(_, _) => "$closure_release",
+        Type::Var(_) => "$rc_release",
+        _ => "$rc_release",
+    }
+}
+
+fn rc_release_for_opt_type(t: Option<&Type>) -> &'static str {
+    t.map(rc_release_for_type).unwrap_or("$rc_release")
+}
+
 fn closure_store_op_for_type(t: &Type) -> &'static str {
     match t {
         Type::Function(_, _) => "closure_set_fun",
@@ -594,8 +616,9 @@ fn compile_borrowed_top_level_cached_ref(
     let g_val = cache_value_global(name);
     Some(
         format!(
-            "global.get ${g_init}\nif (result i32)\n  global.get ${g_val}\nelse\n  call ${}\n  local.set {scratch_slot}\n  local.get {scratch_slot}\n  call $rc_release\n  drop\n  global.get ${g_val}\nend",
-            ident(name)
+            "global.get ${g_init}\nif (result i32)\n  global.get ${g_val}\nelse\n  call ${}\n  local.set {scratch_slot}\n  local.get {scratch_slot}\n  call {}\n  drop\n  global.get ${g_val}\nend",
+            ident(name),
+            rc_release_for_type(ret_ty)
         )
     )
 }
@@ -649,6 +672,10 @@ fn top_level_borrow_plan(
         locals.insert(format!("__borrowed_top_level::{name}"), slot);
         let g_init = cache_init_global(name);
         let g_val = cache_value_global(name);
+        let release = fn_sigs
+            .get(name)
+            .map(|(_, ret)| rc_release_for_type(ret))
+            .unwrap_or("$rc_release");
         prelude.push(format!(
             "global.get ${g_init}\n\
              if (result i32)\n\
@@ -657,7 +684,7 @@ fn top_level_borrow_plan(
                call ${}\n\
                local.set {scratch_slot}\n\
                local.get {scratch_slot}\n\
-               call $rc_release\n\
+               call {release}\n\
                drop\n\
                global.get ${g_val}\n\
              end\n\
@@ -6150,8 +6177,12 @@ fn should_release_set_rhs(node: &TypedExpression) -> bool {
     is_fresh_owned_managed_expr(node)
 }
 
-fn emit_release_fresh_owned_temp(tmp_val: usize) -> String {
-    format!("local.get {}\ncall $rc_release\ndrop", tmp_val)
+fn emit_release_fresh_owned_temp(tmp_val: usize, ty: Option<&Type>) -> String {
+    format!(
+        "local.get {}\ncall {}\ndrop",
+        tmp_val,
+        rc_release_for_opt_type(ty)
+    )
 }
 
 fn emit_direct_builder_scalar_store_i32(
@@ -6704,9 +6735,14 @@ fn compile_do(
                             .unwrap_or(false);
                         let value = if managed_local && borrowed_rhs {
                             let tmp_owned = ctx.tmp_i32 + 2;
+                            let retain = ctx
+                                .local_types
+                                .get(name)
+                                .map(rc_retain_for_type)
+                                .unwrap_or("$rc_retain");
                             format!(
-                                "{value}\nlocal.tee {}\ncall $rc_retain\ndrop\nlocal.get {}",
-                                tmp_owned, tmp_owned
+                                "{value}\nlocal.tee {}\ncall {retain}\ndrop\nlocal.get {}",
+                                tmp_owned, tmp_owned,
                             )
                         } else {
                             value
@@ -6817,11 +6853,16 @@ fn compile_do(
             };
             if managed && !borrowed {
                 let c = compile_expr(n, &scoped_ctx)?;
+                let release = n
+                    .typ
+                    .as_ref()
+                    .map(rc_release_for_type)
+                    .unwrap_or("$rc_release");
                 let tmp_val = ctx.tmp_i32;
                 let tmp_keep = ctx.tmp_i32 + 1;
                 let mut blk = Vec::new();
                 if managed_local_slots.is_empty() {
-                    blk.push(format!("{c}\ncall $rc_release\ndrop"));
+                    blk.push(format!("{c}\ncall {release}\ndrop"));
                 } else {
                     blk.push(format!("{c}\nlocal.set {}", tmp_val));
                     blk.push(format!("i32.const 0\nlocal.set {}", tmp_keep));
@@ -6835,13 +6876,10 @@ fn compile_do(
                             )
                         );
                     }
-                    blk.push(
-                        format!(
-                            "local.get {}\ni32.eqz\nif\n  local.get {}\n  call $rc_release\n  drop\nend",
-                            tmp_keep,
-                            tmp_val
-                        )
-                    );
+                    blk.push(format!(
+                        "local.get {}\ni32.eqz\nif\n  local.get {}\n  call {release}\n  drop\nend",
+                        tmp_keep, tmp_val
+                    ));
                 }
                 parts.push(blk.join("\n"));
             } else {
@@ -7128,9 +7166,14 @@ fn compile_tail_do(
                             .unwrap_or(false);
                         let value = if managed_local && borrowed_rhs {
                             let tmp_owned = ctx.tmp_i32 + 2;
+                            let retain = ctx
+                                .local_types
+                                .get(name)
+                                .map(rc_retain_for_type)
+                                .unwrap_or("$rc_retain");
                             format!(
-                                "{value}\nlocal.tee {}\ncall $rc_retain\ndrop\nlocal.get {}",
-                                tmp_owned, tmp_owned
+                                "{value}\nlocal.tee {}\ncall {retain}\ndrop\nlocal.get {}",
+                                tmp_owned, tmp_owned,
                             )
                         } else {
                             value
@@ -7215,11 +7258,16 @@ fn compile_tail_do(
             };
             if managed && !borrowed {
                 let c = compile_expr(n, &scoped_ctx)?;
+                let release = n
+                    .typ
+                    .as_ref()
+                    .map(rc_release_for_type)
+                    .unwrap_or("$rc_release");
                 let tmp_val = ctx.tmp_i32;
                 let tmp_keep = ctx.tmp_i32 + 1;
                 let mut blk = Vec::new();
                 if managed_local_slots.is_empty() {
-                    blk.push(format!("{c}\ncall $rc_release\ndrop"));
+                    blk.push(format!("{c}\ncall {release}\ndrop"));
                 } else {
                     blk.push(format!("{c}\nlocal.set {}", tmp_val));
                     blk.push(format!("i32.const 0\nlocal.set {}", tmp_keep));
@@ -7233,13 +7281,10 @@ fn compile_tail_do(
                             )
                         );
                     }
-                    blk.push(
-                        format!(
-                            "local.get {}\ni32.eqz\nif\n  local.get {}\n  call $rc_release\n  drop\nend",
-                            tmp_keep,
-                            tmp_val
-                        )
-                    );
+                    blk.push(format!(
+                        "local.get {}\ni32.eqz\nif\n  local.get {}\n  call {release}\n  drop\nend",
+                        tmp_keep, tmp_val
+                    ));
                 }
                 parts.push(blk.join("\n"));
             } else {
@@ -7359,16 +7404,15 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         let release_arg = should_release_set_rhs(a);
         if release_arg {
             // Fresh managed values are retained by vector push; release the temporary owner.
-            out.push(
-                format!(
-                    "local.get {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
-                    ctx.tmp_i32,
-                    v,
-                    ctx.tmp_i32 + 1,
-                    push_op,
-                    ctx.tmp_i32 + 1
-                )
-            );
+            out.push(format!(
+                "local.get {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall {}\ndrop",
+                ctx.tmp_i32,
+                v,
+                ctx.tmp_i32 + 1,
+                push_op,
+                ctx.tmp_i32 + 1,
+                rc_release_for_opt_type(a.typ.as_ref())
+            ));
         } else {
             out.push(format!(
                 "local.get {}\n{}\ncall {}\ndrop",
@@ -7587,7 +7631,7 @@ fn compile_trusted_typed_vector_literal(
                 v,
                 ctx.tmp_i32 + 1,
                 push_op,
-                emit_release_fresh_owned_temp(ctx.tmp_i32 + 1)
+                emit_release_fresh_owned_temp(ctx.tmp_i32 + 1, fake_node.typ.as_ref())
             ));
         } else {
             out.push(format!(
@@ -7643,10 +7687,10 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         a_tmp, b_tmp, out_tmp
     ));
     if release_a {
-        out.push(emit_release_fresh_owned_temp(a_tmp));
+        out.push(emit_release_fresh_owned_temp(a_tmp, a_node.typ.as_ref()));
     }
     if release_b {
-        out.push(emit_release_fresh_owned_temp(b_tmp));
+        out.push(emit_release_fresh_owned_temp(b_tmp, b_node.typ.as_ref()));
     }
     out.push(format!("local.get {}", out_tmp));
     Ok(out.join("\n"))
@@ -7697,7 +7741,7 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             out.push(format!("{a}\nlocal.set {}", a_tmp));
             if release_b {
                 out.push(format!("{b}\nlocal.set {}", b_tmp));
-                out.push(emit_release_fresh_owned_temp(b_tmp));
+                out.push(emit_release_fresh_owned_temp(b_tmp, b_node.typ.as_ref()));
             } else {
                 out.push(format!("{b}\ndrop"));
             }
@@ -7756,7 +7800,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             let mut out = Vec::new();
             if release_a {
                 out.push(format!("{a}\nlocal.set {}", a_tmp));
-                out.push(emit_release_fresh_owned_temp(a_tmp));
+                out.push(emit_release_fresh_owned_temp(a_tmp, a_node.typ.as_ref()));
             } else {
                 out.push(format!("{a}\ndrop"));
             }
@@ -7955,7 +7999,7 @@ fn emit_constant_scalar_get(
          i32.load"
     );
     if release_xs_after {
-        format!("{load}\nlocal.get {tmp_ptr}\ncall $rc_release\ndrop")
+        format!("{load}\nlocal.get {tmp_ptr}\ncall $rc_release_vec\ndrop")
     } else {
         load
     }
@@ -8314,7 +8358,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         }
         if release_xs_after {
             return Ok(format!(
-                "{bounds}\nlocal.get {}\ncall $rc_release\ndrop",
+                "{bounds}\nlocal.get {}\ncall $rc_release_vec\ndrop",
                 ctx.tmp_i32
             ));
         }
@@ -8334,7 +8378,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     }
     if release_xs_after {
         Ok(format!(
-            "{xs}\nlocal.set {}\n{idx}\nlocal.get {}\ncall $vec_get_{}\nlocal.set {}\nlocal.get {}\ncall $rc_release\ndrop\nlocal.get {}",
+            "{xs}\nlocal.set {}\n{idx}\nlocal.get {}\ncall $vec_get_{}\nlocal.set {}\nlocal.get {}\ncall $rc_release_vec\ndrop\nlocal.get {}",
             ctx.tmp_i32,
             ctx.tmp_i32,
             elem.suffix(),
@@ -8436,7 +8480,12 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         xs
     };
     let target_release = if release_target {
-        emit_release_managed_temp_if_not_local_alias(target_tmp, target_keep, &managed_slots)
+        emit_release_managed_temp_if_not_local_alias(
+            target_tmp,
+            target_keep,
+            &managed_slots,
+            xs_node.typ.as_ref(),
+        )
     } else {
         String::new()
     };
@@ -8519,8 +8568,12 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     if release_rhs {
         let tmp_val = ctx.tmp_i32 + 1;
         let keep_tmp = ctx.tmp_i32 + 2;
-        let release =
-            emit_release_managed_temp_if_not_local_alias(tmp_val, keep_tmp, &managed_slots);
+        let release = emit_release_managed_temp_if_not_local_alias(
+            tmp_val,
+            keep_tmp,
+            &managed_slots,
+            val_node.typ.as_ref(),
+        );
         let mut tail = Vec::new();
         tail.push(release);
         if !target_release.is_empty() {
@@ -9835,7 +9888,8 @@ fn compile_fast_box_ctor(
     if release_value {
         Ok(
             format!(
-                "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\nlocal.tee {tmp_val}\ncall {set_op}\ndrop\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {vec_local}"
+                "i32.const 0\ni32.const {elem_ref}\ncall $vec_new_i32\nlocal.set {vec_local}\nlocal.get {vec_local}\ni32.const 0\n{normalized_value}\nlocal.tee {tmp_val}\ncall {set_op}\ndrop\nlocal.get {tmp_val}\ncall {}\ndrop\nlocal.get {vec_local}",
+                rc_release_for_opt_type(value_node.typ.as_ref())
             )
         )
     } else {
@@ -9906,8 +9960,12 @@ fn compile_fast_cell_set(
     if release_rhs {
         let tmp_val = ctx.tmp_i32 + 1;
         let keep_tmp = ctx.tmp_i32 + 2;
-        let release =
-            emit_release_managed_temp_if_not_local_alias(tmp_val, keep_tmp, &managed_slots);
+        let release = emit_release_managed_temp_if_not_local_alias(
+            tmp_val,
+            keep_tmp,
+            &managed_slots,
+            value_node.typ.as_ref(),
+        );
         Ok(format!(
             "{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall {set_op}\n{}",
             release
@@ -9996,15 +10054,17 @@ fn emit_release_managed_temp_if_not_local_alias(
     tmp_val: usize,
     tmp_keep: usize,
     managed_local_slots: &[usize],
+    ty: Option<&Type>,
 ) -> String {
     let debug_rc = cfg!(feature = "debug-rc");
+    let release = rc_release_for_opt_type(ty);
     if managed_local_slots.is_empty() {
         if debug_rc {
             return format!(
-                "global.get $dbg_tmp_release_exec\ni64.const 1\ni64.add\nglobal.set $dbg_tmp_release_exec\nlocal.get {tmp_val}\ncall $rc_release\ndrop\nlocal.get {tmp_val}\ncall $is_vec_ptr\nif\n  local.get {tmp_val}\n  i32.const 8\n  i32.add\n  i32.load\n  i32.const 1\n  i32.eq\n  if\n    global.get $dbg_tmp_release_post_rc_eq_1\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_rc_eq_1\n  else\n    global.get $dbg_tmp_release_post_rc_other\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_rc_other\n  end\nelse\n  global.get $dbg_tmp_release_post_not_vec\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_post_not_vec\nend"
+                "global.get $dbg_tmp_release_exec\ni64.const 1\ni64.add\nglobal.set $dbg_tmp_release_exec\nlocal.get {tmp_val}\ncall {release}\ndrop\nlocal.get {tmp_val}\ncall $is_vec_ptr\nif\n  local.get {tmp_val}\n  i32.const 8\n  i32.add\n  i32.load\n  i32.const 1\n  i32.eq\n  if\n    global.get $dbg_tmp_release_post_rc_eq_1\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_rc_eq_1\n  else\n    global.get $dbg_tmp_release_post_rc_other\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_rc_other\n  end\nelse\n  global.get $dbg_tmp_release_post_not_vec\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_post_not_vec\nend"
             );
         }
-        return format!("local.get {tmp_val}\ncall $rc_release\ndrop");
+        return format!("local.get {tmp_val}\ncall {release}\ndrop");
     }
     let mut out = Vec::new();
     out.push(format!("i32.const 0\nlocal.set {}", tmp_keep));
@@ -10017,7 +10077,7 @@ fn emit_release_managed_temp_if_not_local_alias(
     if debug_rc {
         out.push(
             format!(
-                "local.get {}\ni32.eqz\nif\n  global.get $dbg_tmp_release_exec\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_exec\n  local.get {}\n  call $rc_release\n  drop\n  local.get {}\n  call $is_vec_ptr\n  if\n    local.get {}\n    i32.const 8\n    i32.add\n    i32.load\n    i32.const 1\n    i32.eq\n    if\n      global.get $dbg_tmp_release_post_rc_eq_1\n      i64.const 1\n      i64.add\n      global.set $dbg_tmp_release_post_rc_eq_1\n    else\n      global.get $dbg_tmp_release_post_rc_other\n      i64.const 1\n      i64.add\n      global.set $dbg_tmp_release_post_rc_other\n    end\n  else\n    global.get $dbg_tmp_release_post_not_vec\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_not_vec\n  end\nelse\n  global.get $dbg_tmp_release_skip\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_skip\nend",
+                "local.get {}\ni32.eqz\nif\n  global.get $dbg_tmp_release_exec\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_exec\n  local.get {}\n  call {release}\n  drop\n  local.get {}\n  call $is_vec_ptr\n  if\n    local.get {}\n    i32.const 8\n    i32.add\n    i32.load\n    i32.const 1\n    i32.eq\n    if\n      global.get $dbg_tmp_release_post_rc_eq_1\n      i64.const 1\n      i64.add\n      global.set $dbg_tmp_release_post_rc_eq_1\n    else\n      global.get $dbg_tmp_release_post_rc_other\n      i64.const 1\n      i64.add\n      global.set $dbg_tmp_release_post_rc_other\n    end\n  else\n    global.get $dbg_tmp_release_post_not_vec\n    i64.const 1\n    i64.add\n    global.set $dbg_tmp_release_post_not_vec\n  end\nelse\n  global.get $dbg_tmp_release_skip\n  i64.const 1\n  i64.add\n  global.set $dbg_tmp_release_skip\nend",
                 tmp_keep,
                 tmp_val,
                 tmp_val,
@@ -10026,7 +10086,7 @@ fn emit_release_managed_temp_if_not_local_alias(
         );
     } else {
         out.push(format!(
-            "local.get {}\ni32.eqz\nif\n  local.get {}\n  call $rc_release\n  drop\nend",
+            "local.get {}\ni32.eqz\nif\n  local.get {}\n  call {release}\n  drop\nend",
             tmp_keep, tmp_val
         ));
     }
@@ -10069,7 +10129,7 @@ fn compile_extern_direct_call(
         if should_release_set_rhs(arg) {
             let slot = first_arg_slot + idx;
             out.push(format!("{av}\nlocal.tee {}", slot));
-            release_slots.push(slot);
+            release_slots.push((slot, rc_release_for_opt_type(arg.typ.as_ref())));
         } else {
             out.push(av);
         }
@@ -10078,8 +10138,8 @@ fn compile_extern_direct_call(
     if ret_managed {
         out.push(format!("local.set {}", result_slot));
     }
-    for slot in release_slots {
-        out.push(format!("local.get {}\ncall $rc_release\ndrop", slot));
+    for (slot, release) in release_slots {
+        out.push(format!("local.get {slot}\ncall {release}\ndrop"));
     }
     if ret_managed {
         out.push(format!("local.get {}", result_slot));
@@ -10216,10 +10276,13 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
         format!(
             "local.get {arg_slot}\nlocal.get {type_slot}\ncall {host_name}\nlocal.set {result_slot}"
         ),
-        format!("local.get {type_slot}\ncall $rc_release\ndrop"),
+        format!("local.get {type_slot}\ncall $rc_release_vec\ndrop"),
     ];
     if release_arg {
-        out.push(format!("local.get {arg_slot}\ncall $rc_release\ndrop"));
+        out.push(format!(
+            "local.get {arg_slot}\ncall {}\ndrop",
+            rc_release_for_opt_type(arg.typ.as_ref())
+        ));
     }
     out.push(format!("local.get {result_slot}"));
     Ok(out.join("\n"))
@@ -10293,13 +10356,14 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                     if release_arg {
                         out.push(
                             format!(
-                                "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                                "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall {}\ndrop",
                                 clo_local,
                                 idx,
                                 av,
                                 tmp_local,
                                 store_op,
-                                tmp_local
+                                tmp_local,
+                                rc_release_for_opt_type(arg.typ.as_ref())
                             )
                         );
                     } else {
@@ -10398,13 +10462,14 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 if release_arg {
                     out.push(
                         format!(
-                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall {}\ndrop",
                             clo_local,
                             idx,
                             av,
                             tmp_local,
                             store_op,
-                            tmp_local
+                            tmp_local,
+                            rc_release_for_opt_type(arg.typ.as_ref())
                         )
                     );
                 } else {
@@ -10532,13 +10597,14 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
                 if release_arg {
                     out.push(
                         format!(
-                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall $rc_release\ndrop",
+                            "local.get {}\ni32.const {}\n{}\nlocal.tee {}\ncall {}\ndrop\nlocal.get {}\ncall {}\ndrop",
                             clo_local,
                             idx,
                             av,
                             tmp_local,
                             store_op,
-                            tmp_local
+                            tmp_local,
+                            rc_release_for_opt_type(arg.typ.as_ref())
                         )
                     );
                 } else {
@@ -11437,7 +11503,7 @@ fn compile_lambda_func(
         )
     {
         out.push_str(&format!("    local.get {}\n", ret_slot));
-        out.push_str("    call $rc_retain\n");
+        out.push_str(&format!("    call {}\n", rc_retain_for_type(&ret_ty)));
         out.push_str("    drop\n");
     }
     let scratch_slot = base_local_count;
@@ -11586,7 +11652,7 @@ fn compile_closure_func(
         )
     {
         out.push_str(&format!("    local.get {}\n", ret_slot));
-        out.push_str("    call $rc_retain\n");
+        out.push_str(&format!("    call {}\n", rc_retain_for_type(&ret_ty)));
         out.push_str("    drop\n");
     }
     let scratch_slot = base_local_count;
@@ -11808,7 +11874,7 @@ fn compile_value_func(
     out.push_str(&format!("      local.set {}\n", ret_slot));
     if ret_is_ref {
         out.push_str(&format!("      local.get {}\n", ret_slot));
-        out.push_str("      call $rc_retain\n");
+        out.push_str(&format!("      call {}\n", rc_retain_for_type(ret_ty)));
         out.push_str("      drop\n");
     }
     out.push_str("    else\n");
@@ -11822,7 +11888,7 @@ fn compile_value_func(
     if ret_is_ref {
         // Keep one root reference in the global cache while returning one to caller.
         out.push_str(&format!("      local.get {}\n", ret_slot));
-        out.push_str("      call $rc_retain\n");
+        out.push_str(&format!("      call {}\n", rc_retain_for_type(ret_ty)));
         out.push_str("      drop\n");
     }
     out.push_str(&format!("      local.get {}\n", ret_slot));
