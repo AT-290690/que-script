@@ -10,6 +10,7 @@ use std::fs;
 use std::io;
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wasmtime::Linker;
@@ -657,6 +658,7 @@ que --learn
 que --style
 que --pitfalls
 que --examples
+que nvim
 ```
 "#
 }
@@ -1139,6 +1141,7 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} --eval <source> [arg ...] --emit-source [--out <expanded.lisp>]\n\
          or:    {bin} init [--demo]\n\
          or:    {bin} init-host <name>\n\
+         or:    {bin} nvim [arg ...] [--debug [basic|code|types|all]|--opt] [--allow ...]\n\
          or:    {bin} explain [script.que] [--json] [--out <file>] [--debug [basic|code|types|all]|--opt]\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
@@ -1164,6 +1167,7 @@ fn native_shell_help(bin_name: &str) -> String {
           init           Write a default `{config}`, empty main.que, and README.md.\n\
                          Use `init --demo` for runnable sample code and tests.\n\
           init-host      Scaffold a custom Rust host binary in `./<name>`.\n\
+          nvim           Edit a temporary .que program in Neovim, then run it on save-and-exit.\n\
           explain        Show type/effect and optimized WAT-shape information without running.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_DEC_OVERFLOW_CHECK,\n\
@@ -1331,6 +1335,111 @@ fn native_shell_learn() -> &'static str {
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! time! random! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
+}
+
+fn native_shell_nvim_help(bin_name: &str) -> String {
+    format!(
+        "Usage: {bin_name} nvim [--code <source>] [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <permissions> ...]\n\
+         \n\
+         Opens a temporary .que file in Neovim with the terminal attached.\n\
+         Run without leaving Neovim with :QueRun or <leader>r.\n\
+         Save and exit with :wq or ZZ to run it and return to the shell.\n\
+         Exit without saving with :q! to cancel. Esc keeps its normal Neovim meaning.\n\
+         --code prefills the scratch buffer with Que source.\n\
+         Arguments and Que flags after `nvim` are passed to the scratch program.\n\
+         Neovim and the Que Neovim plugin are external user-installed dependencies."
+    )
+}
+
+fn take_nvim_initial_code(args: &mut Vec<String>) -> Result<String, String> {
+    let Some(pos) = args.iter().position(|arg| arg == "--code") else {
+        return Ok(String::new());
+    };
+    if args.iter().skip(pos + 1).any(|arg| arg == "--code") {
+        return Err("que nvim accepts --code only once".to_string());
+    }
+    let Some(code) = args.get(pos + 1).cloned() else {
+        return Err("que nvim --code requires Que source".to_string());
+    };
+    args.drain(pos..=pos + 1);
+    Ok(code)
+}
+
+fn nvim_scratch_path(cwd: &Path) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    cwd.join(format!(".que-nvim-{}-{nonce}.que", std::process::id()))
+}
+
+fn run_nvim_command(args: &[String], bin_name: &str) -> Result<(), String> {
+    if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
+        println!("{}", native_shell_nvim_help(bin_name));
+        return Ok(());
+    }
+
+    let mut run_args = args.to_vec();
+    let initial_code = take_nvim_initial_code(&mut run_args)?;
+    let cwd =
+        env::current_dir().map_err(|err| format!("failed to read current directory: {err}"))?;
+    let scratch_path = nvim_scratch_path(&cwd);
+    let run_marker = scratch_path.with_extension("run");
+    let current_exe =
+        env::current_exe().map_err(|err| format!("failed to locate the Que executable: {err}"))?;
+    fs::write(&scratch_path, initial_code).map_err(|err| {
+        format!(
+            "failed to create Neovim scratch file '{}': {err}",
+            scratch_path.display()
+        )
+    })?;
+
+    let mut editor = Command::new("nvim");
+    editor
+        .env("QUE_NVIM_RUN_MARKER", &run_marker)
+        .env("QUE_NVIM_EXE", &current_exe)
+        .env("QUE_NVIM_ARG_COUNT", run_args.len().to_string());
+    for (index, arg) in run_args.iter().enumerate() {
+        editor.env(format!("QUE_NVIM_ARG_{index}"), arg);
+    }
+    let editor_result = editor
+        .arg("-c")
+        .arg("setlocal filetype=que")
+        .arg("-c")
+        .arg("lua vim.api.nvim_create_autocmd('BufWritePost',{buffer=0,callback=function() vim.fn.writefile({'run'},vim.env.QUE_NVIM_RUN_MARKER) end})")
+        .arg("-c")
+        .arg("lua vim.api.nvim_create_user_command('QueRun',function() vim.cmd('silent write'); vim.fn.delete(vim.env.QUE_NVIM_RUN_MARKER); local cmd={vim.env.QUE_NVIM_EXE,vim.api.nvim_buf_get_name(0)}; for i=0,tonumber(vim.env.QUE_NVIM_ARG_COUNT)-1 do table.insert(cmd,vim.env['QUE_NVIM_ARG_'..i]) end; vim.cmd('botright new'); vim.fn.termopen(cmd); vim.cmd('startinsert') end,{})")
+        .arg("-c")
+        .arg("nnoremap <silent> <leader>r :QueRun<CR>")
+        .arg("-c")
+        .arg("setlocal modified")
+        .arg(&scratch_path)
+        .status();
+
+    let result = match editor_result {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            Err("nvim was not found in PATH; install Neovim to use `que nvim`".to_string())
+        }
+        Err(err) => Err(format!("failed to launch nvim: {err}")),
+        Ok(status) if !status.success() => Ok(()),
+        Ok(_) if !run_marker.exists() => Ok(()),
+        Ok(_) => (|| {
+            let status = Command::new(&current_exe)
+                .arg(&scratch_path)
+                .args(&run_args)
+                .status()
+                .map_err(|err| format!("failed to run the Que scratch program: {err}"))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("Que scratch program exited with status {status}"))
+            }
+        })(),
+    };
+
+    let _ = fs::remove_file(&scratch_path);
+    let _ = fs::remove_file(&run_marker);
+    result
 }
 
 fn native_shell_examples() -> &'static str {
@@ -3577,14 +3686,14 @@ fn build_debug_error_report(
 mod tests {
     use super::{
         init_host_project, init_project_config_file, native_shell_examples, native_shell_help,
-        parse_test_results, resolve_explain_input, resolve_project_entry_path,
-        take_debug_mode_from_argv, take_emit_request_from_argv, take_help_flag_from_argv,
-        take_no_result_flag_from_argv, take_opt_flag_from_argv, take_shell_policy_from_argv,
-        wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol, QueTestCase, ShellPermission,
-        ShellPolicy,
+        native_shell_nvim_help, nvim_scratch_path, parse_test_results, resolve_explain_input,
+        resolve_project_entry_path, take_debug_mode_from_argv, take_emit_request_from_argv,
+        take_help_flag_from_argv, take_no_result_flag_from_argv, take_nvim_initial_code,
+        take_opt_flag_from_argv, take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind,
+        LibraryExploreSymbol, QueTestCase, ShellPermission, ShellPolicy,
     };
     use std::collections::HashSet;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn parse_policy_empty_permissions() {
@@ -3960,6 +4069,46 @@ mod tests {
         assert!(help.contains("Print common Eclisp gotchas and debugging rules"));
         assert!(help.contains("que --examples"));
         assert!(help.contains("Print small functional, imperative, and mixed Que examples"));
+        assert!(help.contains("que nvim"));
+        assert!(help.contains("Edit a temporary .que program in Neovim"));
+    }
+
+    #[test]
+    fn native_shell_nvim_help_describes_terminal_workflow() {
+        let help = native_shell_nvim_help("que");
+        assert!(help.contains("Usage: que nvim"));
+        assert!(help.contains(":QueRun or <leader>r"));
+        assert!(help.contains(":wq or ZZ"));
+        assert!(help.contains(":q! to cancel"));
+        assert!(help.contains("Esc keeps its normal Neovim meaning"));
+        assert!(help.contains("--code prefills"));
+        let project = Path::new("/tmp/example-project");
+        let scratch = nvim_scratch_path(project);
+        assert_eq!(scratch.parent(), Some(project));
+        assert_eq!(
+            scratch.extension().and_then(|ext| ext.to_str()),
+            Some("que")
+        );
+        assert!(scratch
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(".que-nvim-")));
+    }
+
+    #[test]
+    fn nvim_code_is_removed_from_scratch_program_arguments() {
+        let mut args = vec![
+            "prompt.txt".to_string(),
+            "--code".to_string(),
+            "(+ 1 2)".to_string(),
+            "--opt".to_string(),
+        ];
+        let code = take_nvim_initial_code(&mut args).expect("code should parse");
+        assert_eq!(code, "(+ 1 2)");
+        assert_eq!(args, ["prompt.txt", "--opt"]);
+
+        let mut missing = vec!["--code".to_string()];
+        assert!(take_nvim_initial_code(&mut missing).is_err());
     }
 
     #[test]
@@ -4133,6 +4282,9 @@ pub fn run_native_shell() -> Result<(), String> {
     if matches!(args.get(1).map(String::as_str), Some("--help" | "-h")) {
         println!("{}", native_shell_help(bin_name));
         return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("nvim")) {
+        return run_nvim_command(&args.iter().skip(2).cloned().collect::<Vec<_>>(), bin_name);
     }
     if matches!(args.get(1).map(String::as_str), Some("init")) {
         if args.len() > 3 || (args.len() == 3 && args.get(2).map(String::as_str) != Some("--demo"))

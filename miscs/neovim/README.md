@@ -8,6 +8,7 @@ It provides:
 - a basic syntax file
 - comment settings for `;`
 - `quelsp` setup through `nvim-lspconfig`
+- completion kind icons through `nvim-cmp` when installed, with Neovim's built-in LSP completion as a fallback
 
 ## Requirements
 
@@ -65,6 +66,25 @@ require("que").setup({
   filetypes = { "que", "eclisp" },
 })
 ```
+
+Completion icons are enabled by default. They can be changed or disabled:
+
+```lua
+require("que").setup({
+  completion_icons = {
+    Function = "ƒ",
+    Variable = "v",
+    Constant = "c",
+    Keyword = "k",
+  },
+})
+
+-- Or keep completion kinds as plain text:
+require("que").setup({ completion_icons = false })
+```
+
+The default glyphs expect a Nerd Font. Existing `on_attach` callbacks and
+`nvim-cmp` formatting are preserved and then decorated for Que buffers.
 
 Default root markers:
 
