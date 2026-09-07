@@ -7765,6 +7765,20 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             .ok_or_else(|| "fst missing tuple arg".to_string())?,
         ctx,
     )?;
+    if node
+        .children
+        .get(1)
+        .and_then(|tuple| tuple.typ.as_ref())
+        .is_some_and(|typ| matches!(typ, Type::Tuple(_)))
+    {
+        return Ok(format!(
+            "{p}\n\
+             i32.const 16\n\
+             i32.add\n\
+             i32.load\n\
+             i32.load"
+        ));
+    }
     Ok(format!("{p}\ncall $tuple_fst"))
 }
 
@@ -7820,6 +7834,22 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             .ok_or_else(|| "snd missing tuple arg".to_string())?,
         ctx,
     )?;
+    if node
+        .children
+        .get(1)
+        .and_then(|tuple| tuple.typ.as_ref())
+        .is_some_and(|typ| matches!(typ, Type::Tuple(_)))
+    {
+        return Ok(format!(
+            "{p}\n\
+             i32.const 16\n\
+             i32.add\n\
+             i32.load\n\
+             i32.const 4\n\
+             i32.add\n\
+             i32.load"
+        ));
+    }
     Ok(format!("{p}\ncall $tuple_snd"))
 }
 

@@ -7846,6 +7846,37 @@ fn"#;
         );
     }
 
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_wat_statically_typed_tuple_projections_inline_direct_loads() {
+        let source = r#"(do
+          (let sum-pair (lambda pair (+ (fst pair) (snd pair))))
+          (sum-pair {20 22}))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let function_start = wat
+            .find("(func $v_sum_dash_pair")
+            .expect("sum-pair function should exist");
+        let function_end = wat[function_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| function_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let function_wat = &wat[function_start..function_end];
+
+        assert!(
+            !function_wat.contains("call $tuple_fst") && !function_wat.contains("call $tuple_snd"),
+            "typed tuple projections should avoid runtime helpers, got:\n{}",
+            function_wat
+        );
+        assert!(
+            function_wat.matches("i32.const 16").count() >= 2,
+            "typed projections should load through the tuple data pointer, got:\n{}",
+            function_wat
+        );
+        assert_eq!(run_program_output(source), "42");
+    }
+
     #[test]
     fn test_wat_initial_managed_local_bind_does_not_release_zero_slot() {
         let expr = crate::parser::build(
