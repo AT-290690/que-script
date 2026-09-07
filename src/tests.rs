@@ -8267,7 +8267,7 @@ fn"#;
     }
 
     #[test]
-    fn test_wat_repeated_scalar_set_materializes_local_once_in_do_sequence() {
+    fn test_wat_repeated_scalar_set_avoids_eager_materialization_in_do_sequence() {
         let _lock = runtime_exec_lock().lock().unwrap();
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
         let expr = crate::parser::build(
@@ -8292,8 +8292,14 @@ fn"#;
 
         assert_eq!(
             fn_wat.matches("call $vec_materialize_i32").count(),
+            0,
+            "ordinary replacements should not eagerly materialize, got:\n{}",
+            fn_wat
+        );
+        assert_eq!(
+            fn_wat.matches("call $vec_set_scalar_i32").count(),
             1,
-            "repeated scalar set! on the same local should materialize once, got:\n{}",
+            "only the first uncertain replacement should retain a generic fallback, got:\n{}",
             fn_wat
         );
     }
@@ -8370,6 +8376,22 @@ fn"#;
         );
 
         assert_eq!(result, "[1 2 3]");
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn test_runtime_dynamic_scalar_param_set_keeps_append_at_length_semantics_under_opt() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let result = run_program_output_unlocked(
+            "(let append-at! (lambda (xs i value) (do (set! xs i value) xs)))
+             (let xs [])
+             (append-at! xs (length xs) 1)
+             (append-at! xs (length xs) 2)
+             xs",
+        );
+
+        assert_eq!(result, "[1 2]");
     }
 
     #[test]
@@ -9048,6 +9070,9 @@ fn"#;
     #[test]
     #[cfg(feature = "runtime")]
     fn test_correctness() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
         let test_cases = [
             ("nil", "0"),
             ("(+ 1 2)", "3"),

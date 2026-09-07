@@ -8056,11 +8056,6 @@ fn emit_constant_scalar_set(
     } else {
         format!("\ni32.const {offset}\ni32.add")
     };
-    let materialize = if target_already_materialized {
-        String::new()
-    } else {
-        format!("local.get {target_tmp}\ncall $vec_materialize_i32\ndrop")
-    };
     let replacement = format!(
         "local.get {target_tmp}\n\
          i32.const 16\n\
@@ -8070,20 +8065,43 @@ fn emit_constant_scalar_set(
          i32.store\n\
          i32.const 0"
     );
+    let fallback_op = if target_already_materialized {
+        "$vec_set_scalar_materialized_i32"
+    } else {
+        "$vec_set_scalar_i32"
+    };
     let fallback = format!(
         "local.get {target_tmp}\n\
          i32.const {index}\n\
          local.get {value_tmp}\n\
-         call $vec_set_scalar_materialized_i32"
+         call {fallback_op}"
     );
     let body = if index < 0 {
         format!("unreachable\n{fallback}")
     } else {
+        let materialized_guard = if target_already_materialized {
+            String::new()
+        } else {
+            format!(
+                "local.get {target_tmp}\n\
+                 i32.const 20\n\
+                 i32.add\n\
+                 i32.load\n\
+                 i32.const 1447380017\n\
+                 i32.eq\n"
+            )
+        };
+        let combine_guard = if target_already_materialized {
+            String::new()
+        } else {
+            "i32.and\n".to_string()
+        };
         format!(
-            "local.get {target_tmp}\n\
+            "{materialized_guard}local.get {target_tmp}\n\
              i32.load\n\
              i32.const {index}\n\
              i32.gt_s\n\
+             {combine_guard}\
              if (result i32)\n\
                {replacement}\n\
              else\n\
@@ -8096,7 +8114,6 @@ fn emit_constant_scalar_set(
          local.set {target_tmp}\n\
          {value}\n\
          local.set {value_tmp}\n\
-         {materialize}\n\
          {body}"
     );
     if !release_target_code.is_empty() {
@@ -8121,24 +8138,46 @@ fn emit_constant_scalar_set_unchecked_replacement(
     } else {
         format!("\ni32.const {offset}\ni32.add")
     };
-    let materialize = if target_already_materialized {
-        String::new()
+    let body = if target_already_materialized {
+        format!(
+            "local.get {target_tmp}\n\
+             i32.const 16\n\
+             i32.add\n\
+             i32.load{offset_code}\n\
+             local.get {value_tmp}\n\
+             i32.store\n\
+             i32.const 0"
+        )
     } else {
-        format!("local.get {target_tmp}\ncall $vec_materialize_i32\ndrop")
+        format!(
+            "local.get {target_tmp}\n\
+             i32.const 20\n\
+             i32.add\n\
+             i32.load\n\
+             i32.const 1447380017\n\
+             i32.eq\n\
+             if (result i32)\n\
+               local.get {target_tmp}\n\
+               i32.const 16\n\
+               i32.add\n\
+               i32.load{offset_code}\n\
+               local.get {value_tmp}\n\
+               i32.store\n\
+               i32.const 0\n\
+             else\n\
+               local.get {target_tmp}\n\
+               i32.const {index}\n\
+               local.get {value_tmp}\n\
+               call $vec_set_scalar_i32\n\
+             end"
+        )
     };
     let mut out = format!(
         "{target_prefix}\n\
          local.set {target_tmp}\n\
          {value}\n\
          local.set {value_tmp}\n\
-         {materialize}\n\
-         local.get {target_tmp}\n\
-         i32.const 16\n\
-         i32.add\n\
-         i32.load{offset_code}\n\
-         local.get {value_tmp}\n\
-         i32.store\n\
-         i32.const 0"
+         {body}"
     );
     if !release_target_code.is_empty() {
         out.push('\n');
@@ -8157,11 +8196,6 @@ fn emit_dynamic_scalar_set(
     release_target_code: &str,
     target_already_materialized: bool,
 ) -> String {
-    let materialize = if target_already_materialized {
-        String::new()
-    } else {
-        format!("local.get {target_tmp}\ncall $vec_materialize_i32\ndrop")
-    };
     let replacement = format!(
         "local.get {target_tmp}\n\
          i32.const 16\n\
@@ -8175,15 +8209,37 @@ fn emit_dynamic_scalar_set(
          i32.store\n\
          i32.const 0"
     );
+    let fallback_op = if target_already_materialized {
+        "$vec_set_scalar_materialized_i32"
+    } else {
+        "$vec_set_scalar_i32"
+    };
     let fallback = format!(
         "local.get {target_tmp}\n\
          local.get {index_tmp}\n\
          local.get {value_tmp}\n\
-         call $vec_set_scalar_materialized_i32"
+         call {fallback_op}"
     );
+    let materialized_guard = if target_already_materialized {
+        String::new()
+    } else {
+        format!(
+            "local.get {target_tmp}\n\
+             i32.const 20\n\
+             i32.add\n\
+             i32.load\n\
+             i32.const 1447380017\n\
+             i32.eq\n"
+        )
+    };
+    let combine_guard = if target_already_materialized {
+        String::new()
+    } else {
+        "i32.and\n".to_string()
+    };
     let body = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
         format!(
-            "local.get {index_tmp}\n\
+            "{materialized_guard}local.get {index_tmp}\n\
              i32.const 0\n\
              i32.ge_s\n\
              local.get {index_tmp}\n\
@@ -8191,6 +8247,7 @@ fn emit_dynamic_scalar_set(
              i32.load\n\
              i32.lt_s\n\
              i32.and\n\
+             {combine_guard}\
              if (result i32)\n\
                {replacement}\n\
              else\n\
@@ -8201,14 +8258,15 @@ fn emit_dynamic_scalar_set(
         // set! also supports appending at idx == length. Keep that case on the
         // runtime helper, but let trusted replacement stores go straight to memory.
         format!(
-            "local.get {index_tmp}\n\
+            "{materialized_guard}local.get {index_tmp}\n\
              local.get {target_tmp}\n\
              i32.load\n\
-             i32.eq\n\
+             i32.ne\n\
+             {combine_guard}\
              if (result i32)\n\
-               {fallback}\n\
-             else\n\
                {replacement}\n\
+             else\n\
+               {fallback}\n\
              end"
         )
     };
@@ -8219,7 +8277,6 @@ fn emit_dynamic_scalar_set(
          local.set {index_tmp}\n\
          {value}\n\
          local.set {value_tmp}\n\
-         {materialize}\n\
          {body}"
     );
     if !release_target_code.is_empty() {
