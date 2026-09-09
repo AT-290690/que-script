@@ -1071,6 +1071,9 @@ fn lambda_is_hoistable(node: &TypedExpression, _top_defs: &HashMap<String, TopDe
     let mut refs = HashSet::new();
     if let Some(body) = items.last() {
         collect_refs(body, &mut bound, &mut refs);
+        let mut direct_host_calls = HashSet::new();
+        collect_builtin_host_extern_call_heads(body, &mut direct_host_calls);
+        refs.retain(|name| !direct_host_calls.contains(name));
     }
     refs.is_empty()
 }
@@ -1095,6 +1098,9 @@ fn lambda_capture_names(
     let mut refs = HashSet::new();
     if let Some(body) = items.last() {
         collect_refs(body, &mut bound, &mut refs);
+        let mut direct_host_calls = HashSet::new();
+        collect_builtin_host_extern_call_heads(body, &mut direct_host_calls);
+        refs.retain(|name| !direct_host_calls.contains(name));
     }
     let mut caps = refs.into_iter().collect::<Vec<_>>();
     caps.sort();

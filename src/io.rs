@@ -1676,7 +1676,7 @@ fn binding_name_from_def(expr: &Expression) -> Option<String> {
     let Expression::Word(keyword) = &items[0] else {
         return None;
     };
-    if keyword != "let" && keyword != "letrec" && keyword != "mut" {
+    if keyword != "let" && keyword != "letrec" && keyword != "letmacro" && keyword != "mut" {
         return None;
     }
     let Expression::Word(name) = &items[1] else {
@@ -1834,6 +1834,7 @@ fn infer_library_symbol_type(name: &str, lib_defs: &[Expression]) -> Result<Stri
 #[derive(Clone)]
 enum LibraryExploreSymbol {
     Source(Expression),
+    Macro(Expression),
     Builtin {
         typ: Option<String>,
         description: &'static str,
@@ -1973,7 +1974,13 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
     let mut by_name = builtin_explore_symbols();
     for def in &lib_defs {
         if let Some(name) = binding_name_from_def(def) {
-            by_name.insert(name, LibraryExploreSymbol::Source(def.clone()));
+            let symbol = match def {
+                Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(word)) if word == "letmacro") => {
+                    LibraryExploreSymbol::Macro(def.clone())
+                }
+                _ => LibraryExploreSymbol::Source(def.clone()),
+            };
+            by_name.insert(name, symbol);
         }
     }
     let all_names = by_name.keys().cloned().collect::<Vec<_>>();
@@ -2014,6 +2021,7 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
                             Err(err) => println!("{} : <type error: {}>", name, err),
                         }
                     }
+                    Some(LibraryExploreSymbol::Macro(_)) => println!("{} : <macro>", name),
                     None => {}
                 }
             }
@@ -2031,6 +2039,11 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
             match symbol {
                 LibraryExploreSymbol::Source(expr) => {
                     println!("kind: library");
+                    println!("source:");
+                    println!("{}", expr.to_lisp());
+                }
+                LibraryExploreSymbol::Macro(expr) => {
+                    println!("kind: macro");
                     println!("source:");
                     println!("{}", expr.to_lisp());
                 }
@@ -2349,6 +2362,14 @@ pub fn write_lisp_vector(
     caller: &mut Caller<'_, ShellStoreData>,
     values: &[i32],
 ) -> wasmtime::Result<i32> {
+    write_lisp_vector_with_elem_ref(caller, values, 0)
+}
+
+fn write_lisp_vector_with_elem_ref(
+    caller: &mut Caller<'_, ShellStoreData>,
+    values: &[i32],
+    elem_ref: i32,
+) -> wasmtime::Result<i32> {
     let alloc = guest_alloc(caller)?;
     let vec_len = i32::try_from(values.len())
         .map_err(|_| wasmtime::Error::msg("output too large for i32 vector length"))?;
@@ -2365,7 +2386,7 @@ pub fn write_lisp_vector(
     write_i32(&memory, caller, header_ptr + VEC_LEN_OFFSET, vec_len)?;
     write_i32(&memory, caller, header_ptr + VEC_CAP_OFFSET, vec_len)?;
     write_i32(&memory, caller, header_ptr + VEC_RC_OFFSET, 1)?;
-    write_i32(&memory, caller, header_ptr + VEC_ELEM_REF_OFFSET, 0)?;
+    write_i32(&memory, caller, header_ptr + VEC_ELEM_REF_OFFSET, elem_ref)?;
     write_i32(&memory, caller, header_ptr + VEC_DATA_PTR_OFFSET, data_ptr)?;
     write_i32(&memory, caller, header_ptr + VEC_MAGIC_OFFSET, VEC_MAGIC)?;
     Ok(header_ptr)
@@ -2527,7 +2548,7 @@ fn ensure_parent_in_sandbox(
     Ok(())
 }
 
-fn list_dir_text(path: &Path) -> Result<String, String> {
+fn list_dir_names(path: &Path) -> Result<Vec<String>, String> {
     let entries = fs::read_dir(path)
         .map_err(|e: io::Error| format!("failed to read directory '{}': {}", path.display(), e))?;
     let mut names = Vec::new();
@@ -2536,11 +2557,7 @@ fn list_dir_text(path: &Path) -> Result<String, String> {
         names.push(entry.file_name().to_string_lossy().into_owned());
     }
     names.sort();
-    if names.is_empty() {
-        Ok(String::new())
-    } else {
-        Ok(format!("{}\n", names.join("\n")))
-    }
+    Ok(names)
 }
 
 pub fn host_list_dir(
@@ -2556,8 +2573,12 @@ pub fn host_list_dir(
 
     let target = resolve_target_path(&caller, &path).map_err(wasmtime::Error::msg)?;
     ensure_existing_path_in_sandbox(&caller, &path, &target).map_err(wasmtime::Error::msg)?;
-    let output = list_dir_text(&target).map_err(wasmtime::Error::msg)?;
-    write_lisp_string(&mut caller, &output)
+    let names = list_dir_names(&target).map_err(wasmtime::Error::msg)?;
+    let name_ptrs = names
+        .iter()
+        .map(|name| write_lisp_string(&mut caller, name))
+        .collect::<wasmtime::Result<Vec<_>>>()?;
+    write_lisp_vector_with_elem_ref(&mut caller, &name_ptrs, 1)
 }
 
 pub fn host_read_file(
@@ -3810,6 +3831,32 @@ mod tests {
                 ..
             }) if typ == "Bool -> T -> T -> T"
         ));
+    }
+
+    #[test]
+    fn lib_explore_recognizes_macro_definitions() {
+        let defs = super::active_library_definitions().expect("library should load");
+        let names = defs
+            .iter()
+            .filter_map(super::binding_name_from_def)
+            .collect::<HashSet<_>>();
+
+        assert!(names.contains("++"));
+        assert!(names.contains("--"));
+        assert!(names.contains("<>"));
+    }
+
+    #[test]
+    fn list_dir_returns_sorted_names_without_newline_encoding() {
+        let root = std::env::temp_dir().join(format!("que-list-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("folder")).expect("test directory should be created");
+        std::fs::write(root.join("file.que"), "nil").expect("test file should be created");
+
+        let names = super::list_dir_names(&root).expect("directory should be listed");
+        assert_eq!(names, vec!["file.que".to_string(), "folder".to_string()]);
+
+        std::fs::remove_dir_all(root).expect("test directory should be removed");
     }
 
     #[test]

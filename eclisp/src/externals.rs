@@ -251,7 +251,7 @@ pub const BUILTIN_HOST_EXTERNS: &[BuiltinHostExternSpec] = &[
         module: "host",
         import: "list_dir",
         local_name: "list-dir!",
-        typ: || fn1(ty_char_list(), ty_char_list()),
+        typ: || fn1(ty_char_list(), Type::List(Box::new(ty_char_list()))),
     },
     BuiltinHostExternSpec {
         module: "host",

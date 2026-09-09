@@ -6176,12 +6176,21 @@ fn substitute_word_with_expr(
                 Expression::Word(w.clone())
             }
         }
-        Expression::Apply(items) => Expression::Apply(
-            items
-                .iter()
-                .map(|it| substitute_word_with_expr(it, name, replacement))
-                .collect(),
-        ),
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(word)) if word == "lambda")
+                && items[1..items.len().saturating_sub(1)]
+                    .iter()
+                    .any(|param| pattern_binds_name(param, name))
+            {
+                return expr.clone();
+            }
+            Expression::Apply(
+                items
+                    .iter()
+                    .map(|it| substitute_word_with_expr(it, name, replacement))
+                    .collect(),
+            )
+        }
         Expression::Int(n) => Expression::Int(*n),
         Expression::Dec(n) => Expression::Dec(*n),
     }
@@ -6192,6 +6201,14 @@ fn substitute_word_with_typed(
     name: &str,
     replacement: &TypedExpression,
 ) -> TypedExpression {
+    if matches!(&node.expr, Expression::Apply(items)
+        if matches!(items.first(), Some(Expression::Word(word)) if word == "lambda")
+            && items[1..items.len().saturating_sub(1)]
+                .iter()
+                .any(|param| pattern_binds_name(param, name)))
+    {
+        return node.clone();
+    }
     if matches!(&node.expr, Expression::Word(w) if w == name) {
         return replacement.clone();
     }
@@ -6214,6 +6231,14 @@ fn substitute_word_with_typed(
         typ: node.typ.clone(),
         effect: node.effect,
         children: new_children,
+    }
+}
+
+fn pattern_binds_name(pattern: &Expression, name: &str) -> bool {
+    match pattern {
+        Expression::Word(word) => word == name,
+        Expression::Apply(items) => items.iter().any(|item| pattern_binds_name(item, name)),
+        _ => false,
     }
 }
 

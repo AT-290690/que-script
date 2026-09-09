@@ -739,6 +739,32 @@ xs)"#,
     }
 
     #[test]
+    fn test_literal_let_elision_respects_shadowing_lambda_parameter() {
+        let output = run_program_output_with_std_and_opts(
+            r#"
+(let xs [1 2 3 4 5 6 7 8])
+(let target 6)
+(let search
+  (lambda (xs target)
+    (do
+      (letrec bs
+        (lambda (left right)
+          (if (> left right) -1
+            (do
+              (let idx (/ (+ left right) 2))
+              (let cur (get xs idx))
+              (cond (= cur target) 1
+                    (> target cur) (bs (+ idx 1) right)
+                    (bs left (- idx 1)))))))
+      (bs 0 (- (length xs) 1)))))
+(search xs target)
+"#,
+            true,
+        );
+        assert_eq!(output.trim(), "1");
+    }
+
+    #[test]
     fn test_runtime_grouped_param_lambda_multiple_body_forms_allow_tuple_destructure_without_explicit_do(
     ) {
         let output = run_program_output_with_std_and_opts(
@@ -1186,6 +1212,30 @@ xs)"#,
     fn test_serialize_preserves_nested_que_data_as_source_text() {
         let output = run_program_output(r#"(serialize { [1 2 3] { "hello\nworld" true } })"#);
         assert_eq!(output, r#"{ [1 2 3] { "hello\nworld" true } }"#);
+    }
+
+    #[test]
+    fn test_serialize_inside_recursive_closure_is_a_direct_host_call_not_a_capture() {
+        let wat = compile_std_program_to_wat(
+            r#"
+(let search! (lambda (xs target)
+  (letrec bs! (lambda (left right)
+    (if (> left right) -1
+      (do
+        (let idx (/ (+ left right) 2))
+        (let cur (get xs idx))
+        (println! (serialize cur))
+        (cond (= cur target) 1
+              (< target cur) (bs! left (- idx 1))
+              (bs! (+ idx 1) right))))))
+  (bs! 0 (- (length xs) 1))))
+(search! (range 1 100) 18)
+"#,
+            false,
+        );
+
+        assert!(wat.contains("call $__que_serialize"));
+        assert!(!wat.contains("Unsupported closure capture 'serialize'"));
     }
 
     #[cfg(all(feature = "runtime", feature = "io"))]
