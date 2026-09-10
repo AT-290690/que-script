@@ -662,6 +662,24 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                 ) {
                     return Err(message);
                 }
+                if let Expression::Apply(binding) = &items[idx] {
+                    if let [Expression::Word(kw), _, rhs] = &binding[..] {
+                        if (kw == "let" || kw == "letrec") && let_node.children.get(2).is_some() {
+                            let mut nested_requires_bang = known_requires_bang.clone();
+                            let mut nested_mutates_first_arg = known_mutates_first_arg.clone();
+                            if let Some(message) = validate_nested_function_names(
+                                rhs,
+                                &let_node.children[2],
+                                &extern_names,
+                                &mut nested_requires_bang,
+                                &mut nested_mutates_first_arg,
+                                &known_function_arities,
+                            ) {
+                                return Err(message);
+                            }
+                        }
+                    }
+                }
             }
             return Ok(());
         }
@@ -675,9 +693,136 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
         ) {
             return Err(message);
         }
+        if let [Expression::Word(kw), _, rhs] = &items[..] {
+            if (kw == "let" || kw == "letrec") && root.children.get(2).is_some() {
+                if let Some(message) = validate_nested_function_names(
+                    rhs,
+                    &root.children[2],
+                    &extern_names,
+                    &mut known_requires_bang,
+                    &mut known_mutates_first_arg,
+                    &known_function_arities,
+                ) {
+                    return Err(message);
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+fn validate_nested_function_names(
+    expr: &Expression,
+    node: &TypedExpression,
+    extern_names: &HashSet<String>,
+    known_requires_bang: &mut HashMap<String, bool>,
+    known_mutates_first_arg: &mut HashSet<String>,
+    known_function_arities: &HashMap<String, usize>,
+) -> Option<String> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if items.is_empty() {
+        return None;
+    }
+
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda") {
+        let body_idx = items.len().saturating_sub(1);
+        let body_node = node
+            .children
+            .get(body_idx)
+            .or_else(|| node.children.last())?;
+        let mut scoped_requires_bang = known_requires_bang.clone();
+        let mut scoped_mutates_first_arg = known_mutates_first_arg.clone();
+        return validate_nested_function_names(
+            &items[body_idx],
+            body_node,
+            extern_names,
+            &mut scoped_requires_bang,
+            &mut scoped_mutates_first_arg,
+            known_function_arities,
+        );
+    }
+
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "do")
+        && items.len() == node.children.len()
+    {
+        let mut scoped_requires_bang = known_requires_bang.clone();
+        let mut scoped_mutates_first_arg = known_mutates_first_arg.clone();
+        for idx in 1..items.len() {
+            let child = &node.children[idx];
+            if let Ok(Some(extern_decl)) = crate::externals::parse_extern_decl(&items[idx]) {
+                if !extern_decl.local_name.ends_with('!') {
+                    return Some(format!(
+                        "Extern '{}' must end with '!'\n{}",
+                        extern_decl.local_name,
+                        items[idx].to_lisp()
+                    ));
+                }
+                continue;
+            }
+            let is_recursive_binding = matches!(
+                &items[idx],
+                Expression::Apply(binding)
+                    if matches!(binding.first(), Some(Expression::Word(kw)) if kw == "letrec")
+            );
+            if is_recursive_binding {
+                if let Some(message) = check_impure_binding_name(
+                    &items[idx],
+                    child,
+                    extern_names,
+                    &mut scoped_requires_bang,
+                    &mut scoped_mutates_first_arg,
+                    known_function_arities,
+                ) {
+                    return Some(message);
+                }
+            }
+            if let Expression::Apply(binding) = &items[idx] {
+                if let [Expression::Word(kw), _, rhs] = &binding[..] {
+                    if (kw == "let" || kw == "letrec") && child.children.get(2).is_some() {
+                        if let Some(message) = validate_nested_function_names(
+                            rhs,
+                            &child.children[2],
+                            extern_names,
+                            &mut scoped_requires_bang,
+                            &mut scoped_mutates_first_arg,
+                            known_function_arities,
+                        ) {
+                            return Some(message);
+                        }
+                        continue;
+                    }
+                }
+            }
+            if let Some(message) = validate_nested_function_names(
+                &items[idx],
+                child,
+                extern_names,
+                &mut scoped_requires_bang,
+                &mut scoped_mutates_first_arg,
+                known_function_arities,
+            ) {
+                return Some(message);
+            }
+        }
+        return None;
+    }
+
+    for (item, child) in items.iter().zip(node.children.iter()) {
+        if let Some(message) = validate_nested_function_names(
+            item,
+            child,
+            extern_names,
+            known_requires_bang,
+            known_mutates_first_arg,
+            known_function_arities,
+        ) {
+            return Some(message);
+        }
+    }
+    None
 }
 
 fn check_impure_binding_name(

@@ -3665,6 +3665,71 @@ out"#,
     }
 
     #[test]
+    fn test_infer_nested_impure_function_requires_bang_suffix() {
+        let exprs = crate::parser::parse(
+            "(let search?! (lambda x (do
+                (let cell (vector 0))
+                (letrec bs (lambda cell n (if (= n 0) true (do (set! cell 0 n) (bs cell (- n 1))))))
+                (bs cell x))))",
+        )
+        .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("nested impure function without ! should fail");
+        assert!(
+            err.contains("Impure function 'bs' must end with '!'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_nested_impure_bool_function_requires_question_suffix() {
+        let exprs = crate::parser::parse(
+            "(let search?! (lambda x (do
+                (let cell (vector 0))
+                (letrec bs! (lambda cell n (if (= n 0) true (do (set! cell 0 n) (bs! cell (- n 1))))))
+                (bs! cell x))))",
+        )
+        .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("nested Bool function without ? should fail");
+        assert!(
+            err.contains("Bool-returning function 'bs!' must end with '?'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_nested_impure_bool_function_accepts_combined_suffix() {
+        let exprs = crate::parser::parse(
+            "(let search?! (lambda x (do
+                (let cell (vector 0))
+                (letrec bs?! (lambda cell n (if (= n 0) true (do (set! cell 0 n) (bs?! cell (- n 1))))))
+                (bs?! cell x))))",
+        )
+        .expect("input should parse");
+        let expr = exprs.first().expect("input should contain one expression");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        assert!(
+            inferred.is_ok(),
+            "valid nested ?/! contracts should pass, got: {:?}",
+            inferred
+        );
+    }
+
+    #[test]
     fn test_infer_impure_function_alias_requires_bang_suffix() {
         let exprs = crate::parser::parse(
             "(do (let reverse! (lambda xs (set! xs 0 1))) (let reverse reverse!) reverse)",
@@ -9203,7 +9268,7 @@ fn"#;
                 r#"(let last-stone-weight (lambda stones (do
   (let max-cmp (lambda a b (> a b)))
   (let heap (std/convert/vector->heap stones max-cmp))
-  (letrec tail-call/smash (lambda t
+  (letrec tail-call/smash?! (lambda t
     (if (> (length heap) 1)
       (do
         (let y (std/heap/peek heap))
@@ -9212,9 +9277,9 @@ fn"#;
         (std/heap/pop! heap max-cmp)
         (if (!= x y)
           (std/heap/push! heap (- y x) max-cmp))
-        (tail-call/smash t))
+        (tail-call/smash?! t))
         false)))
-  (tail-call/smash true)
+  (tail-call/smash?! true)
   (if (> (length heap) 0) (std/heap/peek heap) Int))))
 
 [(last-stone-weight [ 2 7 4 1 8 1 ]) (last-stone-weight [ 1 ])]"#,
@@ -10564,16 +10629,16 @@ L82")
   (integer components len)
 
   ; root with path compression
-  (letrec root (lambda i
+  (letrec root! (lambda i
       (if (= (get parent i) i) i
           (do
-            (set! parent i (root (get parent i)))
+            (set! parent i (root! (get parent i)))
             (get parent i)))))
 
   ; merge with size tracking
   (let merge (lambda a b (do
-        (let ra (root a))
-        (let rb (root b))
+        (let ra (root! a))
+        (let rb (root! b))
         (if (<> ra rb) (do
               (if (< (get size ra) (get size rb))
                   (do
@@ -10741,14 +10806,14 @@ UUUUD")
         (do 
         (let m (length image))
         (let n (length (first image)))
-        (letrec adj (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (get image r c) old)) (do 
+        (letrec adj! (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (get image r c) old)) (do 
                     (set! image r c color)
-                    (adj (+ r 1) c)
-                    (adj (- r 1) c)
-                    (adj r (+ c 1))
-                    (adj r (- c 1))
+                    (adj! (+ r 1) c)
+                    (adj! (- r 1) c)
+                    (adj! r (+ c 1))
+                    (adj! r (- c 1))
                 nil))))
-        (adj sr sc)
+        (adj! sr sc)
         nil)))))
 
 (let image [[1 1 1] [1 1 0] [1 0 1]])
@@ -10953,7 +11018,7 @@ bbrgwb")
 (let first-winning-board
   (lambda numbers boards (do
     (let drawn (buckets 32))
-    (letrec step
+    (letrec step!
       (lambda i result
         (if (or
               (not (= (fst result) -1))
@@ -10963,12 +11028,12 @@ bbrgwb")
               (Set/add! drawn (Integer->String (get numbers i)))
               (let winners
                 (filter (lambda b (board-wins? b drawn)) boards))
-              (step
+              (step!
                 (+ i 1)
                 (if (empty? winners)
                     result
                     { i (get winners 0) }))))))
-    (step 0 { -1 [] }))))
+    (step! 0 { -1 [] }))))
 ; [[Int]] -> [[[Char]]] -> Int -> Int
 (let score
   (lambda board drawn last-number (do
@@ -11296,15 +11361,15 @@ bbrgwb")
     (Vector/new (lambda _ id) ch))
     (Vector/new (lambda _ -1) ch))])) [])))
   (let blanks (reduce/i (lambda a x i (do (if (= x -1) (push! a i)) a)) [] disk))
-  (letrec fragment (lambda ind out (do 
+  (letrec fragment?! (lambda ind out (do 
     (let i (get blanks ind))
-    (if (= (last disk) -1) (do (pop! disk) (fragment ind out))
+    (if (= (last disk) -1) (do (pop! disk) (fragment?! ind out))
       (if (not (<= (length disk) i)) (do 
         (set! disk i (last disk))
         (pop! disk)
-        (fragment (+ ind 1) out)
+        (fragment?! (+ ind 1) out)
       ) false)))))
-  (fragment 0 true)
+  (fragment?! 0 true)
   (|> disk (reduce/i (lambda a b i (+ a (* b i))) 0)))))
 (part1 (parse INPUT))"#,
                 "1928",

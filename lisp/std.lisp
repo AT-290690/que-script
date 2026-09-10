@@ -1419,13 +1419,13 @@ heap)))
     (if (= num 0) "0" (do 
         (let neg? (< num 0))
         (&mut n (if neg? (* num -1) num))
-        (letrec tail-call/while (lambda out
+        (letrec tail-call/while! (lambda out
             (if (> (&get n) 0) (do
                 (let x (mod (&get n) base))
                 (std/vector/push! out x)
                 (&alter! n (/ (&get n) base))
-                (tail-call/while out)) out)))
-        (let str (std/convert/digits->chars (tail-call/while [])))
+                (tail-call/while! out)) out)))
+        (let str (std/convert/digits->chars (tail-call/while! [])))
         (std/vector/reverse (if neg? (std/vector/append! str std/char/dash) str))))))
 (let std/convert/integer->string (lambda x (std/convert/integer->string-base x 10)))
 (let std/convert/vector->set (lambda xs (do
@@ -1447,12 +1447,12 @@ heap)))
     (let left (std/convert/integer->string (Dec->Int exponent)))
     (let right (std/convert/integer->string (Dec->Int (*. mantisa std/dec/dec-scaling flip))))
     (let len (length right))
-    (letrec tail-call/while (lambda i 
+    (letrec tail-call/while! (lambda i 
         (if (=# (get right (- len i)) '0') (do 
             (pop! right)
-            (tail-call/while (+ i 1))) 
+            (tail-call/while! (+ i 1))) 
         i)))
-    (tail-call/while 1)
+    (tail-call/while! 1)
     (cons left [std/char/dot] right)))))
 
 ; Experimental still
@@ -1984,12 +1984,12 @@ q)))
 (let std/convert/integer->bits (lambda num  
     (if (= num 0) [ 0 ] (do 
         (&mut n num)
-        (letrec tail-call/while (lambda out
+        (letrec tail-call/while! (lambda out
             (if (> (&get n) 0) (do
                 (std/vector/push! out (mod (get n) 2))
                 (&alter! n (/ (&get n) 2))
-                (tail-call/while out)) out)))
-        (std/vector/reverse (tail-call/while []))))))
+                (tail-call/while! out)) out)))
+        (std/vector/reverse (tail-call/while! []))))))
 
 (let std/vector/subset (lambda xs (if (std/vector/empty? xs) [ xs ] (do
     (let n (length xs))
@@ -2662,12 +2662,12 @@ q)))
 (let std/convert/integer->digits-base (lambda num base  
     (if (= num 0) [ 0 ] (do 
         (&mut n num)
-        (letrec tail-call/while (lambda out
+        (letrec tail-call/while! (lambda out
             (if (> (&get n) 0) (do
                 (std/vector/push! out (mod (&get n) base))
                 (&alter! n (/ (&get n) base))
-                (tail-call/while out)) out)))
-        (let digits (tail-call/while []))
+                (tail-call/while! out)) out)))
+        (let digits (tail-call/while! []))
         (std/vector/reverse digits)))))
 
 (let std/convert/integer->digits (lambda num (std/convert/integer->digits-base num 10)))

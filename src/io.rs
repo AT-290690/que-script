@@ -1370,7 +1370,7 @@ fn nvim_scratch_path(cwd: &Path) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    cwd.join(format!(".que-nvim-{}-{nonce}.que", std::process::id()))
+    cwd.join(format!("que-script-{nonce}.que"))
 }
 
 fn run_nvim_command(args: &[String], bin_name: &str) -> Result<(), String> {
@@ -4139,7 +4139,7 @@ mod tests {
         assert!(scratch
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with(".que-nvim-")));
+            .is_some_and(|name| name.starts_with("que-script-")));
     }
 
     #[test]
