@@ -1038,6 +1038,7 @@ fn collect_top_level_lambda_bindings(
     top_defs: &HashMap<String, TopDef>,
     out: &mut HashMap<String, TypedExpression>,
 ) {
+    let mut aliases = Vec::new();
     for (name, def) in top_defs {
         match &def.node.expr {
             Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda") =>
@@ -1045,11 +1046,28 @@ fn collect_top_level_lambda_bindings(
                 out.insert(name.clone(), def.node.clone());
             }
             Expression::Word(alias) => {
-                if let Some(target) = out.get(alias).cloned() {
-                    out.insert(name.clone(), target);
-                }
+                aliases.push((name.clone(), alias.clone()));
             }
             _ => {}
+        }
+    }
+
+    // Resolve aliases after collecting all lambdas. `top_defs` is a HashMap, so
+    // resolving aliases during the first pass made ownership analysis depend on
+    // nondeterministic iteration order and missed chains such as
+    // Integer->String -> std/convert/chars->integer -> lambda.
+    while !aliases.is_empty() {
+        let before = aliases.len();
+        aliases.retain(|(name, alias)| {
+            if let Some(target) = out.get(alias).cloned() {
+                out.insert(name.clone(), target);
+                false
+            } else {
+                true
+            }
+        });
+        if aliases.len() == before {
+            break;
         }
     }
 }
@@ -5979,7 +5997,10 @@ fn is_borrowed_managed_rhs_with_env(
                         )
                     })
                     .unwrap_or(false);
-                return then_borrowed && else_borrowed;
+                // A call result is safe to release only when every possible
+                // branch returns an owned value. If either branch may return
+                // a borrowed alias, classify the whole result as borrowed.
+                return then_borrowed || else_borrowed;
             }
             if op == "do" {
                 let mut scoped_env = env.clone();
@@ -6140,42 +6161,10 @@ fn is_borrowed_managed_rhs_expr(
     )
 }
 
-fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
-    match &node.expr {
-        Expression::Apply(items) if !items.is_empty() => {
-            if let Expression::Word(op) = &items[0] {
-                if op == "as" || op == "char" {
-                    return node
-                        .children
-                        .get(1)
-                        .map(is_fresh_owned_managed_expr)
-                        .unwrap_or(false);
-                }
-                return matches!(
-                    op.as_str(),
-                    "lambda"
-                        | "vector"
-                        | "tuple"
-                        | "box"
-                        | "int"
-                        | "dec"
-                        | "bool"
-                        | "string"
-                        | "integers"
-                        | "bools"
-                        | "decimals"
-                        | "strings"
-                        | "serialize"
-                        | "deserialize"
-                );
-            }
-            false
-        }
-        _ => false,
-    }
-}
-
-fn should_release_set_rhs(node: &TypedExpression) -> bool {
+fn should_release_set_rhs(
+    node: &TypedExpression,
+    lambda_bindings: &HashMap<String, TypedExpression>,
+) -> bool {
     if !node
         .typ
         .as_ref()
@@ -6184,7 +6173,7 @@ fn should_release_set_rhs(node: &TypedExpression) -> bool {
     {
         return false;
     }
-    is_fresh_owned_managed_expr(node)
+    !is_borrowed_managed_rhs_expr(node, lambda_bindings)
 }
 
 fn emit_release_fresh_owned_temp(tmp_val: usize, ty: Option<&Type>) -> String {
@@ -7417,7 +7406,7 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             tmp_i32: ctx.tmp_i32 + 1,
         };
         let v = compile_expr(a, &nested_ctx)?;
-        let release_arg = should_release_set_rhs(a);
+        let release_arg = should_release_set_rhs(a, ctx.lambda_bindings);
         if release_arg {
             // Fresh managed values are retained by vector push; release the temporary owner.
             out.push(format!(
@@ -7640,7 +7629,7 @@ fn compile_trusted_typed_vector_literal(
             effect: EffectFlags::PURE,
             children: Vec::new(),
         };
-        if should_release_set_rhs(&fake_node) {
+        if should_release_set_rhs(&fake_node, ctx.lambda_bindings) {
             out.push(format!(
                 "local.get {}\n{}\nlocal.tee {}\ncall {}\ndrop\n{}",
                 ctx.tmp_i32,
@@ -7690,8 +7679,8 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         .ok_or_else(|| "tuple missing second element".to_string())?;
     let a = compile_expr(a_node, &nested_ctx)?;
     let b = compile_expr(b_node, &nested_ctx)?;
-    let release_a = should_release_set_rhs(a_node);
-    let release_b = should_release_set_rhs(b_node);
+    let release_a = should_release_set_rhs(a_node, ctx.lambda_bindings);
+    let release_b = should_release_set_rhs(b_node, ctx.lambda_bindings);
     let a_tmp = ctx.tmp_i32;
     let b_tmp = ctx.tmp_i32 + 1;
     let out_tmp = ctx.tmp_i32 + 2;
@@ -7750,7 +7739,7 @@ fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 .as_ref()
                 .map(is_managed_local_type)
                 .unwrap_or(false);
-            let release_b = should_release_set_rhs(b_node);
+            let release_b = should_release_set_rhs(b_node, ctx.lambda_bindings);
             let a_tmp = ctx.tmp_i32;
             let b_tmp = ctx.tmp_i32 + 1;
             let mut out = Vec::new();
@@ -7825,7 +7814,7 @@ fn compile_snd(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             };
             let a = compile_expr(a_node, &nested_ctx)?;
             let b = compile_expr(b_node, &nested_ctx)?;
-            let release_a = should_release_set_rhs(a_node);
+            let release_a = should_release_set_rhs(a_node, ctx.lambda_bindings);
             let a_tmp = ctx.tmp_i32;
             let mut out = Vec::new();
             if release_a {
@@ -8573,7 +8562,7 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     } else {
         vec_set_runtime_for_scalar(is_scalar_value)
     };
-    let release_rhs = should_release_set_rhs(val_node);
+    let release_rhs = should_release_set_rhs(val_node, ctx.lambda_bindings);
     let managed_slots = managed_local_slots(ctx);
     let target_tmp = ctx.tmp_i32 + 3;
     let target_keep = ctx.tmp_i32 + 4;
@@ -9977,7 +9966,7 @@ fn compile_fast_box_ctor(
         tmp_i32: ctx.tmp_i32 + 2,
     };
     let value = compile_expr(value_node, &nested_ctx)?;
-    let release_value = should_release_set_rhs(value_node);
+    let release_value = should_release_set_rhs(value_node, ctx.lambda_bindings);
     // Keep polymorphic `box` as ref-cell like generic lowering; typed scalar ctors stay scalar cells.
     let elem_ref = if op == "box" { 1 } else { 0 };
     let normalized_value = if op == "bool" {
@@ -10047,7 +10036,7 @@ fn compile_fast_cell_set(
     } else {
         value_raw
     };
-    let release_rhs = should_release_set_rhs(value_node);
+    let release_rhs = should_release_set_rhs(value_node, ctx.lambda_bindings);
     let managed_slots = managed_local_slots(ctx);
     let cell_prefix = cell;
     let set_op = vec_set_runtime_for_scalar(
@@ -10229,7 +10218,7 @@ fn compile_extern_direct_call(
     let mut release_slots = Vec::new();
     for (idx, arg) in args.iter().enumerate() {
         let av = compile_expr(arg, &eval_ctx)?;
-        if should_release_set_rhs(arg) {
+        if should_release_set_rhs(arg, ctx.lambda_bindings) {
             let slot = first_arg_slot + idx;
             out.push(format!("{av}\nlocal.tee {}", slot));
             release_slots.push((slot, rc_release_for_opt_type(arg.typ.as_ref())));
@@ -10372,7 +10361,7 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
     } else {
         "$__que_deserialize"
     };
-    let release_arg = should_release_set_rhs(arg);
+    let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
     let mut out = vec![
         format!("{arg_code}\nlocal.set {arg_slot}"),
         format!("{type_code}\nlocal.set {type_slot}"),
@@ -10454,7 +10443,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
                 let av = compile_expr(arg, &nested_ctx)?;
                 let idx = i + 1;
                 let store_op = closure_store_op_for_type_wat(&ret_params[i]);
-                let release_arg = should_release_set_rhs(arg);
+                let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
                 if store_op != "$closure_set" {
                     if release_arg {
                         out.push(
@@ -10560,7 +10549,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
             let av = compile_expr(arg, &nested_ctx)?;
             let idx = i + 1;
             let store_op = closure_store_op_for_type_wat(&params[i]);
-            let release_arg = should_release_set_rhs(arg);
+            let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
             if store_op != "$closure_set" {
                 if release_arg {
                     out.push(
@@ -10695,7 +10684,7 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
             let av = compile_expr(arg, &nested_ctx)?;
             let idx = i + 1;
             let store_op = closure_store_op_for_type_wat(&head_params[i]);
-            let release_arg = should_release_set_rhs(arg);
+            let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
             if store_op != "$closure_set" {
                 if release_arg {
                     out.push(

@@ -6419,6 +6419,26 @@ parse-value"#;
     }
 
     #[test]
+    #[cfg(all(feature = "runtime", feature = "io"))]
+    fn test_wat_host_print_releases_temporary_string_from_std_function_alias() {
+        let wat = compile_std_program_to_wat(r#"(print! (Integer->String 42))"#, true);
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+        let print_pos = main_wat
+            .find("call $v_print_bang")
+            .expect("expected print host call");
+        let after_print = &main_wat[print_pos..];
+
+        assert!(
+            after_print.contains("call $rc_release_vec"),
+            "expected an owned string returned through the Integer->String alias chain to be released after print!, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
     fn test_wat_user_extern_emits_import_and_direct_call() {
         let expr = crate::parser::build(
             r#"(do (extern env add_one add-one! (Int -> Int)) (add-one! 41))"#,
