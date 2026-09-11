@@ -1614,6 +1614,7 @@ fn desugar_with_counter(
                     "apply" => Ok(apply_transform(exprs)?),
                     "comp" => Ok(combinator_transform_rev(exprs)?),
                     "do" => Ok(transform_do(exprs, binding_counter)?),
+                    "block" => Ok(transform_block(exprs, binding_counter)?),
                     "sig" => Ok(sig_transform(exprs)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
@@ -2520,6 +2521,135 @@ fn transform_do(
             .chain(exprs_with_destructured_lets)
             .collect(),
     ))
+}
+
+fn fresh_block_binding(name: &str, binding_counter: &mut usize) -> String {
+    let id = *binding_counter;
+    *binding_counter += 1;
+    format!("__block_{}_{}", id, name)
+}
+
+fn rename_block_sequence(
+    exprs: Vec<Expression>,
+    names: &mut HashMap<String, String>,
+    binding_counter: &mut usize,
+) -> Vec<Expression> {
+    exprs
+        .into_iter()
+        .map(|expr| rename_block_sequence_item(expr, names, binding_counter))
+        .collect()
+}
+
+fn rename_block_sequence_item(
+    expr: Expression,
+    names: &mut HashMap<String, String>,
+    binding_counter: &mut usize,
+) -> Expression {
+    let Expression::Apply(items) = expr else {
+        return rename_block_expr(expr, names, binding_counter);
+    };
+    if let [Expression::Word(kw), Expression::Word(name), rhs] = &items[..] {
+        if kw == "let" || kw == "letrec" || kw == "mut" {
+            let fresh = fresh_block_binding(name, binding_counter);
+            let renamed_rhs = if kw == "letrec" {
+                let mut recursive_names = names.clone();
+                recursive_names.insert(name.clone(), fresh.clone());
+                rename_block_expr(rhs.clone(), &mut recursive_names, binding_counter)
+            } else {
+                rename_block_expr(rhs.clone(), names, binding_counter)
+            };
+            names.insert(name.clone(), fresh.clone());
+            return Expression::Apply(vec![
+                Expression::Word(kw.clone()),
+                Expression::Word(fresh),
+                renamed_rhs,
+            ]);
+        }
+        if kw == "letype" {
+            let fresh = names
+                .entry(name.clone())
+                .or_insert_with(|| fresh_block_binding(name, binding_counter))
+                .clone();
+            return Expression::Apply(vec![
+                Expression::Word(kw.clone()),
+                Expression::Word(fresh),
+                rename_block_expr(rhs.clone(), names, binding_counter),
+            ]);
+        }
+    }
+    rename_block_expr(Expression::Apply(items), names, binding_counter)
+}
+
+fn rename_block_expr(
+    expr: Expression,
+    names: &mut HashMap<String, String>,
+    binding_counter: &mut usize,
+) -> Expression {
+    match expr {
+        Expression::Word(name) => names
+            .get(&name)
+            .cloned()
+            .map(Expression::Word)
+            .unwrap_or(Expression::Word(name)),
+        Expression::Int(_) | Expression::Dec(_) => expr,
+        Expression::Apply(items) if items.is_empty() => Expression::Apply(items),
+        Expression::Apply(items) => {
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "do") {
+                let mut iter = items.into_iter();
+                let head = iter.next().expect("non-empty application");
+                let renamed = rename_block_sequence(iter.collect(), names, binding_counter);
+                return Expression::Apply(std::iter::once(head).chain(renamed).collect());
+            }
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda") {
+                let last = items.len().saturating_sub(1);
+                let mut lambda_names = names.clone();
+                for param in items.iter().skip(1).take(last.saturating_sub(1)) {
+                    let mut bound = HashSet::new();
+                    collect_pattern_words(param, &mut bound);
+                    for name in bound {
+                        lambda_names.remove(&name);
+                    }
+                }
+                return Expression::Apply(
+                    items
+                        .into_iter()
+                        .enumerate()
+                        .map(|(idx, item)| {
+                            if idx == last {
+                                rename_block_expr(item, &mut lambda_names, binding_counter)
+                            } else {
+                                item
+                            }
+                        })
+                        .collect(),
+                );
+            }
+            Expression::Apply(
+                items
+                    .into_iter()
+                    .map(|item| rename_block_expr(item, names, binding_counter))
+                    .collect(),
+            )
+        }
+    }
+}
+
+fn transform_block(
+    mut exprs: Vec<Expression>,
+    binding_counter: &mut usize,
+) -> Result<Expression, String> {
+    exprs.remove(0);
+    if exprs.is_empty() {
+        return Err("block requires at least one expression".to_string());
+    }
+    let mut names = HashMap::new();
+    let renamed = rename_block_sequence(exprs, &mut names, binding_counter);
+    transform_do(
+        std::iter::once(Expression::Word("do".to_string()))
+            .chain(renamed)
+            .collect(),
+        binding_counter,
+    )
 }
 
 fn sig_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {

@@ -6108,6 +6108,8 @@ fn is_borrowed_managed_rhs_with_env(
                     | "bools"
                     | "decimals"
                     | "strings"
+                    | "serialize"
+                    | "deserialize"
             ) {
                 // Fresh constructors return owned values.
                 return false;
@@ -6163,6 +6165,8 @@ fn is_fresh_owned_managed_expr(node: &TypedExpression) -> bool {
                         | "bools"
                         | "decimals"
                         | "strings"
+                        | "serialize"
+                        | "deserialize"
                 );
             }
             false

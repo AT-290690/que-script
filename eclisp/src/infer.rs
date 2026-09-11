@@ -629,7 +629,7 @@ fn annotate_effects(root: &mut TypedExpression) {
 }
 
 fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), String> {
-    let extern_names = collect_top_level_extern_names(root);
+    let mut extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
     let mut known_mutates_first_arg: HashSet<String> = HashSet::new();
     let known_function_arities = top_level_function_arities(root);
@@ -662,6 +662,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                 ) {
                     return Err(message);
                 }
+                record_io_function_binding(&items[idx], let_node, &mut extern_names);
                 if let Expression::Apply(binding) = &items[idx] {
                     if let [Expression::Word(kw), _, rhs] = &binding[..] {
                         if (kw == "let" || kw == "letrec") && let_node.children.get(2).is_some() {
@@ -712,6 +713,28 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
     Ok(())
 }
 
+fn record_io_function_binding(
+    expr: &Expression,
+    node: &TypedExpression,
+    io_function_names: &mut HashSet<String>,
+) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    let [Expression::Word(kw), Expression::Word(name), _] = &items[..] else {
+        return;
+    };
+    if kw != "let" && kw != "letrec" {
+        return;
+    }
+    let Some(rhs) = node.children.get(2) else {
+        return;
+    };
+    if matches!(rhs.typ, Some(Type::Function(_, _))) && rhs.effect.contains(EffectFlags::IO) {
+        io_function_names.insert(name.clone());
+    }
+}
+
 fn validate_nested_function_names(
     expr: &Expression,
     node: &TypedExpression,
@@ -743,6 +766,32 @@ fn validate_nested_function_names(
             &mut scoped_mutates_first_arg,
             known_function_arities,
         );
+    }
+
+    if let [Expression::Word(kw), _, rhs] = &items[..] {
+        if kw == "letrec" {
+            if let Some(message) = check_impure_binding_name(
+                expr,
+                node,
+                extern_names,
+                known_requires_bang,
+                known_mutates_first_arg,
+                known_function_arities,
+            ) {
+                return Some(message);
+            }
+            if let Some(rhs_node) = node.children.get(2) {
+                return validate_nested_function_names(
+                    rhs,
+                    rhs_node,
+                    extern_names,
+                    known_requires_bang,
+                    known_mutates_first_arg,
+                    known_function_arities,
+                );
+            }
+            return None;
+        }
     }
 
     if matches!(items.first(), Some(Expression::Word(op)) if op == "do")
@@ -1494,32 +1543,33 @@ fn eval_function_binding_requires_bang(
         return None;
     }
 
-    let requires_bang = match rhs {
-        Expression::Word(alias_target) => {
-            if alias_target.ends_with('!') && !is_impure_bang_exception_name(alias_target) {
-                true
-            } else if alias_target.contains('/') {
-                false
-            } else {
-                known_requires_bang
-                    .get(alias_target)
-                    .copied()
-                    .unwrap_or(false)
+    let requires_bang = rhs_node.effect.contains(EffectFlags::IO)
+        || match rhs {
+            Expression::Word(alias_target) => {
+                if alias_target.ends_with('!') && !is_impure_bang_exception_name(alias_target) {
+                    true
+                } else if alias_target.contains('/') {
+                    false
+                } else {
+                    known_requires_bang
+                        .get(alias_target)
+                        .copied()
+                        .unwrap_or(false)
+                }
             }
-        }
-        _ => match rhs {
-            Expression::Apply(rhs_items) => {
-                matches!(rhs_items.first(), Some(Expression::Word(w)) if w == "lambda")
-                    && lambda_requires_bang(
-                        rhs,
-                        extern_names,
-                        known_requires_bang,
-                        known_function_arities,
-                    )
-            }
-            _ => false,
-        },
-    };
+            _ => match rhs {
+                Expression::Apply(rhs_items) => {
+                    matches!(rhs_items.first(), Some(Expression::Word(w)) if w == "lambda")
+                        && lambda_requires_bang(
+                            rhs,
+                            extern_names,
+                            known_requires_bang,
+                            known_function_arities,
+                        )
+                }
+                _ => false,
+            },
+        };
 
     known_requires_bang.insert(name.clone(), requires_bang);
     Some((name.clone(), requires_bang))

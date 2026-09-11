@@ -683,6 +683,61 @@ xs)"#,
     }
 
     #[test]
+    fn test_runtime_block_is_lexical_but_can_mutate_outer_local() {
+        let source = r#"(do
+            (mut current 0)
+            (if true
+                (block
+                  (let value 41)
+                  (alter! current (+ value 1)))
+                (block
+                  (let value false)
+                  (if value (alter! current 99) nil)))
+            current)"#;
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, false).trim(),
+            "42"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true).trim(),
+            "42"
+        );
+    }
+
+    #[test]
+    fn test_runtime_sequential_loops_can_reuse_index_name() {
+        let source = r#"(do
+            (mut total 0)
+            (loop i (< i 3) (alter! total (+ total i)))
+            (loop i (< i 3) (alter! total (+ total i)))
+            total)"#;
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, false).trim(),
+            "6"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true).trim(),
+            "6"
+        );
+    }
+
+    #[test]
+    fn test_infer_block_binding_does_not_escape_scope() {
+        let expr = crate::parser::build("(do (block (let value 1) value) value)")
+            .expect("input should build");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            &expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("block-local binding should not escape");
+        assert!(
+            err.contains("Undefined variable: value"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_runtime_std_join_does_not_duplicate_last_item() {
         let output = run_program_output_with_std_and_opts(
             r#"(join ", " (strings "Jill" "Tom" "Anthony"))"#,
@@ -3709,6 +3764,26 @@ out"#,
     }
 
     #[test]
+    fn test_infer_direct_lambda_body_letrec_requires_question_suffix() {
+        let expr = crate::parser::build(
+            "(let search (lambda (target xs)
+                (letrec bs (lambda (left right)
+                    (if (> left right) false (= target (get xs left)))))))",
+        )
+        .expect("input should build");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            &expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("direct nested Bool function without ? should fail");
+        assert!(
+            err.contains("Bool-returning function 'bs' must end with '?'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_infer_nested_impure_bool_function_accepts_combined_suffix() {
         let exprs = crate::parser::parse(
             "(let search?! (lambda x (do
@@ -3726,6 +3801,50 @@ out"#,
             inferred.is_ok(),
             "valid nested ?/! contracts should pass, got: {:?}",
             inferred
+        );
+    }
+
+    #[test]
+    fn test_infer_io_effect_from_composed_function_propagates_to_outer_function() {
+        let source = r#"(do
+            (extern env log println! (Int -> ()))
+            (let log/int! (comp println!))
+            (let search (lambda n (do
+              (letrec bs! (lambda i
+                (if (= i 0) 0 (do (log/int! i) (bs! (- i 1))))))
+              (bs! n)))))"#;
+        let expr = crate::parser::build(source).expect("input should build");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            &expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("IO through composed function should require !");
+        assert!(
+            err.contains("Impure function 'search' must end with '!'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_infer_io_effect_from_composed_function_propagates_to_nested_letrec() {
+        let source = r#"(do
+            (extern env log println! (Int -> ()))
+            (let log/int! (comp println!))
+            (let search! (lambda n (do
+              (letrec bs (lambda i
+                (if (= i 0) 0 (do (log/int! i) (bs (- i 1))))))
+              (bs n)))))"#;
+        let expr = crate::parser::build(source).expect("input should build");
+        let inferred = crate::infer::infer_with_builtins_typed(
+            &expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        );
+        let err = inferred.expect_err("nested IO function should require !");
+        assert!(
+            err.contains("Impure function 'bs' must end with '!'"),
+            "unexpected error: {}",
+            err
         );
     }
 
@@ -6268,6 +6387,33 @@ parse-value"#;
         assert!(
             release_pos > host_pos,
             "expected temporary [Char] arg to be released after print!, got wat:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "io")]
+    fn test_wat_host_print_releases_temporary_serialized_string() {
+        let expr =
+            crate::parser::build(r#"(print! (serialize 42))"#).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        let serialize_pos = wat
+            .find("call $__que_serialize")
+            .expect("expected serialize host call");
+        let print_pos = wat[serialize_pos..]
+            .find("call $v_print_bang")
+            .map(|pos| serialize_pos + pos)
+            .expect("expected print host call after serialize");
+        let release_pos = wat[print_pos..]
+            .find("call $rc_release_vec")
+            .map(|pos| print_pos + pos)
+            .expect("expected serialized string release after print");
+
+        assert!(
+            release_pos > print_pos,
+            "expected the temporary result of serialize to be released after print!, got wat:\n{}",
             wat
         );
     }

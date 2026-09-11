@@ -63,7 +63,7 @@
 
 (letmacro loop/for
   (lambda name init con step . body
-    (qq (do
+    (qq (block
           (mut (uq name) (uq init))
           (while (uq con)
             (do
@@ -73,7 +73,7 @@
 
 (letmacro loop/range/exclusive
   (lambda name start end . body
-    (qq (do
+    (qq (block
           (mut (uq name) (uq start))
           (while (< (uq name) (uq end))
             (do
@@ -83,7 +83,7 @@
 
 (letmacro loop/range/inclusive
   (lambda name start end . body
-    (qq (do
+    (qq (block
           (mut (uq name) (uq start))
           (while (<= (uq name) (uq end))
             (do
@@ -98,7 +98,7 @@
 
 (letmacro loop/range/inclusive/by
   (lambda name start end step . body
-    (qq (do
+    (qq (block
           (mut (uq name) (uq start))
           (let step# (uq step))
           (if (> step# 0)
@@ -115,7 +115,7 @@
 
 (letmacro loop/range/exclusive/by
   (lambda name start end step . body
-    (qq (do
+    (qq (block
           (mut (uq name) (uq start))
           (let step# (uq step))
           (if (> step# 0)
@@ -141,7 +141,7 @@
       (let i (gensym))
       (let xs (gensym))
       (let len (gensym))
-      (qq (do
+      (qq (block
             (let (uq xs) (uq items))
             (let (uq len) (length (uq xs)))
             (mut (uq i) 0)
@@ -166,7 +166,7 @@
       (let row (gensym))
       (let height (gensym))
       (let width (gensym))
-      (qq (do
+      (qq (block
             (let (uq rows) (uq items))
             (let (uq height) (length (uq rows)))
             (mut (uq y) 0)
@@ -201,7 +201,7 @@
 
 (letmacro loop
   (lambda name condition . body
-    (qq (do
+    (qq (block
           (mut (uq name) 0)
           (while (uq condition)
             (do
@@ -218,11 +218,6 @@
     (qq (block
           (let (uq name) (uq value))
           (let* (uqs rest))))))
-
-(letmacro block
-    (lambda . body
-      (qq ((lambda
-              (do (uqs body)))))))
 
 (letmacro vector/default/items/static
   (lambda n x

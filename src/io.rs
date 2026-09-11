@@ -1265,6 +1265,7 @@ fn native_shell_learn() -> &'static str {
     - Because do does not scope, repeated lets collide: (do (let i 1) (let i 2)) is invalid.\n\
     - (block e1 e2 ... en) evaluates in order, returns en, and creates a new lexical scope.\n\
     - Use block when reusing local names in separate regions: (do (block (let i 1) i) (block (let i 2) i)).\n\
+    - loop macros create their own block, so sequential loops may safely reuse the same index name.\n\
     - Unit is 0 (nil).\n\
     \n\
     Control:\n\
@@ -1505,6 +1506,24 @@ SEQUENCING AND SCOPE
       (println! name)
       name)))
 
+; Use block for branch-local temporary names. Both branches can use
+; `left` and `right`, and a block may alter an outer mut binding.
+(mut current 0)
+(if true
+    (block
+      (let left 20)
+      (let right 22)
+      (alter! current (+ left right)))
+    (block
+      (let left 10)
+      (let right 20)
+      (alter! current (+ left right))))
+; => current is 42
+
+; Loop macros are already scoped, so index names can be reused.
+(loop i (< i 3) nil)
+(loop i (< i 3) nil)
+
 Que supports functional interfaces, imperative hot loops, and mixtures of both.
 Use `que --learn` for syntax, `que --style` for conventions, and
 `que --pitfalls` for common mistakes."#
@@ -1518,8 +1537,9 @@ fn native_shell_pitfalls() -> &'static str {
     - Reusing a let name in the same do collides: (do (let x 1) (let x 2)) is invalid.\n\
     - Use block when branch-local or temporary bindings need reusable names.\n\
     - block creates a fresh lexical scope and returns its last expression.\n\
-    - block is effectively an IIFE/lambda boundary, not just a scoped spelling of do.\n\
-    - If mutation needs to cross a block/lambda boundary, use the appropriate shared mutable representation such as &mut/&alter!.\n\
+    - block is a lexical sequence, not a lambda: its local names do not escape, but it can alter! outer mut bindings.\n\
+    - loop macros create a block automatically, so separate loops may reuse index names without wrapping them manually.\n\
+    - If mutation needs to cross a lambda boundary, use the appropriate shared mutable representation such as &mut/&alter!.\n\
     \n\
     Control flow:\n\
     - while accepts multiple body expressions directly: (while cond e1 e2 e3).\n\
@@ -1539,7 +1559,7 @@ fn native_shell_pitfalls() -> &'static str {
     - Put the thing being mutated first, matching set!, push!, and pop!.\n\
     - If a function mutates multiple caller-visible values, group them into the first argument.\n\
     - mut/alter! are for local primitive scalar mutation in the same lambda scope.\n\
-    - &mut/&alter! are for shared mutable state across lambda/block boundaries.\n\
+    - &mut/&alter! are for shared mutable state across lambda boundaries.\n\
     \n\
     Bindings and recursion:\n\
     - Use let for normal non-recursive bindings.\n\
@@ -1615,7 +1635,9 @@ fn native_shell_style() -> &'static str {
     Scope and sequencing:\n\
     - do sequences expressions but does not create a new scope.\n\
     - block sequences expressions and creates a new lexical scope.\n\
-    - Use block when branch-local names need to be reused.\n\
+    - Use block around if/cond branches and other regions when local names such as left, right, current, or result may be reused.\n\
+    - When generating Que code, default to block for branch-local temporaries so a complete generated program does not suffer accidental name collisions.\n\
+    - loop macros already introduce a block; reuse clear index names such as i in sequential loops instead of inventing i2, i3, and so on.\n\
     - Use do only when you need a single branch expression containing multiple effects/results and no fresh scope.\n\
     \n\
     Conditionals:\n\
@@ -1624,7 +1646,7 @@ fn native_shell_style() -> &'static str {
     - Do not add explicit nil just to satisfy an if branch.\n\
     - unless is inverted if: (unless cond then) or (unless cond then else). It is not a variadic body form.\n\
     - For multiple unless effects, write: (unless cond (do effect1 effect2)).\n\
-    - Use block inside branches if you need a fresh scope.\n\
+    - Use block inside branches if you declare temporary bindings; this keeps independently written or generated branches composable.\n\
     \n\
     Data style:\n\
     - Use [T] vectors for homogeneous collections and pipelines.\n\

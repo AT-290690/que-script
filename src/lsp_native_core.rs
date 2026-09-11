@@ -561,14 +561,15 @@ pub fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMa
         if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
             if keyword == "let" || keyword == "letrec" || keyword == "mut" {
                 if let Some(rhs_type) = node.children.get(2).and_then(|child| child.typ.as_ref()) {
-                    match signatures.get(name) {
+                    let source_name = block_source_name(name);
+                    match signatures.get(source_name) {
                         Some(existing) => {
                             if should_replace_type(existing, rhs_type) {
-                                signatures.insert(name.clone(), rhs_type.clone());
+                                signatures.insert(source_name.to_string(), rhs_type.clone());
                             }
                         }
                         None => {
-                            signatures.insert(name.clone(), rhs_type.clone());
+                            signatures.insert(source_name.to_string(), rhs_type.clone());
                         }
                     }
                 }
@@ -717,14 +718,15 @@ pub fn format_effect_flags_for_symbol(
 pub fn collect_symbol_types(node: &TypedExpression, symbols: &mut HashMap<String, Type>) {
     if let Expression::Word(name) = &node.expr {
         if let Some(typ) = &node.typ {
-            match symbols.get(name) {
+            let source_name = block_source_name(name);
+            match symbols.get(source_name) {
                 Some(existing) => {
                     if should_replace_type(existing, typ) {
-                        symbols.insert(name.clone(), typ.clone());
+                        symbols.insert(source_name.to_string(), typ.clone());
                     }
                 }
                 None => {
-                    symbols.insert(name.clone(), typ.clone());
+                    symbols.insert(source_name.to_string(), typ.clone());
                 }
             }
         }
@@ -743,7 +745,7 @@ pub fn collect_symbol_type_occurrences(
             if matches!(keyword.as_str(), "let" | "letrec" | "mut") {
                 if let Some(rhs_type) = node.children.get(2).and_then(|child| child.typ.as_ref()) {
                     symbols
-                        .entry(name.clone())
+                        .entry(block_source_name(name).to_string())
                         .or_default()
                         .push(rhs_type.clone());
                 }
@@ -758,11 +760,28 @@ pub fn collect_symbol_type_occurrences(
     }
     if let Expression::Word(name) = &node.expr {
         if let Some(typ) = &node.typ {
-            symbols.entry(name.clone()).or_default().push(typ.clone());
+            symbols
+                .entry(block_source_name(name).to_string())
+                .or_default()
+                .push(typ.clone());
         }
     }
     for child in &node.children {
         collect_symbol_type_occurrences(child, symbols);
+    }
+}
+
+fn block_source_name(name: &str) -> &str {
+    let Some(rest) = name.strip_prefix("__block_") else {
+        return name;
+    };
+    let Some((id, source_name)) = rest.split_once('_') else {
+        return name;
+    };
+    if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) || source_name.is_empty() {
+        name
+    } else {
+        source_name
     }
 }
 
