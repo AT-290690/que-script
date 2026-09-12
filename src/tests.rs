@@ -8849,6 +8849,39 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_discards_owned_vector_threaded_through_local_recursion() {
+        let expr = crate::parser::build(
+            r#"(do
+              (let build! (lambda n
+                (do
+                  (let remaining [n])
+                  (letrec fill! (lambda out
+                    (if (> (get remaining 0) 0)
+                        (do
+                          (set! out (length out) (get remaining 0))
+                          (set! remaining 0 (- (get remaining 0) 1))
+                          (fill! out))
+                        out)))
+                  (fill! []))))
+              (build! 3)
+              0)"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let main = wat
+            .split("(func (export \"main\")")
+            .nth(1)
+            .expect("main export should exist");
+
+        assert!(
+            main.contains("call $v_build_bang_") && main.contains("call $rc_release_vec"),
+            "discarded vector returned through recursive pass-through must be released, got:\n{}",
+            main
+        );
+    }
+
+    #[test]
     fn test_wat_hidden_zeroed_scalar_vector_builtin_compiles_to_runtime_call() {
         let typed = crate::infer::TypedExpression {
             expr: crate::parser::Expression::Apply(vec![

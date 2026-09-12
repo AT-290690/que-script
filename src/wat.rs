@@ -5843,6 +5843,52 @@ fn lambda_params_and_body<'a>(
     Some((params, body))
 }
 
+fn recursive_passthrough_param_origins(
+    expr: &Expression,
+    self_name: &str,
+    params: &[String],
+) -> Option<HashSet<usize>> {
+    match expr {
+        Expression::Word(name) => params
+            .iter()
+            .position(|param| param == name)
+            .map(|idx| HashSet::from([idx])),
+        Expression::Apply(items) if !items.is_empty() => {
+            let Expression::Word(op) = &items[0] else {
+                return None;
+            };
+            match op.as_str() {
+                "as" | "char" => items.get(1).and_then(|inner| {
+                    recursive_passthrough_param_origins(inner, self_name, params)
+                }),
+                "do" | "block" => items
+                    .last()
+                    .and_then(|last| recursive_passthrough_param_origins(last, self_name, params)),
+                "if" => {
+                    let mut origins =
+                        recursive_passthrough_param_origins(items.get(2)?, self_name, params)?;
+                    origins.extend(recursive_passthrough_param_origins(
+                        items.get(3)?,
+                        self_name,
+                        params,
+                    )?);
+                    Some(origins)
+                }
+                name if name == self_name => {
+                    let mut origins = HashSet::new();
+                    for arg in items.iter().skip(1) {
+                        origins
+                            .extend(recursive_passthrough_param_origins(arg, self_name, params)?);
+                    }
+                    Some(origins)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn resolve_callable_binding_from_arg(
     arg: &TypedExpression,
     callable_env: &HashMap<String, CallableBinding>,
@@ -5878,6 +5924,7 @@ fn resolve_callable_binding_from_arg(
 fn analyze_borrow_for_lambda_invocation(
     lambda_node: &TypedExpression,
     call_node: &TypedExpression,
+    invoked_name: Option<&str>,
     env: &HashMap<String, bool>,
     callable_env: &HashMap<String, CallableBinding>,
     lambda_bindings: &HashMap<String, TypedExpression>,
@@ -5885,6 +5932,24 @@ fn analyze_borrow_for_lambda_invocation(
     depth: usize,
 ) -> Option<bool> {
     let (params, body) = lambda_params_and_body(lambda_node)?;
+    if let Some(name) = invoked_name {
+        if let Some(origins) = recursive_passthrough_param_origins(&body.expr, name, &params) {
+            return Some(origins.into_iter().any(|idx| {
+                apply_child_at(call_node, idx + 1)
+                    .map(|arg| {
+                        is_borrowed_managed_rhs_with_env(
+                            arg,
+                            env,
+                            callable_env,
+                            lambda_bindings,
+                            call_stack,
+                            depth + 1,
+                        )
+                    })
+                    .unwrap_or(true)
+            }));
+        }
+    }
     let mut lambda_env: HashMap<String, bool> = HashMap::new();
     let mut lambda_callable_env: HashMap<String, CallableBinding> = HashMap::new();
     for (idx, param_name) in params.iter().enumerate() {
@@ -6071,6 +6136,7 @@ fn is_borrowed_managed_rhs_with_env(
                             let result = analyze_borrow_for_lambda_invocation(
                                 lambda_node,
                                 node,
+                                Some(name),
                                 env,
                                 callable_env,
                                 lambda_bindings,
@@ -6086,6 +6152,7 @@ fn is_borrowed_managed_rhs_with_env(
                         return analyze_borrow_for_lambda_invocation(
                             lambda_node,
                             node,
+                            Some(op),
                             env,
                             callable_env,
                             lambda_bindings,
@@ -6105,6 +6172,7 @@ fn is_borrowed_managed_rhs_with_env(
                 let result = analyze_borrow_for_lambda_invocation(
                     lambda_node,
                     node,
+                    Some(op),
                     env,
                     callable_env,
                     lambda_bindings,
@@ -8737,6 +8805,18 @@ fn compile_expr_discarding_result(node: &TypedExpression, ctx: &Ctx<'_>) -> Resu
         return compile_or_discarding_result(node, ctx);
     }
     let code = compile_expr(node, ctx)?;
+    if node
+        .typ
+        .as_ref()
+        .map(is_managed_local_type)
+        .unwrap_or(false)
+        && should_release_set_rhs(node, ctx.lambda_bindings)
+    {
+        return Ok(format!(
+            "{code}\ncall {}\ndrop",
+            rc_release_for_opt_type(node.typ.as_ref())
+        ));
+    }
     if !matches!(node.typ.as_ref(), Some(Type::Unit)) {
         return Ok(format!("{code}\ndrop"));
     }
