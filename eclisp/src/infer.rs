@@ -138,9 +138,6 @@ fn is_bang_contract_op(op: &str, known_requires_bang: &HashMap<String, bool>) ->
     if known_requires_bang.get(op).copied().unwrap_or(false) {
         return true;
     }
-    if op.ends_with('!') {
-        return true;
-    }
     if is_impure_bang_exception_name(op) {
         return true;
     }
@@ -642,14 +639,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                 let Some(let_node) = root.children.get(idx) else {
                     continue;
                 };
-                if let Ok(Some(extern_decl)) = crate::externals::parse_extern_decl(&items[idx]) {
-                    if !extern_decl.local_name.ends_with('!') {
-                        return Err(format!(
-                            "Extern '{}' must end with '!'\n{}",
-                            extern_decl.local_name,
-                            items[idx].to_lisp()
-                        ));
-                    }
+                if let Ok(Some(_extern_decl)) = crate::externals::parse_extern_decl(&items[idx]) {
                     continue;
                 }
                 if let Some(message) = check_impure_binding_name(
@@ -801,14 +791,7 @@ fn validate_nested_function_names(
         let mut scoped_mutates_first_arg = known_mutates_first_arg.clone();
         for idx in 1..items.len() {
             let child = &node.children[idx];
-            if let Ok(Some(extern_decl)) = crate::externals::parse_extern_decl(&items[idx]) {
-                if !extern_decl.local_name.ends_with('!') {
-                    return Some(format!(
-                        "Extern '{}' must end with '!'\n{}",
-                        extern_decl.local_name,
-                        items[idx].to_lisp()
-                    ));
-                }
+            if let Ok(Some(_extern_decl)) = crate::externals::parse_extern_decl(&items[idx]) {
                 continue;
             }
             let is_recursive_binding = matches!(
@@ -882,28 +865,26 @@ fn check_impure_binding_name(
     known_mutates_first_arg: &mut HashSet<String>,
     known_function_arities: &HashMap<String, usize>,
 ) -> Option<String> {
-    let (name, requires_bang) = eval_function_binding_requires_bang(
+    let (name, _requires_bang) = eval_function_binding_requires_bang(
         item_expr,
         let_node,
         extern_names,
         known_requires_bang,
         known_function_arities,
     )?;
-    if requires_bang {
-        if let Some(offending_idx) = eval_function_binding_non_first_mutation_target(
-            item_expr,
-            known_requires_bang,
-            known_mutates_first_arg,
-        ) {
-            return Some(
-                format!(
-                    "Impure function '{}' must mutate its first parameter (argument 1); found mutation target using argument {}\n{}",
-                    name,
-                    offending_idx + 1,
-                    item_expr.to_lisp()
-                )
-            );
-        }
+    if let Some(offending_idx) = eval_function_binding_non_first_mutation_target(
+        item_expr,
+        known_requires_bang,
+        known_mutates_first_arg,
+    ) {
+        return Some(
+            format!(
+                "Impure function '{}' must mutate its first parameter (argument 1); found mutation target using argument {}\n{}",
+                name,
+                offending_idx + 1,
+                item_expr.to_lisp()
+            )
+        );
     }
     if eval_function_binding_mutates_first_arg(
         item_expr,
@@ -913,68 +894,7 @@ fn check_impure_binding_name(
         known_mutates_first_arg.insert(name.clone());
     }
 
-    if name.starts_with('_') || is_impure_bang_exception_name(&name) {
-        return None;
-    }
-
-    if requires_bang && !name.ends_with('!') {
-        return Some(format!(
-            "Impure function '{}' must end with '!'\n{}",
-            name,
-            item_expr.to_lisp()
-        ));
-    }
-
-    let rhs_effect = let_node
-        .children
-        .get(2)
-        .map(|rhs| rhs.effect)
-        .unwrap_or(EffectFlags::PURE);
-    if !requires_bang && rhs_effect.is_pure() && name.ends_with('!') {
-        return Some(format!(
-            "Function '{}' ends with '!' but has no caller-visible effect\n{}",
-            name,
-            item_expr.to_lisp()
-        ));
-    }
-
-    if let Some(ret) = let_node
-        .children
-        .get(2)
-        .and_then(|rhs| rhs.typ.as_ref())
-        .map(function_return_type)
-    {
-        let returns_bool = matches!(ret, Type::Bool);
-        if returns_bool && !has_predicate_suffix(&name) {
-            return Some(format!(
-                "Bool-returning function '{}' must end with '?'\n{}",
-                name,
-                item_expr.to_lisp()
-            ));
-        }
-        if !returns_bool && has_predicate_suffix(&name) {
-            return Some(format!(
-                "Function '{}' ends with '?' but returns {}, expected Bool\n{}",
-                name,
-                ret,
-                item_expr.to_lisp()
-            ));
-        }
-    }
-
     None
-}
-
-fn function_return_type(typ: &Type) -> &Type {
-    let mut cur = typ;
-    while let Type::Function(_, ret) = cur {
-        cur = ret;
-    }
-    cur
-}
-
-fn has_predicate_suffix(name: &str) -> bool {
-    name.ends_with('?') || name.ends_with("?!")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1581,7 +1501,44 @@ pub fn collect_top_level_function_external_impurity(
 ) {
     let extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
+    let mut known_mutates_first_arg: HashSet<String> = HashSet::new();
     let known_function_arities = top_level_function_arities(root);
+    let mut record = |item_expr: &Expression, let_node: &TypedExpression| {
+        let binding_name = match item_expr {
+            Expression::Apply(items) => match &items[..] {
+                [Expression::Word(kw), Expression::Word(name), _]
+                    if kw == "let" || kw == "letrec" =>
+                {
+                    Some(name.clone())
+                }
+                _ => None,
+            },
+            _ => None,
+        }?;
+        let _ = eval_function_binding_requires_bang(
+            item_expr,
+            let_node,
+            &extern_names,
+            &mut known_requires_bang,
+            &known_function_arities,
+        );
+        let mutates = match item_expr {
+            Expression::Apply(items) => match items.get(2) {
+                Some(Expression::Word(alias)) => known_mutates_first_arg.contains(alias),
+                _ => eval_function_binding_mutates_first_arg(
+                    item_expr,
+                    &known_requires_bang,
+                    &known_mutates_first_arg,
+                ),
+            },
+            _ => false,
+        };
+        if mutates {
+            known_mutates_first_arg.insert(binding_name.clone());
+        }
+        out.insert(binding_name, mutates);
+        Some(())
+    };
     if let Expression::Apply(items) = &root.expr {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
             if items.len() == root.children.len() {
@@ -1589,28 +1546,12 @@ pub fn collect_top_level_function_external_impurity(
                     let Some(let_node) = root.children.get(idx) else {
                         continue;
                     };
-                    if let Some((name, requires)) = eval_function_binding_requires_bang(
-                        &items[idx],
-                        let_node,
-                        &extern_names,
-                        &mut known_requires_bang,
-                        &known_function_arities,
-                    ) {
-                        out.insert(name, requires);
-                    }
+                    let _ = record(&items[idx], let_node);
                 }
             }
             return;
         }
-        if let Some((name, requires)) = eval_function_binding_requires_bang(
-            &root.expr,
-            root,
-            &extern_names,
-            &mut known_requires_bang,
-            &known_function_arities,
-        ) {
-            out.insert(name, requires);
-        }
+        let _ = record(&root.expr, root);
     }
 }
 
@@ -2455,9 +2396,6 @@ fn infer_extern(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     let typ = crate::externals::parse_extern_decl(&Expression::Apply(exprs.to_vec()))?
         .ok_or_else(|| "invalid extern declaration".to_string())?
         .typ;
-    if !local_name.ends_with('!') {
-        return Err(format!("Extern '{}' must end with '!'", local_name));
-    }
     let scheme = TypeScheme::monotype(typ.clone());
     if let Some(current) = ctx
         .env

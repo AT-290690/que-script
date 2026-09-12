@@ -1323,7 +1323,7 @@ fn native_shell_learn() -> &'static str {
     - mut/alter! are for local primitive scalar mutation only (Int/Dec/Bool/Char), same lambda scope.\n\
     - &mut/&alter! are for shared mutation across lambda scopes via boxed references.\n\
     - Vector/state mutation uses set!, push!, pop!.\n\
-    - Functions with side effects (mutation or I/O) must end with !.\n\
+    - A trailing ! is an optional convention for functions with mutation or I/O; effects are inferred from the body.\n\
     - If a function mutates args, the mutated arg must be the first arg.\n\
     - If mutating multiple values, pass them inside the first arg (typically a tuple).\n\
     - Low-level mutation forms such as alter!, set!, push!, and pop! are effect-oriented; use their result only when the specific function documents one.\n\
@@ -1552,9 +1552,9 @@ fn native_shell_pitfalls() -> &'static str {
     - when is variadic and wraps its body in do.\n\
     \n\
     Mutation and effects:\n\
-    - Local mut/alter! inside a function does not automatically require a ! suffix.\n\
+    - A ! suffix is optional; mutation and I/O are inferred independently of the function name.\n\
     - ! means the function has caller-visible mutation/effects, not merely internal mutable implementation.\n\
-    - An impure function with caller-visible mutation must end with !.\n\
+    - Caller-visible mutation is tracked structurally; using ! remains a readability convention.\n\
     - In an impure ! function, the caller-visible mutated argument must be argument 1.\n\
     - Put the thing being mutated first, matching set!, push!, and pop!.\n\
     - If a function mutates multiple caller-visible values, group them into the first argument.\n\
@@ -1680,7 +1680,7 @@ fn native_shell_style() -> &'static str {
     - Use mut/alter! for local scalar counters and accumulators.\n\
     - Use push!, set!, pop! for vector-building hot loops.\n\
     - Use &mut/&alter! only for shared mutable state across lambda scopes.\n\
-    - Functions with effects must end with !.\n\
+    - Functions may conventionally end with ! for effects and ? for predicates, but neither suffix is required.\n\
     \n\
     Testing:\n\
     - Keep program code in main.que and tests in main.test.que for projects.\n\

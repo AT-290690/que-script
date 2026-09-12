@@ -605,6 +605,13 @@ pub fn collect_let_binding_effects(
     effects: &mut HashMap<String, EffectFlags>,
     fallback_effects: &HashMap<String, EffectFlags>,
 ) {
+    // Nested bindings must be known before refining their enclosing lambda.
+    // Otherwise a call to a local `letrec` is left as `unknown-call`, and its
+    // real IO/mutation effects never reach the outer function.
+    for child in &node.children {
+        collect_let_binding_effects(child, effects, fallback_effects);
+    }
+
     if let Expression::Apply(items) = &node.expr {
         if let [Expression::Word(keyword), Expression::Word(name), _rhs, ..] = &items[..] {
             if keyword == "let" || keyword == "letrec" || keyword == "mut" {
@@ -646,10 +653,6 @@ pub fn collect_let_binding_effects(
             }
         }
     }
-
-    for child in &node.children {
-        collect_let_binding_effects(child, effects, fallback_effects);
-    }
 }
 
 pub fn known_symbol_effect(symbol: &str) -> Option<EffectFlags> {
@@ -657,9 +660,6 @@ pub fn known_symbol_effect(symbol: &str) -> Option<EffectFlags> {
         return Some(EffectFlags::IO);
     }
     if matches!(symbol, "set!" | "&alter!" | "alter!" | "pop!" | "pop-val!") {
-        return Some(EffectFlags::MUTATE);
-    }
-    if symbol.ends_with('!') {
         return Some(EffectFlags::MUTATE);
     }
     None
@@ -687,7 +687,7 @@ pub fn format_effect_flags(effect: EffectFlags) -> Option<String> {
 }
 
 pub fn format_effect_flags_for_symbol(
-    symbol: &str,
+    _symbol: &str,
     effect: EffectFlags,
     externally_impure: Option<bool>,
 ) -> Option<String> {
@@ -696,10 +696,13 @@ pub fn format_effect_flags_for_symbol(
     }
     let mut labels = Vec::new();
     if effect.contains(EffectFlags::MUTATE) {
-        if symbol.ends_with('!') || externally_impure == Some(true) {
-            labels.push("mutate");
-        } else {
-            labels.push("local-mutate");
+        match externally_impure {
+            Some(true) => labels.push("mutate"),
+            Some(false) => {
+                // Mutation used only inside the implementation is not an
+                // observable effect of calling this function.
+            }
+            None => {}
         }
     }
     if effect.contains(EffectFlags::IO) {

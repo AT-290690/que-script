@@ -206,12 +206,12 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         user_form_count,
     ) {
         Ok((_typ, typed)) => {
+            collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
             let typed_user_forms = extract_user_top_level_typed_forms(&typed, user_form_count);
             for form in &typed_user_forms {
                 collect_symbol_types(form, &mut symbol_types_raw);
                 collect_let_binding_types(form, &mut let_binding_types_raw);
                 collect_let_binding_effects(form, &mut let_binding_effects, &core.global_effects);
-                collect_let_binding_external_impurity(form, &mut let_binding_external_impure);
             }
             let form_ranges = top_level_form_ranges(text);
             let count = form_ranges.len().min(typed_user_forms.len());

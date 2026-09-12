@@ -1,6 +1,4 @@
-const fs = require("fs");
 const os = require("os");
-const path = require("path");
 const vscode = require("vscode");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 
@@ -8,6 +6,7 @@ const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 let client;
 /** @type {vscode.DiagnosticCollection | undefined} */
 let shellDiagnostics;
+let activeServer;
 
 const QUE_HEREDOC_TAG = "QUE";
 const SHELL_ANALYSIS_DEBOUNCE_MS = 250;
@@ -872,15 +871,7 @@ function executableName() {
   return os.platform() === "win32" ? "quelsp.exe" : "quelsp";
 }
 
-function workspaceRoot() {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) {
-    return undefined;
-  }
-  return folders[0].uri.fsPath;
-}
-
-function resolveServerCommand(context) {
+function resolveServerCommand(_context) {
   const cfg = vscode.workspace.getConfiguration("que");
   const configuredPath = cfg.get("languageServer.path");
   if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
@@ -892,42 +883,14 @@ function resolveServerCommand(context) {
     return { command: envPath.trim(), args: [] };
   }
 
-  const exe = executableName();
-  const root = workspaceRoot();
-  const candidateRoots = [];
-  if (root) {
-    candidateRoots.push(root);
-  }
-  candidateRoots.push(path.resolve(context.extensionPath, "..", "..", ".."));
-
-  for (const base of candidateRoots) {
-    const debugPath = path.join(base, "target", "debug", exe);
-    if (fs.existsSync(debugPath)) {
-      return { command: debugPath, args: [] };
-    }
-    const releasePath = path.join(base, "target", "release", exe);
-    if (fs.existsSync(releasePath)) {
-      return { command: releasePath, args: [] };
-    }
-  }
-
-  if (root) {
-    const cargoManifest = path.join(root, "Cargo.toml");
-    const lspBinSource = path.join(root, "src", "bin", "quelsp.rs");
-    if (fs.existsSync(cargoManifest) && fs.existsSync(lspBinSource)) {
-      return {
-        command: "cargo",
-        args: ["run", "--quiet", "--bin", "quelsp"],
-        cwd: root,
-      };
-    }
-  }
-
-  return { command: exe, args: [] };
+  // Match other editors by using the installed server from PATH. Previously a
+  // checkout's target/debug/quelsp silently won, even when it was stale.
+  return { command: executableName(), args: [] };
 }
 
 function createClient(context) {
   const server = resolveServerCommand(context);
+  activeServer = server;
   const run = {
     command: server.command,
     args: server.args,
@@ -995,6 +958,14 @@ async function activate(context) {
     }
   );
 
+  const showServerCommand = vscode.commands.registerCommand(
+    "que.showLanguageServer",
+    () => {
+      const server = activeServer || resolveServerCommand(context);
+      vscode.window.showInformationMessage(`Que language server: ${server.command}`);
+    }
+  );
+
   const toggleLineCommentCommand = vscode.commands.registerCommand(
     "que.toggleLineComment",
     async () => {
@@ -1012,6 +983,7 @@ async function activate(context) {
 
   context.subscriptions.push(signatureProvider);
   context.subscriptions.push(restartCommand);
+  context.subscriptions.push(showServerCommand);
   context.subscriptions.push(toggleLineCommentCommand);
 }
 

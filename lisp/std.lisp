@@ -3577,3 +3577,63 @@ q)))
   (print! text)
   (print! [nl]))))
 (let println! std/io/println!)
+
+(let std/vector/char/matches-at?
+  (lambda (data target offset)
+    (let target-len (length target))
+    (mut i 0)
+    (mut same true)
+    (while (and same (< i target-len))
+      (do
+        (if (not (=# (get data (+ offset i))
+                     (get target i)))
+            (alter! same false))
+        (alter! i (+ i 1))))
+    same))
+
+(let std/vector/char/contains?
+  (lambda (data target)
+    (let data-len (length data))
+    (let target-len (length target))
+    (if (= target-len 0)
+        true
+        (if (> target-len data-len)
+            false
+            (do
+              (mut i 0)
+              (mut found false)
+              (while
+                (and
+                  (not found)
+                  (<= i (- data-len target-len)))
+                (do
+                  (if
+                    (std/vector/char/matches-at?
+                      data
+                      target
+                      i)
+                    (alter! found true))
+                  (alter! i (+ i 1))))
+              found)))))
+
+(let std/vector/char/starts?
+  (lambda (data prefix)
+    (let data-len (length data))
+    (let prefix-len (length prefix))
+    (if (> prefix-len data-len)
+        false
+        (std/vector/char/matches-at?
+          data
+          prefix
+          0))))
+
+(let std/vector/char/ends?
+  (lambda (data suffix)
+    (let data-len (length data))
+    (let suffix-len (length suffix))
+    (if (> suffix-len data-len)
+        false
+        (std/vector/char/matches-at?
+          data
+          suffix
+          (- data-len suffix-len)))))

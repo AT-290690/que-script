@@ -10,6 +10,10 @@ Requires the Que LSP binary (`quelsp`) to be installed or configured with:
 "que.languageServer.path": "/absolute/path/to/quelsp"
 ```
 
+By default the extension runs `quelsp` from `PATH`, matching other editors.
+Use **Que: Show Language Server** from the command palette to see the selected
+command. Set the path above (or `QUE_LSP_PATH`) for a checkout-specific binary.
+
 Works in:
 
 - `.que` files

@@ -2056,14 +2056,15 @@ xs)"#,
                                 (lambda x
                                     (do
                                         (letrec tail-call:retry!
-                                            (lambda x out
+                                            (lambda out x
                                                 (do
                                                     (let result (- (/ x 3) 2))
                                                     (if (<= result 0)
                                                         out
-                                                        (tail-call:retry! result
-                                                            (do (push! out result) out))))))
-                                        (tail-call:retry! x []))))
+                                                        (tail-call:retry!
+                                                            (do (push! out result) out)
+                                                            result)))))
+                                        (tail-call:retry! [] x))))
                             (|> input (map retry) (map sum) (sum)))))
                 [(part1 PARSED) (part2 PARSED)])"#,
             true,
@@ -3631,7 +3632,7 @@ out"#,
     }
 
     #[test]
-    fn test_infer_impure_function_requires_bang_suffix() {
+    fn test_infer_impure_function_does_not_require_bang_suffix() {
         let exprs =
             crate::parser::parse("(let fn (lambda xs (set! xs 0 1)))").expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -3639,16 +3640,11 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("impure function without ! should fail");
-        assert!(
-            err.contains("Impure function 'fn' must end with '!'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
-    fn test_infer_bang_function_must_have_caller_visible_effect() {
+    fn test_infer_bang_suffix_is_allowed_on_pure_function() {
         let exprs =
             crate::parser::parse("(let f! (lambda x (+ x 1)))").expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -3656,16 +3652,11 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("pure function with ! should fail");
-        assert!(
-            err.contains("Function 'f!' ends with '!' but has no caller-visible effect"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
-    fn test_infer_bool_returning_function_requires_question_suffix() {
+    fn test_infer_bool_returning_function_does_not_require_question_suffix() {
         let exprs = crate::parser::parse("(let even (lambda x (= (mod x 2) 0)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -3673,16 +3664,11 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("Bool-returning function without ? should fail");
-        assert!(
-            err.contains("Bool-returning function 'even' must end with '?'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
-    fn test_infer_question_function_must_return_bool() {
+    fn test_infer_question_suffix_is_allowed_on_non_bool_function() {
         let exprs = crate::parser::parse("(let count? (lambda xs (length xs)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -3690,12 +3676,7 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("non-Bool function with ? should fail");
-        assert!(
-            err.contains("Function 'count?' ends with '?' but returns Int, expected Bool"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
@@ -3720,7 +3701,7 @@ out"#,
     }
 
     #[test]
-    fn test_infer_nested_impure_function_requires_bang_suffix() {
+    fn test_infer_nested_impure_function_does_not_require_bang_suffix() {
         let exprs = crate::parser::parse(
             "(let search?! (lambda x (do
                 (let cell (vector 0))
@@ -3733,16 +3714,11 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("nested impure function without ! should fail");
-        assert!(
-            err.contains("Impure function 'bs' must end with '!'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
-    fn test_infer_nested_impure_bool_function_requires_question_suffix() {
+    fn test_infer_nested_impure_bool_function_does_not_require_question_suffix() {
         let exprs = crate::parser::parse(
             "(let search?! (lambda x (do
                 (let cell (vector 0))
@@ -3755,16 +3731,11 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("nested Bool function without ? should fail");
-        assert!(
-            err.contains("Bool-returning function 'bs!' must end with '?'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
-    fn test_infer_direct_lambda_body_letrec_requires_question_suffix() {
+    fn test_infer_direct_lambda_body_letrec_allows_plain_name() {
         let expr = crate::parser::build(
             "(let search (lambda (target xs)
                 (letrec bs (lambda (left right)
@@ -3775,12 +3746,7 @@ out"#,
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("direct nested Bool function without ? should fail");
-        assert!(
-            err.contains("Bool-returning function 'bs' must end with '?'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
@@ -3818,12 +3784,7 @@ out"#,
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("IO through composed function should require !");
-        assert!(
-            err.contains("Impure function 'search' must end with '!'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
@@ -3840,16 +3801,11 @@ out"#,
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("nested IO function should require !");
-        assert!(
-            err.contains("Impure function 'bs' must end with '!'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
-    fn test_infer_impure_function_alias_requires_bang_suffix() {
+    fn test_infer_impure_function_alias_does_not_require_bang_suffix() {
         let exprs = crate::parser::parse(
             "(do (let reverse! (lambda xs (set! xs 0 1))) (let reverse reverse!) reverse)",
         )
@@ -3859,16 +3815,11 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("impure function alias without ! should fail");
-        assert!(
-            err.contains("Impure function 'reverse' must end with '!'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
-    fn test_infer_impure_wrapper_call_requires_bang_suffix() {
+    fn test_infer_impure_wrapper_call_does_not_require_bang_suffix() {
         let exprs = crate::parser
             ::parse(
                 "(do (let reverse! (lambda xs (set! xs 0 1))) (let wrap (lambda xs (reverse! xs))) wrap)"
@@ -3879,12 +3830,7 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("impure wrapper without ! should fail");
-        assert!(
-            err.contains("Impure function 'wrap' must end with '!'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
@@ -3925,7 +3871,7 @@ out"#,
     }
 
     #[test]
-    fn test_infer_saturated_alias_call_of_impure_function_requires_bang_suffix() {
+    fn test_infer_saturated_alias_call_does_not_require_bang_suffix() {
         let exprs = crate::parser
             ::parse(
                 "(do (let fn! (lambda a b (do (set! a 0 b) a))) (let f2 (lambda xs (do (let c xs) (fn! c 2)))) f2)"
@@ -3936,12 +3882,7 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("saturated impure alias call without ! should fail");
-        assert!(
-            err.contains("Impure function 'f2' must end with '!'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
@@ -3961,7 +3902,7 @@ out"#,
     }
 
     #[test]
-    fn test_infer_impure_hyphenated_function_requires_bang_suffix() {
+    fn test_infer_impure_hyphenated_function_does_not_require_bang_suffix() {
         let exprs = crate::parser::parse("(let append-ten (lambda xs (set! xs (length xs) 10)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -3969,12 +3910,7 @@ out"#,
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("impure hyphenated function without ! should fail");
-        assert!(
-            err.contains("Impure function 'append-ten' must end with '!'"),
-            "unexpected error: {}",
-            err
-        );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]
@@ -3991,6 +3927,30 @@ out"#,
             err.contains("must mutate its first parameter"),
             "unexpected error: {}",
             err
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
+    fn test_loop_in_pop_val_rejects_mutating_second_parameter_without_bang_suffix() {
+        let source = r#"(let rev (lambda (u xs)
+  (let out [])
+  (loop/in x xs (push! out (pop-val! xs)))
+  out))
+(rev [] [1 2 3])"#;
+        let std_ast = crate::baked::load_ast();
+        let crate::parser::Expression::Apply(items) = std_ast else {
+            panic!("std ast should be (do ...)");
+        };
+        let program = crate::parser::merge_std_and_program(source, items[1..].to_vec())
+            .expect("program + std should merge");
+        let err = crate::wat::compile_program_to_wat_with_opts(&program, true)
+            .expect_err("mutation of argument 2 must be rejected");
+
+        assert!(
+            err.contains("must mutate its first parameter (argument 1)")
+                && err.contains("argument 2"),
+            "unexpected error: {err}"
         );
     }
 
@@ -5220,7 +5180,7 @@ out"#,
 
         assert_eq!(
             contents,
-            "map : ([Char] -> [Char]) -> [[Char]] -> [[Char]] | effects: local-mutate, unknown-call"
+            "map : ([Char] -> [Char]) -> [[Char]] -> [[Char]] | effects: unknown-call"
         );
     }
 
@@ -5416,7 +5376,7 @@ out"#,
 
         assert_eq!(
             contents,
-            "map : (T -> K) -> [T] -> [K] | effects: local-mutate, unknown-call"
+            "map : (T -> K) -> [T] -> [K] | effects: unknown-call"
         );
     }
 
@@ -5433,7 +5393,7 @@ out"#,
 
         assert_eq!(
             contents,
-            "map : (T -> K) -> [T] -> [K] | effects: local-mutate, unknown-call"
+            "map : (T -> K) -> [T] -> [K] | effects: unknown-call"
         );
     }
 
@@ -5448,10 +5408,7 @@ out"#,
             .and_then(|v| v.as_str())
             .expect("hover response should include string contents");
 
-        assert_eq!(
-            contents,
-            "String->Integer : [Char] -> Int | effects: local-mutate"
-        );
+        assert_eq!(contents, "String->Integer : [Char] -> Int");
     }
 
     #[test]
@@ -5517,7 +5474,7 @@ out"#,
     }
 
     #[test]
-    fn test_wasm_lsp_diagnostics_preserve_impure_uppercase_function_name() {
+    fn test_wasm_lsp_diagnostics_allow_impure_uppercase_function_without_suffix() {
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(
             r#"(let J
   (lambda (xs)
@@ -5527,22 +5484,7 @@ out"#,
         );
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
-        let first_message = diagnostics
-            .as_array()
-            .and_then(|items| items.first())
-            .and_then(|item| item.get("message"))
-            .and_then(|message| message.as_str())
-            .expect("diagnostic should include a message");
-        assert!(
-            first_message.contains("Impure function 'J' must end with '!'"),
-            "expected diagnostic to preserve function name J, got: {}",
-            diagnostics_json
-        );
-        assert!(
-            !first_message.contains("Impure function 'T'"),
-            "diagnostic should not normalize function name J as a type variable, got: {}",
-            diagnostics_json
-        );
+        assert_eq!(diagnostics, serde_json::json!([]));
     }
 
     #[test]
@@ -5607,6 +5549,91 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_io_composition_does_not_report_internal_mutation() {
+        let program = "(let log! (comp Integer->String println!))\nlog!";
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 1, 2);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(contents.contains("effects: io"), "got: {}", contents);
+        assert!(!contents.contains("mutate"), "got: {}", contents);
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_io_wrapper_does_not_inherit_false_mutation() {
+        let program = r#"(let log! (comp Integer->String println!))
+(let search?! (lambda (target xs) (do (log! target) false)))
+search?!"#;
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 2, 3);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let contents = hover
+            .get("contents")
+            .and_then(|v| v.as_str())
+            .expect("hover response should include string contents");
+
+        assert!(contents.contains("effects: io"), "got: {}", contents);
+        assert!(!contents.contains("mutate"), "got: {}", contents);
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_nested_io_recursion_propagates_io_without_mutation() {
+        let program = r#"(let log! (comp Integer->String println!))
+(let search?! (lambda (target xs)
+  (letrec bs?! (lambda (left right)
+    (if (> left right) false
+      (do
+        (let idx (/ (+ left right) 2))
+        (let current (get xs idx))
+        (log! current)
+        (if (= target current) true
+          (if (> target current)
+              (bs?! (+ idx 1) right)
+              (bs?! left (- idx 1))))))))
+  (bs?! 0 (- (length xs) 1))))
+search?!"#;
+
+        let search: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_hover(program.to_string(), 1, 7))
+                .expect("search hover should be valid JSON");
+        let bs: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_hover(program.to_string(), 2, 11))
+                .expect("bs hover should be valid JSON");
+        let search_contents = search["contents"].as_str().unwrap_or("");
+        let bs_contents = bs["contents"].as_str().unwrap_or("");
+
+        assert!(
+            search_contents.contains("effects: io"),
+            "got: {search_contents}"
+        );
+        assert!(
+            !search_contents.contains("mutate"),
+            "got: {search_contents}"
+        );
+        assert!(bs_contents.contains("effects: io"), "got: {bs_contents}");
+        assert!(!bs_contents.contains("mutate"), "got: {bs_contents}");
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_plain_named_function_reports_inferred_caller_mutation() {
+        let program = r#"(let reverse-list-loop (lambda (xs)
+  (do
+    (pop-val! xs)
+    xs)))
+reverse-list-loop"#;
+        let hover: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_hover(program.to_string(), 4, 5))
+                .expect("hover response should be valid JSON");
+        let contents = hover["contents"].as_str().unwrap_or("");
+
+        assert!(contents.contains("effects: mutate"), "got: {contents}");
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_alias_preserves_mutation_effect() {
         let program =
             "(let std/vector/reverse! (lambda xs (do (set! xs 0 1) nil)))\n(let reverse! std/vector/reverse!)\nreverse!";
@@ -5657,11 +5684,7 @@ out"#,
             .and_then(|v| v.as_str())
             .expect("hover response should include string contents");
 
-        assert!(
-            contents.contains("effects: local-mutate"),
-            "expected std/vector/map hover to include local-mutate effect, got: {}",
-            contents
-        );
+        assert!(!contents.contains("mutate"), "got: {}", contents);
     }
 
     #[test]
@@ -5675,11 +5698,7 @@ out"#,
             .and_then(|v| v.as_str())
             .expect("hover response should include string contents");
 
-        assert!(
-            contents.contains("effects: local-mutate"),
-            "expected map hover to include local-mutate effect, got: {}",
-            contents
-        );
+        assert!(!contents.contains("mutate"), "got: {}", contents);
     }
 
     #[test]
@@ -5723,7 +5742,7 @@ out"#,
     }
 
     #[test]
-    fn test_wasm_lsp_hover_local_mutation_without_bang_is_local_mutate() {
+    fn test_wasm_lsp_hover_local_mutation_is_not_an_observable_effect() {
         let hover_json = crate::wasm_api::lsp_hover(
             "(let fn (lambda xs (do (let out []) (push! out 0) out)))\nfn".to_string(),
             1,
@@ -5738,13 +5757,8 @@ out"#,
             .expect("hover response should include string contents");
 
         assert!(
-            contents.contains("effects: local-mutate"),
-            "expected local mutation classification, got: {}",
-            contents
-        );
-        assert!(
-            !contents.contains("effects: mutate"),
-            "expected not to classify as external mutate, got: {}",
+            !contents.contains("mutate"),
+            "expected implementation-local mutation to be hidden, got: {}",
             contents
         );
     }
@@ -6460,20 +6474,15 @@ parse-value"#;
     }
 
     #[test]
-    fn test_extern_requires_bang_suffix() {
+    fn test_extern_does_not_require_bang_suffix() {
         let expr =
             crate::parser::build(r#"(do (extern env add_one add-one (Int -> Int)) (add-one 41))"#)
                 .expect("program should build");
-        let err = crate::infer::infer_with_builtins_typed(
+        let inferred = crate::infer::infer_with_builtins_typed(
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
-        )
-        .expect_err("extern without ! should fail");
-        assert!(
-            err.contains("must end with '!'"),
-            "expected extern bang validation error, got: {}",
-            err
         );
+        assert!(inferred.is_ok(), "got: {:?}", inferred);
     }
 
     #[test]

@@ -3,7 +3,7 @@
   "displayName": "Eclisp language support for Que",
   "publisher": "anthony",
   "description": "Eclisp syntax highlighting and IntelliSense for .que files powered by the Que toolchain.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "main": "./extension.js",
   "icon": "logo.png",
   "scripts": {
@@ -56,6 +56,10 @@
       {
         "command": "que.restartLanguageServer",
         "title": "Que: Restart Eclisp Language Server"
+      },
+      {
+        "command": "que.showLanguageServer",
+        "title": "Que: Show Language Server"
       },
       {
         "command": "que.toggleLineComment",

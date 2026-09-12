@@ -1334,11 +1334,11 @@ fn analyze_document_text(
     match infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count)
     {
         Ok((_typ, typed)) => {
+            collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
             for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
                 collect_symbol_types(form, &mut symbol_types_raw);
                 collect_let_binding_types(form, &mut let_binding_types_raw);
                 collect_let_binding_effects(form, &mut let_binding_effects, global_effects);
-                collect_let_binding_external_impurity(form, &mut let_binding_external_impure);
             }
             form_scoped_symbols =
                 build_form_scoped_analyses(text, user_form_count, &typed, global_effects);
