@@ -208,7 +208,7 @@
 (let Int/eq? (lambda a b (= a b)))
 (let Bool/eq? (lambda a b (=? a b)))
 
-(let String/start? (lambda (needle xs) (std/vector/char/starts? xs needle)))
+(let String/starts? (lambda (needle xs) (std/vector/char/starts? xs needle)))
 (let String/ends? (lambda (needle xs) (std/vector/char/ends? xs needle)))
 (let String/contains? (lambda (needle xs) (std/vector/char/contains? xs needle)))
 
