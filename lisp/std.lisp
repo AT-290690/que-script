@@ -1418,15 +1418,22 @@ heap)))
 (let std/convert/integer->string-base (lambda num base  
     (if (= num 0) "0" (do 
         (let neg? (< num 0))
-        (&mut n (if neg? (* num -1) num))
-        (letrec tail-call/while! (lambda out
-            (if (> (&get n) 0) (do
-                (let x (mod (&get n) base))
-                (std/vector/push! out x)
-                (&alter! n (/ (&get n) base))
-                (tail-call/while! out)) out)))
-        (let str (std/convert/digits->chars (tail-call/while! [])))
-        (std/vector/reverse (if neg? (std/vector/append! str std/char/dash) str))))))
+        (mut n (if neg? (* num -1) num))
+        (let str [])
+        (while (> n 0) (do
+            (let x (mod n base))
+            (std/vector/push! str (+# (Int->Char x) (char 48)))
+            (alter! n (/ n base))))
+        (if neg? (do (std/vector/push! str std/char/dash) nil))
+        (mut left 0)
+        (mut right (- (length str) 1))
+        (while (< left right) (do
+            (let ch (get str left))
+            (set! str left (get str right))
+            (set! str right ch)
+            (alter! left (+ left 1))
+            (alter! right (- right 1))))
+        str))))
 (let std/convert/integer->string (lambda x (std/convert/integer->string-base x 10)))
 (let std/convert/vector->set (lambda xs (do
     (let s [ [] [] [] [] [] [] [] ])

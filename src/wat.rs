@@ -6911,7 +6911,9 @@ fn compile_do(
             &scoped_lambda_bindings,
         );
     }
-    let last = child_at(items.len() - 1)
+    let last_node =
+        child_at(items.len() - 1).ok_or_else(|| "Missing final do expression".to_string())?;
+    let last = Some(last_node)
         .ok_or_else(|| "Missing final do expression".to_string())
         .and_then(|n| {
             let scoped_ctx = Ctx {
@@ -10614,6 +10616,7 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
     if ctx.extern_names.contains(op) {
         return compile_extern_direct_call(op, args, &ret_ty, ctx);
     }
+
     let mut out = Vec::new();
     if !unit_arity_elided {
         for arg in args {
