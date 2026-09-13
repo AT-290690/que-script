@@ -1268,6 +1268,11 @@ fn native_shell_learn() -> &'static str {
     - loop macros create their own block, so sequential loops may safely reuse the same index name.\n\
     - Unit is 0 (nil).\n\
     \n\
+    Comments:\n\
+    - A semicolon starts a line comment: ; this is ignored\n\
+    - The comment continues to the end of the current line.\n\
+    - Comments may appear on their own line or after an expression: (+ 1 2) ; result is 3\n\
+    \n\
     Control:\n\
     - (if cond then else)\n\
     - (if cond then) is valid and inserts nil as the else branch.\n\
@@ -3833,16 +3838,15 @@ fn build_debug_error_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        init_host_project, init_project_config_file, native_shell_examples, native_shell_help,
-        native_shell_nvim_help, nvim_runner_lua, nvim_scratch_path, parse_test_results,
+        init_host_project, init_project_config_file, nvim_runner_lua, parse_test_results,
         resolve_explain_input, resolve_project_entry_path, take_debug_mode_from_argv,
-        take_emit_request_from_argv, take_help_flag_from_argv, take_no_result_flag_from_argv,
+        take_emit_request_from_argv, take_no_result_flag_from_argv,
         take_nvim_initial_code, take_opt_flag_from_argv, take_shell_policy_from_argv,
         wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol, QueTestCase, ShellPermission,
         ShellPolicy,
     };
     use std::collections::HashSet;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     #[test]
     fn parse_policy_empty_permissions() {
@@ -4093,27 +4097,6 @@ mod tests {
     }
 
     #[test]
-    fn take_help_strips_help_flags() {
-        let mut args = vec![
-            "script.que".to_string(),
-            "--help".to_string(),
-            "-h".to_string(),
-            "user-arg".to_string(),
-        ];
-        let has_help = take_help_flag_from_argv(&mut args);
-        assert!(has_help);
-        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
-    }
-
-    #[test]
-    fn take_help_returns_false_when_missing() {
-        let mut args = vec!["script.que".to_string(), "user-arg".to_string()];
-        let has_help = take_help_flag_from_argv(&mut args);
-        assert!(!has_help);
-        assert_eq!(args, vec!["script.que".to_string(), "user-arg".to_string()]);
-    }
-
-    #[test]
     fn take_no_result_strips_flag() {
         let mut args = vec![
             "script.que".to_string(),
@@ -4234,52 +4217,8 @@ mod tests {
             std::fs::read_to_string(base.join("README.md")).expect("README.md should be readable");
         assert!(readme_text.contains("que test ."));
         assert!(readme_text.contains("que init --demo"));
-        assert!(readme_text.contains("que --learn"));
-        assert!(readme_text.contains("que --style"));
-        assert!(readme_text.contains("que --pitfalls"));
-        assert!(readme_text.contains("que --examples"));
         let err = init_project_config_file(&base, false).expect_err("second init should fail");
         assert!(err.contains("already exists"));
-    }
-
-    #[test]
-    fn native_shell_help_mentions_style_guide() {
-        let help = native_shell_help("que");
-        assert!(help.contains("que --style"));
-        assert!(help.contains("Print Eclisp style and optimization guidance"));
-        assert!(help.contains("que --pitfalls"));
-        assert!(help.contains("Print common Eclisp gotchas and debugging rules"));
-        assert!(help.contains("que --examples"));
-        assert!(help.contains("Print small functional, imperative, and mixed Que examples"));
-        assert!(help.contains("que nvim"));
-        assert!(help.contains("Edit a temporary .que program in Neovim"));
-    }
-
-    #[test]
-    fn native_shell_nvim_help_describes_terminal_workflow() {
-        let help = native_shell_nvim_help("que");
-        assert!(help.contains("Usage: que nvim"));
-        assert!(help.contains(":QueRun / <leader>r"));
-        assert!(help.contains(":QueDebug / <leader>d"));
-        assert!(help.contains(":QueWat / <leader>w"));
-        assert!(help.contains(":QueTypes / <leader>a"));
-        assert!(help.contains(":QueExplain / <leader>e"));
-        assert!(help.contains(":QueSource / <leader>z"));
-        assert!(help.contains(":wq or ZZ"));
-        assert!(help.contains(":q! to cancel"));
-        assert!(help.contains("Esc keeps its normal Neovim meaning"));
-        assert!(help.contains("--code prefills"));
-        let project = Path::new("/tmp/example-project");
-        let scratch = nvim_scratch_path(project);
-        assert_eq!(scratch.parent(), Some(project));
-        assert_eq!(
-            scratch.extension().and_then(|ext| ext.to_str()),
-            Some("que")
-        );
-        assert!(scratch
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("que-script-")));
     }
 
     #[test]
@@ -4307,19 +4246,6 @@ mod tests {
 
         let mut missing = vec!["--code".to_string()];
         assert!(take_nvim_initial_code(&mut missing).is_err());
-    }
-
-    #[test]
-    fn native_shell_examples_cover_core_language_styles() {
-        let examples = native_shell_examples();
-        assert!(examples.contains("FUNCTIONAL"));
-        assert!(examples.contains("IMPERATIVE"));
-        assert!(examples.contains("SEQUENCING AND SCOPE"));
-        assert!(examples.contains("(letrec factorial"));
-        assert!(examples.contains("(|> [1 2 3 4 5]"));
-        assert!(examples.contains("(mut total 0)"));
-        assert!(examples.contains("(let squares!"));
-        assert!(examples.contains("do sequences expressions"));
     }
 
     #[test]

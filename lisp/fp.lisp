@@ -560,3 +560,7 @@
 (let trim std/vector/char/trim)
 (let trim/left std/vector/char/trim/left)
 (let trim/right std/vector/char/trim/right)
+
+(let shoelace std/int/shoelace)
+(let sequence std/vector/int/sequence)
+(let collinear? std/int/collinear?)

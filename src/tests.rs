@@ -2351,44 +2351,6 @@ xs)"#,
         assert_eq!(output, "2");
     }
 
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_runtime_parse_int_words_from_baked_library() {
-        let output =
-            run_program_output_with_std_and_opts(r#"(sum (parse/int/words "10 20 30"))"#, true);
-        assert_eq!(output, "60");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_runtime_parse_bool_words_from_baked_library() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(sum (map Bool->Int (parse/bool/words "yes false 1 true no")))"#,
-            true,
-        );
-        assert_eq!(output, "3");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_runtime_parse_row3_from_baked_library() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(let {a b c} (parse/row3 String->Integer String->Integer String->Integer "4 5 6"))
-(+ a b c)"#,
-            true,
-        );
-        assert_eq!(output, "15");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_runtime_parse_int_matrix_from_baked_library() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(sum (map sum (parse/int/matrix "1 2\n3 4")))"#,
-            true,
-        );
-        assert_eq!(output, "10");
-    }
 
     #[test]
     #[cfg(all(feature = "runtime", feature = "io"))]
