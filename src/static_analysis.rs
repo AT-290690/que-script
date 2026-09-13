@@ -11,6 +11,12 @@ struct GuardRelation {
 
 type GuardSummary = Vec<GuardRelation>;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PredicateSummary {
+    params: Vec<String>,
+    body: String,
+}
+
 /// Abstract state at one program point.  This is deliberately independent of
 /// the runtime representation: later analyses (division, overflow, and so on)
 /// can add domains here without becoming part of WAT lowering.
@@ -29,6 +35,7 @@ struct AbstractState {
     /// expression prove an access through a later `let` bound to that expression.
     scalar_aliases: HashMap<String, String>,
     guard_summaries: HashMap<String, GuardSummary>,
+    predicate_summaries: HashMap<String, PredicateSummary>,
 }
 
 /// Conservative control-flow merge.  A fact is available after a join only
@@ -94,6 +101,7 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         // Function summaries are immutable analysis metadata rather than a
         // path-sensitive fact.
         guard_summaries: left.guard_summaries.clone(),
+        predicate_summaries: left.predicate_summaries.clone(),
     }
 }
 
@@ -210,6 +218,7 @@ fn collect_static_bound_guard_facts(
     lower: &mut HashSet<String>,
     upper: &mut Vec<(String, String)>,
     minimum_lengths: &mut Vec<(String, usize)>,
+    expansion_depth: usize,
 ) {
     let Expression::Apply(items) = expr else {
         return;
@@ -226,11 +235,20 @@ fn collect_static_bound_guard_facts(
                     lower,
                     upper,
                     minimum_lengths,
+                    expansion_depth,
                 );
             }
         }
         [Expression::Word(op), inner] if op == "not" => {
-            collect_static_bound_guard_facts(inner, facts, !is_true, lower, upper, minimum_lengths);
+            collect_static_bound_guard_facts(
+                inner,
+                facts,
+                !is_true,
+                lower,
+                upper,
+                minimum_lengths,
+                expansion_depth,
+            );
         }
         [Expression::Word(op), Expression::Word(index), Expression::Int(bound)]
             if (is_true && ((op == ">=" && *bound == 0) || (op == ">" && *bound == -1)))
@@ -343,6 +361,36 @@ fn collect_static_bound_guard_facts(
                     }
                 }
             }
+            if expansion_depth < 16 {
+                if let Some(op) = items.first().and_then(word) {
+                    if let Some(summary) = facts.predicate_summaries.get(op) {
+                        if summary.params.len() == items.len().saturating_sub(1) {
+                            let Ok(parsed_body) = crate::parser::build(&summary.body) else {
+                                return;
+                            };
+                            let substitutions: HashMap<&str, &Expression> = summary
+                                .params
+                                .iter()
+                                .map(String::as_str)
+                                .zip(items.iter().skip(1))
+                                .collect();
+                            let expanded = substitute_predicate_body(
+                                single_built_expression(&parsed_body),
+                                &substitutions,
+                            );
+                            collect_static_bound_guard_facts(
+                                &expanded,
+                                facts,
+                                is_true,
+                                lower,
+                                upper,
+                                minimum_lengths,
+                                expansion_depth + 1,
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
     lower.extend(facts.nonnegative.iter().cloned());
@@ -368,6 +416,7 @@ fn state_for_branch(expr: &Expression, facts: &AbstractState, is_true: bool) -> 
         &mut lower,
         &mut upper,
         &mut minimum_lengths,
+        0,
     );
     for (xs, index) in upper {
         if lower.contains(&index) {
@@ -543,6 +592,7 @@ fn validate_static_bounds_expr(
             // remain available inside nested functions.
             let mut scoped = AbstractState {
                 guard_summaries: facts.guard_summaries.clone(),
+                predicate_summaries: facts.predicate_summaries.clone(),
                 ..AbstractState::default()
             };
             for child in items.iter().skip(2) {
@@ -674,9 +724,11 @@ pub fn analyze_user_program_diagnostics(
         expression => vec![expression],
     };
     let guard_summaries = infer_guard_summaries(&all_expressions);
+    let predicate_summaries = infer_predicate_summaries(&all_expressions);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
+        predicate_summaries,
         ..AbstractState::default()
     };
     let mut diagnostics = Vec::new();
@@ -684,6 +736,78 @@ pub fn analyze_user_program_diagnostics(
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
     }
     diagnostics
+}
+
+fn substitute_predicate_body(
+    expr: &Expression,
+    substitutions: &HashMap<&str, &Expression>,
+) -> Expression {
+    match expr {
+        Expression::Word(name) => substitutions
+            .get(name.as_str())
+            .map(|replacement| (*replacement).clone())
+            .unwrap_or_else(|| expr.clone()),
+        Expression::Apply(items) => Expression::Apply(
+            items
+                .iter()
+                .map(|item| substitute_predicate_body(item, substitutions))
+                .collect(),
+        ),
+        _ => expr.clone(),
+    }
+}
+
+fn infer_predicate_summaries(expressions: &[&Expression]) -> HashMap<String, PredicateSummary> {
+    let mut summaries: HashMap<String, PredicateSummary> = HashMap::new();
+    for _ in 0..expressions.len().max(1) {
+        let mut changed = false;
+        for expression in expressions {
+            let Expression::Apply(binding) = expression else {
+                continue;
+            };
+            let [Expression::Word(keyword), Expression::Word(name), rhs] = binding.as_slice()
+            else {
+                continue;
+            };
+            if keyword != "let" && keyword != "letrec" {
+                continue;
+            }
+            if let Expression::Word(alias) = rhs {
+                if let Some(summary) = summaries.get(alias).cloned() {
+                    changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
+                }
+                continue;
+            }
+            let Expression::Apply(lambda) = rhs else {
+                continue;
+            };
+            if !matches!(lambda.first(), Some(Expression::Word(op)) if op == "lambda")
+                || lambda.len() < 3
+            {
+                continue;
+            }
+            let Some(body) = lambda.last() else {
+                continue;
+            };
+            let params: Vec<String> = lambda[1..lambda.len() - 1]
+                .iter()
+                .filter_map(word)
+                .map(str::to_string)
+                .collect();
+            if params.len() != lambda.len() - 2 {
+                continue;
+            }
+            let summary = PredicateSummary {
+                params,
+                body: body.to_lisp(),
+            };
+            changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
+        }
+        if !changed {
+            break;
+        }
+    }
+    summaries
 }
 
 fn infer_guard_summaries(expressions: &[&Expression]) -> HashMap<String, GuardSummary> {
@@ -931,5 +1055,11 @@ mod tests {
     fn false_out_of_bounds_comparisons_refine_else_branch() {
         let source = "(let xs [1 2]) (let index 1) (if (or false (< index 0) (>= index (length xs))) -1 (get xs index))";
         assert_eq!(analyze(source, 3), Ok(()));
+    }
+
+    #[test]
+    fn predicate_body_substitution_preserves_false_comparison_implication() {
+        let source = "(let gte? (lambda a b (>= b a))) (let xs [1 2]) (let index 1) (if (gte? (length xs) index) -1 (get xs index))";
+        assert_eq!(analyze(source, 4), Ok(()));
     }
 }
