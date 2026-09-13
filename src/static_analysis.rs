@@ -510,6 +510,68 @@ fn record_diagnostic(diagnostics: &mut Vec<String>, message: String) {
     }
 }
 
+fn access_index_is_proven(
+    vector: &Expression,
+    index: &Expression,
+    facts: &AbstractState,
+    allow_append: bool,
+) -> bool {
+    let vector_key = canonical_access(vector, facts);
+    let index_key = canonical_scalar(index, facts);
+
+    // A normal bounds proof establishes 0 <= index < length. This is also
+    // sufficient for set!, whose additional valid case is index == length.
+    if facts.safe_pairs.contains(&(vector_key.clone(), index_key)) {
+        return true;
+    }
+
+    // `set! xs (length xs) value` is Que's append-at-end operation.
+    if allow_append {
+        if let Expression::Apply(length) = index {
+            if matches!(length.first(), Some(Expression::Word(op)) if op == "length")
+                && length.len() == 2
+                && canonical_access(&length[1], facts) == vector_key
+            {
+                return true;
+            }
+        }
+        if let Expression::Word(name) = index {
+            if facts.length_sources.get(name) == Some(&vector_key) {
+                return true;
+            }
+        }
+    }
+
+    // Preserve the existing get analysis here: constant propagation through a
+    // name is not yet treated as a general access proof. set! may use it for
+    // its append-aware rule, while get continues to require a literal or an
+    // explicit path fact.
+    let constant_index = if allow_append {
+        integer_constant(index, facts)
+    } else if let Expression::Int(index) = index {
+        Some(*index)
+    } else {
+        None
+    };
+    let Some(index) = constant_index.filter(|index| *index >= 0) else {
+        return false;
+    };
+    let index = index as usize;
+    if facts
+        .minimum_lengths
+        .get(&vector_key)
+        .is_some_and(|minimum| index < *minimum || (allow_append && index <= *minimum))
+    {
+        return true;
+    }
+    facts
+        .fixed_lengths
+        .get(&vector_key)
+        .copied()
+        .or_else(|| literal_vector_length(vector))
+        .is_some_and(|len| index < len || (allow_append && index == len))
+}
+
 fn validate_static_bounds_expr(
     expr: &Expression,
     facts: &mut AbstractState,
@@ -534,31 +596,21 @@ fn validate_static_bounds_expr(
     }
 
     if op == "get" && items.len() == 3 {
-        let proven = match (&items[1], &items[2]) {
-            (xs, Expression::Word(index)) => facts.safe_pairs.contains(&(
-                canonical_access(xs, facts),
-                canonical_scalar(&Expression::Word(index.clone()), facts),
-            )),
-            (xs, Expression::Int(index)) => {
-                facts
-                    .safe_pairs
-                    .contains(&(canonical_access(xs, facts), index.to_string()))
-                    || facts
-                        .minimum_lengths
-                        .get(&canonical_access(xs, facts))
-                        .is_some_and(|minimum| *index >= 0 && (*index as usize) < *minimum)
-                    || facts
-                        .fixed_lengths
-                        .get(&canonical_access(xs, facts))
-                        .copied()
-                        .or_else(|| literal_vector_length(xs))
-                        .is_some_and(|len| *index >= 0 && (*index as usize) < len)
-            }
-            _ => false,
-        };
+        let proven = access_index_is_proven(&items[1], &items[2], facts, false);
         if !proven {
             record_diagnostic(diagnostics, format!(
                 "static bounds: cannot prove `{}` is within bounds for `{}`; guard the access with `(and (>= index 0) (< index (length xs)))`",
+                items[2].to_lisp(),
+                items[1].to_lisp()
+            ));
+        }
+    }
+
+    if op == "set!" && items.len() == 4 {
+        let proven = access_index_is_proven(&items[1], &items[2], facts, true);
+        if !proven {
+            record_diagnostic(diagnostics, format!(
+                "static bounds: cannot prove `{}` is a valid set! index for `{}`; guard replacement with `(and (>= index 0) (< index (length xs)))`, or append at `(length xs)`",
                 items[2].to_lisp(),
                 items[1].to_lisp()
             ));
@@ -1061,5 +1113,33 @@ mod tests {
     fn predicate_body_substitution_preserves_false_comparison_implication() {
         let source = "(let gte? (lambda a b (>= b a))) (let xs [1 2]) (let index 1) (if (gte? (length xs) index) -1 (get xs index))";
         assert_eq!(analyze(source, 4), Ok(()));
+    }
+
+    #[test]
+    fn set_requires_a_proven_replacement_or_append_index() {
+        let unguarded = "(let xs [1 2]) (let i 10) (set! xs i 3)";
+        assert!(analyze(unguarded, 3)
+            .expect_err("unproven set! should fail")
+            .contains("valid set! index"));
+
+        let guarded =
+            "(let xs [1 2]) (let i 1) (if (and (>= i 0) (< i (length xs))) (set! xs i 3) nil)";
+        assert_eq!(analyze(guarded, 3), Ok(()));
+    }
+
+    #[test]
+    fn set_accepts_ques_append_at_length_semantics() {
+        assert_eq!(analyze("(let xs []) (set! xs (length xs) 1)", 2), Ok(()));
+        assert_eq!(
+            analyze("(let xs [1]) (let end (length xs)) (set! xs end 2)", 3),
+            Ok(())
+        );
+        assert_eq!(analyze("(let xs [1]) (set! xs 1 2)", 2), Ok(()));
+    }
+
+    #[test]
+    fn set_rejects_negative_and_past_end_literal_indices() {
+        assert!(analyze("(let xs [1]) (set! xs -1 2)", 2).is_err());
+        assert!(analyze("(let xs [1]) (set! xs 2 2)", 2).is_err());
     }
 }

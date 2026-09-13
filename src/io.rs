@@ -1193,7 +1193,7 @@ fn native_shell_help(bin_name: &str) -> String {
                          static-analysis findings as warnings.\n\
            --opt          Run with performance flags for this invocation: speed/aggressive opts,\n\
                          larger scalar inlining, and runtime overflow/div-zero/bounds checks OFF.\n\
-           --static-bounds Reject `get` accesses whose bounds are not statically proven.\n\
+           --static-bounds Reject indexed reads/writes whose safety is not statically proven.\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
            --allow        Enable host io permissions (read, stdin, write, print, clock, delete, all).\n\
          \n\
