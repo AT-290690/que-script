@@ -2351,7 +2351,6 @@ xs)"#,
         assert_eq!(output, "2");
     }
 
-
     #[test]
     #[cfg(all(feature = "runtime", feature = "io"))]
     fn test_runtime_io_rejects_parent_directory_escape_even_with_read_permission() {

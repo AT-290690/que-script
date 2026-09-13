@@ -92,12 +92,8 @@ pub fn explain_program_with_effects(
     let optimization_targets = collect_optimization_targets(&compiled_functions);
     let user_nodes = user_form_nodes(typed_ast, user_form_count);
     let mut external_impurity = HashMap::new();
-    crate::infer::collect_top_level_function_external_impurity(
-        typed_ast,
-        &mut external_impurity,
-    );
-    let effect_scope =
-        collect_user_effect_scope(&user_nodes, known_effects, &external_impurity);
+    crate::infer::collect_top_level_function_external_impurity(typed_ast, &mut external_impurity);
+    let effect_scope = collect_user_effect_scope(&user_nodes, known_effects, &external_impurity);
     let forms = collect_user_forms(&user_nodes, &effect_scope, &external_impurity);
     let user_effect = user_nodes.into_iter().fold(EffectFlags::PURE, |acc, form| {
         acc | observable_form_effect(
@@ -1166,15 +1162,13 @@ mod tests {
         let std_defs = crate::lsp_native_core::load_std_definitions();
         let (base_env, base_next_id, _signatures, effects) =
             crate::lsp_native_core::build_base_environment(&std_defs);
-        let program = crate::parser::merge_std_and_program(source, std_defs)
-            .expect("source should merge");
-        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
-            &program,
-            (base_env, base_next_id),
-        )
-        .expect("source should infer");
-        let split = crate::wat::compile_program_to_split_wat_typed(&typed)
-            .expect("source should compile");
+        let program =
+            crate::parser::merge_std_and_program(source, std_defs).expect("source should merge");
+        let (_typ, typed) =
+            crate::infer::infer_with_builtins_typed(&program, (base_env, base_next_id))
+                .expect("source should infer");
+        let split =
+            crate::wat::compile_program_to_split_wat_typed(&typed).expect("source should compile");
         let report = explain_program_with_effects(&typed, &split.user_wat, 3, &effects);
 
         for name in ["log!", "search?"] {

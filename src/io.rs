@@ -305,11 +305,30 @@ fn take_opt_flag_from_argv(argv: &mut Vec<String>) -> bool {
     found
 }
 
+fn take_static_bounds_flag_from_argv(argv: &mut Vec<String>) -> bool {
+    let found = argv.iter().any(|token| token == "--static-bounds");
+    argv.retain(|token| token != "--static-bounds");
+    found
+}
+
+fn static_bounds_enabled_from_env() -> bool {
+    env::var("QUE_STATIC_BOUNDS")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on" | "yes"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn enable_debug_runtime_guards() {
     env::set_var("QUE_INT_OVERFLOW_CHECK", "1");
     env::set_var("QUE_DEC_OVERFLOW_CHECK", "1");
     env::set_var("QUE_DIV_ZERO_CHECK", "1");
     env::set_var("QUE_BOUNDS_CHECK", "1");
+    env::set_var("QUE_STATIC_BOUNDS", "1");
 }
 
 fn enable_opt_runtime_flags() {
@@ -1171,9 +1190,10 @@ fn native_shell_help(bin_name: &str) -> String {
           explain        Show type/effect and optimized WAT-shape information without running.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_DEC_OVERFLOW_CHECK,\n\
-                         QUE_DIV_ZERO_CHECK, and QUE_BOUNDS_CHECK to ON for this run.\n\
+                         QUE_DIV_ZERO_CHECK, QUE_BOUNDS_CHECK, and QUE_STATIC_BOUNDS to ON.\n\
            --opt          Run with performance flags for this invocation: speed/aggressive opts,\n\
                          larger scalar inlining, and runtime overflow/div-zero/bounds checks OFF.\n\
+           --static-bounds Reject `get` accesses whose bounds are not statically proven.\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
            --allow        Enable host io permissions (read, stdin, write, print, clock, delete, all).\n\
          \n\
@@ -1223,6 +1243,7 @@ fn native_shell_env_help(bin_name: &str) -> String {
            QUE_LOOP_UNROLL_MAX Maximum constant small-loop trip count to unroll (default: 4, max: 16).\n\
            QUE_LOOP_UNROLL_COST Maximum body_cost * trip_count unroll budget (default: 120, max: 2000).\n\
            QUE_BOUNDS_CHECK   Vector get() bounds check (default: on). Disable with 0|false|off|no.\n\
+           QUE_STATIC_BOUNDS Reject unproven user `get` accesses (default: off; on with --debug).\n\
            QUE_VEC_MIN_CAP    Minimum initial vector capacity (default: 2, range: 1..4096).\n\
            QUE_VEC_GROWTH_NUM Vector growth numerator (default: 2, range: 1..64).\n\
            QUE_VEC_GROWTH_DEN Vector growth denominator (default: 1, range: 1..64).\n\
@@ -2212,6 +2233,9 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     }
     let opt_mode = take_opt_flag_from_argv(&mut args);
     let debug_mode = take_debug_mode_from_argv(&mut args);
+    let static_bounds = take_static_bounds_flag_from_argv(&mut args)
+        || debug_mode.is_enabled()
+        || static_bounds_enabled_from_env();
     if opt_mode && debug_mode.is_enabled() {
         return Err("--opt and --debug cannot be used together".to_string());
     }
@@ -2256,6 +2280,9 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     if debug_mode.is_enabled() {
         enable_debug_runtime_guards();
     }
+    if static_bounds {
+        env::set_var("QUE_STATIC_BOUNDS", "1");
+    }
 
     let analysis_source = crate::lsp_native_core::strip_comment_bodies_preserve_newlines(&program);
     let user_form_count =
@@ -2274,6 +2301,9 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     let wrapped_with_externs = crate::externals::prepend_builtin_host_externs(&wrapped_ast)?;
     let (_typ, typed_ast) =
         infer_with_builtins_typed(&wrapped_with_externs, (base_env, base_next_id))?;
+    if static_bounds {
+        crate::static_analysis::analyze_user_program(&typed_ast, user_form_count)?;
+    }
     let split_wat = crate::wat::compile_program_to_split_wat_typed(&typed_ast)?;
     let report = crate::explain::explain_program_with_effects(
         &typed_ast,
@@ -3840,8 +3870,8 @@ mod tests {
     use super::{
         init_host_project, init_project_config_file, nvim_runner_lua, parse_test_results,
         resolve_explain_input, resolve_project_entry_path, take_debug_mode_from_argv,
-        take_emit_request_from_argv, take_no_result_flag_from_argv,
-        take_nvim_initial_code, take_opt_flag_from_argv, take_shell_policy_from_argv,
+        take_emit_request_from_argv, take_no_result_flag_from_argv, take_nvim_initial_code,
+        take_opt_flag_from_argv, take_shell_policy_from_argv, take_static_bounds_flag_from_argv,
         wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol, QueTestCase, ShellPermission,
         ShellPolicy,
     };
@@ -4097,6 +4127,17 @@ mod tests {
     }
 
     #[test]
+    fn static_bounds_flag_is_removed_from_program_arguments() {
+        let mut args = vec![
+            "script.que".to_string(),
+            "--static-bounds".to_string(),
+            "user-arg".to_string(),
+        ];
+        assert!(take_static_bounds_flag_from_argv(&mut args));
+        assert_eq!(args, ["script.que", "user-arg"]);
+    }
+
+    #[test]
     fn take_no_result_strips_flag() {
         let mut args = vec![
             "script.que".to_string(),
@@ -4224,11 +4265,17 @@ mod tests {
     #[test]
     fn nvim_runner_has_run_debug_and_emit_modes() {
         let lua = nvim_runner_lua();
-        assert!(lua.contains("QueRun = { key = 'r', title = 'output', terminal = true, args = { '--opt' } }"));
-        assert!(lua.contains("QueDebug = { key = 'd', title = 'debug', terminal = true, args = { '--debug' } }"));
+        assert!(lua.contains(
+            "QueRun = { key = 'r', title = 'output', terminal = true, args = { '--opt' } }"
+        ));
+        assert!(lua.contains(
+            "QueDebug = { key = 'd', title = 'debug', terminal = true, args = { '--debug' } }"
+        ));
         assert!(lua.contains("QueWat = { key = 'w', title = 'WAT', filetype = 'wat', args = { '--opt', '--emit', 'wat' } }"));
         assert!(lua.contains("QueTypes = { key = 'a', title = 'types', filetype = 'que', args = { '--opt', '--emit', 'types' } }"));
-        assert!(lua.contains("QueExplain = { key = 'e', title = 'explain', filetype = 'markdown', explain = true }"));
+        assert!(lua.contains(
+            "QueExplain = { key = 'e', title = 'explain', filetype = 'markdown', explain = true }"
+        ));
         assert!(lua.contains("QueSource = { key = 'z', title = 'source', filetype = 'que', args = { '--opt', '--emit', 'source' } }"));
     }
 
@@ -4519,6 +4566,9 @@ pub fn run_native_shell() -> Result<(), String> {
     apply_project_env_vars(&script_cwd)?;
     let opt_mode = take_opt_flag_from_argv(&mut argv);
     let debug_mode = crate::io::take_debug_mode_from_argv(&mut argv);
+    let static_bounds = take_static_bounds_flag_from_argv(&mut argv)
+        || debug_mode.is_enabled()
+        || static_bounds_enabled_from_env();
     if opt_mode && debug_mode.is_enabled() {
         return Err("--opt and --debug cannot be used together".to_string());
     }
@@ -4528,10 +4578,14 @@ pub fn run_native_shell() -> Result<(), String> {
     if debug_mode.is_enabled() {
         enable_debug_runtime_guards();
     }
+    if static_bounds {
+        env::set_var("QUE_STATIC_BOUNDS", "1");
+    }
     let shell_policy = crate::io::take_shell_policy_from_argv(&mut argv)
         .map_err(|e| format!("invalid shell policy: {}", e))?;
     let analysis_source = crate::lsp_native_core::strip_comment_bodies_preserve_newlines(&program);
     let needs_user_form_count = debug_mode.is_enabled()
+        || static_bounds
         || matches!(
             emit_request.as_ref().map(|req| req.kind),
             Some(EmitKind::OptSource | EmitKind::Types)
@@ -4701,7 +4755,7 @@ pub fn run_native_shell() -> Result<(), String> {
         }
     }
 
-    let wat_src = if debug_mode.is_enabled() {
+    let wat_src = if debug_mode.is_enabled() || static_bounds {
         let (base_env, base_next_id) =
             crate::types::create_builtin_environment(crate::types::TypeEnv::new());
         let inferred = crate::infer::infer_with_builtins_typed_lsp(
@@ -4712,6 +4766,9 @@ pub fn run_native_shell() -> Result<(), String> {
 
         match inferred {
             Ok((_typ, typed_ast)) => {
+                if static_bounds {
+                    crate::static_analysis::analyze_user_program(&typed_ast, user_form_count)?;
+                }
                 crate::wat::compile_program_to_wat_typed(&typed_ast).map_err(|message| {
                     build_debug_error_report(
                         debug_mode,
