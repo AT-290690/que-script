@@ -1334,6 +1334,11 @@ fn analyze_document_text(
     match infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count)
     {
         Ok((_typ, typed)) => {
+            for message in
+                que::static_analysis::analyze_user_program_diagnostics(&typed, user_form_count)
+            {
+                diagnostics.extend(make_static_analysis_warning(text, message));
+            }
             collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
             for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
                 collect_symbol_types(form, &mut symbol_types_raw);
@@ -1701,6 +1706,16 @@ fn make_error_diagnostic(
             ..Diagnostic::default()
         })
         .collect()
+}
+
+fn make_static_analysis_warning(text: &str, message: String) -> Vec<Diagnostic> {
+    let snippet = native_core::static_analysis_diagnostic_snippet(&message);
+    let mut diagnostics = make_error_diagnostic(text, message, None, snippet.as_deref());
+    for diagnostic in &mut diagnostics {
+        diagnostic.severity = Some(DiagnosticSeverity::WARNING);
+        diagnostic.source = Some("que static analysis".to_string());
+    }
+    diagnostics
 }
 
 fn diagnostic_summary_without_snippet(message: &str) -> String {

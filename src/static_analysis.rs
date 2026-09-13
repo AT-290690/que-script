@@ -10,6 +10,7 @@ struct AbstractState {
     safe_pairs: HashSet<(String, String)>,
     nonnegative: HashSet<String>,
     fixed_lengths: HashMap<String, usize>,
+    minimum_lengths: HashMap<String, usize>,
     length_sources: HashMap<String, String>,
     /// Value-numbering table for immutable aliases and projected vectors.
     /// The canonical expression is the symbolic identity used by proofs.
@@ -32,6 +33,16 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         .filter(|(name, source)| right.length_sources.get(*name) == Some(*source))
         .map(|(name, source)| (name.clone(), source.clone()))
         .collect();
+    let minimum_lengths = left
+        .minimum_lengths
+        .iter()
+        .filter_map(|(name, left_min)| {
+            right
+                .minimum_lengths
+                .get(name)
+                .map(|right_min| (name.clone(), (*left_min).min(*right_min)))
+        })
+        .collect();
     let aliases = left
         .aliases
         .iter()
@@ -50,6 +61,7 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
             .cloned()
             .collect(),
         fixed_lengths,
+        minimum_lengths,
         length_sources,
         aliases,
         // Function summaries are immutable analysis metadata rather than a
@@ -98,12 +110,36 @@ fn literal_vector_length(expr: &Expression) -> Option<usize> {
     }
 }
 
+fn add_upper_bound(
+    vector: &Expression,
+    index: &Expression,
+    facts: &AbstractState,
+    lower: &mut HashSet<String>,
+    upper: &mut Vec<(String, String)>,
+    minimum_lengths: &mut Vec<(String, usize)>,
+) {
+    let index_key = index.to_lisp();
+    if matches!(index, Expression::Int(value) if *value >= 0)
+        || matches!(index, Expression::Word(name) if facts.nonnegative.contains(name))
+    {
+        lower.insert(index_key.clone());
+    }
+    let vector_key = canonical_access(vector, facts);
+    if let Expression::Int(index) = index {
+        if *index >= 0 {
+            minimum_lengths.push((vector_key.clone(), (*index as usize).saturating_add(1)));
+        }
+    }
+    upper.push((vector_key, index_key));
+}
+
 fn collect_static_bound_guard_facts(
     expr: &Expression,
     facts: &AbstractState,
     is_true: bool,
     lower: &mut HashSet<String>,
     upper: &mut Vec<(String, String)>,
+    minimum_lengths: &mut Vec<(String, usize)>,
 ) {
     let Expression::Apply(items) = expr else {
         return;
@@ -112,42 +148,99 @@ fn collect_static_bound_guard_facts(
         [Expression::Word(op), left, right]
             if (op == "and" && is_true) || (op == "or" && !is_true) =>
         {
-            collect_static_bound_guard_facts(left, facts, is_true, lower, upper);
-            collect_static_bound_guard_facts(right, facts, is_true, lower, upper);
+            collect_static_bound_guard_facts(left, facts, is_true, lower, upper, minimum_lengths);
+            collect_static_bound_guard_facts(right, facts, is_true, lower, upper, minimum_lengths);
         }
         [Expression::Word(op), inner] if op == "not" => {
-            collect_static_bound_guard_facts(inner, facts, !is_true, lower, upper);
+            collect_static_bound_guard_facts(inner, facts, !is_true, lower, upper, minimum_lengths);
         }
         [Expression::Word(op), Expression::Word(index), Expression::Int(bound)]
             if is_true && ((op == ">=" && *bound == 0) || (op == ">" && *bound == -1)) =>
         {
             lower.insert(index.clone());
         }
-        [Expression::Word(op), Expression::Word(index), Expression::Apply(length)]
+        [Expression::Word(op), index, Expression::Apply(length)]
             if is_true
                 && op == "<"
                 && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
                 && length.len() == 2 =>
         {
-            upper.push((canonical_access(&length[1], facts), index.clone()));
+            add_upper_bound(&length[1], index, facts, lower, upper, minimum_lengths);
         }
-        [Expression::Word(op), Expression::Word(index), Expression::Word(length)]
+        [Expression::Word(op), Expression::Apply(length), index]
+            if is_true
+                && op == ">"
+                && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
+                && length.len() == 2 =>
+        {
+            add_upper_bound(&length[1], index, facts, lower, upper, minimum_lengths);
+        }
+        [Expression::Word(op), index, Expression::Word(length)]
             if is_true && op == "<" && facts.length_sources.contains_key(length) =>
         {
+            let index_key = index.to_lisp();
+            if matches!(index, Expression::Int(value) if *value >= 0)
+                || matches!(index, Expression::Word(name) if facts.nonnegative.contains(name))
+            {
+                lower.insert(index_key.clone());
+            }
             upper.push((
                 facts
                     .length_sources
                     .get(length)
                     .expect("checked cached length source")
                     .clone(),
-                index.clone(),
+                index_key,
             ));
+            if let Expression::Int(index) = index {
+                if *index >= 0 {
+                    minimum_lengths.push((
+                        facts
+                            .length_sources
+                            .get(length)
+                            .expect("checked cached length source")
+                            .clone(),
+                        (*index as usize).saturating_add(1),
+                    ));
+                }
+            }
         }
-        [Expression::Word(op), xs, Expression::Word(index)]
+        [Expression::Word(op), Expression::Word(length), index]
+            if is_true && op == ">" && facts.length_sources.contains_key(length) =>
+        {
+            let index_key = index.to_lisp();
+            if matches!(index, Expression::Int(value) if *value >= 0)
+                || matches!(index, Expression::Word(name) if facts.nonnegative.contains(name))
+            {
+                lower.insert(index_key.clone());
+            }
+            upper.push((
+                facts
+                    .length_sources
+                    .get(length)
+                    .expect("checked cached length source")
+                    .clone(),
+                index_key,
+            ));
+            if let Expression::Int(index) = index {
+                if *index >= 0 {
+                    minimum_lengths.push((
+                        facts
+                            .length_sources
+                            .get(length)
+                            .expect("checked cached length source")
+                            .clone(),
+                        (*index as usize).saturating_add(1),
+                    ));
+                }
+            }
+        }
+        [Expression::Word(op), xs, index]
             if is_true && matches!(op.as_str(), "in-bounds?" | "std/vector/in-bounds?") =>
         {
-            lower.insert(index.clone());
-            upper.push((canonical_access(xs, facts), index.clone()));
+            let index_key = index.to_lisp();
+            lower.insert(index_key.clone());
+            upper.push((canonical_access(xs, facts), index_key));
         }
         [Expression::Word(op), Expression::Word(index), Expression::Word(xs)]
             if is_true && op == "Vector/in-bounds?" =>
@@ -189,11 +282,25 @@ fn state_for_branch(expr: &Expression, facts: &AbstractState, is_true: bool) -> 
     let mut next = facts.clone();
     let mut lower = HashSet::new();
     let mut upper = Vec::new();
-    collect_static_bound_guard_facts(expr, facts, is_true, &mut lower, &mut upper);
+    let mut minimum_lengths = Vec::new();
+    collect_static_bound_guard_facts(
+        expr,
+        facts,
+        is_true,
+        &mut lower,
+        &mut upper,
+        &mut minimum_lengths,
+    );
     for (xs, index) in upper {
         if lower.contains(&index) {
             next.safe_pairs.insert((xs, index));
         }
+    }
+    for (vector, minimum) in minimum_lengths {
+        next.minimum_lengths
+            .entry(vector)
+            .and_modify(|known| *known = (*known).max(minimum))
+            .or_insert(minimum);
     }
     next
 }
@@ -209,6 +316,9 @@ fn invalidate_resized_vector(items: &[Expression], facts: &mut AbstractState) {
                 .safe_pairs
                 .retain(|(name, _)| name != &xs && !name.starts_with(&format!("(get {xs} ")));
             facts.fixed_lengths.remove(&xs);
+            facts
+                .minimum_lengths
+                .retain(|name, _| name != &xs && !name.starts_with(&format!("(get {xs} ")));
             facts
                 .length_sources
                 .retain(|_, source| source != &xs && !source.starts_with(&format!("(get {xs} ")));
@@ -239,6 +349,7 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     facts.safe_pairs.retain(|(_, index)| index != name);
     facts.nonnegative.remove(name);
     facts.fixed_lengths.remove(name);
+    facts.minimum_lengths.remove(name);
     facts.length_sources.remove(name);
     facts.aliases.remove(name);
 
@@ -257,9 +368,19 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     }
 }
 
-fn validate_static_bounds_expr(expr: &Expression, facts: &mut AbstractState) -> Result<(), String> {
+fn record_diagnostic(diagnostics: &mut Vec<String>, message: String) {
+    if !diagnostics.contains(&message) {
+        diagnostics.push(message);
+    }
+}
+
+fn validate_static_bounds_expr(
+    expr: &Expression,
+    facts: &mut AbstractState,
+    diagnostics: &mut Vec<String>,
+) {
     let Expression::Apply(items) = expr else {
-        return Ok(());
+        return;
     };
     let op = items.first().and_then(word).unwrap_or("");
 
@@ -271,9 +392,9 @@ fn validate_static_bounds_expr(expr: &Expression, facts: &mut AbstractState) -> 
                 accessed,
                 index.clone(),
             ]);
-            validate_static_bounds_expr(&accessed, facts)?;
+            validate_static_bounds_expr(&accessed, facts, diagnostics);
         }
-        return Ok(());
+        return;
     }
 
     if op == "get" && items.len() == 3 {
@@ -281,16 +402,25 @@ fn validate_static_bounds_expr(expr: &Expression, facts: &mut AbstractState) -> 
             (xs, Expression::Word(index)) => facts
                 .safe_pairs
                 .contains(&(canonical_access(xs, facts), index.clone())),
-            (xs, Expression::Int(index)) => facts
-                .fixed_lengths
-                .get(&canonical_access(xs, facts))
-                .copied()
-                .or_else(|| literal_vector_length(xs))
-                .is_some_and(|len| *index >= 0 && (*index as usize) < len),
+            (xs, Expression::Int(index)) => {
+                facts
+                    .safe_pairs
+                    .contains(&(canonical_access(xs, facts), index.to_string()))
+                    || facts
+                        .minimum_lengths
+                        .get(&canonical_access(xs, facts))
+                        .is_some_and(|minimum| *index >= 0 && (*index as usize) < *minimum)
+                    || facts
+                        .fixed_lengths
+                        .get(&canonical_access(xs, facts))
+                        .copied()
+                        .or_else(|| literal_vector_length(xs))
+                        .is_some_and(|len| *index >= 0 && (*index as usize) < len)
+            }
             _ => false,
         };
         if !proven {
-            return Err(format!(
+            record_diagnostic(diagnostics, format!(
                 "static bounds: cannot prove `{}` is within bounds for `{}`; guard the access with `(and (>= index 0) (< index (length xs)))`",
                 items[2].to_lisp(),
                 items[1].to_lisp()
@@ -302,31 +432,31 @@ fn validate_static_bounds_expr(expr: &Expression, facts: &mut AbstractState) -> 
         "and" => {
             let mut scoped = facts.clone();
             for child in items.iter().skip(1) {
-                validate_static_bounds_expr(child, &mut scoped)?;
+                validate_static_bounds_expr(child, &mut scoped, diagnostics);
                 scoped = state_for_true_branch(child, &scoped);
             }
         }
         "do" => {
             let mut scoped = facts.clone();
             for child in items.iter().skip(1) {
-                validate_static_bounds_expr(child, &mut scoped)?;
+                validate_static_bounds_expr(child, &mut scoped, diagnostics);
             }
             *facts = scoped;
         }
         "block" => {
             let mut scoped = facts.clone();
             for child in items.iter().skip(1) {
-                validate_static_bounds_expr(child, &mut scoped)?;
+                validate_static_bounds_expr(child, &mut scoped, diagnostics);
             }
         }
         "lambda" => {
             let mut scoped = AbstractState::default();
             for child in items.iter().skip(2) {
-                validate_static_bounds_expr(child, &mut scoped)?;
+                validate_static_bounds_expr(child, &mut scoped, diagnostics);
             }
         }
         "let" | "mut" if items.len() >= 3 => {
-            validate_static_bounds_expr(&items[2], facts)?;
+            validate_static_bounds_expr(&items[2], facts, diagnostics);
             if let Expression::Word(name) = &items[1] {
                 let alias = match &items[2] {
                     Expression::Word(_) => Some(canonical_access(&items[2], facts)),
@@ -345,18 +475,18 @@ fn validate_static_bounds_expr(expr: &Expression, facts: &mut AbstractState) -> 
             }
         }
         "alter!" if items.len() == 3 => {
-            validate_static_bounds_expr(&items[2], facts)?;
+            validate_static_bounds_expr(&items[2], facts, diagnostics);
             if let Expression::Word(name) = &items[1] {
                 assign_abstract_scalar(name, &items[2], facts);
             }
         }
         "if" if items.len() >= 3 => {
-            validate_static_bounds_expr(&items[1], facts)?;
+            validate_static_bounds_expr(&items[1], facts, diagnostics);
             let mut consequent = state_for_true_branch(&items[1], facts);
-            validate_static_bounds_expr(&items[2], &mut consequent)?;
+            validate_static_bounds_expr(&items[2], &mut consequent, diagnostics);
             let mut alternate = state_for_false_branch(&items[1], facts);
             if let Some(otherwise) = items.get(3) {
-                validate_static_bounds_expr(otherwise, &mut alternate)?;
+                validate_static_bounds_expr(otherwise, &mut alternate, diagnostics);
             }
             *facts = join_states(&consequent, &alternate);
         }
@@ -367,10 +497,10 @@ fn validate_static_bounds_expr(expr: &Expression, facts: &mut AbstractState) -> 
             let entry = facts.clone();
             let mut header = entry.clone();
             for _ in 0..16 {
-                validate_static_bounds_expr(&items[1], &mut header)?;
+                validate_static_bounds_expr(&items[1], &mut header, diagnostics);
                 let mut body_exit = state_for_true_branch(&items[1], &header);
                 for child in items.iter().skip(2) {
-                    validate_static_bounds_expr(child, &mut body_exit)?;
+                    validate_static_bounds_expr(child, &mut body_exit, diagnostics);
                 }
                 let next = join_states(&entry, &body_exit);
                 if next == header {
@@ -391,7 +521,7 @@ fn validate_static_bounds_expr(expr: &Expression, facts: &mut AbstractState) -> 
             let guarded = state_for_true_branch(&items[2], &scoped);
             scoped = guarded;
             for child in items.iter().skip(3) {
-                validate_static_bounds_expr(child, &mut scoped)?;
+                validate_static_bounds_expr(child, &mut scoped, diagnostics);
             }
         }
         "loop/range" if items.len() >= 5 => {
@@ -410,23 +540,35 @@ fn validate_static_bounds_expr(expr: &Expression, facts: &mut AbstractState) -> 
                 }
             }
             for child in items.iter().skip(4) {
-                validate_static_bounds_expr(child, &mut scoped)?;
+                validate_static_bounds_expr(child, &mut scoped, diagnostics);
             }
         }
         _ => {
             for child in items.iter().skip(1) {
-                validate_static_bounds_expr(child, facts)?;
+                validate_static_bounds_expr(child, facts, diagnostics);
             }
         }
     }
     invalidate_resized_vector(items, facts);
-    Ok(())
 }
 
 pub fn analyze_user_program(
     typed_program: &TypedExpression,
     user_form_count: usize,
 ) -> Result<(), String> {
+    match analyze_user_program_diagnostics(typed_program, user_form_count)
+        .into_iter()
+        .next()
+    {
+        Some(message) => Err(message),
+        None => Ok(()),
+    }
+}
+
+pub fn analyze_user_program_diagnostics(
+    typed_program: &TypedExpression,
+    user_form_count: usize,
+) -> Vec<String> {
     let all_expressions: Vec<&Expression> = match &typed_program.expr {
         Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
             items.iter().skip(1).collect()
@@ -450,10 +592,11 @@ pub fn analyze_user_program(
         guard_summaries,
         ..AbstractState::default()
     };
+    let mut diagnostics = Vec::new();
     for expression in &all_expressions[start..] {
-        validate_static_bounds_expr(expression, &mut facts)?;
+        validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
     }
-    Ok(())
+    diagnostics
 }
 
 fn infer_guard_summaries(expressions: &[&Expression]) -> HashMap<String, (usize, usize)> {
@@ -596,5 +739,30 @@ mod tests {
     fn false_or_and_negation_refine_the_else_branch() {
         let source = "(let in-bounds? (lambda (xs i) (and (>= i 0) (< i (length xs))))) (let xs [1 2]) (let i 1) (if (or (> i 10) (not (in-bounds? xs i))) 0 (get xs i))";
         assert_eq!(analyze(source, 4), Ok(()));
+    }
+
+    #[test]
+    fn diagnostic_mode_collects_all_unproven_accesses() {
+        let source = "(let xs [1]) (let ys [2]) (let i 0) (let j 0) (get xs i) (get ys j)";
+        let expression = crate::parser::build(source).expect("source should parse");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        let diagnostics = analyze_user_program_diagnostics(&typed, 6);
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn positive_dynamic_length_proves_literal_zero_access() {
+        let source = "(let xs []) (if (> (length xs) 0) (get xs 0) -1)";
+        assert_eq!(analyze(source, 2), Ok(()));
+
+        let equivalent = "(let xs []) (if (< 0 (length xs)) (get xs 0) -1)";
+        assert_eq!(analyze(equivalent, 2), Ok(()));
+
+        let stronger = "(let xs []) (if (> (length xs) 1) (get xs 0) -1)";
+        assert_eq!(analyze(stronger, 2), Ok(()));
     }
 }

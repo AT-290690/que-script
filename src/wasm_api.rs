@@ -206,6 +206,11 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         user_form_count,
     ) {
         Ok((_typ, typed)) => {
+            for message in
+                crate::static_analysis::analyze_user_program_diagnostics(&typed, user_form_count)
+            {
+                diagnostics.extend(make_static_analysis_warning(text, message));
+            }
             collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
             let typed_user_forms = extract_user_top_level_typed_forms(&typed, user_form_count);
             for form in &typed_user_forms {
@@ -731,6 +736,15 @@ fn make_error_diagnostic(
             range: to_json_range(range),
         })
         .collect()
+}
+
+fn make_static_analysis_warning(text: &str, message: String) -> Vec<JsonDiagnostic> {
+    let snippet = native_core::static_analysis_diagnostic_snippet(&message);
+    let mut diagnostics = make_error_diagnostic(text, message, None, snippet.as_deref());
+    for diagnostic in &mut diagnostics {
+        diagnostic.severity = "warning".to_string();
+    }
+    diagnostics
 }
 
 fn diagnostic_summary_without_snippet(message: &str) -> String {

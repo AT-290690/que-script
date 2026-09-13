@@ -8,7 +8,6 @@ pub mod op;
 pub mod project;
 #[cfg(feature = "runtime")]
 pub mod runtime;
-#[cfg(feature = "compiler")]
 pub mod static_analysis;
 #[cfg(test)]
 mod tests;

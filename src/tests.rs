@@ -5984,6 +5984,68 @@ parse-value"#;
     }
 
     #[test]
+    fn test_wasm_lsp_warns_for_unproven_vector_access() {
+        let source = "(let xs [1 2 3])\n(let i 10)\n(get xs i)";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        let warning = diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .find(|item| {
+                item.get("message")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|message| message.starts_with("static bounds:"))
+            })
+            .expect("unproven get should produce a static-analysis warning");
+        assert_eq!(warning.get("severity"), Some(&serde_json::json!("warning")));
+        assert_eq!(warning["range"]["start"]["line"], serde_json::json!(2));
+    }
+
+    #[test]
+    fn test_wasm_lsp_reports_all_unproven_vector_accesses() {
+        let source = "(let xs [1])\n(let ys [2])\n(let i 0)\n(let j 0)\n(get xs i)\n(get ys j)";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        let warnings: Vec<_> = diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .filter(|item| {
+                item.get("message")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|message| message.starts_with("static bounds:"))
+            })
+            .collect();
+        assert_eq!(warnings.len(), 2, "{diagnostics_json}");
+        assert!(warnings
+            .iter()
+            .all(|warning| warning.get("severity") == Some(&serde_json::json!("warning"))));
+    }
+
+    #[test]
+    fn test_wasm_lsp_accepts_negated_bounds_guard_in_else_branch() {
+        let source =
+            "(let xs [1 2 3])\n(let i 1)\n(if (or false (not (in-bounds? xs i))) 0 (get xs i))";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        assert!(
+            diagnostics
+                .as_array()
+                .expect("diagnostics should be an array")
+                .iter()
+                .all(|item| !item
+                    .get("message")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|message| message.starts_with("static bounds:"))),
+            "guarded access should not warn: {diagnostics_json}"
+        );
+    }
+
+    #[test]
     fn test_lsp_top_level_ranges_ignore_parens_inside_char_literals() {
         let program =
             "(let solve (lambda input (- (count/char '(' input) (count/char ')' input))))\n(solve \"())\")\n";

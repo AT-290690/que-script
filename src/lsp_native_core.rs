@@ -1121,6 +1121,16 @@ pub fn diagnostic_summary_without_snippet(message: &str) -> String {
     lines.join(" | ")
 }
 
+pub fn static_analysis_diagnostic_snippet(message: &str) -> Option<String> {
+    let mut quoted = message.split('`').skip(1).step_by(2);
+    let index = quoted.next()?;
+    let vector = quoted.next()?;
+    if !message.starts_with("static bounds:") {
+        return None;
+    }
+    Some(format!("(get {vector} {index})"))
+}
+
 pub fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut HashSet<String>) {
     for expr in exprs {
         collect_user_bound_symbols(expr, out);
