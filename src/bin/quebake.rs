@@ -127,7 +127,6 @@ fn base_library_defs() -> Result<Vec<Expression>, String> {
         "./lisp/std.lisp",
         "./lisp/fp.lisp",
         "./lisp/ds.lisp",
-        "./lisp/csv.lisp",
     ] {
         defs.extend(load_defs_from_path(path, false)?);
     }

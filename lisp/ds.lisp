@@ -1,3 +1,19 @@
+
+(let box (lambda value [ value ]))
+(let true? (lambda vrbl (if (get vrbl) true false)))
+(let false? (lambda vrbl (if (get vrbl) false true)))
+
+(let Bool->Int (lambda x (if (=? x true) 1 0)))
+(let Bool->Char (lambda x (if (=? x true) '1' '0')))
+(let Char->Int (lambda x (if (>=# x std/char/empty) (as x Int) 0)))
+(let Char->Bool (lambda x (if (or (=# x std/char/empty) (=# x '0')) false true)))
+(let Int->Bool (lambda x 
+    (cond 
+        (<= x 0) false
+        (>= x 1) true
+        false)))
+(let Int->Char (lambda x (if (>= x 0) (as x Char) std/char/empty)))
+
 (let Tuple/new (lambda a b (tuple a b)))
 (let Tuple/swap std/tuple/swap)
 (let Tuple/map std/tuple/map)

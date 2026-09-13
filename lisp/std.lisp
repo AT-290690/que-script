@@ -30,14 +30,6 @@
 (let std/char/backslash (char 92))
 (let std/char/carriage-return (char 13))
 
-(let nl std/char/new-line)
-(let sp std/char/space)
-(let ep std/char/empty)
-(let dq std/char/double-quote)
-(let sq std/char/single-quote)
-(let bt std/char/backtick)
-(let cr std/char/carriage-return)
-
 (let std/dec/floor (lambda n (-. n (mod. n 1.0))))
 (let std/dec/ceil (lambda n (do 
     (let sign (if (>=. n 0.0) 1 -1))
@@ -67,21 +59,6 @@
 (let std/vector/second (lambda xs (get xs 1)))
 (let std/vector/third (lambda xs (get xs 3)))
 (let std/vector/last (lambda xs (get xs (- (length xs) 1))))
-
-(let box (lambda value [ value ]))
-(let true? (lambda vrbl (if (get vrbl) true false)))
-(let false? (lambda vrbl (if (get vrbl) false true)))
-
-(let Bool->Int (lambda x (if (=? x true) 1 0)))
-(let Bool->Char (lambda x (if (=? x true) '1' '0')))
-(let Char->Int (lambda x (if (>=# x std/char/empty) (as x Int) 0)))
-(let Char->Bool (lambda x (if (or (=# x std/char/empty) (=# x '0')) false true)))
-(let Int->Bool (lambda x 
-    (cond 
-        (<= x 0) false
-        (>= x 1) true
-        false)))
-(let Int->Char (lambda x (if (>= x 0) (as x Char) std/char/empty)))
 
 (let std/char/digit? (lambda ch (and (>=# ch '0') (<=# ch '9'))))
 (let std/char/upper (lambda ch (if (and (>=# ch 'a') (<=# ch 'z')) (-# ch std/char/space) ch)))

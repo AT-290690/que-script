@@ -21,7 +21,7 @@ copy_release_artifacts() {
   cp "${source_dir}/que-lib.lisp" "releases/que-lib-${target_suffix}.lisp"
 }
 
-echo "[1/7] Baking std library"
+echo "[1/7] Baking language library"
 ./scripts/bake.sh
 
 echo "[2/7] Building native artifacts"

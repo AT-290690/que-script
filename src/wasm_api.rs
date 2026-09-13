@@ -596,7 +596,7 @@ fn from_core_range(range: native_core::CoreRange) -> TextRange {
 }
 
 fn should_hide_completion_symbol(symbol: &str) -> bool {
-    symbol.starts_with('_')
+    symbol.starts_with('_') || symbol.starts_with("std/")
 }
 
 fn completion_matches_prefix(label: &str, prefix: &str) -> bool {

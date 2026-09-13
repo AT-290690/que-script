@@ -2187,44 +2187,6 @@ xs)"#,
 
     #[test]
     #[cfg(feature = "runtime")]
-    fn test_runtime_csv_helpers_and_with_csv_columns_macro_work() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(do
-                (let text (cons
-                    "Ids,User Names,User Ages,Active,Score" [nl]
-                    "1,Alice,30,true,1.5" [nl]
-                    "2,Bob,,false,"))
-                (with-csv-columns text [',']
-                    ids "Ids" csv/column/int 0
-                    user_names "User Names" csv/column/string ""
-                    user_ages "User Ages" csv/column/int 0
-                    active "Active" csv/column/bool false
-                    score "Score" csv/column/decimal 0.0
-                    [(sum ids)
-                     (sum user_ages)
-                     (if (get active 0) 1 0)
-                     (Dec->Int (get score 0))
-                     (length user_names)]))"#,
-            true,
-        );
-        assert_eq!(output, "[3 30 1 1 2]");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_runtime_csv_write_simple_formats_header_and_rows_as_csv_text() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(do
-                (let headers ["odd" "even"])
-                (let rows [["1" "2"] ["3" "4"] ["5" "6"]])
-                (csv/write/simple headers rows ","))"#,
-            true,
-        );
-        assert_eq!(output, "odd,even\n1,2\n3,4\n5,6");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_graph_find_cycles_returns_single_normalized_simple_cycle() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2426,57 +2388,6 @@ xs)"#,
             true,
         );
         assert_eq!(output, "10");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_runtime_json_parser_macro_parses_typed_flat_object() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(let User/parse
-  (json/parse
-    "id" json/int
-    "name" json/chars
-    "active" json/bool?))
-
-(let { id name active } (User/parse "{ \"active\": true, \"name\": \"Anthony\", \"id\": 12 }"))
-{ id name active }"#,
-            true,
-        );
-        assert_eq!(output, "{ 12 { \"Anthony\" true } }");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_runtime_json_array_reader_parses_bool_vector() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(let Root/parse
-  (json/parse
-    "bools" (json/array json/bool?)))
-
-(let bools (Root/parse "{ \"bools\": [true,false,true] }"))
-(map Bool->Int bools)"#,
-            true,
-        );
-        assert_eq!(output, "[1 0 1]");
-    }
-
-    #[test]
-    #[cfg(feature = "runtime")]
-    fn test_runtime_json_array_reader_parses_nested_objects() {
-        let output = run_program_output_with_std_and_opts(
-            r#"(let Is/parse?
-  (json/parse
-    "is" json/bool?))
-
-(let Root/parse
-  (json/parse
-    "bools" (json/array Is/parse?)))
-
-(let bools (Root/parse "{ \"bools\": [{\"is\": true}, {\"is\": false}] }"))
-(map Bool->Int bools)"#,
-            true,
-        );
-        assert_eq!(output, "[1 0]");
     }
 
     #[test]
@@ -5234,6 +5145,24 @@ out"#,
             labels.iter().any(|label| label == "data/department_id"),
             "expected namespaced symbol after data/, got: {:?}",
             labels
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_completions_hide_std_compatibility_symbols() {
+        let completion_json = crate::wasm_api::lsp_completions_at("std/".to_string(), 0, 4);
+        let items: serde_json::Value = serde_json::from_str(&completion_json)
+            .expect("completion response should be valid JSON");
+        assert!(
+            items
+                .as_array()
+                .expect("completion response should be an array")
+                .iter()
+                .all(|item| !item["label"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("std/")),
+            "std compatibility symbols should not be offered"
         );
     }
 

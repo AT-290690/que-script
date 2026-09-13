@@ -91,10 +91,20 @@ pub fn explain_program_with_effects(
     let compiled_functions = collect_compiled_functions(wat);
     let optimization_targets = collect_optimization_targets(&compiled_functions);
     let user_nodes = user_form_nodes(typed_ast, user_form_count);
-    let effect_scope = collect_user_effect_scope(&user_nodes, known_effects);
-    let forms = collect_user_forms(&user_nodes, &effect_scope);
+    let mut external_impurity = HashMap::new();
+    crate::infer::collect_top_level_function_external_impurity(
+        typed_ast,
+        &mut external_impurity,
+    );
+    let effect_scope =
+        collect_user_effect_scope(&user_nodes, known_effects, &external_impurity);
+    let forms = collect_user_forms(&user_nodes, &effect_scope, &external_impurity);
     let user_effect = user_nodes.into_iter().fold(EffectFlags::PURE, |acc, form| {
-        acc | refined_form_effect(form, &effect_scope)
+        acc | observable_form_effect(
+            form,
+            refined_form_effect(form, &effect_scope),
+            &external_impurity,
+        )
     });
     let result_type = user_form_nodes(typed_ast, user_form_count)
         .last()
@@ -364,6 +374,7 @@ pub fn render_json(report: &ExplainReport) -> Result<String, String> {
 fn collect_user_forms(
     forms: &[&TypedExpression],
     known_effects: &HashMap<String, EffectFlags>,
+    external_impurity: &HashMap<String, bool>,
 ) -> Vec<ExplainForm> {
     forms
         .iter()
@@ -374,26 +385,49 @@ fn collect_user_forms(
             collect_calls(&form.expr, &mut calls);
             calls.sort();
             calls.dedup();
+            let effect = observable_form_effect(
+                form,
+                refined_form_effect(form, known_effects),
+                external_impurity,
+            );
             ExplainForm {
                 name,
                 kind,
                 typ,
-                effect: effect_labels(refined_form_effect(form, known_effects)),
+                effect: effect_labels(effect),
                 calls,
             }
         })
         .collect()
 }
 
+fn observable_form_effect(
+    form: &TypedExpression,
+    mut effect: EffectFlags,
+    external_impurity: &HashMap<String, bool>,
+) -> EffectFlags {
+    if let Some((_keyword, name)) = top_level_binding(form) {
+        if external_impurity.get(name) == Some(&false) {
+            effect = EffectFlags(effect.0 & !EffectFlags::MUTATE.0);
+        }
+    }
+    effect
+}
+
 fn collect_user_effect_scope(
     forms: &[&TypedExpression],
     known_effects: &HashMap<String, EffectFlags>,
+    external_impurity: &HashMap<String, bool>,
 ) -> HashMap<String, EffectFlags> {
     let mut scope = known_effects.clone();
     for form in forms {
         if let Some((keyword, name)) = top_level_binding(form) {
             if keyword == "let" || keyword == "letrec" || keyword == "mut" {
-                let effect = refined_form_effect(form, &scope);
+                let effect = observable_form_effect(
+                    form,
+                    refined_form_effect(form, &scope),
+                    external_impurity,
+                );
                 scope.insert(name.to_string(), effect);
             }
         }
@@ -1116,5 +1150,43 @@ mod tests {
             "expected explain effect to keep unknown-call, got: {:?}",
             report.effect
         );
+    }
+
+    #[test]
+    fn explain_reports_transitive_io_without_local_mutation() {
+        let source = r#"(let log! (lambda (x)
+  (mut scratch 0)
+  (alter! scratch x)
+  (print! "log")))
+(let search? (lambda (x)
+  (letrec bs (lambda (n)
+    (if (= n 0) true (do (log! n) (bs (- n 1))))))
+  (bs x)))
+(search? 1)"#;
+        let std_defs = crate::lsp_native_core::load_std_definitions();
+        let (base_env, base_next_id, _signatures, effects) =
+            crate::lsp_native_core::build_base_environment(&std_defs);
+        let program = crate::parser::merge_std_and_program(source, std_defs)
+            .expect("source should merge");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &program,
+            (base_env, base_next_id),
+        )
+        .expect("source should infer");
+        let split = crate::wat::compile_program_to_split_wat_typed(&typed)
+            .expect("source should compile");
+        let report = explain_program_with_effects(&typed, &split.user_wat, 3, &effects);
+
+        for name in ["log!", "search?"] {
+            let form = report
+                .forms
+                .iter()
+                .find(|form| form.name == name)
+                .expect("function should be reported");
+            assert!(form.effect.iter().any(|effect| effect == "io"));
+            assert!(!form.effect.iter().any(|effect| effect == "mutate"));
+        }
+        assert!(report.effect.iter().any(|effect| effect == "io"));
+        assert!(!report.effect.iter().any(|effect| effect == "mutate"));
     }
 }

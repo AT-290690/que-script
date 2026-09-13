@@ -533,14 +533,10 @@ fn is_known_pure_syntax_call(op: &str) -> bool {
 
 pub fn refine_effect_with_known_calls(
     expr: &Expression,
-    raw_effect: EffectFlags,
+    _raw_effect: EffectFlags,
     known_effects: &HashMap<String, EffectFlags>,
     self_name: Option<&str>,
 ) -> EffectFlags {
-    if !raw_effect.contains(EffectFlags::UNKNOWN_CALL) {
-        return raw_effect;
-    }
-
     let mut scoped_effects = known_effects.clone();
     if let Some(name) = self_name {
         scoped_effects
@@ -549,11 +545,7 @@ pub fn refine_effect_with_known_calls(
     }
 
     let syntax_effect = estimate_syntax_effect(expr, &scoped_effects);
-    if syntax_effect.contains(EffectFlags::UNKNOWN_CALL) {
-        raw_effect
-    } else {
-        syntax_effect
-    }
+    syntax_effect
 }
 
 pub fn collect_let_binding_types(node: &TypedExpression, signatures: &mut HashMap<String, Type>) {

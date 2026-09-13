@@ -1343,13 +1343,113 @@ fn native_shell_nvim_help(bin_name: &str) -> String {
         "Usage: {bin_name} nvim [--code <source>] [arg ...] [--debug [basic|code|types|all]|--opt] [--allow <permissions> ...]\n\
          \n\
          Opens a temporary .que file in Neovim with the terminal attached.\n\
-         Run without leaving Neovim with :QueRun or <leader>r.\n\
+         Run without leaving Neovim with:\n\
+           :QueRun / <leader>r     optimized run\n\
+           :QueDebug / <leader>d   debug run\n\
+           :QueWat / <leader>w     emit WAT\n\
+           :QueTypes / <leader>a   emit inferred types\n\
+           :QueExplain / <leader>e explain optimized program\n\
+           :QueSource / <leader>z  emit expanded source\n\
          Save and exit with :wq or ZZ to run it and return to the shell.\n\
          Exit without saving with :q! to cancel. Esc keeps its normal Neovim meaning.\n\
          --code prefills the scratch buffer with Que source.\n\
          Arguments and Que flags after `nvim` are passed to the scratch program.\n\
          Neovim and the Que Neovim plugin are external user-installed dependencies."
     )
+}
+
+fn nvim_runner_lua() -> &'static str {
+    r#"lua do
+local function mode_args(extra)
+  local args = {}
+  local i = 0
+  local count = tonumber(vim.env.QUE_NVIM_ARG_COUNT)
+  while i < count do
+    local arg = vim.env['QUE_NVIM_ARG_' .. i]
+    if arg == '--debug' then
+      local next_arg = i + 1 < count and vim.env['QUE_NVIM_ARG_' .. (i + 1)] or nil
+      if next_arg == 'basic' or next_arg == 'code' or next_arg == 'types' or next_arg == 'all' then
+        i = i + 1
+      end
+    elseif arg == '--emit' or arg == '--out' then
+      i = i + 1
+    elseif arg ~= '--opt' and arg ~= '--emit-source' then
+      table.insert(args, arg)
+    end
+    i = i + 1
+  end
+  vim.list_extend(args, extra)
+  return args
+end
+
+local function append_output(buf, data)
+  if not data or #data == 0 then return end
+  vim.schedule(function()
+    if not vim.api.nvim_buf_is_valid(buf) then return end
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, -1, -1, false, data)
+  end)
+end
+
+local function run(mode)
+  vim.cmd('silent write')
+  vim.fn.delete(vim.env.QUE_NVIM_RUN_MARKER)
+  local source = vim.api.nvim_buf_get_name(0)
+  local cmd
+  if mode.explain then
+    cmd = { vim.env.QUE_NVIM_EXE, 'explain', source, '--opt' }
+  else
+    cmd = { vim.env.QUE_NVIM_EXE, source }
+    vim.list_extend(cmd, mode_args(mode.args))
+  end
+  vim.cmd('botright new')
+  if mode.terminal then
+    vim.fn.termopen(cmd)
+    vim.cmd('startinsert')
+    return
+  end
+  local buf = vim.api.nvim_get_current_buf()
+  vim.bo[buf].buftype = 'nofile'
+  vim.bo[buf].bufhidden = 'wipe'
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = mode.filetype or ''
+  vim.api.nvim_buf_set_name(buf, '[Que ' .. mode.title .. ']')
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+  local job = vim.fn.jobstart(cmd, {
+    stdout_buffered = false,
+    stderr_buffered = false,
+    on_stdout = function(_, data) append_output(buf, data) end,
+    on_stderr = function(_, data) append_output(buf, data) end,
+    on_exit = function(_, code)
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(buf) then return end
+        if code ~= 0 then
+          append_output(buf, { '', '[process exited with status ' .. code .. ']' })
+        end
+        vim.bo[buf].modifiable = false
+        vim.bo[buf].readonly = true
+      end)
+    end,
+  })
+  if job <= 0 then
+    append_output(buf, { 'Failed to start Que process.' })
+  end
+end
+
+local modes = {
+  QueRun = { key = 'r', title = 'output', terminal = true, args = { '--opt' } },
+  QueDebug = { key = 'd', title = 'debug', terminal = true, args = { '--debug' } },
+  QueWat = { key = 'w', title = 'WAT', filetype = 'wat', args = { '--opt', '--emit', 'wat' } },
+  QueTypes = { key = 'a', title = 'types', filetype = 'que', args = { '--opt', '--emit', 'types' } },
+  QueExplain = { key = 'e', title = 'explain', filetype = 'markdown', explain = true },
+  QueSource = { key = 'z', title = 'source', filetype = 'que', args = { '--opt', '--emit', 'source' } },
+}
+
+for name, mode in pairs(modes) do
+  vim.api.nvim_create_user_command(name, function() run(mode) end, {})
+  vim.keymap.set('n', '<leader>' .. mode.key, '<cmd>' .. name .. '<CR>', { silent = true, buffer = true })
+end
+end"#
 }
 
 fn take_nvim_initial_code(args: &mut Vec<String>) -> Result<String, String> {
@@ -1409,9 +1509,7 @@ fn run_nvim_command(args: &[String], bin_name: &str) -> Result<(), String> {
         .arg("-c")
         .arg("lua vim.api.nvim_create_autocmd('BufWritePost',{buffer=0,callback=function() vim.fn.writefile({'run'},vim.env.QUE_NVIM_RUN_MARKER) end})")
         .arg("-c")
-        .arg("lua vim.api.nvim_create_user_command('QueRun',function() vim.cmd('silent write'); vim.fn.delete(vim.env.QUE_NVIM_RUN_MARKER); local cmd={vim.env.QUE_NVIM_EXE,vim.api.nvim_buf_get_name(0)}; for i=0,tonumber(vim.env.QUE_NVIM_ARG_COUNT)-1 do table.insert(cmd,vim.env['QUE_NVIM_ARG_'..i]) end; vim.cmd('botright new'); vim.fn.termopen(cmd); vim.cmd('startinsert') end,{})")
-        .arg("-c")
-        .arg("nnoremap <silent> <leader>r :QueRun<CR>")
+        .arg(nvim_runner_lua())
         .arg("-c")
         .arg("setlocal modified")
         .arg(&scratch_path)
@@ -1973,6 +2071,10 @@ fn builtin_explore_symbols() -> BTreeMap<String, LibraryExploreSymbol> {
     out
 }
 
+fn should_hide_library_symbol(name: &str) -> bool {
+    name.starts_with('_') || name.starts_with("std/")
+}
+
 fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         println!(
@@ -1986,7 +2088,7 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
              \n\
              Examples:\n\
                queio --lib names '*map*'\n\
-               queio --lib types 'std/vector/*'\n\
+               queio --lib types '*map*'\n\
                queio --lib source map"
         );
         return Ok(());
@@ -1996,6 +2098,9 @@ fn run_library_explore_via_io(args: &[String]) -> Result<(), String> {
     let mut by_name = builtin_explore_symbols();
     for def in &lib_defs {
         if let Some(name) = binding_name_from_def(def) {
+            if should_hide_library_symbol(&name) {
+                continue;
+            }
             let symbol = match def {
                 Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(word)) if word == "letmacro") => {
                     LibraryExploreSymbol::Macro(def.clone())
@@ -3729,11 +3834,12 @@ fn build_debug_error_report(
 mod tests {
     use super::{
         init_host_project, init_project_config_file, native_shell_examples, native_shell_help,
-        native_shell_nvim_help, nvim_scratch_path, parse_test_results, resolve_explain_input,
-        resolve_project_entry_path, take_debug_mode_from_argv, take_emit_request_from_argv,
-        take_help_flag_from_argv, take_no_result_flag_from_argv, take_nvim_initial_code,
-        take_opt_flag_from_argv, take_shell_policy_from_argv, wildcard_match, DebugMode, EmitKind,
-        LibraryExploreSymbol, QueTestCase, ShellPermission, ShellPolicy,
+        native_shell_nvim_help, nvim_runner_lua, nvim_scratch_path, parse_test_results,
+        resolve_explain_input, resolve_project_entry_path, take_debug_mode_from_argv,
+        take_emit_request_from_argv, take_help_flag_from_argv, take_no_result_flag_from_argv,
+        take_nvim_initial_code, take_opt_flag_from_argv, take_shell_policy_from_argv,
+        wildcard_match, DebugMode, EmitKind, LibraryExploreSymbol, QueTestCase, ShellPermission,
+        ShellPolicy,
     };
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
@@ -3853,6 +3959,13 @@ mod tests {
                 ..
             }) if typ == "Bool -> T -> T -> T"
         ));
+    }
+
+    #[test]
+    fn lib_explore_hides_internal_and_std_compatibility_symbols() {
+        assert!(super::should_hide_library_symbol("_internal"));
+        assert!(super::should_hide_library_symbol("std/vector/map"));
+        assert!(!super::should_hide_library_symbol("map"));
     }
 
     #[test]
@@ -4146,7 +4259,12 @@ mod tests {
     fn native_shell_nvim_help_describes_terminal_workflow() {
         let help = native_shell_nvim_help("que");
         assert!(help.contains("Usage: que nvim"));
-        assert!(help.contains(":QueRun or <leader>r"));
+        assert!(help.contains(":QueRun / <leader>r"));
+        assert!(help.contains(":QueDebug / <leader>d"));
+        assert!(help.contains(":QueWat / <leader>w"));
+        assert!(help.contains(":QueTypes / <leader>a"));
+        assert!(help.contains(":QueExplain / <leader>e"));
+        assert!(help.contains(":QueSource / <leader>z"));
         assert!(help.contains(":wq or ZZ"));
         assert!(help.contains(":q! to cancel"));
         assert!(help.contains("Esc keeps its normal Neovim meaning"));
@@ -4162,6 +4280,17 @@ mod tests {
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.starts_with("que-script-")));
+    }
+
+    #[test]
+    fn nvim_runner_has_run_debug_and_emit_modes() {
+        let lua = nvim_runner_lua();
+        assert!(lua.contains("QueRun = { key = 'r', title = 'output', terminal = true, args = { '--opt' } }"));
+        assert!(lua.contains("QueDebug = { key = 'd', title = 'debug', terminal = true, args = { '--debug' } }"));
+        assert!(lua.contains("QueWat = { key = 'w', title = 'WAT', filetype = 'wat', args = { '--opt', '--emit', 'wat' } }"));
+        assert!(lua.contains("QueTypes = { key = 'a', title = 'types', filetype = 'que', args = { '--opt', '--emit', 'types' } }"));
+        assert!(lua.contains("QueExplain = { key = 'e', title = 'explain', filetype = 'markdown', explain = true }"));
+        assert!(lua.contains("QueSource = { key = 'z', title = 'source', filetype = 'que', args = { '--opt', '--emit', 'source' } }"));
     }
 
     #[test]

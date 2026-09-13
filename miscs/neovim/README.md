@@ -91,6 +91,21 @@ Existing `on_attach` callbacks and `nvim-cmp` formatting are preserved and then 
 Inferred completion types are displayed alongside candidates by default; use
 `completion_type_hints = false` to hide that column.
 
+## Scratch runner
+
+Inside `que nvim`, these buffer-local commands and shortcuts save the scratch file and show their output in a syntax-highlighted result split:
+
+- `:QueRun` / `<leader>r`: optimized run
+- `:QueDebug` / `<leader>d`: debug run
+- `:QueWat` / `<leader>w`: optimized WAT output
+- `:QueTypes` / `<leader>a`: optimized inferred types
+- `:QueExplain` / `<leader>e`: optimized explanation
+- `:QueSource` / `<leader>z`: optimized expanded source
+
+The shortcuts use Space as the leader in the preconfigured Que scratch editor.
+Normal and debug runs retain their original interactive terminal splits. Source and inferred
+types use Que highlighting, WAT uses WAT highlighting, and explanations use Markdown.
+
 Default root markers:
 
 - `que.toml`

@@ -1810,7 +1810,7 @@ fn apply_completion_replace_range(items: &mut [CompletionItem], range: Range) {
 }
 
 fn should_hide_completion_symbol(symbol: &str) -> bool {
-    symbol.starts_with('_')
+    symbol.starts_with('_') || symbol.starts_with("std/")
 }
 
 fn symbol_at_position(text: &str, position: Position) -> Option<(String, Range)> {
@@ -2111,6 +2111,13 @@ fn format_literal_hover(text: &str, range: Range, literal_type: &str) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_hides_internal_and_std_compatibility_symbols() {
+        assert!(should_hide_completion_symbol("_internal"));
+        assert!(should_hide_completion_symbol("std/vector/map"));
+        assert!(!should_hide_completion_symbol("map"));
+    }
 
     #[test]
     fn literal_completions_have_concrete_constant_types() {
