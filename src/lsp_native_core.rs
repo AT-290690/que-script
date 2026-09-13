@@ -1128,7 +1128,73 @@ pub fn static_analysis_diagnostic_snippet(message: &str) -> Option<String> {
     if !message.starts_with("static bounds:") {
         return None;
     }
-    Some(format!("(get {vector} {index})"))
+    let snippet = format!(
+        "(get {} {})",
+        restore_block_source_names(vector),
+        restore_block_source_names(index)
+    );
+    let parsed = parser::build(&snippet).ok()?;
+    let parsed = if let Expression::Apply(items) = &parsed {
+        if matches!(items.first(), Some(Expression::Word(op)) if op == "do") && items.len() == 2 {
+            &items[1]
+        } else {
+            &parsed
+        }
+    } else {
+        &parsed
+    };
+    Some(flatten_get_source(parsed))
+}
+
+fn flatten_get_source(expr: &Expression) -> String {
+    fn collect<'a>(expr: &'a Expression, indices: &mut Vec<&'a Expression>) -> &'a Expression {
+        if let Expression::Apply(items) = expr {
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "get")
+                && items.len() == 3
+            {
+                let base = collect(&items[1], indices);
+                indices.push(&items[2]);
+                return base;
+            }
+        }
+        expr
+    }
+
+    let mut indices = Vec::new();
+    let base = collect(expr, &mut indices);
+    if indices.is_empty() {
+        return expr.to_lisp();
+    }
+    format!(
+        "(get {} {})",
+        base.to_lisp(),
+        indices
+            .iter()
+            .map(|index| index.to_lisp())
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
+fn restore_block_source_names(expression: &str) -> String {
+    let mut out = String::with_capacity(expression.len());
+    let mut token = String::new();
+    let flush = |out: &mut String, token: &mut String| {
+        if !token.is_empty() {
+            out.push_str(block_source_name(token));
+            token.clear();
+        }
+    };
+    for character in expression.chars() {
+        if character.is_whitespace() || matches!(character, '(' | ')' | '[' | ']' | '{' | '}') {
+            flush(&mut out, &mut token);
+            out.push(character);
+        } else {
+            token.push(character);
+        }
+    }
+    flush(&mut out, &mut token);
+    out
 }
 
 pub fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut HashSet<String>) {

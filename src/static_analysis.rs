@@ -2,6 +2,15 @@ use crate::infer::TypedExpression;
 use crate::parser::Expression;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GuardRelation {
+    vector_arg: usize,
+    projection_index_args: Vec<usize>,
+    index_arg: usize,
+}
+
+type GuardSummary = Vec<GuardRelation>;
+
 /// Abstract state at one program point.  This is deliberately independent of
 /// the runtime representation: later analyses (division, overflow, and so on)
 /// can add domains here without becoming part of WAT lowering.
@@ -9,13 +18,17 @@ use std::collections::{HashMap, HashSet};
 struct AbstractState {
     safe_pairs: HashSet<(String, String)>,
     nonnegative: HashSet<String>,
+    integer_constants: HashMap<String, i32>,
     fixed_lengths: HashMap<String, usize>,
     minimum_lengths: HashMap<String, usize>,
     length_sources: HashMap<String, String>,
     /// Value-numbering table for immutable aliases and projected vectors.
     /// The canonical expression is the symbolic identity used by proofs.
     aliases: HashMap<String, String>,
-    guard_summaries: HashMap<String, (usize, usize)>,
+    /// Symbolic values for immutable scalar bindings. This lets a guard on an
+    /// expression prove an access through a later `let` bound to that expression.
+    scalar_aliases: HashMap<String, String>,
+    guard_summaries: HashMap<String, GuardSummary>,
 }
 
 /// Conservative control-flow merge.  A fact is available after a join only
@@ -26,6 +39,12 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         .iter()
         .filter(|(name, len)| right.fixed_lengths.get(*name) == Some(*len))
         .map(|(name, len)| (name.clone(), *len))
+        .collect();
+    let integer_constants = left
+        .integer_constants
+        .iter()
+        .filter(|(name, value)| right.integer_constants.get(*name) == Some(*value))
+        .map(|(name, value)| (name.clone(), *value))
         .collect();
     let length_sources = left
         .length_sources
@@ -49,6 +68,12 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         .filter(|(name, value)| right.aliases.get(*name) == Some(*value))
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect();
+    let scalar_aliases = left
+        .scalar_aliases
+        .iter()
+        .filter(|(name, value)| right.scalar_aliases.get(*name) == Some(*value))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
     AbstractState {
         safe_pairs: left
             .safe_pairs
@@ -60,13 +85,59 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
             .intersection(&right.nonnegative)
             .cloned()
             .collect(),
+        integer_constants,
         fixed_lengths,
         minimum_lengths,
         length_sources,
         aliases,
+        scalar_aliases,
         // Function summaries are immutable analysis metadata rather than a
         // path-sensitive fact.
         guard_summaries: left.guard_summaries.clone(),
+    }
+}
+
+fn canonical_scalar(expr: &Expression, state: &AbstractState) -> String {
+    match expr {
+        Expression::Word(name) => state
+            .scalar_aliases
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.clone()),
+        Expression::Apply(items) => {
+            let parts: Vec<String> = items
+                .iter()
+                .map(|item| canonical_scalar(item, state))
+                .collect();
+            format!("({})", parts.join(" "))
+        }
+        _ => expr.to_lisp(),
+    }
+}
+
+fn integer_constant(expr: &Expression, state: &AbstractState) -> Option<i32> {
+    match expr {
+        Expression::Int(value) => Some(*value),
+        Expression::Word(name) => state.integer_constants.get(name).copied(),
+        Expression::Apply(items) => match items.as_slice() {
+            [Expression::Word(op), left, right] if op == "+" => {
+                integer_constant(left, state)?.checked_add(integer_constant(right, state)?)
+            }
+            [Expression::Word(op), left, right] if op == "-" => {
+                integer_constant(left, state)?.checked_sub(integer_constant(right, state)?)
+            }
+            [Expression::Word(op), left, right] if op == "*" => {
+                integer_constant(left, state)?.checked_mul(integer_constant(right, state)?)
+            }
+            [Expression::Word(op), left, right] if op == "/" => {
+                let divisor = integer_constant(right, state)?;
+                (divisor != 0)
+                    .then(|| integer_constant(left, state)?.checked_div(divisor))
+                    .flatten()
+            }
+            _ => None,
+        },
+        Expression::Dec(_) => None,
     }
 }
 
@@ -118,17 +189,16 @@ fn add_upper_bound(
     upper: &mut Vec<(String, String)>,
     minimum_lengths: &mut Vec<(String, usize)>,
 ) {
-    let index_key = index.to_lisp();
-    if matches!(index, Expression::Int(value) if *value >= 0)
+    let index_key = canonical_scalar(index, facts);
+    let constant_index = integer_constant(index, facts);
+    if constant_index.is_some_and(|value| value >= 0)
         || matches!(index, Expression::Word(name) if facts.nonnegative.contains(name))
     {
         lower.insert(index_key.clone());
     }
     let vector_key = canonical_access(vector, facts);
-    if let Expression::Int(index) = index {
-        if *index >= 0 {
-            minimum_lengths.push((vector_key.clone(), (*index as usize).saturating_add(1)));
-        }
+    if let Some(index) = constant_index.filter(|value| *value >= 0) {
+        minimum_lengths.push((vector_key.clone(), (index as usize).saturating_add(1)));
     }
     upper.push((vector_key, index_key));
 }
@@ -145,40 +215,48 @@ fn collect_static_bound_guard_facts(
         return;
     };
     match items.as_slice() {
-        [Expression::Word(op), left, right]
-            if (op == "and" && is_true) || (op == "or" && !is_true) =>
+        [Expression::Word(op), operands @ ..]
+            if operands.len() >= 2 && ((op == "and" && is_true) || (op == "or" && !is_true)) =>
         {
-            collect_static_bound_guard_facts(left, facts, is_true, lower, upper, minimum_lengths);
-            collect_static_bound_guard_facts(right, facts, is_true, lower, upper, minimum_lengths);
+            for operand in operands {
+                collect_static_bound_guard_facts(
+                    operand,
+                    facts,
+                    is_true,
+                    lower,
+                    upper,
+                    minimum_lengths,
+                );
+            }
         }
         [Expression::Word(op), inner] if op == "not" => {
             collect_static_bound_guard_facts(inner, facts, !is_true, lower, upper, minimum_lengths);
         }
         [Expression::Word(op), Expression::Word(index), Expression::Int(bound)]
-            if is_true && ((op == ">=" && *bound == 0) || (op == ">" && *bound == -1)) =>
+            if (is_true && ((op == ">=" && *bound == 0) || (op == ">" && *bound == -1)))
+                || (!is_true && ((op == "<" && *bound == 0) || (op == "<=" && *bound == -1))) =>
         {
-            lower.insert(index.clone());
+            lower.insert(canonical_scalar(&Expression::Word(index.clone()), facts));
         }
         [Expression::Word(op), index, Expression::Apply(length)]
-            if is_true
-                && op == "<"
+            if ((is_true && op == "<") || (!is_true && op == ">="))
                 && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
                 && length.len() == 2 =>
         {
             add_upper_bound(&length[1], index, facts, lower, upper, minimum_lengths);
         }
         [Expression::Word(op), Expression::Apply(length), index]
-            if is_true
-                && op == ">"
+            if ((is_true && op == ">") || (!is_true && op == "<="))
                 && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
                 && length.len() == 2 =>
         {
             add_upper_bound(&length[1], index, facts, lower, upper, minimum_lengths);
         }
         [Expression::Word(op), index, Expression::Word(length)]
-            if is_true && op == "<" && facts.length_sources.contains_key(length) =>
+            if ((is_true && op == "<") || (!is_true && op == ">="))
+                && facts.length_sources.contains_key(length) =>
         {
-            let index_key = index.to_lisp();
+            let index_key = canonical_scalar(index, facts);
             if matches!(index, Expression::Int(value) if *value >= 0)
                 || matches!(index, Expression::Word(name) if facts.nonnegative.contains(name))
             {
@@ -206,9 +284,10 @@ fn collect_static_bound_guard_facts(
             }
         }
         [Expression::Word(op), Expression::Word(length), index]
-            if is_true && op == ">" && facts.length_sources.contains_key(length) =>
+            if ((is_true && op == ">") || (!is_true && op == "<="))
+                && facts.length_sources.contains_key(length) =>
         {
-            let index_key = index.to_lisp();
+            let index_key = canonical_scalar(index, facts);
             if matches!(index, Expression::Int(value) if *value >= 0)
                 || matches!(index, Expression::Word(name) if facts.nonnegative.contains(name))
             {
@@ -235,33 +314,32 @@ fn collect_static_bound_guard_facts(
                 }
             }
         }
-        [Expression::Word(op), xs, index]
-            if is_true && matches!(op.as_str(), "in-bounds?" | "std/vector/in-bounds?") =>
-        {
-            let index_key = index.to_lisp();
-            lower.insert(index_key.clone());
-            upper.push((canonical_access(xs, facts), index_key));
-        }
-        [Expression::Word(op), Expression::Word(index), Expression::Word(xs)]
-            if is_true && op == "Vector/in-bounds?" =>
-        {
-            lower.insert(index.clone());
-            upper.push((
-                canonical_access(&Expression::Word(xs.clone()), facts),
-                index.clone(),
-            ));
-        }
         _ => {
             if is_true {
                 let Some(op) = items.first().and_then(word) else {
                     return;
                 };
-                if let Some((vector_arg, index_arg)) = facts.guard_summaries.get(op) {
-                    if let (Some(vector), Some(Expression::Word(index))) =
-                        (items.get(*vector_arg + 1), items.get(*index_arg + 1))
-                    {
-                        lower.insert(index.clone());
-                        upper.push((canonical_access(vector, facts), index.clone()));
+                if let Some(relations) = facts.guard_summaries.get(op) {
+                    for relation in relations {
+                        let Some(mut vector) = items.get(relation.vector_arg + 1).cloned() else {
+                            continue;
+                        };
+                        let Some(index) = items.get(relation.index_arg + 1) else {
+                            continue;
+                        };
+                        for projection_arg in &relation.projection_index_args {
+                            let Some(projection_index) = items.get(*projection_arg + 1) else {
+                                continue;
+                            };
+                            vector = Expression::Apply(vec![
+                                Expression::Word("get".to_string()),
+                                vector,
+                                projection_index.clone(),
+                            ]);
+                        }
+                        let index_key = canonical_scalar(index, facts);
+                        lower.insert(index_key.clone());
+                        upper.push((canonical_access(&vector, facts), index_key));
                     }
                 }
             }
@@ -327,6 +405,9 @@ fn invalidate_resized_vector(items: &[Expression], facts: &mut AbstractState) {
 }
 
 fn expression_is_nonnegative(expr: &Expression, facts: &AbstractState) -> bool {
+    if let Some(value) = integer_constant(expr, facts) {
+        return value >= 0;
+    }
     match expr {
         Expression::Int(number) => *number >= 0,
         Expression::Word(name) => facts.nonnegative.contains(name),
@@ -346,15 +427,21 @@ fn expression_is_nonnegative(expr: &Expression, facts: &AbstractState) -> bool {
 
 fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractState) {
     let remains_nonnegative = expression_is_nonnegative(value, facts);
+    let constant = integer_constant(value, facts);
     facts.safe_pairs.retain(|(_, index)| index != name);
     facts.nonnegative.remove(name);
+    facts.integer_constants.remove(name);
     facts.fixed_lengths.remove(name);
     facts.minimum_lengths.remove(name);
     facts.length_sources.remove(name);
     facts.aliases.remove(name);
+    facts.scalar_aliases.remove(name);
 
     if remains_nonnegative {
         facts.nonnegative.insert(name.to_string());
+    }
+    if let Some(constant) = constant {
+        facts.integer_constants.insert(name.to_string(), constant);
     }
     if let Expression::Apply(length) = value {
         if matches!(length.first(), Some(Expression::Word(op)) if op == "length")
@@ -399,9 +486,10 @@ fn validate_static_bounds_expr(
 
     if op == "get" && items.len() == 3 {
         let proven = match (&items[1], &items[2]) {
-            (xs, Expression::Word(index)) => facts
-                .safe_pairs
-                .contains(&(canonical_access(xs, facts), index.clone())),
+            (xs, Expression::Word(index)) => facts.safe_pairs.contains(&(
+                canonical_access(xs, facts),
+                canonical_scalar(&Expression::Word(index.clone()), facts),
+            )),
             (xs, Expression::Int(index)) => {
                 facts
                     .safe_pairs
@@ -450,7 +538,13 @@ fn validate_static_bounds_expr(
             }
         }
         "lambda" => {
-            let mut scoped = AbstractState::default();
+            // A lambda starts with no caller-local value facts, but inferred
+            // function contracts are global immutable analysis metadata and
+            // remain available inside nested functions.
+            let mut scoped = AbstractState {
+                guard_summaries: facts.guard_summaries.clone(),
+                ..AbstractState::default()
+            };
             for child in items.iter().skip(2) {
                 validate_static_bounds_expr(child, &mut scoped, diagnostics);
             }
@@ -458,6 +552,7 @@ fn validate_static_bounds_expr(
         "let" | "mut" if items.len() >= 3 => {
             validate_static_bounds_expr(&items[2], facts, diagnostics);
             if let Expression::Word(name) = &items[1] {
+                let scalar_alias = (op == "let").then(|| canonical_scalar(&items[2], facts));
                 let alias = match &items[2] {
                     Expression::Word(_) => Some(canonical_access(&items[2], facts)),
                     Expression::Apply(rhs) if matches!(rhs.first(), Some(Expression::Word(op)) if op == "get") => {
@@ -471,6 +566,9 @@ fn validate_static_bounds_expr(
                 }
                 if let Some(alias) = alias {
                     facts.aliases.insert(name.clone(), alias);
+                }
+                if let Some(scalar_alias) = scalar_alias {
+                    facts.scalar_aliases.insert(name.clone(), scalar_alias);
                 }
             }
         }
@@ -575,18 +673,7 @@ pub fn analyze_user_program_diagnostics(
         }
         expression => vec![expression],
     };
-    let mut guard_summaries = infer_guard_summaries(&all_expressions);
-    // Retain the canonical predicates even when tree shaking has removed their
-    // definitions before this pass sees the program.
-    guard_summaries
-        .entry("in-bounds?".to_string())
-        .or_insert((0, 1));
-    guard_summaries
-        .entry("std/vector/in-bounds?".to_string())
-        .or_insert((0, 1));
-    guard_summaries
-        .entry("Vector/in-bounds?".to_string())
-        .or_insert((1, 0));
+    let guard_summaries = infer_guard_summaries(&all_expressions);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
@@ -599,8 +686,8 @@ pub fn analyze_user_program_diagnostics(
     diagnostics
 }
 
-fn infer_guard_summaries(expressions: &[&Expression]) -> HashMap<String, (usize, usize)> {
-    let mut summaries = HashMap::new();
+fn infer_guard_summaries(expressions: &[&Expression]) -> HashMap<String, GuardSummary> {
+    let mut summaries: HashMap<String, GuardSummary> = HashMap::new();
     for _ in 0..expressions.len().max(1) {
         let mut changed = false;
         for expression in expressions {
@@ -615,8 +702,8 @@ fn infer_guard_summaries(expressions: &[&Expression]) -> HashMap<String, (usize,
                 continue;
             }
             if let Expression::Word(alias) = rhs {
-                if let Some(summary) = summaries.get(alias).copied() {
-                    changed |= summaries.insert(name.clone(), summary) != Some(summary);
+                if let Some(summary) = summaries.get(alias).cloned() {
+                    changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
                 }
                 continue;
             }
@@ -637,15 +724,34 @@ fn infer_guard_summaries(expressions: &[&Expression]) -> HashMap<String, (usize,
                 ..AbstractState::default()
             };
             facts = state_for_true_branch(lambda.last().expect("lambda has a body"), &facts);
+            let mut summary = Vec::new();
             for (vector, index) in &facts.safe_pairs {
-                if let (Some(vector_arg), Some(index_arg)) = (
-                    params.iter().position(|param| *param == vector),
-                    params.iter().position(|param| *param == index),
-                ) {
-                    let summary = (vector_arg, index_arg);
-                    changed |= summaries.insert(name.clone(), summary) != Some(summary);
-                    break;
+                let Some(index_arg) = params.iter().position(|param| *param == index) else {
+                    continue;
+                };
+                let Ok(vector_expr) = crate::parser::build(vector) else {
+                    continue;
+                };
+                if let Some((vector_arg, projection_index_args)) =
+                    guard_path_from_params(single_built_expression(&vector_expr), &params)
+                {
+                    summary.push(GuardRelation {
+                        vector_arg,
+                        projection_index_args,
+                        index_arg,
+                    });
                 }
+            }
+            summary.sort_by_key(|relation| {
+                (
+                    relation.projection_index_args.len(),
+                    relation.vector_arg,
+                    relation.index_arg,
+                )
+            });
+            summary.dedup();
+            if !summary.is_empty() {
+                changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
             }
         }
         if !changed {
@@ -653,6 +759,36 @@ fn infer_guard_summaries(expressions: &[&Expression]) -> HashMap<String, (usize,
         }
     }
     summaries
+}
+
+fn single_built_expression(expr: &Expression) -> &Expression {
+    if let Expression::Apply(items) = expr {
+        if matches!(items.first(), Some(Expression::Word(op)) if op == "do") && items.len() == 2 {
+            return &items[1];
+        }
+    }
+    expr
+}
+
+fn guard_path_from_params(expr: &Expression, params: &[&str]) -> Option<(usize, Vec<usize>)> {
+    match expr {
+        Expression::Word(name) => params
+            .iter()
+            .position(|param| *param == name)
+            .map(|root| (root, Vec::new())),
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "get")
+                && items.len() == 3 =>
+        {
+            let (root, mut projections) = guard_path_from_params(&items[1], params)?;
+            let Expression::Word(index) = &items[2] else {
+                return None;
+            };
+            projections.push(params.iter().position(|param| *param == index)?);
+            Some((root, projections))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -764,5 +900,36 @@ mod tests {
 
         let stronger = "(let xs []) (if (> (length xs) 1) (get xs 0) -1)";
         assert_eq!(analyze(stronger, 2), Ok(()));
+
+        let constant_alias = "(let xs []) (let index 0) (if (> (length xs) index) (get xs 0) -1)";
+        assert_eq!(analyze(constant_alias, 3), Ok(()));
+    }
+
+    #[test]
+    fn guarded_scalar_expression_proves_its_later_let_alias() {
+        let source = "(let xs [1 2 3]) (let left 0) (let right 2) (if (in-bounds? xs (/ (+ left right) 2)) (block (let index (/ (+ left right) 2)) (get xs index)) -1)";
+        // Supply the predicate definition because this unit helper intentionally
+        // infers without merging the baked standard library.
+        let source =
+            format!("(let in-bounds? (lambda (xs i) (and (>= i 0) (< i (length xs))))) {source}");
+        assert_eq!(analyze(&source, 5), Ok(()));
+    }
+
+    #[test]
+    fn inferred_wrapper_contract_substitutes_reordered_arguments() {
+        let source = "(let base? (lambda (xs i) (and (>= i 0) (< i (length xs))))) (let flipped? (lambda (i xs) (base? xs i))) (let xs [1 2]) (let i 1) (if (flipped? i xs) (get xs i) -1)";
+        assert_eq!(analyze(source, 5), Ok(()));
+    }
+
+    #[test]
+    fn inferred_contract_is_available_inside_nested_lambda() {
+        let source = "(let valid? (lambda (xs i) (and (>= i 0) (< i (length xs))))) (let search (lambda (xs) (let index 0) (if (valid? xs index) (get xs index) -1)))";
+        assert_eq!(analyze(source, 2), Ok(()));
+    }
+
+    #[test]
+    fn false_out_of_bounds_comparisons_refine_else_branch() {
+        let source = "(let xs [1 2]) (let index 1) (if (or false (< index 0) (>= index (length xs))) -1 (get xs index))";
+        assert_eq!(analyze(source, 3), Ok(()));
     }
 }

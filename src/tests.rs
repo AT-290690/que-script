@@ -5364,6 +5364,16 @@ out"#,
     }
 
     #[test]
+    fn test_lsp_static_analysis_snippet_restores_multi_index_get_sugar() {
+        let message =
+            "static bounds: cannot prove `y` is within bounds for `(get m x)`; guard the access";
+        assert_eq!(
+            crate::lsp_native_core::static_analysis_diagnostic_snippet(message).as_deref(),
+            Some("(get m x y)")
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_diagnostics_allow_impure_uppercase_function_without_suffix() {
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(
             r#"(let J
@@ -6023,6 +6033,46 @@ parse-value"#;
         assert!(warnings
             .iter()
             .all(|warning| warning.get("severity") == Some(&serde_json::json!("warning"))));
+    }
+
+    #[test]
+    fn test_wasm_lsp_static_warning_maps_block_renamed_binding_to_source() {
+        let source = "(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get xs index))))\n(let xs2 [])\n(let index2 0)\n(if (> (length xs2) index2) (get xs2 0) -1)";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        let warnings: Vec<_> = diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .filter(|item| {
+                item.get("message")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|message| message.starts_with("static bounds:"))
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1, "{diagnostics_json}");
+        assert_eq!(warnings[0]["range"]["start"]["line"], serde_json::json!(3));
+        assert_eq!(warnings[0]["range"]["end"]["line"], serde_json::json!(3));
+    }
+
+    #[test]
+    fn test_wasm_lsp_infers_matrix_bounds_contract_without_warning() {
+        let source = "(let m [[1 3] [2]])\n(let x 1)\n(let y 1)\n(if (Matrix/in-bounds? x y m) (get m x y) -1)";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        assert!(
+            diagnostics
+                .as_array()
+                .expect("diagnostics should be an array")
+                .iter()
+                .all(|item| !item
+                    .get("message")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|message| message.starts_with("static bounds:"))),
+            "matrix predicate should prove both accesses: {diagnostics_json}"
+        );
     }
 
     #[test]
