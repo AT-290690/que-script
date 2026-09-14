@@ -5365,11 +5365,37 @@ out"#,
 
     #[test]
     fn test_lsp_static_analysis_snippet_restores_multi_index_get_sugar() {
-        let message =
-            "static bounds: cannot prove `y` is within bounds for `(get m x)`; guard the access";
+        let message = "static bounds: index not proven safe: `(get (get m x) y)`";
         assert_eq!(
             crate::lsp_native_core::static_analysis_diagnostic_snippet(message).as_deref(),
             Some("(get m x y)")
+        );
+    }
+
+    #[test]
+    fn test_lsp_static_analysis_snippet_preserves_nonempty_operation() {
+        let message = "static bounds: vector may be empty: `(pop-val! xs)`";
+        assert_eq!(
+            crate::lsp_native_core::static_analysis_diagnostic_snippet(message).as_deref(),
+            Some("(pop-val! xs)")
+        );
+    }
+
+    #[test]
+    fn test_lsp_static_analysis_snippet_preserves_arithmetic_operation() {
+        let message = "static arithmetic: divisor may be zero: `(/ total divisor)`";
+        assert_eq!(
+            crate::lsp_native_core::static_analysis_diagnostic_snippet(message).as_deref(),
+            Some("(/ total divisor)")
+        );
+    }
+
+    #[test]
+    fn test_lsp_static_analysis_summary_is_short_and_has_no_category_prefix() {
+        let message = "static arithmetic: divisor may be zero: `(/ x d)`\nhelp: guard it with `(not (= d 0))`";
+        assert_eq!(
+            crate::lsp_native_core::static_analysis_diagnostic_summary(message),
+            "divisor may be zero: `(/ x d)`"
         );
     }
 

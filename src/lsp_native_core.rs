@@ -1122,17 +1122,10 @@ pub fn diagnostic_summary_without_snippet(message: &str) -> String {
 }
 
 pub fn static_analysis_diagnostic_snippet(message: &str) -> Option<String> {
-    let mut quoted = message.split('`').skip(1).step_by(2);
-    let index = quoted.next()?;
-    let vector = quoted.next()?;
-    if !message.starts_with("static bounds:") {
+    if !message.starts_with("static bounds:") && !message.starts_with("static arithmetic:") {
         return None;
     }
-    let snippet = format!(
-        "(get {} {})",
-        restore_block_source_names(vector),
-        restore_block_source_names(index)
-    );
+    let snippet = restore_block_source_names(message.split('`').nth(1)?);
     let parsed = parser::build(&snippet).ok()?;
     let parsed = if let Expression::Apply(items) = &parsed {
         if matches!(items.first(), Some(Expression::Word(op)) if op == "do") && items.len() == 2 {
@@ -1144,6 +1137,15 @@ pub fn static_analysis_diagnostic_snippet(message: &str) -> Option<String> {
         &parsed
     };
     Some(flatten_get_source(parsed))
+}
+
+pub fn static_analysis_diagnostic_summary(message: &str) -> String {
+    let first_line = message.lines().next().unwrap_or(message).trim();
+    first_line
+        .strip_prefix("static bounds: ")
+        .or_else(|| first_line.strip_prefix("static arithmetic: "))
+        .unwrap_or(first_line)
+        .to_string()
 }
 
 fn flatten_get_source(expr: &Expression) -> String {

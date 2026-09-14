@@ -740,7 +740,8 @@ fn make_error_diagnostic(
 
 fn make_static_analysis_warning(text: &str, message: String) -> Vec<JsonDiagnostic> {
     let snippet = native_core::static_analysis_diagnostic_snippet(&message);
-    let mut diagnostics = make_error_diagnostic(text, message, None, snippet.as_deref());
+    let display_message = native_core::static_analysis_diagnostic_summary(&message);
+    let mut diagnostics = make_error_diagnostic(text, display_message, None, snippet.as_deref());
     for diagnostic in &mut diagnostics {
         diagnostic.severity = "warning".to_string();
     }

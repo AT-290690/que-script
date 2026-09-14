@@ -17,6 +17,34 @@ struct PredicateSummary {
     body: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct IntInterval {
+    min: i64,
+    max: i64,
+}
+
+impl IntInterval {
+    const I32: Self = Self {
+        min: i32::MIN as i64,
+        max: i32::MAX as i64,
+    };
+
+    fn exact(value: i32) -> Self {
+        Self {
+            min: value as i64,
+            max: value as i64,
+        }
+    }
+
+    fn excludes_zero(self) -> bool {
+        self.max < 0 || self.min > 0
+    }
+
+    fn fits_i32(self) -> bool {
+        self.min >= Self::I32.min && self.max <= Self::I32.max
+    }
+}
+
 /// Abstract state at one program point.  This is deliberately independent of
 /// the runtime representation: later analyses (division, overflow, and so on)
 /// can add domains here without becoming part of WAT lowering.
@@ -25,6 +53,8 @@ struct AbstractState {
     safe_pairs: HashSet<(String, String)>,
     nonnegative: HashSet<String>,
     integer_constants: HashMap<String, i32>,
+    integer_ranges: HashMap<String, IntInterval>,
+    nonzero: HashSet<String>,
     fixed_lengths: HashMap<String, usize>,
     minimum_lengths: HashMap<String, usize>,
     length_sources: HashMap<String, String>,
@@ -52,6 +82,21 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         .iter()
         .filter(|(name, value)| right.integer_constants.get(*name) == Some(*value))
         .map(|(name, value)| (name.clone(), *value))
+        .collect();
+    let integer_ranges = left
+        .integer_ranges
+        .iter()
+        .filter_map(|(name, left_range)| {
+            right.integer_ranges.get(name).map(|right_range| {
+                (
+                    name.clone(),
+                    IntInterval {
+                        min: left_range.min.min(right_range.min),
+                        max: left_range.max.max(right_range.max),
+                    },
+                )
+            })
+        })
         .collect();
     let length_sources = left
         .length_sources
@@ -93,6 +138,8 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
             .cloned()
             .collect(),
         integer_constants,
+        integer_ranges,
+        nonzero: left.nonzero.intersection(&right.nonzero).cloned().collect(),
         fixed_lengths,
         minimum_lengths,
         length_sources,
@@ -147,6 +194,89 @@ fn integer_constant(expr: &Expression, state: &AbstractState) -> Option<i32> {
         },
         Expression::Dec(_) => None,
     }
+}
+
+fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInterval> {
+    match expr {
+        Expression::Int(value) => Some(IntInterval::exact(*value)),
+        Expression::Word(name) => {
+            let key = canonical_scalar(expr, state);
+            state
+                .integer_ranges
+                .get(&key)
+                .copied()
+                .or_else(|| state.integer_ranges.get(name).copied())
+                .or_else(|| {
+                    state
+                        .integer_constants
+                        .get(name)
+                        .copied()
+                        .map(IntInterval::exact)
+                })
+                .or_else(|| {
+                    state.nonnegative.contains(name).then_some(IntInterval {
+                        min: 0,
+                        max: i32::MAX as i64,
+                    })
+                })
+        }
+        Expression::Apply(items) => match items.as_slice() {
+            [Expression::Word(op), value] if op == "length" => {
+                let vector = canonical_access(value, state);
+                state
+                    .fixed_lengths
+                    .get(&vector)
+                    .copied()
+                    .or_else(|| literal_vector_length(value))
+                    .map(|len| IntInterval {
+                        min: len.min(i32::MAX as usize) as i64,
+                        max: len.min(i32::MAX as usize) as i64,
+                    })
+                    .or(Some(IntInterval {
+                        min: 0,
+                        max: i32::MAX as i64,
+                    }))
+            }
+            [Expression::Word(op), left, right] if matches!(op.as_str(), "+" | "-" | "*") => {
+                let left = integer_interval(left, state)?;
+                let right = integer_interval(right, state)?;
+                Some(match op.as_str() {
+                    "+" => IntInterval {
+                        min: left.min.saturating_add(right.min),
+                        max: left.max.saturating_add(right.max),
+                    },
+                    "-" => IntInterval {
+                        min: left.min.saturating_sub(right.max),
+                        max: left.max.saturating_sub(right.min),
+                    },
+                    "*" => {
+                        let products = [
+                            left.min.saturating_mul(right.min),
+                            left.min.saturating_mul(right.max),
+                            left.max.saturating_mul(right.min),
+                            left.max.saturating_mul(right.max),
+                        ];
+                        IntInterval {
+                            min: *products.iter().min().expect("four products"),
+                            max: *products.iter().max().expect("four products"),
+                        }
+                    }
+                    _ => unreachable!(),
+                })
+            }
+            _ => state
+                .integer_ranges
+                .get(&canonical_scalar(expr, state))
+                .copied(),
+        },
+        Expression::Dec(_) => None,
+    }
+}
+
+fn divisor_is_proven_nonzero(expr: &Expression, state: &AbstractState) -> bool {
+    let key = canonical_scalar(expr, state);
+    state.nonzero.contains(&key)
+        || integer_interval(expr, state).is_some_and(IntInterval::excludes_zero)
 }
 
 fn canonical_access(expr: &Expression, state: &AbstractState) -> String {
@@ -404,6 +534,141 @@ fn state_for_false_branch(expr: &Expression, facts: &AbstractState) -> AbstractS
     state_for_branch(expr, facts, false)
 }
 
+fn constrain_integer_range(expr: &Expression, facts: &mut AbstractState, constraint: IntInterval) {
+    let key = canonical_scalar(expr, facts);
+    let current = integer_interval(expr, facts).unwrap_or(IntInterval::I32);
+    let narrowed = IntInterval {
+        min: current.min.max(constraint.min),
+        max: current.max.min(constraint.max),
+    };
+    if narrowed.min <= narrowed.max {
+        facts.integer_ranges.insert(key.clone(), narrowed);
+        if narrowed.excludes_zero() {
+            facts.nonzero.insert(key);
+        }
+    }
+}
+
+fn collect_numeric_guard_facts(
+    expr: &Expression,
+    facts: &mut AbstractState,
+    is_true: bool,
+    expansion_depth: usize,
+) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    match items.as_slice() {
+        [Expression::Word(op), operands @ ..]
+            if operands.len() >= 2 && ((op == "and" && is_true) || (op == "or" && !is_true)) =>
+        {
+            for operand in operands {
+                collect_numeric_guard_facts(operand, facts, is_true, expansion_depth);
+            }
+        }
+        [Expression::Word(op), inner] if op == "not" => {
+            collect_numeric_guard_facts(inner, facts, !is_true, expansion_depth);
+        }
+        [Expression::Word(op), value, Expression::Int(bound)]
+            if matches!(op.as_str(), "=" | ">" | ">=" | "<" | "<=") =>
+        {
+            let effective = if is_true {
+                op.as_str()
+            } else {
+                match op.as_str() {
+                    ">" => "<=",
+                    ">=" => "<",
+                    "<" => ">=",
+                    "<=" => ">",
+                    "=" => "!=",
+                    _ => return,
+                }
+            };
+            match effective {
+                "=" => constrain_integer_range(value, facts, IntInterval::exact(*bound)),
+                "!=" if *bound == 0 => {
+                    facts.nonzero.insert(canonical_scalar(value, facts));
+                }
+                ">" => constrain_integer_range(
+                    value,
+                    facts,
+                    IntInterval {
+                        min: (*bound as i64) + 1,
+                        max: i32::MAX as i64,
+                    },
+                ),
+                ">=" => constrain_integer_range(
+                    value,
+                    facts,
+                    IntInterval {
+                        min: *bound as i64,
+                        max: i32::MAX as i64,
+                    },
+                ),
+                "<" => constrain_integer_range(
+                    value,
+                    facts,
+                    IntInterval {
+                        min: i32::MIN as i64,
+                        max: (*bound as i64) - 1,
+                    },
+                ),
+                "<=" => constrain_integer_range(
+                    value,
+                    facts,
+                    IntInterval {
+                        min: i32::MIN as i64,
+                        max: *bound as i64,
+                    },
+                ),
+                _ => {}
+            }
+        }
+        [Expression::Word(op), Expression::Int(bound), value]
+            if matches!(op.as_str(), "=" | ">" | ">=" | "<" | "<=") =>
+        {
+            let reversed = match op.as_str() {
+                "=" => "=",
+                ">" => "<",
+                ">=" => "<=",
+                "<" => ">",
+                "<=" => ">=",
+                _ => return,
+            };
+            let normalized = Expression::Apply(vec![
+                Expression::Word(reversed.to_string()),
+                value.clone(),
+                Expression::Int(*bound),
+            ]);
+            collect_numeric_guard_facts(&normalized, facts, is_true, expansion_depth);
+        }
+        _ if expansion_depth < 16 => {
+            let Some(op) = items.first().and_then(word) else {
+                return;
+            };
+            let Some(summary) = facts.predicate_summaries.get(op).cloned() else {
+                return;
+            };
+            if summary.params.len() != items.len().saturating_sub(1) {
+                return;
+            }
+            let Ok(parsed_body) = crate::parser::build(&summary.body) else {
+                return;
+            };
+            let substitutions: HashMap<&str, &Expression> = summary
+                .params
+                .iter()
+                .map(String::as_str)
+                .zip(items.iter().skip(1))
+                .collect();
+            let expanded =
+                substitute_predicate_body(single_built_expression(&parsed_body), &substitutions);
+            collect_numeric_guard_facts(&expanded, facts, is_true, expansion_depth + 1);
+        }
+        _ => {}
+    }
+}
+
 fn state_for_branch(expr: &Expression, facts: &AbstractState, is_true: bool) -> AbstractState {
     let mut next = facts.clone();
     let mut lower = HashSet::new();
@@ -429,6 +694,7 @@ fn state_for_branch(expr: &Expression, facts: &AbstractState, is_true: bool) -> 
             .and_modify(|known| *known = (*known).max(minimum))
             .or_insert(minimum);
     }
+    collect_numeric_guard_facts(expr, &mut next, is_true, 0);
     next
 }
 
@@ -477,9 +743,13 @@ fn expression_is_nonnegative(expr: &Expression, facts: &AbstractState) -> bool {
 fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractState) {
     let remains_nonnegative = expression_is_nonnegative(value, facts);
     let constant = integer_constant(value, facts);
+    let interval = integer_interval(value, facts).filter(|range| range.fits_i32());
+    let remains_nonzero = divisor_is_proven_nonzero(value, facts);
     facts.safe_pairs.retain(|(_, index)| index != name);
     facts.nonnegative.remove(name);
     facts.integer_constants.remove(name);
+    facts.integer_ranges.remove(name);
+    facts.nonzero.remove(name);
     facts.fixed_lengths.remove(name);
     facts.minimum_lengths.remove(name);
     facts.length_sources.remove(name);
@@ -491,6 +761,12 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     }
     if let Some(constant) = constant {
         facts.integer_constants.insert(name.to_string(), constant);
+    }
+    if let Some(interval) = interval {
+        facts.integer_ranges.insert(name.to_string(), interval);
+    }
+    if remains_nonzero {
+        facts.nonzero.insert(name.to_string());
     }
     if let Expression::Apply(length) = value {
         if matches!(length.first(), Some(Expression::Word(op)) if op == "length")
@@ -582,6 +858,44 @@ fn validate_static_bounds_expr(
     };
     let op = items.first().and_then(word).unwrap_or("");
 
+    if matches!(op, "/" | "mod") && items.len() == 3 {
+        if !divisor_is_proven_nonzero(&items[2], facts) {
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "static arithmetic: divisor may be zero: `{}`\nhelp: guard it with `(not (= divisor 0))`",
+                    expr.to_lisp()
+                ),
+            );
+        }
+        if op == "/"
+            && integer_interval(&items[1], facts) == Some(IntInterval::exact(i32::MIN))
+            && integer_interval(&items[2], facts) == Some(IntInterval::exact(-1))
+        {
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "static arithmetic: Int overflow: `{}`\nhelp: minimum Int cannot be divided by -1",
+                    expr.to_lisp()
+                ),
+            );
+        }
+    }
+
+    if matches!(op, "+" | "-" | "*") && items.len() == 3 {
+        if let Some(result) = integer_interval(expr, facts) {
+            if !result.fits_i32() {
+                record_diagnostic(
+                    diagnostics,
+                    format!(
+                        "static arithmetic: Int overflow possible: `{}`\nhelp: constrain the operands to keep the result within 32-bit Int range",
+                        expr.to_lisp()
+                    ),
+                );
+            }
+        }
+    }
+
     if op == "get" && items.len() > 3 {
         let mut accessed = items[1].clone();
         for index in items.iter().skip(2) {
@@ -598,22 +912,39 @@ fn validate_static_bounds_expr(
     if op == "get" && items.len() == 3 {
         let proven = access_index_is_proven(&items[1], &items[2], facts, false);
         if !proven {
-            record_diagnostic(diagnostics, format!(
-                "static bounds: cannot prove `{}` is within bounds for `{}`; guard the access with `(and (>= index 0) (< index (length xs)))`",
-                items[2].to_lisp(),
-                items[1].to_lisp()
-            ));
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "static bounds: index not proven safe: `{}`\nhelp: guard it with `(and (>= index 0) (< index (length xs)))`",
+                    expr.to_lisp()
+                ),
+            );
         }
     }
 
     if op == "set!" && items.len() == 4 {
         let proven = access_index_is_proven(&items[1], &items[2], facts, true);
         if !proven {
-            record_diagnostic(diagnostics, format!(
-                "static bounds: cannot prove `{}` is a valid set! index for `{}`; guard replacement with `(and (>= index 0) (< index (length xs)))`, or append at `(length xs)`",
-                items[2].to_lisp(),
-                items[1].to_lisp()
-            ));
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "static bounds: set! index not proven safe: `{}`\nhelp: guard replacement with `0 <= index < length`, or append at `(length xs)`",
+                    expr.to_lisp()
+                ),
+            );
+        }
+    }
+
+    if matches!(op, "car" | "pop-val!") && items.len() == 2 {
+        let zero = Expression::Int(0);
+        if !access_index_is_proven(&items[1], &zero, facts, false) {
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "static bounds: vector may be empty: `{}`\nhelp: guard it with `(> (length xs) 0)`",
+                    expr.to_lisp()
+                ),
+            );
         }
     }
 
@@ -994,7 +1325,7 @@ mod tests {
         let unguarded = "(let xs [[1] [2]]) (let x 10) (let y 10) (get xs x y)";
         assert!(analyze(unguarded, 4)
             .expect_err("unproven access should fail")
-            .contains("static bounds: cannot prove"));
+            .contains("index not proven safe"));
     }
 
     #[test]
@@ -1014,7 +1345,7 @@ mod tests {
         let source = "(let xs [1 2]) (let i 1) (if (and (>= i 0) (< i (length xs))) (get xs i) 0) (get xs i)";
         assert!(analyze(source, 4)
             .expect_err("a path-local proof must not escape its branch")
-            .contains("static bounds: cannot prove"));
+            .contains("index not proven safe"));
     }
 
     #[test]
@@ -1022,7 +1353,7 @@ mod tests {
         let source = "(let xs [1 2]) (mut i 1) (if (and (>= i 0) (< i (length xs))) (do (alter! i -1) (get xs i)) 0)";
         assert!(analyze(source, 3)
             .expect_err("assigning the index must kill its prior proof")
-            .contains("static bounds: cannot prove"));
+            .contains("index not proven safe"));
     }
 
     #[test]
@@ -1030,7 +1361,7 @@ mod tests {
         let source = "(let xs [1 2]) (let len (length xs)) (pop! xs) (mut i 0) (while (< i len) (do (let x (get xs i)) (alter! i (+ i 1))))";
         assert!(analyze(source, 5)
             .expect_err("resizing a vector must invalidate its cached length")
-            .contains("static bounds: cannot prove"));
+            .contains("index not proven safe"));
     }
 
     #[test]
@@ -1044,7 +1375,7 @@ mod tests {
         let source = "(let xs [1 2]) (let ys xs) (let len (length xs)) (pop! ys) (mut i 0) (while (< i len) (do (let x (get xs i)) (alter! i (+ i 1))))";
         assert!(analyze(source, 6)
             .expect_err("an alias resize must invalidate the shared vector identity")
-            .contains("static bounds: cannot prove"));
+            .contains("index not proven safe"));
     }
 
     #[test]
@@ -1120,7 +1451,7 @@ mod tests {
         let unguarded = "(let xs [1 2]) (let i 10) (set! xs i 3)";
         assert!(analyze(unguarded, 3)
             .expect_err("unproven set! should fail")
-            .contains("valid set! index"));
+            .contains("set! index not proven safe"));
 
         let guarded =
             "(let xs [1 2]) (let i 1) (if (and (>= i 0) (< i (length xs))) (set! xs i 3) nil)";
@@ -1141,5 +1472,78 @@ mod tests {
     fn set_rejects_negative_and_past_end_literal_indices() {
         assert!(analyze("(let xs [1]) (set! xs -1 2)", 2).is_err());
         assert!(analyze("(let xs [1]) (set! xs 2 2)", 2).is_err());
+    }
+
+    #[test]
+    fn car_and_pop_val_require_a_proven_nonempty_vector() {
+        assert!(analyze("(let xs []) (car xs)", 2)
+            .expect_err("car of a known empty vector should fail")
+            .contains("may be empty"));
+        assert!(analyze("(let xs []) (pop-val! xs)", 2)
+            .expect_err("pop-val! of a known empty vector should fail")
+            .contains("may be empty"));
+
+        assert_eq!(analyze("(let xs [1]) (car xs)", 2), Ok(()));
+        assert_eq!(analyze("(let xs [1]) (pop-val! xs)", 2), Ok(()));
+    }
+
+    #[test]
+    fn nonempty_branch_proves_car_and_pop_val_safety() {
+        let car = "(let xs []) (if (> (length xs) 0) (car xs) 0)";
+        assert_eq!(analyze(car, 2), Ok(()));
+
+        let pop = "(let xs []) (if (> (length xs) 0) (pop-val! xs) 0)";
+        assert_eq!(analyze(pop, 2), Ok(()));
+    }
+
+    #[test]
+    fn empty_pop_remains_a_safe_noop() {
+        assert_eq!(analyze("(let xs []) (pop! xs)", 2), Ok(()));
+    }
+
+    #[test]
+    fn division_and_modulo_require_a_nonzero_divisor_proof() {
+        assert!(analyze("(let x 10) (let divisor 0) (/ x divisor)", 3)
+            .expect_err("zero divisor should fail")
+            .contains("divisor may be zero"));
+        assert!(analyze("(let divide (lambda x divisor (/ x divisor)))", 1)
+            .expect_err("unknown divisor should require a guard")
+            .contains("divisor may be zero"));
+        assert!(analyze("(mod 10 0)", 1).is_err());
+        assert_eq!(analyze("(/ 10 2)", 1), Ok(()));
+    }
+
+    #[test]
+    fn branch_facts_prove_division_is_nonzero() {
+        let guarded = "(let divide (lambda x divisor (if (= divisor 0) 0 (/ x divisor))))";
+        assert_eq!(analyze(guarded, 1), Ok(()));
+
+        let positive = "(let divide (lambda x divisor (if (> divisor 0) (/ x divisor) 0)))";
+        assert_eq!(analyze(positive, 1), Ok(()));
+
+        let predicate = "(let nonzero? (lambda x (not (= x 0)))) (let divide (lambda x divisor (if (nonzero? divisor) (/ x divisor) 0)))";
+        assert_eq!(analyze(predicate, 2), Ok(()));
+    }
+
+    #[test]
+    fn known_integer_ranges_report_possible_overflow() {
+        assert!(analyze("(+ 2147483647 1)", 1)
+            .expect_err("literal addition overflow should fail")
+            .contains("overflow"));
+        assert!(analyze("(* 50000 50000)", 1)
+            .expect_err("literal multiplication overflow should fail")
+            .contains("overflow"));
+        assert_eq!(analyze("(+ 20 22)", 1), Ok(()));
+    }
+
+    #[test]
+    fn branch_ranges_can_prove_or_expose_overflow() {
+        let safe = "(let add-one (lambda x (if (< x 2147483647) (+ x 1) x)))";
+        assert_eq!(analyze(safe, 1), Ok(()));
+
+        let unsafe_range = "(let add-one (lambda x (if (>= x 2147483647) (+ x 1) x)))";
+        assert!(analyze(unsafe_range, 1)
+            .expect_err("upper-edge range should expose overflow")
+            .contains("overflow"));
     }
 }

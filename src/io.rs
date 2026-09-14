@@ -1193,7 +1193,7 @@ fn native_shell_help(bin_name: &str) -> String {
                          static-analysis findings as warnings.\n\
            --opt          Run with performance flags for this invocation: speed/aggressive opts,\n\
                          larger scalar inlining, and runtime overflow/div-zero/bounds checks OFF.\n\
-           --static-bounds Reject indexed reads/writes whose safety is not statically proven.\n\
+           --static-bounds Reject unproven bounds and integer-arithmetic safety checks.\n\
            --no-result    Do not print/decode the final evaluated program value.\n\
            --allow        Enable host io permissions (read, stdin, write, print, clock, delete, all).\n\
          \n\
@@ -1243,7 +1243,7 @@ fn native_shell_env_help(bin_name: &str) -> String {
            QUE_LOOP_UNROLL_MAX Maximum constant small-loop trip count to unroll (default: 4, max: 16).\n\
            QUE_LOOP_UNROLL_COST Maximum body_cost * trip_count unroll budget (default: 120, max: 2000).\n\
            QUE_BOUNDS_CHECK   Vector get() bounds check (default: on). Disable with 0|false|off|no.\n\
-           QUE_STATIC_BOUNDS Reject unproven user `get` accesses (default: off).\n\
+           QUE_STATIC_BOUNDS Reject unproven bounds and integer-arithmetic safety checks (default: off).\n\
            QUE_VEC_MIN_CAP    Minimum initial vector capacity (default: 2, range: 1..4096).\n\
            QUE_VEC_GROWTH_NUM Vector growth numerator (default: 2, range: 1..64).\n\
            QUE_VEC_GROWTH_DEN Vector growth denominator (default: 1, range: 1..64).\n\
