@@ -869,24 +869,94 @@ fn state_for_branch(expr: &Expression, facts: &AbstractState, is_true: bool) -> 
     next
 }
 
-fn invalidate_resized_vector(items: &[Expression], facts: &mut AbstractState) {
+fn apply_vector_mutation(items: &[Expression], facts: &mut AbstractState) {
     let Some(op) = items.first().and_then(word) else {
         return;
     };
-    if matches!(op, "push!" | "pop!" | "pop-val!" | "set!") {
-        if let Some(xs_expr) = items.get(1) {
-            let xs = canonical_access(xs_expr, facts);
+    let Some(xs_expr) = items.get(1) else {
+        return;
+    };
+    let xs = canonical_access(xs_expr, facts);
+    let nested_prefix = format!("(get {xs} ");
+
+    match op {
+        "push!" => {
             facts
-                .safe_pairs
-                .retain(|(name, _)| name != &xs && !name.starts_with(&format!("(get {xs} ")));
-            facts.fixed_lengths.remove(&xs);
+                .fixed_lengths
+                .entry(xs.clone())
+                .and_modify(|length| *length = length.saturating_add(1));
             facts
                 .minimum_lengths
-                .retain(|name, _| name != &xs && !name.starts_with(&format!("(get {xs} ")));
+                .entry(xs)
+                .and_modify(|length| *length = length.saturating_add(1))
+                .or_insert(1);
+        }
+        "set!" => {
+            // Replacing an element can invalidate facts about a nested vector,
+            // but never invalidates an existing index into the container.
+            facts
+                .safe_pairs
+                .retain(|(name, _)| !name.starts_with(&nested_prefix));
+            facts
+                .fixed_lengths
+                .retain(|name, _| !name.starts_with(&nested_prefix));
+            facts
+                .minimum_lengths
+                .retain(|name, _| !name.starts_with(&nested_prefix));
             facts
                 .length_sources
-                .retain(|_, source| source != &xs && !source.starts_with(&format!("(get {xs} ")));
+                .retain(|_, source| !source.starts_with(&nested_prefix));
+
+            let direct_append = items.get(2).is_some_and(|index| {
+                matches!(index, Expression::Apply(length)
+                    if matches!(length.first(), Some(Expression::Word(name)) if name == "length")
+                        && length.len() == 2
+                        && canonical_access(&length[1], facts) == xs)
+            });
+            let known_append = items
+                .get(2)
+                .and_then(|index| integer_constant(index, facts))
+                .zip(
+                    facts
+                        .fixed_lengths
+                        .get(&xs)
+                        .copied()
+                        .and_then(|length| i32::try_from(length).ok()),
+                )
+                .is_some_and(|(index, length)| index == length);
+            if direct_append || known_append {
+                facts
+                    .fixed_lengths
+                    .entry(xs.clone())
+                    .and_modify(|length| *length = length.saturating_add(1));
+                facts
+                    .minimum_lengths
+                    .entry(xs)
+                    .and_modify(|length| *length = length.saturating_add(1))
+                    .or_insert(1);
+            }
         }
+        "pop!" | "pop-val!" => {
+            facts
+                .safe_pairs
+                .retain(|(name, _)| name != &xs && !name.starts_with(&nested_prefix));
+            facts
+                .fixed_lengths
+                .retain(|name, _| name == &xs || !name.starts_with(&nested_prefix));
+            if let Some(length) = facts.fixed_lengths.get_mut(&xs) {
+                *length = length.saturating_sub(1);
+            }
+            facts
+                .minimum_lengths
+                .retain(|name, _| name == &xs || !name.starts_with(&nested_prefix));
+            if let Some(length) = facts.minimum_lengths.get_mut(&xs) {
+                *length = length.saturating_sub(1);
+            }
+            facts
+                .length_sources
+                .retain(|_, source| source != &xs && !source.starts_with(&nested_prefix));
+        }
+        _ => {}
     }
 }
 
@@ -1297,7 +1367,7 @@ fn validate_static_bounds_expr(
             }
         }
     }
-    invalidate_resized_vector(items, facts);
+    apply_vector_mutation(items, facts);
 }
 
 pub fn analyze_user_program(
@@ -1599,6 +1669,34 @@ mod tests {
         let source = "(let xs [1 2]) (let ys xs) (let len (length xs)) (pop! ys) (mut i 0) (while (< i len) (do (let x (get xs i)) (alter! i (+ i 1))))";
         assert!(analyze(source, 6)
             .expect_err("an alias resize must invalidate the shared vector identity")
+            .contains("index not proven safe"));
+    }
+
+    #[test]
+    fn push_preserves_old_bounds_and_extends_known_length() {
+        let source = "(let push! (lambda xs value (set! xs (length xs) value))) (let xs [1 2 3]) (push! xs 10) {(get xs 2) (get xs 3)}";
+        assert_eq!(analyze(source, 3), Ok(()));
+    }
+
+    #[test]
+    fn set_replacement_preserves_length_and_known_bounds() {
+        let source = "(let xs [1 2 3]) (set! xs 1 10) (get xs 2)";
+        assert_eq!(analyze(source, 3), Ok(()));
+    }
+
+    #[test]
+    fn set_append_extends_known_length() {
+        let source = "(let xs [1 2 3]) (set! xs (length xs) 10) (get xs 3)";
+        assert_eq!(analyze(source, 3), Ok(()));
+    }
+
+    #[test]
+    fn set_replacement_invalidates_nested_element_facts() {
+        let source = "(let rows [[1]]) (let x 0) (let y 0) (if (and (in-bounds? rows x) (in-bounds? (get rows x) y)) (block (set! rows x []) (get rows x y)) -1)";
+        let source =
+            format!("(let in-bounds? (lambda xs i (and (>= i 0) (< i (length xs))))) {source}");
+        assert!(analyze(&source, 5)
+            .expect_err("replacing a row must invalidate facts about its old contents")
             .contains("index not proven safe"));
     }
 
