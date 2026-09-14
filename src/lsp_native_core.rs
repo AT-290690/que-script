@@ -1141,11 +1141,12 @@ pub fn static_analysis_diagnostic_snippet(message: &str) -> Option<String> {
 
 pub fn static_analysis_diagnostic_summary(message: &str) -> String {
     let first_line = message.lines().next().unwrap_or(message).trim();
-    first_line
-        .strip_prefix("static bounds: ")
-        .or_else(|| first_line.strip_prefix("static arithmetic: "))
-        .unwrap_or(first_line)
-        .to_string()
+    restore_block_source_names(
+        first_line
+            .strip_prefix("static bounds: ")
+            .or_else(|| first_line.strip_prefix("static arithmetic: "))
+            .unwrap_or(first_line),
+    )
 }
 
 fn flatten_get_source(expr: &Expression) -> String {

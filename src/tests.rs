@@ -6032,7 +6032,7 @@ parse-value"#;
             .find(|item| {
                 item.get("message")
                     .and_then(|value| value.as_str())
-                    .is_some_and(|message| message.starts_with("static bounds:"))
+                    .is_some_and(|message| message.contains("index not proven safe"))
             })
             .expect("unproven get should produce a static-analysis warning");
         assert_eq!(warning.get("severity"), Some(&serde_json::json!("warning")));
@@ -6052,7 +6052,7 @@ parse-value"#;
             .filter(|item| {
                 item.get("message")
                     .and_then(|value| value.as_str())
-                    .is_some_and(|message| message.starts_with("static bounds:"))
+                    .is_some_and(|message| message.contains("index not proven safe"))
             })
             .collect();
         assert_eq!(warnings.len(), 2, "{diagnostics_json}");
@@ -6074,7 +6074,7 @@ parse-value"#;
             .filter(|item| {
                 item.get("message")
                     .and_then(|value| value.as_str())
-                    .is_some_and(|message| message.starts_with("static bounds:"))
+                    .is_some_and(|message| message.contains("index not proven safe"))
             })
             .collect();
         assert_eq!(warnings.len(), 1, "{diagnostics_json}");
@@ -6096,7 +6096,7 @@ parse-value"#;
                 .all(|item| !item
                     .get("message")
                     .and_then(|value| value.as_str())
-                    .is_some_and(|message| message.starts_with("static bounds:"))),
+                    .is_some_and(|message| message.contains("index not proven safe"))),
             "matrix predicate should prove both accesses: {diagnostics_json}"
         );
     }
@@ -6116,7 +6116,7 @@ parse-value"#;
                 .all(|item| !item
                     .get("message")
                     .and_then(|value| value.as_str())
-                    .is_some_and(|message| message.starts_with("static bounds:"))),
+                    .is_some_and(|message| message.contains("index not proven safe"))),
             "guarded access should not warn: {diagnostics_json}"
         );
     }

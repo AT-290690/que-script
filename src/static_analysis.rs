@@ -240,29 +240,7 @@ fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInter
             [Expression::Word(op), left, right] if matches!(op.as_str(), "+" | "-" | "*") => {
                 let left = integer_interval(left, state)?;
                 let right = integer_interval(right, state)?;
-                Some(match op.as_str() {
-                    "+" => IntInterval {
-                        min: left.min.saturating_add(right.min),
-                        max: left.max.saturating_add(right.max),
-                    },
-                    "-" => IntInterval {
-                        min: left.min.saturating_sub(right.max),
-                        max: left.max.saturating_sub(right.min),
-                    },
-                    "*" => {
-                        let products = [
-                            left.min.saturating_mul(right.min),
-                            left.min.saturating_mul(right.max),
-                            left.max.saturating_mul(right.min),
-                            left.max.saturating_mul(right.max),
-                        ];
-                        IntInterval {
-                            min: *products.iter().min().expect("four products"),
-                            max: *products.iter().max().expect("four products"),
-                        }
-                    }
-                    _ => unreachable!(),
-                })
+                integer_arithmetic_interval(op, left, right)
             }
             _ => state
                 .integer_ranges
@@ -271,6 +249,36 @@ fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInter
         },
         Expression::Dec(_) => None,
     }
+}
+
+fn integer_arithmetic_interval(
+    op: &str,
+    left: IntInterval,
+    right: IntInterval,
+) -> Option<IntInterval> {
+    Some(match op {
+        "+" => IntInterval {
+            min: left.min.saturating_add(right.min),
+            max: left.max.saturating_add(right.max),
+        },
+        "-" => IntInterval {
+            min: left.min.saturating_sub(right.max),
+            max: left.max.saturating_sub(right.min),
+        },
+        "*" => {
+            let products = [
+                left.min.saturating_mul(right.min),
+                left.min.saturating_mul(right.max),
+                left.max.saturating_mul(right.min),
+                left.max.saturating_mul(right.max),
+            ];
+            IntInterval {
+                min: *products.iter().min().expect("four products"),
+                max: *products.iter().max().expect("four products"),
+            }
+        }
+        _ => return None,
+    })
 }
 
 fn divisor_is_proven_nonzero(expr: &Expression, state: &AbstractState) -> bool {
@@ -569,13 +577,28 @@ fn collect_numeric_guard_facts(
         [Expression::Word(op), inner] if op == "not" => {
             collect_numeric_guard_facts(inner, facts, !is_true, expansion_depth);
         }
-        [Expression::Word(op), value, Expression::Int(bound)]
+        [Expression::Word(op), left, right]
             if matches!(op.as_str(), "=" | ">" | ">=" | "<" | "<=") =>
         {
-            let effective = if is_true {
-                op.as_str()
+            let (value, bound, comparison) = if let Some(bound) = integer_constant(right, facts) {
+                (left, bound, op.as_str())
+            } else if let Some(bound) = integer_constant(left, facts) {
+                let reversed = match op.as_str() {
+                    "=" => "=",
+                    ">" => "<",
+                    ">=" => "<=",
+                    "<" => ">",
+                    "<=" => ">=",
+                    _ => return,
+                };
+                (right, bound, reversed)
             } else {
-                match op.as_str() {
+                return;
+            };
+            let effective = if is_true {
+                comparison
+            } else {
+                match comparison {
                     ">" => "<=",
                     ">=" => "<",
                     "<" => ">=",
@@ -585,15 +608,15 @@ fn collect_numeric_guard_facts(
                 }
             };
             match effective {
-                "=" => constrain_integer_range(value, facts, IntInterval::exact(*bound)),
-                "!=" if *bound == 0 => {
+                "=" => constrain_integer_range(value, facts, IntInterval::exact(bound)),
+                "!=" if bound == 0 => {
                     facts.nonzero.insert(canonical_scalar(value, facts));
                 }
                 ">" => constrain_integer_range(
                     value,
                     facts,
                     IntInterval {
-                        min: (*bound as i64) + 1,
+                        min: (bound as i64) + 1,
                         max: i32::MAX as i64,
                     },
                 ),
@@ -601,7 +624,7 @@ fn collect_numeric_guard_facts(
                     value,
                     facts,
                     IntInterval {
-                        min: *bound as i64,
+                        min: bound as i64,
                         max: i32::MAX as i64,
                     },
                 ),
@@ -610,7 +633,7 @@ fn collect_numeric_guard_facts(
                     facts,
                     IntInterval {
                         min: i32::MIN as i64,
-                        max: (*bound as i64) - 1,
+                        max: (bound as i64) - 1,
                     },
                 ),
                 "<=" => constrain_integer_range(
@@ -618,29 +641,11 @@ fn collect_numeric_guard_facts(
                     facts,
                     IntInterval {
                         min: i32::MIN as i64,
-                        max: *bound as i64,
+                        max: bound as i64,
                     },
                 ),
                 _ => {}
             }
-        }
-        [Expression::Word(op), Expression::Int(bound), value]
-            if matches!(op.as_str(), "=" | ">" | ">=" | "<" | "<=") =>
-        {
-            let reversed = match op.as_str() {
-                "=" => "=",
-                ">" => "<",
-                ">=" => "<=",
-                "<" => ">",
-                "<=" => ">=",
-                _ => return,
-            };
-            let normalized = Expression::Apply(vec![
-                Expression::Word(reversed.to_string()),
-                value.clone(),
-                Expression::Int(*bound),
-            ]);
-            collect_numeric_guard_facts(&normalized, facts, is_true, expansion_depth);
         }
         _ if expansion_depth < 16 => {
             let Some(op) = items.first().and_then(word) else {
@@ -780,6 +785,24 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     }
 }
 
+fn forget_lambda_parameter(expr: &Expression, facts: &mut AbstractState) {
+    match expr {
+        Expression::Word(name) => {
+            facts.nonnegative.remove(name);
+            facts.nonzero.remove(name);
+            facts.integer_constants.remove(name);
+            facts.integer_ranges.remove(name);
+            facts.scalar_aliases.remove(name);
+        }
+        Expression::Apply(items) => {
+            for item in items {
+                forget_lambda_parameter(item, facts);
+            }
+        }
+        Expression::Int(_) | Expression::Dec(_) => {}
+    }
+}
+
 fn record_diagnostic(diagnostics: &mut Vec<String>, message: String) {
     if !diagnostics.contains(&message) {
         diagnostics.push(message);
@@ -883,16 +906,27 @@ fn validate_static_bounds_expr(
     }
 
     if matches!(op, "+" | "-" | "*") && items.len() == 3 {
-        if let Some(result) = integer_interval(expr, facts) {
-            if !result.fits_i32() {
-                record_diagnostic(
-                    diagnostics,
-                    format!(
-                        "static arithmetic: Int overflow possible: `{}`\nhelp: constrain the operands to keep the result within 32-bit Int range",
-                        expr.to_lisp()
-                    ),
-                );
-            }
+        let left = integer_interval(&items[1], facts).unwrap_or(IntInterval::I32);
+        let right = integer_interval(&items[2], facts).unwrap_or(IntInterval::I32);
+        let result = integer_arithmetic_interval(op, left, right)
+            .expect("validated integer arithmetic operator");
+        if !result.fits_i32() {
+            let kind = match (
+                result.min < IntInterval::I32.min,
+                result.max > IntInterval::I32.max,
+            ) {
+                (true, true) => "Int overflow/underflow possible",
+                (true, false) => "Int underflow possible",
+                (false, true) => "Int overflow possible",
+                (false, false) => unreachable!(),
+            };
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "static arithmetic: {kind}: `{}`\nhelp: constrain the operands to keep the result within 32-bit Int range",
+                    expr.to_lisp()
+                ),
+            );
         }
     }
 
@@ -970,14 +1004,22 @@ fn validate_static_bounds_expr(
             }
         }
         "lambda" => {
-            // A lambda starts with no caller-local value facts, but inferred
-            // function contracts are global immutable analysis metadata and
-            // remain available inside nested functions.
+            // Immutable scalar facts remain valid when captured by a closure.
+            // Container/liveness facts do not: the vector may be mutated
+            // between closure creation and invocation.
             let mut scoped = AbstractState {
+                nonnegative: facts.nonnegative.clone(),
+                nonzero: facts.nonzero.clone(),
+                integer_constants: facts.integer_constants.clone(),
+                integer_ranges: facts.integer_ranges.clone(),
+                scalar_aliases: facts.scalar_aliases.clone(),
                 guard_summaries: facts.guard_summaries.clone(),
                 predicate_summaries: facts.predicate_summaries.clone(),
                 ..AbstractState::default()
             };
+            for parameter in items.iter().skip(1).take(items.len().saturating_sub(2)) {
+                forget_lambda_parameter(parameter, &mut scoped);
+            }
             for child in items.iter().skip(2) {
                 validate_static_bounds_expr(child, &mut scoped, diagnostics);
             }
@@ -1114,6 +1156,13 @@ pub fn analyze_user_program_diagnostics(
         predicate_summaries,
         ..AbstractState::default()
     };
+    // Seed facts from bundled/project library forms so public immutable
+    // constants behave exactly like user constants. Library diagnostics are
+    // intentionally discarded; only user forms are reported.
+    let mut ignored_library_diagnostics = Vec::new();
+    for expression in &all_expressions[..start] {
+        validate_static_bounds_expr(expression, &mut facts, &mut ignored_library_diagnostics);
+    }
     let mut diagnostics = Vec::new();
     for expression in &all_expressions[start..] {
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
@@ -1545,5 +1594,50 @@ mod tests {
         assert!(analyze(unsafe_range, 1)
             .expect_err("upper-edge range should expose overflow")
             .contains("overflow"));
+    }
+
+    #[test]
+    fn captured_constant_alias_refines_overflow_guard() {
+        let source = "(let mi 2147483647) (let increment (lambda index (if (>= index mi) index (+ index 1))))";
+        assert_eq!(analyze(source, 2), Ok(()));
+
+        let local_capture = "(let make-increment (lambda () (let mi 2147483647) (lambda index (if (>= index mi) index (+ index 1)))))";
+        assert_eq!(analyze(local_capture, 1), Ok(()));
+    }
+
+    #[test]
+    fn library_constant_alias_refines_user_overflow_guard() {
+        let source = "(let const/int/max-safe 2147483647) (let increment (lambda index (if (>= index const/int/max-safe) index (+ index 1))))";
+        // Only `increment` is a user form; the constant models a bundled
+        // standard-library definition.
+        assert_eq!(analyze(source, 1), Ok(()));
+    }
+
+    #[test]
+    fn unknown_integer_ranges_report_both_bounds_and_arithmetic_risks() {
+        let source = "(let inspect (lambda xs left right (block (let index (/ (+ left right) 2)) (let current (get xs index)) {(+ index 1) (- index 1)})))";
+        let expression = crate::parser::build(source).expect("source should parse");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        let diagnostics = analyze_user_program_diagnostics(&typed, 1);
+        assert!(diagnostics
+            .iter()
+            .any(|message| message.contains("index not proven safe")));
+        assert!(diagnostics
+            .iter()
+            .any(|message| message.contains("(+ left right)")
+                && message.contains("overflow/underflow")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|message| message.contains("Int overflow possible")),
+            "{diagnostics:?}"
+        );
+        assert!(diagnostics
+            .iter()
+            .any(|message| message.contains("Int underflow possible")));
     }
 }
