@@ -529,6 +529,22 @@ fn collect_static_bound_guard_facts(
         {
             lower.insert(canonical_scalar(&Expression::Word(index.clone()), facts));
         }
+        [Expression::Word(op), Expression::Apply(length), Expression::Int(0)]
+            if op == "="
+                && !is_true
+                && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
+                && length.len() == 2 =>
+        {
+            minimum_lengths.push((canonical_access(&length[1], facts), 1));
+        }
+        [Expression::Word(op), Expression::Int(0), Expression::Apply(length)]
+            if op == "="
+                && !is_true
+                && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
+                && length.len() == 2 =>
+        {
+            minimum_lengths.push((canonical_access(&length[1], facts), 1));
+        }
         [Expression::Word(op), index, Expression::Apply(length)]
             if ((is_true && op == "<") || (!is_true && op == ">="))
                 && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
@@ -1816,6 +1832,24 @@ mod tests {
 
         let pop = "(let xs []) (if (> (length xs) 0) (pop-val! xs) 0)";
         assert_eq!(analyze(pop, 2), Ok(()));
+    }
+
+    #[test]
+    fn false_zero_length_branch_proves_nonempty_vector() {
+        let direct = "(let xs []) (if (= (length xs) 0) 0 (car xs))";
+        assert_eq!(analyze(direct, 2), Ok(()));
+
+        let reversed = "(let xs []) (if (= 0 (length xs)) 0 (pop-val! xs))";
+        assert_eq!(analyze(reversed, 2), Ok(()));
+
+        let negated = "(let xs []) (if (not (= (length xs) 0)) (car xs) 0)";
+        assert_eq!(analyze(negated, 2), Ok(()));
+    }
+
+    #[test]
+    fn recursive_car_after_empty_base_case_is_proven_safe() {
+        let source = "(letrec rev (lambda (xs ys) (if (= (length xs) 0) ys (rev (cdr xs) (cons [(car xs)] ys))))) (rev [1 2 3] [])";
+        assert_eq!(analyze(source, 2), Ok(()));
     }
 
     #[test]
