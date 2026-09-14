@@ -55,6 +55,8 @@ struct AbstractState {
     integer_constants: HashMap<String, i32>,
     integer_ranges: HashMap<String, IntInterval>,
     nonzero: HashSet<String>,
+    /// Symbolic integer ordering facts: `(a, b)` means `a <= b`.
+    leq_pairs: HashSet<(String, String)>,
     fixed_lengths: HashMap<String, usize>,
     minimum_lengths: HashMap<String, usize>,
     length_sources: HashMap<String, String>,
@@ -140,6 +142,11 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         integer_constants,
         integer_ranges,
         nonzero: left.nonzero.intersection(&right.nonzero).cloned().collect(),
+        leq_pairs: left
+            .leq_pairs
+            .intersection(&right.leq_pairs)
+            .cloned()
+            .collect(),
         fixed_lengths,
         minimum_lengths,
         length_sources,
@@ -170,6 +177,69 @@ fn canonical_scalar(expr: &Expression, state: &AbstractState) -> String {
     }
 }
 
+fn relation_is_known_leq(left: &Expression, right: &Expression, state: &AbstractState) -> bool {
+    let start = canonical_scalar(left, state);
+    let goal = canonical_scalar(right, state);
+    if start == goal {
+        return true;
+    }
+    let mut pending = vec![start];
+    let mut seen = HashSet::new();
+    while let Some(current) = pending.pop() {
+        if !seen.insert(current.clone()) {
+            continue;
+        }
+        for (_, upper) in state
+            .leq_pairs
+            .iter()
+            .filter(|(lower, _)| lower == &current)
+        {
+            if upper == &goal {
+                return true;
+            }
+            pending.push(upper.clone());
+        }
+    }
+    false
+}
+
+fn propagate_relational_ranges(facts: &mut AbstractState) {
+    for _ in 0..facts.leq_pairs.len().saturating_add(1) {
+        let mut changed = false;
+        for (lower, upper) in facts.leq_pairs.clone() {
+            let lower_range = facts
+                .integer_ranges
+                .get(&lower)
+                .copied()
+                .unwrap_or(IntInterval::I32);
+            let upper_range = facts
+                .integer_ranges
+                .get(&upper)
+                .copied()
+                .unwrap_or(IntInterval::I32);
+            let narrowed_lower = IntInterval {
+                min: lower_range.min,
+                max: lower_range.max.min(upper_range.max),
+            };
+            let narrowed_upper = IntInterval {
+                min: upper_range.min.max(lower_range.min),
+                max: upper_range.max,
+            };
+            if narrowed_lower != lower_range {
+                facts.integer_ranges.insert(lower.clone(), narrowed_lower);
+                changed = true;
+            }
+            if narrowed_upper != upper_range {
+                facts.integer_ranges.insert(upper.clone(), narrowed_upper);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
 fn integer_constant(expr: &Expression, state: &AbstractState) -> Option<i32> {
     match expr {
         Expression::Int(value) => Some(*value),
@@ -194,6 +264,42 @@ fn integer_constant(expr: &Expression, state: &AbstractState) -> Option<i32> {
         },
         Expression::Dec(_) => None,
     }
+}
+
+fn safe_midpoint_interval(
+    base: &Expression,
+    offset: &Expression,
+    state: &AbstractState,
+) -> Option<IntInterval> {
+    let Expression::Apply(div) = offset else {
+        return None;
+    };
+    let [Expression::Word(div_op), Expression::Apply(sub), divisor] = div.as_slice() else {
+        return None;
+    };
+    let [Expression::Word(sub_op), upper, repeated_base] = sub.as_slice() else {
+        return None;
+    };
+    if div_op != "/"
+        || sub_op != "-"
+        || canonical_scalar(base, state) != canonical_scalar(repeated_base, state)
+        || integer_constant(divisor, state).is_none_or(|value| value < 1)
+        || !relation_is_known_leq(base, upper, state)
+    {
+        return None;
+    }
+    let base_range = integer_interval(base, state)?;
+    let upper_range = integer_interval(upper, state)?;
+    // With base <= upper and a positive divisor, the offset lies between zero
+    // and upper-base, so the result remains between base and upper. Requiring
+    // a nonnegative base also proves upper-base itself cannot overflow Int.
+    if base_range.min < 0 {
+        return None;
+    }
+    Some(IntInterval {
+        min: base_range.min,
+        max: upper_range.max,
+    })
 }
 
 fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInterval> {
@@ -238,9 +344,38 @@ fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInter
                     }))
             }
             [Expression::Word(op), left, right] if matches!(op.as_str(), "+" | "-" | "*") => {
-                let left = integer_interval(left, state)?;
-                let right = integer_interval(right, state)?;
-                integer_arithmetic_interval(op, left, right)
+                if op == "+" {
+                    if let Some(midpoint) = safe_midpoint_interval(left, right, state)
+                        .or_else(|| safe_midpoint_interval(right, left, state))
+                    {
+                        return Some(midpoint);
+                    }
+                }
+                let left_range = integer_interval(left, state)?;
+                let right_range = integer_interval(right, state)?;
+                let mut result = integer_arithmetic_interval(op, left_range, right_range)?;
+                if op == "-" {
+                    if relation_is_known_leq(&items[2], &items[1], state) {
+                        result.min = result.min.max(0);
+                    }
+                    if relation_is_known_leq(&items[1], &items[2], state) {
+                        result.max = result.max.min(0);
+                    }
+                }
+                Some(result)
+            }
+            [Expression::Word(op), numerator, divisor] if op == "/" => {
+                let numerator = integer_interval(numerator, state)?;
+                let divisor = integer_constant(divisor, state)?;
+                if divisor == 0 {
+                    return None;
+                }
+                let a = numerator.min / divisor as i64;
+                let b = numerator.max / divisor as i64;
+                Some(IntInterval {
+                    min: a.min(b),
+                    max: a.max(b),
+                })
             }
             _ => state
                 .integer_ranges
@@ -593,6 +728,36 @@ fn collect_numeric_guard_facts(
                 };
                 (right, bound, reversed)
             } else {
+                let effective = if is_true {
+                    op.as_str()
+                } else {
+                    match op.as_str() {
+                        ">" => "<=",
+                        ">=" => "<",
+                        "<" => ">=",
+                        "<=" => ">",
+                        "=" => "!=",
+                        _ => return,
+                    }
+                };
+                let left_key = canonical_scalar(left, facts);
+                let right_key = canonical_scalar(right, facts);
+                match effective {
+                    "<" | "<=" => {
+                        facts.leq_pairs.insert((left_key, right_key));
+                    }
+                    ">" | ">=" => {
+                        facts.leq_pairs.insert((right_key, left_key));
+                    }
+                    "=" => {
+                        facts
+                            .leq_pairs
+                            .insert((left_key.clone(), right_key.clone()));
+                        facts.leq_pairs.insert((right_key, left_key));
+                    }
+                    _ => {}
+                }
+                propagate_relational_ranges(facts);
                 return;
             };
             let effective = if is_true {
@@ -646,6 +811,7 @@ fn collect_numeric_guard_facts(
                 ),
                 _ => {}
             }
+            propagate_relational_ranges(facts);
         }
         _ if expansion_depth < 16 => {
             let Some(op) = items.first().and_then(word) else {
@@ -760,6 +926,9 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     facts.length_sources.remove(name);
     facts.aliases.remove(name);
     facts.scalar_aliases.remove(name);
+    facts
+        .leq_pairs
+        .retain(|(left, right)| left != name && right != name);
 
     if remains_nonnegative {
         facts.nonnegative.insert(name.to_string());
@@ -793,6 +962,9 @@ fn forget_lambda_parameter(expr: &Expression, facts: &mut AbstractState) {
             facts.integer_constants.remove(name);
             facts.integer_ranges.remove(name);
             facts.scalar_aliases.remove(name);
+            facts
+                .leq_pairs
+                .retain(|(left, right)| left != name && right != name);
         }
         Expression::Apply(items) => {
             for item in items {
@@ -906,10 +1078,12 @@ fn validate_static_bounds_expr(
     }
 
     if matches!(op, "+" | "-" | "*") && items.len() == 3 {
-        let left = integer_interval(&items[1], facts).unwrap_or(IntInterval::I32);
-        let right = integer_interval(&items[2], facts).unwrap_or(IntInterval::I32);
-        let result = integer_arithmetic_interval(op, left, right)
-            .expect("validated integer arithmetic operator");
+        let result = integer_interval(expr, facts).unwrap_or_else(|| {
+            let left = integer_interval(&items[1], facts).unwrap_or(IntInterval::I32);
+            let right = integer_interval(&items[2], facts).unwrap_or(IntInterval::I32);
+            integer_arithmetic_interval(op, left, right)
+                .expect("validated integer arithmetic operator")
+        });
         if !result.fits_i32() {
             let kind = match (
                 result.min < IntInterval::I32.min,
@@ -1013,6 +1187,7 @@ fn validate_static_bounds_expr(
                 integer_constants: facts.integer_constants.clone(),
                 integer_ranges: facts.integer_ranges.clone(),
                 scalar_aliases: facts.scalar_aliases.clone(),
+                leq_pairs: facts.leq_pairs.clone(),
                 guard_summaries: facts.guard_summaries.clone(),
                 predicate_summaries: facts.predicate_summaries.clone(),
                 ..AbstractState::default()
@@ -1639,5 +1814,40 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|message| message.contains("Int underflow possible")));
+    }
+
+    #[test]
+    fn relational_ranges_prove_safe_binary_search_midpoint() {
+        let source = "(let midpoint (lambda left right (if (or (> left right) (< left 0)) 0 (+ left (/ (- right left) 2)))))";
+        assert_eq!(analyze(source, 1), Ok(()));
+
+        let missing_lower_bound =
+            "(let midpoint (lambda left right (if (> left right) 0 (+ left (/ (- right left) 2)))))";
+        assert!(analyze(missing_lower_bound, 1)
+            .expect_err("signed endpoints still need a nonnegative invariant")
+            .contains("underflow"));
+    }
+
+    #[test]
+    fn relational_ranges_cover_recursive_binary_search_shape() {
+        let source = r#"
+            (let in-bounds? (lambda xs i (and (>= i 0) (< i (length xs)))))
+            (let max-safe 2147483647)
+            (let search? (lambda (target xs)
+              (letrec bs (lambda (left right)
+                (if (or (> left right) (< left 0)) false
+                  (block
+                    (let index (+ left (/ (- right left) 2)))
+                    (if (not (in-bounds? xs index)) false
+                      (block
+                        (let current (get xs index))
+                        (if (= target current) true
+                          (if (>= index max-safe) false
+                            (if (> target current)
+                              (bs (+ index 1) right)
+                              (bs left (- index 1)))))))))))
+              (bs 0 (- (length xs) 1))))
+        "#;
+        assert_eq!(analyze(source, 3), Ok(()));
     }
 }
