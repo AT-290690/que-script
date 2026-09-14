@@ -537,6 +537,34 @@ fn collect_static_bound_guard_facts(
         {
             minimum_lengths.push((canonical_access(&length[1], facts), 1));
         }
+        [Expression::Word(op), Expression::Apply(length), Expression::Int(bound)]
+            if matches!(op.as_str(), ">" | ">=" | "<" | "<=")
+                && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
+                && length.len() == 2 =>
+        {
+            let minimum = match (op.as_str(), is_true) {
+                (">", true) | ("<=", false) => i64::from(*bound) + 1,
+                (">=", true) | ("<", false) => i64::from(*bound),
+                _ => return,
+            };
+            if minimum > 0 {
+                minimum_lengths.push((canonical_access(&length[1], facts), minimum as usize));
+            }
+        }
+        [Expression::Word(op), Expression::Int(bound), Expression::Apply(length)]
+            if matches!(op.as_str(), ">" | ">=" | "<" | "<=")
+                && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
+                && length.len() == 2 =>
+        {
+            let minimum = match (op.as_str(), is_true) {
+                ("<", true) | (">=", false) => i64::from(*bound) + 1,
+                ("<=", true) | (">", false) => i64::from(*bound),
+                _ => return,
+            };
+            if minimum > 0 {
+                minimum_lengths.push((canonical_access(&length[1], facts), minimum as usize));
+            }
+        }
         [Expression::Word(op), Expression::Int(0), Expression::Apply(length)]
             if op == "="
                 && !is_true
@@ -718,6 +746,18 @@ fn collect_numeric_guard_facts(
         return;
     };
     match items.as_slice() {
+        [Expression::Word(op), operands @ ..]
+            if operands.len() >= 2 && ((op == "or" && is_true) || (op == "and" && !is_true)) =>
+        {
+            let mut alternatives = operands.iter().map(|operand| {
+                let mut branch = facts.clone();
+                collect_numeric_guard_facts(operand, &mut branch, is_true, expansion_depth);
+                branch
+            });
+            if let Some(first) = alternatives.next() {
+                *facts = alternatives.fold(first, |joined, branch| join_states(&joined, &branch));
+            }
+        }
         [Expression::Word(op), operands @ ..]
             if operands.len() >= 2 && ((op == "and" && is_true) || (op == "or" && !is_true)) =>
         {
@@ -1983,3 +2023,7 @@ mod tests {
         assert_eq!(analyze(source, 3), Ok(()));
     }
 }
+
+#[cfg(test)]
+#[path = "static_analysis_model_tests.rs"]
+mod model_tests;
