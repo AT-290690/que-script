@@ -249,6 +249,8 @@ fn model_check_equivalent_nonempty_guards() {
         "(not (= 0 (length xs)))",
         "(>= (length xs) 1)",
         "(not (< (length xs) 1))",
+        "(= (length xs) 1)",
+        "(= 1 (length xs))",
     ];
     for guard in guards {
         for operation in ["(car xs)", "(pop-val! xs)"] {
@@ -258,6 +260,32 @@ fn model_check_equivalent_nonempty_guards() {
                 !has(&found, "vector may be empty"),
                 "equivalent nonempty guard was not recognized\nsource: {source}\ndiagnostics: {found:#?}"
             );
+        }
+    }
+}
+
+#[test]
+fn model_check_exact_length_guards_prove_all_smaller_literal_indices() {
+    for length in 1..=10usize {
+        for index in 0..length {
+            for guard in [
+                format!("(= (length xs) {length})"),
+                format!("(= {length} (length xs))"),
+                format!("(let n {length}) (= (length xs) n)"),
+            ] {
+                let source = if guard.starts_with("(let n") {
+                    format!(
+                        "(let xs []) (let n {length}) (if (= (length xs) n) (get xs {index}) -1)"
+                    )
+                } else {
+                    format!("(let xs []) (if {guard} (get xs {index}) -1)")
+                };
+                let found = diagnostics(&source, source.matches("(let ").count() + 1);
+                assert!(
+                    !has(&found, "index not proven safe"),
+                    "exact-length guard did not prove access\nsource: {source}\ndiagnostics: {found:#?}"
+                );
+            }
         }
     }
 }

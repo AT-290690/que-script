@@ -564,3 +564,67 @@
 (let shoelace std/int/shoelace)
 (let sequence std/vector/int/sequence)
 (let collinear? std/int/collinear?)
+
+(let bit/set?
+  (lambda (pos n)
+    (std/int/bit/set? n pos)))
+
+(let bit/set
+  (lambda (pos n)
+    (std/int/bit/set n pos)))
+
+(let bit/clear
+  (lambda (pos n)
+    (std/int/bit/clear n pos)))
+
+(let bit/power-of-two
+  (lambda (n)
+    (std/int/bit/power-of-two n)))
+
+(let bit/odd?
+  (lambda (n)
+    (std/int/bit/odd? n)))
+
+(let bit/even?
+  (lambda (n)
+    (std/int/bit/even? n)))
+
+(let bit/average
+  (lambda (a b)
+    (std/int/bit/average a b)))
+
+(let bit/flag-flip
+  (lambda (x)
+    (std/int/bit/flag-flip x)))
+
+(let bit/toggle
+  (lambda (a b n)
+    (std/int/bit/toggle n a b)))
+
+(let bit/same-sign?
+  (lambda (a b)
+    (std/int/bit/same-sign? a b)))
+
+(let bit/max
+  (lambda (a b)
+    (std/int/bit/max a b)))
+
+(let bit/min
+  (lambda (a b)
+    (std/int/bit/min a b)))
+
+(let bit/equal?
+  (lambda (a b)
+    (std/int/bit/equal? a b)))
+
+(let bit/modulo
+  (lambda (divisor numerator)
+    (std/int/bit/modulo numerator divisor)))
+
+(let bit/n-one?
+  (lambda (nth n)
+    (std/int/bit/n-one? n nth)))
+
+(let bit/largest-power
+  (lambda (n)
+    (std/int/bit/largest-power n)))

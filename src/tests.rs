@@ -5400,6 +5400,34 @@ out"#,
     }
 
     #[test]
+    fn test_static_analysis_user_form_count_includes_destructuring_expansion() {
+        let source = r#"(let inp "1,2")
+(let [a b] (split "," inp))
+{a b}
+(let inp2 (split "," inp))
+(get inp2 0)
+(get inp2 1)"#;
+        let raw_count = crate::lsp_native_core::parse_user_exprs_for_symbol_collection(source)
+            .expect("source should parse")
+            .len();
+        let expanded_count = crate::lsp_native_core::desugared_user_form_count(source)
+            .expect("source should desugar");
+
+        assert_eq!(raw_count, 7);
+        assert_eq!(expanded_count, 8);
+    }
+
+    #[test]
+    fn test_lsp_static_analysis_directive_is_limited_to_leading_comment_header() {
+        assert!(crate::lsp_native_core::lsp_static_analysis_enabled(
+            "\n; title\n; use-strict-warnings!\n(let x 1)"
+        ));
+        assert!(!crate::lsp_native_core::lsp_static_analysis_enabled(
+            "(let x 1)\n; use-strict-warnings!"
+        ));
+    }
+
+    #[test]
     fn test_wasm_lsp_diagnostics_allow_impure_uppercase_function_without_suffix() {
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(
             r#"(let J
@@ -6021,7 +6049,7 @@ parse-value"#;
 
     #[test]
     fn test_wasm_lsp_warns_for_unproven_vector_access() {
-        let source = "(let xs [1 2 3])\n(let i 10)\n(get xs i)";
+        let source = "; use-strict-warnings!\n(let xs [1 2 3])\n(let i 10)\n(get xs i)";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -6036,12 +6064,28 @@ parse-value"#;
             })
             .expect("unproven get should produce a static-analysis warning");
         assert_eq!(warning.get("severity"), Some(&serde_json::json!("warning")));
-        assert_eq!(warning["range"]["start"]["line"], serde_json::json!(2));
+        assert_eq!(warning["range"]["start"]["line"], serde_json::json!(3));
+    }
+
+    #[test]
+    fn test_wasm_lsp_static_analysis_is_off_without_directive() {
+        let source = "(let xs [1 2 3])\n(let i 10)\n(get xs i)";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        assert!(diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .all(|item| item
+                .get("message")
+                .and_then(|value| value.as_str())
+                .is_none_or(|message| !message.contains("index not proven safe"))));
     }
 
     #[test]
     fn test_wasm_lsp_reports_all_unproven_vector_accesses() {
-        let source = "(let xs [1])\n(let ys [2])\n(let i 0)\n(let j 0)\n(get xs i)\n(get ys j)";
+        let source = "; use-strict-warnings!\n(let xs [1])\n(let ys [2])\n(let i 0)\n(let j 0)\n(get xs i)\n(get ys j)";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -6063,7 +6107,7 @@ parse-value"#;
 
     #[test]
     fn test_wasm_lsp_static_warning_maps_block_renamed_binding_to_source() {
-        let source = "(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get xs index))))\n(let xs2 [])\n(let index2 0)\n(if (> (length xs2) index2) (get xs2 0) -1)";
+        let source = "; use-strict-warnings!\n(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get xs index))))\n(let xs2 [])\n(let index2 0)\n(if (> (length xs2) index2) (get xs2 0) -1)";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -6078,13 +6122,13 @@ parse-value"#;
             })
             .collect();
         assert_eq!(warnings.len(), 1, "{diagnostics_json}");
-        assert_eq!(warnings[0]["range"]["start"]["line"], serde_json::json!(3));
-        assert_eq!(warnings[0]["range"]["end"]["line"], serde_json::json!(3));
+        assert_eq!(warnings[0]["range"]["start"]["line"], serde_json::json!(4));
+        assert_eq!(warnings[0]["range"]["end"]["line"], serde_json::json!(4));
     }
 
     #[test]
     fn test_wasm_lsp_infers_matrix_bounds_contract_without_warning() {
-        let source = "(let m [[1 3] [2]])\n(let x 1)\n(let y 1)\n(if (Matrix/in-bounds? x y m) (get m x y) -1)";
+        let source = "; use-strict-warnings!\n(let m [[1 3] [2]])\n(let x 1)\n(let y 1)\n(if (Matrix/in-bounds? x y m) (get m x y) -1)";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -6104,7 +6148,7 @@ parse-value"#;
     #[test]
     fn test_wasm_lsp_accepts_negated_bounds_guard_in_else_branch() {
         let source =
-            "(let xs [1 2 3])\n(let i 1)\n(if (or false (not (in-bounds? xs i))) 0 (get xs i))";
+            "; use-strict-warnings!\n(let xs [1 2 3])\n(let i 1)\n(if (or false (not (in-bounds? xs i))) 0 (get xs i))";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");

@@ -921,6 +921,41 @@ pub fn parse_user_exprs_for_symbol_collection(text: &str) -> Option<Vec<Expressi
     parser::parse(&repaired_masked).ok()
 }
 
+/// Number of top-level runtime forms produced from user source after surface
+/// syntax (notably destructuring lets) has been expanded.  Typed programs have
+/// already undergone this expansion, so their library/user boundary must use
+/// this count rather than the number of raw source forms.
+pub fn desugared_user_form_count(text: &str) -> Option<usize> {
+    let built = parser::build(text).ok()?;
+    Some(match built {
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "do") =>
+        {
+            items.len().saturating_sub(1)
+        }
+        _ => 1,
+    })
+}
+
+/// Static-analysis diagnostics are intentionally opt-in in editors.  Accept
+/// the directive anywhere in the leading blank/comment header, but not after
+/// program forms have begun.
+pub fn lsp_static_analysis_enabled(text: &str) -> bool {
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if !line.starts_with(';') {
+            return false;
+        }
+        if line == "; use-strict-warnings!" {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_comment = false;

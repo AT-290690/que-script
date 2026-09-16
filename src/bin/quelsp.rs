@@ -1334,10 +1334,16 @@ fn analyze_document_text(
     match infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count)
     {
         Ok((_typ, typed)) => {
-            for message in
-                que::static_analysis::analyze_user_program_diagnostics(&typed, user_form_count)
-            {
-                diagnostics.extend(make_static_analysis_warning(text, message));
+            if que::lsp_native_core::lsp_static_analysis_enabled(text) {
+                let analysis_form_count =
+                    que::lsp_native_core::desugared_user_form_count(&analysis_source)
+                        .unwrap_or(user_form_count);
+                for message in que::static_analysis::analyze_user_program_diagnostics(
+                    &typed,
+                    analysis_form_count,
+                ) {
+                    diagnostics.extend(make_static_analysis_warning(text, message));
+                }
             }
             collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
             for form in extract_user_top_level_typed_forms(&typed, user_form_count) {

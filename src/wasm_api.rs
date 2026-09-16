@@ -206,10 +206,15 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         user_form_count,
     ) {
         Ok((_typ, typed)) => {
-            for message in
-                crate::static_analysis::analyze_user_program_diagnostics(&typed, user_form_count)
-            {
-                diagnostics.extend(make_static_analysis_warning(text, message));
+            if native_core::lsp_static_analysis_enabled(text) {
+                let analysis_form_count = native_core::desugared_user_form_count(&analysis_source)
+                    .unwrap_or(user_form_count);
+                for message in crate::static_analysis::analyze_user_program_diagnostics(
+                    &typed,
+                    analysis_form_count,
+                ) {
+                    diagnostics.extend(make_static_analysis_warning(text, message));
+                }
             }
             collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
             let typed_user_forms = extract_user_top_level_typed_forms(&typed, user_form_count);

@@ -529,6 +529,26 @@ fn collect_static_bound_guard_facts(
         {
             lower.insert(canonical_scalar(&Expression::Word(index.clone()), facts));
         }
+        [Expression::Word(op), Expression::Apply(length), bound]
+            if op == "="
+                && is_true
+                && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
+                && length.len() == 2 =>
+        {
+            if let Some(minimum) = integer_constant(bound, facts).filter(|value| *value > 0) {
+                minimum_lengths.push((canonical_access(&length[1], facts), minimum as usize));
+            }
+        }
+        [Expression::Word(op), bound, Expression::Apply(length)]
+            if op == "="
+                && is_true
+                && matches!(length.first(), Some(Expression::Word(len)) if len == "length")
+                && length.len() == 2 =>
+        {
+            if let Some(minimum) = integer_constant(bound, facts).filter(|value| *value > 0) {
+                minimum_lengths.push((canonical_access(&length[1], facts), minimum as usize));
+            }
+        }
         [Expression::Word(op), Expression::Apply(length), Expression::Int(0)]
             if op == "="
                 && !is_true
@@ -1321,8 +1341,8 @@ fn validate_static_bounds_expr(
             for parameter in items.iter().skip(1).take(items.len().saturating_sub(2)) {
                 forget_lambda_parameter(parameter, &mut scoped);
             }
-            for child in items.iter().skip(2) {
-                validate_static_bounds_expr(child, &mut scoped, diagnostics);
+            if let Some(body) = items.last().filter(|_| items.len() >= 2) {
+                validate_static_bounds_expr(body, &mut scoped, diagnostics);
             }
         }
         "let" | "mut" if items.len() >= 3 => {
@@ -1863,6 +1883,20 @@ mod tests {
 
         assert_eq!(analyze("(let xs [1]) (car xs)", 2), Ok(()));
         assert_eq!(analyze("(let xs [1]) (pop-val! xs)", 2), Ok(()));
+    }
+
+    #[test]
+    fn zero_argument_lambda_body_is_statically_analyzed() {
+        let source = "(let push! (lambda xs x (set! xs (length xs) x))) (let history []) (let alt []) (let undo! (lambda () (push! alt (pop-val! history)))) (let redo! (lambda () (push! history (pop-val! alt))))";
+        let expression = crate::parser::build(source).expect("source should parse");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        let diagnostics = analyze_user_program_diagnostics(&typed, 5);
+        assert!(diagnostics.iter().any(|message| message.contains("(pop-val! history)")));
+        assert!(diagnostics.iter().any(|message| message.contains("(pop-val! alt)")));
     }
 
     #[test]

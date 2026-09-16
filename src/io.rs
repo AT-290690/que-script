@@ -2302,8 +2302,13 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     let (_typ, typed_ast) =
         infer_with_builtins_typed(&wrapped_with_externs, (base_env, base_next_id))?;
     if run_static_analysis {
-        let findings =
-            crate::static_analysis::analyze_user_program_diagnostics(&typed_ast, user_form_count);
+        let analysis_form_count =
+            crate::lsp_native_core::desugared_user_form_count(&analysis_source)
+                .unwrap_or(user_form_count);
+        let findings = crate::static_analysis::analyze_user_program_diagnostics(
+            &typed_ast,
+            analysis_form_count,
+        );
         if strict_static_bounds {
             if let Some(message) = findings.into_iter().next() {
                 return Err(message);
@@ -4777,9 +4782,12 @@ pub fn run_native_shell() -> Result<(), String> {
         match inferred {
             Ok((_typ, typed_ast)) => {
                 if run_static_analysis {
+                    let analysis_form_count =
+                        crate::lsp_native_core::desugared_user_form_count(&analysis_source)
+                            .unwrap_or(user_form_count);
                     let findings = crate::static_analysis::analyze_user_program_diagnostics(
                         &typed_ast,
-                        user_form_count,
+                        analysis_form_count,
                     );
                     if strict_static_bounds {
                         if let Some(message) = findings.into_iter().next() {
