@@ -1,6 +1,6 @@
 use crate::infer::TypedExpression;
 use crate::parser::Expression;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct GuardRelation {
@@ -22,6 +22,12 @@ struct IntInterval {
     min: i64,
     max: i64,
 }
+
+/// A normalized affine expression without its constant term.  Keeping these
+/// relations lets the interval domain retain correlations such as
+/// `a <= INT-MAX - b`, which is exactly `a + b <= INT-MAX`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct AffineTerms(Vec<(String, i64)>);
 
 impl IntInterval {
     const I32: Self = Self {
@@ -57,6 +63,8 @@ struct AbstractState {
     nonzero: HashSet<String>,
     /// Symbolic integer ordering facts: `(a, b)` means `a <= b`.
     leq_pairs: HashSet<(String, String)>,
+    /// Upper bounds for normalized affine expressions: `terms <= bound`.
+    affine_upper_bounds: HashMap<AffineTerms, i64>,
     fixed_lengths: HashMap<String, usize>,
     minimum_lengths: HashMap<String, usize>,
     length_sources: HashMap<String, String>,
@@ -128,6 +136,17 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         .filter(|(name, value)| right.scalar_aliases.get(*name) == Some(*value))
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect();
+    let mut affine_candidates: HashSet<AffineTerms> =
+        left.affine_upper_bounds.keys().cloned().collect();
+    affine_candidates.extend(right.affine_upper_bounds.keys().cloned());
+    let affine_upper_bounds = affine_candidates
+        .into_iter()
+        .filter_map(|terms| {
+            let left_bound = affine_upper_bound(&terms, left)?;
+            let right_bound = affine_upper_bound(&terms, right)?;
+            Some((terms, left_bound.max(right_bound)))
+        })
+        .collect();
     AbstractState {
         safe_pairs: left
             .safe_pairs
@@ -147,6 +166,7 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
             .intersection(&right.leq_pairs)
             .cloned()
             .collect(),
+        affine_upper_bounds,
         fixed_lengths,
         minimum_lengths,
         length_sources,
@@ -174,6 +194,171 @@ fn canonical_scalar(expr: &Expression, state: &AbstractState) -> String {
             format!("({})", parts.join(" "))
         }
         _ => expr.to_lisp(),
+    }
+}
+
+fn affine_expression(expr: &Expression, state: &AbstractState) -> Option<(AffineTerms, i64)> {
+    if let Some(value) = integer_constant(expr, state) {
+        return Some((AffineTerms(Vec::new()), value as i64));
+    }
+    fn collect(
+        expr: &Expression,
+        state: &AbstractState,
+        scale: i64,
+        terms: &mut BTreeMap<String, i64>,
+        constant: &mut i64,
+    ) -> Option<()> {
+        if let Some(value) = integer_constant(expr, state) {
+            *constant = constant.checked_add(scale.checked_mul(value as i64)?)?;
+            return Some(());
+        }
+        match expr {
+            Expression::Apply(items) => match items.as_slice() {
+                [Expression::Word(op), left, right] if op == "+" => {
+                    collect(left, state, scale, terms, constant)?;
+                    collect(right, state, scale, terms, constant)
+                }
+                [Expression::Word(op), left, right] if op == "-" => {
+                    collect(left, state, scale, terms, constant)?;
+                    collect(right, state, -scale, terms, constant)
+                }
+                _ => {
+                    let atom = canonical_scalar(expr, state);
+                    *terms.entry(atom).or_default() += scale;
+                    Some(())
+                }
+            },
+            Expression::Word(_) => {
+                let atom = canonical_scalar(expr, state);
+                *terms.entry(atom).or_default() += scale;
+                Some(())
+            }
+            Expression::Int(value) => {
+                *constant = constant.checked_add(scale.checked_mul(*value as i64)?)?;
+                Some(())
+            }
+            Expression::Dec(_) => None,
+        }
+    }
+
+    let mut terms = BTreeMap::new();
+    let mut constant = 0;
+    collect(expr, state, 1, &mut terms, &mut constant)?;
+    terms.retain(|_, coefficient| *coefficient != 0);
+    Some((AffineTerms(terms.into_iter().collect()), constant))
+}
+
+fn negate_affine_terms(terms: &AffineTerms) -> AffineTerms {
+    AffineTerms(
+        terms
+            .0
+            .iter()
+            .map(|(atom, coefficient)| (atom.clone(), -*coefficient))
+            .collect(),
+    )
+}
+
+fn affine_interval_from_atoms(terms: &AffineTerms, state: &AbstractState) -> Option<IntInterval> {
+    let mut result = IntInterval { min: 0, max: 0 };
+    for (atom, coefficient) in &terms.0 {
+        let range = state
+            .integer_ranges
+            .get(atom)
+            .copied()
+            .or_else(|| {
+                state
+                    .integer_constants
+                    .get(atom)
+                    .copied()
+                    .map(IntInterval::exact)
+            })
+            .unwrap_or(IntInterval::I32);
+        let (min, max) = if *coefficient >= 0 {
+            (
+                range.min.checked_mul(*coefficient)?,
+                range.max.checked_mul(*coefficient)?,
+            )
+        } else {
+            (
+                range.max.checked_mul(*coefficient)?,
+                range.min.checked_mul(*coefficient)?,
+            )
+        };
+        result.min = result.min.checked_add(min)?;
+        result.max = result.max.checked_add(max)?;
+    }
+    Some(result)
+}
+
+fn affine_upper_bound(terms: &AffineTerms, state: &AbstractState) -> Option<i64> {
+    let interval_bound = affine_interval_from_atoms(terms, state)?.max;
+    Some(
+        state
+            .affine_upper_bounds
+            .get(terms)
+            .copied()
+            .map_or(interval_bound, |known| known.min(interval_bound)),
+    )
+}
+
+fn affine_interval(expr: &Expression, state: &AbstractState) -> Option<IntInterval> {
+    let (terms, constant) = affine_expression(expr, state)?;
+    let max = affine_upper_bound(&terms, state)?.checked_add(constant)?;
+    let negated = negate_affine_terms(&terms);
+    let min = affine_upper_bound(&negated, state)?
+        .checked_neg()?
+        .checked_add(constant)?;
+    Some(IntInterval { min, max })
+}
+
+fn record_affine_comparison(
+    left: &Expression,
+    right: &Expression,
+    comparison: &str,
+    state: &mut AbstractState,
+) {
+    let (left_terms, left_constant) = match affine_expression(left, state) {
+        Some(value) => value,
+        None => return,
+    };
+    let (right_terms, right_constant) = match affine_expression(right, state) {
+        Some(value) => value,
+        None => return,
+    };
+    let mut combined: BTreeMap<String, i64> = left_terms.0.into_iter().collect();
+    for (atom, coefficient) in right_terms.0 {
+        *combined.entry(atom).or_default() -= coefficient;
+    }
+    combined.retain(|_, coefficient| *coefficient != 0);
+    let terms = AffineTerms(combined.into_iter().collect());
+    let Some(mut bound) = right_constant.checked_sub(left_constant) else {
+        return;
+    };
+    if comparison == "<" {
+        bound -= 1;
+    }
+    state
+        .affine_upper_bounds
+        .entry(terms)
+        .and_modify(|known| *known = (*known).min(bound))
+        .or_insert(bound);
+}
+
+fn record_effective_affine_comparison(
+    left: &Expression,
+    right: &Expression,
+    comparison: &str,
+    state: &mut AbstractState,
+) {
+    match comparison {
+        "<" | "<=" => record_affine_comparison(left, right, comparison, state),
+        ">" => record_affine_comparison(right, left, "<", state),
+        ">=" => record_affine_comparison(right, left, "<=", state),
+        "=" => {
+            record_affine_comparison(left, right, "<=", state);
+            record_affine_comparison(right, left, "<=", state);
+        }
+        _ => {}
     }
 }
 
@@ -756,6 +941,22 @@ fn constrain_integer_range(expr: &Expression, facts: &mut AbstractState, constra
     }
 }
 
+fn predicate_result_state(
+    expr: &Expression,
+    state: &AbstractState,
+    desired: bool,
+    expansion_depth: usize,
+) -> Option<AbstractState> {
+    if let Expression::Word(value) = expr {
+        if value == "true" || value == "false" {
+            return ((value == "true") == desired).then(|| state.clone());
+        }
+    }
+    let mut result = state.clone();
+    collect_numeric_guard_facts(expr, &mut result, desired, expansion_depth);
+    Some(result)
+}
+
 fn collect_numeric_guard_facts(
     expr: &Expression,
     facts: &mut AbstractState,
@@ -766,6 +967,29 @@ fn collect_numeric_guard_facts(
         return;
     };
     match items.as_slice() {
+        [Expression::Word(op), condition, consequent, alternate] if op == "if" => {
+            let mut outcomes = Vec::new();
+            let mut true_path = facts.clone();
+            collect_numeric_guard_facts(condition, &mut true_path, true, expansion_depth);
+            if let Some(outcome) =
+                predicate_result_state(consequent, &true_path, is_true, expansion_depth)
+            {
+                outcomes.push(outcome);
+            }
+            let mut false_path = facts.clone();
+            collect_numeric_guard_facts(condition, &mut false_path, false, expansion_depth);
+            if let Some(outcome) =
+                predicate_result_state(alternate, &false_path, is_true, expansion_depth)
+            {
+                outcomes.push(outcome);
+            }
+            if let Some(first) = outcomes
+                .into_iter()
+                .reduce(|left, right| join_states(&left, &right))
+            {
+                *facts = first;
+            }
+        }
         [Expression::Word(op), operands @ ..]
             if operands.len() >= 2 && ((op == "or" && is_true) || (op == "and" && !is_true)) =>
         {
@@ -816,6 +1040,7 @@ fn collect_numeric_guard_facts(
                         _ => return,
                     }
                 };
+                record_effective_affine_comparison(left, right, effective, facts);
                 let left_key = canonical_scalar(left, facts);
                 let right_key = canonical_scalar(right, facts);
                 match effective {
@@ -848,6 +1073,7 @@ fn collect_numeric_guard_facts(
                     _ => return,
                 }
             };
+            record_effective_affine_comparison(left, right, effective, facts);
             match effective {
                 "=" => constrain_integer_range(value, facts, IntInterval::exact(bound)),
                 "!=" if bound == 0 => {
@@ -1075,6 +1301,9 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     facts
         .leq_pairs
         .retain(|(left, right)| left != name && right != name);
+    facts
+        .affine_upper_bounds
+        .retain(|terms, _| !terms.0.iter().any(|(atom, _)| atom == name));
 
     if remains_nonnegative {
         facts.nonnegative.insert(name.to_string());
@@ -1111,6 +1340,9 @@ fn forget_lambda_parameter(expr: &Expression, facts: &mut AbstractState) {
             facts
                 .leq_pairs
                 .retain(|(left, right)| left != name && right != name);
+            facts
+                .affine_upper_bounds
+                .retain(|terms, _| !terms.0.iter().any(|(atom, _)| atom == name));
         }
         Expression::Apply(items) => {
             for item in items {
@@ -1224,7 +1456,16 @@ fn validate_static_bounds_expr(
     }
 
     if matches!(op, "+" | "-" | "*") && items.len() == 3 {
-        let result = integer_interval(expr, facts).unwrap_or_else(|| {
+        let relational = (op != "*").then(|| affine_interval(expr, facts)).flatten();
+        let ordinary = integer_interval(expr, facts);
+        let refined = match (relational, ordinary) {
+            (Some(relational), Some(ordinary)) => Some(IntInterval {
+                min: relational.min.max(ordinary.min),
+                max: relational.max.min(ordinary.max),
+            }),
+            (relational, ordinary) => relational.or(ordinary),
+        };
+        let result = refined.unwrap_or_else(|| {
             let left = integer_interval(&items[1], facts).unwrap_or(IntInterval::I32);
             let right = integer_interval(&items[2], facts).unwrap_or(IntInterval::I32);
             integer_arithmetic_interval(op, left, right)
@@ -1334,6 +1575,7 @@ fn validate_static_bounds_expr(
                 integer_ranges: facts.integer_ranges.clone(),
                 scalar_aliases: facts.scalar_aliases.clone(),
                 leq_pairs: facts.leq_pairs.clone(),
+                affine_upper_bounds: facts.affine_upper_bounds.clone(),
                 guard_summaries: facts.guard_summaries.clone(),
                 predicate_summaries: facts.predicate_summaries.clone(),
                 ..AbstractState::default()
@@ -1974,6 +2216,35 @@ mod tests {
         let unsafe_range = "(let add-one (lambda x (if (>= x 2147483647) (+ x 1) x)))";
         assert!(analyze(unsafe_range, 1)
             .expect_err("upper-edge range should expose overflow")
+            .contains("overflow"));
+    }
+
+    #[test]
+    fn relational_predicate_proves_guarded_addition_safe() {
+        let safe = r#"
+            (let INT-MIN -2147483648)
+            (let INT-MAX 2147483647)
+            (let int/add-safe?
+              (lambda (a b)
+                (if (> b 0)
+                    (<= a (- INT-MAX b))
+                    (if (< b 0)
+                        (>= a (- INT-MIN b))
+                        true))))
+            (let guarded-add
+              (lambda (a b)
+                (if (int/add-safe? a b) (+ a b) a)))
+        "#;
+        assert_eq!(analyze(safe, 4), Ok(()));
+
+        let wrong_upper_guard = r#"
+            (let INT-MAX 2147483647)
+            (let bad-add
+              (lambda (a b)
+                (if (and (> b 0) (<= a INT-MAX)) (+ a b) a)))
+        "#;
+        assert!(analyze(wrong_upper_guard, 2)
+            .expect_err("an unrelated upper guard must not prove addition safe")
             .contains("overflow"));
     }
 
