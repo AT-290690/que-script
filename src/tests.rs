@@ -34,7 +34,7 @@ mod tests {
             ("(+. 1.23 2.112)", "Dec"),
             ("(tuple (Int->Dec 5) (Dec->Int 5.2))", "{Dec Int}"),
             (
-                r#"(do 
+                r#"(do
 (let xs (vector (vector (vector))))
 (set! xs (length xs) (vector (vector true)))
 (set! xs (length xs) (vector (vector false)))
@@ -144,7 +144,7 @@ xs)"#,
                 "set! value expected Bool but got Int\n(set! xs (length xs) (vector (vector 1)))",
             ),
             (
-                r#"(do 
+                r#"(do
 (let xs (vector))
 (set! xs (length xs) false)
 (set! xs (length xs) 1))"#,
@@ -906,8 +906,8 @@ xs)"#,
                   (=. (log 1.0) 0.0)
                   (and (>. (log 2.0) 0.68) (<. (log 2.0) 0.71))
                   (and (>. (log 8.0) 2.07) (<. (log 8.0) 2.09))
-                  (fst (std/dec/log/option 2.0))
-                  (not (fst (std/dec/log/option 0.0)))
+                  (>. (log 2.0) 0.0)
+                  (=. (log 1.0) 0.0)
                 ])"#,
             true,
         );
@@ -1376,10 +1376,10 @@ xs)"#,
     }
 
     #[cfg(feature = "runtime")]
-    fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .expect("runtime test lock should not be poisoned");
+    fn run_program_output_with_std_and_opts_unlocked(
+        src: &str,
+        enable_optimizer: bool,
+    ) -> String {
         let wat = compile_std_program_to_wat(src, enable_optimizer);
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
@@ -1394,6 +1394,14 @@ xs)"#,
         #[cfg(not(feature = "io"))]
         let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         run_result.expect("program should run without trap")
+    }
+
+    #[cfg(feature = "runtime")]
+    fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        run_program_output_with_std_and_opts_unlocked(src, enable_optimizer)
     }
 
     #[cfg(all(feature = "runtime", feature = "io"))]
@@ -2434,6 +2442,53 @@ xs)"#,
 
     #[test]
     #[cfg(feature = "runtime")]
+    fn test_public_safe_arithmetic_predicates_cover_int_and_dec_edges() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .expect("runtime test lock should not be poisoned");
+        let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
+        let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
+        let _div_zero = ScopedEnvVar::set("QUE_DIV_ZERO_CHECK", "1");
+        let output = run_program_output_with_std_and_opts_unlocked(
+            r#"[
+              (add/safe? const/int/max-safe 0)
+              (add/safe? const/int/max-safe 1)
+              (add/safe? const/int/min-safe -1)
+              (sub/safe? const/int/min-safe 1)
+              (sub/safe? const/int/max-safe -1)
+              (mul/safe? const/int/max-safe 1)
+              (mul/safe? const/int/max-safe 2)
+              (mul/safe? const/int/min-safe -1)
+              (div/safe? const/int/min-safe -1)
+              (div/safe? 10 0)
+              (mod/safe? const/int/min-safe -1)
+              (mod/safe? 10 0)
+              (add./safe? const/dec/max-safe 0.001)
+              (sub./safe? const/dec/min-safe 0.001)
+              (mul./safe? const/dec/max-safe 1.0)
+              (mul./safe? const/dec/max-safe 1.001)
+              (mul./safe? const/dec/min-safe -1.0)
+              (div./safe? const/dec/max-safe 0.001)
+              (div./safe? 1.0 0.001)
+              (div./safe? const/dec/min-safe -1.0)
+              (mod./safe? 10.0 0.0)
+              (mod./safe? const/dec/min-safe -1.0)
+            ]"#,
+            true,
+        );
+        assert_eq!(
+            output,
+            "[true false false false false true false false false false true false false false true false false false true false false true]"
+        );
+        let bounds = run_program_output_with_std_and_opts_unlocked(
+            "{ const/dec/min-safe const/dec/max-safe }",
+            true,
+        );
+        assert_eq!(bounds, "{ -2147483.648 2147483.647 }");
+    }
+
+    #[test]
+    #[cfg(feature = "runtime")]
     fn test_alter_inline_rhs_matches_precompute_with_int_overflow_check() {
         let _lock = runtime_exec_lock()
             .lock()
@@ -2608,9 +2663,9 @@ xs)"#,
     #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_smoke2() {
         assert_std_program_output_matches_with_and_without_optimizer(
-            r#"(|> 
+            r#"(|>
   (range 1 10)
-  (filter even?) 
+  (filter even?)
   (map square)
   (map/i (lambda x i { x i }))
   unzip
@@ -2694,12 +2749,12 @@ xs)"#,
     #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_reduce_until_i() {
         assert_std_program_output_matches_with_and_without_optimizer(
-            r#"(let two-sum-test (lambda nums target (snd (|> nums 
-            (filter (lambda x (< x 1000))) 
-            (filter/i (lambda x i (and (< x 100) (< i 10)))) 
+            r#"(let two-sum-test (lambda nums target (snd (|> nums
+            (filter (lambda x (< x 1000)))
+            (filter/i (lambda x i (and (< x 100) (< i 10))))
             (map identity) (reduce/until/i (lambda { a out } b i (do
         (let check (Integer->String (- target b)))
-        (if (Table/has? check a) (do 
+        (if (Table/has? check a) (do
             (push! out i)  (push! out (snd (get (Table/get check a))))))
         (let key (Integer->String b))
         (Table/set! a key i)
@@ -4061,7 +4116,7 @@ out"#,
     #[test]
     fn test_typed_optimization_map_short_name_fuses_to_direct_loop() {
         let typed = infer_typed(
-            "(do (let std/vector/map (lambda xs fn (fn (get xs 0)))) (let map (lambda fn xs (std/vector/map xs fn))) (map (lambda x (+ x 1)) (vector 41)))"
+            "(do (let vector-map (lambda xs fn (fn (get xs 0)))) (let map (lambda fn xs (vector-map xs fn))) (map (lambda x (+ x 1)) (vector 41)))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -4081,7 +4136,7 @@ out"#,
     #[test]
     fn test_typed_optimization_filter_short_name_fuses_to_direct_loop() {
         let typed = infer_typed(
-            "(do (let std/vector/filter (lambda xs fn (fn (get xs 0)))) (let filter (lambda fn xs (std/vector/filter xs fn))) (filter (lambda x (> x 0)) (vector 41)))"
+            "(do (let vector-filter (lambda xs fn (fn (get xs 0)))) (let filter (lambda fn xs (vector-filter xs fn))) (filter (lambda x (> x 0)) (vector 41)))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -4101,7 +4156,7 @@ out"#,
     #[test]
     fn test_typed_optimization_reduce_short_name_fuses_to_direct_loop() {
         let typed = infer_typed(
-            "(do (let std/vector/reduce (lambda xs fn init (fn init (get xs 0)))) (let reduce (lambda fn init xs (std/vector/reduce xs fn init))) (reduce (lambda a x (+ a x)) 10 (vector 32)))"
+            "(do (let vector-reduce (lambda xs fn init (fn init (get xs 0)))) (let reduce (lambda fn init xs (vector-reduce xs fn init))) (reduce (lambda a x (+ a x)) 10 (vector 32)))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -5110,24 +5165,6 @@ out"#,
     }
 
     #[test]
-    fn test_wasm_lsp_completions_hide_std_compatibility_symbols() {
-        let completion_json = crate::wasm_api::lsp_completions_at("std/".to_string(), 0, 4);
-        let items: serde_json::Value = serde_json::from_str(&completion_json)
-            .expect("completion response should be valid JSON");
-        assert!(
-            items
-                .as_array()
-                .expect("completion response should be an array")
-                .iter()
-                .all(|item| !item["label"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .starts_with("std/")),
-            "std compatibility symbols should not be offered"
-        );
-    }
-
-    #[test]
     fn test_wasm_lsp_completions_include_typed_literals() {
         for (prefix, expected_label, expected_detail) in [
             ("tr", "true", "Bool"),
@@ -5302,8 +5339,8 @@ out"#,
     }
 
     #[test]
-    fn test_wasm_lsp_hover_std_namespaced_function_in_incomplete_call_uses_std_signature() {
-        let hover_json = crate::wasm_api::lsp_hover("(std/vector/map )".to_string(), 0, 6);
+    fn test_wasm_lsp_hover_public_map_in_incomplete_call_uses_library_signature() {
+        let hover_json = crate::wasm_api::lsp_hover("(map )".to_string(), 0, 2);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
 
@@ -5313,8 +5350,8 @@ out"#,
             .expect("hover response should include string contents");
 
         assert!(
-            contents.starts_with("std/vector/map : [T] -> (T -> K) -> [K]"),
-            "expected std/vector/map fallback hover, got: {}",
+            contents.starts_with("map : (T -> K) -> [T] -> [K]"),
+            "expected public map fallback hover, got: {}",
             contents
         );
     }
@@ -5590,7 +5627,7 @@ reverse-list-loop"#;
     #[test]
     fn test_wasm_lsp_hover_alias_preserves_mutation_effect() {
         let program =
-            "(let std/vector/reverse! (lambda xs (do (set! xs 0 1) nil)))\n(let reverse! std/vector/reverse!)\nreverse!";
+            "(let reverse-core! (lambda xs (do (set! xs 0 1) nil)))\n(let reverse! reverse-core!)\nreverse!";
         let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 2, 3);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
@@ -5610,7 +5647,7 @@ reverse-list-loop"#;
     #[test]
     fn test_wasm_lsp_hover_std_usage_includes_global_effects() {
         let hover_json =
-            crate::wasm_api::lsp_hover("(std/vector/reverse! [ 1 2 3 ])".to_string(), 0, 6);
+            crate::wasm_api::lsp_hover("(reverse! [ 1 2 3 ])".to_string(), 0, 6);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
 
@@ -5629,7 +5666,7 @@ reverse-list-loop"#;
     #[test]
     fn test_wasm_lsp_hover_std_local_mutating_function_includes_global_effects() {
         let hover_json =
-            crate::wasm_api::lsp_hover("(std/vector/map [ 1 2 3 ] square)".to_string(), 0, 6);
+            crate::wasm_api::lsp_hover("(map square [ 1 2 3 ])".to_string(), 0, 6);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
 
@@ -5742,7 +5779,7 @@ reverse-list-loop"#;
     #[test]
     fn test_wasm_lsp_hover_exempt_name_calling_impure_callee_is_mutate() {
         let hover_json = crate::wasm_api::lsp_hover(
-            "(let _fn (lambda xs (std/vector/reverse! xs)))\n_fn".to_string(),
+            "(let _fn (lambda xs (reverse! xs)))\n_fn".to_string(),
             1,
             1,
         );
@@ -9276,7 +9313,7 @@ fn"#;
       (outer bi0)
       (alter! bi0 (+ bi0 1))))
     1
-    
+
     (let mk1 (lambda n (do
       (let v [])
       (mut i 0)
@@ -9290,7 +9327,7 @@ fn"#;
       (length t)
       (alter! bi1 (+ bi1 1))))
     1
-    
+
     (let mk2 (lambda n (do
       (let v [])
       (mut i 0)
@@ -9305,7 +9342,7 @@ fn"#;
       (+ (length a) (length b))
       (alter! bi2 (+ bi2 1))))
     1
-    
+
     ; closure captures a vector, closure dies each loop iteration
     (let mk-reader (lambda n (do
       (let xs [])
@@ -9314,7 +9351,7 @@ fn"#;
         (set! xs (length xs) i)
         (alter! i (+ i 1))))
       (lambda idx (get xs idx)))))
-    
+
     (mut bi3 0)
     (while (< bi3 500000) (do
       (let f (mk-reader 8))
@@ -9326,20 +9363,20 @@ fn"#;
       (let xs [n (+ n 1)])
       (let add-base (lambda x (+ x (get xs 0))))
       (lambda y (add-base (+ y (get xs 1)))))))
-    
+
     (mut bi4 0)
     (while (< bi4 400000) (do
       (let g (mk-pipeline bi4))
       (g 1)
       (alter! bi4 (+ bi4 1))))
     1
-    
+
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline2 (lambda n (do
       (let xs [n (+ n 1)])
       (let add-base (lambda x (+ x (get xs 0))))
       (lambda y (add-base (+ y (get xs 1)))))))
-    
+
     (mut bi5 0)
     (while (< bi5 400000) (do
       (let g (mk-pipeline2 bi5))
@@ -9351,53 +9388,53 @@ fn"#;
       (let xs [n (+ n 1)])
       (let add-base (lambda x (+ x (get xs 0))))
       (lambda y (add-base (+ y (get xs 1)))))))
-    
+
     (mut bi6 0)
     (while (< bi6 400000) (do
       (let g (mk-pipeline3 bi6))
       (g 1)
       (alter! bi6 (+ bi6 1))))
     1
-    
+
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline4 (lambda n (do
       (let xs [n (+ n 1)])
       (let add-base (lambda x (+ x (get xs 0))))
       (lambda y (add-base (+ y (get xs 1)))))))
-    
+
     (mut bi7 0)
     (while (< bi7 400000) (do
       (let g (mk-pipeline4 bi7))
       (g 1)
       (alter! bi7 (+ bi7 1))))
     1
-    
+
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline5 (lambda n (do
       (let xs [n (+ n 1)])
       (let add-base (lambda x (+ x (get xs 0))))
       (lambda y (add-base (+ y (get xs 1)))))))
-    
+
     (mut bi8 0)
     (while (< bi8 400000) (do
       (let g (mk-pipeline5 bi8))
       (g 1)
       (alter! bi8 (+ bi8 1))))
     1
-    
+
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline6 (lambda n (do
       (let xs [n (+ n 1)])
       (let add-base (lambda x (+ x (get xs 0))))
       (lambda y (add-base (+ y (get xs 1)))))))
-    
+
     (mut bi9 0)
     (while (< bi9 400000) (do
       (let g (mk-pipeline6 bi9))
       (g 1)
       (alter! bi9 (+ bi9 1))))
     1
-    
+
     ; closure captures nested vectors
     (let mk-grid-reader7 (lambda n (do
       (let rows [])
@@ -9406,7 +9443,7 @@ fn"#;
         (set! rows (length rows) [i (+ i 1) (+ i 2)])
         (alter! i (+ i 1))))
       (lambda j (+ (get (get rows 0) 0) (get (get rows 1) 1) j)))))
-    
+
     (mut bi10 0)
     (while (< bi10 250000) (do
       (let r (mk-grid-reader7 4))
@@ -9418,17 +9455,17 @@ fn"#;
       (let y [a b])
       (set! y (length y) 10)
       (lambda k (+ (length y) k)))))
-    
+
     (let outer2 (lambda z (do
       (let g (make2 1 2))
       (g z))))
-    
+
     (mut bi11 0)
     (while (< bi11 500000) (do
       (outer2 bi11)
       (alter! bi11 (+ bi11 1))))
     1
-    
+
     ; vector fn clean up
     (let build-fns (lambda n (do
       (let fs [])
@@ -9438,7 +9475,7 @@ fn"#;
         (set! fs (length fs) (lambda x (+ x idx)))
         (alter! i (+ i 1))))
       fs)))
-    
+
     (let sum-call (lambda fs n (do
       (integer acc 0)
       (mut i 0)
@@ -9447,15 +9484,15 @@ fn"#;
         (&alter! acc (+ (&get acc) (f 1)))
         (alter! i (+ i 1))))
       (get acc))))
-    
+
     (let once (sum-call (build-fns 5) 5))
-    
+
     (mut bi12 0)
     (while (< bi12 50000) (do
       (let fs (build-fns 16))
       (sum-call fs 16)
       (alter! bi12 (+ bi12 1))))
-    
+
     (= once 15)"#;
 
         let expr = crate::parser::build(test_case).expect("program should build");
@@ -9547,20 +9584,20 @@ fn"#;
             (
                 r#"(let last-stone-weight (lambda stones (do
   (let max-cmp (lambda a b (> a b)))
-  (let heap (std/convert/vector->heap stones max-cmp))
+  (let heap (Vector->Heap max-cmp stones))
   (letrec tail-call/smash?! (lambda t
     (if (> (length heap) 1)
       (do
-        (let y (std/heap/peek heap))
-        (std/heap/pop! heap max-cmp)
-        (let x (std/heap/peek heap))
-        (std/heap/pop! heap max-cmp)
+        (let y (Heap/peek! heap))
+        (Heap/pop! heap max-cmp)
+        (let x (Heap/peek! heap))
+        (Heap/pop! heap max-cmp)
         (if (!= x y)
-          (std/heap/push! heap (- y x) max-cmp))
+          (Heap/push! heap (- y x) max-cmp))
         (tail-call/smash?! t))
         false)))
   (tail-call/smash?! true)
-  (if (> (length heap) 0) (std/heap/peek heap) Int))))
+  (if (> (length heap) 0) (Heap/peek! heap) Int))))
 
 [(last-stone-weight [ 2 7 4 1 8 1 ]) (last-stone-weight [ 1 ])]"#,
                 "[1 1]",
@@ -9568,14 +9605,14 @@ fn"#;
             (
                 r#"(let has-groups? (lambda deck
   (do
-    (let chars (<| deck
-                    (std/vector/map std/convert/integer->string)
-                    (std/vector/hash/table/count)
-                    (std/vector/hash/table/entries)
-                    (std/vector/map snd)))
-    
+    (let chars (|> deck
+                    (lambda __std_arg0 (map Integer->String __std_arg0))
+                    (Table/count)
+                    (Table/entries)
+                    (lambda __std_arg0 (map snd __std_arg0))))
+
     (let counts (as chars [Int]))
-    (> (std/vector/reduce counts std/int/gcd (std/vector/first counts)) 1)
+    (> (reduce gcd (first counts) counts) 1)
     )))
 
 [
@@ -9587,13 +9624,14 @@ fn"#;
             ),
             (
                 r#"
-            (let find-missing-numbers (lambda nums (<| 
-    (std/vector/int/range 1 (length nums)) 
-    (std/vector/map (lambda x (std/convert/integer->string-base x 10)))
-    (std/convert/vector->set)
-    (std/vector/hash/set/difference (<| nums (std/vector/map (lambda x (std/convert/integer->string-base x 10))) (std/convert/vector->set)))
-    (std/vector/flat-one)
-    (std/vector/map std/convert/chars->integer))))
+            (let find-missing-numbers (lambda nums (|>
+    (range 1 (length nums))
+    (lambda xs (map Integer->String xs))
+    (Vector->Set)
+    (lambda all
+      (Set/difference all (|> nums (map Integer->String) (Vector->Set))))
+    (flat)
+    (lambda __std_arg0 (map Chars->Integer __std_arg0)))))
 
 [
     (find-missing-numbers [ 4 3 2 7 8 2 3 1 ]) ; Output/ [5 6]
@@ -9603,7 +9641,7 @@ fn"#;
                 "[[5 6] [2]]",
             ),
             (
-                r#"(let has-trailing-zeros? (lambda nums (>= (std/vector/count-of nums (lambda x (= (mod x 2) 0))) 2)))
+                r#"(let has-trailing-zeros? (lambda nums (>= (count (lambda x (= (mod x 2) 0)) nums) 2)))
 
 [(has-trailing-zeros? [ 1 2 3 4 5 ]) ; Should return true
  (has-trailing-zeros? [ 2 4 8 16 ]) ; Should return true
@@ -9625,24 +9663,24 @@ fn"#;
                 "[2 3]",
             ),
             (
-                r#"(let flood-fill! (lambda image sr sc color (do 
+                r#"(let flood-fill! (lambda image sr sc color (do
     (let old (get image sr sc))
-    (unless (= old color) 
-        (do 
+    (unless (= old color)
+        (do
             (let m (length image))
-            (let n (length (std/vector/first image)))
+            (let n (length (first image)))
             (let stack [[sr sc]])
-            (while (std/vector/not-empty? stack) (do 
-                (let t (std/vector/last stack))
+            (while (not-empty? stack) (do
+                (let t (last stack))
                 (pop! stack)
-                (let i (std/vector/first t))
-                (let j (std/vector/second t))
+                (let i (first t))
+                (let j (get t 1))
                 (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get image i j) old)) (do
-                    (std/vector/three-d/set! image i j color)
-                    (std/vector/push! stack [(+ i 1) j])
-                    (std/vector/push! stack [(- i 1) j])
-                    (std/vector/push! stack [i (+ j 1)])
-                    (std/vector/push! stack [i (- j 1)])
+                    (set! image i j color)
+                    (push! stack [(+ i 1) j])
+                    (push! stack [(- i 1) j])
+                    (push! stack [i (+ j 1)])
+                    (push! stack [i (- j 1)])
                     nil))))
         nil)))))
 
@@ -9654,15 +9692,15 @@ image
                 "[[2 2 2] [2 2 0] [2 0 1]]",
             ),
             (
-                r#"(let flood-fill! (lambda image sr sc color (do 
+                r#"(let flood-fill! (lambda image sr sc color (do
     (let old (get image sr sc))
-    (unless (= old color) 
-        (do 
+    (unless (= old color)
+        (do
             (let m (length image))
             (let n (length (get image 0)))
             (let stack [[sr sc]])
-            (while (not-empty? stack) (do 
-                (let t (std/vector/last stack))
+            (while (not-empty? stack) (do
+                (let t (last stack))
                 (pop! stack)
                 (let i (get t 0))
                 (let j (get t 1))
@@ -9686,27 +9724,27 @@ image
                 r#"(let valid-path? (lambda n edges source destination (do
   (if (= source destination) true
     (do
-      (let graph (std/vector/map (std/vector/int/zeroes n) (lambda _ [])))
-      (std/vector/for edges (lambda edge (do
+      (let graph (map (lambda _ []) (zeroes n)))
+      (for (lambda edge (do
         (let u (get edge 0))
         (let v (get edge 1))
-        (std/vector/push! (get graph u) v)
-        (std/vector/push! (get graph v) u))))
-      (let visited (std/vector/int/zeroes n))
+        (push! (get graph u) v)
+        (push! (get graph v) u))) edges)
+      (let visited (zeroes n))
       (let queue [source])
-      (std/vector/set! visited source 1)
+      (set! visited source 1)
       (boolean found false)
       (while (and (not (true? found)) (> (length queue) 0)) (do
-        (let current (std/vector/last queue))
+        (let current (last queue))
         (pop! queue)
         (if (= current destination)
           (&alter! found true)
-          (std/vector/for (get graph current) (lambda neighbor (do
+          (for (lambda neighbor (do
             (if (= (get visited neighbor) 0)
               (do
-                (std/vector/set! visited neighbor 1)
-                (std/vector/push! queue neighbor) 
-                nil))))))))
+                (set! visited neighbor 1)
+                (push! queue neighbor)
+                nil)))) (get graph current)))))
       (true? found))))))
 
 [(valid-path? 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2) ; Should return true
@@ -9714,7 +9752,7 @@ image
                 "[true false]",
             ),
             (
-                r#"(let INPUT 
+                r#"(let INPUT
 "89010123
 78121874
 87430965
@@ -9723,61 +9761,61 @@ image
 32019012
 01329801
 10456732")
-(let yx->key (lambda y x (std/vector/concat/with (std/vector/map [ (as y Char) (as x Char) ] (lambda c [ c ])) std/char/dash)))
-(let parse (lambda input (<| input (std/convert/string->vector std/char/new-line) (std/vector/map std/convert/chars->digits))))
+(let yx->key (lambda y x (join ['-'] (map (lambda c [ c ]) [ (as y Char) (as x Char) ]))))
+(let parse (lambda input (|> input (lambda __std_arg0 (String->Vector nl __std_arg0)) (lambda __std_arg0 (map Chars->Digits __std_arg0)))))
 (let part1 (lambda matrix (do
-  (let coords (std/vector/three-d/points matrix std/int/zero?))
-  (std/vector/reduce coords (lambda a xs (do
+  (let coords (points zero? matrix))
+  (reduce (lambda a xs (do
         (integer score 0)
-        (let y (std/vector/first xs))
-        (let x (std/vector/second xs))
-        (let visited (std/vector/buckets 8))
-        (let queue (std/vector/queue/new [Int]))
+        (let y (first xs))
+        (let x (get xs 1))
+        (let visited (buckets 8))
+        (let queue (Que/new [Int]))
         (let current (get matrix y x))
-        (std/vector/hash/set/add! visited (yx->key y x))
-        (std/vector/queue/enqueue! queue [ y x ])
-        
-        (while (std/vector/queue/not-empty? queue) (do
-            (let element (std/vector/queue/peek queue))
-            (std/vector/queue/dequeue! queue )
-            (let y (std/vector/first element))
-            (let x (std/vector/second element))  
-            (std/vector/three-d/adjacent matrix std/vector/three-d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
-                 (let key (yx->key dy dx))
-                 (if (and (= (- cell (get matrix y x)) 1) (not (std/vector/hash/set/has? visited key))) (do
-                    (if (= cell 9) (do (&alter! score  (+ (&get score) 1)) nil) (do (std/vector/queue/enqueue! queue [ dy dx ]) nil))
-                    (std/vector/hash/set/add! visited key)
-                    nil)))))))
+        (Set/add! visited (yx->key y x))
+        (Que/enque! queue [ y x ])
 
-        (+ a (get score)))) 0))))
+        (while (Que/not-empty? queue) (do
+            (let element (Que/peek queue))
+            (Que/deque! queue )
+            (let y (first element))
+            (let x (get element 1))
+            (neighborhood neighborhood/von-neumann y x (lambda cell dir dy dx (do
+                 (let key (yx->key dy dx))
+                 (if (and (= (- cell (get matrix y x)) 1) (not (Set/has? key visited))) (do
+                    (if (= cell 9) (do (&alter! score  (+ (&get score) 1)) nil) (do (Que/enque! queue [ dy dx ]) nil))
+                    (Set/add! visited key)
+                    nil)))) matrix)))
+
+        (+ a (get score)))) 0 coords))))
 
 (let part2 (lambda matrix (do
-  (let coords (std/vector/three-d/points matrix std/int/zero?))
-  (std/vector/reduce coords (lambda a xs (do
+  (let coords (points zero? matrix))
+  (reduce (lambda a xs (do
         (integer score 0)
-        (let y (std/vector/first xs))
-        (let x (std/vector/second xs))
-        (let visited (std/vector/buckets 8))
-        (let queue (std/vector/queue/new [Int]))
+        (let y (first xs))
+        (let x (get xs 1))
+        (let visited (buckets 8))
+        (let queue (Que/new [Int]))
         (let current (get matrix y x))
         (let root-key (yx->key y x))
-        (std/vector/hash/table/set! visited root-key 1)
-        (std/vector/queue/enqueue! queue [ y x ])
-        (while (std/vector/queue/not-empty? queue) (do
-            (let element (std/vector/queue/peek queue))
-            (let y (std/vector/first element))
-            (let x (std/vector/second element))  
-            (if (= (get matrix y x) 9) (&alter! score (+ (&get score) (snd (get (std/vector/hash/table/get visited root-key))))))
-            (std/vector/queue/dequeue! queue)
-            (std/vector/three-d/adjacent matrix std/vector/three-d/von-neumann-neighborhood y x (lambda cell dir dy dx (do
+        (Table/set! visited root-key 1)
+        (Que/enque! queue [ y x ])
+        (while (Que/not-empty? queue) (do
+            (let element (Que/peek queue))
+            (let y (first element))
+            (let x (get element 1))
+            (if (= (get matrix y x) 9) (&alter! score (+ (&get score) (snd (get (Table/get root-key visited))))))
+            (Que/deque! queue)
+            (neighborhood neighborhood/von-neumann y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
                  (if (= (- cell (get matrix y x)) 1) (do
-                    (std/vector/queue/enqueue! queue [ dy dx ])
-                    (if (std/vector/hash/table/has? visited key) 
-                        (std/vector/hash/table/set! visited key (+ (snd (get (std/vector/hash/table/get visited root-key))) (snd (get (std/vector/hash/table/get visited key))))) 
-                        (std/vector/hash/table/set! visited key (as (snd (get (std/vector/hash/table/get visited root-key))) Int)))
-                      nil)))))))
-        (+ a (get score)))) 0))))
+                    (Que/enque! queue [ dy dx ])
+                    (if (Table/has? key visited)
+                        (Table/set! visited key (+ (snd (get (Table/get root-key visited))) (snd (get (Table/get key visited)))))
+                        (Table/set! visited key (as (snd (get (Table/get root-key visited))) Int)))
+                      nil)))) matrix)))
+        (+ a (get score)))) 0 coords))))
 
 (let PARSED (parse INPUT))
 
@@ -9794,32 +9832,30 @@ image
 3   9
 3   3")
 
-(let parse (lambda input (<|
+(let parse (lambda input (|>
                             input
-                            (std/vector/char/lines)
-                            (std/vector/map (lambda word (<|
+                            (split/lines)
+                            (lambda __std_arg0 (map (lambda word (|>
                                                       word
-                                                      (std/vector/char/words)
-                                                      (std/vector/filter std/vector/not-empty?)
-                                                      (std/vector/map std/convert/chars->integer)))))))
+                                                      (split/words)
+                                                      (lambda __std_arg0 (filter not-empty? __std_arg0))
+                                                      (lambda __std_arg0 (map Chars->Integer __std_arg0)))) __std_arg0)))))
 
-(let part1 (lambda input (<|
-                          input
-                          (std/vector/unzip)
-                          (std/vector/map std/vector/sort/desc!)
-                          (std/vector/zip)
-                          (std/vector/map std/vector/int/pair/sub)
-                          (std/vector/map std/int/abs)
-                          (std/vector/int/sum))))
-                        
+(let part1 (lambda input (do
+  (let left (map first input))
+  (let right (map (lambda pair (get pair 1)) input))
+  (|> (zip {(sort > left) (sort > right)})
+      (map (lambda pair (- (fst pair) (snd pair))))
+      (map abs)
+      (sum)))))
+
 (let part2 (lambda input (do
-  (let unzipped (std/vector/unzip input))
-  (let left (std/vector/first unzipped))
-  (let right (std/vector/second unzipped))
-  (<|
+  (let left (map first input))
+  (let right (map (lambda pair (get pair 1)) input))
+  (|>
     left
-    (std/vector/map (lambda l (* l (std/vector/count-of right (lambda r (= l r))))))
-    (std/vector/int/sum)))))
+    (lambda __std_arg0 (map (lambda l (* l (count (lambda r (= l r)) right))) __std_arg0))
+    (sum)))))
 
 (let PARSED (parse INPUT))
 [(part1 PARSED) (part2 PARSED)]"#,
@@ -9827,22 +9863,22 @@ image
             ),
             (
                 r#"
-(let parse (lambda input (<| input (std/vector/char/lines) (std/vector/map std/convert/chars->integer))))
-(let part1 (lambda input (do 
-    (let m (std/vector/int/minimum input))
-    (<| input
-        (std/vector/map (lambda x (- x m)))
-        (std/vector/int/sum)))))
+(let parse (lambda input (|> input (split/lines) (lambda __std_arg0 (map Chars->Integer __std_arg0)))))
+(let part1 (lambda input (do
+    (let m (minimum input))
+    (|> input
+        (lambda __std_arg0 (map (lambda x (- x m)) __std_arg0))
+        (sum)))))
 
  (let part2 (lambda inp (do
-    (let input (copy inp))
-    (std/vector/sort/desc! input)
-    (let m (std/vector/int/median input))
-    (<| input
-        (std/vector/map (lambda x (cond (> x m) (- x m) (< x m) (- m x) 0)))
-        (std/vector/int/sum)))))
+    (let copied (copy inp))
+    (let input (sort > copied))
+    (let m (median input))
+    (|> input
+        (lambda __std_arg0 (map (lambda x (cond (> x m) (- x m) (< x m) (- m x) 0)) __std_arg0))
+        (sum)))))
 
-[(<| 
+[(|>
 "3
 4
 7
@@ -9850,7 +9886,7 @@ image
     (parse)
     (part1)
 )
-(<| 
+(|>
 "2
 4
 5
@@ -9864,13 +9900,13 @@ image
             (
                 r#"(let xs [1 2 0 4 3 0 5 0])
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
-(let solve! (lambda xs (do 
+(let solve! (lambda xs (do
     (integer c 0)
     (let len (length xs))
-    (std/vector/for xs (lambda x (if (<> x 0) (do 
+    (for (lambda x (if (<> x 0) (do
         (set! xs (get c) x)
-        (&alter! c (+ (&get c) 1))))))
-    (while (< (get c) len) (do 
+        (&alter! c (+ (&get c) 1))))) xs)
+    (while (< (get c) len) (do
         (set! xs (get c) 0)
         (&alter! c (+ (&get c) 1))))
     nil)))
@@ -9880,17 +9916,17 @@ xs"#,
                 "[1 2 4 3 5 0 0 0]",
             ),
             (
-                r#"(let naive-sub-array-sum (lambda xs (do 
+                r#"(let naive-sub-array-sum (lambda xs (do
     (let n (length xs))
     (integer out 0)
-    (loop/range/exclusive i 0 n (do 
+    (loop/range/exclusive i 0 n (do
         (integer temp 0)
         (loop/range/exclusive j i n (do
             (&alter! temp (+ (&get temp) (get xs j)))
             (&alter! out (+ (&get out) (get temp)))))))
     (&get out))))
 
-(let expert-sub-array-sum (lambda xs (do 
+(let expert-sub-array-sum (lambda xs (do
     (let n (length xs))
     (integer out 0)
     (loop/range/exclusive i 0 n (&alter! out (+ (&get out) (* (get xs i) (+ i 1) (- n i)))))
@@ -9905,34 +9941,34 @@ xs"#,
                 r#"
 ; Input / [1, 2, 4]
 ; Output / 125
-; Explanation/ 124 + 1 = 125 
+; Explanation/ 124 + 1 = 125
 
 ; Input / [9, 9, 9]
 ; Output/ 1000
-; Explanation/ 999 + 1 = 1000 
+; Explanation/ 999 + 1 = 1000
 
 [
-    (+ (std/convert/digits->integer [ 1 2 4 ]) 1)
-    (+ (std/convert/digits->integer [ 9 9 9 ]) 1)
+    (+ (Digits->Integer [ 1 2 4 ]) 1)
+    (+ (Digits->Integer [ 9 9 9 ]) 1)
 ]
             "#,
                 "[125 1000]",
             ),
-            ("(std/convert/bits->integer [ 1 0 0 0 0 0 1 1 0 0 ])", "524"),
+            ("(Bits->Integer [ 1 0 0 0 0 0 1 1 0 0 ])", "524"),
             (
                 r#"(let xs [ 1 2 3 ])
-(let copy (std/vector/copy xs))
-(set! copy 0 1000)
-[ xs copy ]"#,
+(let copied (copy xs))
+(set! copied 0 1000)
+[ xs copied ]"#,
                 "[[1 2 3] [1000 2 3]]",
             ),
             (
-                r#"(let sort-array-by-parity2 (lambda nums (if (std/vector/empty? nums) nums (do 
+                r#"(let sort-array-by-parity2 (lambda nums (if (empty? nums) nums (do
     (let odd [])
     (let even [])
     (let out [])
-    (loop/range/exclusive i 0 (length nums) (std/vector/push! (if (std/int/even? i) even odd) (get nums i)))
-    (loop/range/exclusive j 0 (length even) (do (std/vector/push! out (get even j)) (std/vector/push! out (get odd j))))
+    (loop/range/exclusive i 0 (length nums) (push! (if (even? i) even odd) (get nums i)))
+    (loop/range/exclusive j 0 (length even) (do (push! out (get even j)) (push! out (get odd j))))
     out))))
 
 [
@@ -9942,9 +9978,9 @@ xs"#,
 ]"#,
                 "[[4 2 5 7] [2 3] [4 3]]",
             ),
-            ("(std/int/collinear? [[ 3 8 ] [ 5 10 ] [ 7 12 ]])", "true"),
+            ("(collinear? [[ 3 8 ] [ 5 10 ] [ 7 12 ]])", "true"),
             (
-                r#"(let fn (lambda [ a b c . r ] (+ a b c (std/vector/int/product r))))
+                r#"(let fn (lambda [ a b c . r ] (+ a b c (product r))))
 (fn [ 1 2 3 4 5 6 ])"#,
                 "126",
             ),
@@ -9954,55 +9990,55 @@ B:+,=,-,+,+,=,-,+,+,=
 C:=,-,+,+,=,-,+,+,=,-
 D:=,=,=,+,=,=,=,+,=,=")
 
-(let parse (lambda input (do 
-(<| input (std/vector/char/lines) (std/vector/map (lambda x (do 
-    (let y (std/vector/char/commas x))
-    (set! y 0 (get (std/convert/string->vector (get y 0) std/char/colon) 1))
-    (std/vector/flat-one y)))))
+(let parse (lambda input (do
+(|> input (split/lines) (lambda __std_arg0 (map (lambda x (do
+    (let y (split/commas x))
+    (set! y 0 (get (String->Vector ':' (get y 0)) 1))
+    (flat y))) __std_arg0)))
 )))
-    
-(let app (lambda a x 
-    (cond (=# x std/char/plus) (std/vector/cons a [(+ (std/vector/last a) 1)])
-    (=# x std/char/minus) (std/vector/cons a [(- (std/vector/last a) 1)])
-    (=# x std/char/equal) (std/vector/cons a [(std/vector/last a)])
-    (std/vector/cons a [(std/vector/last a)]))))
+
+(let app (lambda a x
+    (cond (=# x '+') (cons a [(+ (last a) 1)])
+    (=# x '-') (cons a [(- (last a) 1)])
+    (=# x '=') (cons a [(last a)])
+    (cons a [(last a)]))))
 (let part1! (lambda xs (do
-    (let letters (<| input (std/vector/char/lines) (std/vector/map std/vector/first)))
-    (<| xs (std/vector/map (lambda x (<| x (std/vector/reduce app [0])))) 
-    (std/vector/map std/vector/int/sum)
-    (std/vector/map/i (lambda x i [i (+ x 100)]))
-    (std/vector/sort! (lambda a b (> (get a 1) (get b 1))))
-    (std/vector/map (lambda [i] (get letters i)))))))
-(<| input (parse) (part1!))"#,
+    (let letters (|> input (split/lines) (lambda __std_arg0 (map first __std_arg0))))
+    (|> xs (lambda __std_arg0 (map (lambda x (|> x (lambda __std_arg0 (reduce app [0] __std_arg0)))) __std_arg0))
+    (lambda __std_arg0 (map sum __std_arg0))
+    (lambda __std_arg0 (map/i (lambda x i [i (+ x 100)]) __std_arg0))
+    (lambda rows (sort (lambda a b (> (get a 1) (get b 1))) rows))
+    (lambda __std_arg0 (map (lambda [i] (get letters i)) __std_arg0))))))
+(|> input (parse) (part1!))"#,
                 "BDCA",
             ),
             (
-                r#"(let palindrome? (lambda str (do 
-    (let q (std/vector/queue/new '0'))
-    (let s (std/vector/stack/new '0'))
-    
-    (std/vector/for str (lambda x (do
-        (std/vector/stack/push! s x)
-        (std/vector/queue/enqueue! q x))))
-    
+                r#"(let palindrome? (lambda str (do
+    (let q (Que/new '0'))
+    (let s [])
+
+    (for (lambda x (do
+        (push! s x)
+        (Que/enque! q x))) str)
+
     (let p? [true])
 
     (mut i 0)
     (while (< i (/ (length str) 2)) (do
-      (if (not (=# (std/vector/stack/peek s) (std/vector/queue/peek q)))
-           (&alter! p? false) 
-           (do 
-               (std/vector/stack/pop! s)
-               (std/vector/queue/dequeue! q)
+      (if (not (=# (last s) (Que/peek q)))
+           (&alter! p? false)
+           (do
+               (pop! s)
+               (Que/deque! q)
                nil))
       (alter! i (+ i 1))))
     (get p?))))
-    
+
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[true false]",
             ),
             (
-                r#"(let palindrome? (lambda str (do 
+                r#"(let palindrome? (lambda str (do
     (let p? [true])
     (loop/range/exclusive i 0 (/ (length str) 2) (if (not (=# (get str i) (get str (- (length str) i 1)))) (&alter! p? false)))
     (true? p?))))
@@ -10010,15 +10046,15 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[true false]",
             ),
             (
-                r#"(let palindrome? (lambda str (std/vector/char/match? str (std/vector/reverse str))))
+                r#"(let palindrome? (lambda str (match? str (reverse str))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[true false]",
             ),
             (
-                r#"(letrec rev! (lambda ys xs 
-    (if (std/vector/empty? xs) 
-         ys 
-        (rev! (do (std/vector/push! ys (std/vector/at xs -1)) ys) (std/vector/drop/last xs 1)))))
+                r#"(letrec rev! (lambda ys xs
+    (if (empty? xs)
+         ys
+        (rev! (do (push! ys (at xs -1)) ys) (drop/last 1 xs)))))
 ;
 (rev! [] [ 1 2 3 4 5 ])"#,
                 "[5 4 3 2 1]",
@@ -10027,27 +10063,27 @@ D:=,=,=,+,=,=,=,+,=,=")
                 r#"
 [
 
-(std/int/big/div [ 1 0 ] [ 5 ])
-(std/int/big/add [ 9 9 9 ] [ 1 2 ])
-(std/int/big/sub [ 1 0 1 ] [ 1 1 ])
-(std/int/big/mul [ 2 ] [ 9 9 5 ])
+(BigInt/div [ 1 0 ] [ 5 ])
+(BigInt/add [ 9 9 9 ] [ 1 2 ])
+(BigInt/sub [ 1 0 1 ] [ 1 1 ])
+(BigInt/mul [ 2 ] [ 9 9 5 ])
 
 ]
 "#,
                 "[[2] [1 0 1 1] [9 0] [1 9 9 0]]",
             ),
             (
-                r#"(let fn (lambda xs (do 
-    (integer max 0)
+                r#"(let fn (lambda xs (do
+    (integer best 0)
     (integer i 0)
     (integer j (- (length xs) 1))
-    (while (<> (get i) (get j)) (do 
-        (if (> (get xs (get i)) (get xs (get j))) (do 
-            (&alter! max (std/int/max (* (- (get j) (get i)) (get xs (get j))) (get max)))
+    (while (<> (get i) (get j)) (do
+        (if (> (get xs (get i)) (get xs (get j))) (do
+            (&alter! best (max (* (- (get j) (get i)) (get xs (get j))) (get best)))
             (&alter! j (- (&get j) 1))) (do
-            (&alter! max (std/int/max (* (- (get j) (get i)) (get xs (get i))) (get max)))
+            (&alter! best (max (* (- (get j) (get i)) (get xs (get i))) (get best)))
             (&alter! i (+ (&get i) 1))))))
-    (get max))))
+    (get best))))
 
 [
     (fn [ 1 8 6 2 5 4 8 3 7 ]) ; 49
@@ -10060,24 +10096,24 @@ D:=,=,=,+,=,=,=,+,=,=")
 (letrec factorial (lambda n total
     (if (= (get n 0) 0)
         total
-        (factorial (std/int/big/sub n [ 1 ]) (std/int/big/mul total n)))))
+        (factorial (BigInt/sub n [ 1 ]) (BigInt/mul total n)))))
 
 (let bionomial-coefficient (lambda a b
-    (std/int/big/div (factorial a [ 1 ])
-            (std/int/big/mul
+    (BigInt/div (factorial a [ 1 ])
+            (BigInt/mul
                 (factorial b [ 1 ])
-                (factorial (std/int/big/sub a b) [ 1 ])))))
+                (factorial (BigInt/sub a b) [ 1 ])))))
 
 (let m [ 2 0 ])
 (let n [ 2 0 ])
-(bionomial-coefficient (std/int/big/add m n) m)
+(bionomial-coefficient (BigInt/add m n) m)
 ; [Int]
 ; [1 3 7 8 4 6 5 2 8 8 2 0]"#,
                 "[1 3 7 8 4 6 5 2 8 8 2 0]",
             ),
             (
-                r#"(letrec fibonacci (lambda n 
-    (if (< n 2) n 
+                r#"(letrec fibonacci (lambda n
+    (if (< n 2) n
         (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
 
 (fibonacci 10)"#,
@@ -10091,34 +10127,33 @@ D:=,=,=,+,=,=,=,+,=,=")
  8 + 1 = 9
  8 + 1 = 10
 ")
-(<|
+(|>
  str
- (std/convert/string->vector std/char/new-line)
- (std/vector/filter std/vector/not-empty?) ; trim
- (std/vector/map (lambda xs
-   (<| xs
-     (std/convert/string->vector std/char/space)
-     (std/vector/filter std/vector/not-empty?)
-     (std/vector/filter/i (lambda _ i (std/int/even? i)))
-     (std/vector/map std/convert/chars->integer))))
- (std/vector/map (lambda [ a b c ] (= (+ a b) c)))
- (std/vector/count-of (lambda x (eq? x true))))"#,
+ (lambda __std_arg0 (String->Vector nl __std_arg0))
+ (lambda __std_arg0 (filter not-empty? __std_arg0)) ; trim
+ (lambda __std_arg0 (map (lambda xs
+   (|> xs
+     (lambda __std_arg0 (String->Vector sp __std_arg0))
+     (lambda __std_arg0 (filter not-empty? __std_arg0))
+     (lambda __std_arg0 (filter/i (lambda _ i (even? i)) __std_arg0))
+     (lambda __std_arg0 (map Chars->Integer __std_arg0)))) __std_arg0))
+ (lambda __std_arg0 (map (lambda [ a b c ] (= (+ a b) c)) __std_arg0))
+ (lambda __std_arg0 (count (lambda x (eq? x true)) __std_arg0)))"#,
                 "4",
             ),
             (
                 r#"(let num-rabbits (lambda answers
-  (<| answers
-      (std/vector/map std/convert/integer->string)
-      (std/vector/hash/table/count)
-      (std/vector/hash/table/entries)
-                
-      (std/vector/reduce (lambda acc { str cnt }
-        (+ acc (* (std/int/ceil/div cnt (+ (std/convert/chars->integer str) 1))
-                  (+ (std/convert/chars->integer str) 1))))
-      0)
-      
+  (|> answers
+      (lambda __std_arg0 (map Integer->String __std_arg0))
+      (Table/count)
+      (Table/entries)
+
+      (lambda __std_arg0 (reduce (lambda acc { str cnt }
+        (+ acc (* (/ (+ cnt (Chars->Integer str)) (+ (Chars->Integer str) 1))
+                  (+ (Chars->Integer str) 1)))) 0 __std_arg0))
+
       )))
-    
+
 [
     (num-rabbits [ 1 1 2 ]) ; Output/ 5
     (num-rabbits [ 10 10 10 ]) ; Output/ 11
@@ -10128,28 +10163,28 @@ D:=,=,=,+,=,=,=,+,=,=")
             ),
             (
                 r#"(let count-apples-and-oranges (lambda s t a b apples oranges (do
-          (let helper (lambda xs m (<| xs (std/vector/map (lambda x (+ x m))) (std/vector/count-of (lambda x (and (>= x s) (<= x t)))))))
+          (let helper (lambda xs m (|> xs (lambda __std_arg0 (map (lambda x (+ x m)) __std_arg0)) (lambda __std_arg0 (count (lambda x (and (>= x s) (<= x t))) __std_arg0)))))
           [(helper apples a) (helper oranges b)])))
-      
+
       (count-apples-and-oranges 7 11 5 15 [ -2 2 1 ] [ 5 -6 ])"#,
                 "[1 1]",
             ),
             (
                 r#"(let count-points (lambda rings (do
-  (let rods (std/vector/map (std/vector/int/zeroes 10) (lambda _ [false false false]))) ; [R, G, B] for each rod
+  (let rods (map (lambda _ [false false false]) (zeroes 10))) ; [R, G, B] for each rod
   (let len (length rings))
   (loop/range/exclusive i 0 len (do
-    (if (std/int/even? i)
+    (if (even? i)
       (do
         (let color (get rings i))
         (let rod-char (get rings (+ i 1)))
-        (let rod (get rods (- (std/convert/char->digit rod-char) 0)))
+        (let rod (get rods (- (Char->Digit rod-char) 0)))
         (cond
           (=# color 'R') (set! rod 0 true)
           (=# color 'G') (set! rod 1 true)
           (=# color 'B') (set! rod 2 true)
           nil)))))
-  (std/vector/count-of rods (lambda rod (and (get rod 0) (get rod 1) (get rod 2)))))))
+  (count (lambda rod (and (get rod 0) (get rod 1) (get rod 2))) rods))))
 
 ; Example usage
 [(count-points "B0B6G0R6R0R6G9") ; Should return 1
@@ -10158,22 +10193,22 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[1 1 0]",
             ),
             (
-                r#"(let part1 (lambda input (<| input 
-    (std/vector/cons [(std/vector/first input)]) 
-    (std/vector/sliding-window 2) 
-    (std/vector/filter (lambda x (= (get x 0) (get x 1))))
-    (std/vector/map std/vector/first)
-    (std/vector/int/sum))))
-(let part2 (lambda input (<| input
-    (std/vector/cons (std/vector/slice input 0 (/ (length input) 2)))
-    (std/vector/sliding-window (+ (/ (length input) 2) 1))
-    (std/vector/filter (lambda x (= (std/vector/first x) (std/vector/last x))))
-    (std/vector/map std/vector/first)
-    (std/vector/int/sum))))
-    
+                r#"(let part1 (lambda input (|> input
+    (lambda xs (cons xs [(first input)]))
+    (lambda __std_arg0 (window 2 __std_arg0))
+    (lambda __std_arg0 (filter (lambda x (= (get x 0) (get x 1))) __std_arg0))
+    (lambda __std_arg0 (map first __std_arg0))
+    (sum))))
+(let part2 (lambda input (|> input
+    (lambda xs (cons xs (slice 0 (/ (length input) 2) input)))
+    (lambda __std_arg0 (window (+ (/ (length input) 2) 1) __std_arg0))
+    (lambda __std_arg0 (filter (lambda x (= (first x) (last x))) __std_arg0))
+    (lambda __std_arg0 (map first __std_arg0))
+    (sum))))
+
 [
-  (<| ["1122" "1111" "1234" "91212129"] (std/vector/map std/convert/chars->digits) (std/vector/map part1)) 
-  (<| ["1212"  "1221" "123425" "123123" "12131415"] (std/vector/map std/convert/chars->digits) (std/vector/map part2))
+  (|> ["1122" "1111" "1234" "91212129"] (lambda __std_arg0 (map Chars->Digits __std_arg0)) (lambda __std_arg0 (map part1 __std_arg0)))
+  (|> ["1212"  "1221" "123425" "123123" "12131415"] (lambda __std_arg0 (map Chars->Digits __std_arg0)) (lambda __std_arg0 (map part2 __std_arg0)))
 ]"#,
                 "[[3 4 0 9] [6 0 4 12 4]]",
             ),
@@ -10184,7 +10219,7 @@ D:=,=,=,+,=,=,=,+,=,=")
 1
 -3")
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
-(let parse (lambda input (<| input (std/convert/string->vector std/char/new-line) (std/vector/map std/convert/chars->integer))))
+(let parse (lambda input (|> input (lambda __std_arg0 (String->Vector nl __std_arg0)) (lambda __std_arg0 (map Chars->Integer __std_arg0)))))
 (let part1 (lambda ip (do
     (let input (copy ip))
     (integer pointer (get input))
@@ -10194,11 +10229,11 @@ D:=,=,=,+,=,=,=,+,=,=")
     (while (false? escaped?) (do
         (set! input (get index) (+ (get pointer) 1))
         (&alter! index (+ (&get index) (get pointer)))
-        (if (std/vector/in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
+        (if (in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
         (&alter! steps (+ (&get steps) 1))))
     (get steps))))
 
-(let part2 (lambda ip (do 
+(let part2 (lambda ip (do
     (let input (copy ip))
     (integer pointer (get input))
     (integer steps 0)
@@ -10207,25 +10242,25 @@ D:=,=,=,+,=,=,=,+,=,=")
     (while (false? escaped?) (do
         (set! input (get index) (+ (get pointer) (if (>= (get pointer) 3) -1 1)))
         (&alter! index (+ (&get index) (get pointer)))
-        (if (std/vector/in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
+        (if (in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
         (&alter! steps (+ (&get steps) 1))))
     (get steps))))
-    
-[(<| INPUT (parse) (part1)) (<| INPUT (parse) (part2))]"#,
+
+[(|> INPUT (parse) (part1)) (|> INPUT (parse) (part2))]"#,
                 "[5 10]",
             ),
             (
                 r#"
 ; Kadane's algorithm: returns maximum subarray sum for a vector of Ints
-(let max-subarray (lambda xs (do 
-  (let step (lambda acc x (do 
-    (let current (std/int/max x (+ (get acc 0) x)))
-    (let best (std/int/max (get acc 1) current))
+(let max-subarray (lambda xs (do
+  (let step (lambda acc x (do
+    (let current (max x (+ (get acc 0) x)))
+    (let best (max (get acc 1) current))
     [ current best ])))
 
   (let init [ (get xs 0) (get xs 0) ]) ; start with first element as current and best
-  (let rest (std/vector/drop xs 1))
-  (let result (std/vector/reduce rest step init))
+  (let rest (drop/first 1 xs))
+  (let result (reduce step init rest))
   (get result 1))))
 
 ; Examples
@@ -10237,8 +10272,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[6 6 -1]",
             ),
             (
-                r#"(let interleave (lambda a b (<| (std/vector/zipper a b) (std/vector/flat-one))))
-(let ints (lambda xs (std/vector/map xs std/convert/integer->string)))
+                r#"(let ints (lambda xs (map Integer->String xs)))
 ; examples
 [
  (interleave [ "a" "b" "c" ] (ints [ 1 2 3 ])) ; [ "a" 1 "b" 2 "c" 3 ]
@@ -10247,15 +10281,16 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[[\"a\" \"1\" \"b\" \"2\" \"c\" \"3\"] [\"1\" \"x\" \"2\" \"y\"]]",
             ),
             (
-                r#"(let fn (lambda [ a b ] [ x y ] (std/int/manhattan-distance a b x y)))
+                r#"(let fn (lambda [ a b ] [ x y ]
+  (+ (abs (- x a)) (abs (- y b)))))
 (fn [ 1 2 ] [ 3 4 ])"#,
                 "4",
             ),
             (
                 r#"
 (let N 9)
-(let matrix (<| (std/vector/int/zeroes N) (std/vector/map (lambda x (std/vector/map (std/vector/int/zeroes N) (lambda _ 0))))))
-(let add-glider! (lambda matrix y x (do 
+(let matrix (|> (zeroes N) (lambda __std_arg0 (map (lambda x (map (lambda _ 0) (zeroes N))) __std_arg0))))
+(let add-glider! (lambda matrix y x (do
   (set! (get matrix (+ y 2)) (+ x 1) 1)
   (set! (get matrix (+ y 2)) (+ x 2) 1)
   (set! (get matrix (+ y 2)) (+ x 3) 1)
@@ -10270,41 +10305,48 @@ D:=,=,=,+,=,=,=,+,=,=")
 ; (set! (get matrix 3) 3 1)
 
 (let gof (lambda matrix (do
-  (std/vector/map/i matrix (lambda arr y (do
-    (std/vector/map/i arr (lambda cell x (do
-      (let score (std/vector/three-d/sliding-adjacent-sum matrix std/vector/three-d/moore-neighborhood y x N +))
-      (cond 
+  (map/i (lambda arr y (do
+    (map/i (lambda cell x (do
+      (let score
+        (reduce + 0
+          (map
+            (lambda dir
+              (get matrix
+                (emod (+ y (get dir 0)) N)
+                (emod (+ x (get dir 1)) N)))
+            neighborhood/moore)))
+      (cond
         (and (= cell 1) (or (< score 2) (> score 3))) 0
         (and (= cell 1) (or (= score 2) (= score 3))) 1
         (and (= cell 0) (= score 3)) 1
-        0))))))))))
-(let render (lambda matrix 
-                  (do (<| matrix 
-                      (std/vector/map (lambda y 
-                        (std/vector/map y (lambda x (cond 
-                                                (= x 0) "." 
+        0))) arr))) matrix))))
+(let render (lambda matrix
+                  (do (|> matrix
+                      (lambda __std_arg0 (map (lambda y
+                        (map (lambda x (cond
+                                                (= x 0) "."
                                                 (= x 1) "*"
-                                                ""))))) 
-                              (std/convert/vector/three-d->string std/char/new-line std/char/space)))))
-(<| matrix (gof) (gof) (gof) (gof) (gof) (gof) (gof) (gof))"#,
+                                                "")) y)) __std_arg0))
+                              (Matrix->String)))))
+(|> matrix (gof) (gof) (gof) (gof) (gof) (gof) (gof) (gof))"#,
                 "[[0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 1 0 0 0 0] [0 0 0 0 0 1 0 0 0] [0 0 0 1 1 1 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0]]",
             ),
             (
                 r#"(let *RES* 51)
 (integer generation 0)
-(&mut cells (std/vector/int/zeroes *RES*))
+(&mut cells (zeroes *RES*))
 (let ruleset [ 0 1 0 1 1 0 1 0 ])
 (set! (&get cells) (/ (length (&get cells)) 2) 1)
 (let out [])
 
-(let rules (lambda a b c (do 
-    (let index (std/convert/bits->integer [ a b c ]))
+(let rules (lambda a b c (do
+    (let index (Bits->Integer [ a b c ]))
     (get ruleset (- 7 index)))))
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
-(while (< (get generation) (/ *RES* 2)) (do 
-    (std/vector/push! out (&get cells))
-    (let nextgen (std/vector/copy (&get cells)))
-    (loop/range/exclusive i 1 (- (length (&get cells)) 1) (do 
+(while (< (get generation) (/ *RES* 2)) (do
+    (push! out (&get cells))
+    (let nextgen (copy (&get cells)))
+    (loop/range/exclusive i 1 (- (length (&get cells)) 1) (do
         (let left (get cells 0 (- i 1)))
         (let me (get cells 0 i))
         (let right (get cells 0 (+ i 1)))
@@ -10313,15 +10355,15 @@ D:=,=,=,+,=,=,=,+,=,=")
     (&alter! generation (+ (&get generation) 1))))
 
 
-(<| out 
-        (std/vector/map (lambda y 
-            (std/vector/map y (lambda x (cond 
-                                    (= x 0) "." 
+(|> out
+        (lambda __std_arg0 (map (lambda y
+            (map (lambda x (cond
+                                    (= x 0) "."
                                     (= x 1) "*"
-                                    "")))))
-                (std/convert/vector/three-d->string std/char/new-line std/char/space))
-out                
-                
+                                    "")) y)) __std_arg0))
+                (Matrix->String))
+out
+
                 "#,
                 "[[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0] [0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 0 0 0 0 0] [0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 1 0 0 0 0 0] [0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0] [0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0] [0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 0] [0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0]]",
             ),
@@ -10331,18 +10373,18 @@ out
 ; R2, R2, R2 leaves you 2 blocks due South of your starting position, which is 2 blocks away.
 ; R5, L5, R5, R3 leaves you 12 blocks away.
 
-(let parse (lambda input 
-    (|> 
-        input 
-        (Vector/cons [std/char/comma])
-        (String->Vector std/char/space)
+(let parse (lambda input
+    (|>
+        input
+        (Vector/cons [','])
+        (String->Vector sp)
         (map (lambda x (drop/last 1 x)))
-        (map (lambda [ D . M ] [ (Char->Int D) (std/convert/chars->integer M) ])))))
+        (map (lambda [ D . M ] [ (Char->Int D) (Chars->Integer M) ])))))
 (let delta/pairs (lambda [ y x ] (+ (abs y) (abs x))))
 (let part1 (lambda input (|> input
     (reduce (lambda [ y x a ] [ D M ] (do
                                 (let F (mod (+ a (if (=# (Int->Char D) 'R') 1 3)) 4))
-                                (cond 
+                                (cond
                                     (= F 0) [y (+ x M) F]
                                     (= F 1) [(- y M) x F]
                                     (= F 2) [y (- x M) F]
@@ -10392,8 +10434,8 @@ out
 
                           (let key (point->key (get y) (get x)))
                           (if (Table/has? key visited)
-                              (&alter! result (+ (std/int/abs (get y))
-                                             (std/int/abs (get x))))
+                              (&alter! result (+ (abs (get y))
+                                             (abs (get x))))
                               (Table/set! visited key true)))))))) input)
 
       (get result))))
@@ -10413,26 +10455,25 @@ out
 8 6 4 4 1
 1 3 6 7 9")
 
-(let parse (lambda input (<| input (std/vector/char/lines) (std/vector/map (lambda l (<| l (std/vector/char/words) (std/vector/map std/convert/chars->integer)))))))
+(let parse (lambda input (|> input (split/lines) (lambda __std_arg0 (map (lambda l (|> l (split/words) (lambda __std_arg0 (map Chars->Integer __std_arg0)))) __std_arg0)))))
 
-(let part1 (lambda input (<| input 
-    (std/vector/filter (lambda line (do
-        (let slc (<| line 
-                       (std/vector/drop/last 1)
-                       (std/vector/zipper (std/vector/drop line 1))
-                       (std/vector/map std/vector/int/pair/sub)))
+(let part1 (lambda input (|> input
+    (lambda __std_arg0 (filter (lambda line (do
+        (let slc
+          (map
+            (lambda pair (- (fst pair) (snd pair)))
+            (zip {(drop/last 1 line) (drop/first 1 line)})))
         ; The levels are either all increasing or all decreasing.
         ; Any two adjacent levels differ by at least one and at most three.
-        (or (std/vector/every? slc (lambda x (and (>= x 1) (<= x 3)))) 
-            (std/vector/every? slc (lambda x (and (<= x -1) (>= x -3))))))))
+        (or (every? (lambda x (and (>= x 1) (<= x 3))) slc)
+            (every? (lambda x (and (<= x -1) (>= x -3))) slc)))) __std_arg0))
     (length))))
 
-(let part2 (lambda input (<| input
-                            (std/vector/map
-                              (lambda line (<| line
-                                (std/vector/map/i (lambda _ i
-                                  (<| line (std/vector/filter/i (lambda _ j (not (= i j))))))))))
-                            (std/vector/count-of (lambda x (std/int/positive? (part1 x)))))))
+(let part2 (lambda input (|> input
+                            (lambda __std_arg0 (map (lambda line (|> line
+                                (lambda __std_arg0 (map/i (lambda _ i
+                                  (|> line (lambda __std_arg0 (filter/i (lambda _ j (not (= i j))) __std_arg0)))) __std_arg0)))) __std_arg0))
+                            (lambda __std_arg0 (count (lambda x (positive? (part1 x))) __std_arg0)))))
 
 (let PARSED (parse INPUT))
 
@@ -10440,7 +10481,7 @@ out
                 "[2 4]",
             ),
             (
-                r#"(let fn (lambda { a b } (do 
+                r#"(let fn (lambda { a b } (do
 (if (= b 1) [ a  ] [ false ])
 b
 )))
@@ -10448,12 +10489,12 @@ b
                 "3",
             ),
             (
-                r#"(std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })"#,
+                r#"(zip { [ 1 2 3 ] [ true false true ] })"#,
                 "[{ 1 true } { 2 false } { 3 true }]",
             ),
             (
-                r#"(std/vector/tuple/unzip 
-    (std/vector/tuple/zip { [ 1 2 3 ] [ true false true ] })
+                r#"(unzip
+    (zip { [ 1 2 3 ] [ true false true ] })
 )"#,
                 "{ [1 2 3] [true false true] }",
             ),
@@ -10485,13 +10526,13 @@ b
             ),
             (
                 r#"(let INPUT "58:5,3,7,8,9,10,4,5,7,8,8")
-(let parse (lambda input (do 
+(let parse (lambda input (do
   (let parts (|> input (String->Vector ':')))
   (let head (|> (car parts) (Chars->Integer)))
   (let tail (|> (cdr parts) (car) (String->Vector ',') (map Chars->Integer)))
   { head tail })))
 
-(let part1 (lambda { _ nums } (do 
+(let part1 (lambda { _ nums } (do
 (let sword [[-1 (get nums 0) -1]])
 (loop/range/exclusive i 1 (length nums) (do
   (let num (get nums i))
@@ -10504,43 +10545,43 @@ b
         nil)))
     (if (false? placed) (push! sword [-1 num -1]))))
 sword)))
-  
+
 (part1 (parse INPUT))"#,
                 "[[3 5 7] [4 8 9] [5 10 -1] [-1 7 8] [-1 8 -1]]",
             ),
             (
                 r#"(let scan/sum! (lambda a b (push! a (+ (last a) b))))
 
-(let left-right-sum-diff (lambda input 
+(let left-right-sum-diff (lambda input
   (|> (zip {
         (|> input (reduce (lambda a b (do (scan/sum! a b) a)) [0]) (drop/last 1))
         (|> input (reverse) (reduce (lambda a b (do (scan/sum! a b) a)) [0]) (drop/last 1) (reverse))
-    }) 
+    })
     (map (lambda { a b } (abs (- a b)))))))
 
 (left-right-sum-diff [ 10 4 8 3 ])"#,
                 "[15 1 11 22]",
             ),
             (
-                r#"(let maximum/count (lambda xs 
-      (max 
-        (count positive? xs) 
+                r#"(let maximum/count (lambda xs
+      (max
+        (count positive? xs)
         (count negative? xs))))
-        
+
 (maximum/count [ -1 -1 1 1 1 -1 1 ])"#,
                 "4",
             ),
             (
                 r#";    halve :: [T] -> {[T] * [T]}
-(let halve (lambda xs (do 
-          (let half (/ (length xs) 2)) 
+(let halve (lambda xs (do
+          (let half (/ (length xs) 2))
           { (take/first half xs) (drop/first half xs)})))
 
 (halve (range 0 11))"#,
                 "{ [0 1 2 3 4 5] [6 7 8 9 10 11] }",
             ),
             (
-                r#"(let max-depth (lambda s (|> s 
+                r#"(let max-depth (lambda s (|> s
   (filter (lambda x (or (=# x '(') (=# x ')'))))
   (map (lambda x (if (=# x '(') 1 -1)))
   (scan +)
@@ -10553,13 +10594,13 @@ sword)))
 (let B { 1 { 0 { true { "" nil } } } })
 (let C { 2 { 0 { false { "algebraic data types" nil } } } })
 
-(let algebraic (lambda T (do 
+(let algebraic (lambda T (do
   (let out [])
   (let kind (fst T))
-  (cond 
+  (cond
     (= kind 0) (push! out (* (fst (snd T)) 10))
     (= kind 1) (if (fst (snd (snd T))) (push! out -1))
-    (= kind 2) (push! out (count/char 'a' (fst (snd (snd (snd T)))))) 
+    (= kind 2) (push! out (count/char 'a' (fst (snd (snd (snd T))))))
   nil)
   out)))
 
@@ -10578,22 +10619,22 @@ L99
 R14
 L82")
 ; (let INPUT "R1000")
-(let parse (lambda xs 
-  (|> xs 
+(let parse (lambda xs
+  (|> xs
     (String->Vector nl)
-    (map (lambda [d . r] 
+    (map (lambda [d . r]
       [(if (=# d 'L') -1 1) (Chars->Integer r)])))))
 
-(let part1 (lambda xs 
-  (snd (reduce (lambda { dial counter } [d r] (do 
+(let part1 (lambda xs
+  (snd (reduce (lambda { dial counter } [d r] (do
       (let res (emod (+ dial (* d r)) 100))
       { res (+ counter (Bool->Int (= res 0))) })) { 50 0 } xs))))
 
-(let part2 (lambda xs 
-  (snd (reduce (lambda { dial counter } [d r] (do 
+(let part2 (lambda xs
+  (snd (reduce (lambda { dial counter } [d r] (do
       (let res (emod (+ dial (* d r)) 100))
       (let rng [dial])
-      (loop/range/exclusive i 1 r (push! rng (emod (+ (at rng -1) (* 1 d)) 100))) 
+      (loop/range/exclusive i 1 r (push! rng (emod (+ (at rng -1) (* 1 d)) 100)))
       { res (+ counter (count/int 0 rng)) })) { 50 0 } xs))))
 
 [ (part1 (parse INPUT)) (part2 (parse INPUT)) ]"#,
@@ -10606,19 +10647,19 @@ L82")
 818181911112111")
 
 (let parse (String->Vector nl))
-(let part1 (lambda parsed (do 
+(let part1 (lambda parsed (do
   (integer S 0)
   (|> parsed (for (lambda inp (do
     (integer M -infinity)
     (loop/range/exclusive i 0 (length inp) (loop/range/exclusive j i (length inp)
-        (if (<> i j) 
+        (if (<> i j)
           (&alter! M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))
-    (&alter! S (+ (&get S) (get M))))))) 
+    (&alter! S (+ (&get S) (get M)))))))
     (&get S))))
 
 (let part2 (lambda parsed (do
   (&mut S [0])
-  (for (lambda line (do 
+  (for (lambda line (do
     (let N (length line))
     (let stack [])
     (loop/range/exclusive i 0 N (do
@@ -10633,7 +10674,7 @@ L82")
                 "{ 357 [3 1 2 1 9 1 0 7 7 8 6 1 9] }",
             ),
             (
-                r#"(let INPUT 
+                r#"(let INPUT
 "..@@.@@@@.
 @@@.@.@.@@
 @@@@@.@.@@
@@ -10648,7 +10689,7 @@ L82")
 (let parse (lambda input (|> input (String->Vector nl) (map (lambda x (map (lambda x (if (=# x '@') 1 0)) x))))))
 (let part1 (lambda input (do
   (integer TOTAL 0)
-  (loop/range/exclusive y 0 (length input) (do 
+  (loop/range/exclusive y 0 (length input) (do
     (loop/range/exclusive x 0 (length (get input 0)) (if (= (get input y x) 1) (do
       (integer SUM 0)
       (neighborhood neighborhood/moore y x (lambda cell dir y x (&alter! SUM (+ (&get SUM) cell))) input)
@@ -10658,12 +10699,12 @@ L82")
   (let part2 (lambda input (do
     (letrec rec (lambda total (do
         (let rem [])
-        (loop/range/exclusive y 0 (length input) (do 
+        (loop/range/exclusive y 0 (length input) (do
         (loop/range/exclusive x 0 (length (get input 0)) (if (= (get input y x) 1) (do
         (integer ACC 0)
         (neighborhood neighborhood/moore y x (lambda cell dir y x (&alter! ACC (+ (&get ACC) cell))) input)
         (if (< (get ACC) 4) (push! rem [ y x ])))))))
-        (if (empty? rem) total (do 
+        (if (empty? rem) total (do
         (for (lambda [y x] (set! (get input y) x 0)) rem)
         (rec (+ total (length rem))))))))
     (rec 0))))
@@ -10684,7 +10725,7 @@ L82")
 17
 32")
 
-(let parse (lambda input (do 
+(let parse (lambda input (do
   (let [ p1 p2 ] (String->Vector '*' input))
   (let A (drop/last 1 p1))
   (let B (drop/first 1 p2))
@@ -10697,11 +10738,11 @@ L82")
   (&mut low (get ranges 0 0))
   (&mut high (get ranges 0 1))
   (&mut out [ 0 ])
-  (loop/range/exclusive i 1 (length ranges) (do 
+  (loop/range/exclusive i 1 (length ranges) (do
     (let [ dlow dhigh ] (get ranges i))
-    (if (BigInt/gte? (&get high) dlow) (do 
+    (if (BigInt/gte? (&get high) dlow) (do
       (&alter! low (if (BigInt/lt? (&get low) dlow) (&get low) dlow))
-      (&alter! high (if (BigInt/gt? (&get high) dhigh) (&get high) dhigh))) (do 
+      (&alter! high (if (BigInt/gt? (&get high) dhigh) (&get high) dhigh))) (do
       (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
       (&alter! low (get ranges i 0))
       (&alter! high (get ranges i 1))))))
@@ -10714,12 +10755,12 @@ L82")
                 "[[3] [1 4]]",
             ),
             (
-                r#"(let INPUT 
-"123 328  51 64 
- 45 64  387 23 
+                r#"(let INPUT
+"123 328  51 64
+ 45 64  387 23
   6 98  215 314
 *   +   *   +  ")
-(let parse (lambda input (do 
+(let parse (lambda input (do
   (let groups (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (filter (lambda x (not (empty? x)))))))))
   (let op (map first (last groups)))
   (pop! groups)
@@ -10728,9 +10769,9 @@ L82")
   {numbers op }
   )))
 
-(let part1 (lambda { numbers op } (reduce (lambda a { op i } 
-    (BigInt/add a 
-      (cond 
+(let part1 (lambda { numbers op } (reduce (lambda a { op i }
+    (BigInt/add a
+      (cond
         (=# op '*') (reduce BigInt/mul [1] (get numbers i))
         (=# op '+') (reduce BigInt/add [0] (get numbers i))
         []
@@ -10740,8 +10781,8 @@ L82")
             ),
             (
                 r#"
-(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))                
-(let INPUT 
+(let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
+(let INPUT
 ".......S.......
 ...............
 .......^.......
@@ -10765,14 +10806,14 @@ L82")
   (let queue (Que/new [Int]))
   (let start (points (lambda x (=# x 'S')) input))
   (Que/enque! queue (get start 0))
-  (while (Que/not-empty? queue) (do 
+  (while (Que/not-empty? queue) (do
     (let current (Que/peek queue))
     (Que/deque! queue)
     (let [ y x ] current)
     (let key (cons (Integer->String y) "-" (Integer->String x)))
-    (if (and (std/vector/three-d/in-bounds? input y x) (not (Set/has? key visited))) (do
+    (if (and (Matrix/in-bounds? y x input) (not (Set/has? key visited))) (do
         (Set/add! visited key)
-        (if (=# (get input y x) '^') (do 
+        (if (=# (get input y x) '^') (do
           (&alter! total (+ (&get total) 1))
           (Que/enque! queue [ y (+ x 1) ])
           (Que/enque! queue [ y (- x 1) ])) (Que/enque! queue [ (+ y 1) x ]))))))
@@ -10782,14 +10823,14 @@ L82")
   (let queue (Que/new [Int]))
   (let start (first (points (lambda x (=# x 'S')) input)))
   (Que/enque! queue [(get start 0) (get start 1) 1])
-  (while (Que/not-empty? queue) (do 
+  (while (Que/not-empty? queue) (do
     (let current (Que/peek queue))
     (Que/deque! queue)
     (let [ y x c ] current)
-    (if (std/vector/three-d/in-bounds? input y x) (do
-        (if (=# (get input y x) '^') (do 
+    (if (Matrix/in-bounds? y x input) (do
+        (if (=# (get input y x) '^') (do
             (Que/enque! queue [ y (+ x 1) c ])
-            (Que/enque! queue [ y (- x 1) c ])) 
+            (Que/enque! queue [ y (- x 1) c ]))
             (Que/enque! queue [ (+ y 1) x c ])))
         (&alter! total (+ (&get total) c)))))
   (get total))))
@@ -10798,7 +10839,7 @@ L82")
                 "[21 40]",
             ),
             (
-                r#"(let INPUT 
+                r#"(let INPUT
 ".......S.......
 ...............
 .......^.......
@@ -10820,15 +10861,15 @@ L82")
   (let data (map (lambda x (map identity x)) input))
   (&mut beam [ 0 ])
   (let timeline (map (lambda _ [ 0 ]) (zeroes (length (get data 0)))))
-  (loop/range/exclusive y 0 (length data) (do 
+  (loop/range/exclusive y 0 (length data) (do
     (let line (get data y))
     (loop/range/exclusive x 0 (length line) (do
       (let c (get line x))
-      (cond 
-        (=# c 'S') (do 
+      (cond
+        (=# c 'S') (do
           (set! (get data (+ y 1)) x '|')
           (set! timeline x [ 1 ]))
-        (=# c '^') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do 
+        (=# c '^') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do
           (set! (get data y) (- x 1) '|')
           (set! (get data y) (+ x 1) '|')
           (&alter! beam (BigInt/add (&get beam) [ 1 ]))
@@ -10836,7 +10877,7 @@ L82")
           (set! timeline (+ x 1) (BigInt/add (get timeline (+ x 1)) (get timeline x)))
           (set! timeline x [ 0 ])
         ))
-        (=# c '.') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do 
+        (=# c '.') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do
           (set! (get data y) x '|'))))))))
   [(&get beam) (BigInt/sum timeline)])))
 
@@ -10870,7 +10911,7 @@ L82")
 (let part1 (lambda input (do
   (let len (length input))
   (let dist [])
-  (loop/range/exclusive i 0 len (do 
+  (loop/range/exclusive i 0 len (do
     (loop/range/exclusive j i len (if (<> i j)
       (push! dist { [ i j ] (abs (distance/three-d (get input i) (get input j))) })))))
   (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2)))
@@ -10879,12 +10920,12 @@ L82")
   (letrec root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
   (let merge (lambda a b (set! parent (root a) (root b))))
   (for (lambda [ a b ] (merge a b)) (take/first 10 edges))
-  (|> 
+  (|>
     (range 0 (- (length input) 1))
-    (reduce (lambda a b (do 
+    (reduce (lambda a b (do
       (let i (root b))
       (set! a i (+ (get a i) 1))
-      a)) 
+      a))
     (zeroes (length input)))
     (sort >)
     (take/first 3)
@@ -10893,14 +10934,14 @@ L82")
 (let part2 (lambda input (do
   (let len (length input))
   (let dist [])
-  
+
   ; compute all pairwise distances
   (loop/range/exclusive i 0 len
     (loop/range/exclusive j (+ i 1) len
       (push! dist { [i j] (distance/three-d (get input i) (get input j)) })))
 
   ; sort edges by distance
-  (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2))) 
+  (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2)))
   (let edges (|> dist (map fst)))
 
   ; initialize union-find
@@ -10952,15 +10993,15 @@ L82")
 7,3")
 (let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
 (let part1 (lambda input (do
-  (let pairs (std/vector/unique-pairs input))
+  (let pairs (combination/pairs input))
   (let rect (lambda [ x1 y1 ] [ x2 y2 ] (* (+ 1 (abs (- x1 x2))) (+ 1 (abs (- y1 y2))))))
- (|> pairs (map (lambda [ a b ] (rect a b))) (maximum)))))
+ (|> pairs (map (lambda { a b } (rect a b))) (maximum)))))
 
 [(part1 (parse INPUT))]"#,
                 "[50]",
             ),
             (
-                "{  (std/vector/dec/mean (range/dec 1 10)) (Dec->Int (std/vector/dec/mean (range/dec 1 10))) }",
+                "{  (mean/dec (range/dec 1 10)) (Dec->Int (mean/dec (range/dec 1 10))) }",
                 "{ 5.5 5 }",
             ),
             (
@@ -10968,13 +11009,13 @@ L82")
                 "{ [1 2 3 4 5 6 7 8 9 10] [1 2 3 4 5 6 7 8 9 10] }",
             ),
             (
-                "(=? 
+                "(=?
     (=
-        (Dec->Int 
+        (Dec->Int
         (sum/dec (range/dec 0 10)))
         (sum/int (range/int 0 10)))
     (=.
-        (Int->Dec 
+        (Int->Dec
         (sum/int (range/int 0 10)))
         (sum/dec (range/dec 0 10))))",
                 "true",
@@ -10986,7 +11027,7 @@ LURDL
 UUUUD")
 
 (let parse (String->Vector nl))
-(let part1 (lambda input (do 
+(let part1 (lambda input (do
   (let pad [['1' '2' '3'] ['4' '5' '6'] ['7' '8' '9']])
   (let len (- (length pad) 1))
   (let start (first (points (lambda x (=# x '5')) pad)))
@@ -10995,18 +11036,18 @@ UUUUD")
   (let U [ -1 0 ])
   (let D [ 1 0 ])
   (let N [ 0 0 ])
-  (|> input (map (lambda x 
-        (|> x (map (lambda y 
+  (|> input (map (lambda x
+        (|> x (map (lambda y
             (cond (=# y 'U') U
                   (=# y 'D') D
                   (=# y 'L') L
                   (=# y 'R') R
                           N)))
-            (reduce (lambda a dir (do 
+            (reduce (lambda a dir (do
               (set! start 0 (clamp-range 0 len (+ (get dir 0) (get start 0))))
               (set! start 1 (clamp-range 0 len (+ (get dir 1) (get start 1))))
               (get pad (get start 0) (get start 1)))) '0'))))))))
-(let part2 (lambda input (do 
+(let part2 (lambda input (do
   (let pad [['*' '*' '1' '*' '*'] ['*' '2' '3' '4' '*'] ['5' '6' '7' '8' '9'] ['*' 'A' 'B' 'C' '*'] ['*' '*' 'D' '*' '*']])
   (let len (- (length pad) 1))
   (let start (first (points (lambda x (=# x '5')) pad)))
@@ -11015,17 +11056,17 @@ UUUUD")
   (let U [ -1 0 ])
   (let D [ 1 0 ])
   (let N [ 0 0 ])
-  (|> input (map (lambda x 
-        (|> x (map (lambda y 
+  (|> input (map (lambda x
+        (|> x (map (lambda y
             (cond (=# y 'U') U
                   (=# y 'D') D
                   (=# y 'L') L
                   (=# y 'R') R
                           N)))
-            (reduce (lambda a dir (do 
+            (reduce (lambda a dir (do
               (let y (+ (get dir 0) (get start 0)))
               (let x (+ (get dir 1) (get start 1)))
-              (unless (and (std/vector/three-d/in-bounds? pad y x) (=# (get pad y x) '*')) (do 
+              (unless (and (Matrix/in-bounds? y x pad) (=# (get pad y x) '*')) (do
                  (set! start 0 (clamp-range 0 len y))
                  (set! start 1 (clamp-range 0 len x))))
               (get pad (get start 0) (get start 1)))) '0'))))))))
@@ -11035,8 +11076,8 @@ UUUUD")
             (
                 r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter digit? x))) (filter not-empty?) (map String->Integer)))))))
 (let part1 (lambda input (|> input (count (lambda [a b c] (and (> (+ a b) c) (> (+ b c) a) (> (+ a c) b)))))))
-(let part2 (lambda input (|> input 
-  (reduce (lambda a [A B C] (do 
+(let part2 (lambda input (|> input
+  (reduce (lambda a [A B C] (do
     (let [ pa pb pc ] (at a -1))
     (push! pa A)
     (push! pb B)
@@ -11050,7 +11091,7 @@ UUUUD")
 [
   (part1 (parse "5 10 25
     330  143  338
-    769  547   83")) 
+    769  547   83"))
   (part2 (parse "  330  143  5
     769  547   10
     930  625  25"))
@@ -11067,7 +11108,7 @@ UUUUD")
   (Set/difference B A)
   (Set/xor A B)
   (Set/union A B)
-] 
+]
  (map Set/values)
  (reduce cons [])
  (reduce cons [])
@@ -11080,13 +11121,13 @@ UUUUD")
                 "e",
             ),
             (
-                r#"(let flood-fill! (lambda image sr sc color (do 
+                r#"(let flood-fill! (lambda image sr sc color (do
     (let old (get image sr sc))
-    (unless (= old color) 
-        (do 
+    (unless (= old color)
+        (do
         (let m (length image))
         (let n (length (first image)))
-        (letrec adj! (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (get image r c) old)) (do 
+        (letrec adj! (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (get image r c) old)) (do
                     (set! image r c color)
                     (adj! (+ r 1) c)
                     (adj! (- r 1) c)
@@ -11111,9 +11152,9 @@ image
             (
                 r#"(let memo [[] [] [] []])
 (letrec fibonacci! (lambda n
-    (do 
+    (do
     (let key (Integer->String n))
-    (if (< n 2) n (if (Table/has? key memo) (snd (first (Table/get key memo))) (do 
+    (if (< n 2) n (if (Table/has? key memo) (snd (first (Table/get key memo))) (do
       (let res (+ (fibonacci! (- n 1)) (fibonacci! (- n 2))))
       (Table/set! memo key res)
       res))))))
@@ -11121,9 +11162,9 @@ image
                 "55",
             ),
             (
-                r#"(letrec ackermann (lambda m n 
-    (cond 
-        (and (< m 0) (< n 0)) -1 
+                r#"(letrec ackermann (lambda m n
+    (cond
+        (and (< m 0) (< n 0)) -1
         (= m 0) (+ n 1)
         (and (> m 0) (= n 0)) (ackermann (- m 1) 1)
         (and (> m 0) (> n 0)) (ackermann (- m 1) (ackermann m (- n 1)))
@@ -11155,13 +11196,13 @@ image
 
 (let PARSED (parse INPUT))
 
-(let part1 (lambda input (do 
-  (let Matrix->Count (lambda sig matrix (|> matrix (map (lambda xs (> (count/int (- 1 (- 1 sig)) xs) (count/int (- 1 sig) xs)))) (map Bool->Int) (std/convert/bits->integer))))
-  (let matrix (std/vector/three-d/rotate input))
+(let part1 (lambda input (do
+  (let Matrix->Count (lambda sig matrix (|> matrix (map (lambda xs (> (count/int (- 1 (- 1 sig)) xs) (count/int (- 1 sig) xs)))) (map Bool->Int) (Bits->Integer))))
+  (let matrix (transpose input))
   (let gamma (Matrix->Count 1 matrix))
   (let epsilon (Matrix->Count 0 matrix))
   (* gamma epsilon))))
-  
+
   (let count-bit
   (lambda rows idx bit
     (count/int
@@ -11198,15 +11239,15 @@ image
   (lambda input (do
     (let oxygen-bits (find-rating input true))
     (let co2-bits    (find-rating input false))
-    (* (std/convert/bits->integer oxygen-bits)
-       (std/convert/bits->integer co2-bits)))))
+    (* (Bits->Integer oxygen-bits)
+       (Bits->Integer co2-bits)))))
 
 
 [(part1 PARSED) (part2 PARSED)]"#,
                 "[198 230]",
             ),
             (
-                r#"(let INPUT 
+                r#"(let INPUT
 "r, wr, b, g, bwu, rb, gb, br
 
 brwrr
@@ -11225,9 +11266,9 @@ bbrgwb")
       (|> lines (drop/first 2))
     })))
 
-(let part1 (lambda { patterns-input towels } (do 
+(let part1 (lambda { patterns-input towels } (do
   (let patterns (reduce (lambda a b (do (Set/add! a b) a)) [[] [] [] [] [] [] [] [] []] patterns-input))
-  (letrec dp? (lambda str (loop/some-range? 1 (length str) (lambda i (do 
+  (letrec dp? (lambda str (loop/some-range? 1 (length str) (lambda i (do
     (let a (slice 0 i str))
     (let b (slice i (length str) str))
     (or (and (Set/has? a patterns) (Set/has? b patterns)) (and (dp? a) (dp? b))))))))
@@ -11239,14 +11280,12 @@ bbrgwb")
             ),
             (
                 r#"
-(let res (lambda x y 
-(std/vector/option/resolve [ 
-    (std/int/div/option (+ 1 2 x) y)
-    (std/true/option (* 4 5 x))
-    (std/int/sqrt/option x)
-  ] 
-  (lambda [ a b c ] (+ a b c))
-  -1)
+(let res (lambda x y
+(resolve/option (lambda [ a b c ] (+ a b c)) -1 [
+    (if (= y 0) {false 0} {true (/ (+ 1 2 x) y)})
+    (true/option (* 4 5 x))
+    (if (< x 0) {false 0} {true (sqrt x)})
+  ])
 ))
 
 [(res 234 25) (res -1 25) (res 234 0)]
@@ -11275,7 +11314,7 @@ bbrgwb")
 22 11 13  6  5
  2  0 12  3  7")
 ; [Char] -> {[Int] * [[[Int]]]}
-(let parse (lambda input (do  
+(let parse (lambda input (do
   (let lines (|> input (String->Vector nl) (filter not-empty?)))
   (let numbers (|> (car lines) (String->Vector ',') (map String->Integer)))
   (let boards (|> (cdr lines) (map (lambda xs (|> xs (String->Vector ' ') (filter not-empty?) (map String->Integer)))) (partition 5)))
@@ -11380,11 +11419,11 @@ bbrgwb")
         (reverse (range b a)))))
 ; Segment -> [Point]
 (let Segment->Points
-  (lambda { Tag { { _ { x1 y1 } } { _ { x2 y2 } } } } 
+  (lambda { Tag { { _ { x1 y1 } } { _ { x2 y2 } } } }
     (cond
         ; vertical
         (= x1 x2)
-        (map (lambda y (make-point x1 y)) 
+        (map (lambda y (make-point x1 y))
              (range (min y1 y2) (max y1 y2)))
 
         ; horizontal
@@ -11445,7 +11484,7 @@ bbrgwb")
 ; [Int] -> [Int] ; length 9
 (let step (lambda [ c0 c1 c2 c3 c4 c5 c6 c7 c8 ] [ c1 c2 c3 c4 c5 c6 (+ c7 c0) c8 c0 ]))
 ; Int -> [Int] -> [Int]
-(let simulate (lambda days state (do 
+(let simulate (lambda days state (do
     (letrec rec (lambda i acc
         (if (= i days)
             acc
@@ -11484,7 +11523,7 @@ bbrgwb")
       ; (let [ w h ] (parse-size (get parts 3)))
       (let coords (parse-coords (get parts 2)))
       (let size (parse-size (get parts 3)))
-      
+
       (let x (get coords 0))
       (let y (get coords 1))
       (let w (get size 0))
@@ -11496,8 +11535,8 @@ bbrgwb")
   (lambda { _ { x { y { w h } } } }
     (flat
         (map (lambda i
-            (map (lambda j [ i j ]) 
-                (range y (- (+ y h) 1)))) 
+            (map (lambda j [ i j ])
+                (range y (- (+ y h) 1))))
             (range x (- (+ x w) 1))))))
 
 ; [Int Int] -> [Char]
@@ -11520,8 +11559,8 @@ bbrgwb")
           (flat)                ; [[x y]]
           (map point->key)      ; [String]
           (Table/count)         ; { key -> Int }
-          (Table/values) 
-          (count (lambda n (>= n 2))))))) 
+          (Table/values)
+          (count (lambda n (>= n 2)))))))
 
 (part1 INPUT)"#,
                 "4",
@@ -11529,19 +11568,19 @@ bbrgwb")
             (
                 r#"[
 (apply (comp
-    (map (String->Vector '-')) 
-    (map (map String->Integer)) 
-    flat 
+    (map (String->Vector '-'))
+    (map (map String->Integer))
+    flat
     sum) ["1-2" "3-4" "5-6"])
 (|> ["1-2" "3-4" "5-6"]
-    (map (String->Vector '-')) 
-    (map (map String->Integer)) 
-    flat 
+    (map (String->Vector '-'))
+    (map (map String->Integer))
+    flat
     sum)]"#,
                 "[21 21]",
             ),
             (
-                r#"(let puncts ['!' ',' '.' '?' ' ' sq nl]) 
+                r#"(let puncts ['!' ',' '.' '?' ' ' sq nl])
 (let punct? (lambda x (some? (apply =# x) puncts)))
 
 (let palindrome? (comp (map lower) (exclude punct?) (S/comb match? reverse)))
@@ -11551,8 +11590,8 @@ bbrgwb")
   "No one made killer apparel like Dame Noon."
   "Go hang a salami, I'm a lasagna hog"
   "Stab nail at ill, italian bats!"
-] 
-(map palindrome?) 
+]
+(map palindrome?)
 (every? identity))"#,
                 "true",
             ),
@@ -11577,17 +11616,17 @@ bbrgwb")
                 "[false false false true true true]",
             ),
             (
-                r#"(let max-water (lambda input (do 
-  (letrec max-water-rec (lambda l r out 
-    (if (< l r) 
-      (do 
+                r#"(let max-water (lambda input (do
+  (letrec max-water-rec (lambda l r out
+    (if (< l r)
+      (do
         (let width (- r l))
         (let left (get input l))
         (let right (get input r))
         (let min-height (min left right))
         (let area (* width min-height))
         (let condition (< left right))
-        (max-water-rec (if condition (+ l 1) l) (unless condition (- r 1) r) (max area out))) 
+        (max-water-rec (if condition (+ l 1) l) (unless condition (- r 1) r) (max area out)))
      out)))
   (max-water-rec 0 (- (length input) 1) 0))))
 
@@ -11596,7 +11635,7 @@ bbrgwb")
             ),
             (
                 r#"
-(let fn (lambda { x y } (do 
+(let fn (lambda { x y } (do
   (let vec [ 1 2 3 ])
   (let [ a b ] vec)
       [ a b  x y ]
@@ -11610,9 +11649,9 @@ bbrgwb")
             (r#"(let [ a b . rest ] [ 1 2 3 4 5 6 ])
 { a rest }"#, "{ 1 [3 4 5 6] }"),
             (
-                r#"(let rev (lambda xs (do 
-  (letrec rec/rev (lambda xs out 
-                  (if (empty? xs) out 
+                r#"(let rev (lambda xs (do
+  (letrec rec/rev (lambda xs out
+                  (if (empty? xs) out
                       (rec/rev (cdr xs) (cons [(car xs)] out)))))
   (rec/rev xs []))))
 
@@ -11632,19 +11671,19 @@ bbrgwb")
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (let INPUT "2333133121414131402")
 (let parse (comp (map Char->Digit)))
-(let part1 (lambda input (do 
+(let part1 (lambda input (do
   (integer file-id -1)
-  (let disk (|> input (reduce/i (lambda disk ch i (std/vector/concat! disk 
-  [(if (even? i) (do 
+  (let disk (|> input (reduce/i (lambda disk ch i (cons disk
+  (if (even? i) (do
     (&alter! file-id (+ (&get file-id) 1))
     (let id (get file-id))
     (Vector/new (lambda _ id) ch))
-    (Vector/new (lambda _ -1) ch))])) [])))
+    (Vector/new (lambda _ -1) ch)))) [])))
   (let blanks (reduce/i (lambda a x i (do (if (= x -1) (push! a i)) a)) [] disk))
-  (letrec fragment?! (lambda ind out (do 
+  (letrec fragment?! (lambda ind out (do
     (let i (get blanks ind))
     (if (= (last disk) -1) (do (pop! disk) (fragment?! ind out))
-      (if (not (<= (length disk) i)) (do 
+      (if (not (<= (length disk) i)) (do
         (set! disk i (last disk))
         (pop! disk)
         (fragment?! (+ ind 1) out)
@@ -11662,38 +11701,38 @@ bbrgwb")
     (integer SECRET secret)
     ; Each step of the above process involves mixing and pruning:
 
-    ; To mix a value into the secret number, 
+    ; To mix a value into the secret number,
     ; calculate the bitwise XOR of the given value and the secret number.
-    ;  Then, the secret number becomes the result of that operation. 
-    ; (If the secret number is 42 and you were to mix 15 into the secret number, 
+    ;  Then, the secret number becomes the result of that operation.
+    ; (If the secret number is 42 and you were to mix 15 into the secret number,
     ; the secret number would become 37.)
     (let mix (lambda value (do (&alter! SECRET (^ value (get SECRET))) (get SECRET))))
 
-    ; To prune the secret number, 
-    ; calculate the value of the secret number modulo 777216. 
-    ; Then, the secret number becomes the result of that operation. 
+    ; To prune the secret number,
+    ; calculate the value of the secret number modulo 777216.
+    ; Then, the secret number becomes the result of that operation.
     (let prune (lambda value (do (&alter! SECRET (emod value 777216)) (get SECRET))))
 
     (let random (lambda (|>
           (get SECRET)
 
           (fp/mul 64)        ; Calculate the result of multiplying the secret number by 64.
-          
+
           mix        ; Then, mix this result into the secret number.
           prune       ; Finally, prune the secret number.
 
           (fp/div 32)        ; Calculate the result of dividing the secret number by 32.
                         ; Round the result down to the nearest integer.
-          
+
          mix         ; Then, mix this result into the secret number.
          prune       ; Finally, prune the secret number.
-                
+
           (fp/mul 2048)      ; Calculate the result of multiplying the secret number by 2048.
 
-          mix         ; Then, mix this result into the secret number. 
+          mix         ; Then, mix this result into the secret number.
           prune       ; Finally, prune the secret number.
           )))
-          
+
         ; In a single day, buyers each have time to generate 2000 new secret numbers
         (loop/repeat 2000 random)
         (get SECRET))))
@@ -11707,9 +11746,9 @@ bbrgwb")
             ),
             (
                 r#"; solve :: [[Char]] -> Int
-(let solve (comp 
-    (map (Vector/get-unsafe 1)) 
-    (map (lambda x (if (=# x '-') -1 1))) 
+(let solve (comp
+    (map (Vector/get-unsafe 1))
+    (map (lambda x (if (=# x '-') -1 1)))
     sum))
 
 (map solve [["--X" "X++" "X++"] ["++X" "++X" "X++"] ["X++" "++X" "--X" "X--"]])
@@ -11718,15 +11757,15 @@ bbrgwb")
                 "[1 3 0]",
             ),
             (
-                r#"(let group-anagrams (comp 
+                r#"(let group-anagrams (comp
     (map (lambda w { w (sort ># w)}))
     (sort (lambda { _ a } { _ b } (String/gt? a b)))
-    (reduce/i (lambda a b i (do 
+    (reduce/i (lambda a b i (do
       (let { bw bs } b)
       (let prev (last a))
       (cond (empty? prev) (set! a 0 [b])
             (not (match? (snd (last prev)) bs)) (push! a [b])
-            (push! prev b)) 
+            (push! prev b))
       a)) [[]])
       (map (cond (map fst)))))
 
@@ -11762,7 +11801,7 @@ bbrgwb")
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (let correct (Vector->Set ["spelling" "bat" "cat"]))
 
-(let generate-abc (lambda (do 
+(let generate-abc (lambda (do
   (let offset (Char->Int 'a'))
   (let out [])
   (loop/range/exclusive i 0 26 (push! out (Int->Char (+ i offset))))
@@ -11780,20 +11819,20 @@ bbrgwb")
     (while (and (true? loop?) (< (get i) (length word))) (do
 
         (let filtered (filter/i (lambda _ j (<> j (get i))) word))
-        (if (Set/has? filtered correct) (do 
+        (if (Set/has? filtered correct) (do
             (&alter! out filtered)
             (&alter! loop? false)))
 
-        (if (> (get i) 0) (do 
+        (if (> (get i) 0) (do
           (let prev (get temp (- (get i) 1)))
           (let next (get temp (get i)))
           (set! temp (- (get i) 1) next)
           (set! temp (get i) prev)
 
-          (if (Set/has? temp correct) (do 
+          (if (Set/has? temp correct) (do
             (&alter! out temp)
             (&alter! loop? false))
-            (do 
+            (do
               (set! temp (- (get i) 1) prev)
               (set! temp (get i) next)))))
 
@@ -11813,7 +11852,7 @@ bbrgwb")
           (let a (get abc (get j)))
           (let added (cons (slice 0 (get i) word) [a] (slice (get i) (length word) word)))
           (if (Set/has? added correct) (do
-              (&alter! out added) 
+              (&alter! out added)
               (&alter! loop? false)))
           (&alter! j (+ (&get j) 1))))
 
@@ -11856,7 +11895,7 @@ SECRET = SANTA")
                 r#"
   (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 
-    (let solve? (lambda s 
+    (let solve? (lambda s
   (and (> (length s) 2) (do
     (let n (length s))
     (integer c 0)
@@ -12175,7 +12214,7 @@ d -> a")
     (let rules (parse-input modified))
     (let cache (Table/new/capacity 512))
     (eval-wire! cache rules "a")))
-{(part1 input) (part2 input)}    
+{(part1 input) (part2 input)}
 "#, "{ 72 72 }"),
 
 (r#"(let input "London to Dublin = 464
@@ -12183,8 +12222,8 @@ London to Belfast = 518
 Dublin to Belfast = 141")
 ; (let input (read! "input.txt"))
 (let parse (comp
-          (split/lines) 
-          (map (split " = ")) (map (lambda ([a b]) 
+          (split/lines)
+          (map (split " = ")) (map (lambda ([a b])
             (let [l r] (split " to " a))
           {{l r} (String->Integer b)}))))
 
@@ -12230,8 +12269,8 @@ Dublin to Belfast = 141")
 ),
 (r#"(let input (string 34 97 122 108 103 120 100 98 108 106 119 121 103 121 116 116 122 107 102 119 117 120 118 34 10 34 118 92 120 102 98 92 34 108 103 115 92 34 107 118 106 102 121 119 109 117 116 92 120 57 99 114 34 10 34 92 92 122 114 115 92 92 115 121 117 114 34))
 
-(letrec memory-length (lambda (line i total) 
-  (if (= i (- (length line) 1)) total 
+(letrec memory-length (lambda (line i total)
+  (if (= i (- (length line) 1)) total
         (if (=# (get line i) '\')
             (memory-length line (if (=# (get line (+ i 1)) 'x') (+ i 4) (+ i 2)) (+ total 1))
             (memory-length line (+ i 1) (+ total 1))))))
@@ -12488,18 +12527,18 @@ humidity-to-location map:
 #2 @ 3,1: 4x4
 #3 @ 5,5: 2x2")
 (let N 8)
-(let parse (comp 
-                (split/lines) 
+(let parse (comp
+                (split/lines)
                 (map (comp (split/words)))
-                (map (lambda ([ a _ c d ]) 
-                  { 
+                (map (lambda ([ a _ c d ])
+                  {
                     (String->Integer (cdr a)) ; id
                     (|> c (drop/last 1) (split/commas) (map String->Integer)) ; pos
                     (|> d (split "x") (map String->Integer)) ; dim
                   }))))
 (let update! (lambda (m x y) (set! m x y (+ (get m x y) 1))))
-(let part1 (comp 
-              (reduce (lambda (a { id [ x y ] [ w h ] }) 
+(let part1 (comp
+              (reduce (lambda (a { id [ x y ] [ w h ] })
                 (loop/range/exclusive iy y (+ y h)
                   (loop/range/exclusive ix x (+ w x)
                     (update! a ix iy))) a)
@@ -12507,16 +12546,16 @@ humidity-to-location map:
               (flat)
             (count (gt/int? 1))))
 
-(let part2 (lambda (input) 
+(let part2 (lambda (input)
   (let out (Vector/new (lambda _ 0) (+ (fst (at input -1)) 1)))
-  
-  (let claim! (lambda (m x y id) 
+
+  (let claim! (lambda (m x y id)
       (let prev (get m x y))
-      (if (not (zero? prev)) (do 
+      (if (not (zero? prev)) (do
         (set! out id id)
         (set! out prev prev)))
       (set! m x y id)))
-              (|> input (reduce (lambda (a { id [ x y ] [ w h ] }) 
+              (|> input (reduce (lambda (a { id [ x y ] [ w h ] })
                 (loop/range/exclusive iy y (+ y h)
                   (loop/range/exclusive ix x (+ w x)
                     (claim! a ix iy id))) a)
@@ -12653,26 +12692,26 @@ humidity-to-location map:
                                             }
                                             Err(e) => {
                                                 println!("{:?}", inp);
-                                                panic!("Failed tests because {}", e);
+                                                panic!("Failed tests because {}\nInput:\n{}", e, inp);
                                             }
                                         }
                                     }
                                     Err(e) => {
                                         // to figure out which test failed due to run time Error!
                                         // println!("{:?}", inp);
-                                        panic!("Failed tests because {}", e);
+                                        panic!("Failed tests because {}\nInput:\n{}", e, inp);
                                     }
                                 }
                             }
                             Err(e) => {
                                 // println!("{:?}", inp);
-                                panic!("Failed tests because {}", e);
+                                panic!("Failed tests because {}\nInput:\n{}", e, inp);
                             }
                         }
                     }
                     Err(e) => {
                         // println!("{:?}", inp);
-                        panic!("Failed tests because {}", e);
+                        panic!("Failed tests because {}\nInput:\n{}", e, inp);
                     }
                 }
             }

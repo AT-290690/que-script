@@ -14,8 +14,84 @@
 
 (let const/int/max-safe 2147483647)
 (let const/int/min-safe -2147483648)
-(let const/dec/max-safe 2147483.647)
-(let const/dec/min-safe -2147483.648)
+(let const/dec/max-safe (+. 2147483.0 0.647))
+(let const/dec/min-safe (-. -2147483.0 0.648))
+
+; Arithmetic guards. These predicates perform only operations that are safe
+; in the branch where they are evaluated, so they can also be used while
+; debug overflow and divide-by-zero traps are enabled.
+(let add/safe? (lambda a b
+  (if (> b 0)
+      (<= a (- const/int/max-safe b))
+      (if (< b 0)
+          (>= a (- const/int/min-safe b))
+          true))))
+
+(let sub/safe? (lambda a b
+  (if (> b 0)
+      (>= a (+ const/int/min-safe b))
+      (if (< b 0)
+          (<= a (+ const/int/max-safe b))
+          true))))
+
+(let mul/safe? (lambda a b
+  (cond
+    (= a 0) true
+    (= b 0) true
+    (> a 0) (if (> b 0)
+                (<= a (/ const/int/max-safe b))
+                (>= b (/ const/int/min-safe a)))
+    (> b 0) (>= a (/ const/int/min-safe b))
+    (>= a (/ const/int/max-safe b)))))
+
+(let div/safe? (lambda a b
+  (and (!= b 0)
+       (not (and (= a const/int/min-safe) (= b -1))))))
+
+(let mod/safe? (lambda a b (and (= a a) (!= b 0))))
+
+(let add./safe? (lambda a b
+  (if (>. b 0.0)
+      (<=. a (-. const/dec/max-safe b))
+      (if (<. b 0.0)
+          (>=. a (-. const/dec/min-safe b))
+          true))))
+
+(let sub./safe? (lambda a b
+  (if (>. b 0.0)
+      (>=. a (+. const/dec/min-safe b))
+      (if (<. b 0.0)
+          (<=. a (+. const/dec/max-safe b))
+          true))))
+
+(let mul./safe? (lambda a b
+  (cond
+    (=. b 0.0) true
+    (=. b 1.0) true
+    (=. b -1.0) (not (=. a const/dec/min-safe))
+    (>. b 1.0) (if (>. a 0.0)
+                   (<=. a (/. const/dec/max-safe b))
+                   (>=. a (/. const/dec/min-safe b)))
+    (<. b -1.0) (if (>. a 0.0)
+                    (<=. a (/. const/dec/min-safe b))
+                    (>=. a (/. const/dec/max-safe b)))
+    true)))
+
+(let div./safe? (lambda a b
+  (if (=. b 0.0)
+      false
+      (if (>=. b 1.0)
+          true
+          (if (<=. b -1.0)
+              (not (and (=. a const/dec/min-safe) (=. b -1.0)))
+              (if (>. b 0.0)
+                  (and (>=. a (*. const/dec/min-safe b))
+                       (<=. a (*. const/dec/max-safe b)))
+                  (and (>=. a (*. const/dec/max-safe b))
+                       (<=. a (*. const/dec/min-safe b)))))))))
+
+(let mod./safe? (lambda a b (and (=. a a) (not (=. b 0.0)))))
+
 (let const/dec/pi 3.142)
 (let const/dec/e 2.718)
 (let const/dec/euler const/dec/e)
