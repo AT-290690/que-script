@@ -65,6 +65,10 @@ struct AbstractState {
     leq_pairs: HashSet<(String, String)>,
     /// Upper bounds for normalized affine expressions: `terms <= bound`.
     affine_upper_bounds: HashMap<AffineTerms, i64>,
+    /// A canonical operand pair whose product is proven not to cross the
+    /// corresponding signed Int boundary.
+    product_upper_safe: HashSet<(String, String)>,
+    product_lower_safe: HashSet<(String, String)>,
     fixed_lengths: HashMap<String, usize>,
     minimum_lengths: HashMap<String, usize>,
     length_sources: HashMap<String, String>,
@@ -147,6 +151,26 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
             Some((terms, left_bound.max(right_bound)))
         })
         .collect();
+    let mut product_candidates: HashSet<(String, String)> = left
+        .product_upper_safe
+        .union(&right.product_upper_safe)
+        .cloned()
+        .collect();
+    product_candidates.extend(
+        left.product_lower_safe
+            .union(&right.product_lower_safe)
+            .cloned(),
+    );
+    let product_upper_safe = product_candidates
+        .iter()
+        .filter(|pair| product_upper_is_safe(pair, left) && product_upper_is_safe(pair, right))
+        .cloned()
+        .collect();
+    let product_lower_safe = product_candidates
+        .iter()
+        .filter(|pair| product_lower_is_safe(pair, left) && product_lower_is_safe(pair, right))
+        .cloned()
+        .collect();
     AbstractState {
         safe_pairs: left
             .safe_pairs
@@ -167,6 +191,8 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
             .cloned()
             .collect(),
         affine_upper_bounds,
+        product_upper_safe,
+        product_lower_safe,
         fixed_lengths,
         minimum_lengths,
         length_sources,
@@ -195,6 +221,149 @@ fn canonical_scalar(expr: &Expression, state: &AbstractState) -> String {
         }
         _ => expr.to_lisp(),
     }
+}
+
+fn canonical_product_pair(
+    left: &Expression,
+    right: &Expression,
+    state: &AbstractState,
+) -> (String, String) {
+    let mut pair = (
+        canonical_scalar(left, state),
+        canonical_scalar(right, state),
+    );
+    if pair.1 < pair.0 {
+        pair = (pair.1, pair.0);
+    }
+    pair
+}
+
+fn range_for_canonical_atom(atom: &str, state: &AbstractState) -> IntInterval {
+    state
+        .integer_ranges
+        .get(atom)
+        .copied()
+        .or_else(|| {
+            state
+                .integer_constants
+                .get(atom)
+                .copied()
+                .map(IntInterval::exact)
+        })
+        .unwrap_or(IntInterval::I32)
+}
+
+fn product_interval_for_pair(pair: &(String, String), state: &AbstractState) -> IntInterval {
+    let left = range_for_canonical_atom(&pair.0, state);
+    let right = range_for_canonical_atom(&pair.1, state);
+    let products = [
+        left.min * right.min,
+        left.min * right.max,
+        left.max * right.min,
+        left.max * right.max,
+    ];
+    IntInterval {
+        min: *products.iter().min().expect("four product endpoints"),
+        max: *products.iter().max().expect("four product endpoints"),
+    }
+}
+
+fn product_upper_is_safe(pair: &(String, String), state: &AbstractState) -> bool {
+    state.product_upper_safe.contains(pair)
+        || product_interval_for_pair(pair, state).max <= i32::MAX as i64
+}
+
+fn product_lower_is_safe(pair: &(String, String), state: &AbstractState) -> bool {
+    state.product_lower_safe.contains(pair)
+        || product_interval_for_pair(pair, state).min >= i32::MIN as i64
+}
+
+fn materialize_product_interval_safety(pair: &(String, String), state: &mut AbstractState) {
+    let interval = product_interval_for_pair(pair, state);
+    if interval.max <= i32::MAX as i64 {
+        state.product_upper_safe.insert(pair.clone());
+    }
+    if interval.min >= i32::MIN as i64 {
+        state.product_lower_safe.insert(pair.clone());
+    }
+}
+
+fn record_product_division_bound(
+    smaller: &Expression,
+    larger: &Expression,
+    state: &mut AbstractState,
+) {
+    // `factor <= bound / divisor`. Multiplication reverses the relation for a
+    // negative divisor. The comparison is useful only once the current path
+    // has proved the divisor's sign.
+    let Expression::Apply(div) = larger else {
+        return;
+    };
+    let [Expression::Word(op), numerator, divisor] = div.as_slice() else {
+        return;
+    };
+    if op != "/" {
+        return;
+    }
+    let Some(bound) = integer_constant(numerator, state) else {
+        return;
+    };
+    let divisor_range = integer_interval(divisor, state).unwrap_or(IntInterval::I32);
+    let pair = canonical_product_pair(smaller, divisor, state);
+    if divisor_range.min > 0 && bound == i32::MAX {
+        state.product_upper_safe.insert(pair.clone());
+    } else if divisor_range.max < 0 && bound == i32::MIN {
+        state.product_lower_safe.insert(pair.clone());
+    }
+    materialize_product_interval_safety(&pair, state);
+}
+
+fn record_product_comparison(
+    left: &Expression,
+    right: &Expression,
+    comparison: &str,
+    state: &mut AbstractState,
+) {
+    match comparison {
+        "<" | "<=" => {
+            record_product_division_bound(left, right, state);
+            // `(bound / divisor) <= factor` is the lower-bound form for a
+            // positive divisor and the upper-bound form for a negative one.
+            record_reversed_product_division_bound(left, right, state);
+        }
+        ">" | ">=" => {
+            record_product_division_bound(right, left, state);
+            record_reversed_product_division_bound(right, left, state);
+        }
+        _ => {}
+    }
+}
+
+fn record_reversed_product_division_bound(
+    smaller: &Expression,
+    larger: &Expression,
+    state: &mut AbstractState,
+) {
+    let Expression::Apply(div) = smaller else {
+        return;
+    };
+    let [Expression::Word(op), numerator, divisor] = div.as_slice() else {
+        return;
+    };
+    if op != "/" {
+        return;
+    }
+    let Some(bound) = integer_constant(numerator, state) else {
+        return;
+    };
+    let divisor_range = integer_interval(divisor, state).unwrap_or(IntInterval::I32);
+    let pair = canonical_product_pair(larger, divisor, state);
+    if divisor_range.min > 0 && bound == i32::MIN {
+        state.product_lower_safe.insert(pair.clone());
+    } else if divisor_range.max < 0 && bound == i32::MAX {
+        state.product_upper_safe.insert(pair.clone());
+    }
+    materialize_product_interval_safety(&pair, state);
 }
 
 fn affine_expression(expr: &Expression, state: &AbstractState) -> Option<(AffineTerms, i64)> {
@@ -929,10 +1098,17 @@ fn state_for_false_branch(expr: &Expression, facts: &AbstractState) -> AbstractS
 fn constrain_integer_range(expr: &Expression, facts: &mut AbstractState, constraint: IntInterval) {
     let key = canonical_scalar(expr, facts);
     let current = integer_interval(expr, facts).unwrap_or(IntInterval::I32);
-    let narrowed = IntInterval {
+    let mut narrowed = IntInterval {
         min: current.min.max(constraint.min),
         max: current.max.min(constraint.max),
     };
+    if facts.nonzero.contains(&key) {
+        if narrowed.min == 0 && narrowed.max > 0 {
+            narrowed.min = 1;
+        } else if narrowed.max == 0 && narrowed.min < 0 {
+            narrowed.max = -1;
+        }
+    }
     if narrowed.min <= narrowed.max {
         facts.integer_ranges.insert(key.clone(), narrowed);
         if narrowed.excludes_zero() {
@@ -1041,6 +1217,7 @@ fn collect_numeric_guard_facts(
                     }
                 };
                 record_effective_affine_comparison(left, right, effective, facts);
+                record_product_comparison(left, right, effective, facts);
                 let left_key = canonical_scalar(left, facts);
                 let right_key = canonical_scalar(right, facts);
                 match effective {
@@ -1074,6 +1251,7 @@ fn collect_numeric_guard_facts(
                 }
             };
             record_effective_affine_comparison(left, right, effective, facts);
+            record_product_comparison(left, right, effective, facts);
             match effective {
                 "=" => constrain_integer_range(value, facts, IntInterval::exact(bound)),
                 "!=" if bound == 0 => {
@@ -1304,6 +1482,12 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     facts
         .affine_upper_bounds
         .retain(|terms, _| !terms.0.iter().any(|(atom, _)| atom == name));
+    facts
+        .product_upper_safe
+        .retain(|(left, right)| left != name && right != name);
+    facts
+        .product_lower_safe
+        .retain(|(left, right)| left != name && right != name);
 
     if remains_nonnegative {
         facts.nonnegative.insert(name.to_string());
@@ -1343,6 +1527,12 @@ fn forget_lambda_parameter(expr: &Expression, facts: &mut AbstractState) {
             facts
                 .affine_upper_bounds
                 .retain(|terms, _| !terms.0.iter().any(|(atom, _)| atom == name));
+            facts
+                .product_upper_safe
+                .retain(|(left, right)| left != name && right != name);
+            facts
+                .product_lower_safe
+                .retain(|(left, right)| left != name && right != name);
         }
         Expression::Apply(items) => {
             for item in items {
@@ -1471,7 +1661,13 @@ fn validate_static_bounds_expr(
             integer_arithmetic_interval(op, left, right)
                 .expect("validated integer arithmetic operator")
         });
-        if !result.fits_i32() {
+        let product_is_proven_safe = if op == "*" {
+            let pair = canonical_product_pair(&items[1], &items[2], facts);
+            product_upper_is_safe(&pair, facts) && product_lower_is_safe(&pair, facts)
+        } else {
+            false
+        };
+        if !result.fits_i32() && !product_is_proven_safe {
             let kind = match (
                 result.min < IntInterval::I32.min,
                 result.max > IntInterval::I32.max,
@@ -1576,6 +1772,8 @@ fn validate_static_bounds_expr(
                 scalar_aliases: facts.scalar_aliases.clone(),
                 leq_pairs: facts.leq_pairs.clone(),
                 affine_upper_bounds: facts.affine_upper_bounds.clone(),
+                product_upper_safe: facts.product_upper_safe.clone(),
+                product_lower_safe: facts.product_lower_safe.clone(),
                 guard_summaries: facts.guard_summaries.clone(),
                 predicate_summaries: facts.predicate_summaries.clone(),
                 ..AbstractState::default()
@@ -2245,6 +2443,72 @@ mod tests {
         "#;
         assert!(analyze(wrong_upper_guard, 2)
             .expect_err("an unrelated upper guard must not prove addition safe")
+            .contains("overflow"));
+    }
+
+    #[test]
+    fn structural_predicate_proves_guarded_multiplication_safe() {
+        let direct_positive = r#"
+            (let guarded-multiply
+              (lambda (a b)
+                (if (and (> a 0) (> b 0) (<= a (/ 2147483647 b)))
+                    (* a b)
+                    0)))
+        "#;
+        assert_eq!(analyze(direct_positive, 1), Ok(()));
+        assert_eq!(analyze("(let f (lambda a b (if (and (> a 0) (< b 0) (>= b (/ -2147483648 a))) (* a b) 0)))", 1), Ok(()));
+        assert_eq!(analyze("(let f (lambda a b (if (and (< a 0) (> b 0) (>= a (/ -2147483648 b))) (* a b) 0)))", 1), Ok(()));
+        assert_eq!(
+            analyze(
+                "(let f (lambda a b (if (and (< a 0) (< b 0) (>= a (/ 2147483647 b))) (* a b) 0)))",
+                1
+            ),
+            Ok(())
+        );
+
+        let safe = r#"
+            (let INT-MIN -2147483648)
+            (let INT-MAX 2147483647)
+            (let multiplication-fits?
+              (lambda (a b)
+                (if (= a 0) true
+                  (if (= b 0) true
+                    (if (> a 0)
+                      (if (> b 0)
+                          (<= a (/ INT-MAX b))
+                          (>= b (/ INT-MIN a)))
+                      (if (> b 0)
+                          (>= a (/ INT-MIN b))
+                          (>= a (/ INT-MAX b))))))))
+            (let guarded-multiply
+              (lambda (a b)
+                (if (multiplication-fits? a b) (* a b) 0)))
+        "#;
+        assert_eq!(analyze(safe, 4), Ok(()));
+
+        let wrong_guard = r#"
+            (let INT-MAX 2147483647)
+            (let multiplication-fits?
+              (lambda (a b) (or (= a 0) (<= a INT-MAX))))
+            (let guarded-multiply
+              (lambda (a b)
+                (if (multiplication-fits? a b) (* a b) 0)))
+        "#;
+        assert!(analyze(wrong_guard, 3)
+            .expect_err("an unrelated guard must not prove multiplication safe")
+            .contains("overflow"));
+
+        let invalidated = r#"
+            (let guarded-multiply
+              (lambda (a b)
+                (block
+                  (mut x a)
+                  (if (and (> x 0) (> b 0) (<= x (/ 2147483647 b)))
+                      (block (alter! x 2147483647) (* x b))
+                      0))))
+        "#;
+        assert!(analyze(invalidated, 1)
+            .expect_err("mutation must invalidate an earlier product proof")
             .contains("overflow"));
     }
 
