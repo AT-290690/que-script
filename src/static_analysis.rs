@@ -1095,6 +1095,36 @@ fn state_for_false_branch(expr: &Expression, facts: &AbstractState) -> AbstractS
     state_for_branch(expr, facts, false)
 }
 
+fn known_integer_predicate(expr: &Expression, state: &AbstractState) -> Option<bool> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    let [Expression::Word(op), left, right] = items.as_slice() else {
+        return None;
+    };
+    if !matches!(op.as_str(), "=" | ">" | ">=" | "<" | "<=") {
+        return None;
+    }
+    let (Some(left), Some(right)) =
+        (integer_interval(left, state), integer_interval(right, state))
+    else {
+        return None;
+    };
+    match op.as_str() {
+        "=" if left.max < right.min || right.max < left.min => Some(false),
+        "=" if left.min == left.max && left == right => Some(true),
+        ">" if left.min > right.max => Some(true),
+        ">" if left.max <= right.min => Some(false),
+        ">=" if left.min >= right.max => Some(true),
+        ">=" if left.max < right.min => Some(false),
+        "<" if left.max < right.min => Some(true),
+        "<" if left.min >= right.max => Some(false),
+        "<=" if left.max <= right.min => Some(true),
+        "<=" if left.min > right.max => Some(false),
+        _ => None,
+    }
+}
+
 fn constrain_integer_range(expr: &Expression, facts: &mut AbstractState, constraint: IntInterval) {
     let key = canonical_scalar(expr, facts);
     let current = integer_interval(expr, facts).unwrap_or(IntInterval::I32);
@@ -1128,6 +1158,9 @@ fn predicate_result_state(
             return ((value == "true") == desired).then(|| state.clone());
         }
     }
+    if let Some(known) = known_integer_predicate(expr, state) {
+        return (known == desired).then(|| state.clone());
+    }
     let mut result = state.clone();
     collect_numeric_guard_facts(expr, &mut result, desired, expansion_depth);
     Some(result)
@@ -1145,19 +1178,24 @@ fn collect_numeric_guard_facts(
     match items.as_slice() {
         [Expression::Word(op), condition, consequent, alternate] if op == "if" => {
             let mut outcomes = Vec::new();
-            let mut true_path = facts.clone();
-            collect_numeric_guard_facts(condition, &mut true_path, true, expansion_depth);
-            if let Some(outcome) =
-                predicate_result_state(consequent, &true_path, is_true, expansion_depth)
-            {
-                outcomes.push(outcome);
+            let known_condition = known_integer_predicate(condition, facts);
+            if known_condition != Some(false) {
+                let mut true_path = facts.clone();
+                collect_numeric_guard_facts(condition, &mut true_path, true, expansion_depth);
+                if let Some(outcome) =
+                    predicate_result_state(consequent, &true_path, is_true, expansion_depth)
+                {
+                    outcomes.push(outcome);
+                }
             }
-            let mut false_path = facts.clone();
-            collect_numeric_guard_facts(condition, &mut false_path, false, expansion_depth);
-            if let Some(outcome) =
-                predicate_result_state(alternate, &false_path, is_true, expansion_depth)
-            {
-                outcomes.push(outcome);
+            if known_condition != Some(true) {
+                let mut false_path = facts.clone();
+                collect_numeric_guard_facts(condition, &mut false_path, false, expansion_depth);
+                if let Some(outcome) =
+                    predicate_result_state(alternate, &false_path, is_true, expansion_depth)
+                {
+                    outcomes.push(outcome);
+                }
             }
             if let Some(first) = outcomes
                 .into_iter()
@@ -2434,6 +2472,20 @@ mod tests {
                 (if (int/add-safe? a b) (+ a b) a)))
         "#;
         assert_eq!(analyze(safe, 4), Ok(()));
+
+        let literal_operand = r#"
+            (let INT-MIN -2147483648)
+            (let INT-MAX 2147483647)
+            (let add-fits?
+              (lambda (a b)
+                (if (> b 0)
+                    (<= a (- INT-MAX b))
+                    (if (< b 0) (>= a (- INT-MIN b)) true))))
+            (let increment
+              (lambda index
+                (if (not (add-fits? index 1)) index (+ index 1))))
+        "#;
+        assert_eq!(analyze(literal_operand, 4), Ok(()));
 
         let wrong_upper_guard = r#"
             (let INT-MAX 2147483647)
