@@ -278,8 +278,25 @@ fn product_lower_is_safe(pair: &(String, String), state: &AbstractState) -> bool
         || product_interval_for_pair(pair, state).min >= i32::MIN as i64
 }
 
-fn materialize_product_interval_safety(pair: &(String, String), state: &mut AbstractState) {
-    let interval = product_interval_for_pair(pair, state);
+fn refined_integer_interval(expr: &Expression, state: &AbstractState) -> IntInterval {
+    state
+        .integer_ranges
+        .get(&canonical_scalar(expr, state))
+        .copied()
+        .or_else(|| integer_interval(expr, state))
+        .unwrap_or(IntInterval::I32)
+}
+
+fn materialize_product_expression_safety(
+    left: &Expression,
+    right: &Expression,
+    pair: &(String, String),
+    state: &mut AbstractState,
+) {
+    let left = refined_integer_interval(left, state);
+    let right = refined_integer_interval(right, state);
+    let interval = integer_arithmetic_interval("*", left, right)
+        .expect("multiplication interval is supported");
     if interval.max <= i32::MAX as i64 {
         state.product_upper_safe.insert(pair.clone());
     }
@@ -308,14 +325,14 @@ fn record_product_division_bound(
     let Some(bound) = integer_constant(numerator, state) else {
         return;
     };
-    let divisor_range = integer_interval(divisor, state).unwrap_or(IntInterval::I32);
+    let divisor_range = refined_integer_interval(divisor, state);
     let pair = canonical_product_pair(smaller, divisor, state);
     if divisor_range.min > 0 && bound == i32::MAX {
         state.product_upper_safe.insert(pair.clone());
     } else if divisor_range.max < 0 && bound == i32::MIN {
         state.product_lower_safe.insert(pair.clone());
     }
-    materialize_product_interval_safety(&pair, state);
+    materialize_product_expression_safety(smaller, divisor, &pair, state);
 }
 
 fn record_product_comparison(
@@ -356,14 +373,14 @@ fn record_reversed_product_division_bound(
     let Some(bound) = integer_constant(numerator, state) else {
         return;
     };
-    let divisor_range = integer_interval(divisor, state).unwrap_or(IntInterval::I32);
+    let divisor_range = refined_integer_interval(divisor, state);
     let pair = canonical_product_pair(larger, divisor, state);
     if divisor_range.min > 0 && bound == i32::MIN {
         state.product_lower_safe.insert(pair.clone());
     } else if divisor_range.max < 0 && bound == i32::MAX {
         state.product_upper_safe.insert(pair.clone());
     }
-    materialize_product_interval_safety(&pair, state);
+    materialize_product_expression_safety(larger, divisor, &pair, state);
 }
 
 fn affine_expression(expr: &Expression, state: &AbstractState) -> Option<(AffineTerms, i64)> {
@@ -2537,6 +2554,33 @@ mod tests {
                 (if (multiplication-fits? a b) (* a b) 0)))
         "#;
         assert_eq!(analyze(safe, 4), Ok(()));
+
+        let repeated_expression = r#"
+            (let INT-MIN -2147483648)
+            (let INT-MAX 2147483647)
+            (let add-fits?
+              (lambda (a b)
+                (if (> b 0)
+                    (<= a (- INT-MAX b))
+                    (if (< b 0) (>= a (- INT-MIN b)) true))))
+            (let multiply-fits?
+              (lambda (a b)
+                (if (= a 0) true
+                  (if (= b 0) true
+                    (if (> a 0)
+                      (if (> b 0)
+                          (<= a (/ INT-MAX b))
+                          (>= b (/ INT-MIN a)))
+                      (if (> b 0)
+                          (>= a (/ INT-MIN b))
+                          (>= a (/ INT-MAX b))))))))
+            (let combine
+              (lambda (a b c)
+                (if (not (add-fits? a b)) 0
+                  (if (not (multiply-fits? (+ a b) c)) 0
+                    (* (+ a b) c)))))
+        "#;
+        assert_eq!(analyze(repeated_expression, 5), Ok(()));
 
         let wrong_guard = r#"
             (let INT-MAX 2147483647)
