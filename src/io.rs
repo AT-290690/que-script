@@ -1282,10 +1282,8 @@ fn native_shell_learn() -> &'static str {
     - (apply f a b) is an alias for nested application, so `(apply (f a) b)` matches `((f a) b)`.\n\
     - Everything is an expression; last expression is the return value.\n\
     - (let name value) creates immutable bindings.\n\
-    - (do e1 e2 ... en) evaluates in order, returns en, and does NOT create a new scope.\n\
-    - Because do does not scope, repeated lets collide: (do (let i 1) (let i 2)) is invalid.\n\
     - (block e1 e2 ... en) evaluates in order, returns en, and creates a new lexical scope.\n\
-    - Use block when reusing local names in separate regions: (do (block (let i 1) i) (block (let i 2) i)).\n\
+    - Use block for branch-local bindings and when local names need a fresh scope.\n\
     - loop macros create their own block, so sequential loops may safely reuse the same index name.\n\
     - Unit is 0 (nil).\n\
     \n\
@@ -1299,8 +1297,8 @@ fn native_shell_learn() -> &'static str {
     - (if cond then) is valid and inserts nil as the else branch.\n\
     - (cond c1 e1 c2 e2 ... default)\n\
     - (unless cond then) and (unless cond then else) are inverted if forms, not variadic bodies.\n\
-    - For multiple unless expressions, wrap the branch: (unless cond (do e1 e2)) or (unless cond (block e1 e2)).\n\
-    - (when cond body...) is variadic and wraps its body in do.\n\
+    - For multiple unless expressions, wrap the branch: (unless cond (block e1 e2)).\n\
+    - (when cond body...) accepts multiple body expressions.\n\
     - Branches must return the same type.\n\
     - Effect-only branches commonly omit else: (if cond (alter! x 1)).\n\
     - Loop with (while cond body). Multiple while body expressions are allowed.\n\
@@ -1326,7 +1324,7 @@ fn native_shell_learn() -> &'static str {
     - quote returns syntax as data; qq builds syntax conveniently.\n\
     - qq builds syntax, uq inserts one syntax value, uqs splices a rest syntax list into qq.\n\
     - gensym returns a fresh syntax name for generated bindings.\n\
-    - Macro bodies can use compile-time do and let.\n\
+    - Macro bodies can sequence compile-time bindings and expressions.\n\
     - (macroexpand-1 expr) expands one macro layer and returns the expanded source as a string.\n\
     - (macroexpand expr) fully expands recursively and returns the expanded source as a string.\n\
     - Macros run at compile time before type inference; infer only sees the expanded result.\n\
@@ -1358,7 +1356,7 @@ fn native_shell_learn() -> &'static str {
     - Run `que --pitfalls` for common Eclisp gotchas around scope, mutation, numbers, macros, and optimization.\n\
     \n\
     Built-ins:\n\
-    - set! pop! length get car cdr cons fst snd while block unless when when-not\n\
+    - set! pop! length get car cdr cons fst snd while do block unless when when-not\n\
     + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! time! random! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
@@ -1621,14 +1619,13 @@ IMPERATIVE
 
 SEQUENCING AND SCOPE
 
-; do sequences expressions and returns the last one.
-; It does not create a lexical scope; block does.
+; Function bodies accept multiple expressions directly.
+; The final expression is returned.
 (let greet!
   (lambda (name)
-    (do
-      (println! "hello")
-      (println! name)
-      name)))
+    (println! "hello")
+    (println! name)
+    name))
 
 ; Use block for branch-local temporary names. Both branches can use
 ; `left` and `right`, and a block may alter an outer mut binding.
@@ -1657,8 +1654,7 @@ fn native_shell_pitfalls() -> &'static str {
     "Eclisp pitfalls and gotchas:\n\
     \n\
     Scoping:\n\
-    - do sequences expressions, returns the last expression, and does NOT create a lexical scope.\n\
-    - Reusing a let name in the same do collides: (do (let x 1) (let x 2)) is invalid.\n\
+    - Function, loop, and when bodies accept multiple expressions directly.\n\
     - Use block when branch-local or temporary bindings need reusable names.\n\
     - block creates a fresh lexical scope and returns its last expression.\n\
     - block is a lexical sequence, not a lambda: its local names do not escape, but it can alter! outer mut bindings.\n\
@@ -1672,8 +1668,8 @@ fn native_shell_pitfalls() -> &'static str {
     - One-sided if is best for side effects: (if cond (push! out x)). Do not add explicit nil just to satisfy the branch.\n\
     - Branches must still type-check. If a one-sided if body returns a real value, it may conflict with implicit unit.\n\
     - unless is inverted if: (unless cond then) or (unless cond then else). It is not a variadic body form.\n\
-    - For multiple unless effects, write (unless cond (do e1 e2)) or (unless cond (block e1 e2)).\n\
-    - when is variadic and wraps its body in do.\n\
+    - For multiple unless effects, write (unless cond (block e1 e2)).\n\
+    - when accepts multiple body expressions.\n\
     \n\
     Mutation and effects:\n\
     - A ! suffix is optional; mutation and I/O are inferred independently of the function name.\n\
@@ -1745,7 +1741,7 @@ fn native_shell_style() -> &'static str {
     - Prefer grouped lambda params: (lambda (a b) body).\n\
     - Avoid old bare params in new code: prefer (lambda (a b) ...) over (lambda a b ...).\n\
     - A lambda can have multiple body expressions; the last expression is returned.\n\
-    - Do not wrap every lambda body in do. Use plain multiple body expressions when no explicit grouping is needed.\n\
+    - Use plain multiple body expressions when no explicit grouping is needed.\n\
     - Use letrec only when the function calls itself by name. Use let for non-recursive functions.\n\
     \n\
     Pipelines:\n\
@@ -1757,19 +1753,17 @@ fn native_shell_style() -> &'static str {
     - Wrong: (|> xs filter odd? map square sum).\n\
     \n\
     Scope and sequencing:\n\
-    - do sequences expressions but does not create a new scope.\n\
     - block sequences expressions and creates a new lexical scope.\n\
     - Use block around if/cond branches and other regions when local names such as left, right, current, or result may be reused.\n\
     - When generating Que code, default to block for branch-local temporaries so a complete generated program does not suffer accidental name collisions.\n\
     - loop macros already introduce a block; reuse clear index names such as i in sequential loops instead of inventing i2, i3, and so on.\n\
-    - Use do only when you need a single branch expression containing multiple effects/results and no fresh scope.\n\
     \n\
     Conditionals:\n\
     - Prefer (if cond then else) for value-producing branches.\n\
     - For side-effect-only conditionals, omit the else branch: (if cond (push! out x)).\n\
     - Do not add explicit nil just to satisfy an if branch.\n\
     - unless is inverted if: (unless cond then) or (unless cond then else). It is not a variadic body form.\n\
-    - For multiple unless effects, write: (unless cond (do effect1 effect2)).\n\
+    - For multiple unless effects, write: (unless cond (block effect1 effect2)).\n\
     - Use block inside branches if you declare temporary bindings; this keeps independently written or generated branches composable.\n\
     \n\
     Data style:\n\

@@ -173,9 +173,8 @@ For large piped input, stream chunks and stop early by returning `true`:
 (let total [])
 (stdin/chunks! 65536
   (lambda (chunk)
-    (do
-      (push! total (length chunk))
-      false)))
+    (push! total (length chunk))
+    false))
 total
 ```
 
