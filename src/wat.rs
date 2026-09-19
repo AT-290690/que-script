@@ -6197,6 +6197,8 @@ fn is_borrowed_managed_rhs_with_env(
                     | "bools"
                     | "decimals"
                     | "strings"
+                    | "__vec_new_zeroed_i32"
+                    | "__vec_new_uninit_i32"
                     | "serialize"
                     | "deserialize"
             ) {
@@ -6395,38 +6397,6 @@ fn expr_uses_name_via_local_lambda(
     }
 }
 
-fn expr_contains_store_like_mutation(expr: &Expression) -> bool {
-    match expr {
-        Expression::Apply(items) => {
-            if let Some(Expression::Word(op)) = items.first() {
-                if matches!(
-                    op.as_str(),
-                    "set!"
-                        | "push!"
-                        | "append!"
-                        | "pop!"
-                        | "alter!"
-                        | "&alter!"
-                        | "set"
-                        | "=!"
-                        | "Table/set!"
-                        | "Table/update!"
-                        | "Table/update-or!"
-                        | "Table/push-or!"
-                        | "Set/add!"
-                        | "Heap/push!"
-                        | "std/vector/push!"
-                        | "std/vector/append!"
-                ) {
-                    return true;
-                }
-            }
-            items.iter().any(expr_contains_store_like_mutation)
-        }
-        _ => false,
-    }
-}
-
 fn append_last_use_releases_for_do_expr(
     parts: &mut Vec<String>,
     managed_do_locals: &[(String, usize)],
@@ -6434,9 +6404,6 @@ fn append_last_use_releases_for_do_expr(
     later_exprs: &[Expression],
     lambda_bindings: &HashMap<String, TypedExpression>,
 ) {
-    if expr_contains_store_like_mutation(current_expr) {
-        return;
-    }
     for (name, slot) in managed_do_locals {
         if (expr_uses_name_as_value(name, current_expr, false)
             || expr_uses_name_via_local_lambda(name, current_expr, lambda_bindings))
@@ -8782,13 +8749,44 @@ fn compile_alter(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         .locals
         .get(&target_name)
         .ok_or_else(|| format!("alter! unknown local '{}'", target_name))?;
-    let value = compile_expr(
-        node.children
-            .get(2)
-            .ok_or_else(|| "alter! missing value".to_string())?,
-        ctx,
-    )?;
-    Ok(format!("{value}\nlocal.set {local_idx}\ni32.const 0"))
+    let value_node = node
+        .children
+        .get(2)
+        .ok_or_else(|| "alter! missing value".to_string())?;
+    let value = compile_expr(value_node, ctx)?;
+    let Some(target_type) = ctx.local_types.get(&target_name) else {
+        return Ok(format!("{value}\nlocal.set {local_idx}\ni32.const 0"));
+    };
+    if !is_managed_local_type(target_type) {
+        return Ok(format!("{value}\nlocal.set {local_idx}\ni32.const 0"));
+    }
+
+    // A managed mutable local owns its current reference. Replacing it must
+    // release that ownership instead of simply overwriting the pointer. Keep
+    // the RHS in a temporary so self-assignment remains safe: borrowed values
+    // are retained before the old target is released, while fresh/owned values
+    // transfer their existing ownership directly into the local.
+    let value_tmp = ctx.tmp_i32;
+    let retain_borrowed = if is_borrowed_managed_rhs_expr(value_node, ctx.lambda_bindings) {
+        format!(
+            "local.get {value_tmp}\ncall {}\ndrop\n",
+            rc_retain_for_type(target_type)
+        )
+    } else {
+        String::new()
+    };
+    Ok(format!(
+        "{value}\n\
+         local.set {value_tmp}\n\
+         {retain_borrowed}\
+         local.get {local_idx}\n\
+         call {}\n\
+         drop\n\
+         local.get {value_tmp}\n\
+         local.set {local_idx}\n\
+         i32.const 0",
+        rc_release_for_type(target_type)
+    ))
 }
 
 fn compile_expr_discarding_result(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {

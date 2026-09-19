@@ -890,6 +890,87 @@ xs)"#,
     }
 
     #[test]
+    fn test_runtime_managed_mut_replacement_releases_old_value_and_keeps_new_value() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (&mut xs [1 2 3])
+                (&alter! xs [4 5 6])
+                (+ (get (&get xs) 0) (length (&get xs))))"#,
+            true,
+        );
+        assert_eq!(output.trim(), "7");
+    }
+
+    #[test]
+    fn test_runtime_managed_mut_self_assignment_is_alias_safe() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (&mut xs [1 2 3])
+                (&alter! xs (&get xs))
+                (set! (&get xs) 0 9)
+                (+ (get (&get xs) 0) (length (&get xs))))"#,
+            true,
+        );
+        assert_eq!(output.trim(), "12");
+    }
+
+    #[test]
+    fn test_wat_managed_alter_releases_previous_owned_local() {
+        let wat = compile_std_program_to_wat(
+            r#"(do
+                (&mut xs [1 2 3])
+                (&alter! xs [4 5 6])
+                (get (&get xs) 0))"#,
+            true,
+        );
+        let main = wat
+            .split("(func (export \"main\")")
+            .nth(1)
+            .expect("main export should exist");
+        assert!(
+            main.contains("call $rc_release_vec"),
+            "managed alter! must release the value previously owned by its local, got:\n{}",
+            main
+        );
+    }
+
+    #[test]
+    fn test_wat_exact_fill_constructor_transfers_fresh_ownership_without_retain() {
+        let wat = compile_std_program_to_wat(
+            r#"(do
+                (let make-board (lambda n (do
+                  (let out [])
+                  (mut i 0)
+                  (while (< i n)
+                    (set! out (length out) 0)
+                    (alter! i (+ i 1)))
+                  out)))
+                (let run (lambda () (do
+                  (let board (make-board 16))
+                  (length board))))
+                (run))"#,
+            true,
+        );
+        let run_fn = wat
+            .split("(func $v_run")
+            .nth(1)
+            .expect("run function should exist")
+            .split("\n  (func ")
+            .next()
+            .expect("run function body should exist");
+        assert!(
+            run_fn.contains("call $vec_new_zeroed_i32"),
+            "exact fill should use the zeroed constructor, got:\n{}",
+            run_fn
+        );
+        assert!(
+            !run_fn.contains("call $rc_retain_vec"),
+            "a fresh internal vector constructor must transfer ownership without an extra retain, got:\n{}",
+            run_fn
+        );
+    }
+
+    #[test]
     fn test_runtime_vector_of_mixed_tuple_literals_with_five_bools_and_string_compiles() {
         let output = run_program_output_with_std_and_opts(
             r#"(do (let xs [{ true false false true false "LK" }]) (length xs))"#,
