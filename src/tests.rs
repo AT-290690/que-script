@@ -1655,9 +1655,9 @@ xs)"#,
               (map
                 (lambda n (cons "row-" (Integer->String n) ",open,US"))
                 (range 1 2500)))
-            (let blob (join [nl] lines))
+            (let blob (join ['\n'] lines))
             (|> blob
-                (split [nl])
+                (split ['\n'])
                 (map (lambda row
                        (|> row
                            (split ",")
@@ -1934,7 +1934,7 @@ xs)"#,
                 (let parse-map
                   (lambda section
                     (do
-                      (let lines (split [nl] section))
+                      (let lines (split ['\n'] section))
                       (let out [])
                       (mut i 1)
                       (while (< i (length lines))
@@ -2052,7 +2052,7 @@ xs)"#,
 1969
 100756")
                 (let parse
-                    (lambda input (|> input (String->Vector nl) (map Chars->Integer))))
+                    (lambda input (|> input (String->Vector '\n') (map Chars->Integer))))
                 (let PARSED (parse INPUT))
                 (let part1
                     (lambda input
@@ -2868,6 +2868,23 @@ out"#,
         )
         .expect("empty char literal should infer");
         assert_eq!(typ.to_string(), "Char");
+    }
+
+    #[test]
+    fn test_char_literal_supports_common_escapes() {
+        let expr = crate::parser::build(r#"'\n' '\r' '\t' '\0' '\\' '\'' '\"'"#)
+            .expect("escaped character literals should build");
+        assert_eq!(
+            expr.to_lisp(),
+            "(do (char 10) (char 13) (char 9) (char 0) (char 92) (char 39) (char 34))"
+        );
+    }
+
+    #[test]
+    fn test_char_literal_rejects_unknown_escape() {
+        let error = crate::parser::build(r#"'\x'"#)
+            .expect_err("unknown character escapes should be rejected");
+        assert!(error.contains("Unknown character escape: \\x"), "{error}");
     }
 
     #[test]
@@ -6424,7 +6441,7 @@ parse-value"#;
                                         (= n 1337) \"leet\"\n\
                                         (= n 69) \";)\"\n\
                                         \"\")))))\n\
-    (Vector->String nl))";
+    (Vector->String '\n'))";
 
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
         let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
@@ -9762,7 +9779,7 @@ image
 01329801
 10456732")
 (let yx->key (lambda y x (join ['-'] (map (lambda c [ c ]) [ (as y Char) (as x Char) ]))))
-(let parse (lambda input (|> input (lambda __std_arg0 (String->Vector nl __std_arg0)) (lambda __std_arg0 (map Chars->Digits __std_arg0)))))
+(let parse (lambda input (|> input (lambda __std_arg0 (String->Vector '\n' __std_arg0)) (lambda __std_arg0 (map Chars->Digits __std_arg0)))))
 (let part1 (lambda matrix (do
   (let coords (points zero? matrix))
   (reduce (lambda a xs (do
@@ -10129,11 +10146,11 @@ D:=,=,=,+,=,=,=,+,=,=")
 ")
 (|>
  str
- (lambda __std_arg0 (String->Vector nl __std_arg0))
+ (lambda __std_arg0 (String->Vector '\n' __std_arg0))
  (lambda __std_arg0 (filter not-empty? __std_arg0)) ; trim
  (lambda __std_arg0 (map (lambda xs
    (|> xs
-     (lambda __std_arg0 (String->Vector sp __std_arg0))
+     (lambda __std_arg0 (String->Vector ' ' __std_arg0))
      (lambda __std_arg0 (filter not-empty? __std_arg0))
      (lambda __std_arg0 (filter/i (lambda _ i (even? i)) __std_arg0))
      (lambda __std_arg0 (map Chars->Integer __std_arg0)))) __std_arg0))
@@ -10219,7 +10236,7 @@ D:=,=,=,+,=,=,=,+,=,=")
 1
 -3")
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
-(let parse (lambda input (|> input (lambda __std_arg0 (String->Vector nl __std_arg0)) (lambda __std_arg0 (map Chars->Integer __std_arg0)))))
+(let parse (lambda input (|> input (lambda __std_arg0 (String->Vector '\n' __std_arg0)) (lambda __std_arg0 (map Chars->Integer __std_arg0)))))
 (let part1 (lambda ip (do
     (let input (copy ip))
     (integer pointer (get input))
@@ -10377,7 +10394,7 @@ out
     (|>
         input
         (Vector/cons [','])
-        (String->Vector sp)
+        (String->Vector ' ')
         (map (lambda x (drop/last 1 x)))
         (map (lambda [ D . M ] [ (Char->Int D) (Chars->Integer M) ])))))
 (let delta/pairs (lambda [ y x ] (+ (abs y) (abs x))))
@@ -10621,7 +10638,7 @@ L82")
 ; (let INPUT "R1000")
 (let parse (lambda xs
   (|> xs
-    (String->Vector nl)
+    (String->Vector '\n')
     (map (lambda [d . r]
       [(if (=# d 'L') -1 1) (Chars->Integer r)])))))
 
@@ -10646,7 +10663,7 @@ L82")
 234234234234278
 818181911112111")
 
-(let parse (String->Vector nl))
+(let parse (String->Vector '\n'))
 (let part1 (lambda parsed (do
   (integer S 0)
   (|> parsed (for (lambda inp (do
@@ -10686,7 +10703,7 @@ L82")
 .@@@@@@@@.
 @.@.@@@.@.")
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
-(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (map (lambda x (if (=# x '@') 1 0)) x))))))
+(let parse (lambda input (|> input (String->Vector '\n') (map (lambda x (map (lambda x (if (=# x '@') 1 0)) x))))))
 (let part1 (lambda input (do
   (integer TOTAL 0)
   (loop/range/exclusive y 0 (length input) (do
@@ -10729,7 +10746,7 @@ L82")
   (let [ p1 p2 ] (String->Vector '*' input))
   (let A (drop/last 1 p1))
   (let B (drop/first 1 p2))
-  { (map (lambda x (map BigInt/new (String->Vector '-' x))) (String->Vector nl A)) (map BigInt/new (String->Vector nl B)) })))
+  { (map (lambda x (map BigInt/new (String->Vector '-' x))) (String->Vector '\n' A)) (map BigInt/new (String->Vector '\n' B)) })))
 
 (let part1 (lambda { ranges fruits } (length (filter (lambda fruit (some? (lambda [ low high ] (and (BigInt/gte? fruit low) (BigInt/lte? fruit high))) ranges)) fruits))))
 
@@ -10761,7 +10778,7 @@ L82")
   6 98  215 314
 *   +   *   +  ")
 (let parse (lambda input (do
-  (let groups (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (filter (lambda x (not (empty? x)))))))))
+  (let groups (|> input (String->Vector '\n') (map (lambda x (|> x (String->Vector ' ') (filter (lambda x (not (empty? x)))))))))
   (let op (map first (last groups)))
   (pop! groups)
   (let ints (map (lambda x (map BigInt/new x)) groups))
@@ -10799,7 +10816,7 @@ L82")
 ...............
 .^.^.^.^.^...^.
 ...............")
-(let parse (lambda input (String->Vector nl input)))
+(let parse (lambda input (String->Vector '\n' input)))
 (let part1 (lambda input (do
   (integer total 0)
   (let visited [[] [] [] [] [] [] [] [] []])
@@ -10856,7 +10873,7 @@ L82")
 ...............
 .^.^.^.^.^...^.
 ...............")
-(let parse (lambda input (String->Vector nl input)))
+(let parse (lambda input (String->Vector '\n' input)))
 (let solution (lambda input (do
   (let data (map (lambda x (map identity x)) input))
   (&mut beam [ 0 ])
@@ -10907,7 +10924,7 @@ L82")
 984,92,344
 425,690,689")
 (let distance/three-d (lambda [ x1 y1 z1 ] [ x2 y2 z2 ] (+ (square (- x2 x1)) (square (- y2 y1)) (square (- z2 z1)))))
-(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
+(let parse (lambda input (|> input (String->Vector '\n') (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
 (let part1 (lambda input (do
   (let len (length input))
   (let dist [])
@@ -10991,7 +11008,7 @@ L82")
 2,5
 2,3
 7,3")
-(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
+(let parse (lambda input (|> input (String->Vector '\n') (map (lambda x (|> x (String->Vector ',') (map Chars->Integer)))))))
 (let part1 (lambda input (do
   (let pairs (combination/pairs input))
   (let rect (lambda [ x1 y1 ] [ x2 y2 ] (* (+ 1 (abs (- x1 x2))) (+ 1 (abs (- y1 y2))))))
@@ -11026,7 +11043,7 @@ RRDDD
 LURDL
 UUUUD")
 
-(let parse (String->Vector nl))
+(let parse (String->Vector '\n'))
 (let part1 (lambda input (do
   (let pad [['1' '2' '3'] ['4' '5' '6'] ['7' '8' '9']])
   (let len (- (length pad) 1))
@@ -11074,7 +11091,7 @@ UUUUD")
                 "[\"1985\" \"5DB3\"]",
             ),
             (
-                r#"(let parse (lambda input (|> input (String->Vector nl) (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter digit? x))) (filter not-empty?) (map String->Integer)))))))
+                r#"(let parse (lambda input (|> input (String->Vector '\n') (map (lambda x (|> x (String->Vector ' ') (map (lambda x (filter digit? x))) (filter not-empty?) (map String->Integer)))))))
 (let part1 (lambda input (|> input (count (lambda [a b c] (and (> (+ a b) c) (> (+ b c) a) (> (+ a c) b)))))))
 (let part2 (lambda input (|> input
   (reduce (lambda a [A B C] (do
@@ -11190,7 +11207,7 @@ image
 (let parse
   (lambda input
     (|> input
-        (String->Vector nl)
+        (String->Vector '\n')
         (map (lambda row
                (map Char->Digit row))))))
 
@@ -11260,7 +11277,7 @@ brgr
 bbrgwb")
 
 (let parse (lambda input (do
-    (let lines (|> input (String->Vector nl)))
+    (let lines (|> input (String->Vector '\n')))
     {
       (|> lines (first) (String->Vector ',') (map (lambda xs (filter (lambda x (not (=# x ' '))) xs))))
       (|> lines (drop/first 2))
@@ -11315,7 +11332,7 @@ bbrgwb")
  2  0 12  3  7")
 ; [Char] -> {[Int] * [[[Int]]]}
 (let parse (lambda input (do
-  (let lines (|> input (String->Vector nl) (filter not-empty?)))
+  (let lines (|> input (String->Vector '\n') (filter not-empty?)))
   (let numbers (|> (car lines) (String->Vector ',') (map String->Integer)))
   (let boards (|> (cdr lines) (map (lambda xs (|> xs (String->Vector ' ') (filter not-empty?) (map String->Integer)))) (partition 5)))
   { numbers boards })))
@@ -11401,7 +11418,7 @@ bbrgwb")
 (let parse
   (lambda input
     (|> input
-        (String->Vector nl)
+        (String->Vector '\n')
         (filter not-empty?)
         (map
           (lambda line (do
@@ -11550,7 +11567,7 @@ bbrgwb")
     (do
       (let claims
         (|> input
-            (String->Vector nl)
+            (String->Vector '\n')
             (filter not-empty?)
             (map parse-claim)))
 
@@ -11580,7 +11597,7 @@ bbrgwb")
                 "[21 21]",
             ),
             (
-                r#"(let puncts ['!' ',' '.' '?' ' ' sq nl])
+                r#"(let puncts ['!' ',' '.' '?' ' ' '\'' '\n'])
 (let punct? (lambda x (some? (apply =# x) puncts)))
 
 (let palindrome? (comp (map lower) (exclude punct?) (S/comb match? reverse)))
@@ -11695,7 +11712,7 @@ bbrgwb")
             ),
 
             (
-                r#"(let parse (comp (String->Vector nl) (map String->Integer)))
+                r#"(let parse (comp (String->Vector '\n') (map String->Integer)))
 (let part1 (comp
   (map (lambda secret (do
     (integer SECRET secret)
@@ -11875,9 +11892,9 @@ DB   = postgres
 SECRET = SANTA")
 
 (let parse/env (comp
-                (String->Vector nl)
+                (String->Vector '\n')
                 (exclude empty?)
-                (map (comp (String->Vector sp)
+                (map (comp (String->Vector ' ')
                 (map (comp (exclude (apply =# '='))))
                 (exclude empty?)))))
 
@@ -12210,7 +12227,7 @@ d -> a")
 
 (let part2
   (lambda (text)
-    (let modified (cons text [nl] "956 -> b"))
+    (let modified (cons text ['\n'] "956 -> b"))
     (let rules (parse-input modified))
     (let cache (Table/new/capacity 512))
     (eval-wire! cache rules "a")))
@@ -12271,7 +12288,7 @@ Dublin to Belfast = 141")
 
 (letrec memory-length (lambda (line i total)
   (if (= i (- (length line) 1)) total
-        (if (=# (get line i) '\')
+        (if (=# (get line i) '\\')
             (memory-length line (if (=# (get line (+ i 1)) 'x') (+ i 4) (+ i 2)) (+ total 1))
             (memory-length line (+ i 1) (+ total 1))))))
 
@@ -12395,7 +12412,7 @@ humidity-to-location map:
 60 56 37
 56 93 4")
 
-(let blocks (split [nl nl] INPUT))
+(let blocks (split ['\n' '\n'] INPUT))
 
 (let parse-number
   (lambda (text) (BigInt/new text)))
@@ -12418,7 +12435,7 @@ humidity-to-location map:
 
 (let parse-map
   (lambda (section)
-    (let lines (split [nl] section))
+    (let lines (split ['\n'] section))
     (let out [])
     (loop/range/exclusive i 1 (length lines)
       (let line (get lines i))

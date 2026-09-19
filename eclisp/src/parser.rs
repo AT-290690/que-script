@@ -356,6 +356,7 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
     let mut in_string_start = None::<(usize, usize)>;
     let mut in_char_start = None::<(usize, usize)>;
     let mut string_escape = false;
+    let mut char_escape = false;
 
     for ch in source.chars() {
         ensure_line_delta(&mut line_deltas, line);
@@ -391,7 +392,11 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
         }
 
         if in_char_start.is_some() {
-            if ch == '\'' {
+            if char_escape {
+                char_escape = false;
+            } else if ch == '\\' {
+                char_escape = true;
+            } else if ch == '\'' {
                 in_char_start = None;
             }
             if ch == '\n' {
@@ -416,6 +421,7 @@ fn delimiter_debug_report(source: &str, mode: DelimiterMode) -> Option<String> {
             }
             '\'' => {
                 in_char_start = Some((line, col));
+                char_escape = false;
                 col += 1;
             }
             '\n' => {
@@ -1533,9 +1539,26 @@ fn preprocess(source: &str) -> Result<String, String> {
 
             '\'' => {
                 let mut s = String::new();
+                let mut escaped = false;
                 while let Some(&next) = chars.peek() {
                     chars.next();
-                    if next == '\'' {
+                    if escaped {
+                        let decoded = match next {
+                            'n' | 'r' | 't' | '0' | '\\' | '"' | '\'' => {
+                                decode_escape_char(next)
+                            }
+                            other => {
+                                return Err(format!(
+                                    "Unknown character escape: \\{}",
+                                    other
+                                ));
+                            }
+                        };
+                        s.push(decoded);
+                        escaped = false;
+                    } else if next == '\\' {
+                        escaped = true;
+                    } else if next == '\'' {
                         break;
                     } else {
                         s.push(next);
@@ -1545,7 +1568,7 @@ fn preprocess(source: &str) -> Result<String, String> {
                     out.push_str("(char 0)");
                     continue;
                 }
-                if s.len() != 1 {
+                if s.chars().count() != 1 {
                     return Err(format!("Char should be of length 1"));
                 }
                 out.push_str("(char ");

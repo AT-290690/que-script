@@ -4,13 +4,6 @@
   (&alter! *Id* (+ (&get *Id*) 1))
   id)))
 
-(let nl std/char/new-line)
-(let sp std/char/space)
-(let ep std/char/empty)
-(let dq std/char/double-quote)
-(let sq std/char/single-quote)
-(let bt std/char/backtick)
-(let cr std/char/carriage-return)
 
 (let const/int/max-safe 2147483647)
 (let const/int/min-safe -2147483648)

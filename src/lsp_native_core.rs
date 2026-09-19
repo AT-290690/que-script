@@ -962,6 +962,7 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
     let mut in_string = false;
     let mut in_char = false;
     let mut string_escape = false;
+    let mut char_escape = false;
 
     for ch in text.chars() {
         if in_comment {
@@ -986,7 +987,11 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
 
         if in_char {
             out.push(ch);
-            if ch == '\'' {
+            if char_escape {
+                char_escape = false;
+            } else if ch == '\\' {
+                char_escape = true;
+            } else if ch == '\'' {
                 in_char = false;
             }
             continue;
@@ -1004,6 +1009,7 @@ pub fn strip_comment_bodies_preserve_newlines(text: &str) -> String {
             }
             '\'' => {
                 in_char = true;
+                char_escape = false;
                 out.push(ch);
             }
             _ => out.push(ch),
@@ -1019,6 +1025,7 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
     let mut in_string = false;
     let mut in_char = false;
     let mut string_escape = false;
+    let mut char_escape = false;
     let mut string_id = 0usize;
     let mut char_id = 0usize;
 
@@ -1043,7 +1050,11 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
         }
 
         if in_char {
-            if ch == '\'' {
+            if char_escape {
+                char_escape = false;
+            } else if ch == '\\' {
+                char_escape = true;
+            } else if ch == '\'' {
                 in_char = false;
             }
             continue;
@@ -1068,6 +1079,7 @@ pub fn mask_literals_for_structural_parse(text: &str) -> String {
                 out.push(' ');
                 char_id += 1;
                 in_char = true;
+                char_escape = false;
             }
             _ => out.push(ch),
         }
@@ -2280,10 +2292,15 @@ fn extract_call_prefix_tokens(snippet: &str, max_tokens: usize) -> Vec<String> {
     let mut depth = 0usize;
     let mut in_string = false;
     let mut in_char = false;
+    let mut char_escape = false;
     for ch in inner.chars() {
         if in_char {
             cur.push(ch);
-            if ch == '\'' {
+            if char_escape {
+                char_escape = false;
+            } else if ch == '\\' {
+                char_escape = true;
+            } else if ch == '\'' {
                 in_char = false;
             }
             continue;
@@ -2302,6 +2319,7 @@ fn extract_call_prefix_tokens(snippet: &str, max_tokens: usize) -> Vec<String> {
             }
             '\'' => {
                 in_char = true;
+                char_escape = false;
                 cur.push(ch);
             }
             '(' | '[' | '{' => {

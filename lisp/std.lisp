@@ -1,35 +1,3 @@
-(let std/char/empty (get (string 0) 0))
-(let std/char/double-quote (get (string 34) 0))
-(let std/char/single-quote (get "'" 0))
-(let std/char/new-line (get (string 10) 0))
-(let std/char/space (get " " 0))
-(let std/char/tab (get "  " 0))
-(let std/char/comma (get "," 0))
-(let std/char/dot (get "." 0))
-(let std/char/semi-colon (get ";" 0))
-(let std/char/colon (get ":" 0))
-(let std/char/dash (get "-" 0))
-(let std/char/lower-dash (get "_" 0))
-(let std/char/left-brace (get "(" 0))
-(let std/char/right-brace (get ")" 0))
-(let std/char/curly-left-brace (get "{" 0))
-(let std/char/curly-right-brace (get "}" 0))
-(let std/char/left-bracket (get "[" 0))
-(let std/char/right-bracket (get "]" 0))
-(let std/char/pipe (get "|" 0))
-(let std/char/hash (get "#" 0))
-(let std/char/question-mark (get "?" 0))
-(let std/char/exclamation-mark (get "!" 0))
-(let std/char/minus (get "-" 0))
-(let std/char/plus (get "+" 0))
-(let std/char/equal (get "=" 0))
-(let std/char/asterix (get "*" 0))
-(let std/char/ampersand (get "&" 0))
-(let std/char/at (get "@" 0))
-(let std/char/backtick (get "`" 0))
-(let std/char/backslash (char 92))
-(let std/char/carriage-return (char 13))
-
 (let std/dec/floor (lambda n (-. n (mod. n 1.0))))
 (let std/dec/ceil (lambda n (do 
     (let sign (if (>=. n 0.0) 1 -1))
@@ -61,8 +29,8 @@
 (let std/vector/last (lambda xs (get xs (- (length xs) 1))))
 
 (let std/char/digit? (lambda ch (and (>=# ch '0') (<=# ch '9'))))
-(let std/char/upper (lambda ch (if (and (>=# ch 'a') (<=# ch 'z')) (-# ch std/char/space) ch)))
-(let std/char/lower (lambda ch (if (and (>=# ch 'A') (<=# ch 'Z')) (+# ch std/char/space) ch)))
+(let std/char/upper (lambda ch (if (and (>=# ch 'a') (<=# ch 'z')) (-# ch ' ') ch)))
+(let std/char/lower (lambda ch (if (and (>=# ch 'A') (<=# ch 'Z')) (+# ch ' ') ch)))
 
 (let std/dec/safe? (lambda value (and (>=. value const/dec/min-safe) (<=. value const/dec/max-safe))))
 (let std/dec/get-safe (lambda vrbl (if (std/dec/safe? (&get vrbl)) (&get vrbl) Dec)))
@@ -346,10 +314,10 @@ out)))
 (let std/vector/two-d/dec/range std/vector/dec/range)
 
 (let std/vector/char/blanks (lambda n (do
-    (let out [ std/char/empty ])
+    (let out [ '' ])
     (mut i 1)
     (while (< i n) (do
-        (set! out (length out) std/char/empty)
+        (set! out (length out) '')
         (alter! i (+ i 1))))
     out))) 
 
@@ -1041,7 +1009,7 @@ out)))
 (let std/vector/char/match? std/vector/char/equal?)
 (let std/vector/char/greater-or-equal? (lambda A B (or (std/vector/char/equal? A B) (std/vector/char/greater? A B))))
 (let std/vector/char/lesser-or-equal? (lambda A B (or (std/vector/char/equal? A B) (std/vector/char/lesser? A B))))
-(let std/vector/char/negative? (lambda str (=# (std/vector/first str) std/char/minus)))
+(let std/vector/char/negative? (lambda str (=# (std/vector/first str) '-')))
 
 (let std/vector/partition (lambda xs n (if (= n (length xs)) [xs] (do 
     (let a [])
@@ -1204,7 +1172,7 @@ out)))
     (mut i 0)
     (while (< i len) (do
       (let ch (get chars i))
-      (if (=# ch std/char/minus)
+      (if (=# ch '-')
           (alter! current-sign -1)
           (do
             (std/vector/push! out (* current-sign (std/convert/char->digit ch)))
@@ -1216,7 +1184,7 @@ out)))
     (let len (length chars))
     (mut sign 1)
     (mut i 0)
-    (if (and (> len 0) (=# (get chars 0) std/char/minus))
+    (if (and (> len 0) (=# (get chars 0) '-'))
         (do
           (alter! sign -1)
           (alter! i 1)))
@@ -1247,7 +1215,7 @@ out)))
     (std/convert/digits->integer (get parts 1)))) (Int->Dec pow)))))
 
 (let std/convert/chars->dec (lambda xs 
-  (if (=# (get xs 0) std/char/minus) (*. (std/convert/chars->ufloat (std/vector/slice xs 1 (length xs))) -1.0) (std/convert/chars->ufloat xs))))
+  (if (=# (get xs 0) '-') (*. (std/convert/chars->ufloat (std/vector/slice xs 1 (length xs))) -1.0) (std/convert/chars->ufloat xs))))
 
 (let std/convert/int->char/alphabet
   (lambda x offset (Int->Char (+ x (Char->Int offset)))))
@@ -1401,7 +1369,7 @@ heap)))
             (let x (mod n base))
             (std/vector/push! str (+# (Int->Char x) (char 48)))
             (alter! n (/ n base))))
-        (if neg? (do (std/vector/push! str std/char/dash) nil))
+        (if neg? (do (std/vector/push! str '-') nil))
         (mut left 0)
         (mut right (- (length str) 1))
         (while (< left right) (do
@@ -1437,7 +1405,7 @@ heap)))
             (tail-call/while! (+ i 1))) 
         i)))
     (tail-call/while! 1)
-    (cons left [std/char/dot] right)))))
+    (cons left ['.'] right)))))
 
 ; Experimental still
 (let std/vector/deque/new (lambda def [[ def ] []]))
@@ -1649,9 +1617,9 @@ q)))
       (alter! i (+ i 1))))
     out)))
 
-(let std/vector/char/lines (lambda xs (std/convert/string->vector xs std/char/new-line)))
-(let std/vector/char/words (lambda xs (std/convert/string->vector xs std/char/space)))
-(let std/vector/char/commas (lambda xs (std/convert/string->vector xs std/char/comma)))
+(let std/vector/char/lines (lambda xs (std/convert/string->vector xs '\n')))
+(let std/vector/char/words (lambda xs (std/convert/string->vector xs ' ')))
+(let std/vector/char/commas (lambda xs (std/convert/string->vector xs ',')))
 
 (let std/vector/int/pair/sub (lambda xs (- (get xs 0) (get xs 1))))
 (let std/vector/int/pair/add (lambda xs (+ (get xs 0) (get xs 1))))
@@ -3262,10 +3230,10 @@ q)))
   (std/vector/char/apply-patches "" patches))))
 
 (let std/char/space? (lambda c
-    (or (=# c std/char/space)
-        (=# c std/char/new-line)
-        (=# c std/char/carriage-return)
-        (=# c std/char/tab))))
+    (or (=# c ' ')
+        (=# c '\n')
+        (=# c '\r')
+        (=# c '\t'))))
 
 (let std/vector/char/trim/left (lambda xs (do
       (let len (length xs))
@@ -3334,12 +3302,12 @@ q)))
             (pop! right)
             (alter! len (- len 1)))
 
-        (cons left [std/char/dot] right)))))
+        (cons left ['.'] right)))))
 (let std/convert/dec->string-6 (std/convert/dec->string-scale 6))
 
 (let std/io/println! (lambda text (do
   (print! text)
-  (print! [nl]))))
+  (print! ['\n']))))
 (let println! std/io/println!)
 
 (let std/vector/char/matches-at?

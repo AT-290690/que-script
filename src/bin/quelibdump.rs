@@ -114,6 +114,8 @@ fn extract_top_level_forms(source: &str) -> io::Result<Vec<String>> {
     let mut in_string = false;
     let mut in_char = false;
     let mut in_comment = false;
+    let mut string_escape = false;
+    let mut char_escape = false;
     let mut start: Option<usize> = None;
 
     for (idx, ch) in source.char_indices() {
@@ -124,13 +126,21 @@ fn extract_top_level_forms(source: &str) -> io::Result<Vec<String>> {
             continue;
         }
         if in_string {
-            if ch == '"' {
+            if string_escape {
+                string_escape = false;
+            } else if ch == '\\' {
+                string_escape = true;
+            } else if ch == '"' {
                 in_string = false;
             }
             continue;
         }
         if in_char {
-            if ch == '\'' {
+            if char_escape {
+                char_escape = false;
+            } else if ch == '\\' {
+                char_escape = true;
+            } else if ch == '\'' {
                 in_char = false;
             }
             continue;
@@ -142,9 +152,11 @@ fn extract_top_level_forms(source: &str) -> io::Result<Vec<String>> {
             }
             '"' => {
                 in_string = true;
+                string_escape = false;
             }
             '\'' => {
                 in_char = true;
+                char_escape = false;
             }
             '(' | '[' | '{' => {
                 if stack.is_empty() && ch == '(' {

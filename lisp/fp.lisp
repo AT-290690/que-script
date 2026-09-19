@@ -364,7 +364,7 @@
               (alter! k (+ k 1))))))
       (alter! i (+ i 1))))
    out)))
-(let join/lines (lambda xs (join [nl] xs)))
+(let join/lines (lambda xs (join ['\n'] xs)))
 (let join/commas (lambda xs (join "," xs)))
 (let split/lines std/vector/char/lines)
 (let split/words std/vector/char/words)

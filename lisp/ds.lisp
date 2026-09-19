@@ -5,14 +5,14 @@
 
 (let Bool->Int (lambda x (if (=? x true) 1 0)))
 (let Bool->Char (lambda x (if (=? x true) '1' '0')))
-(let Char->Int (lambda x (if (>=# x std/char/empty) (as x Int) 0)))
-(let Char->Bool (lambda x (if (or (=# x std/char/empty) (=# x '0')) false true)))
+(let Char->Int (lambda x (if (>=# x '') (as x Int) 0)))
+(let Char->Bool (lambda x (if (or (=# x '') (=# x '0')) false true)))
 (let Int->Bool (lambda x 
     (cond 
         (<= x 0) false
         (>= x 1) true
         false)))
-(let Int->Char (lambda x (if (>= x 0) (as x Char) std/char/empty)))
+(let Int->Char (lambda x (if (>= x 0) (as x Char) '')))
 
 (let Tuple/new (lambda a b (tuple a b)))
 (let Tuple/swap std/tuple/swap)
@@ -218,7 +218,7 @@
 (let String/find std/string/find)
 (let String/find/last std/string/find/last)
 (let String/quote (lambda str (cons "'" str "'")))
-(let String/dquote (lambda str (cons [dq] str [dq])))
+(let String/dquote (lambda str (cons ['"'] str ['"'])))
 (let String->Bool (lambda str (or (std/vector/char/equal? text "true")
       (std/vector/char/equal? text "1")
       (std/vector/char/equal? text "yes"))))
@@ -298,7 +298,7 @@
 (let Heap/empty! std/vector/empty!)
 (let Vector->Heap (lambda fn xs (std/convert/vector->heap xs fn)))
 
-(let Matrix->String (comp (map (Vector->String sp)) (Vector->String nl)))
+(let Matrix->String (comp (map (Vector->String ' ')) (Vector->String '\n')))
 
 (let Date/iso->Vector
   (lambda ts
