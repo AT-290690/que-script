@@ -315,7 +315,7 @@
 (let fp/add (lambda b a (+ a b)))
 (let fp/sub (lambda b a (- a b)))
 (let fp/emod (lambda b a (emod a b)))
-(let fp/mod (lambda b a (mod a b)))
+(let fp/mod (lambda b a (% a b)))
 
 (let cond/dispatch (lambda fn? a b x (if (fn? x) a b)))
 ; experimental functions
@@ -392,7 +392,7 @@
       (mut i 0)
       (let len (length xs))
       (while (< i len) (do
-        (push! out (get xs (mod (+ start i) len)))
+        (push! out (get xs (% (+ start i) len)))
         (alter! i (+ i 1))))
       out)))
 

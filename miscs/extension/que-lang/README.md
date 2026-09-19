@@ -36,7 +36,6 @@ Notes:
 - Strings are vectors of chars: `[Char]`.
 - Vectors are homogeneous: all elements share the same type.
 - Tuples are fixed-shape product values and can contain different field types.
-- `do` sequences expressions without creating a new scope.
 - `block` sequences expressions and creates a new scope.
 
 Shell eval highlighting:
@@ -46,7 +45,7 @@ Use a `QUE` heredoc in shell files to get embedded Eclisp highlighting:
 ```bash
 que --eval "$(cat <<'QUE'
 (if (empty? ARGV) "Provide a file"
-  (do
+  (block
     (let [file] ARGV)
     (let text (map lower (read! file)))
     text))

@@ -1676,7 +1676,7 @@ fn validate_static_bounds_expr(
     };
     let op = items.first().and_then(word).unwrap_or("");
 
-    if matches!(op, "/" | "mod") && items.len() == 3 {
+    if matches!(op, "/" | "%") && items.len() == 3 {
         if !divisor_is_proven_nonzero(&items[2], facts) {
             record_diagnostic(
                 diagnostics,
@@ -2434,7 +2434,7 @@ mod tests {
         assert!(analyze("(let divide (lambda x divisor (/ x divisor)))", 1)
             .expect_err("unknown divisor should require a guard")
             .contains("divisor may be zero"));
-        assert!(analyze("(mod 10 0)", 1).is_err());
+        assert!(analyze("(% 10 0)", 1).is_err());
         assert_eq!(analyze("(/ 10 2)", 1), Ok(()));
     }
 

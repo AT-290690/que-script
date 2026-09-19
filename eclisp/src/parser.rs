@@ -961,7 +961,7 @@ fn macro_expr_as_int(expr: &Expression) -> Option<i32> {
 fn is_compile_time_int_op(op: &str) -> bool {
     matches!(
         op,
-        "+" | "-" | "*" | "/" | "mod" | "=" | "<" | "<=" | ">" | ">="
+        "+" | "-" | "*" | "/" | "%" | "=" | "<" | "<=" | ">" | ">="
     )
 }
 
@@ -1058,7 +1058,7 @@ fn eval_compile_time_int_op(
             }
             Ok(Expression::Int(out))
         }
-        "/" | "mod" => {
+        "/" | "%" => {
             if args.len() != 2 {
                 return Err(format!("compile-time '{}' expects exactly 2 arguments", op));
             }

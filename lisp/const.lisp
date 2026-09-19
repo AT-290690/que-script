@@ -83,7 +83,7 @@
                   (and (>=. a (*. const/dec/max-safe b))
                        (<=. a (*. const/dec/min-safe b)))))))))
 
-(let mod./safe? (lambda a b (and (=. a a) (not (=. b 0.0)))))
+(let %./safe? (lambda a b (and (=. a a) (not (=. b 0.0)))))
 
 (let const/dec/pi 3.142)
 (let const/dec/e 2.718)
@@ -332,16 +332,16 @@
       (< n 2) false
       (= n 2) true
       (= n 3) true
-      (= (mod n 2) 0) false
-      (= (mod n 3) 0) false
+      (= (% n 2) 0) false
+      (= (% n 3) 0) false
 
       (do
         (mut i 5)
         (mut ok true)
 
         (while (and ok (<= (* i i) n)) (do
-          (if (or (= (mod n i) 0)
-                  (= (mod n (+ i 2)) 0))
+          (if (or (= (% n i) 0)
+                  (= (% n (+ i 2)) 0))
               (alter! ok false))
 
           (alter! i (+ i 6))))

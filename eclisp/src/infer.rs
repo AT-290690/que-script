@@ -162,8 +162,8 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             | "/"
             | "/#"
             | "/."
-            | "mod"
-            | "mod."
+            | "%"
+            | "%."
             | "="
             | "=?"
             | "=#"
@@ -1924,8 +1924,8 @@ fn is_arithmetic_operator(name: &str) -> bool {
             | "/"
             | "/#"
             | "/."
-            | "mod"
-            | "mod."
+            | "%"
+            | "%."
     )
 }
 

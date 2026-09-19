@@ -1357,7 +1357,7 @@ fn native_shell_learn() -> &'static str {
     \n\
     Built-ins:\n\
     - set! pop! length get car cdr cons fst snd while do block unless when when-not\n\
-    + - * / mod = < > <= >= +. -. *. /. mod. =. <. >. <=. >=. +# -# *# /# =# =?\n\
+    + - * / % = < > <= >= +. -. *. /. %. =. <. >. <=. >=. +# -# *# /# =# =?\n\
     and or not & | ^ >> << ~ Int->Dec Dec->Int true false nil\n\
     ARGV print! sleep! time! random! clear! list-dir! mkdir! read! stdin! read/chunks! stdin/chunks! read/lines! delete! write! move!"
 }
@@ -1703,13 +1703,13 @@ fn native_shell_pitfalls() -> &'static str {
     \n\
     Types and operators:\n\
     - Int, Dec, Char, and Bool operators are intentionally separate.\n\
-    - Int examples: +, -, *, /, mod, =, <, <=, >, >=.\n\
-    - Dec examples: +., -., *., /., mod., =., <., <=., >., >=.\n\
+    - Int examples: +, -, *, /, %, =, <, <=, >, >=.\n\
+    - Dec examples: +., -., *., /., %., =., <., <=., >., >=.\n\
     - Char equality uses =#.\n\
     - Bool equality uses =?.\n\
     - String is [Char]. Vectors are homogeneous. Tuples can hold mixed fixed-shape data.\n\
     - Dec is fixed-scale decimal, not arbitrary precision.\n\
-    - Primitive Int is currently i32; intermediate overflow matters before mod can reduce a result.\n\
+    - Primitive Int is currently i32; intermediate overflow matters before `%` can reduce a result.\n\
     - BigInt solves range, not performance. Giant BigInt temporaries in hot loops can dominate runtime or memory.\n\
     - WASM32 linear memory is a separate ceiling from integer width.\n\
     \n\

@@ -872,7 +872,7 @@ xs)"#,
                 (let step-and-hash (lambda board size weight (do
                   (let next (new-board size))
                   (mut acc weight)
-                  { next (mod acc MOD) })))
+                  { next (% acc MOD) })))
                 (let SIZE 4)
                 (let initial (new-board SIZE))
                 (&mut STATE initial)
@@ -881,7 +881,7 @@ xs)"#,
                 (while (< step 1) (do
                   (let { a b } (step-and-hash (&get STATE) SIZE (+ step 1)))
                   (&alter! STATE a)
-                  (alter! acc (mod (+ acc b) MOD))
+                  (alter! acc (% (+ acc b) MOD))
                   (alter! step (+ step 1))))
                 acc)"#,
             true,
@@ -1673,7 +1673,7 @@ xs)"#,
     fn bench_runtime_table_grouping_workload() {
         let src = r#"(do
             (let ids (range 0 12000))
-            (let teams (map (lambda x (if (= (mod x 3) 0) "Blue" (if (= (mod x 3) 1) "Red" "Green"))) ids))
+            (let teams (map (lambda x (if (= (% x 3) 0) "Blue" (if (= (% x 3) 1) "Red" "Green"))) ids))
             (Table/entries
               (reduce/i (lambda (a team i)
                           (let id (Integer->String (get ids i)))
@@ -1696,7 +1696,7 @@ xs)"#,
     fn bench_runtime_graph_cycle_workload() {
         let src = r#"(do
             (let from (map (lambda x (cons "U" (Integer->String x))) (range 1 40)))
-            (let to (map (lambda x (cons "U" (Integer->String (+ 1 (mod x 39))))) (range 1 40)))
+            (let to (map (lambda x (cons "U" (Integer->String (+ 1 (% x 39))))) (range 1 40)))
             (let rows (range 0 (- (length from) 1)))
             (graph/has-cycle? rows from to))"#;
         let (_, _, output) = benchmark_std_program("graph-cycle", src, 3);
@@ -2471,8 +2471,8 @@ xs)"#,
               (div./safe? const/dec/max-safe 0.001)
               (div./safe? 1.0 0.001)
               (div./safe? const/dec/min-safe -1.0)
-              (mod./safe? 10.0 0.0)
-              (mod./safe? const/dec/min-safe -1.0)
+              (%./safe? 10.0 0.0)
+              (%./safe? const/dec/min-safe -1.0)
             ]"#,
             true,
         );
@@ -2809,7 +2809,7 @@ xs)"#,
                   (let odd [])
                   (let even [])
                   (let out [])
-                  (loop/range/exclusive i 0 (length nums) (push! (if (= (mod i 2) 0) even odd) (get nums i)))
+                  (loop/range/exclusive i 0 (length nums) (push! (if (= (% i 2) 0) even odd) (get nums i)))
                   (loop/range/exclusive j 0 (length even) (do (push! out (get even j)) (push! out (get odd j))))
                   out)))
                 [(sort-array-by-parity2 [4 2 5 7])
@@ -3399,7 +3399,7 @@ out"#,
                       (mut y b)
                       (while (> y 0)
                         (do
-                          (let r (mod x y))
+                          (let r (% x y))
                           (alter! x y)
                           (alter! y r)))
                       x)))
@@ -3601,7 +3601,7 @@ out"#,
 
     #[test]
     fn test_infer_bool_returning_function_does_not_require_question_suffix() {
-        let exprs = crate::parser::parse("(let even (lambda x (= (mod x 2) 0)))")
+        let exprs = crate::parser::parse("(let even (lambda x (= (% x 2) 0)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
@@ -3627,7 +3627,7 @@ out"#,
     fn test_infer_bool_predicate_and_impure_bang_contracts_pass() {
         let exprs = crate::parser::parse(
             "(do
-                (let even? (lambda x (= (mod x 2) 0)))
+                (let even? (lambda x (= (% x 2) 0)))
                 (let put! (lambda xs x (set! xs 0 x)))
                 (even? 2))",
         )
@@ -7737,7 +7737,7 @@ fn"#;
                 (mut i 1)
                 (mut acc 0)
                 (while (<= i N) (do
-                  (alter! acc (mod (+ acc i) MOD))
+                  (alter! acc (% (+ acc i) MOD))
                   (alter! i (+ i 1))))
                 acc)"#,
         )
@@ -9658,7 +9658,7 @@ fn"#;
                 "[[5 6] [2]]",
             ),
             (
-                r#"(let has-trailing-zeros? (lambda nums (>= (count (lambda x (= (mod x 2) 0)) nums) 2)))
+                r#"(let has-trailing-zeros? (lambda nums (>= (count (lambda x (= (% x 2) 0)) nums) 2)))
 
 [(has-trailing-zeros? [ 1 2 3 4 5 ]) ; Should return true
  (has-trailing-zeros? [ 2 4 8 16 ]) ; Should return true
@@ -9670,7 +9670,7 @@ fn"#;
             (
                 r#"(let pillow-holder (lambda n time (do
   (let cycle (- (* 2 n) 2))
-  (let t (mod time cycle))
+  (let t (% time cycle))
   (if (< t n)
     (+ 1 t)
     (- (+ n n -1) t)))))
@@ -10400,7 +10400,7 @@ out
 (let delta/pairs (lambda [ y x ] (+ (abs y) (abs x))))
 (let part1 (lambda input (|> input
     (reduce (lambda [ y x a ] [ D M ] (do
-                                (let F (mod (+ a (if (=# (Int->Char D) 'R') 1 3)) 4))
+                                (let F (% (+ a (if (=# (Int->Char D) 'R') 1 3)) 4))
                                 (cond
                                     (= F 0) [y (+ x M) F]
                                     (= F 1) [(- y M) x F]
@@ -10415,7 +10415,7 @@ out
 ; How many blocks away is the first location you visit twice?
 (let turn
   (lambda facing D
-    (mod (+ facing (if (=# (Int->Char D) 'R') 1 3)) 4)))
+    (% (+ facing (if (=# (Int->Char D) 'R') 1 3)) 4)))
 (let step
   (lambda y x facing
     (cond
@@ -11940,7 +11940,7 @@ SECRET = SANTA")
             (mod-add a a m)
             (/ b 2)
             m
-            (if (= (mod b 2) 1)
+            (if (= (% b 2) 1)
                 (mod-add acc a m)
                 acc)))))
 
@@ -11953,7 +11953,7 @@ SECRET = SANTA")
             (mul-mod base base m)
             (/ exp 2)
             m
-            (if (= (mod exp 2) 1)
+            (if (= (% exp 2) 1)
                 (mul-mod acc base m)
                 acc)))))
 
@@ -12040,7 +12040,7 @@ SECRET = SANTA")
 
 (let shift-by (lambda i
 (do
-(let r (mod i 4))
+(let r (% i 4))
 (if (< i 16)
 (if (= r 0) 7 (if (= r 1) 12 (if (= r 2) 17 22)))
 (if (< i 32)
@@ -12069,7 +12069,7 @@ SECRET = SANTA")
 (loop/range/exclusive di 0 10 (if (> (get div) 0) (do
 (let digit (/ (get x) (get div)))
 (set! block (get msg-len) (+ 48 digit))
-(&alter! x (mod (get x) (get div)))
+(&alter! x (% (get x) (get div)))
 (&alter! div (/ (get div) 10))
 (&alter! msg-len (+ (get msg-len) 1)))
 nil))
@@ -12117,14 +12117,14 @@ nil))
 (if (< ri 32)
 (do
   (&alter! f (| (& (get D) (get B)) (& (~ (get D)) (get C))))
-  (&alter! g (mod (+ (* 5 ri) 1) 16)))
+  (&alter! g (% (+ (* 5 ri) 1) 16)))
 (if (< ri 48)
 (do
   (&alter! f (^ (get B) (^ (get C) (get D))))
-  (&alter! g (mod (+ (* 3 ri) 5) 16)))
+  (&alter! g (% (+ (* 3 ri) 5) 16)))
 (do
   (&alter! f (^ (get C) (| (get B) (~ (get D)))))
-  (&alter! g (mod (* 7 ri) 16))))))
+  (&alter! g (% (* 7 ri) 16))))))
 (let x4 (add32-4 (get A) (get f) (get K ri) (get words (get g))))
 (let new-b (add32 (get B) (left-rotate x4 (shift-by ri))))
 (let old-d (get D))
@@ -12161,7 +12161,7 @@ NOT x -> h
 NOT y -> i
 d -> a")
 
-(let mask16 (lambda (value) (mod value 65536)))
+(let mask16 (lambda (value) (% value 65536)))
 
 (let parse-operand
   (lambda (token)

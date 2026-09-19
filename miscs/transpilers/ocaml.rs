@@ -121,8 +121,8 @@ fn op_call(name: &str) -> Option<&'static str> {
         "*." => Some("*."),
         "/" | "/#" => Some("/"),
         "/." => Some("/."),
-        "mod" => Some("mod"),
-        "mod." => Some("mod_float"),
+        "%" => Some("mod"),
+        "%." => Some("mod_float"),
         "=" | "=?" | "=#" | "=." => Some("="),
         "<" | "<#" | "<." => Some("<"),
         ">" | ">#" | ">." => Some(">"),
@@ -141,7 +141,7 @@ fn op_call(name: &str) -> Option<&'static str> {
 fn is_int_arith_op(name: &str) -> bool {
     matches!(
         name,
-        "+" | "+#" | "-" | "-#" | "*" | "*#" | "/" | "/#" | "mod"
+        "+" | "+#" | "-" | "-#" | "*" | "*#" | "/" | "/#" | "%"
     )
 }
 

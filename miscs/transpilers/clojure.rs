@@ -355,7 +355,7 @@ fn compile_expr_inner(expr: &Expression, mut_vars: &HashSet<String>, in_fn_body:
                         compile_expr_inner(&items[1], mut_vars, false),
                         compile_expr_inner(&items[2], mut_vars, false)
                     ),
-                    "mod" | "mod." => format!(
+                    "%" | "%." => format!(
                         "(mod {} {})",
                         compile_expr_inner(&items[1], mut_vars, false),
                         compile_expr_inner(&items[2], mut_vars, false)

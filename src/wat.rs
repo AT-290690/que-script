@@ -233,7 +233,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "-" | "-#" => Some(2),
         "*" | "*#" => Some(3),
         "/" | "/#" => Some(4),
-        "mod" => Some(5),
+        "%" => Some(5),
         "=" | "=?" | "=#" => Some(6),
         "<" | "<#" => Some(7),
         ">" | ">#" => Some(8),
@@ -258,7 +258,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "-." => Some(26),
         "*." => Some(27),
         "/." => Some(28),
-        "mod." => Some(29),
+        "%." => Some(29),
         "=." => Some(30),
         "<." => Some(31),
         ">." => Some(32),
@@ -783,8 +783,8 @@ fn is_special_word(w: &str) -> bool {
             | "/"
             | "/#"
             | "/."
-            | "mod"
-            | "mod."
+            | "%"
+            | "%."
             | "="
             | "=?"
             | "=#"
@@ -5562,7 +5562,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             }
             "i32.div_s"
         }
-        "mod" => {
+        "%" => {
             if checks.div_zero_check {
                 return Ok(
                     format!(
@@ -5640,7 +5640,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             }
             return Ok(format!("{a}\n{b}\ncall $dec_div"));
         }
-        "mod." => {
+        "%." => {
             if checks.div_zero_check || checks.dec_overflow_check {
                 let div_zero_check = if checks.div_zero_check {
                     format!("{}\n", emit_float_div_zero_check(rhs_local))

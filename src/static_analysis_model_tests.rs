@@ -84,7 +84,7 @@ fn model_check_all_boundary_integer_add_sub_mul_pairs() {
 fn model_check_all_boundary_integer_division_and_modulo_pairs() {
     for &left in INTEGER_BOUNDARIES {
         for &right in INTEGER_BOUNDARIES {
-            for op in ["/", "mod"] {
+            for op in ["/", "%"] {
                 let source = format!("({op} {left} {right})");
                 let found = diagnostics(&source, 1);
                 assert_eq!(

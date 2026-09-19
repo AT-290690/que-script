@@ -3548,7 +3548,7 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         "-" | "-#" => fold_int_sub(node, &items),
         "*" | "*#" => fold_int_mul(node, &items),
         "/" | "/#" => fold_int_checked_bin(node, &items, i32::checked_div),
-        "mod" => fold_int_checked_bin(node, &items, i32::checked_rem),
+        "%" => fold_int_checked_bin(node, &items, i32::checked_rem),
 
         "=" | "=?" | "=#" => fold_int_cmp(node, &items, |a, b| a == b),
         "<" | "<#" => fold_int_cmp(node, &items, |a, b| a < b),
@@ -3560,7 +3560,7 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         "-." => fold_float_bin(node, &items, "-.", |a, b| a - b),
         "*." => fold_float_bin(node, &items, "*.", |a, b| a * b),
         "/." => fold_float_bin(node, &items, "/.", |a, b| a / b),
-        "mod." => fold_float_bin(node, &items, "mod.", |a, b| a - (a / b).trunc() * b),
+        "%." => fold_float_bin(node, &items, "%.", |a, b| a - (a / b).trunc() * b),
 
         "=." => fold_float_cmp(node, &items, |a, b| a == b),
         "<." => fold_float_cmp(node, &items, |a, b| a < b),
@@ -4534,7 +4534,7 @@ fn fold_float_bin(
     ) else {
         return node;
     };
-    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", false) && (op == "/." || op == "mod.") && b == 0.0
+    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", false) && (op == "/." || op == "%.") && b == 0.0
     {
         return node;
     }

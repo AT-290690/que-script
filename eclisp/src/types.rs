@@ -464,14 +464,14 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         )),
     );
     let _ = env.insert(
-        "mod".to_string(),
+        "%".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Int),
             Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
         )),
     );
     let _ = env.insert(
-        "mod.".to_string(),
+        "%.".to_string(),
         TypeScheme::monotype(Type::Function(
             Box::new(Type::Dec),
             Box::new(Type::Function(Box::new(Type::Dec), Box::new(Type::Dec))),

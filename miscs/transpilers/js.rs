@@ -9,7 +9,7 @@ fn ident(name: &str, idx: usize) -> String {
         // float division
         "/." => "(a)=>(b)=>a/b".to_string(),
         "*" | "*#" | "*." => "(a)=>(b)=>a*b".to_string(),
-        "mod" | "mod." => "(a)=>(b)=>a%b".to_string(),
+        "%" | "%." => "(a)=>(b)=>a%b".to_string(),
         "=" | "=?" | "=#" | "=." => "(a)=>(b)=>a==b".to_string(),
         "<" | "<#" | "<." => "(a)=>(b)=>a<b".to_string(),
         ">" | ">#" | ">." => "(a)=>(b)=>a>b".to_string(),
@@ -258,7 +258,7 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),
-                    "mod" | "mod." => format!(
+                    "%" | "%." => format!(
                         "({} % {})",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
