@@ -20,7 +20,7 @@ syn keyword queKeyword
 
 " Keyword forms containing punctuation cannot be expressed reliably with
 " :syn keyword because characters such as &, ! and . are not keyword chars.
-syn match queKeyword /\%(^\|\s\|(\|\[\|{\)\zs\%(&mut\|alter!\|&alter!\|%\.\|%\)\ze\%($\|\s\|)\|\]\|}\)/
+syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(&alter!\|&mut\|alter!\|%\.\|%\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
 
 " --- Builtins (Functions, Core Operations & Mutations) ---
 syn keyword queBuiltin
