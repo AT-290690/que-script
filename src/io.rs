@@ -1670,7 +1670,7 @@ fn native_shell_pitfalls() -> &'static str {
     - unless is inverted if: (unless cond then) or (unless cond then else). It is not a variadic body form.\n\
     - For multiple unless effects, write (unless cond (block e1 e2)).\n\
     - when accepts multiple body expressions.\n\
-    \n\
+    - Prefer cond over deeply nested if expressions. It preserves ordered branching while reducing parentheses and making AI-generated Que substantially less error-prone.\n\
     Mutation and effects:\n\
     - A ! suffix is optional; mutation and I/O are inferred independently of the function name.\n\
     - ! means the function has caller-visible mutation/effects, not merely internal mutable implementation.\n\

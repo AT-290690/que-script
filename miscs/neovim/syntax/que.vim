@@ -15,14 +15,19 @@ syn match queNumber /\v<[-+]?\d+(\.\d+)?>/
 syn keyword queKeyword
       \ lambda comp if let letrec letmacro mut do block while
       \ cond unless when when-not loop and or not quote qq uq uqs gensym
+      \ fst snd
       \ macroexpand macroexpand-1 as sig
+
+" Keyword forms containing punctuation cannot be expressed reliably with
+" :syn keyword because characters such as &, ! and . are not keyword chars.
+syn match queKeyword /\%(^\|\s\|(\|\[\|{\)\zs\%(&mut\|alter!\|&alter!\|mod\.\|mod\)\ze\%($\|\s\|)\|\]\|}\)/
 
 " --- Builtins (Functions, Core Operations & Mutations) ---
 syn keyword queBuiltin
-      \ length mod mod. car cdr cons get fst snd
+      \ length car cdr cons get
 
 " Regexp matching for builtins containing symbols like ! & |
-syn match queBuiltin /\v(\&alter!|\&get|\&mut|alter!|set!|push!|pop!|pop-val!)/
+syn match queBuiltin /\v(\&get|set!|push!|pop!|pop-val!)/
 syn match queBuiltin /\v(<\||\|>)/
 
 " --- Literals & Delimiters ---
