@@ -16,9 +16,9 @@
 
 (let Tuple/new (lambda a b (tuple a b)))
 (let Tuple/swap std/tuple/swap)
-(let Tuple/map std/tuple/map)
-(let Tuple/map/fst std/tuple/map/fst)
-(let Tuple/map/snd std/tuple/map/snd)
+(let Tuple/map map/tuple)
+(let Tuple/map/fst map/fst)
+(let Tuple/map/snd map/snd)
 
 (let Vector->Tuple (lambda fn1 fn2 xs (std/convert/vector->tuple xs fn1 fn2)))
 (let Tuple/int/add std/tuple/int/add)
