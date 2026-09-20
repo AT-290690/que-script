@@ -1657,7 +1657,6 @@ xs)"#,
     fn test_loop_range_runtime_produces_expected_sequence() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                (let push! (lambda xs x (do (set! xs (length xs) x) xs)))
                 (let xs [])
                 (loop/range/exclusive i 0 10 (push! xs i))
                 xs)"#,
@@ -2695,7 +2694,6 @@ xs)"#,
     fn test_loop_condition_runtime_produces_expected_sequence() {
         let output = run_program_output(
             r#"(do
-                (let push! (lambda xs x (do (set! xs (length xs) x) xs)))
                 (let xs [])
                 (let i [0])
                 (while (< (get i 0) 10) (do (push! xs (get i 0)) (set! i 0 (+ (get i 0) 1))))
@@ -2885,7 +2883,6 @@ xs)"#,
     fn test_regression_loop_callback_discard_does_not_overrelease_borrowed_result() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                (let push! (lambda xs x (do (set! xs (length xs) x) xs)))
                 (let sort-array-by-parity2 (lambda nums (do
                   (let odd [])
                   (let even [])
@@ -3328,7 +3325,7 @@ out"#,
     #[test]
     fn test_typed_optimization_canonicalizes_push_to_set_append() {
         let typed = infer_typed_built(
-            "(do (let push! (lambda (xs x) (set! xs (length xs) x))) (let xs []) (push! xs 1) xs)",
+            "(do (let xs []) (push! xs 1) xs)",
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -4304,7 +4301,7 @@ out"#,
     #[test]
     #[cfg(feature = "runtime")]
     fn test_typed_optimization_map_partial_application_fuses_by_hoisting_callable_once() {
-        let expr = crate::parser::parse("(map (add 1) (range 0 10))")
+        let expr = crate::parser::parse("(map (fp/add 1) (range 0 10))")
             .expect("input should parse")
             .remove(0);
         let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
@@ -4320,13 +4317,13 @@ out"#,
             fused_lisp
         );
         assert!(
-            !fused_lisp.contains("(map (add 1)"),
+            !fused_lisp.contains("(map (fp/add 1)"),
             "fused expression should not keep original map call, got: {}",
             fused_lisp
         );
 
         assert_std_program_output_matches_with_and_without_optimizer(
-            "(|> (range 0 10) (map (add 1)))",
+            "(|> (range 0 10) (map (fp/add 1)))",
         );
     }
 
@@ -7952,7 +7949,6 @@ fn"#;
         let _inline_cost = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "64");
         let expr = crate::parser::build(
             r#"(do
-                    (let push! (lambda xs x (set! xs (length xs) x)))
                     (let Counter->Char
                       (lambda counter
                         (if (= counter 1)
@@ -10602,27 +10598,6 @@ b
                 "{ false 12 }",
             ),
             (
-                r#"(let factorial! (lambda N (snd (pop-val! (Rec { N 1 } (lambda { n acc }
-                  (if (= n 0)
-                      { Rec/return [ { n acc } ]}
-                      { Rec/push [ { (- n 1) (* acc n) } ] })))))))
-
-            (let rec-sum (lambda N (snd (get (Rec { N 0 } (lambda { n acc }
-                (if (= 0 n)
-                    { Rec/return [ { n acc } ] }
-                    { Rec/push [ { (- n 1) (+ acc n) } ] })))))))
-
-            (let factorialVec! (lambda N (first (pop-val! (Rec [ 1 N ] (lambda [ acc n ]
-                  (if (= n 0)
-                      { Rec/return [ [ acc n ] ]}
-                      { Rec/push [ [ (* acc n) (- n 1) ] ] })))))))
-
-            (factorialVec! 5)
-
-            [(factorial! 5) (factorialVec! 5) (rec-sum 10)]"#,
-                "[120 120 55]",
-            ),
-            (
                 r#"(let INPUT "58:5,3,7,8,9,10,4,5,7,8,8")
 (let parse (lambda input (do
   (let parts (|> input (String->Vector ':')))
@@ -11681,7 +11656,8 @@ bbrgwb")
                 r#"(let puncts ['!' ',' '.' '?' ' ' '\'' '\n'])
 (let punct? (lambda x (some? (apply =# x) puncts)))
 
-(let palindrome? (comp (map lower) (exclude punct?) (S/comb match? reverse)))
+(let palindrome/raw? (lambda xs (match? xs (reverse xs))))
+(let palindrome? (comp (map lower) (exclude punct?) palindrome/raw?))
 (|> [
   "Was it a cat I saw?"
   "No lemon, no melon"

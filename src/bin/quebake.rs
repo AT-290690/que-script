@@ -124,7 +124,6 @@ fn base_library_defs() -> Result<Vec<Expression>, String> {
     for path in [
         "./lisp/const.lisp",
         "./lisp/macros.lisp",
-        "./lisp/std.lisp",
         "./lisp/fp.lisp",
         "./lisp/ds.lisp",
     ] {
@@ -137,7 +136,7 @@ fn usage(bin_name: &str) -> String {
     format!(
         "Usage: {bin} [--bundle <helpers.que> [more.que ...]] [helpers.que ...] [--out <que-lib.lisp>]\n\
          \n\
-         Bakes const/macros/std/fp/ds plus optional helper bundles into an external library file.\n\
+         Bakes const/macros/fp/ds plus optional helper bundles into an external library file.\n\
          Helper bundles must contain only top-level definitions (let/letrec/letmacro/mut).\n\
          Rebuild/reinstall binaries (and restart LSP/editor) after baking.\n\
          After install, helper bundle source files may be removed.\n\

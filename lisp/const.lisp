@@ -327,7 +327,7 @@
     (lambda (text key)
       (Meta/get (Meta/table text) key)))
 
-  (let std/int/prime? (lambda n
+  (let prime? (lambda n
     (cond
       (< n 2) false
       (= n 2) true
@@ -383,3 +383,17 @@
 (let UTF8/start-2? (lambda (b) (= (& b 224) 192)))
 (let UTF8/start-3? (lambda (b) (= (& b 240) 224)))
 (let UTF8/start-4? (lambda (b) (= (& b 248) 240)))
+
+(let get* (lambda xs i some none (if (in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
+
+(let println! (lambda text (do
+  (print! text)
+  (print! ['\n']))))
+
+(let int (lambda value
+  (if (and (>= value const/int/min-safe) (<= value const/int/max-safe)) [value] [0])))
+
+(let dec (lambda value
+  (if (and (>=. value const/dec/min-safe) (<=. value const/dec/max-safe)) [value] [0.0])))
+
+(let bool (lambda value [(=? value true)]))

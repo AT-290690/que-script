@@ -244,7 +244,6 @@ fn build_final_symbol_defs(include_std: bool) -> io::Result<Vec<SymbolDef>> {
     ];
     if include_std {
         files.insert(1, ("./lisp/macros.lisp", true));
-        files.insert(1, ("./lisp/std.lisp", true));
     }
 
     let mut by_name: HashMap<String, SymbolDef> = HashMap::new();

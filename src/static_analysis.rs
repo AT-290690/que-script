@@ -2245,8 +2245,8 @@ mod tests {
 
     #[test]
     fn push_preserves_old_bounds_and_extends_known_length() {
-        let source = "(let push! (lambda xs value (set! xs (length xs) value))) (let xs [1 2 3]) (push! xs 10) {(get xs 2) (get xs 3)}";
-        assert_eq!(analyze(source, 3), Ok(()));
+        let source = "(let xs [1 2 3]) (push! xs 10) {(get xs 2) (get xs 3)}";
+        assert_eq!(analyze(source, 2), Ok(()));
     }
 
     #[test]
@@ -2382,14 +2382,14 @@ mod tests {
 
     #[test]
     fn zero_argument_lambda_body_is_statically_analyzed() {
-        let source = "(let push! (lambda xs x (set! xs (length xs) x))) (let history []) (let alt []) (let undo! (lambda () (push! alt (pop-val! history)))) (let redo! (lambda () (push! history (pop-val! alt))))";
+        let source = "(let history []) (let alt []) (let undo! (lambda () (push! alt (pop-val! history)))) (let redo! (lambda () (push! history (pop-val! alt))))";
         let expression = crate::parser::build(source).expect("source should parse");
         let (_typ, typed) = crate::infer::infer_with_builtins_typed(
             &expression,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
         .expect("source should infer");
-        let diagnostics = analyze_user_program_diagnostics(&typed, 5);
+        let diagnostics = analyze_user_program_diagnostics(&typed, 4);
         assert!(diagnostics.iter().any(|message| message.contains("(pop-val! history)")));
         assert!(diagnostics.iter().any(|message| message.contains("(pop-val! alt)")));
     }

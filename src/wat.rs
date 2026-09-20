@@ -252,6 +252,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "set!" => Some(21),
         "pop!" => Some(22),
         "pop-val!" => Some(38),
+        "push!" => Some(39),
         "fst" => Some(23),
         "snd" => Some(24),
         "+." => Some(25),
@@ -274,7 +275,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
 fn builtin_tag_arity(tag: i32) -> Option<usize> {
     match tag {
         1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 25 | 26
-        | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 37 => Some(2),
+        | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 37 | 39 => Some(2),
         21 => Some(3),
         18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 | 38 => Some(1),
         _ => None,
@@ -282,7 +283,7 @@ fn builtin_tag_arity(tag: i32) -> Option<usize> {
 }
 
 fn builtin_tag_first_param_is_ref(tag: i32) -> bool {
-    matches!(tag, 21 | 37)
+    matches!(tag, 21 | 37 | 39)
 }
 
 fn is_i32ish_type(t: &Type) -> bool {
@@ -4637,6 +4638,16 @@ fn emit_vector_runtime(
         out.push_str(
             r#"
     local.get $f
+    i32.const 39
+    i32.eq
+    if (result i32)
+      local.get $a
+      local.get $a
+      call $vec_len
+      local.get $b
+      call $vec_set_i32
+    else
+    local.get $f
     i32.const 1
     i32.eq
     if (result i32)
@@ -4902,6 +4913,7 @@ fn emit_vector_runtime(
           end
         end
       end
+    end
     end
   "#,
         );
@@ -10470,8 +10482,16 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
     let (params, ret_ty) = if let Some(sig) = ctx.fn_sigs.get(op) {
         sig.clone()
     } else if builtin_fn_tag(op).is_some() {
-        // Builtin used via namespaced value (e.g. std/vector/set!) without explicit top def.
-        (Vec::new(), Type::Int)
+        // A builtin may have no top-level library definition. Recover its concrete
+        // instantiated signature from the typed call head so direct and partial
+        // applications do not try to call a generated `$v_<name>` function.
+        let head_ty = node
+            .children
+            .first()
+            .and_then(|head| head.typ.as_ref())
+            .ok_or_else(|| format!("Builtin '{}' is missing its inferred type", op))?;
+        let (params, ret) = function_parts(head_ty);
+        (params, ret.clone())
     } else {
         return Err(format!("Unknown function '{}'", op));
     };
@@ -10693,6 +10713,15 @@ fn compile_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<Strin
     }
     if ctx.extern_names.contains(op) {
         return compile_extern_direct_call(op, args, &ret_ty, ctx);
+    }
+
+    if let Some(tag) = builtin_fn_tag(op) {
+        let mut out = vec![format!("i32.const {}", tag)];
+        for arg in args {
+            out.push(compile_expr(arg, ctx)?);
+        }
+        out.push(format!("call $apply{}_i32", args.len()));
+        return Ok(out.join("\n"));
     }
 
     let mut out = Vec::new();

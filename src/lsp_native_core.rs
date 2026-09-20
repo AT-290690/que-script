@@ -651,7 +651,10 @@ pub fn known_symbol_effect(symbol: &str) -> Option<EffectFlags> {
     if crate::externals::is_builtin_host_extern_symbol(symbol) {
         return Some(EffectFlags::IO);
     }
-    if matches!(symbol, "set!" | "&alter!" | "alter!" | "pop!" | "pop-val!") {
+    if matches!(
+        symbol,
+        "set!" | "&alter!" | "alter!" | "push!" | "pop!" | "pop-val!"
+    ) {
         return Some(EffectFlags::MUTATE);
     }
     None

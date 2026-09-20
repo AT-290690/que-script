@@ -179,10 +179,7 @@ fn enumerate_mutations(depth: usize, prefix: &mut Vec<Mutation>, out: &mut Vec<V
 
 fn mutation_program(initial_length: usize, sequence: &[Mutation]) -> (String, usize, usize) {
     let mut length = initial_length;
-    let mut forms = vec![
-        "(let push! (lambda xs value (set! xs (length xs) value)))".to_string(),
-        format!("(let xs {})", vector_literal(initial_length)),
-    ];
+    let mut forms = vec![format!("(let xs {})", vector_literal(initial_length))];
     for mutation in sequence {
         match mutation {
             Mutation::Push => {

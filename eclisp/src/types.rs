@@ -244,6 +244,19 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
     {
         let a: Type = fresh_var();
         let _ = env.insert(
+            "push!".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::Function(Box::new(a), Box::new(Type::Unit))),
+                ),
+            ),
+        );
+    }
+    {
+        let a: Type = fresh_var();
+        let _ = env.insert(
             "pop!".to_string(),
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
