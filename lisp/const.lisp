@@ -250,7 +250,7 @@
 (let random const/int/mulberry32/raw)
 (let random. const/dec/mulberry32/next)
 
-(let std/dec/log (lambda x
+(let log (lambda x
   (if (<=. x 0.0)
       0.0
       (do
