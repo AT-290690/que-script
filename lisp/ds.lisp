@@ -772,19 +772,21 @@ q)))
 
 (let Integer->Bits (lambda num
     (if (= num 0) [ 0 ] (do
-        (&mut n num)
-        (letrec tail-call/while! (lambda out
-            (if (> (&get n) 0) (do
-                (push! out (% (get n) 2))
-                (&alter! n (/ (&get n) 2))
-                (tail-call/while! out)) out)))
-        (reverse (tail-call/while! []))))))
+        (mut n num)
+        (let out [])
+        (while (> n 0) (do
+            (push! out (% n 2))
+            (alter! n (/ n 2))))
+        (reverse out)))))
 
 (let Bits->Integer (lambda xs (do
-  (letrec tail-call/bits->integer (lambda index out (if
-                              (= index (length xs)) out
-                              (tail-call/bits->integer (+ index 1) (+ out (* (at xs index) (expt (- (length xs) index 1) 2)))))))
-  (tail-call/bits->integer 0 0))))
+  (let len (length xs))
+  (mut index 0)
+  (mut out 0)
+  (while (< index len) (do
+    (alter! out (+ out (* (at xs index) (expt (- len index 1) 2))))
+    (alter! index (+ index 1))))
+  out)))
 
 (let BigInt/range (lambda start end (do
      (let out [ (BigInt/new (Integer->Chars start)) ])
@@ -1834,13 +1836,11 @@ q)))
 
 (let Integer->Digits-base (lambda num base
     (if (= num 0) [ 0 ] (do
-        (&mut n num)
-        (letrec tail-call/while! (lambda out
-            (if (> (&get n) 0) (do
-                (Vector/push! out (% (&get n) base))
-                (&alter! n (/ (&get n) base))
-                (tail-call/while! out)) out)))
-        (let digits (tail-call/while! []))
+        (mut n num)
+        (let digits [])
+        (while (> n 0) (do
+            (Vector/push! digits (% n base))
+            (alter! n (/ n base))))
         (reverse digits)))))
 
   

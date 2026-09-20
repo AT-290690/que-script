@@ -1583,13 +1583,13 @@ out)))
     (alter! i (+ i 1))))
   nil)))
 (let loop/some-range? (lambda start end predicate? (do
-  (letrec tail-call/loop/some-range? (lambda i out
-                          (if (< i end)
-                                (if (predicate? i)
-                                    true
-                                    (tail-call/loop/some-range? (+ i 1) out))
-                            out)))
-                          (tail-call/loop/some-range? start false))))
+  (mut i start)
+  (mut found? false)
+  (while (and (< i end) (not found?)) (do
+    (if (predicate? i)
+        (alter! found? true)
+        (alter! i (+ i 1)))))
+  found?)))
 
 (let loop/some-n? (lambda n predicate? (loop/some-range? 0 n predicate?)))
 
