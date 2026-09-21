@@ -422,6 +422,38 @@ xs)"#,
     }
 
     #[test]
+    fn test_parser_letmacro_supports_grouped_lambda_params() {
+        let built = crate::parser::build(
+            r#"(letmacro pair (lambda (a b) (qq {(uq a) (uq b)})))
+               (pair 1 2)"#,
+        )
+        .expect("grouped macro lambda parameters should build");
+        assert!(
+            built.to_lisp().contains("(tuple 1 2)"),
+            "expected grouped macro lambda to expand, got: {}",
+            built.to_lisp()
+        );
+    }
+
+    #[test]
+    fn test_parser_letmacro_grouped_lambda_params_support_rest_and_multiple_body_forms() {
+        let built = crate::parser::build(
+            r#"(letmacro values
+                 (lambda (first . rest)
+                   (let ignored first)
+                   (qq [(uq ignored) (uqs rest)])))
+               (values 1 2 3)"#,
+        )
+        .expect("grouped variadic macro lambda with implicit compile-time do should build");
+        let lisp = built.to_lisp();
+        assert!(
+            lisp.contains("(vector 1 2 3)"),
+            "expected grouped variadic macro lambda to expand, got: {}",
+            lisp
+        );
+    }
+
+    #[test]
     fn test_parser_macroexpand_and_macroexpand_1_render_expanded_source() {
         let expr = crate::parser::build(
             "(do
@@ -2410,7 +2442,7 @@ xs)"#,
     }
 
     #[test]
-    fn test_baked_cond_macro_preserves_legacy_parser_expansion_shapes() {
+    fn test_baked_cond_macro_expands_empty_to_nil_and_recurses() {
         let std_ast = crate::baked::load_ast();
         let mut lib_defs = crate::baked::ast_to_definitions(std_ast, "active library")
             .expect("embedded library should flatten to definitions");
@@ -2426,8 +2458,8 @@ xs)"#,
             rendered
         );
         assert!(
-            rendered.contains("(vector 0") || rendered.contains("[0 "),
-            "empty cond should expand to 0, got: {}",
+            rendered.contains("(vector nil"),
+            "empty cond should expand to nil, got: {}",
             rendered
         );
     }
@@ -3772,6 +3804,34 @@ out"#,
     }
 
     #[test]
+    fn test_infer_rejects_recursive_function_with_inconsistent_result_shape() {
+        let err = crate::parser::build(
+            r#"(letrec gray
+                  (lambda (n)
+                    (if (= n 1)
+                        ["0" "1"]
+                        (cons (car (gray (- n 1)))
+                              (car (cdr (gray (- n 1))))))))
+               (gray 1)"#,
+        )
+        .and_then(|expr| {
+            crate::infer::infer_with_builtins_typed(
+                &expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            )
+            .map(|_| expr)
+        })
+        .expect_err("incompatible recursive result shapes must be rejected");
+        assert!(
+            err.contains("Cannot unify")
+                || err.contains("Type mismatch")
+                || err.contains("Occurs check failed"),
+            "unexpected recursive result mismatch error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_infer_nested_impure_bool_function_accepts_combined_suffix() {
         let exprs = crate::parser::parse(
             "(let search?! (lambda x (do
@@ -3978,21 +4038,21 @@ out"#,
 
     #[test]
     fn test_infer_impure_function_mutation_target_inside_block_must_be_first_param() {
-        let exprs = crate::parser::parse(
+        let expr = crate::parser::build(
             "(do
-                (let extend-env! (lambda env pair (set! env (length env) pair)))
+                (let extend-env! (lambda env pair
+                  (do (set! env (length env) pair) env)))
                 (letrec prove-tautology? (lambda expr vars env
                   (if (= (length vars) 0)
                       true
-                      ((lambda (do
+                      (block
                         (let current-var (car vars))
                         (let next-env (extend-env! env (tuple current-var true)))
-                        (prove-tautology? expr (cdr vars) next-env))))))))",
+                        (prove-tautology? expr (cdr vars) next-env))))))",
         )
-        .expect("input should parse");
-        let expr = exprs.first().expect("input should contain one expression");
+        .expect("input should build");
         let inferred = crate::infer::infer_with_builtins_typed(
-            expr,
+            &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
         let err = inferred.expect_err("block should not hide mutation of a non-first parameter");

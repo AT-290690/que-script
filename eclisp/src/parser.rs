@@ -668,15 +668,26 @@ fn parse_macro_lambda(expr: &Expression, macro_name: &str) -> Result<MacroClause
             macro_name
         ));
     }
-    if items.len() < 2 {
+    if items.len() < 3 {
         return Err(format!("letmacro '{}' lambda must have a body", macro_name));
     }
-    let params_slice = &items[1..items.len() - 1];
+    let (params_slice, body_forms) = match &items[1] {
+        Expression::Apply(grouped_params) => (grouped_params.as_slice(), &items[2..]),
+        _ => (&items[1..items.len() - 1], &items[items.len() - 1..]),
+    };
+    if body_forms.is_empty() {
+        return Err(format!("letmacro '{}' lambda must have a body", macro_name));
+    }
     let (params, rest_param) = parse_macro_param_list(params_slice, macro_name)?;
-    let body = items
-        .last()
-        .cloned()
-        .ok_or_else(|| format!("letmacro '{}' lambda must have a body", macro_name))?;
+    let body = if body_forms.len() == 1 {
+        body_forms[0].clone()
+    } else {
+        Expression::Apply(
+            std::iter::once(Expression::Word("do".to_string()))
+                .chain(body_forms.iter().cloned())
+                .collect(),
+        )
+    };
     Ok(MacroClause {
         params,
         rest_param,

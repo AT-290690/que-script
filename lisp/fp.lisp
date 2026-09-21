@@ -490,7 +490,7 @@
     (while (< i len) (do
         (mut j (+ i 1))
         (while (< j len) (do
-            (Vector/push! pairs { (get xs i) (get xs j) })
+            (push! pairs { (get xs i) (get xs j) })
             (alter! j (+ j 1))))
         (alter! i (+ i 1))))
     pairs)))
@@ -641,7 +641,7 @@
 
 (let combination (lambda xs (do
     (let out [])
-    (letrec combinations (lambda arr size start temp
+    (letrec combinations (lambda temp arr size start
         (if (= (length temp) size)
             (set! out (length out) (copy temp))
             (do
@@ -649,13 +649,13 @@
               (let len (length arr))
               (while (< i len) (do
                     (set! temp (length temp) (get arr i))
-                    (combinations arr size (+ i 1) temp)
+                    (combinations temp arr size (+ i 1))
                     (pop! temp)
                     (alter! i (+ i 1))))))))
    (mut i 1)
    (let max-size (+ 1 (length xs)))
    (while (< i max-size) (do
-      (combinations xs i 0 [])
+      (combinations [] xs i 0)
       (alter! i (+ i 1))))
     out)))
 
@@ -1035,7 +1035,7 @@ out)))
 
 (let combination/n (lambda n xs (do
     (let out [])
-    (letrec combinations (lambda arr size start temp
+    (letrec combinations (lambda temp arr size start
         (if (= (length temp) size)
             (set! out (length out) (copy temp))
             (do
@@ -1043,10 +1043,10 @@ out)))
               (let len (length arr))
               (while (< i len) (do
                     (set! temp (length temp) (get arr i))
-                    (combinations arr size (+ i 1) temp)
+                    (combinations temp arr size (+ i 1))
                     (pop! temp)
                     (alter! i (+ i 1))))))))
-    (combinations xs n 0 [])
+    (combinations [] xs n 0)
     out)))
 
 (let resolve/option (lambda fn df xs (do

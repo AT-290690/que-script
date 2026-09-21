@@ -16,7 +16,7 @@
 
 (letmacro cond
   (()
-    (qq 0))
+    (qq nil))
   ((default)
     (qq (uq default)))
   ((test branch)
@@ -209,6 +209,16 @@
               (++ (uq name))
               nil))))))
 
+(letmacro loop++
+  (lambda name start condition . body
+    (qq (block
+          (mut (uq name) (uq start))
+          (while (uq condition)
+            (do
+              (uqs body)
+              (++ (uq name))
+              nil))))))
+
 (letmacro let*
   ((name value body)
     (qq (block
@@ -295,3 +305,22 @@
 (letmacro test-suite/static
   (lambda name . tests
     (qq [(uqs tests)])))
+
+(letmacro loop/in/i
+  (lambda index item items . body
+    (do
+      (let xs (gensym))
+      (let len (gensym))
+
+      (qq
+        (block
+          (let (uq xs) (uq items))
+          (let (uq len) (length (uq xs)))
+          (mut (uq index) 0)
+
+          (while (< (uq index) (uq len))
+            (let (uq item)
+              (get (uq xs) (uq index)))
+
+            (uqs body)
+            (++ (uq index))))))))

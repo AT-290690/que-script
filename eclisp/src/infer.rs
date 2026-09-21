@@ -2990,12 +2990,26 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         // assign a fresh monotype placeholder
         let tv = ctx.fresh_var();
 
+        let recursive_type = declared_type.clone().unwrap_or(tv);
         ctx.env.insert(
             name.clone(),
-            TypeScheme::monotype(declared_type.clone().unwrap_or(tv.clone())),
+            TypeScheme::monotype(recursive_type.clone()),
         )?;
 
         let value_type = infer_expr(value_expr, ctx)?;
+
+        // The monomorphic placeholder used by recursive calls must denote the
+        // value being bound. Without this constraint, recursive uses can solve
+        // to a different type from the lambda itself and leave contradictory
+        // types in the typed tree.
+        ctx.add_constraint(
+            recursive_type,
+            value_type.clone(),
+            ctx.type_error(
+                TypeErrorVariant::Source,
+                vec![Expression::Apply(exprs.to_vec())],
+            ),
+        );
 
         // solve constraints
         let constraints_vec = ctx.constraints.clone();
