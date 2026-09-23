@@ -1122,9 +1122,10 @@ fn known_integer_predicate(expr: &Expression, state: &AbstractState) -> Option<b
     if !matches!(op.as_str(), "=" | ">" | ">=" | "<" | "<=") {
         return None;
     }
-    let (Some(left), Some(right)) =
-        (integer_interval(left, state), integer_interval(right, state))
-    else {
+    let (Some(left), Some(right)) = (
+        integer_interval(left, state),
+        integer_interval(right, state),
+    ) else {
         return None;
     };
     match op.as_str() {
@@ -1658,16 +1659,113 @@ enum CounterStep {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SizeStep {
+    Shrink,
+    Grow,
+    Unchanged,
+    Unknown,
+}
+
+fn collect_size_mutations(expr: &Expression, out: &mut HashMap<String, Vec<SizeStep>>) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return;
+    }
+    match items.as_slice() {
+        [Expression::Word(op), Expression::Word(name)]
+            if matches!(op.as_str(), "pop!" | "pop-val!") =>
+        {
+            out.entry(name.clone()).or_default().push(SizeStep::Shrink);
+        }
+        [Expression::Word(op), Expression::Word(name), _] if op == "push!" => {
+            out.entry(name.clone()).or_default().push(SizeStep::Grow);
+        }
+        [Expression::Word(op), Expression::Word(name)] if op == "empty!" => {
+            out.entry(name.clone()).or_default().push(SizeStep::Shrink);
+        }
+        _ => {}
+    }
+    for child in items.iter().skip(1) {
+        collect_size_mutations(child, out);
+    }
+}
+
+fn length_operand(expr: &Expression) -> Option<&str> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    match items.as_slice() {
+        [Expression::Word(op), Expression::Word(name)] if op == "length" => Some(name),
+        _ => None,
+    }
+}
+
+fn size_guard_exit_direction(condition: &Expression) -> Option<(&str, SizeStep)> {
+    let Expression::Apply(items) = condition else {
+        return None;
+    };
+    let [Expression::Word(op), left, right] = items.as_slice() else {
+        return None;
+    };
+    if !matches!(op.as_str(), "<" | "<=" | ">" | ">=") {
+        return None;
+    }
+    if let Some(name) = length_operand(left) {
+        return Some((
+            name,
+            if matches!(op.as_str(), ">" | ">=") {
+                SizeStep::Shrink
+            } else {
+                SizeStep::Grow
+            },
+        ));
+    }
+    length_operand(right).map(|name| {
+        (
+            name,
+            if matches!(op.as_str(), "<" | "<=") {
+                SizeStep::Shrink
+            } else {
+                SizeStep::Grow
+            },
+        )
+    })
+}
+
+fn combined_size_step(steps: &[SizeStep]) -> SizeStep {
+    let Some(first) = steps.first().copied() else {
+        return SizeStep::Unchanged;
+    };
+    steps
+        .iter()
+        .copied()
+        .skip(1)
+        .try_fold(first, |known, next| (known == next).then_some(known))
+        .unwrap_or(SizeStep::Unknown)
+}
+
 fn counter_step(name: &str, updates: &[Expression]) -> CounterStep {
     let classify = |value: &Expression| match value {
         Expression::Word(other) if other == name => CounterStep::Unchanged,
         Expression::Apply(items) if items.len() == 3 => match items.as_slice() {
             [Expression::Word(op), Expression::Word(var), Expression::Int(step)]
-                if var == name && op == "+" && *step > 0 => CounterStep::Increase,
+                if var == name && op == "+" && *step > 0 =>
+            {
+                CounterStep::Increase
+            }
             [Expression::Word(op), Expression::Int(step), Expression::Word(var)]
-                if var == name && op == "+" && *step > 0 => CounterStep::Increase,
+                if var == name && op == "+" && *step > 0 =>
+            {
+                CounterStep::Increase
+            }
             [Expression::Word(op), Expression::Word(var), Expression::Int(step)]
-                if var == name && op == "-" && *step > 0 => CounterStep::Decrease,
+                if var == name && op == "-" && *step > 0 =>
+            {
+                CounterStep::Decrease
+            }
             _ => CounterStep::Unknown,
         },
         _ => CounterStep::Unknown,
@@ -1728,6 +1826,10 @@ fn analyze_while_termination(
     for body in items.iter().skip(2) {
         collect_altered_values(body, &mut updates);
     }
+    let mut size_mutations = HashMap::new();
+    for body in items.iter().skip(2) {
+        collect_size_mutations(body, &mut size_mutations);
+    }
     let mut guard_words = HashSet::new();
     if simple_guard_words(condition, &mut guard_words)
         && guard_words.iter().all(|name| !updates.contains_key(name))
@@ -1745,8 +1847,14 @@ fn analyze_while_termination(
         let Some((comparison, counter_on_left)) = comparison_for_counter(condition, name) else {
             continue;
         };
-        let toward_upper_exit = matches!((comparison, counter_on_left), ("<" | "<=", true) | (">" | ">=", false));
-        let toward_lower_exit = matches!((comparison, counter_on_left), (">" | ">=", true) | ("<" | "<=", false));
+        let toward_upper_exit = matches!(
+            (comparison, counter_on_left),
+            ("<" | "<=", true) | (">" | ">=", false)
+        );
+        let toward_lower_exit = matches!(
+            (comparison, counter_on_left),
+            (">" | ">=", true) | ("<" | "<=", false)
+        );
         let step = counter_step(name, values);
         let moves_away = (toward_upper_exit && step == CounterStep::Decrease)
             || (toward_lower_exit && step == CounterStep::Increase);
@@ -1761,13 +1869,29 @@ fn analyze_while_termination(
             );
         }
     }
+    if let Some((name, expected)) = size_guard_exit_direction(condition) {
+        let actual = size_mutations
+            .get(name)
+            .map(|steps| combined_size_step(steps))
+            .unwrap_or(SizeStep::Unchanged);
+        let moves_away = matches!(
+            (expected, actual),
+            (SizeStep::Shrink, SizeStep::Grow) | (SizeStep::Grow, SizeStep::Shrink)
+        );
+        if moves_away || actual == SizeStep::Unchanged {
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "termination: length of '{}' does not move toward the loop exit: `{}`",
+                    name,
+                    condition.to_lisp()
+                ),
+            );
+        }
+    }
 }
 
-fn contains_unchanged_recursive_call(
-    expr: &Expression,
-    function: &str,
-    params: &[String],
-) -> bool {
+fn contains_unchanged_recursive_call(expr: &Expression, function: &str, params: &[String]) -> bool {
     let Expression::Apply(items) = expr else {
         return false;
     };
@@ -1814,6 +1938,78 @@ fn contains_if(expr: &Expression) -> bool {
 
 fn recursive_argument_step(arg: &Expression, parameter: &str) -> CounterStep {
     counter_step(parameter, std::slice::from_ref(arg))
+}
+
+fn recursive_argument_size_step(arg: &Expression, parameter: &str) -> SizeStep {
+    match arg {
+        Expression::Word(name) if name == parameter => SizeStep::Unchanged,
+        Expression::Apply(items) => match items.as_slice() {
+            [Expression::Word(op), Expression::Word(name)] if op == "cdr" && name == parameter => {
+                SizeStep::Shrink
+            }
+            [Expression::Word(op), Expression::Word(name), _]
+                if op == "cdr" && name == parameter =>
+            {
+                SizeStep::Shrink
+            }
+            [Expression::Word(op), left, right]
+                if op == "cons"
+                    && (matches!(left, Expression::Word(name) if name == parameter)
+                        || matches!(right, Expression::Word(name) if name == parameter)) =>
+            {
+                SizeStep::Grow
+            }
+            _ => SizeStep::Unknown,
+        },
+        _ => SizeStep::Unknown,
+    }
+}
+
+fn length_base_case(condition: &Expression, parameter: &str) -> bool {
+    let Expression::Apply(items) = condition else {
+        return false;
+    };
+    match items.as_slice() {
+        [Expression::Word(op), left, Expression::Int(bound)]
+            if matches!(op.as_str(), "=" | "<=" | "<")
+                && *bound <= 1
+                && length_operand(left) == Some(parameter) =>
+        {
+            true
+        }
+        [Expression::Word(op), Expression::Int(bound), right]
+            if matches!(op.as_str(), "=" | ">=" | ">")
+                && *bound <= 1
+                && length_operand(right) == Some(parameter) =>
+        {
+            true
+        }
+        _ => false,
+    }
+}
+
+fn recursive_calls_fail_to_shrink(
+    expr: &Expression,
+    function: &str,
+    params: &[String],
+    shrinking_param: usize,
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return false;
+    }
+    if matches!(items.first(), Some(Expression::Word(name)) if name == function)
+        && items.len() == params.len() + 1
+    {
+        return recursive_argument_size_step(&items[shrinking_param + 1], &params[shrinking_param])
+            != SizeStep::Shrink;
+    }
+    items
+        .iter()
+        .skip(1)
+        .any(|child| recursive_calls_fail_to_shrink(child, function, params, shrinking_param))
 }
 
 fn guard_direction_for_parameter(
@@ -1875,8 +2071,7 @@ fn recursive_calls_move_away_from_guard(
         // the guard toward the opposite truth value.
         let target_truth = !recurse_when_true;
         return params.iter().enumerate().any(|(index, parameter)| {
-            let Some(expected) =
-                guard_direction_for_parameter(condition, parameter, target_truth)
+            let Some(expected) = guard_direction_for_parameter(condition, parameter, target_truth)
             else {
                 return false;
             };
@@ -1889,13 +2084,7 @@ fn recursive_calls_move_away_from_guard(
         });
     }
     items.iter().skip(1).any(|child| {
-        recursive_calls_move_away_from_guard(
-            child,
-            function,
-            params,
-            condition,
-            recurse_when_true,
-        )
+        recursive_calls_move_away_from_guard(child, function, params, condition, recurse_when_true)
     })
 }
 
@@ -1908,6 +2097,12 @@ fn analyze_recursive_progress(
     let Expression::Apply(items) = body else {
         return;
     };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "do" || op == "block") {
+        for expression in items.iter().skip(1) {
+            analyze_recursive_progress(expression, function, params, diagnostics);
+        }
+        return;
+    }
     if matches!(items.first(), Some(Expression::Word(name)) if name == function) {
         record_diagnostic(
             diagnostics,
@@ -1945,6 +2140,23 @@ fn analyze_recursive_progress(
                         recursive_branch.to_lisp()
                     ),
                 );
+            }
+            if !recurse_when_true {
+                for (index, parameter) in params.iter().enumerate() {
+                    if length_base_case(&items[1], parameter)
+                        && recursive_calls_fail_to_shrink(recursive_branch, function, params, index)
+                    {
+                        record_diagnostic(
+                            diagnostics,
+                            format!(
+                                "termination: recursive call to '{}' does not shrink '{}': `{}`",
+                                function,
+                                parameter,
+                                recursive_branch.to_lisp()
+                            ),
+                        );
+                    }
+                }
             }
             return;
         }
@@ -2602,10 +2814,7 @@ mod tests {
             .iter()
             .any(|message| message.contains("no program-controlled exit")));
 
-        let invariant = diagnostics(
-            "(mut i 0) (mut j 0) (while (< i 10) (alter! j (+ j 1)))",
-            3,
-        );
+        let invariant = diagnostics("(mut i 0) (mut j 0) (while (< i 10) (alter! j (+ j 1)))", 3);
         assert!(invariant
             .iter()
             .any(|message| message.contains("condition cannot change")));
@@ -2613,18 +2822,12 @@ mod tests {
 
     #[test]
     fn termination_warns_when_counter_moves_away_but_not_toward_bound() {
-        let away = diagnostics(
-            "(mut i 0) (while (< i 10) (alter! i (- i 1)))",
-            2,
-        );
+        let away = diagnostics("(mut i 0) (while (< i 10) (alter! i (- i 1)))", 2);
         assert!(away
             .iter()
             .any(|message| message.contains("does not move toward")));
 
-        let toward = diagnostics(
-            "(mut i 0) (while (< i 10) (alter! i (+ i 1)))",
-            2,
-        );
+        let toward = diagnostics("(mut i 0) (while (< i 10) (alter! i (+ i 1)))", 2);
         assert!(!toward
             .iter()
             .any(|message| message.starts_with("termination:")));
@@ -2632,10 +2835,7 @@ mod tests {
 
     #[test]
     fn termination_warns_for_unchanged_recursive_arguments() {
-        let findings = diagnostics(
-            "(letrec repeat (lambda (n) (if (= n 0) 0 (repeat n))))",
-            1,
-        );
+        let findings = diagnostics("(letrec repeat (lambda (n) (if (= n 0) 0 (repeat n))))", 1);
         assert!(findings
             .iter()
             .any(|message| message.contains("repeats all arguments unchanged")));
@@ -2671,6 +2871,71 @@ mod tests {
         assert!(unconditional
             .iter()
             .any(|message| message.contains("no conditional exit path")));
+    }
+
+    #[test]
+    fn termination_tracks_structural_vector_recursion() {
+        let shrinking = diagnostics(
+            "(letrec drain (lambda (xs) (if (= (length xs) 0) 0 (drain (cdr xs)))))",
+            1,
+        );
+        assert!(
+            !shrinking
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{shrinking:?}"
+        );
+
+        let unchanged = diagnostics(
+            "(letrec stuck (lambda (xs n) (if (= (length xs) 0) 0 (stuck xs (- n 1)))))",
+            1,
+        );
+        assert!(unchanged
+            .iter()
+            .any(|message| message.contains("does not shrink 'xs'")));
+
+        let growing = diagnostics(
+            "(letrec grow (lambda (xs) (if (= (length xs) 0) 0 (grow (cons [1] xs)))))",
+            1,
+        );
+        assert!(growing
+            .iter()
+            .any(|message| message.contains("does not shrink 'xs'")));
+    }
+
+    #[test]
+    fn termination_tracks_vectors_consumed_by_loops() {
+        let shrinking = diagnostics("(let xs [1 2 3]) (while (> (length xs) 0) (pop! xs))", 2);
+        assert!(!shrinking
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+
+        let unchanged = diagnostics(
+            "(let xs [1 2 3]) (mut n 0) (while (> (length xs) 0) (alter! n (+ n 1)))",
+            3,
+        );
+        assert!(unchanged
+            .iter()
+            .any(|message| message.contains("length of 'xs' does not move")));
+
+        let growing = diagnostics("(let xs [1]) (while (> (length xs) 0) (push! xs 1))", 2);
+        assert!(growing
+            .iter()
+            .any(|message| message.contains("length of 'xs' does not move")));
+    }
+
+    #[test]
+    fn termination_checks_unconditional_recursion_after_an_earlier_if() {
+        let findings = diagnostics(
+            "(letrec grow (lambda (n) (if (= n 0) 0 0) (grow (+ n 1))))",
+            1,
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|message| message.contains("no conditional exit path")),
+            "{findings:?}"
+        );
     }
 
     #[test]
@@ -2887,8 +3152,12 @@ mod tests {
         )
         .expect("source should infer");
         let diagnostics = analyze_user_program_diagnostics(&typed, 4);
-        assert!(diagnostics.iter().any(|message| message.contains("(pop-val! history)")));
-        assert!(diagnostics.iter().any(|message| message.contains("(pop-val! alt)")));
+        assert!(diagnostics
+            .iter()
+            .any(|message| message.contains("(pop-val! history)")));
+        assert!(diagnostics
+            .iter()
+            .any(|message| message.contains("(pop-val! alt)")));
     }
 
     #[test]
