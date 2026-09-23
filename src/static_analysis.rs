@@ -2,6 +2,14 @@ use crate::infer::TypedExpression;
 use crate::parser::Expression;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminationFinding {
+    pub subject: String,
+    pub status: String,
+    pub measure: Option<String>,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct GuardRelation {
     vector_arg: usize,
@@ -2681,6 +2689,255 @@ pub fn analyze_user_program_diagnostics(
         analyze_termination_expr(expression, &structural_summaries, &mut diagnostics);
     }
     diagnostics
+}
+
+fn first_recursive_call<'a>(expr: &'a Expression, function: &str) -> Option<&'a [Expression]> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return None;
+    }
+    if matches!(items.first(), Some(Expression::Word(name)) if name == function) {
+        return Some(items);
+    }
+    items
+        .iter()
+        .skip(1)
+        .find_map(|child| first_recursive_call(child, function))
+}
+
+fn collect_termination_findings(
+    expr: &Expression,
+    structural_summaries: &HashMap<String, StructuralSummary>,
+    findings: &mut Vec<TerminationFinding>,
+) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    let op = items.first().and_then(word).unwrap_or("");
+    if op == "while" && items.len() >= 3 {
+        let condition = &items[1];
+        let subject = format!("while {}", condition.to_lisp());
+        let mut diagnostics = Vec::new();
+        analyze_while_termination(expr, items, structural_summaries, &mut diagnostics);
+        if let Some(reason) = diagnostics
+            .into_iter()
+            .find(|message| message.starts_with("termination:"))
+        {
+            findings.push(TerminationFinding {
+                subject,
+                status: "warning".to_string(),
+                measure: None,
+                reason: reason.trim_start_matches("termination: ").to_string(),
+            });
+        } else {
+            let mut updates = HashMap::new();
+            for body in items.iter().skip(2) {
+                collect_altered_values(body, &mut updates);
+            }
+            let scalar_proof = updates.iter().find_map(|(name, values)| {
+                let (comparison, counter_on_left) = comparison_for_counter(condition, name)?;
+                let toward_upper = matches!(
+                    (comparison, counter_on_left),
+                    ("<" | "<=", true) | (">" | ">=", false)
+                );
+                let toward_lower = matches!(
+                    (comparison, counter_on_left),
+                    (">" | ">=", true) | ("<" | "<=", false)
+                );
+                let step = counter_step(name, values);
+                ((toward_upper && step == CounterStep::Increase)
+                    || (toward_lower && step == CounterStep::Decrease))
+                    .then(|| {
+                        (
+                            name.clone(),
+                            if step == CounterStep::Increase {
+                                "increases"
+                            } else {
+                                "decreases"
+                            },
+                        )
+                    })
+            });
+            let mut size_mutations = HashMap::new();
+            for body in items.iter().skip(2) {
+                collect_size_mutations(body, structural_summaries, &mut size_mutations);
+            }
+            let structural_proof = size_guard_exit_direction(condition).and_then(|(name, expected)| {
+                let actual = size_mutations
+                    .get(name)
+                    .map(|steps| combined_size_step(steps))
+                    .unwrap_or(SizeStep::Unchanged);
+                (actual == expected).then(|| name.to_string())
+            });
+            if let Some((name, direction)) = scalar_proof {
+                findings.push(TerminationFinding {
+                    subject,
+                    status: "proven".to_string(),
+                    measure: Some(name.clone()),
+                    reason: format!("{} {} toward the exit bound", name, direction),
+                });
+            } else if let Some(name) = structural_proof {
+                findings.push(TerminationFinding {
+                    subject,
+                    status: "proven".to_string(),
+                    measure: Some(format!("length({name})")),
+                    reason: format!("length({name}) moves toward the exit bound"),
+                });
+            } else {
+                findings.push(TerminationFinding {
+                    subject,
+                    status: "unknown".to_string(),
+                    measure: None,
+                    reason: "no monotonic measure was inferred".to_string(),
+                });
+            }
+        }
+    }
+    if op == "letrec" && items.len() == 3 {
+        if let (Expression::Word(name), Expression::Apply(lambda)) = (&items[1], &items[2]) {
+            if matches!(lambda.first(), Some(Expression::Word(head)) if head == "lambda")
+                && lambda.len() >= 2
+            {
+                let params = lambda[1..lambda.len() - 1]
+                    .iter()
+                    .filter_map(|param| word(param).map(str::to_string))
+                    .collect::<Vec<_>>();
+                let body = lambda.last().expect("lambda body exists");
+                let mut diagnostics = Vec::new();
+                if params.len() == lambda.len() - 2 {
+                    if contains_unchanged_recursive_call(body, name, &params) {
+                        diagnostics.push(format!(
+                            "recursive call to '{}' repeats all arguments unchanged",
+                            name
+                        ));
+                    }
+                    analyze_recursive_progress(
+                        body,
+                        name,
+                        &params,
+                        structural_summaries,
+                        &mut diagnostics,
+                    );
+                }
+                if let Some(reason) = diagnostics.into_iter().next() {
+                    findings.push(TerminationFinding {
+                        subject: name.clone(),
+                        status: "warning".to_string(),
+                        measure: None,
+                        reason: reason.trim_start_matches("termination: ").to_string(),
+                    });
+                } else if let Expression::Apply(branch) = body {
+                    if matches!(branch.first(), Some(Expression::Word(head)) if head == "if")
+                        && branch.len() >= 3
+                    {
+                        let then_recurses = contains_recursive_call(&branch[2], name);
+                        let else_recurses = branch
+                            .get(3)
+                            .is_some_and(|candidate| contains_recursive_call(candidate, name));
+                        let recursive_branch = if then_recurses ^ else_recurses {
+                            Some(if then_recurses { &branch[2] } else { &branch[3] })
+                        } else {
+                            None
+                        };
+                        let proof = recursive_branch
+                            .and_then(|recursive_branch| first_recursive_call(recursive_branch, name))
+                            .and_then(|call| {
+                                params.iter().enumerate().find_map(|(index, parameter)| {
+                                    let argument = call.get(index + 1)?;
+                                    if length_base_case(&branch[1], parameter)
+                                        && recursive_argument_size_step(
+                                            argument,
+                                            parameter,
+                                            structural_summaries,
+                                        ) == SizeStep::Shrink
+                                    {
+                                        return Some((
+                                            format!("length({parameter})"),
+                                            format!(
+                                                "length({parameter}) decreases on the recursive path"
+                                            ),
+                                        ));
+                                    }
+                                    let recurse_when_true = then_recurses;
+                                    let expected = guard_direction_for_parameter(
+                                        &branch[1],
+                                        parameter,
+                                        !recurse_when_true,
+                                    )?;
+                                    let actual = recursive_argument_step(argument, parameter);
+                                    (actual == expected).then(|| {
+                                        let direction = if actual == CounterStep::Increase {
+                                            "increases"
+                                        } else {
+                                            "decreases"
+                                        };
+                                        (
+                                            parameter.clone(),
+                                            format!(
+                                                "{} {} toward the base-case guard",
+                                                parameter, direction
+                                            ),
+                                        )
+                                    })
+                                })
+                            });
+                        if let Some((measure, reason)) = proof {
+                            findings.push(TerminationFinding {
+                                subject: name.clone(),
+                                status: "proven".to_string(),
+                                measure: Some(measure),
+                                reason,
+                            });
+                        } else if contains_recursive_call(body, name) {
+                            findings.push(TerminationFinding {
+                                subject: name.clone(),
+                                status: "unknown".to_string(),
+                                measure: None,
+                                reason: "recursive calls exist, but no decreasing measure was inferred"
+                                    .to_string(),
+                            });
+                        }
+                    } else if contains_recursive_call(body, name) {
+                        findings.push(TerminationFinding {
+                            subject: name.clone(),
+                            status: "unknown".to_string(),
+                            measure: None,
+                            reason: "recursive calls exist, but no base-case measure was inferred"
+                                .to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    for child in items.iter().skip(1) {
+        collect_termination_findings(child, structural_summaries, findings);
+    }
+}
+
+pub fn explain_termination(
+    typed_program: &TypedExpression,
+    user_form_count: usize,
+) -> Vec<TerminationFinding> {
+    let all_expressions = match &typed_program.expr {
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "do") =>
+        {
+            items.iter().skip(1).collect::<Vec<_>>()
+        }
+        expression => vec![expression],
+    };
+    let predicate_summaries = infer_predicate_summaries(&all_expressions);
+    let structural_summaries =
+        infer_structural_summaries(&all_expressions, &predicate_summaries);
+    let start = all_expressions.len().saturating_sub(user_form_count);
+    let mut findings = Vec::new();
+    for expression in &all_expressions[start..] {
+        collect_termination_findings(expression, &structural_summaries, &mut findings);
+    }
+    findings
 }
 
 fn substitute_predicate_body(

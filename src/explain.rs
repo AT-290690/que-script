@@ -14,6 +14,7 @@ pub struct ExplainReport {
     pub compiled_functions: Vec<ExplainCompiledFunction>,
     pub optimization_targets: Vec<ExplainOptimizationTarget>,
     pub forms: Vec<ExplainForm>,
+    pub termination: Vec<ExplainTermination>,
     pub warnings: Vec<ExplainWarning>,
 }
 
@@ -71,6 +72,14 @@ pub struct ExplainWarning {
     pub suggestion: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ExplainTermination {
+    pub subject: String,
+    pub status: String,
+    pub measure: Option<String>,
+    pub reason: String,
+}
+
 pub fn explain_program(
     typed_ast: &TypedExpression,
     wat: &str,
@@ -95,6 +104,15 @@ pub fn explain_program_with_effects(
     crate::infer::collect_top_level_function_external_impurity(typed_ast, &mut external_impurity);
     let effect_scope = collect_user_effect_scope(&user_nodes, known_effects, &external_impurity);
     let forms = collect_user_forms(&user_nodes, &effect_scope, &external_impurity);
+    let termination = crate::static_analysis::explain_termination(typed_ast, user_form_count)
+        .into_iter()
+        .map(|finding| ExplainTermination {
+            subject: finding.subject,
+            status: finding.status,
+            measure: finding.measure,
+            reason: finding.reason,
+        })
+        .collect();
     let user_effect = user_nodes.into_iter().fold(EffectFlags::PURE, |acc, form| {
         acc | observable_form_effect(
             form,
@@ -181,6 +199,7 @@ pub fn explain_program_with_effects(
         compiled_functions,
         optimization_targets,
         forms,
+        termination,
         warnings,
     }
 }
@@ -345,6 +364,23 @@ pub fn render_text(report: &ExplainReport) -> String {
             if !form.calls.is_empty() {
                 lines.push(format!("    calls: {}", form.calls.join(", ")));
             }
+        }
+    }
+
+    if !report.termination.is_empty() {
+        lines.push(String::new());
+        lines.push("Termination:".to_string());
+        for finding in &report.termination {
+            let measure = finding
+                .measure
+                .as_ref()
+                .map(|measure| format!("; measure: {measure}"))
+                .unwrap_or_default();
+            lines.push(format!(
+                "  {}: {}{}",
+                finding.subject, finding.status, measure
+            ));
+            lines.push(format!("    {}", finding.reason));
         }
     }
 
@@ -1026,6 +1062,37 @@ mod tests {
         assert!(text.contains("Que Explain"));
         assert!(text.contains("Result type: Int"));
         assert!(text.contains("WAT shape:"));
+    }
+
+    #[test]
+    fn explain_reports_proven_warning_and_unknown_termination() {
+        let proven = explain_source(
+            "(letrec down (lambda (n) (if (<= n 0) 0 (down (- n 1)))))",
+        );
+        assert!(proven.termination.iter().any(|finding| {
+            finding.subject == "down"
+                && finding.status == "proven"
+                && finding.measure.as_deref() == Some("n")
+        }));
+        let text = render_text(&proven);
+        assert!(text.contains("Termination:"));
+        assert!(text.contains("down: proven; measure: n"));
+
+        let warning = explain_source(
+            "(letrec stuck (lambda (n) (if (= n 0) 0 (stuck n))))",
+        );
+        assert!(warning
+            .termination
+            .iter()
+            .any(|finding| finding.subject == "stuck" && finding.status == "warning"));
+
+        let unknown = explain_source(
+            "(letrec mystery (lambda (n) (if (= n 0) 0 (mystery (* n 2)))))",
+        );
+        assert!(unknown
+            .termination
+            .iter()
+            .any(|finding| finding.subject == "mystery" && finding.status == "unknown"));
     }
 
     #[test]
