@@ -1604,6 +1604,233 @@ fn record_diagnostic(diagnostics: &mut Vec<String>, message: String) {
     }
 }
 
+fn collect_altered_values(expr: &Expression, out: &mut HashMap<String, Vec<Expression>>) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return;
+    }
+    if let [Expression::Word(op), Expression::Word(name), value] = items.as_slice() {
+        if op == "alter!" {
+            out.entry(name.clone()).or_default().push(value.clone());
+            return;
+        }
+    }
+    for child in items.iter().skip(1) {
+        collect_altered_values(child, out);
+    }
+}
+
+fn simple_guard_words(expr: &Expression, out: &mut HashSet<String>) -> bool {
+    match expr {
+        Expression::Int(_) => true,
+        Expression::Word(word) if matches!(word.as_str(), "true" | "false") => true,
+        Expression::Word(word) => {
+            out.insert(word.clone());
+            true
+        }
+        Expression::Dec(_) => false,
+        Expression::Apply(items) if !items.is_empty() => {
+            let Some(op) = items.first().and_then(word) else {
+                return false;
+            };
+            if !matches!(
+                op,
+                "and" | "or" | "not" | "=" | "<" | "<=" | ">" | ">=" | "+" | "-" | "*" | "/" | "%"
+            ) {
+                return false;
+            }
+            items
+                .iter()
+                .skip(1)
+                .all(|child| simple_guard_words(child, out))
+        }
+        Expression::Apply(_) => false,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CounterStep {
+    Increase,
+    Decrease,
+    Unchanged,
+    Unknown,
+}
+
+fn counter_step(name: &str, updates: &[Expression]) -> CounterStep {
+    let classify = |value: &Expression| match value {
+        Expression::Word(other) if other == name => CounterStep::Unchanged,
+        Expression::Apply(items) if items.len() == 3 => match items.as_slice() {
+            [Expression::Word(op), Expression::Word(var), Expression::Int(step)]
+                if var == name && op == "+" && *step > 0 => CounterStep::Increase,
+            [Expression::Word(op), Expression::Int(step), Expression::Word(var)]
+                if var == name && op == "+" && *step > 0 => CounterStep::Increase,
+            [Expression::Word(op), Expression::Word(var), Expression::Int(step)]
+                if var == name && op == "-" && *step > 0 => CounterStep::Decrease,
+            _ => CounterStep::Unknown,
+        },
+        _ => CounterStep::Unknown,
+    };
+    let Some(first) = updates.first().map(classify) else {
+        return CounterStep::Unchanged;
+    };
+    updates
+        .iter()
+        .skip(1)
+        .map(classify)
+        .try_fold(first, |known, next| (known == next).then_some(known))
+        .unwrap_or(CounterStep::Unknown)
+}
+
+fn comparison_for_counter<'a>(expr: &'a Expression, name: &str) -> Option<(&'a str, bool)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if let [Expression::Word(op), left, right] = items.as_slice() {
+        if matches!(op.as_str(), "<" | "<=" | ">" | ">=") {
+            if matches!(left, Expression::Word(var) if var == name) {
+                return Some((op, true));
+            }
+            if matches!(right, Expression::Word(var) if var == name) {
+                return Some((op, false));
+            }
+        }
+    }
+    for child in items.iter().skip(1) {
+        if let Some(found) = comparison_for_counter(child, name) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn analyze_while_termination(
+    whole: &Expression,
+    items: &[Expression],
+    diagnostics: &mut Vec<String>,
+) {
+    if items.len() < 3 {
+        return;
+    }
+    let condition = &items[1];
+    if matches!(condition, Expression::Word(value) if value == "true") {
+        record_diagnostic(
+            diagnostics,
+            format!(
+                "termination: loop has no program-controlled exit: `{}`",
+                whole.to_lisp()
+            ),
+        );
+        return;
+    }
+    let mut updates = HashMap::new();
+    for body in items.iter().skip(2) {
+        collect_altered_values(body, &mut updates);
+    }
+    let mut guard_words = HashSet::new();
+    if simple_guard_words(condition, &mut guard_words)
+        && guard_words.iter().all(|name| !updates.contains_key(name))
+    {
+        record_diagnostic(
+            diagnostics,
+            format!(
+                "termination: loop condition cannot change once entered: `{}`",
+                condition.to_lisp()
+            ),
+        );
+        return;
+    }
+    for (name, values) in &updates {
+        let Some((comparison, counter_on_left)) = comparison_for_counter(condition, name) else {
+            continue;
+        };
+        let toward_upper_exit = matches!((comparison, counter_on_left), ("<" | "<=", true) | (">" | ">=", false));
+        let toward_lower_exit = matches!((comparison, counter_on_left), (">" | ">=", true) | ("<" | "<=", false));
+        let step = counter_step(name, values);
+        let moves_away = (toward_upper_exit && step == CounterStep::Decrease)
+            || (toward_lower_exit && step == CounterStep::Increase);
+        if moves_away || step == CounterStep::Unchanged {
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "termination: loop counter '{}' does not move toward its exit bound: `{}`",
+                    name,
+                    condition.to_lisp()
+                ),
+            );
+        }
+    }
+}
+
+fn contains_unchanged_recursive_call(
+    expr: &Expression,
+    function: &str,
+    params: &[String],
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return false;
+    }
+    if matches!(items.first(), Some(Expression::Word(name)) if name == function)
+        && items.len() == params.len() + 1
+        && items
+            .iter()
+            .skip(1)
+            .zip(params)
+            .all(|(arg, param)| matches!(arg, Expression::Word(name) if name == param))
+    {
+        return true;
+    }
+    items
+        .iter()
+        .skip(1)
+        .any(|child| contains_unchanged_recursive_call(child, function, params))
+}
+
+fn analyze_termination_expr(expr: &Expression, diagnostics: &mut Vec<String>) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    let op = items.first().and_then(word).unwrap_or("");
+    if op == "while" {
+        analyze_while_termination(expr, items, diagnostics);
+    }
+    if op == "letrec" && items.len() == 3 {
+        if let (Expression::Word(name), Expression::Apply(lambda)) = (&items[1], &items[2]) {
+            if matches!(lambda.first(), Some(Expression::Word(head)) if head == "lambda")
+                && lambda.len() >= 2
+            {
+                let params = lambda[1..lambda.len() - 1]
+                    .iter()
+                    .filter_map(|param| word(param).map(str::to_string))
+                    .collect::<Vec<_>>();
+                if params.len() == lambda.len() - 2
+                    && contains_unchanged_recursive_call(
+                        lambda.last().expect("lambda body exists"),
+                        name,
+                        &params,
+                    )
+                {
+                    record_diagnostic(
+                        diagnostics,
+                        format!(
+                            "termination: recursive call to '{}' repeats all arguments unchanged: `{}`",
+                            name,
+                            expr.to_lisp()
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    for child in items.iter().skip(1) {
+        analyze_termination_expr(child, diagnostics);
+    }
+}
+
 fn access_index_is_proven(
     vector: &Expression,
     index: &Expression,
@@ -1982,6 +2209,7 @@ pub fn analyze_user_program_diagnostics(
     let mut diagnostics = Vec::new();
     for expression in &all_expressions[start..] {
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
+        analyze_termination_expr(expression, &mut diagnostics);
     }
     diagnostics
 }
@@ -2174,6 +2402,70 @@ mod tests {
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )?;
         analyze_user_program(&typed, user_form_count)
+    }
+
+    fn diagnostics(source: &str, user_form_count: usize) -> Vec<String> {
+        let expression = crate::parser::build(source).expect("source should build");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        analyze_user_program_diagnostics(&typed, user_form_count)
+    }
+
+    #[test]
+    fn termination_warns_for_constant_true_and_invariant_guard_loops() {
+        let constant = diagnostics("(mut i 0) (while true (alter! i i))", 2);
+        assert!(constant
+            .iter()
+            .any(|message| message.contains("no program-controlled exit")));
+
+        let invariant = diagnostics(
+            "(mut i 0) (mut j 0) (while (< i 10) (alter! j (+ j 1)))",
+            3,
+        );
+        assert!(invariant
+            .iter()
+            .any(|message| message.contains("condition cannot change")));
+    }
+
+    #[test]
+    fn termination_warns_when_counter_moves_away_but_not_toward_bound() {
+        let away = diagnostics(
+            "(mut i 0) (while (< i 10) (alter! i (- i 1)))",
+            2,
+        );
+        assert!(away
+            .iter()
+            .any(|message| message.contains("does not move toward")));
+
+        let toward = diagnostics(
+            "(mut i 0) (while (< i 10) (alter! i (+ i 1)))",
+            2,
+        );
+        assert!(!toward
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+    }
+
+    #[test]
+    fn termination_warns_for_unchanged_recursive_arguments() {
+        let findings = diagnostics(
+            "(letrec repeat (lambda (n) (if (= n 0) 0 (repeat n))))",
+            1,
+        );
+        assert!(findings
+            .iter()
+            .any(|message| message.contains("repeats all arguments unchanged")));
+
+        let decreasing = diagnostics(
+            "(letrec count-down (lambda (n) (if (<= n 0) 0 (count-down (- n 1)))))",
+            1,
+        );
+        assert!(!decreasing
+            .iter()
+            .any(|message| message.starts_with("termination:")));
     }
 
     #[test]

@@ -1717,7 +1717,9 @@ fn native_shell_pitfalls() -> &'static str {
     - Write clear functional code first, then inspect hot spots with que explain.\n\
     - que explain reports useful clues such as dynamic apply calls, closure allocations, tuple allocations, vector allocations, direct user calls, and WAT size.\n\
     - Tuples are convenient source-level data, but hot-loop tuples may still matter unless optimized away.\n\
-    - Run with --debug while developing to catch overflow, bounds, div-zero, and traps earlier.\n\
+    - Run with --debug while developing to catch overflow, bounds, div-zero, suspicious non-termination, and traps earlier.\n\
+    - ; use-strict-warnings! enables the same static warnings in the LSP for that file.\n\
+    - Termination analysis proves common counted loops and decreasing recursion, and warns only for recognizable non-progress; complex cases remain unknown.\n\
     - Run with --opt only after correctness is trusted.\n\
     - If normal/debug output differs from --opt output, suspect an optimizer/runtime assumption and minimize the case.\n\
     - Optimized and unoptimized runs are useful semantic cross-checks for compiler bugs.\n\
