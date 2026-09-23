@@ -1780,25 +1780,33 @@ fn combined_size_step(steps: &[SizeStep]) -> SizeStep {
         .unwrap_or(SizeStep::Unknown)
 }
 
-fn counter_step(name: &str, updates: &[Expression]) -> CounterStep {
+fn counter_step(name: &str, updates: &[Expression], facts: &AbstractState) -> CounterStep {
+    let direction = |step: &Expression| {
+        let interval = integer_interval(step, facts)?;
+        if interval.min > 0 {
+            Some(CounterStep::Increase)
+        } else if interval.max < 0 {
+            Some(CounterStep::Decrease)
+        } else if interval.min == 0 && interval.max == 0 {
+            Some(CounterStep::Unchanged)
+        } else {
+            Some(CounterStep::Unknown)
+        }
+    };
     let classify = |value: &Expression| match value {
         Expression::Word(other) if other == name => CounterStep::Unchanged,
         Expression::Apply(items) if items.len() == 3 => match items.as_slice() {
-            [Expression::Word(op), Expression::Word(var), Expression::Int(step)]
-                if var == name && op == "+" && *step > 0 =>
-            {
-                CounterStep::Increase
-            }
-            [Expression::Word(op), Expression::Int(step), Expression::Word(var)]
-                if var == name && op == "+" && *step > 0 =>
-            {
-                CounterStep::Increase
-            }
-            [Expression::Word(op), Expression::Word(var), Expression::Int(step)]
-                if var == name && op == "-" && *step > 0 =>
-            {
-                CounterStep::Decrease
-            }
+            [Expression::Word(op), Expression::Word(var), step]
+                if var == name && op == "+" => direction(step).unwrap_or(CounterStep::Unknown),
+            [Expression::Word(op), step, Expression::Word(var)]
+                if var == name && op == "+" => direction(step).unwrap_or(CounterStep::Unknown),
+            [Expression::Word(op), Expression::Word(var), step]
+                if var == name && op == "-" => match direction(step) {
+                    Some(CounterStep::Increase) => CounterStep::Decrease,
+                    Some(CounterStep::Decrease) => CounterStep::Increase,
+                    Some(other) => other,
+                    None => CounterStep::Unknown,
+                },
             _ => CounterStep::Unknown,
         },
         _ => CounterStep::Unknown,
@@ -1840,12 +1848,14 @@ fn analyze_while_termination(
     whole: &Expression,
     items: &[Expression],
     structural_summaries: &HashMap<String, StructuralSummary>,
+    facts: &AbstractState,
     diagnostics: &mut Vec<String>,
 ) {
     if items.len() < 3 {
         return;
     }
     let condition = &items[1];
+    let loop_facts = state_for_true_branch(condition, facts);
     if matches!(condition, Expression::Word(value) if value == "true") {
         record_diagnostic(
             diagnostics,
@@ -1889,7 +1899,7 @@ fn analyze_while_termination(
             (comparison, counter_on_left),
             (">" | ">=", true) | ("<" | "<=", false)
         );
-        let step = counter_step(name, values);
+        let step = counter_step(name, values, &loop_facts);
         let moves_away = (toward_upper_exit && step == CounterStep::Decrease)
             || (toward_lower_exit && step == CounterStep::Increase);
         if moves_away || step == CounterStep::Unchanged {
@@ -1970,8 +1980,12 @@ fn contains_if(expr: &Expression) -> bool {
         || items.iter().skip(1).any(contains_if)
 }
 
-fn recursive_argument_step(arg: &Expression, parameter: &str) -> CounterStep {
-    counter_step(parameter, std::slice::from_ref(arg))
+fn recursive_argument_step(
+    arg: &Expression,
+    parameter: &str,
+    facts: &AbstractState,
+) -> CounterStep {
+    counter_step(parameter, std::slice::from_ref(arg), facts)
 }
 
 fn recursive_argument_size_step(
@@ -2121,6 +2135,7 @@ fn recursive_calls_move_away_from_guard(
     params: &[String],
     condition: &Expression,
     recurse_when_true: bool,
+    facts: &AbstractState,
 ) -> bool {
     let Expression::Apply(items) = expr else {
         return false;
@@ -2139,7 +2154,7 @@ fn recursive_calls_move_away_from_guard(
             else {
                 return false;
             };
-            let actual = recursive_argument_step(&items[index + 1], parameter);
+            let actual = recursive_argument_step(&items[index + 1], parameter, facts);
             matches!(
                 (expected, actual),
                 (CounterStep::Increase, CounterStep::Decrease)
@@ -2148,7 +2163,14 @@ fn recursive_calls_move_away_from_guard(
         });
     }
     items.iter().skip(1).any(|child| {
-        recursive_calls_move_away_from_guard(child, function, params, condition, recurse_when_true)
+        recursive_calls_move_away_from_guard(
+            child,
+            function,
+            params,
+            condition,
+            recurse_when_true,
+            facts,
+        )
     })
 }
 
@@ -2157,6 +2179,7 @@ fn analyze_recursive_progress(
     function: &str,
     params: &[String],
     structural_summaries: &HashMap<String, StructuralSummary>,
+    facts: &AbstractState,
     diagnostics: &mut Vec<String>,
 ) {
     let Expression::Apply(items) = body else {
@@ -2169,6 +2192,7 @@ fn analyze_recursive_progress(
                 function,
                 params,
                 structural_summaries,
+                facts,
                 diagnostics,
             );
         }
@@ -2202,6 +2226,7 @@ fn analyze_recursive_progress(
                 params,
                 &items[1],
                 recurse_when_true,
+                &state_for_branch(&items[1], facts, recurse_when_true),
             ) {
                 record_diagnostic(
                     diagnostics,
@@ -2255,6 +2280,7 @@ fn analyze_recursive_progress(
 fn analyze_termination_expr(
     expr: &Expression,
     structural_summaries: &HashMap<String, StructuralSummary>,
+    facts: &AbstractState,
     diagnostics: &mut Vec<String>,
 ) {
     let Expression::Apply(items) = expr else {
@@ -2262,7 +2288,7 @@ fn analyze_termination_expr(
     };
     let op = items.first().and_then(word).unwrap_or("");
     if op == "while" {
-        analyze_while_termination(expr, items, structural_summaries, diagnostics);
+        analyze_while_termination(expr, items, structural_summaries, facts, diagnostics);
     }
     if op == "letrec" && items.len() == 3 {
         if let (Expression::Word(name), Expression::Apply(lambda)) = (&items[1], &items[2]) {
@@ -2295,6 +2321,7 @@ fn analyze_termination_expr(
                         name,
                         &params,
                         structural_summaries,
+                        facts,
                         diagnostics,
                     );
                 }
@@ -2302,7 +2329,7 @@ fn analyze_termination_expr(
         }
     }
     for child in items.iter().skip(1) {
-        analyze_termination_expr(child, structural_summaries, diagnostics);
+        analyze_termination_expr(child, structural_summaries, facts, diagnostics);
     }
 }
 
@@ -2686,7 +2713,7 @@ pub fn analyze_user_program_diagnostics(
     let mut diagnostics = Vec::new();
     for expression in &all_expressions[start..] {
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
-        analyze_termination_expr(expression, &structural_summaries, &mut diagnostics);
+        analyze_termination_expr(expression, &structural_summaries, &facts, &mut diagnostics);
     }
     diagnostics
 }
@@ -2710,6 +2737,7 @@ fn first_recursive_call<'a>(expr: &'a Expression, function: &str) -> Option<&'a 
 fn collect_termination_findings(
     expr: &Expression,
     structural_summaries: &HashMap<String, StructuralSummary>,
+    facts: &AbstractState,
     findings: &mut Vec<TerminationFinding>,
 ) {
     let Expression::Apply(items) = expr else {
@@ -2720,7 +2748,13 @@ fn collect_termination_findings(
         let condition = &items[1];
         let subject = format!("while {}", condition.to_lisp());
         let mut diagnostics = Vec::new();
-        analyze_while_termination(expr, items, structural_summaries, &mut diagnostics);
+        analyze_while_termination(
+            expr,
+            items,
+            structural_summaries,
+            facts,
+            &mut diagnostics,
+        );
         if let Some(reason) = diagnostics
             .into_iter()
             .find(|message| message.starts_with("termination:"))
@@ -2736,6 +2770,7 @@ fn collect_termination_findings(
             for body in items.iter().skip(2) {
                 collect_altered_values(body, &mut updates);
             }
+            let loop_facts = state_for_true_branch(condition, facts);
             let scalar_proof = updates.iter().find_map(|(name, values)| {
                 let (comparison, counter_on_left) = comparison_for_counter(condition, name)?;
                 let toward_upper = matches!(
@@ -2746,7 +2781,7 @@ fn collect_termination_findings(
                     (comparison, counter_on_left),
                     (">" | ">=", true) | ("<" | "<=", false)
                 );
-                let step = counter_step(name, values);
+                let step = counter_step(name, values, &loop_facts);
                 ((toward_upper && step == CounterStep::Increase)
                     || (toward_lower && step == CounterStep::Decrease))
                     .then(|| {
@@ -2818,6 +2853,7 @@ fn collect_termination_findings(
                         name,
                         &params,
                         structural_summaries,
+                        facts,
                         &mut diagnostics,
                     );
                 }
@@ -2866,7 +2902,16 @@ fn collect_termination_findings(
                                         parameter,
                                         !recurse_when_true,
                                     )?;
-                                    let actual = recursive_argument_step(argument, parameter);
+                                    let recursive_facts = state_for_branch(
+                                        &branch[1],
+                                        facts,
+                                        then_recurses,
+                                    );
+                                    let actual = recursive_argument_step(
+                                        argument,
+                                        parameter,
+                                        &recursive_facts,
+                                    );
                                     (actual == expected).then(|| {
                                         let direction = if actual == CounterStep::Increase {
                                             "increases"
@@ -2913,7 +2958,7 @@ fn collect_termination_findings(
         }
     }
     for child in items.iter().skip(1) {
-        collect_termination_findings(child, structural_summaries, findings);
+        collect_termination_findings(child, structural_summaries, facts, findings);
     }
 }
 
@@ -2929,13 +2974,24 @@ pub fn explain_termination(
         }
         expression => vec![expression],
     };
+    let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
     let structural_summaries =
         infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
+    let mut facts = AbstractState {
+        guard_summaries,
+        predicate_summaries,
+        ..AbstractState::default()
+    };
+    let mut ignored_diagnostics = Vec::new();
+    for expression in &all_expressions[..start] {
+        validate_static_bounds_expr(expression, &mut facts, &mut ignored_diagnostics);
+    }
     let mut findings = Vec::new();
     for expression in &all_expressions[start..] {
-        collect_termination_findings(expression, &structural_summaries, &mut findings);
+        validate_static_bounds_expr(expression, &mut facts, &mut ignored_diagnostics);
+        collect_termination_findings(expression, &structural_summaries, &facts, &mut findings);
     }
     findings
 }
@@ -3471,6 +3527,41 @@ mod tests {
 
         let toward = diagnostics("(mut i 0) (while (< i 10) (alter! i (+ i 1)))", 2);
         assert!(!toward
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+    }
+
+    #[test]
+    fn termination_uses_symbolic_step_sign_facts() {
+        let positive = diagnostics(
+            "(let step 2) (mut i 0) (while (< i 10) (alter! i (+ i step)))",
+            3,
+        );
+        assert!(!positive
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+
+        let guarded_parameter = diagnostics(
+            "(let count (lambda (step) (mut i 0) (while (and (> step 0) (< i 10)) (alter! i (+ i step))) i))",
+            1,
+        );
+        assert!(!guarded_parameter
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+
+        let negative = diagnostics(
+            "(let step -2) (mut i 0) (while (< i 10) (alter! i (+ i step)))",
+            3,
+        );
+        assert!(negative
+            .iter()
+            .any(|message| message.contains("does not move toward")));
+
+        let recursive = diagnostics(
+            "(let step 2) (letrec down (lambda (n) (if (<= n 0) 0 (down (- n step)))))",
+            2,
+        );
+        assert!(!recursive
             .iter()
             .any(|message| message.starts_with("termination:")));
     }

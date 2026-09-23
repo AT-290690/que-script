@@ -1093,6 +1093,15 @@ mod tests {
             .termination
             .iter()
             .any(|finding| finding.subject == "mystery" && finding.status == "unknown"));
+
+        let symbolic_step = explain_source(
+            "(let count (lambda (step) (mut i 0) (while (and (> step 0) (< i 10)) (alter! i (+ i step))) i))",
+        );
+        assert!(symbolic_step.termination.iter().any(|finding| {
+            finding.status == "proven"
+                && finding.measure.as_deref() == Some("i")
+                && finding.reason.contains("i increases")
+        }));
     }
 
     #[test]
