@@ -1790,6 +1790,179 @@ fn contains_unchanged_recursive_call(
         .any(|child| contains_unchanged_recursive_call(child, function, params))
 }
 
+fn contains_recursive_call(expr: &Expression, function: &str) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return false;
+    }
+    matches!(items.first(), Some(Expression::Word(name)) if name == function)
+        || items
+            .iter()
+            .skip(1)
+            .any(|child| contains_recursive_call(child, function))
+}
+
+fn contains_if(expr: &Expression) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    matches!(items.first(), Some(Expression::Word(op)) if op == "if")
+        || items.iter().skip(1).any(contains_if)
+}
+
+fn recursive_argument_step(arg: &Expression, parameter: &str) -> CounterStep {
+    counter_step(parameter, std::slice::from_ref(arg))
+}
+
+fn guard_direction_for_parameter(
+    condition: &Expression,
+    parameter: &str,
+    target_truth: bool,
+) -> Option<CounterStep> {
+    let Expression::Apply(items) = condition else {
+        return None;
+    };
+    let [Expression::Word(op), left, right] = items.as_slice() else {
+        return None;
+    };
+    if !matches!(op.as_str(), "<" | "<=" | ">" | ">=") {
+        return None;
+    }
+    let parameter_on_left = if matches!(left, Expression::Word(name) if name == parameter) {
+        true
+    } else if matches!(right, Expression::Word(name) if name == parameter) {
+        false
+    } else {
+        return None;
+    };
+    let less_relation = matches!(op.as_str(), "<" | "<=");
+    let increase_makes_true = if parameter_on_left {
+        !less_relation
+    } else {
+        less_relation
+    };
+    let increase_is_target = if target_truth {
+        increase_makes_true
+    } else {
+        !increase_makes_true
+    };
+    Some(if increase_is_target {
+        CounterStep::Increase
+    } else {
+        CounterStep::Decrease
+    })
+}
+
+fn recursive_calls_move_away_from_guard(
+    expr: &Expression,
+    function: &str,
+    params: &[String],
+    condition: &Expression,
+    recurse_when_true: bool,
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return false;
+    }
+    if matches!(items.first(), Some(Expression::Word(name)) if name == function)
+        && items.len() == params.len() + 1
+    {
+        // The sibling branch is the exit path, so recursive progress must move
+        // the guard toward the opposite truth value.
+        let target_truth = !recurse_when_true;
+        return params.iter().enumerate().any(|(index, parameter)| {
+            let Some(expected) =
+                guard_direction_for_parameter(condition, parameter, target_truth)
+            else {
+                return false;
+            };
+            let actual = recursive_argument_step(&items[index + 1], parameter);
+            matches!(
+                (expected, actual),
+                (CounterStep::Increase, CounterStep::Decrease)
+                    | (CounterStep::Decrease, CounterStep::Increase)
+            )
+        });
+    }
+    items.iter().skip(1).any(|child| {
+        recursive_calls_move_away_from_guard(
+            child,
+            function,
+            params,
+            condition,
+            recurse_when_true,
+        )
+    })
+}
+
+fn analyze_recursive_progress(
+    body: &Expression,
+    function: &str,
+    params: &[String],
+    diagnostics: &mut Vec<String>,
+) {
+    let Expression::Apply(items) = body else {
+        return;
+    };
+    if matches!(items.first(), Some(Expression::Word(name)) if name == function) {
+        record_diagnostic(
+            diagnostics,
+            format!(
+                "termination: recursive call to '{}' has no conditional exit path: `{}`",
+                function,
+                body.to_lisp()
+            ),
+        );
+        return;
+    }
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "if") && items.len() >= 3 {
+        let then_recurses = contains_recursive_call(&items[2], function);
+        let else_recurses = items
+            .get(3)
+            .is_some_and(|branch| contains_recursive_call(branch, function));
+        if then_recurses ^ else_recurses {
+            let (recursive_branch, recurse_when_true) = if then_recurses {
+                (&items[2], true)
+            } else {
+                (&items[3], false)
+            };
+            if recursive_calls_move_away_from_guard(
+                recursive_branch,
+                function,
+                params,
+                &items[1],
+                recurse_when_true,
+            ) {
+                record_diagnostic(
+                    diagnostics,
+                    format!(
+                        "termination: recursive call to '{}' moves away from its base-case guard: `{}`",
+                        function,
+                        recursive_branch.to_lisp()
+                    ),
+                );
+            }
+            return;
+        }
+    }
+    // A top-level sequence or arithmetic wrapper containing recursion but no
+    // guarding branch repeats unconditionally.
+    if contains_recursive_call(body, function) && !contains_if(body) {
+        record_diagnostic(
+            diagnostics,
+            format!(
+                "termination: recursion in '{}' has no conditional exit path: `{}`",
+                function,
+                body.to_lisp()
+            ),
+        );
+    }
+}
+
 fn analyze_termination_expr(expr: &Expression, diagnostics: &mut Vec<String>) {
     let Expression::Apply(items) = expr else {
         return;
@@ -1821,6 +1994,14 @@ fn analyze_termination_expr(expr: &Expression, diagnostics: &mut Vec<String>) {
                             name,
                             expr.to_lisp()
                         ),
+                    );
+                }
+                if params.len() == lambda.len() - 2 {
+                    analyze_recursive_progress(
+                        lambda.last().expect("lambda body exists"),
+                        name,
+                        &params,
+                        diagnostics,
                     );
                 }
             }
@@ -2466,6 +2647,30 @@ mod tests {
         assert!(!decreasing
             .iter()
             .any(|message| message.starts_with("termination:")));
+    }
+
+    #[test]
+    fn termination_compares_recursive_steps_with_base_case_guards() {
+        let away = diagnostics(
+            "(letrec grow (lambda (n) (if (<= n 0) 0 (grow (+ n 1)))))",
+            1,
+        );
+        assert!(away
+            .iter()
+            .any(|message| message.contains("moves away from its base-case guard")));
+
+        let toward = diagnostics(
+            "(letrec shrink (lambda (n) (if (<= n 0) 0 (shrink (- n 1)))))",
+            1,
+        );
+        assert!(!toward
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+
+        let unconditional = diagnostics("(letrec grow (lambda (n) (grow (+ n 1))))", 1);
+        assert!(unconditional
+            .iter()
+            .any(|message| message.contains("no conditional exit path")));
     }
 
     #[test]
