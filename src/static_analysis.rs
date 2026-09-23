@@ -1667,7 +1667,18 @@ enum SizeStep {
     Unknown,
 }
 
-fn collect_size_mutations(expr: &Expression, out: &mut HashMap<String, Vec<SizeStep>>) {
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StructuralSummary {
+    params: Vec<String>,
+    parameter_effects: Vec<SizeStep>,
+    result_relations: Vec<SizeStep>,
+}
+
+fn collect_size_mutations(
+    expr: &Expression,
+    summaries: &HashMap<String, StructuralSummary>,
+    out: &mut HashMap<String, Vec<SizeStep>>,
+) {
     let Expression::Apply(items) = expr else {
         return;
     };
@@ -1683,13 +1694,27 @@ fn collect_size_mutations(expr: &Expression, out: &mut HashMap<String, Vec<SizeS
         [Expression::Word(op), Expression::Word(name), _] if op == "push!" => {
             out.entry(name.clone()).or_default().push(SizeStep::Grow);
         }
-        [Expression::Word(op), Expression::Word(name)] if op == "empty!" => {
-            out.entry(name.clone()).or_default().push(SizeStep::Shrink);
-        }
         _ => {}
     }
+    if let Some(op) = items.first().and_then(word) {
+        if let Some(summary) = summaries.get(op) {
+            if summary.params.len() == items.len().saturating_sub(1) {
+                for (argument, effect) in items
+                    .iter()
+                    .skip(1)
+                    .zip(summary.parameter_effects.iter().copied())
+                {
+                    if let Expression::Word(name) = argument {
+                        if effect != SizeStep::Unchanged {
+                            out.entry(name.clone()).or_default().push(effect);
+                        }
+                    }
+                }
+            }
+        }
+    }
     for child in items.iter().skip(1) {
-        collect_size_mutations(child, out);
+        collect_size_mutations(child, summaries, out);
     }
 }
 
@@ -1806,6 +1831,7 @@ fn comparison_for_counter<'a>(expr: &'a Expression, name: &str) -> Option<(&'a s
 fn analyze_while_termination(
     whole: &Expression,
     items: &[Expression],
+    structural_summaries: &HashMap<String, StructuralSummary>,
     diagnostics: &mut Vec<String>,
 ) {
     if items.len() < 3 {
@@ -1828,7 +1854,7 @@ fn analyze_while_termination(
     }
     let mut size_mutations = HashMap::new();
     for body in items.iter().skip(2) {
-        collect_size_mutations(body, &mut size_mutations);
+        collect_size_mutations(body, structural_summaries, &mut size_mutations);
     }
     let mut guard_words = HashSet::new();
     if simple_guard_words(condition, &mut guard_words)
@@ -1940,7 +1966,11 @@ fn recursive_argument_step(arg: &Expression, parameter: &str) -> CounterStep {
     counter_step(parameter, std::slice::from_ref(arg))
 }
 
-fn recursive_argument_size_step(arg: &Expression, parameter: &str) -> SizeStep {
+fn recursive_argument_size_step(
+    arg: &Expression,
+    parameter: &str,
+    summaries: &HashMap<String, StructuralSummary>,
+) -> SizeStep {
     match arg {
         Expression::Word(name) if name == parameter => SizeStep::Unchanged,
         Expression::Apply(items) => match items.as_slice() {
@@ -1959,7 +1989,27 @@ fn recursive_argument_size_step(arg: &Expression, parameter: &str) -> SizeStep {
             {
                 SizeStep::Grow
             }
-            _ => SizeStep::Unknown,
+            _ => {
+                let Some(op) = items.first().and_then(word) else {
+                    return SizeStep::Unknown;
+                };
+                let Some(summary) = summaries.get(op) else {
+                    return SizeStep::Unknown;
+                };
+                if summary.params.len() != items.len().saturating_sub(1) {
+                    return SizeStep::Unknown;
+                }
+                summary
+                    .result_relations
+                    .iter()
+                    .copied()
+                    .zip(items.iter().skip(1))
+                    .find_map(|(relation, argument)| {
+                        matches!(argument, Expression::Word(name) if name == parameter)
+                            .then_some(relation)
+                    })
+                    .unwrap_or(SizeStep::Unknown)
+            }
         },
         _ => SizeStep::Unknown,
     }
@@ -1993,6 +2043,7 @@ fn recursive_calls_fail_to_shrink(
     function: &str,
     params: &[String],
     shrinking_param: usize,
+    summaries: &HashMap<String, StructuralSummary>,
 ) -> bool {
     let Expression::Apply(items) = expr else {
         return false;
@@ -2003,13 +2054,18 @@ fn recursive_calls_fail_to_shrink(
     if matches!(items.first(), Some(Expression::Word(name)) if name == function)
         && items.len() == params.len() + 1
     {
-        return recursive_argument_size_step(&items[shrinking_param + 1], &params[shrinking_param])
-            != SizeStep::Shrink;
+        return recursive_argument_size_step(
+            &items[shrinking_param + 1],
+            &params[shrinking_param],
+            summaries,
+        ) != SizeStep::Shrink;
     }
     items
         .iter()
         .skip(1)
-        .any(|child| recursive_calls_fail_to_shrink(child, function, params, shrinking_param))
+        .any(|child| {
+            recursive_calls_fail_to_shrink(child, function, params, shrinking_param, summaries)
+        })
 }
 
 fn guard_direction_for_parameter(
@@ -2092,6 +2148,7 @@ fn analyze_recursive_progress(
     body: &Expression,
     function: &str,
     params: &[String],
+    structural_summaries: &HashMap<String, StructuralSummary>,
     diagnostics: &mut Vec<String>,
 ) {
     let Expression::Apply(items) = body else {
@@ -2099,7 +2156,13 @@ fn analyze_recursive_progress(
     };
     if matches!(items.first(), Some(Expression::Word(op)) if op == "do" || op == "block") {
         for expression in items.iter().skip(1) {
-            analyze_recursive_progress(expression, function, params, diagnostics);
+            analyze_recursive_progress(
+                expression,
+                function,
+                params,
+                structural_summaries,
+                diagnostics,
+            );
         }
         return;
     }
@@ -2144,7 +2207,13 @@ fn analyze_recursive_progress(
             if !recurse_when_true {
                 for (index, parameter) in params.iter().enumerate() {
                     if length_base_case(&items[1], parameter)
-                        && recursive_calls_fail_to_shrink(recursive_branch, function, params, index)
+                        && recursive_calls_fail_to_shrink(
+                            recursive_branch,
+                            function,
+                            params,
+                            index,
+                            structural_summaries,
+                        )
                     {
                         record_diagnostic(
                             diagnostics,
@@ -2175,13 +2244,17 @@ fn analyze_recursive_progress(
     }
 }
 
-fn analyze_termination_expr(expr: &Expression, diagnostics: &mut Vec<String>) {
+fn analyze_termination_expr(
+    expr: &Expression,
+    structural_summaries: &HashMap<String, StructuralSummary>,
+    diagnostics: &mut Vec<String>,
+) {
     let Expression::Apply(items) = expr else {
         return;
     };
     let op = items.first().and_then(word).unwrap_or("");
     if op == "while" {
-        analyze_while_termination(expr, items, diagnostics);
+        analyze_while_termination(expr, items, structural_summaries, diagnostics);
     }
     if op == "letrec" && items.len() == 3 {
         if let (Expression::Word(name), Expression::Apply(lambda)) = (&items[1], &items[2]) {
@@ -2213,6 +2286,7 @@ fn analyze_termination_expr(expr: &Expression, diagnostics: &mut Vec<String>) {
                         lambda.last().expect("lambda body exists"),
                         name,
                         &params,
+                        structural_summaries,
                         diagnostics,
                     );
                 }
@@ -2220,7 +2294,7 @@ fn analyze_termination_expr(expr: &Expression, diagnostics: &mut Vec<String>) {
         }
     }
     for child in items.iter().skip(1) {
-        analyze_termination_expr(child, diagnostics);
+        analyze_termination_expr(child, structural_summaries, diagnostics);
     }
 }
 
@@ -2586,6 +2660,8 @@ pub fn analyze_user_program_diagnostics(
     };
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
+    let structural_summaries =
+        infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
@@ -2602,7 +2678,7 @@ pub fn analyze_user_program_diagnostics(
     let mut diagnostics = Vec::new();
     for expression in &all_expressions[start..] {
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
-        analyze_termination_expr(expression, &mut diagnostics);
+        analyze_termination_expr(expression, &structural_summaries, &mut diagnostics);
     }
     diagnostics
 }
@@ -2669,6 +2745,315 @@ fn infer_predicate_summaries(expressions: &[&Expression]) -> HashMap<String, Pre
             let summary = PredicateSummary {
                 params,
                 body: body.to_lisp(),
+            };
+            changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
+        }
+        if !changed {
+            break;
+        }
+    }
+    summaries
+}
+
+fn combine_size_steps(left: SizeStep, right: SizeStep) -> SizeStep {
+    match (left, right) {
+        (SizeStep::Unchanged, other) | (other, SizeStep::Unchanged) => other,
+        (left, right) if left == right => left,
+        _ => SizeStep::Unknown,
+    }
+}
+
+fn condition_proves_empty(
+    condition: &Expression,
+    parameter: &str,
+    is_true: bool,
+    predicate_summaries: &HashMap<String, PredicateSummary>,
+    depth: usize,
+) -> bool {
+    if depth >= 16 {
+        return false;
+    }
+    let Expression::Apply(items) = condition else {
+        return false;
+    };
+    if let [Expression::Word(op), inner] = items.as_slice() {
+        if op == "not" {
+            return condition_proves_empty(
+                inner,
+                parameter,
+                !is_true,
+                predicate_summaries,
+                depth + 1,
+            );
+        }
+    }
+    if let [Expression::Word(op), left, Expression::Int(bound)] = items.as_slice() {
+        if length_operand(left) == Some(parameter) {
+            return matches!((op.as_str(), *bound, is_true), ("=", 0, true) | ("<=", 0, true) | ("<", 1, true) | (">", 0, false) | (">=", 1, false));
+        }
+    }
+    if let [Expression::Word(op), Expression::Int(bound), right] = items.as_slice() {
+        if length_operand(right) == Some(parameter) {
+            return matches!((op.as_str(), *bound, is_true), ("=", 0, true) | (">=", 0, true) | (">", 1, true) | ("<", 0, false) | ("<=", 0, false));
+        }
+    }
+    let Some(op) = items.first().and_then(word) else {
+        return false;
+    };
+    let Some(summary) = predicate_summaries.get(op) else {
+        return false;
+    };
+    if summary.params.len() != items.len().saturating_sub(1) {
+        return false;
+    }
+    let Ok(parsed_body) = crate::parser::build(&summary.body) else {
+        return false;
+    };
+    let substitutions = summary
+        .params
+        .iter()
+        .map(String::as_str)
+        .zip(items.iter().skip(1))
+        .collect::<HashMap<_, _>>();
+    let expanded = substitute_predicate_body(single_built_expression(&parsed_body), &substitutions);
+    condition_proves_empty(
+        &expanded,
+        parameter,
+        is_true,
+        predicate_summaries,
+        depth + 1,
+    )
+}
+
+fn structural_parameter_effect(
+    expr: &Expression,
+    parameter: &str,
+    summaries: &HashMap<String, StructuralSummary>,
+    predicate_summaries: &HashMap<String, PredicateSummary>,
+) -> SizeStep {
+    let Expression::Apply(items) = expr else {
+        return SizeStep::Unchanged;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return SizeStep::Unchanged;
+    }
+    match items.as_slice() {
+        [Expression::Word(op), Expression::Word(name)]
+            if name == parameter && matches!(op.as_str(), "pop!" | "pop-val!") =>
+        {
+            return SizeStep::Shrink;
+        }
+        [Expression::Word(op), Expression::Word(name), _]
+            if name == parameter && op == "push!" =>
+        {
+            return SizeStep::Grow;
+        }
+        _ => {}
+    }
+    let op = items.first().and_then(word).unwrap_or("");
+    if op == "if" {
+        let then_effect = items
+            .get(2)
+            .map(|branch| {
+                structural_parameter_effect(
+                    branch,
+                    parameter,
+                    summaries,
+                    predicate_summaries,
+                )
+            })
+            .unwrap_or(SizeStep::Unchanged);
+        let else_effect = items
+            .get(3)
+            .map(|branch| {
+                structural_parameter_effect(
+                    branch,
+                    parameter,
+                    summaries,
+                    predicate_summaries,
+                )
+            })
+            .unwrap_or(SizeStep::Unchanged);
+        return if then_effect == else_effect {
+            then_effect
+        } else if condition_proves_empty(
+            &items[1],
+            parameter,
+            true,
+            predicate_summaries,
+            0,
+        ) && then_effect == SizeStep::Unchanged
+            && else_effect == SizeStep::Shrink
+        {
+            SizeStep::Shrink
+        } else if condition_proves_empty(
+            &items[1],
+            parameter,
+            false,
+            predicate_summaries,
+            0,
+        ) && then_effect == SizeStep::Shrink
+            && else_effect == SizeStep::Unchanged
+        {
+            SizeStep::Shrink
+        } else {
+            SizeStep::Unknown
+        };
+    }
+    if let Some(summary) = summaries.get(op) {
+        if summary.params.len() == items.len().saturating_sub(1) {
+            let mut effect = SizeStep::Unchanged;
+            for (argument, called_effect) in items
+                .iter()
+                .skip(1)
+                .zip(summary.parameter_effects.iter().copied())
+            {
+                if matches!(argument, Expression::Word(name) if name == parameter) {
+                    effect = combine_size_steps(effect, called_effect);
+                }
+            }
+            if effect != SizeStep::Unchanged {
+                return effect;
+            }
+        }
+    }
+    items.iter().skip(1).fold(SizeStep::Unchanged, |effect, child| {
+        combine_size_steps(
+            effect,
+            structural_parameter_effect(child, parameter, summaries, predicate_summaries),
+        )
+    })
+}
+
+fn structural_result_relation(
+    expr: &Expression,
+    parameter: &str,
+    summaries: &HashMap<String, StructuralSummary>,
+) -> SizeStep {
+    match expr {
+        Expression::Word(name) if name == parameter => SizeStep::Unchanged,
+        Expression::Apply(items) => {
+            match items.as_slice() {
+                [Expression::Word(op), Expression::Word(name)]
+                    if op == "cdr" && name == parameter =>
+                {
+                    return SizeStep::Shrink;
+                }
+                [Expression::Word(op), Expression::Word(name), _]
+                    if op == "cdr" && name == parameter =>
+                {
+                    return SizeStep::Shrink;
+                }
+                [Expression::Word(op), left, right]
+                    if op == "cons"
+                        && (matches!(left, Expression::Word(name) if name == parameter)
+                            || matches!(right, Expression::Word(name) if name == parameter)) =>
+                {
+                    return SizeStep::Grow;
+                }
+                _ => {}
+            }
+            let op = items.first().and_then(word).unwrap_or("");
+            if matches!(op, "do" | "block") {
+                return items
+                    .last()
+                    .map(|result| structural_result_relation(result, parameter, summaries))
+                    .unwrap_or(SizeStep::Unknown);
+            }
+            if op == "if" {
+                let then_relation = items
+                    .get(2)
+                    .map(|branch| structural_result_relation(branch, parameter, summaries))
+                    .unwrap_or(SizeStep::Unknown);
+                let else_relation = items
+                    .get(3)
+                    .map(|branch| structural_result_relation(branch, parameter, summaries))
+                    .unwrap_or(SizeStep::Unknown);
+                return if then_relation == else_relation {
+                    then_relation
+                } else {
+                    SizeStep::Unknown
+                };
+            }
+            let Some(summary) = summaries.get(op) else {
+                return SizeStep::Unknown;
+            };
+            if summary.params.len() != items.len().saturating_sub(1) {
+                return SizeStep::Unknown;
+            }
+            summary
+                .result_relations
+                .iter()
+                .copied()
+                .zip(items.iter().skip(1))
+                .find_map(|(relation, argument)| {
+                    matches!(argument, Expression::Word(name) if name == parameter)
+                        .then_some(relation)
+                })
+                .unwrap_or(SizeStep::Unknown)
+        }
+        _ => SizeStep::Unknown,
+    }
+}
+
+fn infer_structural_summaries(
+    expressions: &[&Expression],
+    predicate_summaries: &HashMap<String, PredicateSummary>,
+) -> HashMap<String, StructuralSummary> {
+    let mut summaries: HashMap<String, StructuralSummary> = HashMap::new();
+    for _ in 0..expressions.len().max(1) {
+        let mut changed = false;
+        for expression in expressions {
+            let Expression::Apply(binding) = expression else {
+                continue;
+            };
+            let [Expression::Word(keyword), Expression::Word(name), rhs] = binding.as_slice()
+            else {
+                continue;
+            };
+            if keyword != "let" && keyword != "letrec" {
+                continue;
+            }
+            if let Expression::Word(alias) = rhs {
+                if let Some(summary) = summaries.get(alias).cloned() {
+                    changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
+                }
+                continue;
+            }
+            let Expression::Apply(lambda) = rhs else {
+                continue;
+            };
+            if !matches!(lambda.first(), Some(Expression::Word(op)) if op == "lambda")
+                || lambda.len() < 3
+            {
+                continue;
+            }
+            let params = lambda[1..lambda.len() - 1]
+                .iter()
+                .filter_map(word)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if params.len() != lambda.len() - 2 {
+                continue;
+            }
+            let body = lambda.last().expect("lambda has a body");
+            let summary = StructuralSummary {
+                parameter_effects: params
+                    .iter()
+                    .map(|param| {
+                        structural_parameter_effect(
+                            body,
+                            param,
+                            &summaries,
+                            predicate_summaries,
+                        )
+                    })
+                    .collect(),
+                result_relations: params
+                    .iter()
+                    .map(|param| structural_result_relation(body, param, &summaries))
+                    .collect(),
+                params,
             };
             changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
         }
@@ -2922,6 +3307,60 @@ mod tests {
         assert!(growing
             .iter()
             .any(|message| message.contains("length of 'xs' does not move")));
+    }
+
+    #[test]
+    fn termination_infers_structural_effects_from_helpers_and_aliases() {
+        let shrinking_helper = diagnostics(
+            "(let remove-last (lambda xs (pop! xs))) (let shrink remove-last) (let xs [1 2 3]) (while (> (length xs) 0) (shrink xs))",
+            4,
+        );
+        assert!(!shrinking_helper
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+
+        let growing_helper = diagnostics(
+            "(let add-one (lambda xs (push! xs 1))) (let xs [1]) (while (> (length xs) 0) (add-one xs))",
+            3,
+        );
+        assert!(growing_helper
+            .iter()
+            .any(|message| message.contains("length of 'xs' does not move")));
+
+        let nested_helper = diagnostics(
+            "(let clear (lambda xs (while (> (length xs) 0) (pop! xs)))) (let xs [1 2]) (while (> (length xs) 0) (clear xs))",
+            3,
+        );
+        assert!(!nested_helper
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+
+        let predicate_wrapped_helper = diagnostics(
+            "(let zero-sized (lambda ys (= (length ys) 0))) (let clear-all (lambda zs (if (zero-sized zs) zs (do (while (> (length zs) 0) (pop! zs)) zs)))) (let clear clear-all) (let xs [1 2]) (while (> (length xs) 0) (clear xs))",
+            5,
+        );
+        assert!(!predicate_wrapped_helper
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+    }
+
+    #[test]
+    fn termination_infers_structural_result_relations_from_helpers() {
+        let through_helper = diagnostics(
+            "(let tail (lambda xs (cdr xs))) (let next tail) (letrec drain (lambda (xs) (if (= (length xs) 0) 0 (drain (next xs)))))",
+            3,
+        );
+        assert!(!through_helper
+            .iter()
+            .any(|message| message.starts_with("termination:")));
+
+        let growing_helper = diagnostics(
+            "(let extend (lambda xs (cons [1] xs))) (letrec grow (lambda (xs) (if (= (length xs) 0) 0 (grow (extend xs)))))",
+            2,
+        );
+        assert!(growing_helper
+            .iter()
+            .any(|message| message.contains("does not shrink 'xs'")));
     }
 
     #[test]
