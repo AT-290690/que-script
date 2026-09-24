@@ -1887,6 +1887,7 @@ fn analyze_while_termination(
         );
         return;
     }
+    let mut scalar_progress_proven = false;
     for (name, values) in &updates {
         let Some((comparison, counter_on_left)) = comparison_for_counter(condition, name) else {
             continue;
@@ -1902,6 +1903,8 @@ fn analyze_while_termination(
         let step = counter_step(name, values, &loop_facts);
         let moves_away = (toward_upper_exit && step == CounterStep::Decrease)
             || (toward_lower_exit && step == CounterStep::Increase);
+        scalar_progress_proven |= (toward_upper_exit && step == CounterStep::Increase)
+            || (toward_lower_exit && step == CounterStep::Decrease);
         if moves_away || step == CounterStep::Unchanged {
             record_diagnostic(
                 diagnostics,
@@ -1922,15 +1925,19 @@ fn analyze_while_termination(
             (expected, actual),
             (SizeStep::Shrink, SizeStep::Grow) | (SizeStep::Grow, SizeStep::Shrink)
         );
-        if moves_away || actual == SizeStep::Unchanged {
-            record_diagnostic(
-                diagnostics,
-                format!(
-                    "termination: length of '{}' does not move toward the loop exit: `{}`",
-                    name,
-                    condition.to_lisp()
-                ),
-            );
+        // When a scalar counter moves toward a fixed length bound, the length
+        // is a bound rather than the measure. If both sides move in opposite
+        // directions, their relative rates are currently unknown, so do not
+        // claim either termination or non-termination.
+        if !scalar_progress_proven && (moves_away || actual == SizeStep::Unchanged) {
+                record_diagnostic(
+                    diagnostics,
+                    format!(
+                        "termination: length of '{}' does not move toward the loop exit: `{}`",
+                        name,
+                        condition.to_lisp()
+                    ),
+                );
         }
     }
 }
@@ -2799,6 +2806,19 @@ fn collect_termination_findings(
             for body in items.iter().skip(2) {
                 collect_size_mutations(body, structural_summaries, &mut size_mutations);
             }
+            let competing_bound = size_guard_exit_direction(condition).is_some_and(
+                |(name, expected)| {
+                    let actual = size_mutations
+                        .get(name)
+                        .map(|steps| combined_size_step(steps))
+                        .unwrap_or(SizeStep::Unchanged);
+                    matches!(
+                        (expected, actual),
+                        (SizeStep::Shrink, SizeStep::Grow)
+                            | (SizeStep::Grow, SizeStep::Shrink)
+                    )
+                },
+            );
             let structural_proof = size_guard_exit_direction(condition).and_then(|(name, expected)| {
                 let actual = size_mutations
                     .get(name)
@@ -2806,7 +2826,15 @@ fn collect_termination_findings(
                     .unwrap_or(SizeStep::Unchanged);
                 (actual == expected).then(|| name.to_string())
             });
-            if let Some((name, direction)) = scalar_proof {
+            if competing_bound && scalar_proof.is_some() {
+                findings.push(TerminationFinding {
+                    subject,
+                    status: "unknown".to_string(),
+                    measure: None,
+                    reason: "counter and length bound move in competing directions; relative progress is unknown"
+                        .to_string(),
+                });
+            } else if let Some((name, direction)) = scalar_proof {
                 findings.push(TerminationFinding {
                     subject,
                     status: "proven".to_string(),
@@ -3564,6 +3592,128 @@ mod tests {
         assert!(!recursive
             .iter()
             .any(|message| message.starts_with("termination:")));
+    }
+
+    #[test]
+    fn termination_treats_vector_length_as_counter_bound_not_measure() {
+        let findings = diagnostics(
+            "(let xs [5 8 2 1 5]) (mut i 0) (while (< i (length xs)) (do (get xs i) (alter! i (+ i 1))))",
+            3,
+        );
+        assert!(
+            !findings
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn termination_model_matrix_separates_measures_from_bounds() {
+        let cases = [
+            (
+                "fixed direct length bound",
+                "(let xs [1 2 3]) (mut i 0) (while (< i (length xs)) (alter! i (+ i 1)))",
+                false,
+            ),
+            (
+                "reversed direct length bound",
+                "(let xs [1 2 3]) (mut i 0) (while (> (length xs) i) (alter! i (+ i 1)))",
+                false,
+            ),
+            (
+                "cached length bound",
+                "(let xs [1 2 3]) (let len (length xs)) (mut i 0) (while (< i len) (alter! i (+ i 1)))",
+                false,
+            ),
+            (
+                "descending scalar counter",
+                "(mut i 3) (let step 1) (while (> i 0) (alter! i (- i step)))",
+                false,
+            ),
+            (
+                "shrinking vector measure",
+                "(let xs [1 2 3]) (while (> (length xs) 0) (pop! xs))",
+                false,
+            ),
+            (
+                "reversed shrinking vector measure",
+                "(let xs [1 2 3]) (while (< 0 (length xs)) (pop! xs))",
+                false,
+            ),
+            (
+                "counter and bound both approach exit",
+                "(let xs [1 2 3]) (mut i 0) (while (< i (length xs)) (do (alter! i (+ i 1)) (pop! xs)))",
+                false,
+            ),
+            (
+                "scalar counter moves away",
+                "(let xs [1 2 3]) (mut i 0) (while (< i (length xs)) (alter! i (- i 1)))",
+                true,
+            ),
+            (
+                "length measure never changes",
+                "(let xs [1 2 3]) (mut n 0) (while (> (length xs) 0) (alter! n (+ n 1)))",
+                true,
+            ),
+            (
+                "length moves away",
+                "(let xs [1]) (while (> (length xs) 0) (push! xs 1))",
+                true,
+            ),
+        ];
+
+        for (name, source, should_warn) in cases {
+            let findings = diagnostics(source, 99);
+            let warned = findings
+                .iter()
+                .any(|message| message.starts_with("termination:"));
+            assert_eq!(warned, should_warn, "{name}: {findings:?}");
+        }
+
+        let competing = "(let xs [1]) (mut i 0) (while (< i (length xs)) (do (alter! i (+ i 1)) (push! xs 1)))";
+        let expression = crate::parser::build(competing).expect("source should build");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        let findings = explain_termination(&typed, 3);
+        assert!(findings.iter().any(|finding| {
+            finding.status == "unknown" && finding.reason.contains("competing directions")
+        }));
+    }
+
+    #[test]
+    fn termination_model_matrix_covers_comparison_orientation() {
+        let cases = [
+            ("(< i 3)", "(+ i 1)", false),
+            ("(<= i 2)", "(+ i 1)", false),
+            ("(> 3 i)", "(+ i 1)", false),
+            ("(>= 2 i)", "(+ i 1)", false),
+            ("(> i 0)", "(- i 1)", false),
+            ("(>= i 1)", "(- i 1)", false),
+            ("(< 0 i)", "(- i 1)", false),
+            ("(<= 1 i)", "(- i 1)", false),
+            ("(< i 3)", "(- i 1)", true),
+            ("(> 3 i)", "(- i 1)", true),
+            ("(> i 0)", "(+ i 1)", true),
+            ("(< 0 i)", "(+ i 1)", true),
+        ];
+        for (condition, update, should_warn) in cases {
+            let source = format!(
+                "(mut i 1) (while {} (alter! i {}))",
+                condition, update
+            );
+            let findings = diagnostics(&source, 99);
+            let warned = findings
+                .iter()
+                .any(|message| message.starts_with("termination:"));
+            assert_eq!(
+                warned, should_warn,
+                "condition={condition}, update={update}: {findings:?}"
+            );
+        }
     }
 
     #[test]
