@@ -213,6 +213,188 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
     }
 }
 
+fn widen_loop_state(previous: &AbstractState, next: &AbstractState) -> AbstractState {
+    let mut widened = next.clone();
+    for (name, next_range) in &next.integer_ranges {
+        let previous_range = previous
+            .integer_ranges
+            .get(name)
+            .copied()
+            .or_else(|| {
+                previous
+                    .integer_constants
+                    .get(name)
+                    .copied()
+                    .map(IntInterval::exact)
+            });
+        let Some(previous_range) = previous_range else {
+            continue;
+        };
+        let range = IntInterval {
+            min: if next_range.min < previous_range.min {
+                i32::MIN as i64
+            } else {
+                next_range.min
+            },
+            max: if next_range.max > previous_range.max {
+                i32::MAX as i64
+            } else {
+                next_range.max
+            },
+        };
+        widened.integer_ranges.insert(name.clone(), range);
+        if range.min != range.max {
+            widened.integer_constants.remove(name);
+        }
+    }
+    widened
+}
+
+fn apply_counted_append_postcondition(
+    items: &[Expression],
+    entry: &AbstractState,
+    exit: &mut AbstractState,
+) {
+    let Some(condition) = items.get(1) else {
+        return;
+    };
+    let Expression::Apply(comparison) = condition else {
+        return;
+    };
+    let [Expression::Word(op), Expression::Word(counter), bound] = comparison.as_slice() else {
+        return;
+    };
+    if !matches!(op.as_str(), "<" | "<=") {
+        return;
+    }
+    let Some(start) = entry.integer_constants.get(counter).copied() else {
+        return;
+    };
+    let Some(end) = integer_constant(bound, entry) else {
+        return;
+    };
+    let iterations = i64::from(end) - i64::from(start) + i64::from(op == "<=");
+    if iterations < 0 {
+        return;
+    }
+    let mut updates = HashMap::new();
+    for body in items.iter().skip(2) {
+        collect_altered_values(body, &mut updates);
+    }
+    if updates
+        .get(counter)
+        .is_none_or(|values| counter_step(counter, values, entry) != CounterStep::Increase)
+    {
+        return;
+    }
+    let mut mutations = HashMap::new();
+    let no_summaries = HashMap::new();
+    for body in items.iter().skip(2) {
+        collect_size_mutations(body, &no_summaries, &mut mutations);
+    }
+    for (vector, effects) in mutations {
+        if effects.len() != 1 || effects[0] != SizeStep::Grow {
+            continue;
+        }
+        let Some(initial) = entry.fixed_lengths.get(&vector).copied() else {
+            continue;
+        };
+        let Some(final_length) = initial.checked_add(iterations as usize) else {
+            continue;
+        };
+        exit.fixed_lengths.insert(vector.clone(), final_length);
+        exit.minimum_lengths.insert(vector, final_length);
+    }
+}
+
+fn refine_bounded_loop_updates(
+    items: &[Expression],
+    entry: &AbstractState,
+    header: &mut AbstractState,
+) {
+    let Some(Expression::Apply(comparison)) = items.get(1) else {
+        return;
+    };
+    let [Expression::Word(op), Expression::Word(counter), bound] = comparison.as_slice() else {
+        return;
+    };
+    if !matches!(op.as_str(), "<" | "<=") {
+        return;
+    }
+    let Some(start) = integer_constant(&Expression::Word(counter.clone()), entry) else {
+        return;
+    };
+    let Some(end) = integer_constant(bound, entry) else {
+        return;
+    };
+    let iterations = i64::from(end) - i64::from(start) + i64::from(op == "<=");
+    if iterations < 0 {
+        return;
+    }
+
+    let mut updates = HashMap::new();
+    for body in items.iter().skip(2) {
+        collect_altered_values(body, &mut updates);
+    }
+    for (name, values) in updates {
+        let Some(initial) = integer_interval(&Expression::Word(name.clone()), entry) else {
+            continue;
+        };
+        let mut delta_min = 0_i64;
+        let mut delta_max = 0_i64;
+        let mut understood = true;
+        for value in values {
+            let delta = match &value {
+                Expression::Apply(parts) => match parts.as_slice() {
+                    [Expression::Word(add), Expression::Word(var), step]
+                        if add == "+" && var == &name => integer_constant(step, entry),
+                    [Expression::Word(add), step, Expression::Word(var)]
+                        if add == "+" && var == &name => integer_constant(step, entry),
+                    [Expression::Word(sub), Expression::Word(var), step]
+                        if sub == "-" && var == &name => {
+                            integer_constant(step, entry).and_then(i32::checked_neg)
+                        }
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(delta) = delta else {
+                understood = false;
+                break;
+            };
+            // An update may be conditional, so zero is always a possible
+            // per-iteration contribution.
+            delta_min += i64::from(delta.min(0));
+            delta_max += i64::from(delta.max(0));
+        }
+        if !understood {
+            continue;
+        }
+        let Some(minimum) = delta_min
+            .checked_mul(iterations)
+            .and_then(|delta| initial.min.checked_add(delta))
+        else {
+            continue;
+        };
+        let Some(maximum) = delta_max
+            .checked_mul(iterations)
+            .and_then(|delta| initial.max.checked_add(delta))
+        else {
+            continue;
+        };
+        let range = IntInterval {
+            min: minimum,
+            max: maximum,
+        };
+        if range.fits_i32() {
+            header.integer_ranges.insert(name.clone(), range);
+            if range.min != range.max {
+                header.integer_constants.remove(&name);
+            }
+        }
+    }
+}
+
 fn canonical_scalar(expr: &Expression, state: &AbstractState) -> String {
     match expr {
         Expression::Word(name) => state
@@ -1173,6 +1355,57 @@ fn constrain_integer_range(expr: &Expression, facts: &mut AbstractState, constra
     }
 }
 
+fn constrain_ordered_operands(
+    left: &Expression,
+    right: &Expression,
+    comparison: &str,
+    facts: &mut AbstractState,
+) {
+    let left_range = integer_interval(left, facts).unwrap_or(IntInterval::I32);
+    let right_range = integer_interval(right, facts).unwrap_or(IntInterval::I32);
+    match comparison {
+        "<" => {
+            constrain_integer_range(
+                left,
+                facts,
+                IntInterval {
+                    min: i32::MIN as i64,
+                    max: right_range.max.saturating_sub(1),
+                },
+            );
+            constrain_integer_range(
+                right,
+                facts,
+                IntInterval {
+                    min: left_range.min.saturating_add(1),
+                    max: i32::MAX as i64,
+                },
+            );
+        }
+        "<=" => {
+            constrain_integer_range(
+                left,
+                facts,
+                IntInterval {
+                    min: i32::MIN as i64,
+                    max: right_range.max,
+                },
+            );
+            constrain_integer_range(
+                right,
+                facts,
+                IntInterval {
+                    min: left_range.min,
+                    max: i32::MAX as i64,
+                },
+            );
+        }
+        ">" => constrain_ordered_operands(right, left, "<", facts),
+        ">=" => constrain_ordered_operands(right, left, "<=", facts),
+        _ => {}
+    }
+}
+
 fn predicate_result_state(
     expr: &Expression,
     state: &AbstractState,
@@ -1282,6 +1515,7 @@ fn collect_numeric_guard_facts(
                 };
                 record_effective_affine_comparison(left, right, effective, facts);
                 record_product_comparison(left, right, effective, facts);
+                constrain_ordered_operands(left, right, effective, facts);
                 let left_key = canonical_scalar(left, facts);
                 let right_key = canonical_scalar(right, facts);
                 match effective {
@@ -1607,6 +1841,33 @@ fn forget_lambda_parameter(expr: &Expression, facts: &mut AbstractState) {
     }
 }
 
+fn forget_local_name(name: &str, facts: &mut AbstractState) {
+    facts.safe_pairs.retain(|(vector, index)| {
+        vector != name && !vector.starts_with(&format!("{name}::")) && index != name
+    });
+    facts.nonnegative.remove(name);
+    facts.integer_constants.remove(name);
+    facts.integer_ranges.remove(name);
+    facts.nonzero.remove(name);
+    facts.fixed_lengths.remove(name);
+    facts.minimum_lengths.remove(name);
+    facts.length_sources.remove(name);
+    facts.aliases.remove(name);
+    facts.scalar_aliases.remove(name);
+    facts
+        .leq_pairs
+        .retain(|(left, right)| left != name && right != name);
+    facts
+        .affine_upper_bounds
+        .retain(|terms, _| !terms.0.iter().any(|(atom, _)| atom == name));
+    facts
+        .product_upper_safe
+        .retain(|(left, right)| left != name && right != name);
+    facts
+        .product_lower_safe
+        .retain(|(left, right)| left != name && right != name);
+}
+
 fn record_diagnostic(diagnostics: &mut Vec<String>, message: String) {
     if !diagnostics.contains(&message) {
         diagnostics.push(message);
@@ -1822,26 +2083,26 @@ fn counter_step(name: &str, updates: &[Expression], facts: &AbstractState) -> Co
         .unwrap_or(CounterStep::Unknown)
 }
 
-fn comparison_for_counter<'a>(expr: &'a Expression, name: &str) -> Option<(&'a str, bool)> {
+fn comparisons_for_counter<'a>(
+    expr: &'a Expression,
+    name: &str,
+    out: &mut Vec<(&'a str, bool)>,
+) {
     let Expression::Apply(items) = expr else {
-        return None;
+        return;
     };
     if let [Expression::Word(op), left, right] = items.as_slice() {
         if matches!(op.as_str(), "<" | "<=" | ">" | ">=") {
             if matches!(left, Expression::Word(var) if var == name) {
-                return Some((op, true));
-            }
-            if matches!(right, Expression::Word(var) if var == name) {
-                return Some((op, false));
+                out.push((op, true));
+            } else if matches!(right, Expression::Word(var) if var == name) {
+                out.push((op, false));
             }
         }
     }
     for child in items.iter().skip(1) {
-        if let Some(found) = comparison_for_counter(child, name) {
-            return Some(found);
-        }
+        comparisons_for_counter(child, name, out);
     }
-    None
 }
 
 fn analyze_while_termination(
@@ -1889,23 +2150,38 @@ fn analyze_while_termination(
     }
     let mut scalar_progress_proven = false;
     for (name, values) in &updates {
-        let Some((comparison, counter_on_left)) = comparison_for_counter(condition, name) else {
+        let mut comparisons = Vec::new();
+        comparisons_for_counter(condition, name, &mut comparisons);
+        if comparisons.is_empty() {
             continue;
-        };
-        let toward_upper_exit = matches!(
-            (comparison, counter_on_left),
-            ("<" | "<=", true) | (">" | ">=", false)
-        );
-        let toward_lower_exit = matches!(
-            (comparison, counter_on_left),
-            (">" | ">=", true) | ("<" | "<=", false)
-        );
+        }
         let step = counter_step(name, values, &loop_facts);
-        let moves_away = (toward_upper_exit && step == CounterStep::Decrease)
-            || (toward_lower_exit && step == CounterStep::Increase);
-        scalar_progress_proven |= (toward_upper_exit && step == CounterStep::Increase)
-            || (toward_lower_exit && step == CounterStep::Decrease);
-        if moves_away || step == CounterStep::Unchanged {
+        let progresses = comparisons.iter().any(|(comparison, counter_on_left)| {
+            let toward_upper = matches!(
+                (*comparison, *counter_on_left),
+                ("<" | "<=", true) | (">" | ">=", false)
+            );
+            let toward_lower = matches!(
+                (*comparison, *counter_on_left),
+                (">" | ">=", true) | ("<" | "<=", false)
+            );
+            (toward_upper && step == CounterStep::Increase)
+                || (toward_lower && step == CounterStep::Decrease)
+        });
+        let moves_away = comparisons.iter().all(|(comparison, counter_on_left)| {
+            let toward_upper = matches!(
+                (*comparison, *counter_on_left),
+                ("<" | "<=", true) | (">" | ">=", false)
+            );
+            let toward_lower = matches!(
+                (*comparison, *counter_on_left),
+                (">" | ">=", true) | ("<" | "<=", false)
+            );
+            (toward_upper && step == CounterStep::Decrease)
+                || (toward_lower && step == CounterStep::Increase)
+        });
+        scalar_progress_proven |= progresses;
+        if (!progresses && moves_away) || step == CounterStep::Unchanged {
             record_diagnostic(
                 diagnostics,
                 format!(
@@ -2372,6 +2648,34 @@ fn access_index_is_proven(
         }
     }
 
+
+    let known_length = facts
+        .fixed_lengths
+        .get(&vector_key)
+        .copied()
+        .or_else(|| literal_vector_length(vector));
+    let index_constant = integer_constant(index, facts);
+    let index_has_widened_range = index_constant.is_some_and(|constant| {
+        integer_interval(index, facts).is_some_and(|range| {
+            range.min != i64::from(constant) || range.max != i64::from(constant)
+        })
+    });
+    if index_constant.is_none() || index_has_widened_range {
+        if let (Some(index_range), Some(length)) = (integer_interval(index, facts), known_length) {
+            let maximum = if allow_append {
+                length
+            } else {
+                length.saturating_sub(1)
+            };
+            if index_range.min >= 0
+                && (length > 0 || allow_append)
+                && index_range.max <= maximum as i64
+            {
+                return true;
+            }
+        }
+    }
+
     // Preserve the existing get analysis here: constant propagation through a
     // name is not yet treated as a general access proof. set! may use it for
     // its append-aware rule, while get continues to require a literal or an
@@ -2547,9 +2851,22 @@ fn validate_static_bounds_expr(
         }
         "block" => {
             let mut scoped = facts.clone();
+            let mut local_names = Vec::new();
             for child in items.iter().skip(1) {
+                if let Expression::Apply(binding) = child {
+                    if matches!(binding.first(), Some(Expression::Word(op)) if matches!(op.as_str(), "let" | "mut" | "letrec"))
+                    {
+                        if let Some(Expression::Word(name)) = binding.get(1) {
+                            local_names.push(name.clone());
+                        }
+                    }
+                }
                 validate_static_bounds_expr(child, &mut scoped, diagnostics);
             }
+            for name in local_names {
+                forget_local_name(&name, &mut scoped);
+            }
+            *facts = scoped;
         }
         "lambda" => {
             // Immutable scalar facts remain valid when captured by a closure.
@@ -2622,21 +2939,45 @@ fn validate_static_bounds_expr(
             let entry = facts.clone();
             let mut header = entry.clone();
             for _ in 0..16 {
-                validate_static_bounds_expr(&items[1], &mut header, diagnostics);
+                let previous = header.clone();
+                // Fixed-point iterations are speculative. Diagnostics emitted
+                // before widening stabilizes would describe an intermediate
+                // state rather than the actual loop invariant.
+                let mut speculative_diagnostics = Vec::new();
+                validate_static_bounds_expr(
+                    &items[1],
+                    &mut header,
+                    &mut speculative_diagnostics,
+                );
                 let mut body_exit = state_for_true_branch(&items[1], &header);
                 for child in items.iter().skip(2) {
-                    validate_static_bounds_expr(child, &mut body_exit, diagnostics);
+                    validate_static_bounds_expr(
+                        child,
+                        &mut body_exit,
+                        &mut speculative_diagnostics,
+                    );
                 }
                 let next = join_states(&entry, &body_exit);
-                if next == header {
+                let next = widen_loop_state(&previous, &next);
+                if next == previous {
+                    header = next;
                     break;
                 }
                 header = next;
             }
+            refine_bounded_loop_updates(items, &entry, &mut header);
+            // Check the loop once using the stabilized invariant.
+            validate_static_bounds_expr(&items[1], &mut header, diagnostics);
+            let mut checked_body = state_for_true_branch(&items[1], &header);
+            for child in items.iter().skip(2) {
+                validate_static_bounds_expr(child, &mut checked_body, diagnostics);
+            }
             // The loop may execute zero times; only header facts are valid on
-            // exit.  False-condition refinement can be added as another
-            // abstract domain without changing traversal.
-            *facts = header;
+            // entry, but code following it is reached only through the false
+            // condition edge.
+            let mut exit = state_for_false_branch(&items[1], &header);
+            apply_counted_append_postcondition(items, &entry, &mut exit);
+            *facts = exit;
         }
         "loop" if items.len() >= 4 => {
             let mut scoped = facts.clone();
@@ -2779,18 +3120,23 @@ fn collect_termination_findings(
             }
             let loop_facts = state_for_true_branch(condition, facts);
             let scalar_proof = updates.iter().find_map(|(name, values)| {
-                let (comparison, counter_on_left) = comparison_for_counter(condition, name)?;
-                let toward_upper = matches!(
-                    (comparison, counter_on_left),
-                    ("<" | "<=", true) | (">" | ">=", false)
-                );
-                let toward_lower = matches!(
-                    (comparison, counter_on_left),
-                    (">" | ">=", true) | ("<" | "<=", false)
-                );
+                let mut comparisons = Vec::new();
+                comparisons_for_counter(condition, name, &mut comparisons);
                 let step = counter_step(name, values, &loop_facts);
-                ((toward_upper && step == CounterStep::Increase)
-                    || (toward_lower && step == CounterStep::Decrease))
+                comparisons
+                    .iter()
+                    .any(|(comparison, counter_on_left)| {
+                        let toward_upper = matches!(
+                            (*comparison, *counter_on_left),
+                            ("<" | "<=", true) | (">" | ">=", false)
+                        );
+                        let toward_lower = matches!(
+                            (*comparison, *counter_on_left),
+                            (">" | ">=", true) | ("<" | "<=", false)
+                        );
+                        (toward_upper && step == CounterStep::Increase)
+                            || (toward_lower && step == CounterStep::Decrease)
+                    })
                     .then(|| {
                         (
                             name.clone(),
@@ -3717,6 +4063,44 @@ mod tests {
     }
 
     #[test]
+    fn loop_induction_range_reports_square_overflow() {
+        for (n, should_warn) in [(46340, false), (46341, true), (5_000_000, true)] {
+            let source = format!(
+                "(let n {n}) (mut i 0) (while (<= i n) (do (if (>= i 2) (let j (* i i))) (alter! i (+ i 1))))"
+            );
+            let findings = diagnostics(&source, 99);
+            let warned = findings.iter().any(|message| {
+                message.contains("Int overflow possible") && message.contains("(* i i)")
+            });
+            assert_eq!(warned, should_warn, "n={n}: {findings:?}");
+        }
+    }
+
+    #[test]
+    fn counted_append_loop_proves_following_get_and_set_bounds() {
+        let source = "(let n 100) (let flags []) (mut i 0) (while (<= i n) (do (push! flags true) (alter! i (+ i 1)))) (mut k 0) (while (<= k n) (do (get flags k) (set! flags k false) (alter! k (+ k 1))))";
+        let findings = diagnostics(source, 99);
+        assert!(
+            !findings
+                .iter()
+                .any(|message| message.starts_with("static bounds:")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn bounded_loop_updates_prove_conditional_counter_increment_safe() {
+        let source = "(let n 5000000) (mut count 0) (mut i 0) (while (<= i n) (do (if (>= i 2) (alter! count (+ count 1))) (alter! i (+ i 1))))";
+        let findings = diagnostics(source, 99);
+        assert!(
+            !findings
+                .iter()
+                .any(|message| message.contains("(+ count 1)")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
     fn termination_warns_for_unchanged_recursive_arguments() {
         let findings = diagnostics("(letrec repeat (lambda (n) (if (= n 0) 0 (repeat n))))", 1);
         assert!(findings
@@ -4363,9 +4747,13 @@ mod tests {
 
         let missing_lower_bound =
             "(let midpoint (lambda left right (if (> left right) 0 (+ left (/ (- right left) 2)))))";
-        assert!(analyze(missing_lower_bound, 1)
-            .expect_err("signed endpoints still need a nonnegative invariant")
-            .contains("underflow"));
+        let result = analyze(missing_lower_bound, 1);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|message| message.contains("overflow")),
+            "{result:?}"
+        );
     }
 
     #[test]

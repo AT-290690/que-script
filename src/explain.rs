@@ -128,6 +128,31 @@ pub fn explain_program_with_effects(
         .unwrap_or_else(|| "_".to_string());
     let mut warnings = Vec::new();
 
+    for finding in crate::static_analysis::analyze_user_program_diagnostics(
+        typed_ast,
+        user_form_count,
+    ) {
+        let mut lines = finding.lines();
+        let message = lines.next().unwrap_or(&finding).to_string();
+        let suggestion = lines
+            .find_map(|line| line.strip_prefix("help: "))
+            .map(str::to_string);
+        let kind = if message.starts_with("static bounds:") {
+            "static_bounds"
+        } else if message.starts_with("static arithmetic:") {
+            "static_arithmetic"
+        } else if message.starts_with("termination:") {
+            "termination"
+        } else {
+            "static_analysis"
+        };
+        warnings.push(ExplainWarning {
+            kind: kind.to_string(),
+            message,
+            suggestion,
+        });
+    }
+
     if metrics.dynamic_apply_calls > 0 {
         warnings.push(ExplainWarning {
             kind: "dynamic_apply".to_string(),
@@ -1110,6 +1135,26 @@ mod tests {
         let json = render_json(&report).expect("json should render");
         assert!(json.contains("\"result_type\": \"Int\""));
         assert!(json.contains("\"metrics\""));
+    }
+
+    #[test]
+    fn explain_json_includes_static_analysis_warnings() {
+        let report = explain_source("(* 50000 50000)");
+        assert!(report
+            .warnings
+            .iter()
+            .any(|warning| warning.kind == "static_arithmetic"));
+        let json = render_json(&report).expect("report should serialize");
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("report should be valid JSON");
+        assert!(value["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings.iter().any(|warning| {
+                warning["kind"] == "static_arithmetic"
+                    && warning["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains("overflow"))
+            })));
     }
 
     #[test]

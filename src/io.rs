@@ -2297,10 +2297,9 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     let wrapped_with_externs = crate::externals::prepend_builtin_host_externs(&wrapped_ast)?;
     let (_typ, typed_ast) =
         infer_with_builtins_typed(&wrapped_with_externs, (base_env, base_next_id))?;
+    let analysis_form_count = crate::lsp_native_core::desugared_user_form_count(&analysis_source)
+        .unwrap_or(user_form_count);
     if run_static_analysis {
-        let analysis_form_count =
-            crate::lsp_native_core::desugared_user_form_count(&analysis_source)
-                .unwrap_or(user_form_count);
         let findings = crate::static_analysis::analyze_user_program_diagnostics(
             &typed_ast,
             analysis_form_count,
@@ -2319,7 +2318,7 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
     let report = crate::explain::explain_program_with_effects(
         &typed_ast,
         &split_wat.user_wat,
-        user_form_count,
+        analysis_form_count,
         &global_effects,
     );
     let rendered = if json {
