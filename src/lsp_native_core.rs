@@ -1172,7 +1172,10 @@ pub fn diagnostic_summary_without_snippet(message: &str) -> String {
 }
 
 pub fn static_analysis_diagnostic_snippet(message: &str) -> Option<String> {
-    if !message.starts_with("static bounds:") && !message.starts_with("static arithmetic:") {
+    if !message.starts_with("static bounds:")
+        && !message.starts_with("static arithmetic:")
+        && !message.starts_with("termination:")
+    {
         return None;
     }
     let snippet = restore_block_source_names(message.split('`').nth(1)?);
@@ -1197,6 +1200,49 @@ pub fn static_analysis_diagnostic_summary(message: &str) -> String {
             .or_else(|| first_line.strip_prefix("static arithmetic: "))
             .unwrap_or(first_line),
     )
+}
+
+/// Maps a static-analysis finding back to the top-level user form that
+/// produced it. Restricting snippet matching to that form avoids attaching a
+/// warning to every identical expression in the file.
+pub fn diagnostic_ranges_in_user_form(
+    text: &str,
+    message: &str,
+    snippet: &str,
+    user_form_index: usize,
+) -> Vec<CoreRange> {
+    let Some(form_range) = top_level_form_ranges(text).get(user_form_index).copied() else {
+        return Vec::new();
+    };
+    let Some(form_start) = position_to_byte_offset(text, form_range.start) else {
+        return Vec::new();
+    };
+    let Some(form_end) = position_to_byte_offset(text, form_range.end) else {
+        return Vec::new();
+    };
+    infer_error_ranges(text, message, None, Some(snippet))
+        .into_iter()
+        .filter(|range| {
+            let Some(start) = position_to_byte_offset(text, range.start) else {
+                return false;
+            };
+            let Some(end) = position_to_byte_offset(text, range.end) else {
+                return false;
+            };
+            start >= form_start && end <= form_end
+        })
+        .collect()
+}
+
+pub fn static_analysis_diagnostic_ranges(
+    text: &str,
+    message: &str,
+    user_form_index: usize,
+) -> Vec<CoreRange> {
+    let Some(snippet) = static_analysis_diagnostic_snippet(message) else {
+        return Vec::new();
+    };
+    diagnostic_ranges_in_user_form(text, message, &snippet, user_form_index)
 }
 
 fn flatten_get_source(expr: &Expression) -> String {

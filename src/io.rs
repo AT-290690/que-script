@@ -2315,11 +2315,12 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
         }
     }
     let split_wat = crate::wat::compile_program_to_split_wat_typed(&typed_ast)?;
-    let report = crate::explain::explain_program_with_effects(
+    let report = crate::explain::explain_program_with_effects_and_source(
         &typed_ast,
         &split_wat.user_wat,
         analysis_form_count,
         &global_effects,
+        Some(&program),
     );
     let rendered = if json {
         crate::explain::render_json(&report)?

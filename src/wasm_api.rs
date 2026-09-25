@@ -209,11 +209,11 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
             if native_core::lsp_static_analysis_enabled(text) {
                 let analysis_form_count = native_core::desugared_user_form_count(&analysis_source)
                     .unwrap_or(user_form_count);
-                for message in crate::static_analysis::analyze_user_program_diagnostics(
+                for finding in crate::static_analysis::analyze_user_program_diagnostics_detailed(
                     &typed,
                     analysis_form_count,
                 ) {
-                    diagnostics.extend(make_static_analysis_warning(text, message));
+                    diagnostics.extend(make_static_analysis_warning(text, finding));
                 }
             }
             collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
@@ -743,10 +743,30 @@ fn make_error_diagnostic(
         .collect()
 }
 
-fn make_static_analysis_warning(text: &str, message: String) -> Vec<JsonDiagnostic> {
+fn make_static_analysis_warning(
+    text: &str,
+    finding: crate::static_analysis::StaticAnalysisDiagnostic,
+) -> Vec<JsonDiagnostic> {
+    let message = finding.message;
     let snippet = native_core::static_analysis_diagnostic_snippet(&message);
     let display_message = native_core::static_analysis_diagnostic_summary(&message);
-    let mut diagnostics = make_error_diagnostic(text, display_message, None, snippet.as_deref());
+    let precise_ranges = native_core::static_analysis_diagnostic_ranges(
+        text,
+        &message,
+        finding.user_form_index,
+    );
+    let mut diagnostics = if precise_ranges.is_empty() {
+        make_error_diagnostic(text, display_message.clone(), None, snippet.as_deref())
+    } else {
+        precise_ranges
+            .into_iter()
+            .map(|range| JsonDiagnostic {
+                message: display_message.clone(),
+                severity: "warning".to_string(),
+                range: to_json_range(from_core_range(range)),
+            })
+            .collect()
+    };
     for diagnostic in &mut diagnostics {
         diagnostic.severity = "warning".to_string();
     }

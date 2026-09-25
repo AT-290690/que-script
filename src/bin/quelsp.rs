@@ -1338,11 +1338,11 @@ fn analyze_document_text(
                 let analysis_form_count =
                     que::lsp_native_core::desugared_user_form_count(&analysis_source)
                         .unwrap_or(user_form_count);
-                for message in que::static_analysis::analyze_user_program_diagnostics(
+                for finding in que::static_analysis::analyze_user_program_diagnostics_detailed(
                     &typed,
                     analysis_form_count,
                 ) {
-                    diagnostics.extend(make_static_analysis_warning(text, message));
+                    diagnostics.extend(make_static_analysis_warning(text, finding));
                 }
             }
             collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
@@ -1714,10 +1714,32 @@ fn make_error_diagnostic(
         .collect()
 }
 
-fn make_static_analysis_warning(text: &str, message: String) -> Vec<Diagnostic> {
+fn make_static_analysis_warning(
+    text: &str,
+    finding: que::static_analysis::StaticAnalysisDiagnostic,
+) -> Vec<Diagnostic> {
+    let message = finding.message;
     let snippet = native_core::static_analysis_diagnostic_snippet(&message);
     let display_message = native_core::static_analysis_diagnostic_summary(&message);
-    let mut diagnostics = make_error_diagnostic(text, display_message, None, snippet.as_deref());
+    let precise_ranges = native_core::static_analysis_diagnostic_ranges(
+        text,
+        &message,
+        finding.user_form_index,
+    );
+    let mut diagnostics = if precise_ranges.is_empty() {
+        make_error_diagnostic(text, display_message.clone(), None, snippet.as_deref())
+    } else {
+        precise_ranges
+            .into_iter()
+            .map(|range| Diagnostic {
+                range: from_core_range(range),
+                severity: Some(DiagnosticSeverity::WARNING),
+                message: display_message.clone(),
+                source: Some("que static analysis".to_string()),
+                ..Diagnostic::default()
+            })
+            .collect()
+    };
     for diagnostic in &mut diagnostics {
         diagnostic.severity = Some(DiagnosticSeverity::WARNING);
         diagnostic.source = Some("que static analysis".to_string());

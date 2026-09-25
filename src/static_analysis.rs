@@ -3035,6 +3035,24 @@ pub fn analyze_user_program_diagnostics(
     typed_program: &TypedExpression,
     user_form_count: usize,
 ) -> Vec<String> {
+    analyze_user_program_diagnostics_detailed(typed_program, user_form_count)
+        .into_iter()
+        .map(|diagnostic| diagnostic.message)
+        .collect()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StaticAnalysisDiagnostic {
+    pub message: String,
+    /// Zero-based index in the user's top-level forms, excluding bundled and
+    /// project-library forms.
+    pub user_form_index: usize,
+}
+
+pub fn analyze_user_program_diagnostics_detailed(
+    typed_program: &TypedExpression,
+    user_form_count: usize,
+) -> Vec<StaticAnalysisDiagnostic> {
     let all_expressions: Vec<&Expression> = match &typed_program.expr {
         Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
             items.iter().skip(1).collect()
@@ -3058,12 +3076,21 @@ pub fn analyze_user_program_diagnostics(
     for expression in &all_expressions[..start] {
         validate_static_bounds_expr(expression, &mut facts, &mut ignored_library_diagnostics);
     }
-    let mut diagnostics = Vec::new();
-    for expression in &all_expressions[start..] {
+    let mut detailed = Vec::new();
+    for (user_form_index, expression) in all_expressions[start..].iter().enumerate() {
+        let mut diagnostics = Vec::new();
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
         analyze_termination_expr(expression, &structural_summaries, &facts, &mut diagnostics);
+        detailed.extend(
+            diagnostics
+                .into_iter()
+                .map(|message| StaticAnalysisDiagnostic {
+                    message,
+                    user_form_index,
+                }),
+        );
     }
-    diagnostics
+    detailed
 }
 
 fn first_recursive_call<'a>(expr: &'a Expression, function: &str) -> Option<&'a [Expression]> {

@@ -5592,6 +5592,35 @@ out"#,
     }
 
     #[test]
+    fn test_lsp_static_analysis_range_is_scoped_to_originating_top_level_form() {
+        let source = "(let xs [])\n(get xs 0)\n(get xs 0)";
+        let message = "static bounds: index not proven safe: `(get xs 0)`";
+        let first = crate::lsp_native_core::static_analysis_diagnostic_ranges(source, message, 1);
+        let second = crate::lsp_native_core::static_analysis_diagnostic_ranges(source, message, 2);
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_eq!(first[0].start.line, 1);
+        assert_eq!(second[0].start.line, 2);
+    }
+
+    #[test]
+    fn test_lsp_type_error_range_is_scoped_to_originating_function() {
+        let source = "(let f (lambda (x) (+ x true)))\n(let g (lambda (x) (+ x true)))";
+        let scope = crate::infer::InferErrorScope {
+            user_top_form: 1,
+            lambda_path: vec![0],
+        };
+        let ranges = crate::lsp_native_core::infer_error_ranges(
+            source,
+            "Cannot unify Int with Bool",
+            Some(&scope),
+            Some("(+ x true)"),
+        );
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start.line, 1);
+    }
+
+    #[test]
     fn test_static_analysis_user_form_count_includes_destructuring_expansion() {
         let source = r#"(let inp "1,2")
 (let [a b] (split "," inp))

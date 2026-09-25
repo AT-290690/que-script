@@ -70,6 +70,17 @@ pub struct ExplainWarning {
     pub kind: String,
     pub message: String,
     pub suggestion: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<ExplainLocation>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExplainLocation {
+    pub form: usize,
+    pub line: u32,
+    pub column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,6 +104,22 @@ pub fn explain_program_with_effects(
     wat: &str,
     user_form_count: usize,
     known_effects: &HashMap<String, EffectFlags>,
+) -> ExplainReport {
+    explain_program_with_effects_and_source(
+        typed_ast,
+        wat,
+        user_form_count,
+        known_effects,
+        None,
+    )
+}
+
+pub fn explain_program_with_effects_and_source(
+    typed_ast: &TypedExpression,
+    wat: &str,
+    user_form_count: usize,
+    known_effects: &HashMap<String, EffectFlags>,
+    source: Option<&str>,
 ) -> ExplainReport {
     let metrics = collect_wat_metrics(wat);
     let host_imports = collect_host_imports(wat);
@@ -128,10 +155,28 @@ pub fn explain_program_with_effects(
         .unwrap_or_else(|| "_".to_string());
     let mut warnings = Vec::new();
 
-    for finding in crate::static_analysis::analyze_user_program_diagnostics(
+    for finding in crate::static_analysis::analyze_user_program_diagnostics_detailed(
         typed_ast,
         user_form_count,
     ) {
+        let location = source.and_then(|source| {
+            let ranges = crate::lsp_native_core::static_analysis_diagnostic_ranges(
+                source,
+                &finding.message,
+                finding.user_form_index,
+            );
+            (ranges.len() == 1).then(|| {
+                let range = ranges[0];
+                ExplainLocation {
+                    form: finding.user_form_index,
+                    line: range.start.line + 1,
+                    column: range.start.character + 1,
+                    end_line: range.end.line + 1,
+                    end_column: range.end.character + 1,
+                }
+            })
+        });
+        let finding = finding.message;
         let mut lines = finding.lines();
         let message = lines.next().unwrap_or(&finding).to_string();
         let suggestion = lines
@@ -150,6 +195,7 @@ pub fn explain_program_with_effects(
             kind: kind.to_string(),
             message,
             suggestion,
+            location,
         });
     }
 
@@ -164,6 +210,7 @@ pub fn explain_program_with_effects(
                 "Prefer direct function calls or let-bound local lambdas when performance matters."
                     .to_string(),
             ),
+            location: None,
         });
     }
     if metrics.closure_allocations > 0 {
@@ -176,6 +223,7 @@ pub fn explain_program_with_effects(
             suggestion: Some(
                 "Avoid returning/storing partially applied functions in hot paths.".to_string(),
             ),
+            location: None,
         });
     }
     if metrics.tuple_allocations > 0 {
@@ -189,6 +237,7 @@ pub fn explain_program_with_effects(
                 "Destructure tuple-returning helpers immediately in hot paths where possible."
                     .to_string(),
             ),
+            location: None,
         });
     }
     if metrics.checked_vector_gets > 0 {
@@ -202,6 +251,7 @@ pub fn explain_program_with_effects(
                 "Use simple counted loops over cached lengths to help bounds-check elimination."
                     .to_string(),
             ),
+            location: None,
         });
     }
     if !host_imports.is_empty() {
@@ -212,6 +262,7 @@ pub fn explain_program_with_effects(
                 host_imports.join(", ")
             ),
             suggestion: Some("Run with the matching --allow permissions.".to_string()),
+            location: None,
         });
     }
 
@@ -413,7 +464,15 @@ pub fn render_text(report: &ExplainReport) -> String {
         lines.push(String::new());
         lines.push("Warnings:".to_string());
         for warning in &report.warnings {
-            lines.push(format!("  {}: {}", warning.kind, warning.message));
+            let location = warning
+                .location
+                .as_ref()
+                .map(|location| format!(" at {}:{}", location.line, location.column))
+                .unwrap_or_default();
+            lines.push(format!(
+                "  {}{}: {}",
+                warning.kind, location, warning.message
+            ));
             if let Some(suggestion) = &warning.suggestion {
                 lines.push(format!("    suggestion: {}", suggestion));
             }
@@ -1076,7 +1135,13 @@ mod tests {
         .expect("source should infer");
         let split =
             crate::wat::compile_program_to_split_wat_typed(&typed).expect("source should compile");
-        explain_program(&typed, &split.user_wat, 1)
+        explain_program_with_effects_and_source(
+            &typed,
+            &split.user_wat,
+            1,
+            &HashMap::new(),
+            Some(src),
+        )
     }
 
     #[test]
@@ -1144,6 +1209,12 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.kind == "static_arithmetic"));
+        assert!(report.warnings.iter().any(|warning| {
+            warning.kind == "static_arithmetic"
+                && warning.location.as_ref().is_some_and(|location| {
+                    location.line == 1 && location.column == 1
+                })
+        }));
         let json = render_json(&report).expect("report should serialize");
         let value: serde_json::Value =
             serde_json::from_str(&json).expect("report should be valid JSON");
