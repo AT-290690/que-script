@@ -182,6 +182,36 @@ local function setup_hover(client, bufnr, hover_handler, opts)
   end, { buffer = bufnr, desc = "Que hover" })
 end
 
+local function setup_format(bufnr, opts)
+  local command = opts.format_cmd or { "que", "fmt", "--stdin" }
+  local function format_buffer()
+    local source = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n") .. "\n"
+    local formatted = vim.fn.system(command, source)
+    if vim.v.shell_error ~= 0 then
+      vim.notify(formatted ~= "" and formatted or "Que formatter failed", vim.log.levels.ERROR)
+      return
+    end
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local lines = vim.split(formatted:gsub("\n$", ""), "\n", { plain = true })
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    local last_line = math.max(1, #lines)
+    cursor[1] = math.min(cursor[1], last_line)
+    cursor[2] = math.min(cursor[2], #(lines[cursor[1]] or ""))
+    vim.api.nvim_win_set_cursor(0, cursor)
+  end
+  pcall(vim.api.nvim_buf_del_user_command, bufnr, "QueFormat")
+  vim.api.nvim_buf_create_user_command(bufnr, "QueFormat", format_buffer, {
+    desc = "Format the current Que buffer",
+  })
+  if opts.format_key ~= false then
+    vim.keymap.set("n", opts.format_key or "<leader>t", format_buffer, {
+      buffer = bufnr,
+      silent = true,
+      desc = "Format Que buffer",
+    })
+  end
+end
+
 function M.setup(opts)
   opts = opts or {}
 
@@ -214,6 +244,8 @@ function M.setup(opts)
   lsp_opts.completion_type_hints = nil
   lsp_opts.signature_help = nil
   lsp_opts.hover_border = nil
+  lsp_opts.format_cmd = nil
+  lsp_opts.format_key = nil
   lsp_opts.handlers = vim.tbl_extend("force", user_handlers, {
     ["textDocument/hover"] = function(err, result, ctx, config)
       return hover_handler(err, clean_que_hover(result), ctx, config)
@@ -226,6 +258,18 @@ function M.setup(opts)
     if user_on_attach then
       user_on_attach(client, bufnr)
     end
+  end
+
+  local format_group = vim.api.nvim_create_augroup("QueFormat", { clear = true })
+  vim.api.nvim_create_autocmd("FileType", {
+    group = format_group,
+    pattern = opts.filetypes or { "que", "eclisp" },
+    callback = function(event)
+      setup_format(event.buf, opts)
+    end,
+  })
+  if vim.bo.filetype == "que" or vim.bo.filetype == "eclisp" then
+    setup_format(vim.api.nvim_get_current_buf(), opts)
   end
 
   lspconfig.quelsp.setup(vim.tbl_deep_extend("force", {

@@ -1161,6 +1161,8 @@ fn native_shell_help(bin_name: &str) -> String {
          or:    {bin} init-host <name>\n\
          or:    {bin} nvim [arg ...] [--debug [basic|code|types|all]|--opt] [--allow ...]\n\
          or:    {bin} explain [script.que] [--json] [--out <file>] [--debug [basic|code|types|all]|--opt]\n\
+         or:    {bin} fmt <file.que> [--check|--stdout]\n\
+         or:    {bin} fmt --stdin\n\
          or:    {bin} --install [helpers.que ...] [--out <que-lib.lisp>]\n\
          or:    {bin} --lib <names|types|source> [pattern|name]\n\
          or:    {bin} --learn\n\
@@ -1187,6 +1189,7 @@ fn native_shell_help(bin_name: &str) -> String {
           init-host      Scaffold a custom Rust host binary in `./<name>`.\n\
           nvim           Edit a temporary .que program in Neovim, then run it on save-and-exit.\n\
           explain        Show type/effect and optimized WAT-shape information without running.\n\
+          fmt            Format Que source; rewrites a file unless --check or --stdout is used.\n\
            --debug        Enable compiler/runtime debug report on errors (default: basic locations).\n\
                          Also forces QUE_INT_OVERFLOW_CHECK, QUE_DEC_OVERFLOW_CHECK,\n\
                          QUE_DIV_ZERO_CHECK and QUE_BOUNDS_CHECK to ON, and reports\n\
@@ -2328,6 +2331,56 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
         crate::explain::render_text(&report)
     };
     emit_text_output(out_path.as_deref(), &rendered)
+}
+
+fn run_format_command(args: &[String], bin_name: &str) -> Result<(), String> {
+    let usage = || format!("Usage: {bin_name} fmt <file.que> [--check|--stdout]\n       {bin_name} fmt --stdin");
+    if args.iter().any(|arg| matches!(arg.as_str(), "--help" | "-h")) {
+        println!("{}", usage());
+        return Ok(());
+    }
+    let stdin_mode = args.iter().any(|arg| arg == "--stdin");
+    let check = args.iter().any(|arg| arg == "--check");
+    let stdout = stdin_mode || args.iter().any(|arg| arg == "--stdout");
+    let paths = args
+        .iter()
+        .filter(|arg| !arg.starts_with("--"))
+        .collect::<Vec<_>>();
+    if stdin_mode && !paths.is_empty() || !stdin_mode && paths.len() != 1 {
+        return Err(usage());
+    }
+    let (source, path) = if stdin_mode {
+        let mut source = String::new();
+        io::stdin()
+            .read_to_string(&mut source)
+            .map_err(|error| format!("failed to read Que source from stdin: {error}"))?;
+        (source, None)
+    } else {
+        let path = PathBuf::from(paths[0]);
+        let source = fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read '{}': {error}", path.display()))?;
+        (source, Some(path))
+    };
+    let formatted = crate::formatter::format_source(&source)?;
+    if check {
+        if formatted == source {
+            return Ok(());
+        }
+        return Err(path
+            .as_ref()
+            .map(|path| format!("'{}' is not formatted", path.display()))
+            .unwrap_or_else(|| "stdin is not formatted".to_string()));
+    }
+    if stdout {
+        print!("{formatted}");
+        io::stdout()
+            .flush()
+            .map_err(|error| format!("failed to flush formatted source: {error}"))?;
+    } else if let Some(path) = path {
+        fs::write(&path, formatted)
+            .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn resolve_explain_input(
@@ -4494,6 +4547,10 @@ pub fn run_native_shell() -> Result<(), String> {
     }
     if matches!(args.get(1).map(String::as_str), Some("explain")) {
         run_explain_command(&args.iter().skip(2).cloned().collect::<Vec<_>>(), bin_name)?;
+        return Ok(());
+    }
+    if matches!(args.get(1).map(String::as_str), Some("fmt" | "format")) {
+        run_format_command(&args.iter().skip(2).cloned().collect::<Vec<_>>(), bin_name)?;
         return Ok(());
     }
     if matches!(args.get(1).map(String::as_str), Some("--learn")) {

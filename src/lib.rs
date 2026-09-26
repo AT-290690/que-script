@@ -1,4 +1,6 @@
 pub mod baked;
+#[path = "../miscs/formatter.rs"]
+pub mod formatter;
 #[cfg(feature = "compiler")]
 pub mod explain;
 #[cfg(feature = "io")]
