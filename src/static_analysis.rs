@@ -8,6 +8,20 @@ pub struct TerminationFinding {
     pub status: String,
     pub measure: Option<String>,
     pub reason: String,
+    pub proof: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BoundsProof {
+    pub expression: String,
+    pub details: Vec<String>,
+}
+
+#[derive(Default)]
+struct AnalysisSink {
+    diagnostics: Vec<String>,
+    bounds_proofs: Vec<BoundsProof>,
+    capture_proofs: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1555,6 +1569,22 @@ fn collect_numeric_guard_facts(
                 "!=" if bound == 0 => {
                     facts.nonzero.insert(canonical_scalar(value, facts));
                 }
+                "!=" if bound == i32::MAX => constrain_integer_range(
+                    value,
+                    facts,
+                    IntInterval {
+                        min: i32::MIN as i64,
+                        max: (i32::MAX as i64) - 1,
+                    },
+                ),
+                "!=" if bound == i32::MIN => constrain_integer_range(
+                    value,
+                    facts,
+                    IntInterval {
+                        min: (i32::MIN as i64) + 1,
+                        max: i32::MAX as i64,
+                    },
+                ),
                 ">" => constrain_integer_range(
                     value,
                     facts,
@@ -1868,9 +1898,9 @@ fn forget_local_name(name: &str, facts: &mut AbstractState) {
         .retain(|(left, right)| left != name && right != name);
 }
 
-fn record_diagnostic(diagnostics: &mut Vec<String>, message: String) {
-    if !diagnostics.contains(&message) {
-        diagnostics.push(message);
+fn record_diagnostic(diagnostics: &mut AnalysisSink, message: String) {
+    if !diagnostics.diagnostics.contains(&message) {
+        diagnostics.diagnostics.push(message);
     }
 }
 
@@ -2105,12 +2135,35 @@ fn comparisons_for_counter<'a>(
     }
 }
 
+fn comparison_detail_for_counter<'a>(
+    expr: &'a Expression,
+    name: &str,
+) -> Option<(&'a str, bool, &'a Expression)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if let [Expression::Word(op), left, right] = items.as_slice() {
+        if matches!(op.as_str(), "<" | "<=" | ">" | ">=") {
+            if matches!(left, Expression::Word(var) if var == name) {
+                return Some((op, true, right));
+            }
+            if matches!(right, Expression::Word(var) if var == name) {
+                return Some((op, false, left));
+            }
+        }
+    }
+    items
+        .iter()
+        .skip(1)
+        .find_map(|child| comparison_detail_for_counter(child, name))
+}
+
 fn analyze_while_termination(
     whole: &Expression,
     items: &[Expression],
     structural_summaries: &HashMap<String, StructuralSummary>,
     facts: &AbstractState,
-    diagnostics: &mut Vec<String>,
+    diagnostics: &mut AnalysisSink,
 ) {
     if items.len() < 3 {
         return;
@@ -2463,7 +2516,7 @@ fn analyze_recursive_progress(
     params: &[String],
     structural_summaries: &HashMap<String, StructuralSummary>,
     facts: &AbstractState,
-    diagnostics: &mut Vec<String>,
+    diagnostics: &mut AnalysisSink,
 ) {
     let Expression::Apply(items) = body else {
         return;
@@ -2564,7 +2617,7 @@ fn analyze_termination_expr(
     expr: &Expression,
     structural_summaries: &HashMap<String, StructuralSummary>,
     facts: &AbstractState,
-    diagnostics: &mut Vec<String>,
+    diagnostics: &mut AnalysisSink,
 ) {
     let Expression::Apply(items) = expr else {
         return;
@@ -2709,7 +2762,7 @@ fn access_index_is_proven(
 fn validate_static_bounds_expr(
     expr: &Expression,
     facts: &mut AbstractState,
-    diagnostics: &mut Vec<String>,
+    diagnostics: &mut AnalysisSink,
 ) {
     let Expression::Apply(items) = expr else {
         return;
@@ -2772,11 +2825,35 @@ fn validate_static_bounds_expr(
                 (false, true) => "Int overflow possible",
                 (false, false) => unreachable!(),
             };
+            let left_range = integer_interval(&items[1], facts).unwrap_or(IntInterval::I32);
+            let right_range = integer_interval(&items[2], facts).unwrap_or(IntInterval::I32);
+            let operand_detail = if canonical_scalar(&items[1], facts)
+                == canonical_scalar(&items[2], facts)
+            {
+                format!(
+                    "\ndetail: inferred range: {} <= {} <= {}",
+                    left_range.min,
+                    canonical_scalar(&items[1], facts),
+                    left_range.max
+                )
+            } else {
+                format!(
+                    "\ndetail: left range: {}..{}\ndetail: right range: {}..{}",
+                    left_range.min, left_range.max, right_range.min, right_range.max
+                )
+            };
+            let safe_detail = if op == "*"
+                && canonical_scalar(&items[1], facts) == canonical_scalar(&items[2], facts)
+            {
+                "\ndetail: safe square range: -46340..46340"
+            } else {
+                ""
+            };
             record_diagnostic(
                 diagnostics,
                 format!(
-                    "static arithmetic: {kind}: `{}`\nhelp: constrain the operands to keep the result within 32-bit Int range",
-                    expr.to_lisp()
+                    "static arithmetic: {kind}: `{}`{operand_detail}{safe_detail}\nhelp: constrain the operands to keep the result within 32-bit Int range",
+                    expr.to_lisp(),
                 ),
             );
         }
@@ -2805,6 +2882,29 @@ fn validate_static_bounds_expr(
                     expr.to_lisp()
                 ),
             );
+        } else if diagnostics.capture_proofs {
+            let vector = canonical_access(&items[1], facts);
+            let index = canonical_scalar(&items[2], facts);
+            let mut details = Vec::new();
+            if let Some(length) = facts
+                .fixed_lengths
+                .get(&vector)
+                .copied()
+                .or_else(|| literal_vector_length(&items[1]))
+            {
+                details.push(format!("length({vector}) = {length}"));
+            } else if let Some(minimum) = facts.minimum_lengths.get(&vector) {
+                details.push(format!("length({vector}) >= {minimum}"));
+            }
+            if let Some(range) = integer_interval(&items[2], facts) {
+                details.push(format!("{} <= {} <= {}", range.min, index, range.max));
+            } else if facts.safe_pairs.contains(&(vector.clone(), index.clone())) {
+                details.push(format!("0 <= {index} < length({vector})"));
+            }
+            diagnostics.bounds_proofs.push(BoundsProof {
+                expression: expr.to_lisp(),
+                details,
+            });
         }
     }
 
@@ -2943,7 +3043,7 @@ fn validate_static_bounds_expr(
                 // Fixed-point iterations are speculative. Diagnostics emitted
                 // before widening stabilizes would describe an intermediate
                 // state rather than the actual loop invariant.
-                let mut speculative_diagnostics = Vec::new();
+                let mut speculative_diagnostics = AnalysisSink::default();
                 validate_static_bounds_expr(
                     &items[1],
                     &mut header,
@@ -3072,17 +3172,17 @@ pub fn analyze_user_program_diagnostics_detailed(
     // Seed facts from bundled/project library forms so public immutable
     // constants behave exactly like user constants. Library diagnostics are
     // intentionally discarded; only user forms are reported.
-    let mut ignored_library_diagnostics = Vec::new();
+    let mut ignored_library_diagnostics = AnalysisSink::default();
     for expression in &all_expressions[..start] {
         validate_static_bounds_expr(expression, &mut facts, &mut ignored_library_diagnostics);
     }
     let mut detailed = Vec::new();
     for (user_form_index, expression) in all_expressions[start..].iter().enumerate() {
-        let mut diagnostics = Vec::new();
+        let mut diagnostics = AnalysisSink::default();
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
         analyze_termination_expr(expression, &structural_summaries, &facts, &mut diagnostics);
         detailed.extend(
-            diagnostics
+            diagnostics.diagnostics
                 .into_iter()
                 .map(|message| StaticAnalysisDiagnostic {
                     message,
@@ -3091,6 +3191,37 @@ pub fn analyze_user_program_diagnostics_detailed(
         );
     }
     detailed
+}
+
+pub fn explain_bounds_proofs(
+    typed_program: &TypedExpression,
+    user_form_count: usize,
+) -> Vec<BoundsProof> {
+    let all_expressions: Vec<&Expression> = match &typed_program.expr {
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "do") =>
+        {
+            items.iter().skip(1).collect()
+        }
+        expression => vec![expression],
+    };
+    let guard_summaries = infer_guard_summaries(&all_expressions);
+    let predicate_summaries = infer_predicate_summaries(&all_expressions);
+    let start = all_expressions.len().saturating_sub(user_form_count);
+    let mut facts = AbstractState {
+        guard_summaries,
+        predicate_summaries,
+        ..AbstractState::default()
+    };
+    let mut sink = AnalysisSink::default();
+    for expression in &all_expressions[..start] {
+        validate_static_bounds_expr(expression, &mut facts, &mut sink);
+    }
+    sink.capture_proofs = true;
+    for expression in &all_expressions[start..] {
+        validate_static_bounds_expr(expression, &mut facts, &mut sink);
+    }
+    sink.bounds_proofs
 }
 
 fn first_recursive_call<'a>(expr: &'a Expression, function: &str) -> Option<&'a [Expression]> {
@@ -3122,7 +3253,7 @@ fn collect_termination_findings(
     if op == "while" && items.len() >= 3 {
         let condition = &items[1];
         let subject = format!("while {}", condition.to_lisp());
-        let mut diagnostics = Vec::new();
+        let mut diagnostics = AnalysisSink::default();
         analyze_while_termination(
             expr,
             items,
@@ -3130,7 +3261,7 @@ fn collect_termination_findings(
             facts,
             &mut diagnostics,
         );
-        if let Some(reason) = diagnostics
+        if let Some(reason) = diagnostics.diagnostics
             .into_iter()
             .find(|message| message.starts_with("termination:"))
         {
@@ -3139,6 +3270,7 @@ fn collect_termination_findings(
                 status: "warning".to_string(),
                 measure: None,
                 reason: reason.trim_start_matches("termination: ").to_string(),
+                proof: Vec::new(),
             });
         } else {
             let mut updates = HashMap::new();
@@ -3206,13 +3338,26 @@ fn collect_termination_findings(
                     measure: None,
                     reason: "counter and length bound move in competing directions; relative progress is unknown"
                         .to_string(),
+                    proof: vec![format!("condition: {}", condition.to_lisp())],
                 });
             } else if let Some((name, direction)) = scalar_proof {
+                let mut proof = Vec::new();
+                if let Some(initial) = integer_constant(&Expression::Word(name.clone()), facts) {
+                    proof.push(format!("initial: {name} = {initial}"));
+                }
+                proof.push(format!("condition: {}", condition.to_lisp()));
+                if let Some(update) = updates.get(&name).and_then(|values| values.first()) {
+                    proof.push(format!("update: {name} = {}", update.to_lisp()));
+                }
+                if let Some((_, _, bound)) = comparison_detail_for_counter(condition, &name) {
+                    proof.push(format!("bound: {}", bound.to_lisp()));
+                }
                 findings.push(TerminationFinding {
                     subject,
                     status: "proven".to_string(),
                     measure: Some(name.clone()),
                     reason: format!("{} {} toward the exit bound", name, direction),
+                    proof,
                 });
             } else if let Some(name) = structural_proof {
                 findings.push(TerminationFinding {
@@ -3220,6 +3365,7 @@ fn collect_termination_findings(
                     status: "proven".to_string(),
                     measure: Some(format!("length({name})")),
                     reason: format!("length({name}) moves toward the exit bound"),
+                    proof: vec![format!("condition: {}", condition.to_lisp())],
                 });
             } else {
                 findings.push(TerminationFinding {
@@ -3227,6 +3373,7 @@ fn collect_termination_findings(
                     status: "unknown".to_string(),
                     measure: None,
                     reason: "no monotonic measure was inferred".to_string(),
+                    proof: Vec::new(),
                 });
             }
         }
@@ -3241,10 +3388,10 @@ fn collect_termination_findings(
                     .filter_map(|param| word(param).map(str::to_string))
                     .collect::<Vec<_>>();
                 let body = lambda.last().expect("lambda body exists");
-                let mut diagnostics = Vec::new();
+                let mut diagnostics = AnalysisSink::default();
                 if params.len() == lambda.len() - 2 {
                     if contains_unchanged_recursive_call(body, name, &params) {
-                        diagnostics.push(format!(
+                        diagnostics.diagnostics.push(format!(
                             "recursive call to '{}' repeats all arguments unchanged",
                             name
                         ));
@@ -3258,12 +3405,13 @@ fn collect_termination_findings(
                         &mut diagnostics,
                     );
                 }
-                if let Some(reason) = diagnostics.into_iter().next() {
+                if let Some(reason) = diagnostics.diagnostics.into_iter().next() {
                     findings.push(TerminationFinding {
                         subject: name.clone(),
                         status: "warning".to_string(),
                         measure: None,
                         reason: reason.trim_start_matches("termination: ").to_string(),
+                        proof: Vec::new(),
                     });
                 } else if let Expression::Apply(branch) = body {
                     if matches!(branch.first(), Some(Expression::Word(head)) if head == "if")
@@ -3335,6 +3483,10 @@ fn collect_termination_findings(
                                 status: "proven".to_string(),
                                 measure: Some(measure),
                                 reason,
+                                proof: vec![
+                                    format!("base case: {}", branch[1].to_lisp()),
+                                    format!("recursive call: {}", first_recursive_call(recursive_branch.expect("recursive branch exists"), name).map(|call| Expression::Apply(call.to_vec()).to_lisp()).unwrap_or_else(|| name.clone())),
+                                ],
                             });
                         } else if contains_recursive_call(body, name) {
                             findings.push(TerminationFinding {
@@ -3343,6 +3495,7 @@ fn collect_termination_findings(
                                 measure: None,
                                 reason: "recursive calls exist, but no decreasing measure was inferred"
                                     .to_string(),
+                                proof: Vec::new(),
                             });
                         }
                     } else if contains_recursive_call(body, name) {
@@ -3352,11 +3505,21 @@ fn collect_termination_findings(
                             measure: None,
                             reason: "recursive calls exist, but no base-case measure was inferred"
                                 .to_string(),
+                            proof: Vec::new(),
                         });
                     }
                 }
             }
         }
+    }
+    if matches!(op, "do" | "block") {
+        let mut scoped = facts.clone();
+        let mut ignored = AnalysisSink::default();
+        for child in items.iter().skip(1) {
+            collect_termination_findings(child, structural_summaries, &scoped, findings);
+            validate_static_bounds_expr(child, &mut scoped, &mut ignored);
+        }
+        return;
     }
     for child in items.iter().skip(1) {
         collect_termination_findings(child, structural_summaries, facts, findings);
@@ -3385,14 +3548,14 @@ pub fn explain_termination(
         predicate_summaries,
         ..AbstractState::default()
     };
-    let mut ignored_diagnostics = Vec::new();
+    let mut ignored_diagnostics = AnalysisSink::default();
     for expression in &all_expressions[..start] {
         validate_static_bounds_expr(expression, &mut facts, &mut ignored_diagnostics);
     }
     let mut findings = Vec::new();
     for expression in &all_expressions[start..] {
-        validate_static_bounds_expr(expression, &mut facts, &mut ignored_diagnostics);
         collect_termination_findings(expression, &structural_summaries, &facts, &mut findings);
+        validate_static_bounds_expr(expression, &mut facts, &mut ignored_diagnostics);
     }
     findings
 }
@@ -4584,6 +4747,12 @@ mod tests {
         assert!(analyze(unsafe_range, 1)
             .expect_err("upper-edge range should expose overflow")
             .contains("overflow"));
+
+        let max_inequality = "(let infinity 2147483647) (let add-one (lambda left (if (= left infinity) left (+ left 1))))";
+        assert_eq!(analyze(max_inequality, 2), Ok(()));
+
+        let min_inequality = "(let minimum -2147483648) (let sub-one (lambda right (if (= right minimum) right (- right 1))))";
+        assert_eq!(analyze(min_inequality, 2), Ok(()));
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub struct ExplainReport {
     pub compiled_functions: Vec<ExplainCompiledFunction>,
     pub optimization_targets: Vec<ExplainOptimizationTarget>,
     pub forms: Vec<ExplainForm>,
+    pub bounds_proofs: Vec<ExplainBoundsProof>,
     pub termination: Vec<ExplainTermination>,
     pub warnings: Vec<ExplainWarning>,
 }
@@ -70,6 +71,7 @@ pub struct ExplainWarning {
     pub kind: String,
     pub message: String,
     pub suggestion: Option<String>,
+    pub details: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<ExplainLocation>,
 }
@@ -89,6 +91,13 @@ pub struct ExplainTermination {
     pub status: String,
     pub measure: Option<String>,
     pub reason: String,
+    pub proof: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExplainBoundsProof {
+    pub expression: String,
+    pub details: Vec<String>,
 }
 
 pub fn explain_program(
@@ -138,6 +147,14 @@ pub fn explain_program_with_effects_and_source(
             status: finding.status,
             measure: finding.measure,
             reason: finding.reason,
+            proof: finding.proof,
+        })
+        .collect();
+    let bounds_proofs = crate::static_analysis::explain_bounds_proofs(typed_ast, user_form_count)
+        .into_iter()
+        .map(|proof| ExplainBoundsProof {
+            expression: proof.expression,
+            details: proof.details,
         })
         .collect();
     let user_effect = user_nodes.into_iter().fold(EffectFlags::PURE, |acc, form| {
@@ -180,8 +197,13 @@ pub fn explain_program_with_effects_and_source(
         let mut lines = finding.lines();
         let message = lines.next().unwrap_or(&finding).to_string();
         let suggestion = lines
+            .clone()
             .find_map(|line| line.strip_prefix("help: "))
             .map(str::to_string);
+        let details = lines
+            .filter_map(|line| line.strip_prefix("detail: "))
+            .map(str::to_string)
+            .collect();
         let kind = if message.starts_with("static bounds:") {
             "static_bounds"
         } else if message.starts_with("static arithmetic:") {
@@ -195,6 +217,7 @@ pub fn explain_program_with_effects_and_source(
             kind: kind.to_string(),
             message,
             suggestion,
+            details,
             location,
         });
     }
@@ -211,6 +234,7 @@ pub fn explain_program_with_effects_and_source(
                     .to_string(),
             ),
             location: None,
+            details: Vec::new(),
         });
     }
     if metrics.closure_allocations > 0 {
@@ -224,6 +248,7 @@ pub fn explain_program_with_effects_and_source(
                 "Avoid returning/storing partially applied functions in hot paths.".to_string(),
             ),
             location: None,
+            details: Vec::new(),
         });
     }
     if metrics.tuple_allocations > 0 {
@@ -238,6 +263,7 @@ pub fn explain_program_with_effects_and_source(
                     .to_string(),
             ),
             location: None,
+            details: Vec::new(),
         });
     }
     if metrics.checked_vector_gets > 0 {
@@ -252,6 +278,7 @@ pub fn explain_program_with_effects_and_source(
                     .to_string(),
             ),
             location: None,
+            details: Vec::new(),
         });
     }
     if !host_imports.is_empty() {
@@ -263,6 +290,7 @@ pub fn explain_program_with_effects_and_source(
             ),
             suggestion: Some("Run with the matching --allow permissions.".to_string()),
             location: None,
+            details: Vec::new(),
         });
     }
 
@@ -275,6 +303,7 @@ pub fn explain_program_with_effects_and_source(
         compiled_functions,
         optimization_targets,
         forms,
+        bounds_proofs,
         termination,
         warnings,
     }
@@ -284,9 +313,60 @@ pub fn render_text(report: &ExplainReport) -> String {
     let mut lines = Vec::new();
     lines.push("Que Explain".to_string());
     lines.push(format!("Result type: {}", report.result_type));
-    lines.push(format!("Effect: {}", format_labels(&report.effect)));
+
+    lines.push(String::new());
+    lines.push("Correctness:".to_string());
+    let correctness_warnings = report
+        .warnings
+        .iter()
+        .filter(|warning| matches!(warning.kind.as_str(), "static_bounds" | "static_arithmetic" | "termination"))
+        .collect::<Vec<_>>();
+    if correctness_warnings.is_empty() {
+        lines.push("  no warnings".to_string());
+    }
+    for warning in correctness_warnings {
+        let location = warning
+            .location
+            .as_ref()
+            .map(|location| format!(" at {}:{}", location.line, location.column))
+            .unwrap_or_default();
+        lines.push(format!("  {}{}: {}", warning.kind, location, warning.message));
+        for detail in &warning.details {
+            lines.push(format!("    {detail}"));
+        }
+        if let Some(suggestion) = &warning.suggestion {
+            lines.push(format!("    suggestion: {suggestion}"));
+        }
+    }
+
+    if !report.bounds_proofs.is_empty() {
+        lines.push("  Proven bounds:".to_string());
+        for proof in &report.bounds_proofs {
+            lines.push(format!("    {} proven safe", proof.expression));
+            for detail in &proof.details {
+                lines.push(format!("      {detail}"));
+            }
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("Termination:".to_string());
+    if report.termination.is_empty() {
+        lines.push("  no loops or recursive functions analyzed".to_string());
+    }
+    for finding in &report.termination {
+        lines.push(format!("  {} terminating: {}", finding.status, finding.subject));
+        lines.push(format!("    {}", finding.reason));
+        for fact in &finding.proof {
+            lines.push(format!("    {fact}"));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("Effects and permissions:".to_string());
+    lines.push(format!("  effect: {}", format_labels(&report.effect)));
     lines.push(format!(
-        "Host imports: {}",
+        "  host imports: {}",
         if report.host_imports.is_empty() {
             "none".to_string()
         } else {
@@ -294,44 +374,53 @@ pub fn render_text(report: &ExplainReport) -> String {
         }
     ));
     lines.push(String::new());
-    lines.push("WAT shape:".to_string());
+    lines.push("Performance:".to_string());
+    for warning in report.warnings.iter().filter(|warning| {
+        !matches!(warning.kind.as_str(), "static_bounds" | "static_arithmetic" | "termination" | "host_imports")
+    }) {
+        lines.push(format!("  {}: {}", warning.kind, warning.message));
+        if let Some(suggestion) = &warning.suggestion {
+            lines.push(format!("    suggestion: {suggestion}"));
+        }
+    }
+    lines.push("  WAT shape:".to_string());
     lines.push(format!(
-        "  vector allocations: {}",
+        "    vector allocations: {}",
         report.metrics.vector_allocations
     ));
     lines.push(format!(
-        "  zeroed vector allocations: {}",
+        "    zeroed vector allocations: {}",
         report.metrics.zeroed_vector_allocations
     ));
     lines.push(format!(
-        "  uninit vector allocations: {}",
+        "    uninit vector allocations: {}",
         report.metrics.uninit_vector_allocations
     ));
     lines.push(format!(
-        "  tuple allocations: {}",
+        "    tuple allocations: {}",
         report.metrics.tuple_allocations
     ));
     lines.push(format!(
-        "  closure allocations: {}",
+        "    closure allocations: {}",
         report.metrics.closure_allocations
     ));
     lines.push(format!(
-        "  dynamic apply calls: {}",
+        "    dynamic apply calls: {}",
         report.metrics.dynamic_apply_calls
     ));
     lines.push(format!(
-        "  checked vector gets: {}",
+        "    checked vector gets: {}",
         report.metrics.checked_vector_gets
     ));
     lines.push(format!(
-        "  unchecked vector gets: {}",
+        "    unchecked vector gets: {}",
         report.metrics.unchecked_vector_gets
     ));
     lines.push(format!(
-        "  direct user function calls: {}",
+        "    direct user function calls: {}",
         report.metrics.direct_user_function_calls
     ));
-    lines.push(format!("  wat bytes: {}", report.metrics.wat_bytes));
+    lines.push(format!("    wat bytes: {}", report.metrics.wat_bytes));
 
     if !report.optimized_user_calls.is_empty() {
         lines.push(format!(
@@ -342,13 +431,13 @@ pub fn render_text(report: &ExplainReport) -> String {
 
     if !report.optimization_targets.is_empty() {
         lines.push(String::new());
-        lines.push("Optimization targets (static WAT shape, not runtime profile):".to_string());
+        lines.push("  Optimization targets (static WAT shape, not runtime profile):".to_string());
         for target in &report.optimization_targets {
             lines.push(format!(
-                "  {}: {} x{}",
+                "    {}: {} x{}",
                 target.function, target.kind, target.count
             ));
-            lines.push(format!("    note: {}", target.note));
+            lines.push(format!("      note: {}", target.note));
         }
     }
 
@@ -357,11 +446,14 @@ pub fn render_text(report: &ExplainReport) -> String {
         .iter()
         .filter(|function| function_has_interesting_explain_details(function))
         .collect::<Vec<_>>();
-    if !interesting_functions.is_empty() {
+    if !interesting_functions.is_empty() || !report.forms.is_empty() {
         lines.push(String::new());
-        lines.push("Compiled function details:".to_string());
+        lines.push("Generated code:".to_string());
+    }
+    if !interesting_functions.is_empty() {
+        lines.push("  Compiled function details:".to_string());
         for function in interesting_functions {
-            lines.push(format!("  {}:", function.name));
+            lines.push(format!("    {}:", function.name));
             let mut detail_parts = Vec::new();
             if function.metrics.vector_allocations > 0 {
                 detail_parts.push(format!("vector {}", function.metrics.vector_allocations));
@@ -427,11 +519,10 @@ pub fn render_text(report: &ExplainReport) -> String {
     }
 
     if !report.forms.is_empty() {
-        lines.push(String::new());
-        lines.push("Source user forms:".to_string());
+        lines.push("  Source user forms:".to_string());
         for form in &report.forms {
             lines.push(format!(
-                "  {} {} : {} [{}]",
+                "    {} {} : {} [{}]",
                 form.kind,
                 form.name,
                 form.typ,
@@ -439,42 +530,6 @@ pub fn render_text(report: &ExplainReport) -> String {
             ));
             if !form.calls.is_empty() {
                 lines.push(format!("    calls: {}", form.calls.join(", ")));
-            }
-        }
-    }
-
-    if !report.termination.is_empty() {
-        lines.push(String::new());
-        lines.push("Termination:".to_string());
-        for finding in &report.termination {
-            let measure = finding
-                .measure
-                .as_ref()
-                .map(|measure| format!("; measure: {measure}"))
-                .unwrap_or_default();
-            lines.push(format!(
-                "  {}: {}{}",
-                finding.subject, finding.status, measure
-            ));
-            lines.push(format!("    {}", finding.reason));
-        }
-    }
-
-    if !report.warnings.is_empty() {
-        lines.push(String::new());
-        lines.push("Warnings:".to_string());
-        for warning in &report.warnings {
-            let location = warning
-                .location
-                .as_ref()
-                .map(|location| format!(" at {}:{}", location.line, location.column))
-                .unwrap_or_default();
-            lines.push(format!(
-                "  {}{}: {}",
-                warning.kind, location, warning.message
-            ));
-            if let Some(suggestion) = &warning.suggestion {
-                lines.push(format!("    suggestion: {}", suggestion));
             }
         }
     }
@@ -1166,7 +1221,9 @@ mod tests {
         }));
         let text = render_text(&proven);
         assert!(text.contains("Termination:"));
-        assert!(text.contains("down: proven; measure: n"));
+        assert!(text.contains("proven terminating: down"));
+        assert!(text.contains("base case:"));
+        assert!(text.contains("recursive call:"));
 
         let warning = explain_source(
             "(letrec stuck (lambda (n) (if (= n 0) 0 (stuck n))))",
@@ -1226,6 +1283,38 @@ mod tests {
                         .as_str()
                         .is_some_and(|message| message.contains("overflow"))
             })));
+    }
+
+    #[test]
+    fn explain_text_groups_sections_and_shows_analysis_evidence() {
+        let report = explain_source(
+            "(let n 10) (let xs []) (mut build 0) (while (<= build n) (push! xs true) (alter! build (+ build 1))) (mut i 0) (while (<= i n) (get xs i) (* i i) (alter! i (+ i 1)))",
+        );
+        let text = render_text(&report);
+        let correctness = text.find("Correctness:").expect("correctness section");
+        let performance = text.find("Performance:").expect("performance section");
+        assert!(correctness < performance);
+        assert!(text.contains("Proven bounds:"));
+        assert!(text.contains("proven safe"));
+        assert!(text.contains("initial:"));
+        assert!(text.contains("condition:"));
+        assert!(text.contains("update:"));
+        assert!(text.contains("bound:"));
+
+        let overflow = explain_source("(mut i 5000000) (* i i)");
+        let warning = overflow
+            .warnings
+            .iter()
+            .find(|warning| warning.kind == "static_arithmetic")
+            .expect("overflow warning");
+        assert!(warning
+            .details
+            .iter()
+            .any(|detail| detail.contains("inferred range")));
+        assert!(warning
+            .details
+            .iter()
+            .any(|detail| detail.contains("safe square range")));
     }
 
     #[test]
