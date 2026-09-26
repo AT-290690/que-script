@@ -20,7 +20,10 @@ syn keyword queKeyword
 
 " Keyword forms containing punctuation cannot be expressed reliably with
 " :syn keyword because characters such as &, ! and . are not keyword chars.
-syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(&alter!\|&mut\|alter!\|%\.\|%\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
+syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(&alter!\|&mut\|alter!\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
+
+" Remainder operators use the theme's operator color, like +, -, * and /.
+syn match queOperator /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(%\.\|%\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
 
 " --- Builtins (Functions, Core Operations & Mutations) ---
 syn keyword queBuiltin
@@ -40,6 +43,7 @@ hi def link queString String
 hi def link queChar Character
 hi def link queNumber Number
 hi def link queKeyword Keyword
+hi def link queOperator Operator
 hi def link queBuiltin Function
 hi def link queBoolean Boolean
 hi def link queDelimiter Delimiter
