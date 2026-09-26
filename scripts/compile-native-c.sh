@@ -8,6 +8,9 @@ fi
 
 input_file="$1"
 output_dir="${2:-build}"
+script_dir="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+repo_dir="$(CDPATH= cd -- "$script_dir/.." && pwd)"
+native_host_dir="$repo_dir/miscs/native-c"
 module_name="main"
 wasm_file="$output_dir/$module_name.wasm"
 c_file="$output_dir/$module_name.c"
@@ -36,12 +39,12 @@ fi
 
 if command -v quec >/dev/null 2>&1; then
   quec_bin="quec"
-elif [ -x "./target/release/quec" ]; then
-  quec_bin="./target/release/quec"
-elif [ -x "./target/debug/quec" ]; then
-  quec_bin="./target/debug/quec"
+elif [ -x "$repo_dir/target/release/quec" ]; then
+  quec_bin="$repo_dir/target/release/quec"
+elif [ -x "$repo_dir/target/debug/quec" ]; then
+  quec_bin="$repo_dir/target/debug/quec"
 else
-  echo "error: quec not found in PATH or ./target/{release,debug}/quec" >&2
+  echo "error: quec not found in PATH or $repo_dir/target/{release,debug}/quec" >&2
   exit 1
 fi
 
@@ -53,14 +56,10 @@ if ! command -v "$type_probe_bin" >/dev/null 2>&1; then
 fi
 
 result_type="$("$type_probe_bin" "$input_file" --emit types | sed -n 's/^result : //p' | tail -n 1)"
-case "$result_type" in
-  "Int" | "{Int * Int}" | "{Bool * [Int]}")
-    ;;
-  *)
-    echo "error: native C runner currently supports result Int, {Int * Int}, or {Bool * [Int]}, got: $result_type" >&2
-    exit 1
-    ;;
-esac
+if [ -z "$result_type" ]; then
+  echo "error: could not determine Que result type" >&2
+  exit 1
+fi
 
 QUE_WASM_OPT="${QUE_WASM_OPT:-speed}" \
 QUE_DEVIRTUALIZE="${QUE_DEVIRTUALIZE:-aggressive}" \
@@ -76,13 +75,21 @@ QUE_VEC_MIN_CAP="${QUE_VEC_MIN_CAP:-8}" \
 "$quec_bin" "$input_file" > "$wasm_file"
 wasm2c "$wasm_file" -n "$module_name" -o "$c_file"
 
+if grep -q 'struct w2c_host' "$output_dir/$module_name.h"; then
+  has_host_imports=1
+else
+  has_host_imports=0
+fi
+
 host_file="$output_dir/$module_name.host.c"
 
 cat > "$host_file" <<'EOF'
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "main.h"
+#include "que_host.h"
 #include "wasm-rt.h"
 
 extern wasm_rt_jmp_buf g_wasm_rt_jmp_buf;
@@ -124,11 +131,50 @@ static void print_bool_int_vector_tuple(w2c_main* instance, uint32_t tuple_ptr) 
     printf(" }\n");
 }
 
-int main(void) {
+static void print_char_vector(w2c_main* instance, uint32_t vec_ptr) {
+    uint32_t len = load_u32(instance, vec_ptr);
+    uint32_t data_ptr = load_u32(instance, vec_ptr + 16);
+    for (uint32_t i = 0; i < len; i++) {
+        uint32_t c = load_u32(instance, data_ptr + i * 4);
+        if (c <= 0x7f) putchar((int)c);
+        else if (c <= 0x7ff) {
+            putchar((int)(0xc0 | (c >> 6)));
+            putchar((int)(0x80 | (c & 0x3f)));
+        } else if (c <= 0xffff) {
+            putchar((int)(0xe0 | (c >> 12)));
+            putchar((int)(0x80 | ((c >> 6) & 0x3f)));
+            putchar((int)(0x80 | (c & 0x3f)));
+        } else {
+            putchar((int)(0xf0 | (c >> 18)));
+            putchar((int)(0x80 | ((c >> 12) & 0x3f)));
+            putchar((int)(0x80 | ((c >> 6) & 0x3f)));
+            putchar((int)(0x80 | (c & 0x3f)));
+        }
+    }
+    putchar('\n');
+}
+
+int main(int argc, char** argv) {
     wasm_rt_init();
 
     w2c_main instance;
+EOF
+
+if [ "$has_host_imports" -eq 1 ]; then
+  cat >> "$host_file" <<'EOF'
+    struct w2c_host host;
+    que_host_init(&host, &instance, que_host_parse_permissions(getenv("QUE_ALLOW")));
+    wasm2c_main_instantiate(&instance, &host);
+EOF
+else
+  cat >> "$host_file" <<'EOF'
     wasm2c_main_instantiate(&instance);
+    struct w2c_host host;
+    que_host_init(&host, &instance, que_host_parse_permissions(getenv("QUE_ALLOW")));
+EOF
+fi
+
+cat >> "$host_file" <<'EOF'
     wasm_rt_trap_t trap = (wasm_rt_trap_t)wasm_rt_try(g_wasm_rt_jmp_buf);
     if (trap != WASM_RT_TRAP_NONE) {
         fprintf(stderr, "wasm trap: %s\n", wasm_rt_strerror(trap));
@@ -136,26 +182,22 @@ int main(void) {
         wasm_rt_free();
         return 134;
     }
+EOF
+
+cat >> "$host_file" <<'EOF'
+    if (que_host_configure_argv(&host, argc, argv) != 0) {
+        wasm2c_main_free(&instance);
+        wasm_rt_free();
+        return 2;
+    }
     uint32_t result = w2c_main_main(&instance);
 EOF
 
-case "$result_type" in
-  "Int")
-    cat >> "$host_file" <<'EOF'
-    printf("%d\n", (int32_t)result);
+if [ "$result_type" != "()" ]; then
+  cat >> "$host_file" <<EOF
+    que_host_print_result(&host, result, "$result_type");
 EOF
-    ;;
-  "{Int * Int}")
-    cat >> "$host_file" <<'EOF'
-    print_int_tuple2(&instance, result);
-EOF
-    ;;
-  "{Bool * [Int]}")
-    cat >> "$host_file" <<'EOF'
-    print_bool_int_vector_tuple(&instance, result);
-EOF
-    ;;
-esac
+fi
 
 cat >> "$host_file" <<'EOF'
 
@@ -167,9 +209,11 @@ EOF
 
 "$cc_bin" -O3 -DNDEBUG -flto -march=native -fno-math-errno -fno-trapping-math \
   -I "$output_dir" \
+  -I "$native_host_dir" \
   -I "$wasm2c_include_dir" \
   -I "$wasm2c_runtime_dir" \
   "$host_file" \
+  "$native_host_dir/que_host.c" \
   "$c_file" \
   "$wasm2c_runtime_dir/wasm-rt-impl.c" \
   "$wasm2c_runtime_dir/wasm-rt-mem-impl.c" \

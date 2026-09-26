@@ -204,7 +204,7 @@ local function setup_format(bufnr, opts)
     desc = "Format the current Que buffer",
   })
   if opts.format_key ~= false then
-    vim.keymap.set("n", opts.format_key or "<leader>t", format_buffer, {
+    vim.keymap.set("n", opts.format_key or "<leader>f", format_buffer, {
       buffer = bufnr,
       silent = true,
       desc = "Format Que buffer",

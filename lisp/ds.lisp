@@ -1629,7 +1629,6 @@ q)))
 (let String->Integer Chars->Integer)
 (let Chars->Dec String->Dec)
 
-
 (let Vector/equal? (lambda fn? xs ys (Vector/equal/raw? xs ys fn?)))
 
 (let Que/empty! (lambda q (do (Que/empty/raw! q) nil)))
@@ -1643,10 +1642,6 @@ q)))
 (let Que/append! (lambda xs v (do (Que/append/raw! xs v) nil)))
 
 (let Que/at (lambda i xs (if (< i 0) (Que/get xs (+ (length xs) i)) (Que/get xs i))))
-
-
-
-
 
 (let Vector/pop-val! pop-val!)
 (let Vector/last last)

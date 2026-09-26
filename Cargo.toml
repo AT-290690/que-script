@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["io"]
-compiler = ["dep:wat"]
+compiler = ["dep:wat", "eclisp/io"]
 runtime = ["compiler", "dep:wasmtime"]
 io = ["runtime", "dep:wasmtime-wasi", "dep:getrandom", "eclisp/io"]
 debug-rc = []

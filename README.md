@@ -1,367 +1,371 @@
 # Que
 
-**The reference toolchain for Eclisp**
+**A statically typed Lisp toolchain targeting WebAssembly.**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./que-light.png">
   <source media="(prefers-color-scheme: light)" srcset="./que.png">
-  <img alt="eclisp" src="./que.png" width="300" style="width: 300px; max-width: 100%;">
+  <img alt="Que" src="./que.png" width="300">
 </picture>
 
-Eclisp is a small, statically typed Lisp with Hindley-Milner inference, macros, explicit mutation, and a minimal core designed for compilation.
+Que is the reference toolchain for **Eclisp**, a small expression-oriented Lisp
+with Hindley–Milner type inference, macros, first-class functions, explicit
+mutation, and WebAssembly as its compilation target.
 
-Que is the reference toolchain for Eclisp: CLI, standard library, WebAssembly compiler, runtime permissions, LSP, tests, `explain`, and editor integration.
+The language is designed to let functional and imperative code live together.
+Use pipelines, recursion, partial application, and immutable values where they
+make code clearer; use mutable locals, vectors, and counted loops where direct
+control over performance matters.
 
-Que still uses `.que` files and the `que` command. The language inside those files is Eclisp.
+```lisp
+(let sum
+  (lambda (xs)
+    (mut total 0)
+    (loop i (< i (length xs))
+      (alter! total (+ total (get xs i))))
+    total))
 
-- **[Lisp](<https://en.wikipedia.org/wiki/Lisp_(programming_language)>)**
-- **[Stack-based bytecode Virtual Machine](https://en.wikipedia.org/wiki/Stack_machine)**
-- **[Standard library](https://en.wikipedia.org/wiki/Standard_library)**
-- **[Tree-shaking](https://en.wikipedia.org/wiki/Tree_shaking)** of Standard Libary
-- **[Strictly evaluated](https://en.wikipedia.org/wiki/Evaluation_strategy)**
-- Everything is an **[Expression](<https://en.wikipedia.org/wiki/Expression_(computer_science)>)**
-- **[Syntactic sugar](https://en.wikipedia.org/wiki/Syntactic_sugar)** layer
-- **[Strongly typed](https://en.wikipedia.org/wiki/Strong_and_weak_typing)** using the **[Hindley-Milner](https://en.wikipedia.org/wiki/Hindley–Milner_type_system)** type system
-- **[WASM](https://en.wikipedia.org/wiki/WebAssembly)** build for [online editor](https://at-290690.github.io/rust-lisp/playground)
-- It supports some cool features from **functional programming**
+(|> [1 2 3 4 5]
+    (map square)
+    sum)
+; => 55
+```
 
-- **[Partial function application](https://en.wikipedia.org/wiki/Partial_application)**
-- **[Lexically scoped closures](<https://en.wikipedia.org/wiki/Closure_(computer_programming)>)**
-- **[First-class functions](https://en.wikipedia.org/wiki/First-class_function)**
-- **[Anonymous Functions](https://en.wikipedia.org/wiki/Anonymous_function)**
-- **[Type inference](https://en.wikipedia.org/wiki/Type_inference)**
-- **[Tail Call Optimization](https://en.wikipedia.org/wiki/Tail_call)**
+## Highlights
 
-Try it online at [playground](https://at-290690.github.io/rust-lisp/editor)
+- Static Hindley–Milner type inference with polymorphic functions
+- Lexical closures, recursion, partial application, composition, and macros
+- Explicit local and vector mutation without abandoning functional APIs
+- `Int` as a WebAssembly `i32` and configurable fixed-point `Dec`
+- Vectors, strings, tuples, booleans, characters, functions, and unit
+- Runtime reference counting for managed values
+- Optimizations for pipelines, scalar helpers, loops, vector access, tuple
+  projections, bounds checks, and reference-count operations
+- Compilation to expanded source, optimized source, WAT, split WAT, or Wasm
+- Wasmtime execution through `que`, plus an optional wasm2c/native-C path
+- Capability-gated filesystem, standard-input, terminal, and clock IO
+- Native and Wasm language servers, a formatter, Neovim integration, and a
+  VS Code extension
+- Static diagnostics for unproven bounds, arithmetic safety, empty-vector
+  operations, mutation, and suspicious non-termination
 
-Check out official website at [website](https://at-290690.github.io/rust-lisp/)
+## Project status
+
+Que is pre-1.0 and under active development. The compiler and runtime have a
+large automated test suite and are already useful for experimentation,
+algorithmic programs, data processing, language research, and portable Wasm
+tools. Language and library compatibility may still change between releases,
+so pin a known release before using Que in long-lived or critical systems.
+
+Bug reports and reduced failing programs are especially valuable while the
+language approaches a stable compatibility contract.
 
 ## Install
 
-### Linux / macOS
+Prebuilt releases currently target Linux, macOS, and Windows. Release artifacts
+are available from [GitHub Releases](https://github.com/AT-290690/que-script/releases).
 
-Using the installer scripts:
+### Linux and macOS
+
+Install the `que` CLI and its library:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install.sh | bash
+```
+
+Optional tools:
+
+```bash
+# WAT runner
 curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install-wat.sh | bash
+
+# Language server
 curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/lsp.sh | bash
 ```
 
-Without the installer scripts:
-
-```bash
-curl -fsSL https://github.com/AT-290690/que-script/releases/latest/download/que -o /tmp/que
-chmod +x /tmp/que
-sudo mv /tmp/que /usr/local/bin/que
-
-curl -fsSL https://github.com/AT-290690/que-script/releases/latest/download/quewat -o /tmp/quewat
-chmod +x /tmp/quewat
-sudo mv /tmp/quewat /usr/local/bin/quewat
-
-curl -fsSL https://github.com/AT-290690/que-script/releases/latest/download/quelsp -o /tmp/quelsp
-chmod +x /tmp/quelsp
-sudo mv /tmp/quelsp /usr/local/bin/quelsp
-
-curl -fsSL https://github.com/AT-290690/que-script/releases/latest/download/que-lib.lisp -o /tmp/que-lib.lisp
-sudo mkdir -p /usr/local/share/que
-sudo mv /tmp/que-lib.lisp /usr/local/share/que/que-lib.lisp
-```
+The default Unix installation uses `/usr/local/bin` and
+`/usr/local/share/que` and may request `sudo`.
 
 ### Windows
 
-Using the PowerShell installers:
+Run these commands from PowerShell:
 
 ```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install.ps1'))
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install-wat.ps1'))
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/lsp.ps1'))
+iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install.ps1'))
+iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install-wat.ps1'))
+iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/lsp.ps1'))
 ```
 
-This installs to:
+Windows installs into `%LOCALAPPDATA%\Programs\Que`.
 
-- `%LOCALAPPDATA%\Programs\Que\bin`
-- `%LOCALAPPDATA%\Programs\Que\share\que\que-lib.lisp`
+### Editor support
 
-Without the installers:
+- [Neovim setup](miscs/neovim/README.md)
+- [VS Code extension](miscs/extension/que-lang/README.md)
 
-1. Create:
-   - `%LOCALAPPDATA%\Programs\Que\bin`
-   - `%LOCALAPPDATA%\Programs\Que\share\que`
-2. Download these release assets into those folders:
-   - `que.exe`
-   - `quewat.exe`
-   - `quelsp.exe`
-   - `que-lib.lisp`
-3. Add `%LOCALAPPDATA%\Programs\Que\bin` to your user `PATH`.
-4. For VS Code, set:
+## Quick start
 
-```json
-"que.languageServer.path": "C:\\Users\\<you>\\AppData\\Local\\Programs\\Que\\bin\\quelsp.exe"
-```
-
-### Uninstall
-
-Linux / macOS:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/uninstall.sh | bash
-```
-
-Windows:
-
-```powershell
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/uninstall.ps1'))
-```
-
-## Build
-
-```bash
-./scripts/build-all.sh
-```
-
-Test
-
-```bash
-cargo test
-```
-
-## Quick Start
-
-Create a new Que project for Eclisp programs:
+Create a project:
 
 ```bash
 mkdir hello-que
 cd hello-que
-que init
-```
-
-This creates:
-
-```text
-que.toml
-main.que        # empty
-README.md
-```
-
-To create a runnable sample instead:
-
-```bash
 que init --demo
 ```
 
-Run the program:
+This creates a `que.toml`, `main.que`, project README, and a small runnable test
+example. Run it with:
 
 ```bash
 que
-```
-
-Read piped input from stdin:
-
-```bash
-printf '1,2,3\n' | que main.que --allow stdin
-```
-
-```lisp
-(let input (stdin!))
-input
-```
-
-For large piped input, stream chunks and stop early by returning `true`:
-
-```lisp
-(let total [])
-(stdin/chunks! 65536
-  (lambda (chunk)
-    (push! total (length chunk))
-    false))
-total
-```
-
-Run the tests:
-
-```bash
 que test .
 ```
 
-Explain the optimized Wasm shape without running:
+For a single file:
 
 ```bash
-que explain
-que explain "(+ 1 2)"
-que explain --json
+que program.que --debug
+que program.que --opt
 ```
 
-`main.que` is the project entry file. `main.test.que` is appended after `main.que` during `que test .`, so tests can directly call functions from the entry file.
+`--debug` enables runtime safety guards and reports static-analysis findings.
+`--opt` enables aggressive optimizations and disables the optional runtime
+integer-overflow, division-by-zero, and vector-bounds guards. Develop with
+`--debug`; use `--opt` after the program's invariants are trusted.
 
-Default `que init` does not create `main.test.que`. Create it when you want folder tests, or use `que init --demo` for a runnable sample with tests.
-
----
-
-### Eclisp Type Inference
-
-- No type annotations required: the compiler figures everything out.
-- Supports **polymorphism** and **higher-order functions**.
-- Only 7 types - **functions**, **booleans**, **integers**, **floats**, **characters**, **vectors** and **tuples**.
-- Guarantees **soundness**: if your program compiles, it won’t have type errors at runtime.
-- Example:
-
-```lisp
-(let sum-odd-squares (lambda (xs)
-    (|> xs
-        (filter odd?)
-        (map square)
-        (sum))))
-
-(sum-odd-squares [ 1 2 3 4 5 6 7 8 9 10 ])
-; Int
-; 165
-```
-
-- **filter**, **map** and **sum** will be tree shaked from std.
-- Pipe (|> ... ) will be desuggered to:
-
-```lisp
-(sum (map square (filter odd? xs)))
-```
-
-- Argument type of the function will be [Int].
-- Return type of the function will be Int.
-- **filter** will only work with [Int] and callback of type Int -> Bool
-- **map** will only work with [Int] and callback of type Int -> Int
-- **sum** will only work with [Int]
-
-### Solving Puzzles
-
-Starting in the top left corner of a 2x2 grid, and only being able to move to the right and down, there are exactly 6 routes to the bottom right corner:
-
-```lisp
-(letrec factorial (lambda (n total)
-   (if (= n 0)
-       total
-       (factorial (- n 1) (* total n)))))
-
-(let bionomial-coefficient (lambda (a b)
-    (/ (factorial a 1)
-            (*
-                (factorial b 1)
-                (factorial (- a b) 1)))))
-
-(let m 2)
-(let n 2)
-(bionomial-coefficient (+ m n) m)
-; Int
-; 6
-```
-
-How many such routes are there through a 20x20 grid?
-Unfortunately, we can't fit that number in 32 big integers.
-Instead we have to use **Big** integers (or numbers as a vectors with arbitrary precision):
-
-```lisp
-(letrec factorial (lambda (n total)
-        (if (= (get n 0) 0)
-            total
-            (factorial (BigInt/sub n [ 1 ]) (BigInt/mul total n)))))
-
-(let bionomial-coefficient (lambda (a b)
-    (BigInt/div (factorial a [ 1 ])
-            (BigInt/mul
-                (factorial b [ 1 ])
-                (factorial (BigInt/sub a b) [ 1 ])))))
-
-(let m [ 2 0 ])
-(let n [ 2 0 ])
-(bionomial-coefficient (BigInt/add m n) m)
-; [Int]
-; [1 3 7 8 4 6 5 2 8 8 2 0]
-```
-
-**Advent of Code 2015**
-
---- Day 1: Not Quite Lisp ---
-
-_Santa is trying to deliver presents in a large apartment building, but he can't find the right floor - the directions he got are a little confusing. He starts on the ground floor (floor 0) and then follows the instructions one character at a time._
-
-_An opening parenthesis, (, means he should go up one floor, and a closing parenthesis, ), means he should go down one floor._
-
-_The apartment building is very tall, and the basement is very deep; he will never find the top or bottom floors._
-
-For example:
-
-```
-(()) and ()() both result in floor 0.
-((( and (()(()( both result in floor 3.
-))((((( also results in floor 3.
-()) and ))( both result in floor -1 (the first basement level).
-))) and )())()) both result in floor -3.
-To what floor do the instructions take Santa?
-```
-
-```lisp
-(let samples [
-    "(())"    ; result in floor 0.
-    "()()"    ; result in floor 0.
-    "((("     ; result in floor 3.
-    "(()(()(" ; result in floor 3.
-    "))(((((" ; also results in floor 3.
-    "())"     ; result in floor -1 (the first basement level).
-    "))("     ; result in floor -1 (the first basement level).
-    ")))"     ; result in floor -3.
-    ")())())" ; result in floor -3.
-])
-(let solve (lambda (input) (- (count/char '(' input) (count/char ')' input))))
-(map solve samples)
-; [Int]
-; [0 0 3 3 3 -1 -1 -3 -3]
-```
-
-Setup some env flags
+Evaluate a short expression without creating a file:
 
 ```bash
-  export QUE_WASM_OPT=speed QUE_TCO=aggressive QUE_DEVIRTUALIZE=aggressive QUE_SMALL_SCALAR_INLINE_COST=64 QUE_BOUNDS_CHECK=0 QUE_DIV_ZERO_CHECK=0 QUE_VEC_MIN_CAP=8 QUE_VEC_GROWTH_NUM=2 QUE_VEC_GROWTH_DEN=1
+que --eval '(+ 1 2)'
 ```
 
-Fallback to default ones
+The CLI contains its own concise language guides:
 
 ```bash
-  unset QUE_WASM_OPT QUE_TCO QUE_DEVIRTUALIZE QUE_SMALL_SCALAR_INLINE_COST QUE_BOUNDS_CHECK QUE_DIV_ZERO_CHECK QUE_VEC_MIN_CAP QUE_VEC_GROWTH_NUM QUE_VEC_GROWTH_DEN
+que --learn
+que --examples
+que --style
+que --pitfalls
 ```
 
-Generating docs
+## Language overview
+
+Everything is an expression. Multiple forms in a function body are sequenced
+automatically, and `block` creates a lexical scope when branch-local names are
+needed.
+
+```lisp
+(let classify
+  (lambda (x)
+    (cond (< x 0) "negative"
+          (= x 0) "zero"
+          "positive")))
+
+(let values [3 -1 0 8])
+(map classify values)
+; => ["positive" "negative" "zero" "positive"]
+```
+
+Mutation is explicit:
+
+```lisp
+(let increment-all!
+  (lambda (xs)
+    (loop i (< i (length xs))
+      (set! xs i (+ (get xs i) 1)))
+    xs))
+
+(increment-all! [10 20 30])
+; => [11 21 31]
+```
+
+Comments begin with `;`. Strings use double quotes and character literals use
+single quotes.
+
+```lisp
+; a comment
+(let greeting "hello")
+(let newline '\n')
+```
+
+The main concrete types are:
+
+```text
+Int                 signed 32-bit integer
+Dec                 fixed-point decimal backed by i32
+Bool                true or false
+Char                Unicode scalar value
+()                  unit / nil
+[T]                 vector of T; strings are [Char]
+{A B}               tuple
+A -> B              function
+```
+
+Use `sig` when an external boundary or polymorphic operation needs an explicit
+type:
+
+```lisp
+(sig parse/int! ([Char] -> Int))
+(let parse/int! (lambda (text) (deserialize text)))
+```
+
+## IO and permissions
+
+IO is exposed through typed host imports and denied unless the matching
+capability is granted:
+
+```lisp
+(let input (read! "input.txt"))
+(println! input)
+```
 
 ```bash
- # with std
-  cargo run --no-default-features --features repo-tools --bin quelibdump -- --output ./example/dist/lib.json
- # without std
-  cargo run --no-default-features --features repo-tools --bin quelibdump -- --split-std --output ./example/dist/lib.json
+que program.que --allow read print
 ```
 
-Example que.toml file
+Available permission groups are:
+
+```text
+read  stdin  write  print  clock  delete  all
+```
+
+Large files and standard input can be processed incrementally with
+`read/chunks!`, `read/lines!`, and `stdin/chunks!`.
+
+See [FFI.md](FFI.md) for custom Wasm host imports and the current ABI.
+
+## Projects and tests
+
+A project is configured by `que.toml`:
 
 ```toml
 entry = "main.que"
 deps = [
   "./lib/math.que",
-  "./lib/utils.que",
+  "./lib/text.que",
 ]
-
-[env]
-QUE_DEVIRTUALIZE = "aggressive"
-QUE_TCO = "aggressive"
-QUE_SMALL_SCALAR_INLINE_COST = "64"
-QUE_BOUNDS_CHECK = "0"
-QUE_VEC_GROWTH_DEN = "1"
-QUE_DECIMAL_SCALE = "1000"
-QUE_RAW_WASM = "0"
-QUE_NO_OPT = "0"
-QUE_NO_FUNC_INLINE = "0"
 ```
 
-**Disclaimer!**
+Running `que` uses the configured entry. Native CLI and LSP processes discover
+the nearest `que.toml` and load its dependencies.
 
-_This project is a work in progress and might contain bugs! Do NOT use it in production!_
+Folder tests append `main.test.que` after the project entry, allowing tests to
+call project definitions directly:
 
-_APIs and behavior may change. New releases can break existing code._
+```bash
+que test .
+que test path/to/example.test.que
+```
 
-![logo](./footer.svg)
+## Compiler output
+
+Inspect every important compilation stage:
+
+```bash
+que program.que --emit source --out expanded.que
+que program.que --opt --emit opt-source --out optimized.que
+que program.que --opt --emit wat --out program.wat
+que program.que --opt --emit wasm --out program.wasm
+que program.que --emit types
+```
+
+`split-wat` emits a reusable runtime module and a user module that imports it.
+
+Use `explain` for an optimization and correctness report:
+
+```bash
+que explain program.que --opt
+que explain program.que --opt --json
+```
+
+The report separates correctness warnings, termination reasoning, effects and
+permissions, performance observations, and generated-code details.
+
+## Formatting and editor workflow
+
+Format files from the CLI:
+
+```bash
+que fmt program.que
+que fmt program.que --check
+que fmt --stdin
+```
+
+Open the configured Que Neovim scratch environment with:
+
+```bash
+que nvim
+que nvim --code "$(cat program.que)"
+```
+
+The Neovim plugin provides LSP integration, formatting, hover and signature
+help, completion, and shortcuts for running, debugging, explaining, and viewing
+generated output.
+
+## Native C output
+
+Que programs compile to standard Wasm and can be run by any compatible host.
+For native experiments, the repository also contains a wasm2c host adapter:
+
+```bash
+./scripts/compile-native-c.sh program.que build/native
+./build/native/main --allow read write print -- argument
+```
+
+This requires WABT's `wasm2c`. The maintained C host implementation lives in
+[`miscs/native-c`](miscs/native-c/README.md).
+
+## Build from source
+
+Requirements:
+
+- A current stable Rust toolchain
+- Node.js and npm for building the VS Code extension
+- Optional: WABT for WAT and native-C workflows
+- Optional: Zig and `cargo-zigbuild` for cross-compilation scripts
+
+Build the local toolchain:
+
+```bash
+./scripts/build-all.sh
+```
+
+Run the test suite:
+
+```bash
+cargo test
+./miscs/native-c/test.sh
+```
+
+Build all configured release artifacts:
+
+```bash
+./scripts/build-everything.sh
+```
+
+The main binaries are:
+
+```text
+que      compile and run with IO permissions
+quec     compile Que source to Wasm
+quer     run compiled programs without the IO host
+quewat   run or inspect WAT
+quelsp   native language server
+```
+
+## Repository layout
+
+```text
+eclisp/             parser and type system
+lisp/               bundled language libraries and macros
+src/                optimizer, Wasm compiler, runtime, IO host, LSP, analysis
+miscs/neovim/       Neovim integration
+miscs/extension/    VS Code extension
+miscs/native-c/     optional wasm2c host
+examples/           example Que programs
+scripts/            build, install, and release helpers
+```
+
+## License
+
+Que is available under the [MIT License](LICENSE).

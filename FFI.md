@@ -212,3 +212,17 @@ Not supported yet:
 - richer automatic marshalling for arbitrary Que data
 
 The supported, stable path is host imports plus the existing Que heap/string ABI.
+
+## wasm2c native host
+
+The optional native-C adapter for builtin Que IO lives in
+[`miscs/native-c`](miscs/native-c). Build a Que program through it with:
+
+```sh
+./scripts/compile-native-c.sh program.que build/native
+./build/native/main --allow read write print -- arg1 arg2
+```
+
+This remains the same Wasm host-import ABI described above: wasm2c translates
+the guest, while the small C adapter supplies the imports. It does not make
+Que's internal representation a public C ABI.

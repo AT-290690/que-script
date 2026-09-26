@@ -12,7 +12,7 @@ It provides:
 - live function signatures and active-argument tracking while typing applications
 - theme-native plain-text hover windows with borders and no Markdown colouring or markers
 - automatic signature help, without duplicating Blink's signature window
-- `:QueFormat` and `<Space>t` formatting through `que fmt --stdin`
+- `:QueFormat` and `<Space>f` formatting through `que fmt --stdin`
 
 The formatter preserves comments, keeps short forms compact, and leaves runs
 of closing delimiters grouped on the final line. Set `format_key` in
