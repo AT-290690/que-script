@@ -22,8 +22,8 @@ syn keyword queKeyword
 " :syn keyword because characters such as &, ! and . are not keyword chars.
 syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(&alter!\|&mut\|alter!\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
 
-" Remainder operators use the theme's operator color, like +, -, * and /.
-syn match queOperator /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(%\.\|%\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
+" Arithmetic operators share one highlight group, including Dec variants.
+syn match queOperator /\%([[:alnum:]_\/.!?&<>=+#*%-]\)\@<!\%([+*\/%-]\.\|[+*\/%-]\)\%([[:alnum:]_\/.!?&<>=+#*%-]\)\@!/
 
 " --- Builtins (Functions, Core Operations & Mutations) ---
 syn keyword queBuiltin
