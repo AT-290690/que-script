@@ -49,18 +49,37 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ShareDir | Out-Null
 
 $QueExe = Join-Path $BinDir "que.exe"
+$RuntimeExe = Join-Path $BinDir "que-runtime.exe"
+$CompilerExe = Join-Path $BinDir "quec.exe"
 $LibPath = Join-Path $ShareDir "que-lib.lisp"
 
 Write-Host "Installing que.exe..."
 Invoke-WebRequest -Uri (Resolve-ReleaseAsset "que" ".exe") -OutFile $QueExe
+
+Write-Host "Installing que-runtime.exe..."
+Invoke-WebRequest -Uri (Resolve-ReleaseAsset "que-runtime" ".exe") -OutFile $RuntimeExe
+
+Write-Host "Installing quec.exe..."
+Invoke-WebRequest -Uri (Resolve-ReleaseAsset "quec" ".exe") -OutFile $CompilerExe
 
 Write-Host "Installing que-lib.lisp..."
 Invoke-WebRequest -Uri (Resolve-ReleaseAsset "que-lib" ".lisp") -OutFile $LibPath
 
 Ensure-UserPathContains $BinDir
 
+if (-not (Get-Command wasmtime -ErrorAction SilentlyContinue)) {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "Installing external Wasmtime CLI..."
+        winget install --id BytecodeAlliance.Wasmtime --exact --accept-source-agreements --accept-package-agreements
+    } else {
+        Write-Warning "Wasmtime is not installed and winget is unavailable. Install it from https://wasmtime.dev/."
+    }
+}
+
 Write-Host "Installed:"
 Write-Host "  $QueExe"
+Write-Host "  $RuntimeExe"
+Write-Host "  $CompilerExe"
 Write-Host "  $LibPath"
 Write-Host ""
 Write-Host 'Restart the terminal, or in PowerShell run:'

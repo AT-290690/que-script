@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BIN_DIR="/usr/local/bin"
-BINARIES=("que" "quec" "quer" "quewat" "quelsp")
+BINARIES=("que" "que-runtime" "eclisp" "quec" "quer" "quewat" "quelsp")
 LIB_PATH="/usr/local/share/que/que-lib.lisp"
 
 removed=0

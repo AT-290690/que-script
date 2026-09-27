@@ -5479,6 +5479,1108 @@ fn emit_vector_runtime(
     out
 }
 
+fn emit_wasi_print_runtime() -> &'static str {
+    r#"
+  ;; Que [Char] -> UTF-8 stdout. Scratch bytes live below the heap base.
+  (func $__wasi_write_text (param $fd i32) (param $text i32) (result i32)
+    (local $len i32) (local $data i32) (local $i i32)
+    (local $c i32) (local $n i32)
+    local.get $text
+    i32.load
+    local.set $len
+    local.get $text
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    block $done
+      loop $chars
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+        local.get $data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.load
+        local.set $c
+        local.get $c
+        i32.const 128
+        i32.lt_u
+        if
+          i32.const 32
+          local.get $c
+          i32.store8
+          i32.const 1
+          local.set $n
+        else
+          local.get $c
+          i32.const 2048
+          i32.lt_u
+          if
+            i32.const 32
+            local.get $c
+            i32.const 6
+            i32.shr_u
+            i32.const 192
+            i32.or
+            i32.store8
+            i32.const 33
+            local.get $c
+            i32.const 63
+            i32.and
+            i32.const 128
+            i32.or
+            i32.store8
+            i32.const 2
+            local.set $n
+          else
+            local.get $c
+            i32.const 65536
+            i32.lt_u
+            if
+              i32.const 32
+              local.get $c
+              i32.const 12
+              i32.shr_u
+              i32.const 224
+              i32.or
+              i32.store8
+              i32.const 33
+              local.get $c
+              i32.const 6
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 34
+              local.get $c
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 3
+              local.set $n
+            else
+              i32.const 32
+              local.get $c
+              i32.const 18
+              i32.shr_u
+              i32.const 240
+              i32.or
+              i32.store8
+              i32.const 33
+              local.get $c
+              i32.const 12
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 34
+              local.get $c
+              i32.const 6
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 35
+              local.get $c
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 4
+              local.set $n
+            end
+          end
+        end
+        i32.const 0
+        i32.const 32
+        i32.store
+        i32.const 4
+        local.get $n
+        i32.store
+        local.get $fd
+        i32.const 0
+        i32.const 1
+        i32.const 16
+        call $__wasi_fd_write
+        drop
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $chars
+      end
+    end
+    i32.const 0)
+  (func $v_print_bang_ (param $text i32) (result i32)
+    i32.const 1
+    local.get $text
+    call $__wasi_write_text)
+"#
+}
+
+fn emit_wasi_clock_runtime() -> &'static str {
+    r#"
+  (func $v_time_bang_ (result i32)
+    i32.const 0
+    i64.const 1000000
+    i32.const 40
+    call $__wasi_clock_time_get
+    if
+      unreachable
+    end
+    i32.const 40
+    i64.load
+    i64.const 1000000000
+    i64.div_u
+    i32.wrap_i64)
+"#
+}
+
+fn emit_wasi_random_runtime() -> &'static str {
+    r#"
+  (func $v_random_bang_ (result i32)
+    i32.const 48
+    i32.const 4
+    call $__wasi_random_get
+    if
+      unreachable
+    end
+    i32.const 48
+    i32.load)
+"#
+}
+
+fn emit_wasi_sleep_runtime() -> &'static str {
+    r#"
+  (func $v_sleep_bang_ (param $millis i32) (result i32)
+    local.get $millis
+    i32.const 0
+    i32.lt_s
+    if
+      unreachable
+    end
+    ;; A relative monotonic-clock subscription. Timeout and precision are ns.
+    i32.const 64
+    i64.const 0
+    i64.store
+    i32.const 72
+    i32.const 0
+    i32.store8
+    i32.const 80
+    i32.const 1
+    i32.store
+    i32.const 88
+    local.get $millis
+    i64.extend_i32_u
+    i64.const 1000000
+    i64.mul
+    i64.store
+    i32.const 96
+    i64.const 1000000
+    i64.store
+    i32.const 104
+    i32.const 0
+    i32.store16
+    i32.const 64
+    i32.const 112
+    i32.const 1
+    i32.const 144
+    call $__wasi_poll_oneoff
+    if
+      unreachable
+    end
+    i32.const 0)
+"#
+}
+
+fn emit_wasi_clear_runtime() -> &'static str {
+    r#"
+  ;; ANSI clear-screen sequence written to stdout.
+  (func $v_clear_bang_ (result i32)
+    i32.const 32
+    i64.const 20366371090225947
+    i64.store
+    i32.const 0
+    i32.const 32
+    i32.store
+    i32.const 4
+    i32.const 7
+    i32.store
+    i32.const 1
+    i32.const 0
+    i32.const 1
+    i32.const 16
+    call $__wasi_fd_write
+    drop
+    i32.const 0)
+"#
+}
+
+fn emit_wasi_stdin_runtime() -> &'static str {
+    r#"
+  ;; Read stdin and decode UTF-8 into Que's [Char] representation.
+  (func $__wasi_read_fd (param $fd i32) (result i32)
+    (local $out i32) (local $n i32) (local $i i32)
+    (local $b i32) (local $c i32) (local $needed i32)
+    i32.const 0
+    i32.const 0
+    call $vec_new_i32
+    local.set $out
+    block $done
+      loop $read
+        i32.const 0
+        i32.const 1024
+        i32.store
+        i32.const 4
+        i32.const 60000
+        i32.store
+        local.get $fd
+        i32.const 0
+        i32.const 1
+        i32.const 16
+        call $__wasi_fd_read
+        if unreachable end
+        i32.const 16
+        i32.load
+        local.tee $n
+        i32.eqz
+        br_if $done
+        i32.const 0
+        local.set $i
+        block $chunk_done
+          loop $decode
+            local.get $i
+            local.get $n
+            i32.ge_u
+            br_if $chunk_done
+            i32.const 1024
+            local.get $i
+            i32.add
+            i32.load8_u
+            local.set $b
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            local.get $needed
+            i32.eqz
+            if
+              local.get $b
+              i32.const 128
+              i32.lt_u
+              if
+                local.get $b
+                local.set $c
+              else
+                local.get $b
+                i32.const 224
+                i32.and
+                i32.const 192
+                i32.eq
+                if
+                  local.get $b
+                  i32.const 31
+                  i32.and
+                  local.set $c
+                  i32.const 1
+                  local.set $needed
+                else
+                  local.get $b
+                  i32.const 240
+                  i32.and
+                  i32.const 224
+                  i32.eq
+                  if
+                    local.get $b
+                    i32.const 15
+                    i32.and
+                    local.set $c
+                    i32.const 2
+                    local.set $needed
+                  else
+                    local.get $b
+                    i32.const 7
+                    i32.and
+                    local.set $c
+                    i32.const 3
+                    local.set $needed
+                  end
+                end
+              end
+            else
+              local.get $c
+              i32.const 6
+              i32.shl
+              local.get $b
+              i32.const 63
+              i32.and
+              i32.or
+              local.set $c
+              local.get $needed
+              i32.const 1
+              i32.sub
+              local.set $needed
+            end
+            local.get $needed
+            i32.eqz
+            if
+              local.get $out
+              local.get $c
+              call $vec_push_i32
+              drop
+            end
+            br $decode
+          end
+        end
+        br $read
+      end
+    end
+    local.get $out)
+  (func $v_stdin_bang_ (result i32)
+    i32.const 0
+    call $__wasi_read_fd)
+"#
+}
+
+fn emit_wasi_argv_runtime() -> &'static str {
+    r#"
+  (func $__wasi_init_argv (result i32)
+    (local $argc i32) (local $size i32) (local $table i32) (local $bytes i32)
+    (local $outer i32) (local $inner i32) (local $arg i32) (local $p i32)
+    (local $b i32) (local $c i32) (local $needed i32)
+    i32.const 0
+    i32.const 4
+    call $__wasi_args_sizes_get
+    if unreachable end
+    i32.const 0
+    i32.load
+    local.set $argc
+    i32.const 4
+    i32.load
+    local.set $size
+    local.get $argc
+    i32.const 4
+    i32.mul
+    call $alloc
+    local.set $table
+    local.get $size
+    call $alloc
+    local.set $bytes
+    local.get $table
+    local.get $bytes
+    call $__wasi_args_get
+    if unreachable end
+    i32.const 0
+    i32.const 1
+    call $vec_new_i32
+    local.set $outer
+    i32.const 1
+    local.set $arg
+    block $done
+      loop $args
+        local.get $arg
+        local.get $argc
+        i32.ge_u
+        br_if $done
+        i32.const 0
+        i32.const 0
+        call $vec_new_i32
+        local.set $inner
+        local.get $table
+        local.get $arg
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.load
+        local.set $p
+        i32.const 0
+        local.set $needed
+        block $string_done
+          loop $chars
+            local.get $p
+            i32.load8_u
+            local.tee $b
+            i32.eqz
+            br_if $string_done
+            local.get $p
+            i32.const 1
+            i32.add
+            local.set $p
+            local.get $needed
+            i32.eqz
+            if
+              local.get $b
+              i32.const 128
+              i32.lt_u
+              if
+                local.get $b
+                local.set $c
+              else
+                local.get $b
+                i32.const 224
+                i32.and
+                i32.const 192
+                i32.eq
+                if
+                  local.get $b
+                  i32.const 31
+                  i32.and
+                  local.set $c
+                  i32.const 1
+                  local.set $needed
+                else
+                  local.get $b
+                  i32.const 240
+                  i32.and
+                  i32.const 224
+                  i32.eq
+                  if
+                    local.get $b
+                    i32.const 15
+                    i32.and
+                    local.set $c
+                    i32.const 2
+                    local.set $needed
+                  else
+                    local.get $b
+                    i32.const 7
+                    i32.and
+                    local.set $c
+                    i32.const 3
+                    local.set $needed
+                  end
+                end
+              end
+            else
+              local.get $c
+              i32.const 6
+              i32.shl
+              local.get $b
+              i32.const 63
+              i32.and
+              i32.or
+              local.set $c
+              local.get $needed
+              i32.const 1
+              i32.sub
+              local.set $needed
+            end
+            local.get $needed
+            i32.eqz
+            if
+              local.get $inner
+              local.get $c
+              call $vec_push_i32
+              drop
+            end
+            br $chars
+          end
+        end
+        local.get $outer
+        local.get $inner
+        call $vec_push_i32
+        drop
+        local.get $inner
+        call $rc_release_vec
+        drop
+        local.get $arg
+        i32.const 1
+        i32.add
+        local.set $arg
+        br $args
+      end
+    end
+    local.get $outer
+    global.set $argv_ptr
+    i32.const 0)
+"#
+}
+
+fn emit_wasi_file_runtime(has_read: bool, has_write: bool) -> String {
+    let mut out = String::from(
+        r#"
+  ;; Encode a Que [Char] path as UTF-8 at scratch address 1024.
+  (func $__wasi_encode_path (param $path i32) (result i32)
+    (local $len i32) (local $data i32) (local $i i32)
+    (local $p i32) (local $c i32)
+    local.get $path
+    i32.load
+    local.set $len
+    local.get $path
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    i32.const 1024
+    local.set $p
+    block $done
+      loop $chars
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+        local.get $data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.load
+        local.set $c
+        local.get $c
+        i32.const 128
+        i32.lt_u
+        if
+          local.get $p
+          local.get $c
+          i32.store8
+          local.get $p
+          i32.const 1
+          i32.add
+          local.set $p
+        else
+          local.get $c
+          i32.const 2048
+          i32.lt_u
+          if
+            local.get $p
+            local.get $c
+            i32.const 6
+            i32.shr_u
+            i32.const 192
+            i32.or
+            i32.store8
+            local.get $p
+            i32.const 1
+            i32.add
+            local.get $c
+            i32.const 63
+            i32.and
+            i32.const 128
+            i32.or
+            i32.store8
+            local.get $p
+            i32.const 2
+            i32.add
+            local.set $p
+          else
+            local.get $c
+            i32.const 65536
+            i32.lt_u
+            if
+              local.get $p
+              local.get $c
+              i32.const 12
+              i32.shr_u
+              i32.const 224
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 1
+              i32.add
+              local.get $c
+              i32.const 6
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 2
+              i32.add
+              local.get $c
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 3
+              i32.add
+              local.set $p
+            else
+              local.get $p
+              local.get $c
+              i32.const 18
+              i32.shr_u
+              i32.const 240
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 1
+              i32.add
+              local.get $c
+              i32.const 12
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 2
+              i32.add
+              local.get $c
+              i32.const 6
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 3
+              i32.add
+              local.get $c
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 4
+              i32.add
+              local.set $p
+            end
+          end
+        end
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $chars
+      end
+    end
+    local.get $p
+    i32.const 1024
+    i32.sub)
+"#,
+    );
+    if has_read {
+        out.push_str(
+            r#"
+  (func $v_read_bang_ (param $path i32) (result i32)
+    (local $len i32) (local $fd i32) (local $result i32)
+    local.get $path
+    call $__wasi_encode_path
+    local.set $len
+    i32.const 3
+    i32.const 0
+    i32.const 1024
+    local.get $len
+    i32.const 0
+    i64.const 2
+    i64.const 0
+    i32.const 0
+    i32.const 16
+    call $__wasi_path_open
+    if unreachable end
+    i32.const 16
+    i32.load
+    local.tee $fd
+    call $__wasi_read_fd
+    local.set $result
+    local.get $fd
+    call $__wasi_fd_close
+    drop
+    local.get $result)
+"#,
+        );
+    }
+    if has_write {
+        out.push_str(
+            r#"
+  (func $v_write_bang_ (param $path i32) (param $text i32) (result i32)
+    (local $len i32) (local $fd i32)
+    local.get $path
+    call $__wasi_encode_path
+    local.set $len
+    i32.const 3
+    i32.const 0
+    i32.const 1024
+    local.get $len
+    i32.const 9
+    i64.const 64
+    i64.const 0
+    i32.const 0
+    i32.const 16
+    call $__wasi_path_open
+    if unreachable end
+    i32.const 16
+    i32.load
+    local.tee $fd
+    local.get $text
+    call $__wasi_write_text
+    drop
+    local.get $fd
+    call $__wasi_fd_close
+    drop
+    i32.const 0)
+"#,
+        );
+    }
+    out
+}
+
+fn emit_wasi_path_mutation_runtime(has_mkdir: bool, has_delete: bool, has_move: bool) -> String {
+    let mut out = String::new();
+    if has_mkdir {
+        out.push_str(
+            r#"
+  (func $v_mkdir_bang_ (param $path i32) (result i32)
+    (local $len i32) (local $i i32) (local $result i32)
+    local.get $path
+    call $__wasi_encode_path
+    local.set $len
+    i32.const 1
+    local.set $i
+    block $parents_done
+      loop $parents
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $parents_done
+        i32.const 1024
+        local.get $i
+        i32.add
+        i32.load8_u
+        i32.const 47
+        i32.eq
+        if
+          i32.const 3
+          i32.const 1024
+          local.get $i
+          call $__wasi_path_create_directory
+          local.tee $result
+          i32.const 0
+          i32.ne
+          local.get $result
+          i32.const 20
+          i32.ne
+          i32.and
+          if unreachable end
+        end
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $parents
+      end
+    end
+    i32.const 3
+    i32.const 1024
+    local.get $len
+    call $__wasi_path_create_directory
+    local.tee $result
+    i32.const 20
+    i32.ne
+    local.get $result
+    i32.const 0
+    i32.ne
+    i32.and
+    if unreachable end
+    i32.const 0)
+"#,
+        );
+    }
+    if has_delete {
+        out.push_str(
+            r#"
+  (func $v_delete_bang_ (param $path i32) (result i32)
+    (local $len i32)
+    local.get $path
+    call $__wasi_encode_path
+    local.set $len
+    i32.const 3
+    i32.const 1024
+    local.get $len
+    call $__wasi_path_unlink_file
+    if
+      i32.const 3
+      i32.const 1024
+      local.get $len
+      call $__wasi_path_remove_directory
+      if unreachable end
+    end
+    i32.const 0)
+"#,
+        );
+    }
+    if has_move {
+        out.push_str(
+            r#"
+  (func $v_move_bang_ (param $src i32) (param $dst i32) (result i32)
+    (local $src_len i32) (local $dst_len i32)
+    local.get $src
+    call $__wasi_encode_path
+    local.set $src_len
+    i32.const 32768
+    i32.const 1024
+    local.get $src_len
+    memory.copy
+    local.get $dst
+    call $__wasi_encode_path
+    local.set $dst_len
+    i32.const 3
+    i32.const 32768
+    local.get $src_len
+    i32.const 3
+    i32.const 1024
+    local.get $dst_len
+    call $__wasi_path_rename
+    if unreachable end
+    i32.const 0)
+"#,
+        );
+    }
+    out
+}
+
+fn emit_wasi_chunk_runtime(
+    has_file_chunks: bool,
+    has_stdin_chunks: bool,
+    has_lines: bool,
+) -> String {
+    let mut out = String::from(
+        r#"
+  (func $__wasi_chunks (param $text i32) (param $size i32) (param $callback i32) (result i32)
+    (local $len i32) (local $data i32) (local $i i32) (local $j i32)
+    (local $chunk i32) (local $stop i32)
+    local.get $size
+    i32.const 0
+    i32.le_s
+    if unreachable end
+    local.get $text
+    i32.load
+    local.set $len
+    local.get $text
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    block $done
+      loop $outer
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+        i32.const 0
+        i32.const 0
+        call $vec_new_i32
+        local.set $chunk
+        i32.const 0
+        local.set $j
+        block $chunk_done
+          loop $copy
+            local.get $j
+            local.get $size
+            i32.ge_u
+            br_if $chunk_done
+            local.get $i
+            local.get $len
+            i32.ge_u
+            br_if $chunk_done
+            local.get $chunk
+            local.get $data
+            local.get $i
+            i32.const 4
+            i32.mul
+            i32.add
+            i32.load
+            call $vec_push_i32
+            drop
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            local.get $j
+            i32.const 1
+            i32.add
+            local.set $j
+            br $copy
+          end
+        end
+        local.get $callback
+        local.get $chunk
+        call $apply1_i32
+        local.set $stop
+        local.get $chunk
+        call $rc_release_vec
+        drop
+        local.get $stop
+        if
+          i32.const 1
+          return
+        end
+        br $outer
+      end
+    end
+    i32.const 0)
+"#,
+    );
+    if has_file_chunks {
+        out.push_str(
+            r#"
+  (func $v_read_slash_chunks_bang_ (param $path i32) (param $size i32) (param $callback i32) (result i32)
+    (local $text i32) (local $result i32)
+    local.get $path
+    call $v_read_bang_
+    local.set $text
+    local.get $text
+    local.get $size
+    local.get $callback
+    call $__wasi_chunks
+    local.set $result
+    local.get $text
+    call $rc_release_vec
+    drop
+    local.get $result)
+"#,
+        );
+    }
+    if has_stdin_chunks {
+        out.push_str(
+            r#"
+  (func $v_stdin_slash_chunks_bang_ (param $size i32) (param $callback i32) (result i32)
+    (local $text i32) (local $result i32)
+    call $v_stdin_bang_
+    local.set $text
+    local.get $text
+    local.get $size
+    local.get $callback
+    call $__wasi_chunks
+    local.set $result
+    local.get $text
+    call $rc_release_vec
+    drop
+    local.get $result)
+"#,
+        );
+    }
+    if has_lines {
+        out.push_str(
+            r#"
+  (func $v_read_slash_lines_bang_ (param $path i32) (param $callback i32) (result i32)
+    (local $text i32) (local $len i32) (local $data i32) (local $i i32)
+    (local $line i32) (local $c i32) (local $stop i32)
+    local.get $path
+    call $v_read_bang_
+    local.tee $text
+    i32.load
+    local.set $len
+    local.get $text
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    block $done
+      loop $lines
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+        i32.const 0
+        i32.const 0
+        call $vec_new_i32
+        local.set $line
+        block $line_done
+          loop $chars
+            local.get $i
+            local.get $len
+            i32.ge_u
+            br_if $line_done
+            local.get $data
+            local.get $i
+            i32.const 4
+            i32.mul
+            i32.add
+            i32.load
+            local.set $c
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            local.get $c
+            i32.const 10
+            i32.eq
+            br_if $line_done
+            local.get $line
+            local.get $c
+            call $vec_push_i32
+            drop
+            br $chars
+          end
+        end
+        local.get $line
+        i32.load
+        i32.const 0
+        i32.gt_u
+        if
+          local.get $line
+          i32.const 16
+          i32.add
+          i32.load
+          local.get $line
+          i32.load
+          i32.const 1
+          i32.sub
+          i32.const 4
+          i32.mul
+          i32.add
+          i32.load
+          i32.const 13
+          i32.eq
+          if
+            local.get $line
+            call $vec_pop_i32
+            drop
+          end
+        end
+        local.get $callback
+        local.get $line
+        call $apply1_i32
+        local.set $stop
+        local.get $line
+        call $rc_release_vec
+        drop
+        local.get $stop
+        if
+          local.get $text
+          call $rc_release_vec
+          drop
+          i32.const 1
+          return
+        end
+        br $lines
+      end
+    end
+    local.get $text
+    call $rc_release_vec
+    drop
+    i32.const 0)
+"#,
+        );
+    }
+    out
+}
+
+fn emit_wasi_list_dir_runtime() -> &'static str {
+    include_str!("wasi_list_dir.wat")
+}
+
 fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     fn emit_int_div_zero_check(rhs_local: usize) -> String {
         format!(
@@ -12931,6 +14033,10 @@ fn compile_program_to_wat_build_typed_with_opts(
         collect_apply_arities_from_code(func, &mut apply_arities);
     }
     collect_apply_arities_from_code(&main_code, &mut apply_arities);
+    let uses_argv = main_code.contains("call $__argv_get")
+        || emitted_funcs
+            .iter()
+            .any(|func| func.contains("call $__argv_get"));
     if extern_names.contains("read/chunks!")
         || extern_names.contains("stdin/chunks!")
         || extern_names.contains("read/lines!")
@@ -12949,8 +14055,12 @@ fn compile_program_to_wat_build_typed_with_opts(
         "  ;; Type: {}\n",
         abi_type_descriptor(main_ret_ty)
     ));
+    let wasi_codegen = std::env::var("QUE_WASI_HOST")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "on" | "yes"))
+        .unwrap_or(false);
+    let main_name = if wasi_codegen { "$__que_main " } else { "" };
     main_func.push_str(&format!(
-        "  (func (export \"main\") (result {main_wasm_ty})\n"
+        "  (func {main_name}(export \"main\") (result {main_wasm_ty})\n"
     ));
     for (_n, t) in &main_local_defs {
         main_func.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
@@ -12963,11 +14073,78 @@ fn compile_program_to_wat_build_typed_with_opts(
             main_borrowed_top_level_prelude.replace('\n', "\n    ")
         ));
     }
+    if wasi_codegen && uses_argv {
+        main_func.push_str("    call $__wasi_init_argv\n    drop\n");
+    }
     main_func.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
     main_func.push_str("  )\n");
+    if wasi_codegen {
+        main_func.push_str("  (func (export \"_start\")\n    call $__que_main\n    drop)\n");
+    }
 
     let mut extern_imports = String::new();
+    let wasi_host = std::env::var("QUE_WASI_HOST")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "on" | "yes"))
+        .unwrap_or(false);
+    if wasi_host {
+        if let Ok(raw_permissions) = std::env::var("QUE_WASI_ALLOW") {
+            let mut permissions = raw_permissions
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<HashSet<_>>();
+            if permissions.contains("all") || permissions.contains("*") {
+                permissions.extend(["read", "stdin", "write", "print", "clock", "delete"]);
+            }
+            let required = [
+                ("list-dir!", "read"),
+                ("read!", "read"),
+                ("read/chunks!", "read"),
+                ("read/lines!", "read"),
+                ("stdin!", "stdin"),
+                ("stdin/chunks!", "stdin"),
+                ("write!", "write"),
+                ("mkdir!", "write"),
+                ("move!", "write"),
+                ("delete!", "delete"),
+                ("print!", "print"),
+                ("clear!", "print"),
+                ("sleep!", "clock"),
+                ("time!", "clock"),
+                ("random!", "clock"),
+            ];
+            for (operation, permission) in required {
+                if used_extern_defs.contains_key(operation) && !permissions.contains(permission) {
+                    return Err(format!(
+                        "{operation} requires --allow {permission} with the external WASI runtime"
+                    ));
+                }
+            }
+        }
+    }
     for extern_decl in used_extern_defs.values() {
+        if wasi_host
+            && matches!(
+                extern_decl.local_name.as_str(),
+                "print!"
+                    | "stdin!"
+                    | "read!"
+                    | "read/chunks!"
+                    | "read/lines!"
+                    | "stdin/chunks!"
+                    | "list-dir!"
+                    | "write!"
+                    | "mkdir!"
+                    | "delete!"
+                    | "move!"
+                    | "sleep!"
+                    | "time!"
+                    | "random!"
+                    | "clear!"
+            )
+        {
+            continue;
+        }
         let (params, ret) = fn_sigs
             .get(&extern_decl.local_name)
             .ok_or_else(|| format!("Missing extern signature for '{}'", extern_decl.local_name))?;
@@ -12982,6 +14159,76 @@ fn compile_program_to_wat_build_typed_with_opts(
             extern_imports.push_str(&format!(" (param {})", param));
         }
         extern_imports.push_str(&format!(" (result {})))\n", wasm_val_type(ret)?));
+    }
+    if wasi_host
+        && (used_extern_defs.contains_key("print!")
+            || used_extern_defs.contains_key("clear!")
+            || used_extern_defs.contains_key("write!"))
+    {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"fd_write\" (func $__wasi_fd_write (param i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("sleep!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"poll_oneoff\" (func $__wasi_poll_oneoff (param i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("time!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"clock_time_get\" (func $__wasi_clock_time_get (param i32 i64 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("random!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"random_get\" (func $__wasi_random_get (param i32 i32) (result i32)))\n",
+        );
+    }
+    let wasi_needs_file_read = used_extern_defs.contains_key("read!")
+        || used_extern_defs.contains_key("read/chunks!")
+        || used_extern_defs.contains_key("read/lines!");
+    let wasi_needs_stdin_read =
+        used_extern_defs.contains_key("stdin!") || used_extern_defs.contains_key("stdin/chunks!");
+    if wasi_host && (wasi_needs_stdin_read || wasi_needs_file_read) {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"fd_read\" (func $__wasi_fd_read (param i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && uses_argv {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"args_sizes_get\" (func $__wasi_args_sizes_get (param i32 i32) (result i32)))\n  (import \"wasi_snapshot_preview1\" \"args_get\" (func $__wasi_args_get (param i32 i32) (result i32)))\n",
+        );
+    }
+    let wasi_uses_path = wasi_needs_file_read
+        || used_extern_defs.contains_key("write!")
+        || used_extern_defs.contains_key("list-dir!")
+        || used_extern_defs.contains_key("mkdir!")
+        || used_extern_defs.contains_key("delete!")
+        || used_extern_defs.contains_key("move!");
+    if wasi_host && wasi_uses_path {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"path_open\" (func $__wasi_path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))\n  (import \"wasi_snapshot_preview1\" \"fd_close\" (func $__wasi_fd_close (param i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("mkdir!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"path_create_directory\" (func $__wasi_path_create_directory (param i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("delete!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"path_unlink_file\" (func $__wasi_path_unlink_file (param i32 i32 i32) (result i32)))\n  (import \"wasi_snapshot_preview1\" \"path_remove_directory\" (func $__wasi_path_remove_directory (param i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("move!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"path_rename\" (func $__wasi_path_rename (param i32 i32 i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("list-dir!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"fd_readdir\" (func $__wasi_fd_readdir (param i32 i32 i32 i64 i32) (result i32)))\n",
+        );
     }
     let generated_code = emitted_funcs
         .iter()
@@ -12998,6 +14245,61 @@ fn compile_program_to_wat_build_typed_with_opts(
         extern_imports.push_str(
             "  (import \"host\" \"deserialize\" (func $__que_deserialize (param i32 i32) (result i32)))\n",
         );
+    }
+    // WebAssembly requires every import to precede every function definition.
+    if wasi_host
+        && (used_extern_defs.contains_key("print!") || used_extern_defs.contains_key("write!"))
+    {
+        extern_imports.push_str(emit_wasi_print_runtime());
+    }
+    if wasi_host && used_extern_defs.contains_key("time!") {
+        extern_imports.push_str(emit_wasi_clock_runtime());
+    }
+    if wasi_host && used_extern_defs.contains_key("random!") {
+        extern_imports.push_str(emit_wasi_random_runtime());
+    }
+    if wasi_host && used_extern_defs.contains_key("sleep!") {
+        extern_imports.push_str(emit_wasi_sleep_runtime());
+    }
+    if wasi_host && used_extern_defs.contains_key("clear!") {
+        extern_imports.push_str(emit_wasi_clear_runtime());
+    }
+    if wasi_host && (wasi_needs_stdin_read || wasi_needs_file_read) {
+        extern_imports.push_str(emit_wasi_stdin_runtime());
+    }
+    if wasi_host && uses_argv {
+        extern_imports.push_str(emit_wasi_argv_runtime());
+    }
+    if wasi_host && wasi_uses_path {
+        extern_imports.push_str(&emit_wasi_file_runtime(
+            wasi_needs_file_read,
+            used_extern_defs.contains_key("write!"),
+        ));
+    }
+    if wasi_host && used_extern_defs.contains_key("list-dir!") {
+        extern_imports.push_str(emit_wasi_list_dir_runtime());
+    }
+    if wasi_host
+        && (used_extern_defs.contains_key("mkdir!")
+            || used_extern_defs.contains_key("delete!")
+            || used_extern_defs.contains_key("move!"))
+    {
+        extern_imports.push_str(&emit_wasi_path_mutation_runtime(
+            used_extern_defs.contains_key("mkdir!"),
+            used_extern_defs.contains_key("delete!"),
+            used_extern_defs.contains_key("move!"),
+        ));
+    }
+    if wasi_host
+        && (used_extern_defs.contains_key("read/chunks!")
+            || used_extern_defs.contains_key("stdin/chunks!")
+            || used_extern_defs.contains_key("read/lines!"))
+    {
+        extern_imports.push_str(&emit_wasi_chunk_runtime(
+            used_extern_defs.contains_key("read/chunks!"),
+            used_extern_defs.contains_key("stdin/chunks!"),
+            used_extern_defs.contains_key("read/lines!"),
+        ));
     }
 
     let mut cached_globals = String::new();

@@ -315,6 +315,37 @@ For native experiments, the repository also contains a wasm2c host adapter:
 This requires WABT's `wasm2c`. The maintained C host implementation lives in
 [`miscs/native-c`](miscs/native-c/README.md).
 
+## Lightweight compiler and native-C path
+
+`quec` provides compilation, emitted source/WAT/Wasm/types, formatting,
+explanations, and optional native execution without linking Wasmtime into the
+compiler:
+
+```bash
+quec program.que > program.wasm
+quec run program.que --opt --allow all
+quec program.que --emit wat --out program.wat
+quec program.que --emit c --out program.c
+quec explain program.que
+quec fmt program.que
+```
+
+`quec run` translates the Wasm through the separately installed WABT `wasm2c`
+tool and invokes the system C compiler. The small `que` frontend delegates fast
+JIT scripting and `que nvim` to the separately installed `que-runtime` host.
+Only `que-runtime` links Wasmtime; neither `que` nor `quec` does.
+
+The in-progress external-Wasmtime backend can be exercised with:
+
+```bash
+quec run-wasi program.que --opt
+```
+
+It currently lowers Unicode `print!`/`stdin!`, `clear!`, `sleep!`, `time!`, and
+`random!` to WASI. Programs using file operations, argument access, chunked
+input, or serialization still require `que-runtime` until those adapters are
+complete.
+
 ## Build from source
 
 Requirements:
@@ -346,8 +377,9 @@ Build all configured release artifacts:
 The main binaries are:
 
 ```text
-que      compile and run with IO permissions
-quec     compile Que source to Wasm
+que      lightweight frontend for the external que-runtime JIT host
+que-runtime  Wasmtime JIT host with Que IO permissions
+quec     compiler/tooling and optional external wasm2c native runner
 quer     run compiled programs without the IO host
 quewat   run or inspect WAT
 quelsp   native language server

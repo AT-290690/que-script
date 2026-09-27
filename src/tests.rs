@@ -1489,10 +1489,7 @@ xs)"#,
     }
 
     #[cfg(feature = "runtime")]
-    fn run_program_output_with_std_and_opts_unlocked(
-        src: &str,
-        enable_optimizer: bool,
-    ) -> String {
+    fn run_program_output_with_std_and_opts_unlocked(src: &str, enable_optimizer: bool) -> String {
         let wat = compile_std_program_to_wat(src, enable_optimizer);
         let argv: Vec<String> = Vec::new();
         #[cfg(feature = "io")]
@@ -3356,9 +3353,7 @@ out"#,
 
     #[test]
     fn test_typed_optimization_canonicalizes_push_to_set_append() {
-        let typed = infer_typed_built(
-            "(do (let xs []) (push! xs 1) xs)",
-        );
+        let typed = infer_typed_built("(do (let xs []) (push! xs 1) xs)");
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
         assert!(
@@ -5830,8 +5825,7 @@ reverse-list-loop"#;
 
     #[test]
     fn test_wasm_lsp_hover_std_usage_includes_global_effects() {
-        let hover_json =
-            crate::wasm_api::lsp_hover("(reverse! [ 1 2 3 ])".to_string(), 0, 6);
+        let hover_json = crate::wasm_api::lsp_hover("(reverse! [ 1 2 3 ])".to_string(), 0, 6);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
 
@@ -5849,8 +5843,7 @@ reverse-list-loop"#;
 
     #[test]
     fn test_wasm_lsp_hover_std_local_mutating_function_includes_global_effects() {
-        let hover_json =
-            crate::wasm_api::lsp_hover("(map square [ 1 2 3 ])".to_string(), 0, 6);
+        let hover_json = crate::wasm_api::lsp_hover("(map square [ 1 2 3 ])".to_string(), 0, 6);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
 
@@ -7305,6 +7298,105 @@ fn"#;
             "random! should emit a zero-arg host import, got:\n{}",
             wat
         );
+    }
+
+    #[test]
+    fn test_wasi_host_replaces_supported_private_host_imports() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (print! "hi")
+                (stdin!)
+                (write! "x" (read! "x"))
+                (read/chunks! "x" 2 (lambda chunk false))
+                (read/lines! "x" (lambda line false))
+                (stdin/chunks! 2 (lambda chunk false))
+                (list-dir! ".")
+                (mkdir! "d")
+                (move! "x" "y")
+                (delete! "y")
+                (sleep! 0)
+                (time!)
+                (random!)
+                (clear!))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        for private_import in [
+            "print",
+            "read_stdin",
+            "read_file",
+            "write_file",
+            "read_chunks",
+            "read_lines",
+            "read_stdin_chunks",
+            "list_dir",
+            "mkdir_p",
+            "move",
+            "delete",
+            "sleep",
+            "time",
+            "random",
+            "clear",
+        ] {
+            assert!(
+                !wat.contains(&format!("(import \"host\" \"{private_import}\"")),
+                "WASI mode should replace host.{private_import}, got:\n{wat}"
+            );
+        }
+        for wasi_import in [
+            "fd_write",
+            "fd_read",
+            "path_open",
+            "fd_close",
+            "fd_readdir",
+            "path_create_directory",
+            "path_rename",
+            "path_unlink_file",
+            "poll_oneoff",
+            "clock_time_get",
+            "random_get",
+        ] {
+            assert!(
+                wat.contains(&format!("\"{wasi_import}\"")),
+                "WASI mode should include {wasi_import}, got:\n{wat}"
+            );
+        }
+        assert_eq!(
+            wat.matches("\"fd_write\"").count(),
+            1,
+            "print! and clear! must share one fd_write import"
+        );
+        wat::parse_str(&wat).expect("combined WASI adapter module should encode");
+    }
+
+    #[test]
+    fn test_wasi_argv_uses_wasi_arguments_and_initializes_guest_argv() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let expr = crate::parser::build("(get ARGV 0)").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(wat.contains("\"args_sizes_get\""));
+        assert!(wat.contains("\"args_get\""));
+        assert!(wat.contains("call $__wasi_init_argv"));
+        assert!(wat.contains("(func (export \"_start\")"));
+        wat::parse_str(&wat).expect("WASI ARGV module should encode");
+    }
+
+    #[test]
+    fn test_wasi_permissions_reject_missing_capability() {
+        let _lock = runtime_exec_lock().lock().unwrap();
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _permissions = ScopedEnvVar::set("QUE_WASI_ALLOW", "print");
+        let expr = crate::parser::build(r#"(read! "input.txt")"#).expect("program should build");
+        let error = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect_err("read! without read permission should fail");
+        assert!(error.contains("read! requires --allow read"), "{error}");
     }
 
     #[test]
@@ -12855,7 +12947,10 @@ humidity-to-location map:
                                             }
                                             Err(e) => {
                                                 println!("{:?}", inp);
-                                                panic!("Failed tests because {}\nInput:\n{}", e, inp);
+                                                panic!(
+                                                    "Failed tests because {}\nInput:\n{}",
+                                                    e, inp
+                                                );
                                             }
                                         }
                                     }

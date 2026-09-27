@@ -2334,8 +2334,15 @@ fn run_explain_command(args: &[String], bin_name: &str) -> Result<(), String> {
 }
 
 fn run_format_command(args: &[String], bin_name: &str) -> Result<(), String> {
-    let usage = || format!("Usage: {bin_name} fmt <file.que> [--check|--stdout]\n       {bin_name} fmt --stdin");
-    if args.iter().any(|arg| matches!(arg.as_str(), "--help" | "-h")) {
+    let usage = || {
+        format!(
+            "Usage: {bin_name} fmt <file.que> [--check|--stdout]\n       {bin_name} fmt --stdin"
+        )
+    };
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+    {
         println!("{}", usage());
         return Ok(());
     }
@@ -4509,11 +4516,13 @@ mod tests {
 
 pub fn run_native_shell() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
-    let bin_name = args
+    let bin_name_from_args = args
         .first()
         .and_then(|p| Path::new(p).file_name())
         .and_then(|p| p.to_str())
         .unwrap_or("queio");
+    let frontend_name = env::var("QUE_FRONTEND_NAME").ok();
+    let bin_name = frontend_name.as_deref().unwrap_or(bin_name_from_args);
     if matches!(args.get(1).map(String::as_str), Some("--help" | "-h")) {
         println!("{}", native_shell_help(bin_name));
         return Ok(());

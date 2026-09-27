@@ -1,8 +1,10 @@
 pub mod baked;
-#[path = "../miscs/formatter.rs"]
-pub mod formatter;
+#[cfg(feature = "compiler")]
+pub mod compiler_cli;
 #[cfg(feature = "compiler")]
 pub mod explain;
+#[path = "../miscs/formatter.rs"]
+pub mod formatter;
 #[cfg(feature = "io")]
 pub mod io;
 pub mod lsp_native_core;

@@ -21,6 +21,10 @@ path = "src/bin/queio.rs"
 required-features = ["io"]
 
 [[bin]]
+name = "que"
+path = "src/bin/que.rs"
+
+[[bin]]
 name = "quec"
 path = "src/bin/quec.rs"
 required-features = ["compiler"]
