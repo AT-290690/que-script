@@ -194,11 +194,14 @@ fn main() {
                 | "--version"
                 | "-V"
                 | "compile"
-                | "run"
                 | "run-wasi"
                 | "wat"
                 | "explain"
                 | "fmt"
+                | "--eval"
+                | "-e"
+                | "--lib"
+                | "--env"
         )
     }) || args.iter().any(|arg| arg == "--emit");
     if !compiler_command {

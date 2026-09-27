@@ -318,16 +318,19 @@ execution without embedding a WebAssembly runtime:
 ```bash
 que program.que --opt
 que compile program.que --out program.wasm
-que run program.que --opt --allow all
 que wat program.que > program.wat
-que program.que --emit c --out program.c
+que --eval "(+ 1 2)"
+que --lib names "*map*"
+que --lib types map
+que --env
 que explain program.que
 que fmt program.que
 ```
 
-`que run` translates the Wasm through the separately installed WABT `wasm2c`
-tool and invokes the system C compiler. Normal `que program.que` execution uses
-a runtime installed by the user. Que neither embeds nor installs a runtime.
+Normal `que program.que` execution uses a runtime installed by the user. Que
+neither embeds nor installs a runtime. The optional native-C experiment remains
+available as `./scripts/compile-native-c.sh`; it is not part of the installed
+CLI.
 
 The external-Wasmtime backend can also be invoked explicitly with:
 
@@ -378,7 +381,7 @@ Build all configured release artifacts:
 The installed binaries are:
 
 ```text
-que      compiler, tooling, native-C path, and user-selected WASI runtime
+que      compiler, tooling, and user-selected WASI runtime
 quelsp   language server (installed separately with editor tooling)
 ```
 

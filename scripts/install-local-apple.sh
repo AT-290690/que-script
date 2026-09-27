@@ -20,7 +20,6 @@ Builds the unified Que compiler and runner.
 Installs:
   /usr/local/bin/que
   /usr/local/share/que/que-lib.lisp
-  /usr/local/share/que/compile-native-c.sh and its C host
 
 Options:
   --no-build   Install existing release binaries and a freshly baked library.
@@ -61,15 +60,6 @@ if [ ! -x "$BIN_SOURCE" ]; then
   echo "Run without --no-build, or build it first." >&2
   exit 1
 fi
-if ! command -v wasm2c >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    echo "Installing WABT (provides the external wasm2c runtime)..."
-    brew install wabt
-  else
-    echo "warning: wasm2c is not installed; que can compile Wasm but cannot use `que run`" >&2
-  fi
-fi
-
 tmp_bin="$(mktemp "/tmp/${APP_NAME}.local.XXXXXX")"
 tmp_lib="$(mktemp "/tmp/que-lib.local.XXXXXX")"
 trap 'rm -f "$tmp_bin" "$tmp_lib"' EXIT
@@ -99,10 +89,6 @@ fi
 echo "Installing library: ${LIB_PATH}"
 sudo mkdir -p "$LIB_DIR"
 sudo mv "$tmp_lib" "$LIB_PATH"
-sudo cp ./scripts/compile-native-c.sh "${LIB_DIR}/compile-native-c.sh"
-sudo chmod +x "${LIB_DIR}/compile-native-c.sh"
-sudo mkdir -p "${LIB_DIR}/native-c"
-sudo cp ./miscs/native-c/que_host.c ./miscs/native-c/que_host.h "${LIB_DIR}/native-c/"
 
 echo "Installed local macOS ${APP_NAME}."
 echo "Check with: ${APP_NAME} --version"

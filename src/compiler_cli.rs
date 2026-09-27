@@ -4,11 +4,12 @@
 
 use crate::infer::{infer_with_builtins_typed_lsp, InferErrorInfo, TypedExpression};
 use crate::parser::Expression;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::path::Path;
+use std::process::{Command, ExitStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WasmRuntime {
@@ -89,7 +90,6 @@ enum EmitKind {
     OptSource,
     Wat,
     Wasm,
-    C,
     Types,
 }
 
@@ -99,19 +99,20 @@ fn help() -> &'static str {
 Usage:
   que <program.que> [arguments ...] [--opt] [--runtime <runtime>]
   que compile <program.que> [--opt] [--out <program.wasm>]
-  que run <program.que> [arguments ...] [--opt] [--allow <permissions ...>]
   que run-wasi <program.que> [arguments ...] [--opt] [--runtime <runtime>]
   que wat <program.que>
   que wat --eval <source>
-  que <program.que> --emit <source|opt-source|wat|wasm|c|types> [--out <file>]
+  que --eval <source> [arguments ...] [--opt|--debug]
+  que --lib <names|types|source> [pattern|name]
+  que --env
+  que <program.que> --emit <source|opt-source|wat|wasm|types> [--out <file>]
   que explain <program.que> [--json] [--opt] [--out <file>]
   que fmt <program.que> [--check|--stdout]
   que fmt --stdin
 
-`que run` uses the separately installed wasm2c and C compiler. `run-wasi` uses
-a user-installed runtime: wasmtime (default), wasmer, or iwasm/WAMR. Select it
-with --runtime or QUE_WASM_RUNTIME. Set QUE_NATIVE_SCRIPT to override the
-native-C driver path."
+`run-wasi` uses a user-installed runtime: wasmtime (default), wasmer, or
+iwasm/WAMR. Select it with --runtime or QUE_WASM_RUNTIME. Native-C tooling is
+kept separately in the repository's scripts directory."
 }
 
 pub fn run() -> Result<(), String> {
@@ -127,16 +128,22 @@ pub fn run_with_args(mut args: Vec<String>) -> Result<(), String> {
         println!("que {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    if matches!(args[0].as_str(), "--eval" | "-e") {
+        return run_eval(args);
+    }
+    if args[0] == "--env" {
+        println!("{}", environment_help());
+        return Ok(());
+    }
+    if args[0] == "--lib" {
+        return run_library_explore(&args[1..]);
+    }
     match args[0].as_str() {
         "fmt" => return run_fmt(&args[1..]),
         "explain" => return run_explain(&args[1..]),
         "compile" => {
             args.remove(0);
             return run_compile(args, Some(EmitKind::Wasm));
-        }
-        "run" => {
-            args.remove(0);
-            return run_native(args);
         }
         "run-wasi" => {
             args.remove(0);
@@ -152,6 +159,191 @@ pub fn run_with_args(mut args: Vec<String>) -> Result<(), String> {
         run_compile(args, None)
     } else {
         run_compile(args, Some(EmitKind::Wasm))
+    }
+}
+
+fn run_eval(mut args: Vec<String>) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err("--eval requires source text".into());
+    }
+    args.remove(0);
+    let source = args.remove(0);
+    let path = env::temp_dir().join(format!("que-eval-{}.que", std::process::id()));
+    fs::write(&path, source).map_err(|error| format!("failed to stage --eval source: {error}"))?;
+    args.insert(0, path.to_string_lossy().into_owned());
+    let result = if args.iter().any(|arg| arg == "--emit") {
+        run_compile(args, None)
+    } else {
+        run_wasi(args)
+    };
+    let _ = fs::remove_file(path);
+    result
+}
+
+fn environment_help() -> &'static str {
+    "Environment:
+  QUE_WASM_RUNTIME       Runtime adapter/executable (wasmtime, wasmer, iwasm/WAMR).
+  QUE_LIB_PATH           Override the baked library path.
+  QUE_WASM_OPT           Optimization level: none, speed, or speed_and_size.
+  QUE_DEVIRTUALIZE       Call devirtualization: off, known-heads, or aggressive.
+  QUE_TCO                Tail-call optimization: off, conservative, or aggressive.
+  QUE_SMALL_SCALAR_INLINE_COST  Scalar helper inline budget.
+  QUE_LOOP_UNROLL_MAX    Maximum constant loop trip count to unroll.
+  QUE_LOOP_UNROLL_COST   Maximum loop unroll cost.
+  QUE_BOUNDS_CHECK       Runtime vector bounds checks.
+  QUE_STATIC_BOUNDS      Static correctness analysis.
+  QUE_INT_OVERFLOW_CHECK Runtime Int overflow checks.
+  QUE_DEC_OVERFLOW_CHECK Runtime Dec overflow checks.
+  QUE_DIV_ZERO_CHECK     Runtime division/modulo-zero checks.
+  QUE_DECIMAL_SCALE      Dec fixed-point scale.
+  QUE_VEC_MIN_CAP        Minimum vector capacity.
+  QUE_VEC_GROWTH_NUM     Vector growth numerator.
+  QUE_VEC_GROWTH_DEN     Vector growth denominator."
+}
+
+#[derive(Clone)]
+enum LibrarySymbol {
+    Source(Expression),
+    Macro(Expression),
+    Builtin(Option<String>, &'static str),
+}
+
+fn binding_name(expr: &Expression) -> Option<String> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if items.len() < 3
+        || !matches!(&items[0], Expression::Word(word) if matches!(word.as_str(), "let" | "letrec" | "letmacro" | "mut"))
+    {
+        return None;
+    }
+    match &items[1] {
+        Expression::Word(name) => Some(name.clone()),
+        _ => None,
+    }
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let (pattern, text) = (pattern.as_bytes(), text.as_bytes());
+    let mut matches = vec![vec![false; text.len() + 1]; pattern.len() + 1];
+    matches[0][0] = true;
+    for i in 1..=pattern.len() {
+        if pattern[i - 1] == b'*' {
+            matches[i][0] = matches[i - 1][0];
+        }
+        for j in 1..=text.len() {
+            matches[i][j] = match pattern[i - 1] {
+                b'*' => matches[i - 1][j] || matches[i][j - 1],
+                b'?' => matches[i - 1][j - 1],
+                byte => byte == text[j - 1] && matches[i - 1][j - 1],
+            };
+        }
+    }
+    matches[pattern.len()][text.len()]
+}
+
+fn library_symbols() -> Result<(BTreeMap<String, LibrarySymbol>, Vec<Expression>), String> {
+    let mut definitions =
+        crate::baked::ast_to_definitions(crate::baked::load_ast(), "active library")?;
+    crate::externals::extend_with_builtin_host_externs(&mut definitions)?;
+    let (environment, _) = crate::types::create_builtin_environment(crate::types::TypeEnv::new());
+    let mut symbols = BTreeMap::new();
+    if let Some(scope) = environment.scopes.first() {
+        for (name, scheme) in scope {
+            symbols.insert(
+                name.clone(),
+                LibrarySymbol::Builtin(
+                    Some(crate::lsp_native_core::normalize_signature(
+                        &scheme.typ.to_string(),
+                    )),
+                    "compiler/runtime built-in",
+                ),
+            );
+        }
+    }
+    for definition in &definitions {
+        let Some(name) = binding_name(definition) else {
+            continue;
+        };
+        if name.starts_with('_') || name.starts_with("std/") {
+            continue;
+        }
+        let symbol = if matches!(definition, Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(word)) if word == "letmacro"))
+        {
+            LibrarySymbol::Macro(definition.clone())
+        } else {
+            LibrarySymbol::Source(definition.clone())
+        };
+        symbols.insert(name, symbol);
+    }
+    Ok((symbols, definitions))
+}
+
+fn run_library_explore(args: &[String]) -> Result<(), String> {
+    if args.is_empty() || matches!(args[0].as_str(), "--help" | "-h") {
+        println!("Usage: que --lib names [pattern]\n       que --lib types [pattern]\n       que --lib source <name>");
+        return Ok(());
+    }
+    let (symbols, definitions) = library_symbols()?;
+    match args[0].as_str() {
+        "names" | "types" => {
+            if args.len() > 2 {
+                return Err(format!("--lib {} accepts at most one pattern", args[0]));
+            }
+            let pattern = args.get(1).map(String::as_str).unwrap_or("*");
+            for (name, symbol) in symbols
+                .iter()
+                .filter(|(name, _)| wildcard_match(pattern, name))
+            {
+                if args[0] == "names" {
+                    println!("{name}");
+                    continue;
+                }
+                let typ = match symbol {
+                    LibrarySymbol::Builtin(Some(typ), _) => typ.clone(),
+                    LibrarySymbol::Builtin(None, _) => "<built-in>".into(),
+                    LibrarySymbol::Macro(_) => "<macro>".into(),
+                    LibrarySymbol::Source(_) => {
+                        let merged =
+                            crate::parser::merge_std_and_program(name, definitions.clone())?;
+                        infer_program(name, &merged)?
+                            .typ
+                            .as_ref()
+                            .map(|typ| {
+                                crate::lsp_native_core::normalize_signature(&typ.to_string())
+                            })
+                            .unwrap_or_else(|| "_".into())
+                    }
+                };
+                println!("{name} : {typ}");
+            }
+            Ok(())
+        }
+        "source" => {
+            if args.len() != 2 {
+                return Err("--lib source requires one symbol name".into());
+            }
+            let name = &args[1];
+            let symbol = symbols
+                .get(name)
+                .ok_or_else(|| format!("library symbol '{name}' not found"))?;
+            println!("name: {name}");
+            match symbol {
+                LibrarySymbol::Source(expr) => {
+                    println!("kind: library\nsource:\n{}", expr.to_lisp())
+                }
+                LibrarySymbol::Macro(expr) => println!("kind: macro\nsource:\n{}", expr.to_lisp()),
+                LibrarySymbol::Builtin(typ, description) => {
+                    println!("kind: built-in");
+                    if let Some(typ) = typ {
+                        println!("type: {typ}");
+                    }
+                    println!("source:\n<{description}>");
+                }
+            }
+            Ok(())
+        }
+        command => Err(format!("unknown --lib command '{command}'")),
     }
 }
 
@@ -307,7 +499,6 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
             "opt-source" => EmitKind::OptSource,
             "wat" => EmitKind::Wat,
             "wasm" => EmitKind::Wasm,
-            "c" => EmitKind::C,
             "types" => EmitKind::Types,
             _ => return Err(format!("unknown emit kind '{value}'")),
         }
@@ -352,34 +543,10 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
     let wat = crate::wat::compile_program_to_wat_typed(&typed)?;
     if emit == EmitKind::Wat {
         write_output(out.as_deref(), wat.as_bytes())
-    } else if emit == EmitKind::Wasm {
+    } else {
         let wasm =
             wat::parse_str(&wat).map_err(|error| format!("failed to encode Wasm: {error}"))?;
         write_output(out.as_deref(), &wasm)
-    } else {
-        let output = out.unwrap_or_else(|| {
-            Path::new(path)
-                .with_extension("c")
-                .to_string_lossy()
-                .into_owned()
-        });
-        let wasm =
-            wat::parse_str(&wat).map_err(|error| format!("failed to encode Wasm: {error}"))?;
-        let wasm_path = env::temp_dir().join(format!("que-emit-c-{}.wasm", std::process::id()));
-        fs::write(&wasm_path, wasm)
-            .map_err(|error| format!("failed to stage Wasm for wasm2c: {error}"))?;
-        let status = Command::new("wasm2c")
-            .arg(&wasm_path)
-            .arg("-n")
-            .arg("main")
-            .arg("-o")
-            .arg(&output)
-            .status()
-            .map_err(|error| format!("failed to start wasm2c: {error}"))?;
-        let _ = fs::remove_file(&wasm_path);
-        status_result(status, "C emission")?;
-        println!("{output}");
-        Ok(())
     }
 }
 
@@ -435,7 +602,11 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
             )
         })?;
     let _ = fs::remove_file(&wasm);
-    status_result(status, &format!("external {runtime:?} execution"))
+    if matches!(status.code(), Some(70 | 134)) {
+        Err("debug guard trapped; see the diagnostic above".into())
+    } else {
+        status_result(status, &format!("external {runtime:?} execution"))
+    }
 }
 
 fn run_explain(raw: &[String]) -> Result<(), String> {
@@ -503,88 +674,12 @@ fn run_fmt(raw: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn native_script() -> Result<PathBuf, String> {
-    if let Some(path) =
-        env::var_os("QUE_NATIVE_SCRIPT").or_else(|| env::var_os("QUEC_NATIVE_SCRIPT"))
-    {
-        return Ok(PathBuf::from(path));
-    }
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/compile-native-c.sh");
-    if manifest.is_file() {
-        return Ok(manifest);
-    }
-    if let Ok(executable) = env::current_exe() {
-        if let Some(prefix) = executable.parent().and_then(Path::parent) {
-            let installed = prefix.join("share/que/compile-native-c.sh");
-            if installed.is_file() {
-                return Ok(installed);
-            }
-        }
-    }
-    Err("native-C driver not found; set QUE_NATIVE_SCRIPT to compile-native-c.sh".into())
-}
-
 fn status_result(status: ExitStatus, operation: &str) -> Result<(), String> {
     if status.success() {
         Ok(())
     } else {
         Err(format!("{operation} failed with {status}"))
     }
-}
-
-fn run_native(mut args: Vec<String>) -> Result<(), String> {
-    let opt = take_flag(&mut args, "--opt");
-    let debug = take_flag(&mut args, "--debug");
-    if opt && debug {
-        return Err("--opt and --debug cannot be used together".to_string());
-    }
-    if opt {
-        enable_opt();
-    }
-    if debug {
-        enable_debug();
-    }
-    let path = args
-        .first()
-        .cloned()
-        .ok_or_else(|| "missing program path".to_string())?;
-    let build = env::temp_dir().join(format!("que-native-{}", std::process::id()));
-    fs::create_dir_all(&build)
-        .map_err(|error| format!("failed to create native build directory: {error}"))?;
-    let script = native_script()?;
-    let status = Command::new(script)
-        .arg(&path)
-        .arg(&build)
-        .env(
-            "QUE_COMPILER",
-            env::current_exe().map_err(|error| error.to_string())?,
-        )
-        .stdout(Stdio::null())
-        .status()
-        .map_err(|error| format!("failed to start native-C compiler: {error}"))?;
-    status_result(status, "native-C compilation")?;
-
-    let mut allow = Vec::new();
-    if let Some(index) = args.iter().position(|arg| arg == "--allow") {
-        let mut i = index + 1;
-        while i < args.len() && !args[i].starts_with("--") {
-            allow.push(args[i].clone());
-            i += 1;
-        }
-        args.drain(index..i);
-    }
-    args.remove(0);
-    let mut command = Command::new(build.join("main"));
-    if !allow.is_empty() {
-        command.env("QUE_ALLOW", allow.join(","));
-    }
-    command.args(args);
-    let status = command
-        .status()
-        .map_err(|error| format!("failed to run native program: {error}"))?;
-    let result = status_result(status, "native program");
-    let _ = fs::remove_dir_all(&build);
-    result
 }
 
 #[cfg(test)]

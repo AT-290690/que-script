@@ -229,7 +229,49 @@ fn is_power_of_ten_i32(n: i32) -> bool {
 }
 
 fn emit_guard_trap_wat(code: i32) -> String {
-    format!("i32.const {code}\nglobal.set $dbg_guard_trap_code\nunreachable")
+    let report = if wasi_bool("QUE_WASI_HOST") {
+        format!("\ni32.const {code}\ncall $__wasi_guard_trap")
+    } else {
+        String::new()
+    };
+    format!("i32.const {code}\nglobal.set $dbg_guard_trap_code{report}\nunreachable")
+}
+
+fn emit_wasi_guard_trap_runtime() -> String {
+    let messages = [
+        "debug.guard_trap: unknown guard trap\n",
+        "debug.guard_trap: integer divide/modulo by zero (QUE_DIV_ZERO_CHECK)\n",
+        "debug.guard_trap: dec divide by zero (QUE_DIV_ZERO_CHECK)\n",
+        "debug.guard_trap: integer overflow on add/inc (QUE_INT_OVERFLOW_CHECK)\n",
+        "debug.guard_trap: integer overflow on sub/dec (QUE_INT_OVERFLOW_CHECK)\n",
+        "debug.guard_trap: integer overflow on mul/square (QUE_INT_OVERFLOW_CHECK)\n",
+        "debug.guard_trap: dec overflow (QUE_DEC_OVERFLOW_CHECK)\n",
+    ];
+    let mut out = String::new();
+    let mut offsets = Vec::new();
+    let mut address = 62_000usize;
+    for message in messages {
+        offsets.push((address, message.len()));
+        let escaped = message.replace('\n', "\\0a");
+        out.push_str(&format!("  (data (i32.const {address}) \"{escaped}\")\n"));
+        address += message.len();
+    }
+    out.push_str(
+        "  (func $__wasi_guard_trap (param $code i32)\n    (local $ptr i32) (local $len i32)\n",
+    );
+    out.push_str(&format!(
+        "    i32.const {}\n    local.set $ptr\n    i32.const {}\n    local.set $len\n",
+        offsets[0].0, offsets[0].1
+    ));
+    for (code, (ptr, len)) in offsets.iter().enumerate().skip(1) {
+        out.push_str(&format!(
+            "    local.get $code\n    i32.const {code}\n    i32.eq\n    if\n      i32.const {ptr}\n      local.set $ptr\n      i32.const {len}\n      local.set $len\n    end\n"
+        ));
+    }
+    out.push_str(
+        "    i32.const 0\n    local.get $ptr\n    i32.store\n    i32.const 4\n    local.get $len\n    i32.store\n    i32.const 2\n    i32.const 0\n    i32.const 1\n    i32.const 16\n    call $__wasi_fd_write\n    drop\n    i32.const 70\n    call $__wasi_proc_exit\n    unreachable)\n",
+    );
+    out
 }
 
 fn parse_env_bool_like(name: &str, default: bool) -> bool {
@@ -14368,6 +14410,10 @@ fn compile_program_to_wat_build_typed_with_opts(
     let mut extern_imports = String::new();
     let wasi_host = wasi_bool("QUE_WASI_HOST");
     let wasi_prints_result = wasi_host && !wasi_no_result;
+    let wasi_guard_diagnostics = wasi_host
+        && (parse_env_bool_like("QUE_INT_OVERFLOW_CHECK", false)
+            || parse_env_bool_like("QUE_DEC_OVERFLOW_CHECK", false)
+            || parse_env_bool_like("QUE_DIV_ZERO_CHECK", false));
     if wasi_host {
         if let Some(raw_permissions) = wasi_allow() {
             let mut permissions = raw_permissions
@@ -14446,10 +14492,16 @@ fn compile_program_to_wat_build_typed_with_opts(
         && (wasi_prints_result
             || used_extern_defs.contains_key("print!")
             || used_extern_defs.contains_key("clear!")
-            || used_extern_defs.contains_key("write!"))
+            || used_extern_defs.contains_key("write!")
+            || wasi_guard_diagnostics)
     {
         extern_imports.push_str(
             "  (import \"wasi_snapshot_preview1\" \"fd_write\" (func $__wasi_fd_write (param i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_guard_diagnostics {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"proc_exit\" (func $__wasi_proc_exit (param i32)))\n",
         );
     }
     if wasi_host && used_extern_defs.contains_key("sleep!") {
@@ -14532,6 +14584,9 @@ fn compile_program_to_wat_build_typed_with_opts(
         );
     }
     // WebAssembly requires every import to precede every function definition.
+    if wasi_guard_diagnostics {
+        extern_imports.push_str(&emit_wasi_guard_trap_runtime());
+    }
     if wasi_host
         && (wasi_prints_result
             || used_extern_defs.contains_key("print!")

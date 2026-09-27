@@ -2525,8 +2525,8 @@ xs)"#,
     fn test_int_div_zero_traps_with_debug_guards() {
         let err = run_program_error_with_debug_guards(r#"(do (let id (lambda x x)) (/ 1 (id 0)))"#);
         assert!(
-            err.contains("integer divide by zero") || err.contains("unreachable"),
-            "expected unreachable trap for int divide-by-zero, got: {}",
+            err.contains("integer divide/modulo by zero"),
+            "expected precise int divide-by-zero guard diagnostic, got: {}",
             err
         );
     }
@@ -2537,8 +2537,8 @@ xs)"#,
             r#"(do (let f (lambda z (/. (Int->Dec 1) z))) (f (Int->Dec 0)))"#,
         );
         assert!(
-            err.contains("unreachable"),
-            "expected unreachable trap for dec divide-by-zero, got: {}",
+            err.contains("dec divide by zero"),
+            "expected precise dec divide-by-zero guard diagnostic, got: {}",
             err
         );
     }
@@ -2585,8 +2585,8 @@ xs)"#,
         let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
         let err = run_program_error_unlocked(r#"(Int->Dec 48000)"#);
         assert!(
-            err.contains("unreachable"),
-            "expected unreachable trap for Int->Dec overflow, got: {}",
+            err.contains("dec overflow"),
+            "expected precise Int->Dec overflow guard diagnostic, got: {}",
             err
         );
     }
@@ -2600,8 +2600,8 @@ xs)"#,
         let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
         let err = run_program_error_with_std_unlocked(r#"(String->Dec "48000.00")"#, true);
         assert!(
-            err.contains("unreachable"),
-            "expected unreachable trap for String->Dec overflow, got: {}",
+            err.contains("dec overflow"),
+            "expected precise String->Dec overflow guard diagnostic, got: {}",
             err
         );
     }
