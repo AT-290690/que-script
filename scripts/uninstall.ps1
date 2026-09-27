@@ -7,6 +7,8 @@ $ShareDir = Join-Path $InstallRoot "share\que"
 $LibPath = Join-Path $ShareDir "que-lib.lisp"
 $Binaries = @(
     (Join-Path $BinDir "que.exe"),
+    (Join-Path $BinDir "que-runtime.exe"),
+    (Join-Path $BinDir "eclisp.exe"),
     (Join-Path $BinDir "quec.exe"),
     (Join-Path $BinDir "quer.exe"),
     (Join-Path $BinDir "quewat.exe"),

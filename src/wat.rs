@@ -1,7 +1,63 @@
 use crate::infer::{EffectFlags, TypedExpression};
 use crate::parser::Expression;
 use crate::types::Type;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+
+#[derive(Clone, Default)]
+struct WasiOverrides {
+    host: Option<bool>,
+    no_result: Option<bool>,
+    allow: Option<String>,
+}
+
+thread_local! {
+    static WASI_OVERRIDES: RefCell<WasiOverrides> = RefCell::new(WasiOverrides::default());
+}
+
+pub struct WasiOverrideGuard(WasiOverrides);
+
+pub fn scoped_wasi_override(key: &str, value: &str) -> Option<WasiOverrideGuard> {
+    WASI_OVERRIDES.with(|cell| {
+        let previous = cell.borrow().clone();
+        let mut current = previous.clone();
+        match key {
+            "QUE_WASI_HOST" => current.host = Some(matches!(value, "1" | "true" | "on" | "yes")),
+            "QUE_WASI_NO_RESULT" => {
+                current.no_result = Some(matches!(value, "1" | "true" | "on" | "yes"))
+            }
+            "QUE_WASI_ALLOW" => current.allow = Some(value.to_string()),
+            _ => return None,
+        }
+        *cell.borrow_mut() = current;
+        Some(WasiOverrideGuard(previous))
+    })
+}
+
+impl Drop for WasiOverrideGuard {
+    fn drop(&mut self) {
+        WASI_OVERRIDES.with(|cell| *cell.borrow_mut() = self.0.clone());
+    }
+}
+
+fn wasi_bool(key: &str) -> bool {
+    let overridden = WASI_OVERRIDES.with(|cell| match key {
+        "QUE_WASI_HOST" => cell.borrow().host,
+        "QUE_WASI_NO_RESULT" => cell.borrow().no_result,
+        _ => None,
+    });
+    overridden.unwrap_or_else(|| {
+        std::env::var(key)
+            .map(|value| matches!(value.as_str(), "1" | "true" | "on" | "yes"))
+            .unwrap_or(false)
+    })
+}
+
+fn wasi_allow() -> Option<String> {
+    WASI_OVERRIDES
+        .with(|cell| cell.borrow().allow.clone())
+        .or_else(|| std::env::var("QUE_WASI_ALLOW").ok())
+}
 
 #[derive(Clone)]
 struct TopDef {
@@ -5479,6 +5535,1145 @@ fn emit_vector_runtime(
     out
 }
 
+fn emit_wasi_print_runtime() -> &'static str {
+    r#"
+  ;; Que [Char] -> UTF-8 stdout. Scratch bytes live below the heap base.
+  (func $__wasi_write_text (param $fd i32) (param $text i32) (result i32)
+    (local $len i32) (local $data i32) (local $i i32)
+    (local $c i32) (local $n i32)
+    local.get $text
+    i32.load
+    local.set $len
+    local.get $text
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    block $done
+      loop $chars
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+        local.get $data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.load
+        local.set $c
+        local.get $c
+        i32.const 128
+        i32.lt_u
+        if
+          i32.const 32
+          local.get $c
+          i32.store8
+          i32.const 1
+          local.set $n
+        else
+          local.get $c
+          i32.const 2048
+          i32.lt_u
+          if
+            i32.const 32
+            local.get $c
+            i32.const 6
+            i32.shr_u
+            i32.const 192
+            i32.or
+            i32.store8
+            i32.const 33
+            local.get $c
+            i32.const 63
+            i32.and
+            i32.const 128
+            i32.or
+            i32.store8
+            i32.const 2
+            local.set $n
+          else
+            local.get $c
+            i32.const 65536
+            i32.lt_u
+            if
+              i32.const 32
+              local.get $c
+              i32.const 12
+              i32.shr_u
+              i32.const 224
+              i32.or
+              i32.store8
+              i32.const 33
+              local.get $c
+              i32.const 6
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 34
+              local.get $c
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 3
+              local.set $n
+            else
+              i32.const 32
+              local.get $c
+              i32.const 18
+              i32.shr_u
+              i32.const 240
+              i32.or
+              i32.store8
+              i32.const 33
+              local.get $c
+              i32.const 12
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 34
+              local.get $c
+              i32.const 6
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 35
+              local.get $c
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              i32.const 4
+              local.set $n
+            end
+          end
+        end
+        i32.const 0
+        i32.const 32
+        i32.store
+        i32.const 4
+        local.get $n
+        i32.store
+        local.get $fd
+        i32.const 0
+        i32.const 1
+        i32.const 16
+        call $__wasi_fd_write
+        drop
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $chars
+      end
+    end
+    i32.const 0)
+  (func $v_print_bang_ (param $text i32) (result i32)
+    i32.const 1
+    local.get $text
+    call $__wasi_write_text)
+"#
+}
+
+fn emit_wasi_clock_runtime() -> &'static str {
+    r#"
+  (func $v_time_bang_ (result i32)
+    i32.const 0
+    i64.const 1000000
+    i32.const 40
+    call $__wasi_clock_time_get
+    if
+      unreachable
+    end
+    i32.const 40
+    i64.load
+    i64.const 1000000000
+    i64.div_u
+    i32.wrap_i64)
+"#
+}
+
+fn emit_wasi_random_runtime() -> &'static str {
+    r#"
+  (func $v_random_bang_ (result i32)
+    i32.const 48
+    i32.const 4
+    call $__wasi_random_get
+    if
+      unreachable
+    end
+    i32.const 48
+    i32.load)
+"#
+}
+
+fn emit_wasi_sleep_runtime() -> &'static str {
+    r#"
+  (func $v_sleep_bang_ (param $millis i32) (result i32)
+    local.get $millis
+    i32.const 0
+    i32.lt_s
+    if
+      unreachable
+    end
+    ;; A relative monotonic-clock subscription. Timeout and precision are ns.
+    i32.const 64
+    i64.const 0
+    i64.store
+    i32.const 72
+    i32.const 0
+    i32.store8
+    i32.const 80
+    i32.const 1
+    i32.store
+    i32.const 88
+    local.get $millis
+    i64.extend_i32_u
+    i64.const 1000000
+    i64.mul
+    i64.store
+    i32.const 96
+    i64.const 1000000
+    i64.store
+    i32.const 104
+    i32.const 0
+    i32.store16
+    i32.const 64
+    i32.const 112
+    i32.const 1
+    i32.const 144
+    call $__wasi_poll_oneoff
+    if
+      unreachable
+    end
+    i32.const 0)
+"#
+}
+
+fn emit_wasi_clear_runtime() -> &'static str {
+    r#"
+  ;; ANSI clear-screen sequence written to stdout.
+  (func $v_clear_bang_ (result i32)
+    i32.const 32
+    i64.const 20366371090225947
+    i64.store
+    i32.const 0
+    i32.const 32
+    i32.store
+    i32.const 4
+    i32.const 7
+    i32.store
+    i32.const 1
+    i32.const 0
+    i32.const 1
+    i32.const 16
+    call $__wasi_fd_write
+    drop
+    i32.const 0)
+"#
+}
+
+fn emit_wasi_stdin_runtime() -> &'static str {
+    r#"
+  ;; Read stdin and decode UTF-8 into Que's [Char] representation.
+  (func $__wasi_read_fd (param $fd i32) (result i32)
+    (local $out i32) (local $n i32) (local $i i32)
+    (local $b i32) (local $c i32) (local $needed i32)
+    i32.const 0
+    i32.const 0
+    call $vec_new_i32
+    local.set $out
+    block $done
+      loop $read
+        i32.const 0
+        i32.const 1024
+        i32.store
+        i32.const 4
+        i32.const 60000
+        i32.store
+        local.get $fd
+        i32.const 0
+        i32.const 1
+        i32.const 16
+        call $__wasi_fd_read
+        if unreachable end
+        i32.const 16
+        i32.load
+        local.tee $n
+        i32.eqz
+        br_if $done
+        i32.const 0
+        local.set $i
+        block $chunk_done
+          loop $decode
+            local.get $i
+            local.get $n
+            i32.ge_u
+            br_if $chunk_done
+            i32.const 1024
+            local.get $i
+            i32.add
+            i32.load8_u
+            local.set $b
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            local.get $needed
+            i32.eqz
+            if
+              local.get $b
+              i32.const 128
+              i32.lt_u
+              if
+                local.get $b
+                local.set $c
+              else
+                local.get $b
+                i32.const 224
+                i32.and
+                i32.const 192
+                i32.eq
+                if
+                  local.get $b
+                  i32.const 31
+                  i32.and
+                  local.set $c
+                  i32.const 1
+                  local.set $needed
+                else
+                  local.get $b
+                  i32.const 240
+                  i32.and
+                  i32.const 224
+                  i32.eq
+                  if
+                    local.get $b
+                    i32.const 15
+                    i32.and
+                    local.set $c
+                    i32.const 2
+                    local.set $needed
+                  else
+                    local.get $b
+                    i32.const 7
+                    i32.and
+                    local.set $c
+                    i32.const 3
+                    local.set $needed
+                  end
+                end
+              end
+            else
+              local.get $c
+              i32.const 6
+              i32.shl
+              local.get $b
+              i32.const 63
+              i32.and
+              i32.or
+              local.set $c
+              local.get $needed
+              i32.const 1
+              i32.sub
+              local.set $needed
+            end
+            local.get $needed
+            i32.eqz
+            if
+              local.get $out
+              local.get $c
+              call $vec_push_i32
+              drop
+            end
+            br $decode
+          end
+        end
+        br $read
+      end
+    end
+    local.get $out)
+  (func $v_stdin_bang_ (result i32)
+    i32.const 0
+    call $__wasi_read_fd)
+"#
+}
+
+fn emit_wasi_argv_runtime() -> &'static str {
+    r#"
+  (func $__wasi_init_argv (result i32)
+    (local $argc i32) (local $size i32) (local $table i32) (local $bytes i32)
+    (local $outer i32) (local $inner i32) (local $arg i32) (local $p i32)
+    (local $b i32) (local $c i32) (local $needed i32)
+    i32.const 0
+    i32.const 4
+    call $__wasi_args_sizes_get
+    if unreachable end
+    i32.const 0
+    i32.load
+    local.set $argc
+    i32.const 4
+    i32.load
+    local.set $size
+    local.get $argc
+    i32.const 4
+    i32.mul
+    call $alloc
+    local.set $table
+    local.get $size
+    call $alloc
+    local.set $bytes
+    local.get $table
+    local.get $bytes
+    call $__wasi_args_get
+    if unreachable end
+    i32.const 0
+    i32.const 1
+    call $vec_new_i32
+    local.set $outer
+    i32.const 1
+    local.set $arg
+    block $done
+      loop $args
+        local.get $arg
+        local.get $argc
+        i32.ge_u
+        br_if $done
+        i32.const 0
+        i32.const 0
+        call $vec_new_i32
+        local.set $inner
+        local.get $table
+        local.get $arg
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.load
+        local.set $p
+        i32.const 0
+        local.set $needed
+        block $string_done
+          loop $chars
+            local.get $p
+            i32.load8_u
+            local.tee $b
+            i32.eqz
+            br_if $string_done
+            local.get $p
+            i32.const 1
+            i32.add
+            local.set $p
+            local.get $needed
+            i32.eqz
+            if
+              local.get $b
+              i32.const 128
+              i32.lt_u
+              if
+                local.get $b
+                local.set $c
+              else
+                local.get $b
+                i32.const 224
+                i32.and
+                i32.const 192
+                i32.eq
+                if
+                  local.get $b
+                  i32.const 31
+                  i32.and
+                  local.set $c
+                  i32.const 1
+                  local.set $needed
+                else
+                  local.get $b
+                  i32.const 240
+                  i32.and
+                  i32.const 224
+                  i32.eq
+                  if
+                    local.get $b
+                    i32.const 15
+                    i32.and
+                    local.set $c
+                    i32.const 2
+                    local.set $needed
+                  else
+                    local.get $b
+                    i32.const 7
+                    i32.and
+                    local.set $c
+                    i32.const 3
+                    local.set $needed
+                  end
+                end
+              end
+            else
+              local.get $c
+              i32.const 6
+              i32.shl
+              local.get $b
+              i32.const 63
+              i32.and
+              i32.or
+              local.set $c
+              local.get $needed
+              i32.const 1
+              i32.sub
+              local.set $needed
+            end
+            local.get $needed
+            i32.eqz
+            if
+              local.get $inner
+              local.get $c
+              call $vec_push_i32
+              drop
+            end
+            br $chars
+          end
+        end
+        local.get $outer
+        local.get $inner
+        call $vec_push_i32
+        drop
+        local.get $inner
+        call $rc_release_vec
+        drop
+        local.get $arg
+        i32.const 1
+        i32.add
+        local.set $arg
+        br $args
+      end
+    end
+    local.get $outer
+    global.set $argv_ptr
+    i32.const 0)
+"#
+}
+
+fn emit_wasi_file_runtime(has_read: bool, has_write: bool) -> String {
+    let mut out = String::from(
+        r#"
+  ;; Encode a Que [Char] path as UTF-8 at scratch address 1024.
+  (func $__wasi_encode_path (param $path i32) (result i32)
+    (local $len i32) (local $data i32) (local $i i32)
+    (local $p i32) (local $c i32)
+    local.get $path
+    i32.load
+    local.set $len
+    local.get $path
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    i32.const 1024
+    local.set $p
+    block $done
+      loop $chars
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+        local.get $data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.load
+        local.set $c
+        local.get $c
+        i32.const 128
+        i32.lt_u
+        if
+          local.get $p
+          local.get $c
+          i32.store8
+          local.get $p
+          i32.const 1
+          i32.add
+          local.set $p
+        else
+          local.get $c
+          i32.const 2048
+          i32.lt_u
+          if
+            local.get $p
+            local.get $c
+            i32.const 6
+            i32.shr_u
+            i32.const 192
+            i32.or
+            i32.store8
+            local.get $p
+            i32.const 1
+            i32.add
+            local.get $c
+            i32.const 63
+            i32.and
+            i32.const 128
+            i32.or
+            i32.store8
+            local.get $p
+            i32.const 2
+            i32.add
+            local.set $p
+          else
+            local.get $c
+            i32.const 65536
+            i32.lt_u
+            if
+              local.get $p
+              local.get $c
+              i32.const 12
+              i32.shr_u
+              i32.const 224
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 1
+              i32.add
+              local.get $c
+              i32.const 6
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 2
+              i32.add
+              local.get $c
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 3
+              i32.add
+              local.set $p
+            else
+              local.get $p
+              local.get $c
+              i32.const 18
+              i32.shr_u
+              i32.const 240
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 1
+              i32.add
+              local.get $c
+              i32.const 12
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 2
+              i32.add
+              local.get $c
+              i32.const 6
+              i32.shr_u
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 3
+              i32.add
+              local.get $c
+              i32.const 63
+              i32.and
+              i32.const 128
+              i32.or
+              i32.store8
+              local.get $p
+              i32.const 4
+              i32.add
+              local.set $p
+            end
+          end
+        end
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $chars
+      end
+    end
+    local.get $p
+    i32.const 1024
+    i32.sub)
+"#,
+    );
+    if has_read {
+        out.push_str(
+            r#"
+  (func $v_read_bang_ (param $path i32) (result i32)
+    (local $len i32) (local $fd i32) (local $result i32)
+    local.get $path
+    call $__wasi_encode_path
+    local.set $len
+    i32.const 3
+    i32.const 0
+    i32.const 1024
+    local.get $len
+    i32.const 0
+    i64.const 2
+    i64.const 0
+    i32.const 0
+    i32.const 16
+    call $__wasi_path_open
+    if unreachable end
+    i32.const 16
+    i32.load
+    local.tee $fd
+    call $__wasi_read_fd
+    local.set $result
+    local.get $fd
+    call $__wasi_fd_close
+    drop
+    local.get $result)
+"#,
+        );
+    }
+    if has_write {
+        out.push_str(
+            r#"
+  (func $v_write_bang_ (param $path i32) (param $text i32) (result i32)
+    (local $len i32) (local $fd i32)
+    local.get $path
+    call $__wasi_encode_path
+    local.set $len
+    i32.const 3
+    i32.const 0
+    i32.const 1024
+    local.get $len
+    i32.const 9
+    i64.const 64
+    i64.const 0
+    i32.const 0
+    i32.const 16
+    call $__wasi_path_open
+    if unreachable end
+    i32.const 16
+    i32.load
+    local.tee $fd
+    local.get $text
+    call $__wasi_write_text
+    drop
+    local.get $fd
+    call $__wasi_fd_close
+    drop
+    i32.const 0)
+"#,
+        );
+    }
+    out
+}
+
+fn emit_wasi_path_mutation_runtime(has_mkdir: bool, has_delete: bool, has_move: bool) -> String {
+    let mut out = String::new();
+    if has_mkdir {
+        out.push_str(
+            r#"
+  (func $v_mkdir_bang_ (param $path i32) (result i32)
+    (local $len i32) (local $i i32) (local $result i32)
+    local.get $path
+    call $__wasi_encode_path
+    local.set $len
+    i32.const 1
+    local.set $i
+    block $parents_done
+      loop $parents
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $parents_done
+        i32.const 1024
+        local.get $i
+        i32.add
+        i32.load8_u
+        i32.const 47
+        i32.eq
+        if
+          i32.const 3
+          i32.const 1024
+          local.get $i
+          call $__wasi_path_create_directory
+          local.tee $result
+          i32.const 0
+          i32.ne
+          local.get $result
+          i32.const 20
+          i32.ne
+          i32.and
+          if unreachable end
+        end
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $parents
+      end
+    end
+    i32.const 3
+    i32.const 1024
+    local.get $len
+    call $__wasi_path_create_directory
+    local.tee $result
+    i32.const 20
+    i32.ne
+    local.get $result
+    i32.const 0
+    i32.ne
+    i32.and
+    if unreachable end
+    i32.const 0)
+"#,
+        );
+    }
+    if has_delete {
+        out.push_str(
+            r#"
+  (func $v_delete_bang_ (param $path i32) (result i32)
+    (local $len i32) (local $entries i32) (local $count i32) (local $edata i32)
+    (local $i i32) (local $name i32) (local $child i32)
+    (local $plen i32) (local $pdata i32) (local $nlen i32) (local $ndata i32) (local $j i32)
+    local.get $path
+    call $__wasi_encode_path
+    local.set $len
+    i32.const 3
+    i32.const 1024
+    local.get $len
+    call $__wasi_path_unlink_file
+    i32.eqz
+    if i32.const 0 return end
+    local.get $path call $v_list_dash_dir_bang_ local.tee $entries
+    i32.load local.set $count
+    local.get $entries i32.const 16 i32.add i32.load local.set $edata
+    local.get $path i32.load local.set $plen
+    local.get $path i32.const 16 i32.add i32.load local.set $pdata
+    block $children_done loop $children
+      local.get $i local.get $count i32.ge_u br_if $children_done
+      local.get $edata local.get $i i32.const 4 i32.mul i32.add i32.load local.tee $name
+      i32.load local.set $nlen
+      local.get $name i32.const 16 i32.add i32.load local.set $ndata
+      i32.const 0 i32.const 0 call $vec_new_i32 local.set $child
+      i32.const 0 local.set $j
+      block $path_done loop $copy_path
+        local.get $j local.get $plen i32.ge_u br_if $path_done
+        local.get $child local.get $pdata local.get $j i32.const 4 i32.mul i32.add i32.load
+        call $vec_push_i32 drop
+        local.get $j i32.const 1 i32.add local.set $j br $copy_path
+      end end
+      local.get $plen i32.eqz
+      if local.get $child i32.const 47 call $vec_push_i32 drop
+      else
+        local.get $pdata local.get $plen i32.const 1 i32.sub i32.const 4 i32.mul i32.add i32.load
+        i32.const 47 i32.ne
+        if local.get $child i32.const 47 call $vec_push_i32 drop end
+      end
+      i32.const 0 local.set $j
+      block $name_done loop $copy_name
+        local.get $j local.get $nlen i32.ge_u br_if $name_done
+        local.get $child local.get $ndata local.get $j i32.const 4 i32.mul i32.add i32.load
+        call $vec_push_i32 drop
+        local.get $j i32.const 1 i32.add local.set $j br $copy_name
+      end end
+      local.get $child call $v_delete_bang_ drop
+      local.get $child call $rc_release_vec drop
+      local.get $i i32.const 1 i32.add local.set $i br $children
+    end end
+    local.get $entries call $rc_release_vec drop
+    local.get $path call $__wasi_encode_path local.set $len
+    i32.const 3 i32.const 1024 local.get $len call $__wasi_path_remove_directory
+    if unreachable end
+    i32.const 0)
+"#,
+        );
+    }
+    if has_move {
+        out.push_str(
+            r#"
+  (func $v_move_bang_ (param $src i32) (param $dst i32) (result i32)
+    (local $src_len i32) (local $dst_len i32)
+    local.get $src
+    call $__wasi_encode_path
+    local.set $src_len
+    i32.const 32768
+    i32.const 1024
+    local.get $src_len
+    memory.copy
+    local.get $dst
+    call $__wasi_encode_path
+    local.set $dst_len
+    i32.const 3
+    i32.const 32768
+    local.get $src_len
+    i32.const 3
+    i32.const 1024
+    local.get $dst_len
+    call $__wasi_path_rename
+    if unreachable end
+    i32.const 0)
+"#,
+        );
+    }
+    out
+}
+
+fn emit_wasi_chunk_runtime(
+    has_file_chunks: bool,
+    has_stdin_chunks: bool,
+    has_lines: bool,
+) -> String {
+    let mut out = String::from(
+        r#"
+  (func $__wasi_chunks (param $text i32) (param $size i32) (param $callback i32) (result i32)
+    (local $len i32) (local $data i32) (local $i i32) (local $j i32)
+    (local $chunk i32) (local $stop i32)
+    local.get $size
+    i32.const 0
+    i32.le_s
+    if unreachable end
+    local.get $text
+    i32.load
+    local.set $len
+    local.get $text
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    block $done
+      loop $outer
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+        i32.const 0
+        i32.const 0
+        call $vec_new_i32
+        local.set $chunk
+        i32.const 0
+        local.set $j
+        block $chunk_done
+          loop $copy
+            local.get $j
+            local.get $size
+            i32.ge_u
+            br_if $chunk_done
+            local.get $i
+            local.get $len
+            i32.ge_u
+            br_if $chunk_done
+            local.get $chunk
+            local.get $data
+            local.get $i
+            i32.const 4
+            i32.mul
+            i32.add
+            i32.load
+            call $vec_push_i32
+            drop
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            local.get $j
+            i32.const 1
+            i32.add
+            local.set $j
+            br $copy
+          end
+        end
+        local.get $callback
+        local.get $chunk
+        call $apply1_i32
+        local.set $stop
+        local.get $chunk
+        call $rc_release_vec
+        drop
+        local.get $stop
+        if
+          i32.const 1
+          return
+        end
+        br $outer
+      end
+    end
+    i32.const 0)
+"#,
+    );
+    if has_file_chunks {
+        out.push_str(
+            r#"
+  (func $v_read_slash_chunks_bang_ (param $path i32) (param $size i32) (param $callback i32) (result i32)
+    (local $text i32) (local $result i32)
+    local.get $path
+    call $v_read_bang_
+    local.set $text
+    local.get $text
+    local.get $size
+    local.get $callback
+    call $__wasi_chunks
+    local.set $result
+    local.get $text
+    call $rc_release_vec
+    drop
+    local.get $result)
+"#,
+        );
+    }
+    if has_stdin_chunks {
+        out.push_str(
+            r#"
+  (func $v_stdin_slash_chunks_bang_ (param $size i32) (param $callback i32) (result i32)
+    (local $text i32) (local $result i32)
+    call $v_stdin_bang_
+    local.set $text
+    local.get $text
+    local.get $size
+    local.get $callback
+    call $__wasi_chunks
+    local.set $result
+    local.get $text
+    call $rc_release_vec
+    drop
+    local.get $result)
+"#,
+        );
+    }
+    if has_lines {
+        out.push_str(
+            r#"
+  (func $v_read_slash_lines_bang_ (param $path i32) (param $callback i32) (result i32)
+    (local $text i32) (local $len i32) (local $data i32) (local $i i32)
+    (local $line i32) (local $c i32) (local $stop i32)
+    local.get $path
+    call $v_read_bang_
+    local.tee $text
+    i32.load
+    local.set $len
+    local.get $text
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $data
+    block $done
+      loop $lines
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+        i32.const 0
+        i32.const 0
+        call $vec_new_i32
+        local.set $line
+        block $line_done
+          loop $chars
+            local.get $i
+            local.get $len
+            i32.ge_u
+            br_if $line_done
+            local.get $data
+            local.get $i
+            i32.const 4
+            i32.mul
+            i32.add
+            i32.load
+            local.set $c
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            local.get $c
+            i32.const 10
+            i32.eq
+            br_if $line_done
+            local.get $line
+            local.get $c
+            call $vec_push_i32
+            drop
+            br $chars
+          end
+        end
+        local.get $line
+        i32.load
+        i32.const 0
+        i32.gt_u
+        if
+          local.get $line
+          i32.const 16
+          i32.add
+          i32.load
+          local.get $line
+          i32.load
+          i32.const 1
+          i32.sub
+          i32.const 4
+          i32.mul
+          i32.add
+          i32.load
+          i32.const 13
+          i32.eq
+          if
+            local.get $line
+            call $vec_pop_i32
+            drop
+          end
+        end
+        local.get $callback
+        local.get $line
+        call $apply1_i32
+        local.set $stop
+        local.get $line
+        call $rc_release_vec
+        drop
+        local.get $stop
+        if
+          local.get $text
+          call $rc_release_vec
+          drop
+          i32.const 1
+          return
+        end
+        br $lines
+      end
+    end
+    local.get $text
+    call $rc_release_vec
+    drop
+    i32.const 0)
+"#,
+        );
+    }
+    out
+}
+
+fn emit_wasi_list_dir_runtime() -> &'static str {
+    include_str!("wasi_list_dir.wat")
+}
+
 fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     fn emit_int_div_zero_check(rhs_local: usize) -> String {
         format!(
@@ -10384,6 +11579,142 @@ fn emit_type_descriptor(typ: &Type, vec_slot: usize, data_slot: usize) -> String
     out.join("\n")
 }
 
+fn wasi_serde_name(typ: &Type) -> String {
+    abi_type_descriptor(typ)
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn wasi_append_literal(out: &str, text: &str) -> String {
+    text.chars()
+        .map(|ch| {
+            format!(
+                "local.get {out}\ni32.const {}\ncall $vec_push_i32\ndrop",
+                u32::from(ch)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<String, String> {
+    let name = wasi_serde_name(typ);
+    if !emitted.insert(name.clone()) {
+        return Ok(String::new());
+    }
+    let function = match typ {
+        Type::Int => format!("  (func $__wasi_serialize_{name} (param i32) (result i32)\n    local.get 0\n    call $__serde_int)\n"),
+        Type::Dec => format!("  (func $__wasi_serialize_{name} (param i32) (result i32)\n    local.get 0\n    call $__serde_dec)\n"),
+        Type::List(inner) if matches!(inner.as_ref(), Type::Char) => format!("  (func $__wasi_serialize_{name} (param i32) (result i32)\n    local.get 0\n    call $__serde_string)\n"),
+        Type::Bool | Type::Unit | Type::Char => {
+            let mut body = String::from("    (local $out i32) (local $tmp i32)\n    i32.const 0\n    i32.const 0\n    call $vec_new_i32\n    local.set $out\n");
+            match typ {
+                Type::Bool => body.push_str(&format!("    local.get 0\n    if\n{}\n    else\n{}\n    end\n", wasi_append_literal("$out", "true").replace('\n', "\n      "), wasi_append_literal("$out", "false").replace('\n', "\n      "))),
+                Type::Unit => body.push_str(&format!("    {}\n", wasi_append_literal("$out", "nil").replace('\n', "\n    "))),
+                Type::Char => body.push_str(&format!("    {}\n    local.get 0\n    call $__serde_int\n    local.set $tmp\n    local.get $out\n    local.get $tmp\n    call $__serde_append\n    local.get $tmp\n    call $rc_release_vec\n    drop\n    {}\n", wasi_append_literal("$out", "(char ").replace('\n', "\n    "), wasi_append_literal("$out", ")").replace('\n', "\n    "))),
+                _ => unreachable!(),
+            }
+            body.push_str("    local.get $out)\n");
+            format!("  (func $__wasi_serialize_{name} (param i32) (result i32)\n{body}")
+        }
+        Type::List(inner) => {
+            let child = wasi_serde_name(inner);
+            let nested = emit_wasi_serializer(inner, emitted)?;
+            format!("{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $len i32) (local $data i32) (local $i i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    local.get $out i32.const 91 call $vec_push_i32 drop\n    local.get $value i32.load local.set $len\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n    block $done loop $items\n      local.get $i local.get $len i32.ge_u br_if $done\n      local.get $i i32.const 0 i32.gt_u if local.get $out i32.const 32 call $vec_push_i32 drop end\n      local.get $data local.get $i i32.const 4 i32.mul i32.add i32.load call $__wasi_serialize_{child} local.set $tmp\n      local.get $out local.get $tmp call $__serde_append\n      local.get $tmp call $rc_release_vec drop\n      local.get $i i32.const 1 i32.add local.set $i br $items\n    end end\n    local.get $out i32.const 93 call $vec_push_i32 drop\n    local.get $out)\n")
+        }
+        Type::Tuple(parts) => {
+            let mut nested = String::new();
+            for part in parts { nested.push_str(&emit_wasi_serializer(part, emitted)?); }
+            let mut fields = String::new();
+            for (index, part) in parts.iter().enumerate() {
+                fields.push_str(&format!("    local.get $data i32.const {} i32.add i32.load call $__wasi_serialize_{} local.set $tmp\n    local.get $out local.get $tmp call $__serde_append\n    local.get $tmp call $rc_release_vec drop\n", index * 4, wasi_serde_name(part)));
+                if index + 1 < parts.len() { fields.push_str("    local.get $out i32.const 32 call $vec_push_i32 drop\n"); }
+            }
+            format!("{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $data i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    local.get $out i32.const 123 call $vec_push_i32 drop\n    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n{fields}    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $out i32.const 125 call $vec_push_i32 drop\n    local.get $out)\n")
+        }
+        Type::Var(_) => format!("  (func $__wasi_serialize_{name} (param i32) (result i32)\n    local.get 0\n    call $__serde_int)\n"),
+        Type::Function(_, _) => return Err("unsupported WASI serialization type".into()),
+    };
+    Ok(function)
+}
+
+fn collect_wasi_serialize_types(node: &TypedExpression, out: &mut Vec<Type>) {
+    if let Expression::Apply(items) = &node.expr {
+        if matches!(items.first(), Some(Expression::Word(op)) if op == "serialize") {
+            if let Some(typ) = node.children.get(1).and_then(|arg| arg.typ.clone()) {
+                if !out.iter().any(|existing| existing == &typ) {
+                    out.push(typ);
+                }
+            }
+        }
+    }
+    for child in &node.children {
+        collect_wasi_serialize_types(child, out);
+    }
+}
+
+fn wasi_expect_literal(text: &str) -> String {
+    let mut out = String::from("call $__deser_ws\n");
+    for ch in text.chars() {
+        out.push_str(&format!(
+            "call $__deser_get\ni32.const {}\ni32.ne\nif unreachable end\n",
+            u32::from(ch)
+        ));
+    }
+    out
+}
+
+fn emit_wasi_deserializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<String, String> {
+    let name = wasi_serde_name(typ);
+    if !emitted.insert(name.clone()) {
+        return Ok(String::new());
+    }
+    let function = match typ {
+        Type::Int => format!("  (func $__wasi_deserialize_{name} (result i32) call $__deser_int)\n"),
+        Type::Dec => format!("  (func $__wasi_deserialize_{name} (result i32) call $__deser_dec)\n"),
+        Type::List(inner) if matches!(inner.as_ref(), Type::Char) => format!("  (func $__wasi_deserialize_{name} (result i32) call $__deser_string)\n"),
+        Type::Bool => format!("  (func $__wasi_deserialize_{name} (result i32)\n    call $__deser_ws\n    call $__deser_peek\n    i32.const 116\n    i32.eq\n    if (result i32)\n{}      i32.const 1\n    else\n{}      i32.const 0\n    end)\n", wasi_expect_literal("true").replace('\n', "\n      "), wasi_expect_literal("false").replace('\n', "\n      ")),
+        Type::Unit => format!("  (func $__wasi_deserialize_{name} (result i32)\n    {}    i32.const 0)\n", wasi_expect_literal("nil").replace('\n', "\n    ")),
+        Type::Char => format!("  (func $__wasi_deserialize_{name} (result i32)\n    {}    call $__deser_int\n    i32.const 41\n    call $__deser_expect)\n", wasi_expect_literal("(char ").replace('\n', "\n    ")),
+        Type::List(inner) => {
+            let child = wasi_serde_name(inner);
+            let nested = emit_wasi_deserializer(inner, emitted)?;
+            let elem_ref = i32::from(is_ref_type(inner));
+            let release = if is_ref_type(inner) { "local.get $item\n      call $rc_release\n      drop" } else { "" };
+            format!("{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $item i32)\n    i32.const 91 call $__deser_expect\n    i32.const 0 i32.const {elem_ref} call $vec_new_i32 local.set $out\n    block $done loop $items\n      call $__deser_ws\n      call $__deser_peek i32.const 93 i32.eq br_if $done\n      call $__wasi_deserialize_{child} local.set $item\n      local.get $out local.get $item call $vec_push_i32 drop\n      {release}\n      br $items\n    end end\n    i32.const 93 call $__deser_expect\n    local.get $out)\n")
+        }
+        Type::Tuple(parts) => {
+            let mut nested = String::new();
+            for part in parts { nested.push_str(&emit_wasi_deserializer(part, emitted)?); }
+            let mut fields = String::new();
+            for part in parts {
+                fields.push_str(&format!("    call $__wasi_deserialize_{} local.set $item\n    local.get $out local.get $item call $vec_push_i32 drop\n", wasi_serde_name(part)));
+                if is_ref_type(part) { fields.push_str("    local.get $item call $rc_release drop\n"); }
+            }
+            format!("{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $item i32)\n    i32.const 123 call $__deser_expect\n    i32.const 0 i32.const 1 call $vec_new_i32 local.set $out\n{fields}    i32.const 125 call $__deser_expect\n    local.get $out)\n")
+        }
+        Type::Var(_) | Type::Function(_, _) => return Err("unsupported WASI deserialization type".into()),
+    };
+    Ok(function)
+}
+
+fn collect_wasi_deserialize_types(node: &TypedExpression, out: &mut Vec<Type>) {
+    if let Expression::Apply(items) = &node.expr {
+        if matches!(items.first(), Some(Expression::Word(op)) if op == "deserialize") {
+            if let Some(typ) = node.typ.clone() {
+                if !out.iter().any(|existing| existing == &typ) {
+                    out.push(typ);
+                }
+            }
+        }
+    }
+    for child in &node.children {
+        collect_wasi_deserialize_types(child, out);
+    }
+}
+
 fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result<String, String> {
     let arg = node
         .children
@@ -10447,6 +11778,40 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
         tmp_i32: ctx.tmp_i32 + 4,
     };
     let arg_code = compile_expr(arg, &nested_ctx)?;
+    let wasi_host = wasi_bool("QUE_WASI_HOST");
+    if wasi_host && op == "serialize" {
+        let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
+        let mut out = vec![
+            format!("{arg_code}\nlocal.set {arg_slot}"),
+            format!(
+                "local.get {arg_slot}\ncall $__wasi_serialize_{}\nlocal.set {result_slot}",
+                wasi_serde_name(value_type)
+            ),
+        ];
+        if release_arg {
+            out.push(format!(
+                "local.get {arg_slot}\ncall {}\ndrop",
+                rc_release_for_opt_type(arg.typ.as_ref())
+            ));
+        }
+        out.push(format!("local.get {result_slot}"));
+        return Ok(out.join("\n"));
+    }
+    if wasi_host && op == "deserialize" {
+        let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
+        let mut out = vec![
+            format!("{arg_code}\nlocal.set {arg_slot}"),
+            format!(
+                "local.get {arg_slot}\ncall $__deser_begin\ncall $__wasi_deserialize_{}\nlocal.set {result_slot}\ncall $__deser_ws\ncall $__deser_peek\ni32.const -1\ni32.ne\nif unreachable end",
+                wasi_serde_name(value_type)
+            ),
+        ];
+        if release_arg {
+            out.push(format!("local.get {arg_slot}\ncall $rc_release_vec\ndrop"));
+        }
+        out.push(format!("local.get {result_slot}"));
+        return Ok(out.join("\n"));
+    }
     let type_code = emit_type_descriptor(value_type, type_slot, type_data_slot);
     let host_name = if op == "serialize" {
         "$__que_serialize"
@@ -12931,6 +14296,10 @@ fn compile_program_to_wat_build_typed_with_opts(
         collect_apply_arities_from_code(func, &mut apply_arities);
     }
     collect_apply_arities_from_code(&main_code, &mut apply_arities);
+    let uses_argv = main_code.contains("call $__argv_get")
+        || emitted_funcs
+            .iter()
+            .any(|func| func.contains("call $__argv_get"));
     if extern_names.contains("read/chunks!")
         || extern_names.contains("stdin/chunks!")
         || extern_names.contains("read/lines!")
@@ -12949,8 +14318,11 @@ fn compile_program_to_wat_build_typed_with_opts(
         "  ;; Type: {}\n",
         abi_type_descriptor(main_ret_ty)
     ));
+    let wasi_codegen = wasi_bool("QUE_WASI_HOST");
+    let wasi_no_result = wasi_bool("QUE_WASI_NO_RESULT");
+    let main_name = if wasi_codegen { "$__que_main " } else { "" };
     main_func.push_str(&format!(
-        "  (func (export \"main\") (result {main_wasm_ty})\n"
+        "  (func {main_name}(export \"main\") (result {main_wasm_ty})\n"
     ));
     for (_n, t) in &main_local_defs {
         main_func.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
@@ -12963,11 +14335,98 @@ fn compile_program_to_wat_build_typed_with_opts(
             main_borrowed_top_level_prelude.replace('\n', "\n    ")
         ));
     }
+    if wasi_codegen && uses_argv {
+        main_func.push_str("    call $__wasi_init_argv\n    drop\n");
+    }
     main_func.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
     main_func.push_str("  )\n");
+    if wasi_codegen {
+        if wasi_no_result {
+            main_func.push_str("  (func (export \"_start\")\n    call $__que_main\n    drop)\n");
+        } else {
+            let render = match main_ret_ty {
+                Type::List(inner) if matches!(inner.as_ref(), Type::Char) => {
+                    "local.get $text\n    local.get $value\n    call $__serde_append".to_string()
+                }
+                Type::Char => "local.get $text\n    local.get $value\n    call $vec_push_i32\n    drop".to_string(),
+                Type::Unit => "i32.const 0\n    call $__serde_int\n    local.set $tmp\n    local.get $text\n    local.get $tmp\n    call $__serde_append\n    local.get $tmp\n    call $rc_release_vec\n    drop".to_string(),
+                Type::Var(_) | Type::Function(_, _) => "local.get $value\n    call $__serde_int\n    local.set $tmp\n    local.get $text\n    local.get $tmp\n    call $__serde_append\n    local.get $tmp\n    call $rc_release_vec\n    drop".to_string(),
+                _ => format!("local.get $value\n    call $__wasi_serialize_{}\n    local.set $tmp\n    local.get $text\n    local.get $tmp\n    call $__serde_append\n    local.get $tmp\n    call $rc_release_vec\n    drop", wasi_serde_name(main_ret_ty)),
+            };
+            let release_value = if is_managed_local_type(main_ret_ty) {
+                format!(
+                    "local.get $value\n    call {}\n    drop\n    ",
+                    rc_release_for_type(main_ret_ty)
+                )
+            } else {
+                String::new()
+            };
+            main_func.push_str(&format!("  (func (export \"_start\")\n    (local $value i32) (local $text i32) (local $tmp i32)\n    call $__que_main\n    local.set $value\n    i32.const 0\n    i32.const 0\n    call $vec_new_i32\n    local.set $text\n    {render}\n    {release_value}local.get $text\n    i32.const 10\n    call $vec_push_i32\n    drop\n    i32.const 1\n    local.get $text\n    call $__wasi_write_text\n    drop\n    local.get $text\n    call $rc_release_vec\n    drop)\n"));
+        }
+    }
 
     let mut extern_imports = String::new();
+    let wasi_host = wasi_bool("QUE_WASI_HOST");
+    let wasi_prints_result = wasi_host && !wasi_no_result;
+    if wasi_host {
+        if let Some(raw_permissions) = wasi_allow() {
+            let mut permissions = raw_permissions
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<HashSet<_>>();
+            if permissions.contains("all") || permissions.contains("*") {
+                permissions.extend(["read", "stdin", "write", "print", "clock", "delete"]);
+            }
+            let required = [
+                ("list-dir!", "read"),
+                ("read!", "read"),
+                ("read/chunks!", "read"),
+                ("read/lines!", "read"),
+                ("stdin!", "stdin"),
+                ("stdin/chunks!", "stdin"),
+                ("write!", "write"),
+                ("mkdir!", "write"),
+                ("move!", "write"),
+                ("delete!", "delete"),
+                ("print!", "print"),
+                ("clear!", "print"),
+                ("sleep!", "clock"),
+                ("time!", "clock"),
+                ("random!", "clock"),
+            ];
+            for (operation, permission) in required {
+                if used_extern_defs.contains_key(operation) && !permissions.contains(permission) {
+                    return Err(format!(
+                        "{operation} requires --allow {permission} with the external WASI runtime"
+                    ));
+                }
+            }
+        }
+    }
     for extern_decl in used_extern_defs.values() {
+        if wasi_host
+            && matches!(
+                extern_decl.local_name.as_str(),
+                "print!"
+                    | "stdin!"
+                    | "read!"
+                    | "read/chunks!"
+                    | "read/lines!"
+                    | "stdin/chunks!"
+                    | "list-dir!"
+                    | "write!"
+                    | "mkdir!"
+                    | "delete!"
+                    | "move!"
+                    | "sleep!"
+                    | "time!"
+                    | "random!"
+                    | "clear!"
+            )
+        {
+            continue;
+        }
         let (params, ret) = fn_sigs
             .get(&extern_decl.local_name)
             .ok_or_else(|| format!("Missing extern signature for '{}'", extern_decl.local_name))?;
@@ -12982,6 +14441,79 @@ fn compile_program_to_wat_build_typed_with_opts(
             extern_imports.push_str(&format!(" (param {})", param));
         }
         extern_imports.push_str(&format!(" (result {})))\n", wasm_val_type(ret)?));
+    }
+    if wasi_host
+        && (wasi_prints_result
+            || used_extern_defs.contains_key("print!")
+            || used_extern_defs.contains_key("clear!")
+            || used_extern_defs.contains_key("write!"))
+    {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"fd_write\" (func $__wasi_fd_write (param i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("sleep!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"poll_oneoff\" (func $__wasi_poll_oneoff (param i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("time!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"clock_time_get\" (func $__wasi_clock_time_get (param i32 i64 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("random!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"random_get\" (func $__wasi_random_get (param i32 i32) (result i32)))\n",
+        );
+    }
+    let wasi_needs_file_read = used_extern_defs.contains_key("read!")
+        || used_extern_defs.contains_key("read/chunks!")
+        || used_extern_defs.contains_key("read/lines!");
+    let wasi_needs_stdin_read =
+        used_extern_defs.contains_key("stdin!") || used_extern_defs.contains_key("stdin/chunks!");
+    if wasi_host && (wasi_needs_stdin_read || wasi_needs_file_read) {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"fd_read\" (func $__wasi_fd_read (param i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && uses_argv {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"args_sizes_get\" (func $__wasi_args_sizes_get (param i32 i32) (result i32)))\n  (import \"wasi_snapshot_preview1\" \"args_get\" (func $__wasi_args_get (param i32 i32) (result i32)))\n",
+        );
+    }
+    let wasi_uses_path = wasi_needs_file_read
+        || used_extern_defs.contains_key("write!")
+        || used_extern_defs.contains_key("list-dir!")
+        || used_extern_defs.contains_key("mkdir!")
+        || used_extern_defs.contains_key("delete!")
+        || used_extern_defs.contains_key("move!");
+    if wasi_host && wasi_uses_path {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"path_open\" (func $__wasi_path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))\n  (import \"wasi_snapshot_preview1\" \"fd_close\" (func $__wasi_fd_close (param i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("mkdir!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"path_create_directory\" (func $__wasi_path_create_directory (param i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("delete!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"path_unlink_file\" (func $__wasi_path_unlink_file (param i32 i32 i32) (result i32)))\n  (import \"wasi_snapshot_preview1\" \"path_remove_directory\" (func $__wasi_path_remove_directory (param i32 i32 i32) (result i32)))\n",
+        );
+    }
+    if wasi_host && used_extern_defs.contains_key("move!") {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"path_rename\" (func $__wasi_path_rename (param i32 i32 i32 i32 i32 i32) (result i32)))\n",
+        );
+    }
+    let wasi_needs_list_dir =
+        used_extern_defs.contains_key("list-dir!") || used_extern_defs.contains_key("delete!");
+    if wasi_host && wasi_needs_list_dir {
+        extern_imports.push_str(
+            "  (import \"wasi_snapshot_preview1\" \"fd_readdir\" (func $__wasi_fd_readdir (param i32 i32 i32 i64 i32) (result i32)))\n",
+        );
     }
     let generated_code = emitted_funcs
         .iter()
@@ -12998,6 +14530,103 @@ fn compile_program_to_wat_build_typed_with_opts(
         extern_imports.push_str(
             "  (import \"host\" \"deserialize\" (func $__que_deserialize (param i32 i32) (result i32)))\n",
         );
+    }
+    // WebAssembly requires every import to precede every function definition.
+    if wasi_host
+        && (wasi_prints_result
+            || used_extern_defs.contains_key("print!")
+            || used_extern_defs.contains_key("write!"))
+    {
+        extern_imports.push_str(emit_wasi_print_runtime());
+    }
+    if wasi_host && used_extern_defs.contains_key("time!") {
+        extern_imports.push_str(emit_wasi_clock_runtime());
+    }
+    if wasi_host && used_extern_defs.contains_key("random!") {
+        extern_imports.push_str(emit_wasi_random_runtime());
+    }
+    if wasi_host && used_extern_defs.contains_key("sleep!") {
+        extern_imports.push_str(emit_wasi_sleep_runtime());
+    }
+    if wasi_host && used_extern_defs.contains_key("clear!") {
+        extern_imports.push_str(emit_wasi_clear_runtime());
+    }
+    if wasi_host && (wasi_needs_stdin_read || wasi_needs_file_read) {
+        extern_imports.push_str(emit_wasi_stdin_runtime());
+    }
+    if wasi_host && uses_argv {
+        extern_imports.push_str(emit_wasi_argv_runtime());
+    }
+    if wasi_host && wasi_uses_path {
+        extern_imports.push_str(&emit_wasi_file_runtime(
+            wasi_needs_file_read,
+            used_extern_defs.contains_key("write!"),
+        ));
+    }
+    if wasi_host && wasi_needs_list_dir {
+        extern_imports.push_str(emit_wasi_list_dir_runtime());
+    }
+    if wasi_host
+        && (used_extern_defs.contains_key("mkdir!")
+            || used_extern_defs.contains_key("delete!")
+            || used_extern_defs.contains_key("move!"))
+    {
+        extern_imports.push_str(&emit_wasi_path_mutation_runtime(
+            used_extern_defs.contains_key("mkdir!"),
+            used_extern_defs.contains_key("delete!"),
+            used_extern_defs.contains_key("move!"),
+        ));
+    }
+    if wasi_host
+        && (used_extern_defs.contains_key("read/chunks!")
+            || used_extern_defs.contains_key("stdin/chunks!")
+            || used_extern_defs.contains_key("read/lines!"))
+    {
+        extern_imports.push_str(&emit_wasi_chunk_runtime(
+            used_extern_defs.contains_key("read/chunks!"),
+            used_extern_defs.contains_key("stdin/chunks!"),
+            used_extern_defs.contains_key("read/lines!"),
+        ));
+    }
+    if wasi_host && (wasi_prints_result || generated_code.contains("call $__wasi_serialize_")) {
+        let scale = decimal_scale_i64();
+        let digits = scale.to_string().len().saturating_sub(1);
+        extern_imports.push_str(
+            &include_str!("wasi_serialize.wat")
+                .replace("__DEC_SCALE__", &scale.to_string())
+                .replace("__DEC_DIGITS__", &digits.to_string()),
+        );
+        let mut types = Vec::new();
+        collect_wasi_serialize_types(typed_ast, &mut types);
+        if wasi_prints_result
+            && !matches!(
+                main_ret_ty,
+                Type::Char | Type::Unit | Type::Var(_) | Type::Function(_, _)
+            )
+            && !matches!(main_ret_ty, Type::List(inner) if matches!(inner.as_ref(), Type::Char))
+            && !types.iter().any(|existing| existing == main_ret_ty)
+        {
+            types.push(main_ret_ty.clone());
+        }
+        let mut emitted = HashSet::new();
+        for typ in types {
+            extern_imports.push_str(&emit_wasi_serializer(&typ, &mut emitted)?);
+        }
+    }
+    if wasi_host && generated_code.contains("call $__wasi_deserialize_") {
+        let scale = decimal_scale_i64();
+        let digits = scale.to_string().len().saturating_sub(1);
+        extern_imports.push_str(
+            &include_str!("wasi_deserialize.wat")
+                .replace("__DEC_SCALE__", &scale.to_string())
+                .replace("__DEC_DIGITS__", &digits.to_string()),
+        );
+        let mut types = Vec::new();
+        collect_wasi_deserialize_types(typed_ast, &mut types);
+        let mut emitted = HashSet::new();
+        for typ in types {
+            extern_imports.push_str(&emit_wasi_deserializer(&typ, &mut emitted)?);
+        }
     }
 
     let mut cached_globals = String::new();

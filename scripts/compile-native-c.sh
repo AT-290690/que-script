@@ -10,7 +10,10 @@ input_file="$1"
 output_dir="${2:-build}"
 script_dir="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 repo_dir="$(CDPATH= cd -- "$script_dir/.." && pwd)"
-native_host_dir="$repo_dir/miscs/native-c"
+native_host_dir="${QUEC_NATIVE_HOST_DIR:-$repo_dir/miscs/native-c}"
+if [ -z "${QUEC_NATIVE_HOST_DIR:-}" ] && [ -d "$script_dir/native-c" ]; then
+  native_host_dir="$script_dir/native-c"
+fi
 module_name="main"
 wasm_file="$output_dir/$module_name.wasm"
 c_file="$output_dir/$module_name.c"
@@ -37,42 +40,41 @@ else
   cc_bin="cc"
 fi
 
-if command -v quec >/dev/null 2>&1; then
-  quec_bin="quec"
-elif [ -x "$repo_dir/target/release/quec" ]; then
-  quec_bin="$repo_dir/target/release/quec"
-elif [ -x "$repo_dir/target/debug/quec" ]; then
-  quec_bin="$repo_dir/target/debug/quec"
+if [ -n "${QUE_COMPILER:-}" ]; then
+  que_bin="$QUE_COMPILER"
+elif [ -n "${QUEC_COMPILER:-}" ]; then
+  que_bin="$QUEC_COMPILER"
+elif command -v que >/dev/null 2>&1; then
+  que_bin="que"
+elif [ -x "$repo_dir/target/release/que" ]; then
+  que_bin="$repo_dir/target/release/que"
+elif [ -x "$repo_dir/target/debug/que" ]; then
+  que_bin="$repo_dir/target/debug/que"
 else
-  echo "error: quec not found in PATH or $repo_dir/target/{release,debug}/quec" >&2
+  echo "error: que not found in PATH or $repo_dir/target/{release,debug}/que" >&2
   exit 1
 fi
 
 mkdir -p "$output_dir"
 
-type_probe_bin="que"
-if ! command -v "$type_probe_bin" >/dev/null 2>&1; then
-  type_probe_bin="$quec_bin"
-fi
-
-result_type="$("$type_probe_bin" "$input_file" --emit types | sed -n 's/^result : //p' | tail -n 1)"
+result_type="$("$que_bin" "$input_file" --emit types | sed -n 's/^result : //p' | tail -n 1)"
 if [ -z "$result_type" ]; then
   echo "error: could not determine Que result type" >&2
   exit 1
 fi
 
-QUE_WASM_OPT="${QUE_WASM_OPT:-speed}" \
-QUE_DEVIRTUALIZE="${QUE_DEVIRTUALIZE:-aggressive}" \
-QUE_TCO="${QUE_TCO:-off}" \
-QUE_SMALL_SCALAR_INLINE_COST="${QUE_SMALL_SCALAR_INLINE_COST:-512}" \
-QUE_LOOP_UNROLL_MAX="${QUE_LOOP_UNROLL_MAX:-16}" \
-QUE_LOOP_UNROLL_COST="${QUE_LOOP_UNROLL_COST:-2000}" \
-QUE_BOUNDS_CHECK="${QUE_BOUNDS_CHECK:-0}" \
-QUE_INT_OVERFLOW_CHECK="${QUE_INT_OVERFLOW_CHECK:-0}" \
-QUE_DEC_OVERFLOW_CHECK="${QUE_DEC_OVERFLOW_CHECK:-0}" \
-QUE_DIV_ZERO_CHECK="${QUE_DIV_ZERO_CHECK:-0}" \
-QUE_VEC_MIN_CAP="${QUE_VEC_MIN_CAP:-8}" \
-"$quec_bin" "$input_file" > "$wasm_file"
+export QUE_WASM_OPT="${QUE_WASM_OPT:-speed}"
+export QUE_DEVIRTUALIZE="${QUE_DEVIRTUALIZE:-aggressive}"
+export QUE_TCO="${QUE_TCO:-off}"
+export QUE_SMALL_SCALAR_INLINE_COST="${QUE_SMALL_SCALAR_INLINE_COST:-512}"
+export QUE_LOOP_UNROLL_MAX="${QUE_LOOP_UNROLL_MAX:-16}"
+export QUE_LOOP_UNROLL_COST="${QUE_LOOP_UNROLL_COST:-2000}"
+export QUE_BOUNDS_CHECK="${QUE_BOUNDS_CHECK:-0}"
+export QUE_INT_OVERFLOW_CHECK="${QUE_INT_OVERFLOW_CHECK:-0}"
+export QUE_DEC_OVERFLOW_CHECK="${QUE_DEC_OVERFLOW_CHECK:-0}"
+export QUE_DIV_ZERO_CHECK="${QUE_DIV_ZERO_CHECK:-0}"
+export QUE_VEC_MIN_CAP="${QUE_VEC_MIN_CAP:-8}"
+"$que_bin" compile "$input_file" --out "$wasm_file"
 wasm2c "$wasm_file" -n "$module_name" -o "$c_file"
 
 if grep -q 'struct w2c_host' "$output_dir/$module_name.h"; then

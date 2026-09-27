@@ -750,11 +750,8 @@ fn make_static_analysis_warning(
     let message = finding.message;
     let snippet = native_core::static_analysis_diagnostic_snippet(&message);
     let display_message = native_core::static_analysis_diagnostic_summary(&message);
-    let precise_ranges = native_core::static_analysis_diagnostic_ranges(
-        text,
-        &message,
-        finding.user_form_index,
-    );
+    let precise_ranges =
+        native_core::static_analysis_diagnostic_ranges(text, &message, finding.user_form_index);
     let mut diagnostics = if precise_ranges.is_empty() {
         make_error_diagnostic(text, display_message.clone(), None, snippet.as_deref())
     } else {

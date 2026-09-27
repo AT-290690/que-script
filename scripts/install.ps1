@@ -53,6 +53,8 @@ $LibPath = Join-Path $ShareDir "que-lib.lisp"
 
 Write-Host "Installing que.exe..."
 Invoke-WebRequest -Uri (Resolve-ReleaseAsset "que" ".exe") -OutFile $QueExe
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir "quec.exe")
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir "quewat.exe")
 
 Write-Host "Installing que-lib.lisp..."
 Invoke-WebRequest -Uri (Resolve-ReleaseAsset "que-lib" ".lisp") -OutFile $LibPath
@@ -65,3 +67,6 @@ Write-Host "  $LibPath"
 Write-Host ""
 Write-Host 'Restart the terminal, or in PowerShell run:'
 Write-Host '  $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")'
+Write-Host ''
+Write-Host 'Install a WASI runtime separately: wasmtime (default), wasmer, or iwasm/WAMR.'
+Write-Host 'Select it with: que program.que --runtime <runtime>'

@@ -230,17 +230,13 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
 fn widen_loop_state(previous: &AbstractState, next: &AbstractState) -> AbstractState {
     let mut widened = next.clone();
     for (name, next_range) in &next.integer_ranges {
-        let previous_range = previous
-            .integer_ranges
-            .get(name)
-            .copied()
-            .or_else(|| {
-                previous
-                    .integer_constants
-                    .get(name)
-                    .copied()
-                    .map(IntInterval::exact)
-            });
+        let previous_range = previous.integer_ranges.get(name).copied().or_else(|| {
+            previous
+                .integer_constants
+                .get(name)
+                .copied()
+                .map(IntInterval::exact)
+        });
         let Some(previous_range) = previous_range else {
             continue;
         };
@@ -361,13 +357,20 @@ fn refine_bounded_loop_updates(
             let delta = match &value {
                 Expression::Apply(parts) => match parts.as_slice() {
                     [Expression::Word(add), Expression::Word(var), step]
-                        if add == "+" && var == &name => integer_constant(step, entry),
+                        if add == "+" && var == &name =>
+                    {
+                        integer_constant(step, entry)
+                    }
                     [Expression::Word(add), step, Expression::Word(var)]
-                        if add == "+" && var == &name => integer_constant(step, entry),
+                        if add == "+" && var == &name =>
+                    {
+                        integer_constant(step, entry)
+                    }
                     [Expression::Word(sub), Expression::Word(var), step]
-                        if sub == "-" && var == &name => {
-                            integer_constant(step, entry).and_then(i32::checked_neg)
-                        }
+                        if sub == "-" && var == &name =>
+                    {
+                        integer_constant(step, entry).and_then(i32::checked_neg)
+                    }
                     _ => None,
                 },
                 _ => None,
@@ -2087,17 +2090,20 @@ fn counter_step(name: &str, updates: &[Expression], facts: &AbstractState) -> Co
     let classify = |value: &Expression| match value {
         Expression::Word(other) if other == name => CounterStep::Unchanged,
         Expression::Apply(items) if items.len() == 3 => match items.as_slice() {
-            [Expression::Word(op), Expression::Word(var), step]
-                if var == name && op == "+" => direction(step).unwrap_or(CounterStep::Unknown),
-            [Expression::Word(op), step, Expression::Word(var)]
-                if var == name && op == "+" => direction(step).unwrap_or(CounterStep::Unknown),
-            [Expression::Word(op), Expression::Word(var), step]
-                if var == name && op == "-" => match direction(step) {
+            [Expression::Word(op), Expression::Word(var), step] if var == name && op == "+" => {
+                direction(step).unwrap_or(CounterStep::Unknown)
+            }
+            [Expression::Word(op), step, Expression::Word(var)] if var == name && op == "+" => {
+                direction(step).unwrap_or(CounterStep::Unknown)
+            }
+            [Expression::Word(op), Expression::Word(var), step] if var == name && op == "-" => {
+                match direction(step) {
                     Some(CounterStep::Increase) => CounterStep::Decrease,
                     Some(CounterStep::Decrease) => CounterStep::Increase,
                     Some(other) => other,
                     None => CounterStep::Unknown,
-                },
+                }
+            }
             _ => CounterStep::Unknown,
         },
         _ => CounterStep::Unknown,
@@ -2113,11 +2119,7 @@ fn counter_step(name: &str, updates: &[Expression], facts: &AbstractState) -> Co
         .unwrap_or(CounterStep::Unknown)
 }
 
-fn comparisons_for_counter<'a>(
-    expr: &'a Expression,
-    name: &str,
-    out: &mut Vec<(&'a str, bool)>,
-) {
+fn comparisons_for_counter<'a>(expr: &'a Expression, name: &str, out: &mut Vec<(&'a str, bool)>) {
     let Expression::Apply(items) = expr else {
         return;
     };
@@ -2259,14 +2261,14 @@ fn analyze_while_termination(
         // directions, their relative rates are currently unknown, so do not
         // claim either termination or non-termination.
         if !scalar_progress_proven && (moves_away || actual == SizeStep::Unchanged) {
-                record_diagnostic(
-                    diagnostics,
-                    format!(
-                        "termination: length of '{}' does not move toward the loop exit: `{}`",
-                        name,
-                        condition.to_lisp()
-                    ),
-                );
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "termination: length of '{}' does not move toward the loop exit: `{}`",
+                    name,
+                    condition.to_lisp()
+                ),
+            );
         }
     }
 }
@@ -2418,12 +2420,9 @@ fn recursive_calls_fail_to_shrink(
             summaries,
         ) != SizeStep::Shrink;
     }
-    items
-        .iter()
-        .skip(1)
-        .any(|child| {
-            recursive_calls_fail_to_shrink(child, function, params, shrinking_param, summaries)
-        })
+    items.iter().skip(1).any(|child| {
+        recursive_calls_fail_to_shrink(child, function, params, shrinking_param, summaries)
+    })
 }
 
 fn guard_direction_for_parameter(
@@ -2701,7 +2700,6 @@ fn access_index_is_proven(
         }
     }
 
-
     let known_length = facts
         .fixed_lengths
         .get(&vector_key)
@@ -2827,21 +2825,20 @@ fn validate_static_bounds_expr(
             };
             let left_range = integer_interval(&items[1], facts).unwrap_or(IntInterval::I32);
             let right_range = integer_interval(&items[2], facts).unwrap_or(IntInterval::I32);
-            let operand_detail = if canonical_scalar(&items[1], facts)
-                == canonical_scalar(&items[2], facts)
-            {
-                format!(
-                    "\ndetail: inferred range: {} <= {} <= {}",
-                    left_range.min,
-                    canonical_scalar(&items[1], facts),
-                    left_range.max
-                )
-            } else {
-                format!(
-                    "\ndetail: left range: {}..{}\ndetail: right range: {}..{}",
-                    left_range.min, left_range.max, right_range.min, right_range.max
-                )
-            };
+            let operand_detail =
+                if canonical_scalar(&items[1], facts) == canonical_scalar(&items[2], facts) {
+                    format!(
+                        "\ndetail: inferred range: {} <= {} <= {}",
+                        left_range.min,
+                        canonical_scalar(&items[1], facts),
+                        left_range.max
+                    )
+                } else {
+                    format!(
+                        "\ndetail: left range: {}..{}\ndetail: right range: {}..{}",
+                        left_range.min, left_range.max, right_range.min, right_range.max
+                    )
+                };
             let safe_detail = if op == "*"
                 && canonical_scalar(&items[1], facts) == canonical_scalar(&items[2], facts)
             {
@@ -3044,11 +3041,7 @@ fn validate_static_bounds_expr(
                 // before widening stabilizes would describe an intermediate
                 // state rather than the actual loop invariant.
                 let mut speculative_diagnostics = AnalysisSink::default();
-                validate_static_bounds_expr(
-                    &items[1],
-                    &mut header,
-                    &mut speculative_diagnostics,
-                );
+                validate_static_bounds_expr(&items[1], &mut header, &mut speculative_diagnostics);
                 let mut body_exit = state_for_true_branch(&items[1], &header);
                 for child in items.iter().skip(2) {
                     validate_static_bounds_expr(
@@ -3161,8 +3154,7 @@ pub fn analyze_user_program_diagnostics_detailed(
     };
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
-    let structural_summaries =
-        infer_structural_summaries(&all_expressions, &predicate_summaries);
+    let structural_summaries = infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
@@ -3181,14 +3173,12 @@ pub fn analyze_user_program_diagnostics_detailed(
         let mut diagnostics = AnalysisSink::default();
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
         analyze_termination_expr(expression, &structural_summaries, &facts, &mut diagnostics);
-        detailed.extend(
-            diagnostics.diagnostics
-                .into_iter()
-                .map(|message| StaticAnalysisDiagnostic {
-                    message,
-                    user_form_index,
-                }),
-        );
+        detailed.extend(diagnostics.diagnostics.into_iter().map(|message| {
+            StaticAnalysisDiagnostic {
+                message,
+                user_form_index,
+            }
+        }));
     }
     detailed
 }
@@ -3198,9 +3188,7 @@ pub fn explain_bounds_proofs(
     user_form_count: usize,
 ) -> Vec<BoundsProof> {
     let all_expressions: Vec<&Expression> = match &typed_program.expr {
-        Expression::Apply(items)
-            if matches!(items.first(), Some(Expression::Word(op)) if op == "do") =>
-        {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
             items.iter().skip(1).collect()
         }
         expression => vec![expression],
@@ -3254,14 +3242,9 @@ fn collect_termination_findings(
         let condition = &items[1];
         let subject = format!("while {}", condition.to_lisp());
         let mut diagnostics = AnalysisSink::default();
-        analyze_while_termination(
-            expr,
-            items,
-            structural_summaries,
-            facts,
-            &mut diagnostics,
-        );
-        if let Some(reason) = diagnostics.diagnostics
+        analyze_while_termination(expr, items, structural_summaries, facts, &mut diagnostics);
+        if let Some(reason) = diagnostics
+            .diagnostics
             .into_iter()
             .find(|message| message.starts_with("termination:"))
         {
@@ -3311,26 +3294,25 @@ fn collect_termination_findings(
             for body in items.iter().skip(2) {
                 collect_size_mutations(body, structural_summaries, &mut size_mutations);
             }
-            let competing_bound = size_guard_exit_direction(condition).is_some_and(
-                |(name, expected)| {
+            let competing_bound =
+                size_guard_exit_direction(condition).is_some_and(|(name, expected)| {
                     let actual = size_mutations
                         .get(name)
                         .map(|steps| combined_size_step(steps))
                         .unwrap_or(SizeStep::Unchanged);
                     matches!(
                         (expected, actual),
-                        (SizeStep::Shrink, SizeStep::Grow)
-                            | (SizeStep::Grow, SizeStep::Shrink)
+                        (SizeStep::Shrink, SizeStep::Grow) | (SizeStep::Grow, SizeStep::Shrink)
                     )
-                },
-            );
-            let structural_proof = size_guard_exit_direction(condition).and_then(|(name, expected)| {
-                let actual = size_mutations
-                    .get(name)
-                    .map(|steps| combined_size_step(steps))
-                    .unwrap_or(SizeStep::Unchanged);
-                (actual == expected).then(|| name.to_string())
-            });
+                });
+            let structural_proof =
+                size_guard_exit_direction(condition).and_then(|(name, expected)| {
+                    let actual = size_mutations
+                        .get(name)
+                        .map(|steps| combined_size_step(steps))
+                        .unwrap_or(SizeStep::Unchanged);
+                    (actual == expected).then(|| name.to_string())
+                });
             if competing_bound && scalar_proof.is_some() {
                 findings.push(TerminationFinding {
                     subject,
@@ -3422,7 +3404,11 @@ fn collect_termination_findings(
                             .get(3)
                             .is_some_and(|candidate| contains_recursive_call(candidate, name));
                         let recursive_branch = if then_recurses ^ else_recurses {
-                            Some(if then_recurses { &branch[2] } else { &branch[3] })
+                            Some(if then_recurses {
+                                &branch[2]
+                            } else {
+                                &branch[3]
+                            })
                         } else {
                             None
                         };
@@ -3485,7 +3471,15 @@ fn collect_termination_findings(
                                 reason,
                                 proof: vec![
                                     format!("base case: {}", branch[1].to_lisp()),
-                                    format!("recursive call: {}", first_recursive_call(recursive_branch.expect("recursive branch exists"), name).map(|call| Expression::Apply(call.to_vec()).to_lisp()).unwrap_or_else(|| name.clone())),
+                                    format!(
+                                        "recursive call: {}",
+                                        first_recursive_call(
+                                            recursive_branch.expect("recursive branch exists"),
+                                            name
+                                        )
+                                        .map(|call| Expression::Apply(call.to_vec()).to_lisp())
+                                        .unwrap_or_else(|| name.clone())
+                                    ),
                                 ],
                             });
                         } else if contains_recursive_call(body, name) {
@@ -3493,8 +3487,9 @@ fn collect_termination_findings(
                                 subject: name.clone(),
                                 status: "unknown".to_string(),
                                 measure: None,
-                                reason: "recursive calls exist, but no decreasing measure was inferred"
-                                    .to_string(),
+                                reason:
+                                    "recursive calls exist, but no decreasing measure was inferred"
+                                        .to_string(),
                                 proof: Vec::new(),
                             });
                         }
@@ -3531,17 +3526,14 @@ pub fn explain_termination(
     user_form_count: usize,
 ) -> Vec<TerminationFinding> {
     let all_expressions = match &typed_program.expr {
-        Expression::Apply(items)
-            if matches!(items.first(), Some(Expression::Word(op)) if op == "do") =>
-        {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
             items.iter().skip(1).collect::<Vec<_>>()
         }
         expression => vec![expression],
     };
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
-    let structural_summaries =
-        infer_structural_summaries(&all_expressions, &predicate_summaries);
+    let structural_summaries = infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
@@ -3666,12 +3658,26 @@ fn condition_proves_empty(
     }
     if let [Expression::Word(op), left, Expression::Int(bound)] = items.as_slice() {
         if length_operand(left) == Some(parameter) {
-            return matches!((op.as_str(), *bound, is_true), ("=", 0, true) | ("<=", 0, true) | ("<", 1, true) | (">", 0, false) | (">=", 1, false));
+            return matches!(
+                (op.as_str(), *bound, is_true),
+                ("=", 0, true)
+                    | ("<=", 0, true)
+                    | ("<", 1, true)
+                    | (">", 0, false)
+                    | (">=", 1, false)
+            );
         }
     }
     if let [Expression::Word(op), Expression::Int(bound), right] = items.as_slice() {
         if length_operand(right) == Some(parameter) {
-            return matches!((op.as_str(), *bound, is_true), ("=", 0, true) | (">=", 0, true) | (">", 1, true) | ("<", 0, false) | ("<=", 0, false));
+            return matches!(
+                (op.as_str(), *bound, is_true),
+                ("=", 0, true)
+                    | (">=", 0, true)
+                    | (">", 1, true)
+                    | ("<", 0, false)
+                    | ("<=", 0, false)
+            );
         }
     }
     let Some(op) = items.first().and_then(word) else {
@@ -3720,9 +3726,7 @@ fn structural_parameter_effect(
         {
             return SizeStep::Shrink;
         }
-        [Expression::Word(op), Expression::Word(name), _]
-            if name == parameter && op == "push!" =>
-        {
+        [Expression::Word(op), Expression::Word(name), _] if name == parameter && op == "push!" => {
             return SizeStep::Grow;
         }
         _ => {}
@@ -3732,44 +3736,24 @@ fn structural_parameter_effect(
         let then_effect = items
             .get(2)
             .map(|branch| {
-                structural_parameter_effect(
-                    branch,
-                    parameter,
-                    summaries,
-                    predicate_summaries,
-                )
+                structural_parameter_effect(branch, parameter, summaries, predicate_summaries)
             })
             .unwrap_or(SizeStep::Unchanged);
         let else_effect = items
             .get(3)
             .map(|branch| {
-                structural_parameter_effect(
-                    branch,
-                    parameter,
-                    summaries,
-                    predicate_summaries,
-                )
+                structural_parameter_effect(branch, parameter, summaries, predicate_summaries)
             })
             .unwrap_or(SizeStep::Unchanged);
         return if then_effect == else_effect {
             then_effect
-        } else if condition_proves_empty(
-            &items[1],
-            parameter,
-            true,
-            predicate_summaries,
-            0,
-        ) && then_effect == SizeStep::Unchanged
+        } else if condition_proves_empty(&items[1], parameter, true, predicate_summaries, 0)
+            && then_effect == SizeStep::Unchanged
             && else_effect == SizeStep::Shrink
         {
             SizeStep::Shrink
-        } else if condition_proves_empty(
-            &items[1],
-            parameter,
-            false,
-            predicate_summaries,
-            0,
-        ) && then_effect == SizeStep::Shrink
+        } else if condition_proves_empty(&items[1], parameter, false, predicate_summaries, 0)
+            && then_effect == SizeStep::Shrink
             && else_effect == SizeStep::Unchanged
         {
             SizeStep::Shrink
@@ -3794,12 +3778,15 @@ fn structural_parameter_effect(
             }
         }
     }
-    items.iter().skip(1).fold(SizeStep::Unchanged, |effect, child| {
-        combine_size_steps(
-            effect,
-            structural_parameter_effect(child, parameter, summaries, predicate_summaries),
-        )
-    })
+    items
+        .iter()
+        .skip(1)
+        .fold(SizeStep::Unchanged, |effect, child| {
+            combine_size_steps(
+                effect,
+                structural_parameter_effect(child, parameter, summaries, predicate_summaries),
+            )
+        })
 }
 
 fn structural_result_relation(
@@ -3918,12 +3905,7 @@ fn infer_structural_summaries(
                 parameter_effects: params
                     .iter()
                     .map(|param| {
-                        structural_parameter_effect(
-                            body,
-                            param,
-                            &summaries,
-                            predicate_summaries,
-                        )
+                        structural_parameter_effect(body, param, &summaries, predicate_summaries)
                     })
                     .collect(),
                 result_relations: params
@@ -4207,7 +4189,8 @@ mod tests {
             assert_eq!(warned, should_warn, "{name}: {findings:?}");
         }
 
-        let competing = "(let xs [1]) (mut i 0) (while (< i (length xs)) (do (alter! i (+ i 1)) (push! xs 1)))";
+        let competing =
+            "(let xs [1]) (mut i 0) (while (< i (length xs)) (do (alter! i (+ i 1)) (push! xs 1)))";
         let expression = crate::parser::build(competing).expect("source should build");
         let (_typ, typed) = crate::infer::infer_with_builtins_typed(
             &expression,
@@ -4237,10 +4220,7 @@ mod tests {
             ("(< 0 i)", "(+ i 1)", true),
         ];
         for (condition, update, should_warn) in cases {
-            let source = format!(
-                "(mut i 1) (while {} (alter! i {}))",
-                condition, update
-            );
+            let source = format!("(mut i 1) (while {} (alter! i {}))", condition, update);
             let findings = diagnostics(&source, 99);
             let warned = findings
                 .iter()

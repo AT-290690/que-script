@@ -12,8 +12,5 @@ mkdir -p dist
 wasm-bindgen \
   --target web \
   --out-dir dist \
-  --out-name quec \
+  --out-name que \
   target/wasm32-unknown-unknown/release/que.wasm
-
-# Convenience alias when consumers expect `quec.wasm` directly.
-cp dist/quec_bg.wasm dist/quec.wasm

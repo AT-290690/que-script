@@ -42,6 +42,7 @@ curl -fsSL "$BIN_URL" -o "/tmp/$APP_NAME"
 chmod +x "/tmp/$APP_NAME"
 sudo mv "/tmp/$APP_NAME" "$BIN_PATH"
 echo "Installed binary: $BIN_PATH"
+sudo rm -f /usr/local/bin/quec /usr/local/bin/quewat
 
 echo "Installing que-lib.lisp..."
 curl -fsSL "$LIB_URL" -o "/tmp/que-lib.lisp"
@@ -49,4 +50,6 @@ sudo mkdir -p "$LIB_DIR"
 sudo mv "/tmp/que-lib.lisp" "$LIB_PATH"
 echo "Installed library: $LIB_PATH"
 
-echo "Done (que + que-lib.lisp)."
+echo "Done (que and que-lib.lisp)."
+echo "To run Que, install a WASI runtime: wasmtime (default), wasmer, or iwasm/WAMR."
+echo "Select it with: que program.que --runtime <runtime>"

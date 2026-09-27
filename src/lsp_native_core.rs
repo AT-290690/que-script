@@ -931,9 +931,7 @@ pub fn parse_user_exprs_for_symbol_collection(text: &str) -> Option<Vec<Expressi
 pub fn desugared_user_form_count(text: &str) -> Option<usize> {
     let built = parser::build(text).ok()?;
     Some(match built {
-        Expression::Apply(items)
-            if matches!(items.first(), Some(Expression::Word(op)) if op == "do") =>
-        {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
             items.len().saturating_sub(1)
         }
         _ => 1,

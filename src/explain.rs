@@ -114,13 +114,7 @@ pub fn explain_program_with_effects(
     user_form_count: usize,
     known_effects: &HashMap<String, EffectFlags>,
 ) -> ExplainReport {
-    explain_program_with_effects_and_source(
-        typed_ast,
-        wat,
-        user_form_count,
-        known_effects,
-        None,
-    )
+    explain_program_with_effects_and_source(typed_ast, wat, user_form_count, known_effects, None)
 }
 
 pub fn explain_program_with_effects_and_source(
@@ -319,7 +313,12 @@ pub fn render_text(report: &ExplainReport) -> String {
     let correctness_warnings = report
         .warnings
         .iter()
-        .filter(|warning| matches!(warning.kind.as_str(), "static_bounds" | "static_arithmetic" | "termination"))
+        .filter(|warning| {
+            matches!(
+                warning.kind.as_str(),
+                "static_bounds" | "static_arithmetic" | "termination"
+            )
+        })
         .collect::<Vec<_>>();
     if correctness_warnings.is_empty() {
         lines.push("  no warnings".to_string());
@@ -330,7 +329,10 @@ pub fn render_text(report: &ExplainReport) -> String {
             .as_ref()
             .map(|location| format!(" at {}:{}", location.line, location.column))
             .unwrap_or_default();
-        lines.push(format!("  {}{}: {}", warning.kind, location, warning.message));
+        lines.push(format!(
+            "  {}{}: {}",
+            warning.kind, location, warning.message
+        ));
         for detail in &warning.details {
             lines.push(format!("    {detail}"));
         }
@@ -355,7 +357,10 @@ pub fn render_text(report: &ExplainReport) -> String {
         lines.push("  no loops or recursive functions analyzed".to_string());
     }
     for finding in &report.termination {
-        lines.push(format!("  {} terminating: {}", finding.status, finding.subject));
+        lines.push(format!(
+            "  {} terminating: {}",
+            finding.status, finding.subject
+        ));
         lines.push(format!("    {}", finding.reason));
         for fact in &finding.proof {
             lines.push(format!("    {fact}"));
@@ -376,7 +381,10 @@ pub fn render_text(report: &ExplainReport) -> String {
     lines.push(String::new());
     lines.push("Performance:".to_string());
     for warning in report.warnings.iter().filter(|warning| {
-        !matches!(warning.kind.as_str(), "static_bounds" | "static_arithmetic" | "termination" | "host_imports")
+        !matches!(
+            warning.kind.as_str(),
+            "static_bounds" | "static_arithmetic" | "termination" | "host_imports"
+        )
     }) {
         lines.push(format!("  {}: {}", warning.kind, warning.message));
         if let Some(suggestion) = &warning.suggestion {
@@ -1211,9 +1219,7 @@ mod tests {
 
     #[test]
     fn explain_reports_proven_warning_and_unknown_termination() {
-        let proven = explain_source(
-            "(letrec down (lambda (n) (if (<= n 0) 0 (down (- n 1)))))",
-        );
+        let proven = explain_source("(letrec down (lambda (n) (if (<= n 0) 0 (down (- n 1)))))");
         assert!(proven.termination.iter().any(|finding| {
             finding.subject == "down"
                 && finding.status == "proven"
@@ -1225,17 +1231,14 @@ mod tests {
         assert!(text.contains("base case:"));
         assert!(text.contains("recursive call:"));
 
-        let warning = explain_source(
-            "(letrec stuck (lambda (n) (if (= n 0) 0 (stuck n))))",
-        );
+        let warning = explain_source("(letrec stuck (lambda (n) (if (= n 0) 0 (stuck n))))");
         assert!(warning
             .termination
             .iter()
             .any(|finding| finding.subject == "stuck" && finding.status == "warning"));
 
-        let unknown = explain_source(
-            "(letrec mystery (lambda (n) (if (= n 0) 0 (mystery (* n 2)))))",
-        );
+        let unknown =
+            explain_source("(letrec mystery (lambda (n) (if (= n 0) 0 (mystery (* n 2)))))");
         assert!(unknown
             .termination
             .iter()
@@ -1268,9 +1271,10 @@ mod tests {
             .any(|warning| warning.kind == "static_arithmetic"));
         assert!(report.warnings.iter().any(|warning| {
             warning.kind == "static_arithmetic"
-                && warning.location.as_ref().is_some_and(|location| {
-                    location.line == 1 && location.column == 1
-                })
+                && warning
+                    .location
+                    .as_ref()
+                    .is_some_and(|location| location.line == 1 && location.column == 1)
         }));
         let json = render_json(&report).expect("report should serialize");
         let value: serde_json::Value =

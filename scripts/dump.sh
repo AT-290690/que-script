@@ -9,5 +9,5 @@ fi
 INPUT_FILE="$1"
 OUTPUT_FILE="$2"
 
-cargo run --quiet --release --bin quewat -- "$INPUT_FILE" > "$OUTPUT_FILE"
+cargo run --quiet --release --bin que -- wat "$INPUT_FILE" > "$OUTPUT_FILE"
 echo "WAT written to $OUTPUT_FILE"

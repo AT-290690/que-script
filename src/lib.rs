@@ -1,15 +1,13 @@
 pub mod baked;
-#[path = "../miscs/formatter.rs"]
-pub mod formatter;
+#[cfg(feature = "compiler")]
+pub mod compiler_cli;
 #[cfg(feature = "compiler")]
 pub mod explain;
-#[cfg(feature = "io")]
-pub mod io;
+#[path = "../miscs/formatter.rs"]
+pub mod formatter;
 pub mod lsp_native_core;
 pub mod op;
 pub mod project;
-#[cfg(feature = "runtime")]
-pub mod runtime;
 pub mod static_analysis;
 #[cfg(test)]
 mod tests;

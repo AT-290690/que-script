@@ -1275,30 +1275,41 @@ xs)"#,
         assert_eq!(typ.to_string(), "Int");
     }
 
-    #[cfg(feature = "runtime")]
     fn runtime_exec_lock() -> &'static std::sync::Mutex<()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| std::sync::Mutex::new(()))
     }
 
-    #[cfg(feature = "runtime")]
     struct ScopedEnvVar {
         key: &'static str,
         prev: Option<String>,
+        wasi: Option<crate::wat::WasiOverrideGuard>,
     }
 
-    #[cfg(feature = "runtime")]
     impl ScopedEnvVar {
         fn set(key: &'static str, value: &str) -> Self {
+            if let Some(wasi) = crate::wat::scoped_wasi_override(key, value) {
+                return Self {
+                    key,
+                    prev: None,
+                    wasi: Some(wasi),
+                };
+            }
             let prev = std::env::var(key).ok();
             std::env::set_var(key, value);
-            Self { key, prev }
+            Self {
+                key,
+                prev,
+                wasi: None,
+            }
         }
     }
 
-    #[cfg(feature = "runtime")]
     impl Drop for ScopedEnvVar {
         fn drop(&mut self) {
+            if self.wasi.is_some() {
+                return;
+            }
             if let Some(prev) = self.prev.as_ref() {
                 std::env::set_var(self.key, prev);
             } else {
@@ -1307,51 +1318,54 @@ xs)"#,
         }
     }
 
-    #[cfg(feature = "runtime")]
+    fn run_external_wat(wat: &str) -> Result<String, String> {
+        let wasm = wat::parse_str(wat).map_err(|error| error.to_string())?;
+        let path = std::env::temp_dir().join(format!(
+            "que-test-{}-{:?}.wasm",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(&path, wasm).map_err(|error| error.to_string())?;
+        let output = std::process::Command::new("wasmtime")
+            .arg("run")
+            .arg(&path)
+            .output()
+            .map_err(|error| {
+                format!("failed to run external wasmtime (install it to run tests): {error}")
+            });
+        let _ = std::fs::remove_file(path);
+        let output = output?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout)
+                .trim_end()
+                .to_string())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    }
+
     fn run_program_output_unlocked(src: &str) -> String {
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "0");
         let expr = crate::parser::build(src).expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
             .expect("program should compile");
-        let argv: Vec<String> = Vec::new();
-        #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
-        #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        });
-        #[cfg(not(feature = "io"))]
-        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
-        run_result.expect("program should run without trap")
+        run_external_wat(&wat).expect("program should run without trap")
     }
 
-    #[cfg(feature = "runtime")]
     fn run_program_error_unlocked(src: &str) -> String {
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "0");
         let expr = crate::parser::build(src).expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
             .expect("program should compile");
-        let argv: Vec<String> = Vec::new();
-        #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
-        #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        });
-        #[cfg(not(feature = "io"))]
-        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
-        run_result.expect_err("program should fail at runtime")
+        run_external_wat(&wat).expect_err("program should fail at runtime")
     }
 
-    #[cfg(feature = "runtime")]
     fn run_program_error_with_debug_guards(src: &str) -> String {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
         let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
         let _div_zero = ScopedEnvVar::set("QUE_DIV_ZERO_CHECK", "1");
@@ -1359,23 +1373,21 @@ xs)"#,
         run_program_error_unlocked(src)
     }
 
-    #[cfg(feature = "runtime")]
     fn run_program_output(src: &str) -> String {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         run_program_output_unlocked(src)
     }
 
-    #[cfg(feature = "runtime")]
     fn run_program_error(src: &str) -> String {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         run_program_error_unlocked(src)
     }
 
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     #[test]
     fn test_serialize_preserves_nested_que_data_as_source_text() {
         let output = run_program_output(r#"(serialize { [1 2 3] { "hello\nworld" true } })"#);
@@ -1406,7 +1418,7 @@ xs)"#,
         assert!(!wat.contains("Unsupported closure capture 'serialize'"));
     }
 
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     #[test]
     fn test_deserialize_parses_literal_data_in_typed_context() {
         let output = run_program_output(
@@ -1417,7 +1429,7 @@ xs)"#,
         assert_eq!(output, "15");
     }
 
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     #[test]
     fn test_deserialize_infers_unconstrained_stored_fields_from_literal_data() {
         let output = run_program_output(
@@ -1429,7 +1441,7 @@ xs)"#,
         assert_eq!(output, "9");
     }
 
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     #[test]
     fn test_sig_propagates_concrete_type_into_deserialize() {
         let output = run_program_output(
@@ -1443,7 +1455,7 @@ xs)"#,
         assert_eq!(output, "[{ true { false { 1 { 2 { 3 [false] } } } } }]");
     }
 
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     #[test]
     fn test_deserialize_rejects_non_literal_code() {
         let error = run_program_error(
@@ -1454,7 +1466,6 @@ xs)"#,
         assert!(error.contains("expected vector literal"), "{error}");
     }
 
-    #[cfg(feature = "runtime")]
     fn compile_std_program_to_wat(src: &str, enable_optimizer: bool) -> String {
         let std_ast = crate::baked::load_ast();
         let expr = match std_ast {
@@ -1470,58 +1481,32 @@ xs)"#,
             .expect("program should compile")
     }
 
-    #[cfg(feature = "runtime")]
     fn run_program_error_with_std_unlocked(src: &str, enable_optimizer: bool) -> String {
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "0");
         let wat = compile_std_program_to_wat(src, enable_optimizer);
-        let argv: Vec<String> = Vec::new();
-        #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
-        #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        });
-        #[cfg(not(feature = "io"))]
-        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
-        run_result.expect_err("program should fail at runtime")
+        run_external_wat(&wat).expect_err("program should fail at runtime")
     }
 
-    #[cfg(feature = "runtime")]
-    fn run_program_output_with_std_and_opts_unlocked(
-        src: &str,
-        enable_optimizer: bool,
-    ) -> String {
+    fn run_program_output_with_std_and_opts_unlocked(src: &str, enable_optimizer: bool) -> String {
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "0");
         let wat = compile_std_program_to_wat(src, enable_optimizer);
-        let argv: Vec<String> = Vec::new();
-        #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
-        #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        });
-        #[cfg(not(feature = "io"))]
-        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
-        run_result.expect("program should run without trap")
+        run_external_wat(&wat).expect("program should run without trap")
     }
 
-    #[cfg(feature = "runtime")]
     fn run_program_output_with_std_and_opts(src: &str, enable_optimizer: bool) -> String {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         run_program_output_with_std_and_opts_unlocked(src, enable_optimizer)
     }
 
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     fn run_program_error_with_std_io_root(src: &str, root: std::path::PathBuf) -> String {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let wat = compile_std_program_to_wat(src, false);
         let argv: Vec<String> = Vec::new();
         let store_data = crate::io::ShellStoreData::new_with_security(
@@ -1536,7 +1521,6 @@ xs)"#,
         run_result.expect_err("program should fail at runtime")
     }
 
-    #[cfg(feature = "runtime")]
     fn assert_std_program_output_matches_with_and_without_optimizer(src: &str) {
         let output_no_opts = run_program_output_with_std_and_opts(src, false);
         let output_with_opts = run_program_output_with_std_and_opts(src, true);
@@ -1546,50 +1530,19 @@ xs)"#,
         );
     }
 
-    #[cfg(feature = "runtime")]
     fn run_compiled_wat_no_result(wat_src: &str) {
-        use wasmtime::Config;
-
         let wasm_bytes = wat::parse_str(wat_src).expect("wat should encode to wasm");
-        let config: Config = {
-            let mut config = wasmtime::Config::new();
-            match std::env::var("QUE_WASM_OPT")
-                .unwrap_or_else(|_| "speed".to_string())
-                .as_str()
-            {
-                "none" => config.cranelift_opt_level(wasmtime::OptLevel::None),
-                "speed" => config.cranelift_opt_level(wasmtime::OptLevel::Speed),
-                "speed_and_size" => config.cranelift_opt_level(wasmtime::OptLevel::SpeedAndSize),
-                other => panic!("invalid QUE_WASM_OPT in benchmark: {}", other),
-            };
-            config.strategy(wasmtime::Strategy::Cranelift);
-            config
-        };
-        let engine = wasmtime::Engine::new(&config).expect("engine should initialize");
-        let module = wasmtime::Module::new(&engine, &wasm_bytes).expect("module should compile");
-        let mut linker = wasmtime::Linker::new(&engine);
-        #[cfg(feature = "io")]
-        crate::io::add_shell_to_linker(&mut linker).expect("io linker should install");
-
-        #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
-        #[cfg(not(feature = "io"))]
-        let store_data = ();
-
-        let mut store = wasmtime::Store::new(&engine, store_data);
-        let instance = linker
-            .instantiate(&mut store, &module)
-            .expect("instance should instantiate");
-        let main = instance
-            .get_typed_func::<(), i32>(&mut store, "main")
-            .expect("main should exist");
-        main.call(&mut store, ()).expect("main should run");
+        let path = std::env::temp_dir().join(format!("que-bench-{}.wasm", std::process::id()));
+        std::fs::write(&path, wasm_bytes).expect("benchmark wasm should stage");
+        let status = std::process::Command::new("wasmtime")
+            .args(["run", "--invoke", "main"])
+            .arg(&path)
+            .status()
+            .expect("external wasmtime should start");
+        let _ = std::fs::remove_file(path);
+        assert!(status.success(), "benchmark module should run");
     }
 
-    #[cfg(feature = "runtime")]
     fn benchmark_wat_execution_only(
         label: &str,
         wat_src: &str,
@@ -1616,7 +1569,6 @@ xs)"#,
         best
     }
 
-    #[cfg(feature = "runtime")]
     fn benchmark_std_program(
         label: &str,
         src: &str,
@@ -1652,7 +1604,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_managed_call_return_may_alias_argument() {
         let src = r#"(do
           (let pick-small (lambda a b (if (BigInt/lt? a b) a b)))
@@ -1665,7 +1616,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_projected_managed_return_survives_local_cleanup() {
         let src = r#"(do
           (let keep (lambda value (do (let result [value]) (car result))))
@@ -1685,7 +1635,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_loop_range_runtime_produces_expected_sequence() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1698,21 +1647,18 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_cons_builtin_concatenates_vectors_without_std() {
         let output = run_program_output(r#"(cons [ 1 2 3 ] [ 4 5 6 ])"#);
         assert_eq!(output, "[1 2 3 4 5 6]");
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_cons_builtin_preferred_over_std_definition() {
         let output = run_program_output_with_std_and_opts(r#"(cons [ 1 2 ] [ 3 4 ])"#, true);
         assert_eq!(output, "[1 2 3 4]");
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_pop_val_returns_last_and_mutates_vector() {
         let output = run_program_output_with_std_and_opts(
             r#"(let xs [1 2 3])
@@ -1723,7 +1669,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_pull_remains_pop_val_alias() {
         let output = run_program_output_with_std_and_opts(
             r#"(let xs [1 2 3])
@@ -1734,7 +1679,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_vector_pop_val_aliases_work() {
         let output = run_program_output_with_std_and_opts(
             r#"(let xs [1 2 3])
@@ -1746,7 +1690,6 @@ xs)"#,
 
     #[test]
     #[ignore = "manual benchmark"]
-    #[cfg(feature = "runtime")]
     fn bench_runtime_map_filter_reduce_pipeline() {
         let src = r#"(do
             (let xs (range 1 20000))
@@ -1760,7 +1703,6 @@ xs)"#,
 
     #[test]
     #[ignore = "manual benchmark"]
-    #[cfg(feature = "runtime")]
     fn bench_runtime_string_split_join_pipeline() {
         let src = r#"(do
             (let lines
@@ -1781,7 +1723,6 @@ xs)"#,
 
     #[test]
     #[ignore = "manual benchmark"]
-    #[cfg(feature = "runtime")]
     fn bench_runtime_table_grouping_workload() {
         let src = r#"(do
             (let ids (range 0 12000))
@@ -1804,7 +1745,6 @@ xs)"#,
 
     #[test]
     #[ignore = "manual benchmark"]
-    #[cfg(feature = "runtime")]
     fn bench_runtime_graph_cycle_workload() {
         let src = r#"(do
             (let from (map (lambda x (cons "U" (Integer->String x))) (range 1 40)))
@@ -1816,7 +1756,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_table_update_sets_initial_and_updates_existing_value() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1830,7 +1769,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_table_update_or_chooses_missing_and_present_branches() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1844,7 +1782,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_table_push_or_builds_grouped_vectors() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1859,7 +1796,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_new_add_and_sub_work() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1872,7 +1808,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_mul_and_zero_normalization_work() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1885,7 +1820,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_comparisons_work() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1898,7 +1832,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_div_truncates_toward_zero() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1911,7 +1844,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_to_string_formats_sign_and_zero() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1924,7 +1856,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_bigint_mod_returns_unsigned_remainder() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1936,7 +1867,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_mod_matches_truncate_toward_zero_division() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1949,7 +1879,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_floor_division_rounds_down() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1963,7 +1892,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_ceil_division_rounds_up() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1977,7 +1905,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_pow_handles_sign_and_zero_exponent() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -1990,7 +1917,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_expt_handles_bigint_exponents() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2003,7 +1929,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_square_keeps_positive_result() {
         let output = run_program_output_with_std_and_opts(
             r#"(SignedBigInt->String (SignedBigInt/square (SignedBigInt/new "-12")))"#,
@@ -2013,7 +1938,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_range_builds_ascending_sequence() {
         let output = run_program_output_with_std_and_opts(
             r#"(map SignedBigInt->String (SignedBigInt/range (SignedBigInt/new "-2") (SignedBigInt/new "2")))"#,
@@ -2023,7 +1947,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_signed_bigint_sum_and_product_fold_values() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2036,7 +1959,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_bigint_tuple_rows_survive_loop_local_cleanup() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2083,7 +2005,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_inline_zip_map_pipeline_with_distinct_lambda_names_works() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2102,7 +2023,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_while_multiple_body_forms_execute_without_explicit_do() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2118,7 +2038,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_while_multiple_body_forms_tuple_destructuring() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2136,7 +2055,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_inline_zip_map_pipeline_shadowing_regression() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2155,7 +2073,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_nested_letrec_inside_lambda_survives_optimized_capture_analysis() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2193,7 +2110,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_letmacro_expands_and_runs_through_normal_pipeline() {
         let output = run_program_output(
             r#"(do
@@ -2204,8 +2120,12 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_library_macros_expand_library_defs_and_user_program() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "0");
         let lib_ast = crate::parser::build_library(
             r#"(do
                     (letmacro inc1 (lambda x (qq (+ (uq x) 1))))
@@ -2218,19 +2138,7 @@ xs)"#,
             .expect("library macro should expand in std defs and user program");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
             .expect("expanded program should compile");
-        #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .expect("io store should initialize");
-        let argv: Vec<String> = Vec::new();
-        #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        });
-        #[cfg(not(feature = "io"))]
-        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
-        assert_eq!(run_result.expect("program should run"), "43");
+        assert_eq!(run_external_wat(&wat).expect("program should run"), "43");
     }
 
     #[test]
@@ -2254,7 +2162,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_macroexpand_and_variadic_when_macro_work() {
         let expand_output = run_program_output(
             r#"(do
@@ -2282,7 +2189,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_letmacro_supports_compile_time_do_let_and_gensym() {
         let output = run_program_output(
             r#"(do
@@ -2299,14 +2205,12 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_letstar_macro_supports_sequential_bindings_with_single_body_expr() {
         let output = run_program_output_with_std_and_opts(r#"(let* a 1 b (+ a 2) (+ a b))"#, true);
         assert_eq!(output, "4");
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_graph_find_cycles_returns_single_normalized_simple_cycle() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2340,7 +2244,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_graph_find_cycles_increasing_time_supports_two_edge_cycle() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2368,7 +2271,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_graph_has_cycle_detects_presence_and_absence_of_directed_cycle() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2386,7 +2288,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_floyd_cycle_detects_link_cycle_by_custom_next_and_eq() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2404,7 +2305,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_cdr_tail_view_materializes_on_mutation_without_touching_source() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2418,7 +2318,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_multiclause_unless_macro_expands_legacy_shapes_for_unit_bodies() {
         let output = run_program_output(
             r#"(do
@@ -2430,11 +2329,10 @@ xs)"#,
                  (unless false nil)
                  (unless false nil nil)])"#,
         );
-        assert_eq!(output, "[0 0 0]");
+        assert_eq!(output, "[nil nil nil]");
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_not_equal_alias_macros_expand_from_baked_library() {
         let output =
             run_program_output_with_std_and_opts(r#"[(!= 1 2) (!= 2 2) (<> 3 4) (<> 5 5)]"#, true);
@@ -2465,14 +2363,13 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_cond_macro_runs_through_baked_library() {
         let output = run_program_output_with_std_and_opts(r#"(cond false 1 true 2 3)"#, true);
         assert_eq!(output, "2");
     }
 
     #[test]
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     fn test_runtime_io_rejects_parent_directory_escape_even_with_read_permission() {
         let base = std::env::temp_dir().join(format!(
             "que-io-sandbox-parent-{}",
@@ -2494,7 +2391,7 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     fn test_runtime_io_rejects_absolute_path_outside_sandbox_even_with_read_permission() {
         let base = std::env::temp_dir().join(format!(
             "que-io-sandbox-absolute-{}",
@@ -2518,7 +2415,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_cons_builtin_works_as_higher_order_function_value() {
         let output =
             run_program_output_with_std_and_opts(r#"(reduce cons [] [[1 2] [3] [4 5]])"#, true);
@@ -2526,7 +2422,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_vector_get_out_of_bounds_traps() {
         let err = run_program_error(
             r#"(do
@@ -2534,7 +2429,7 @@ xs)"#,
                 [(get xs -1) (get xs 4) (get xs 10)])"#,
         );
         assert!(
-            err.contains("call error"),
+            err.contains("failed to run main module"),
             "expected runtime call error for out-of-bounds get, got: {}",
             err
         );
@@ -2546,18 +2441,16 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_int_overflow_wraps_by_default() {
         let output = run_program_output(r#"(+ 2147483647 1)"#);
         assert_eq!(output, "-2147483648");
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_public_safe_arithmetic_predicates_cover_int_and_dec_edges() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
         let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
         let _div_zero = ScopedEnvVar::set("QUE_DIV_ZERO_CHECK", "1");
@@ -2600,11 +2493,10 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_alter_inline_rhs_matches_precompute_with_int_overflow_check() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _int_overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
         let output = run_program_output_unlocked(
             r#"(do
@@ -2630,7 +2522,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_int_div_zero_traps_with_debug_guards() {
         let err = run_program_error_with_debug_guards(r#"(do (let id (lambda x x)) (/ 1 (id 0)))"#);
         assert!(
@@ -2641,7 +2532,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_float_div_zero_traps_with_debug_guards() {
         let err = run_program_error_with_debug_guards(
             r#"(do (let f (lambda z (/. (Int->Dec 1) z))) (f (Int->Dec 0)))"#,
@@ -2654,7 +2544,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_decimal_literal_scaling_and_basic_ops() {
         let output = run_program_output(
             r#"[ 3.14
@@ -2667,7 +2556,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_decimal_int_conversions() {
         let output = run_program_output(
             r#"(do
@@ -2679,22 +2567,20 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_decimal_scale_env_changes_literal_quantization_and_display() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "100");
         let output = run_program_output_unlocked(r#"[ 3.141 3.146 (+. 1.11 2.22) ]"#);
         assert_eq!(output, "[3.14 3.15 3.33]");
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_int_to_dec_overflow_traps_with_debug_guards() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "100000");
         let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
         let err = run_program_error_unlocked(r#"(Int->Dec 48000)"#);
@@ -2706,11 +2592,10 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_string_to_dec_overflow_traps_with_debug_guards() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "100000");
         let _dec_overflow = ScopedEnvVar::set("QUE_DEC_OVERFLOW_CHECK", "1");
         let err = run_program_error_with_std_unlocked(r#"(String->Dec "48000.00")"#, true);
@@ -2722,7 +2607,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_loop_condition_runtime_produces_expected_sequence() {
         let output = run_program_output(
             r#"(do
@@ -2735,7 +2619,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_regression_graph_build_two_calls_preserves_first_result() {
         let output = run_program_output_with_std_and_opts(
             r#"(let build-graph (lambda n edges source destination (do
@@ -2758,7 +2641,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_smoke() {
         assert_std_program_output_matches_with_and_without_optimizer(
             r#"(do
@@ -2771,7 +2653,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_smoke2() {
         assert_std_program_output_matches_with_and_without_optimizer(
             r#"(|>
@@ -2787,14 +2668,12 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_smoke3() {
         assert_std_program_output_matches_with_and_without_optimizer(
             r#"(|> (range 1 (|> (range 1 20) (map (lambda x (+ x 1))) (find (lambda x (> x 15))))) (map odd?) (every? (Bool/eq? true)))"#,
         )
     }
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_smoke4() {
         assert_std_program_output_matches_with_and_without_optimizer(
             r#"
@@ -2805,21 +2684,18 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_pipe_can_use_single_arg_or_stage_as_partial() {
         let output = run_program_output_with_std_and_opts(r#"(|> false not (or false))"#, true);
         assert_eq!(output, "true");
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_pipe_can_use_single_arg_plus_stage_as_partial() {
         let output = run_program_output_with_std_and_opts(r#"(|> 10 (+ 1))"#, true);
         assert_eq!(output, "11");
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_oversaturated_returned_function_call_matches_explicit_apply() {
         let src = r#"(do
   (let make-adder (lambda x (lambda y (+ x y))))
@@ -2833,7 +2709,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_mapcar_comp_works_with_nested_and_apply_call_forms() {
         let src = r#"(do
   (let mymap (lambda fn xs (if (= (length xs) 0) [] (do
@@ -2857,7 +2732,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_reduce_until_i() {
         assert_std_program_output_matches_with_and_without_optimizer(
             r#"(let two-sum-test (lambda nums target (snd (|> nums
@@ -2881,7 +2755,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_reduce_until() {
         assert_std_program_output_matches_with_and_without_optimizer(
             r#"(|> [1 2 3 4 5 6]
@@ -2895,7 +2768,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_template() {
         assert_std_program_output_matches_with_and_without_optimizer(
             r#"(|> (range 1 10) (map (lambda x (+ x 1))) (filter (lambda x (> x 3))) (reduce + 0))"#,
@@ -2903,7 +2775,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness_fusion_opt_equivalence_template6() {
         assert_std_program_output_matches_with_and_without_optimizer(
             r#"(|> (range 1 10) (map (lambda x (+ x 1))) (window 3) (map sum) (filter even?) sum)"#,
@@ -2911,7 +2782,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_regression_loop_callback_discard_does_not_overrelease_borrowed_result() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
@@ -2931,7 +2801,6 @@ xs)"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_regression_std_vector_for_isolated_behavior() {
         let output = run_program_output_with_std_and_opts(
             r#"(let out [])
@@ -3312,7 +3181,7 @@ out"#,
     fn test_typed_optimization_inlines_branchy_vector_read_scalar_helper() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _inline_cost = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "64");
         let typed = infer_typed_built(
             r#"(do
@@ -3356,9 +3225,7 @@ out"#,
 
     #[test]
     fn test_typed_optimization_canonicalizes_push_to_set_append() {
-        let typed = infer_typed_built(
-            "(do (let xs []) (push! xs 1) xs)",
-        );
+        let typed = infer_typed_built("(do (let xs []) (push! xs 1) xs)");
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
         assert!(
@@ -3468,11 +3335,10 @@ out"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_inlined_local_mutate_helper_alpha_renames_bindings() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _inline_budget = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "512");
         let output = run_program_output_unlocked(
             r#"(do
@@ -3494,11 +3360,10 @@ out"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_single_use_let_not_inlined_across_mutated_dependency() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _inline_budget = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "512");
         let output = run_program_output_unlocked(
             r#"(do
@@ -4013,7 +3878,6 @@ out"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_loop_in_pop_val_rejects_mutating_second_parameter_without_bang_suffix() {
         let source = r#"(let rev (lambda (u xs)
   (let out [])
@@ -4359,7 +4223,6 @@ out"#,
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_typed_optimization_map_partial_application_fuses_by_hoisting_callable_once() {
         let expr = crate::parser::parse("(map (fp/add 1) (range 0 10))")
             .expect("input should parse")
@@ -5830,8 +5693,7 @@ reverse-list-loop"#;
 
     #[test]
     fn test_wasm_lsp_hover_std_usage_includes_global_effects() {
-        let hover_json =
-            crate::wasm_api::lsp_hover("(reverse! [ 1 2 3 ])".to_string(), 0, 6);
+        let hover_json = crate::wasm_api::lsp_hover("(reverse! [ 1 2 3 ])".to_string(), 0, 6);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
 
@@ -5849,8 +5711,7 @@ reverse-list-loop"#;
 
     #[test]
     fn test_wasm_lsp_hover_std_local_mutating_function_includes_global_effects() {
-        let hover_json =
-            crate::wasm_api::lsp_hover("(map square [ 1 2 3 ])".to_string(), 0, 6);
+        let hover_json = crate::wasm_api::lsp_hover("(map square [ 1 2 3 ])".to_string(), 0, 6);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
 
@@ -6671,7 +6532,6 @@ parse-value"#;
     }
 
     #[test]
-    #[cfg(feature = "io")]
     fn test_wat_host_print_releases_temporary_string_arg() {
         let expr =
             crate::parser::build(r#"(do (print! "hello") 1)"#).expect("program should build");
@@ -6699,7 +6559,6 @@ parse-value"#;
     }
 
     #[test]
-    #[cfg(feature = "io")]
     fn test_wat_host_print_releases_temporary_serialized_string() {
         let expr =
             crate::parser::build(r#"(print! (serialize 42))"#).expect("program should build");
@@ -6726,7 +6585,7 @@ parse-value"#;
     }
 
     #[test]
-    #[cfg(all(feature = "runtime", feature = "io"))]
+    #[cfg(any())]
     fn test_wat_host_print_releases_temporary_string_from_std_function_alias() {
         let wat = compile_std_program_to_wat(r#"(print! (Integer->String 42))"#, true);
         let main_start = wat
@@ -7308,6 +7167,214 @@ fn"#;
     }
 
     #[test]
+    fn test_wasi_host_replaces_supported_private_host_imports() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (print! "hi")
+                (stdin!)
+                (write! "x" (read! "x"))
+                (read/chunks! "x" 2 (lambda chunk false))
+                (read/lines! "x" (lambda line false))
+                (stdin/chunks! 2 (lambda chunk false))
+                (list-dir! ".")
+                (mkdir! "d")
+                (move! "x" "y")
+                (delete! "y")
+                (sleep! 0)
+                (time!)
+                (random!)
+                (clear!))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        for private_import in [
+            "print",
+            "read_stdin",
+            "read_file",
+            "write_file",
+            "read_chunks",
+            "read_lines",
+            "read_stdin_chunks",
+            "list_dir",
+            "mkdir_p",
+            "move",
+            "delete",
+            "sleep",
+            "time",
+            "random",
+            "clear",
+        ] {
+            assert!(
+                !wat.contains(&format!("(import \"host\" \"{private_import}\"")),
+                "WASI mode should replace host.{private_import}, got:\n{wat}"
+            );
+        }
+        for wasi_import in [
+            "fd_write",
+            "fd_read",
+            "path_open",
+            "fd_close",
+            "fd_readdir",
+            "path_create_directory",
+            "path_rename",
+            "path_unlink_file",
+            "poll_oneoff",
+            "clock_time_get",
+            "random_get",
+        ] {
+            assert!(
+                wat.contains(&format!("\"{wasi_import}\"")),
+                "WASI mode should include {wasi_import}, got:\n{wat}"
+            );
+        }
+        assert_eq!(
+            wat.matches("\"fd_write\"").count(),
+            1,
+            "print! and clear! must share one fd_write import"
+        );
+        wat::parse_str(&wat).expect("combined WASI adapter module should encode");
+    }
+
+    #[test]
+    fn test_wasi_argv_uses_wasi_arguments_and_initializes_guest_argv() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let expr = crate::parser::build("(get ARGV 0)").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(wat.contains("\"args_sizes_get\""));
+        assert!(wat.contains("\"args_get\""));
+        assert!(wat.contains("call $__wasi_init_argv"));
+        assert!(wat.contains("(func (export \"_start\")"));
+        wat::parse_str(&wat).expect("WASI ARGV module should encode");
+    }
+
+    #[test]
+    fn test_wasi_permissions_reject_missing_capability() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _permissions = ScopedEnvVar::set("QUE_WASI_ALLOW", "print");
+        let expr = crate::parser::build(r#"(read! "input.txt")"#).expect("program should build");
+        let error = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect_err("read! without read permission should fail");
+        assert!(error.contains("read! requires --allow read"), "{error}");
+    }
+
+    #[test]
+    fn test_wasi_serialize_is_specialized_inside_guest() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let expr =
+            crate::parser::build(r#"(serialize {42 -3.25 true 'x' [1 2 3] "hello\nworld"})"#)
+                .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(!wat.contains("(import \"host\" \"serialize\""), "{wat}");
+        assert!(wat.contains("call $__wasi_serialize_"), "{wat}");
+        assert!(wat.contains("func $__serde_string"), "{wat}");
+        wat::parse_str(&wat).expect("specialized serializer module should encode");
+    }
+
+    #[test]
+    fn test_wasi_deserialize_is_specialized_inside_guest() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (sig value {Int {Dec {Bool {Char {[Int] [Char]}}}}})
+                (let value (deserialize "{ 42 { -3.25 { true { (char 120) { [1 2 3] \"ok\" } } } } }"))
+                (serialize value))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(!wat.contains("(import \"host\" \"deserialize\""), "{wat}");
+        assert!(wat.contains("call $__wasi_deserialize_"), "{wat}");
+        assert!(wat.contains("func $__deser_string"), "{wat}");
+        wat::parse_str(&wat).expect("specialized deserializer module should encode");
+    }
+
+    #[test]
+    fn test_wasi_start_renders_top_level_result() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "0");
+        let expr = crate::parser::build("(+ 1 2)").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(wat.contains("(func (export \"_start\")"), "{wat}");
+        assert!(wat.contains("call $__serde_int"), "{wat}");
+        assert!(wat.contains("call $__wasi_write_text"), "{wat}");
+        assert!(wat.contains("\"fd_write\""), "{wat}");
+        wat::parse_str(&wat).expect("result-printing WASI module should encode");
+    }
+
+    #[test]
+    fn test_wasi_no_result_start_drops_result_without_print_runtime() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _no_result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "1");
+        let expr = crate::parser::build("(+ 1 2)").expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(wat.contains("call $__que_main\n    drop"), "{wat}");
+        assert!(!wat.contains("\"fd_write\""), "{wat}");
+        assert!(!wat.contains("func $__serde_int"), "{wat}");
+        wat::parse_str(&wat).expect("silent WASI module should encode");
+    }
+
+    #[test]
+    fn test_wasi_test_configuration_is_thread_local() {
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let wasi_barrier = barrier.clone();
+        let wasi = std::thread::spawn(move || {
+            let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+            wasi_barrier.wait();
+            for _ in 0..20 {
+                let expr = crate::parser::build("(+ 1 2)").unwrap();
+                let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false).unwrap();
+                assert!(wat.contains("(func (export \"_start\")"), "{wat}");
+            }
+        });
+        let normal = std::thread::spawn(move || {
+            barrier.wait();
+            for _ in 0..20 {
+                let expr = crate::parser::build("(+ 1 2)").unwrap();
+                let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false).unwrap();
+                assert!(!wat.contains("(func (export \"_start\")"), "{wat}");
+                assert!(wat.contains("(func (export \"main\")"), "{wat}");
+            }
+        });
+        wasi.join().expect("WASI compilation thread should pass");
+        normal
+            .join()
+            .expect("normal compilation thread should pass");
+    }
+
+    #[test]
     fn test_stdin_chunks_builtin_host_extern_emits_callback_apply_runtime() {
         let expr = crate::parser::build(r#"(stdin/chunks! 4 (lambda chunk false))"#)
             .expect("program should build");
@@ -7462,7 +7529,6 @@ fn"#;
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_runtime_push_canonicalization_preserves_unit_and_managed_values() {
         let result = run_program_output_with_std_and_opts(
             r#"(do
@@ -7473,7 +7539,7 @@ fn"#;
                 {unit scalar (get managed 0)})"#,
             true,
         );
-        assert_eq!(result, "{ 0 { [1] \"hi\" } }");
+        assert_eq!(result, "{ nil { [1] \"hi\" } }");
     }
 
     #[test]
@@ -7655,7 +7721,6 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_wat_top_level_managed_vector_is_borrowed_once_per_function() {
         let source = r#"(do
@@ -7698,7 +7763,6 @@ fn"#;
         assert_eq!(run_program_output(source), "6");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_wat_non_escaping_destructured_refs_are_borrowed() {
         let source = r#"(do
@@ -7736,7 +7800,6 @@ fn"#;
         assert_eq!(run_program_output(source), "6");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_borrowed_destructured_vector_mutation_updates_owner() {
         let source = r#"(do
@@ -7750,7 +7813,6 @@ fn"#;
         assert_eq!(run_program_output(source), "9");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_returned_destructured_ref_keeps_owned_lifetime() {
         let source = r#"(do
@@ -7860,10 +7922,9 @@ fn"#;
 
     #[test]
     fn test_wat_append_fill_loop_uses_filled_scalar_vector_constructor() {
-        #[cfg(feature = "runtime")]
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             r#"(do
@@ -8034,7 +8095,7 @@ fn"#;
     fn test_wat_branchy_scalar_helper_inlines_into_later_lambda_body() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _inline_cost = ScopedEnvVar::set("QUE_SMALL_SCALAR_INLINE_COST", "64");
         let expr = crate::parser::build(
             r#"(do
@@ -8113,8 +8174,9 @@ fn"#;
 
     #[test]
     fn test_wat_loop_get_keeps_checked_path_without_nonnegative_index_proof() {
-        #[cfg(feature = "runtime")]
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let expr = crate::parser::build(
             r#"(do
                     (let xs [1 2 3 4])
@@ -8141,7 +8203,6 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_proven_while_loop_scalar_get_stays_correct() {
         let result = run_program_output(
@@ -8158,7 +8219,6 @@ fn"#;
         assert_eq!(result, "10");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_discarded_and_or_preserve_short_circuit_effects() {
         let result = run_program_output(
@@ -8347,12 +8407,11 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_tail_recursive_mutating_call_preserves_all_managed_arguments() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _tco = ScopedEnvVar::set("QUE_TCO", "conservative");
         let output = run_program_output_unlocked(
             r#"(do
@@ -8371,10 +8430,11 @@ fn"#;
         assert_eq!(output, "[0 65 66]");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_opt_builtin_function_alias_call_works() {
-        let _guard = runtime_exec_lock().lock().unwrap();
+        let _guard = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let prev_tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
         let result = run_program_output_unlocked(
             r#"(do
@@ -8387,7 +8447,6 @@ fn"#;
         assert_eq!(result, "[1 2 10]");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_impure_branch_tuple_return_destructure_preserves_effects() {
         let result = run_program_output(
@@ -8477,7 +8536,6 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_wat_statically_typed_tuple_projections_inline_direct_loads() {
         let source = r#"(do
@@ -8599,10 +8657,11 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_wat_counted_replacement_loop_hoists_scalar_data_pointer_for_set() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             "((lambda (do
@@ -8652,10 +8711,11 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_wat_read_only_managed_vector_loop_hoists_data_pointer_for_get() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let source = r#"((lambda (do
                 (let xs ["a" "bb" "ccc"])
@@ -8699,10 +8759,11 @@ fn"#;
         assert_eq!(run_program_output_unlocked(source), "6");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_wat_managed_vector_loop_with_alias_mutation_keeps_get_helper() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             r#"((lambda (do
@@ -8733,10 +8794,11 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_wat_cached_length_replacement_loop_hoists_scalar_data_pointer() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             "((lambda (do
@@ -8773,7 +8835,6 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_cached_length_loop_with_resize_keeps_snapshot_semantics() {
         let result = run_program_output(
@@ -8790,10 +8851,11 @@ fn"#;
         assert_eq!(result, "[2 9]");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_wat_constant_bound_replacement_loop_hoists_scalar_data_pointer_for_set() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             "(let bump! (lambda (xs)
@@ -8851,7 +8913,9 @@ fn"#;
 
     #[test]
     fn test_wat_inclusive_constant_bound_replacement_loop_hoists_scalar_data_pointer_for_set() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             "(do
@@ -8899,7 +8963,9 @@ fn"#;
 
     #[test]
     fn test_wat_repeated_scalar_set_avoids_eager_materialization_in_do_sequence() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
         let expr = crate::parser::build(
             "(let fill! (lambda (xs)
@@ -8937,7 +9003,9 @@ fn"#;
 
     #[test]
     fn test_wat_guarded_constant_scalar_param_sets_use_raw_fast_branch() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             "(let fill! (lambda (xs)
@@ -8986,10 +9054,11 @@ fn"#;
         );
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_guarded_constant_scalar_param_set_keeps_short_vector_append_semantics() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let result = run_program_output_unlocked(
             "(let fill! (lambda (xs) (do (set! xs 0 1) (set! xs 1 2) xs)))
@@ -8999,7 +9068,6 @@ fn"#;
         assert_eq!(result, "[1 2]");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_dynamic_scalar_set_keeps_append_at_length_semantics() {
         let result = run_program_output(
@@ -9009,10 +9077,11 @@ fn"#;
         assert_eq!(result, "[1 2 3]");
     }
 
-    #[cfg(feature = "runtime")]
     #[test]
     fn test_runtime_dynamic_scalar_param_set_keeps_append_at_length_semantics_under_opt() {
-        let _lock = runtime_exec_lock().lock().unwrap();
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let result = run_program_output_unlocked(
             "(let append-at! (lambda (xs i value) (do (set! xs i value) xs)))
@@ -9678,65 +9747,35 @@ fn"#;
 
     (= once 15)"#;
 
-        let expr = crate::parser::build(test_case).expect("program should build");
-        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
-        let argv: Vec<String> = Vec::new();
-        #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .unwrap();
-        #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        });
-        #[cfg(not(feature = "io"))]
-        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
         assert_eq!(
-            run_result.expect("program should run without trap"),
+            run_program_output(test_case),
             "true",
             "expected stress loop to finish without memory trap"
         );
     }
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_set_ref_vector_stress_no_leak_crash() {
-        let expr = crate::parser::build(
-            r#"(do
+        let source = r#"(do
 (let x [[]])
 (mut i 0)
 (while (< i 300000) (do
   (set! x 0 [])
   (alter! i (+ i 1))))
-1)"#,
-        )
-        .expect("program should build");
-        let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
-        let argv: Vec<String> = Vec::new();
-        #[cfg(feature = "io")]
-        let store_data =
-            crate::io::ShellStoreData::new_with_security(None, crate::io::ShellPolicy::disabled())
-                .map_err(|e| e.to_string())
-                .unwrap();
-        #[cfg(feature = "io")]
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        });
-        #[cfg(not(feature = "io"))]
-        let run_result = crate::runtime::run_wat_text(&wat, (), &argv, |_linker| Ok(()));
+1)"#;
         assert_eq!(
-            run_result.expect("program should run without trap"),
+            run_program_output(source),
             "1",
             "expected stress loop to finish without memory trap"
         );
     }
 
     #[test]
-    #[cfg(feature = "runtime")]
     fn test_correctness() {
         let _lock = runtime_exec_lock()
             .lock()
-            .expect("runtime test lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "0");
         let test_cases = [
             ("nil", "0"),
             ("(+ 1 2)", "3"),
@@ -12474,7 +12513,7 @@ the sea shore
   (if (=# x prev) (++ counter) (do (push! temp { counter prev }) (alter! prev x) (alter! counter 1))))
   (push! temp { counter prev })
   temp)))
-(encode ['a' 'a' 'a' 'a' 'b' 'c' 'c' 'a' 'a' 'd' 'e' 'e' 'e' 'e'])"#, "[{ 4 a } { 1 b } { 2 c } { 2 a } { 1 d } { 4 e }]"),
+(encode ['a' 'a' 'a' 'a' 'b' 'c' 'c' 'a' 'a' 'd' 'e' 'e' 'e' 'e'])"#, "[{ 4 (char 97) } { 1 (char 98) } { 2 (char 99) } { 2 (char 97) } { 1 (char 100) } { 4 (char 101) }]"),
 (r#"(let encode (lambda (xs) (do
   (mut prev (car xs))
   (mut counter 0)
@@ -12823,39 +12862,17 @@ humidity-to-location map:
                                 // match crate::vm::run(&exprs, crate::vm::VM::new()) {
                                 match crate::wat::compile_program_to_wat(&exprs) {
                                     Ok(result) => {
-                                        let argv: Vec<String> = Vec::new();
-                                        #[cfg(feature = "io")]
-                                        let store_data =
-                                            crate::io::ShellStoreData::new_with_security(
-                                                None,
-                                                crate::io::ShellPolicy::disabled(),
-                                            )
-                                            .map_err(|e| e.to_string())
-                                            .unwrap();
-                                        #[cfg(feature = "io")]
-                                        let run_result = crate::runtime::run_wat_text(
-                                            &result,
-                                            store_data,
-                                            &argv,
-                                            |linker| {
-                                                crate::io::add_shell_to_linker(linker)
-                                                    .map_err(|e| e.to_string())
-                                            },
-                                        );
-                                        #[cfg(not(feature = "io"))]
-                                        let run_result = crate::runtime::run_wat_text(
-                                            &result,
-                                            (),
-                                            &argv,
-                                            |_linker| Ok(()),
-                                        );
+                                        let run_result = run_external_wat(&result);
                                         match run_result {
                                             Ok(res) => {
                                                 assert_eq!(format!("{}", res), *out, "Solution");
                                             }
                                             Err(e) => {
                                                 println!("{:?}", inp);
-                                                panic!("Failed tests because {}\nInput:\n{}", e, inp);
+                                                panic!(
+                                                    "Failed tests because {}\nInput:\n{}",
+                                                    e, inp
+                                                );
                                             }
                                         }
                                     }

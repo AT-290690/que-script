@@ -38,22 +38,14 @@ fi
 export "AR_${TARGET_ENV_KEY}=${LINUX_AR}"
 export "CARGO_TARGET_${TARGET_ENV_KEY_UPPER}_AR=${LINUX_AR}"
 
-cargo zigbuild --release --target "${TARGET}" --no-default-features --features io --bin queio
-cargo zigbuild --release --target "${TARGET}" --no-default-features --features compiler --bin quec
-cargo zigbuild --release --target "${TARGET}" --no-default-features --features runtime --bin quer
-cargo zigbuild --release --target "${TARGET}" --bin quewat
-cargo zigbuild --release --target "${TARGET}" --features io --bin quelsp
+cargo zigbuild --release --target "${TARGET}" --no-default-features --features compiler --bin que
+cargo zigbuild --release --target "${TARGET}" --no-default-features --features compiler --bin quelsp
 
 mkdir -p "${OUT_DIR}"
-cp "${OUT_DIR}/queio" "${OUT_DIR}/que"
-
 # The baked std lib is platform-independent text, so generating it with the host tool is sufficient.
 cargo run --release --no-default-features --features repo-tools --bin quebake -- --out "${OUT_DIR}/que-lib.lisp"
 
 printf 'Linux release artifacts written to %s\n' "${OUT_DIR}"
 printf '  %s\n' "${OUT_DIR}/que"
-printf '  %s\n' "${OUT_DIR}/quec"
-printf '  %s\n' "${OUT_DIR}/quer"
-printf '  %s\n' "${OUT_DIR}/quewat"
 printf '  %s\n' "${OUT_DIR}/quelsp"
 printf '  %s\n' "${OUT_DIR}/que-lib.lisp"
