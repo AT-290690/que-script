@@ -12,6 +12,5 @@ wasm-bindgen \
   --out-name quelsp
 
 # Native LSP binary for editor integration.
-cargo build --release --features io --bin quelsp
-
+cargo build --release --no-default-features --features compiler --bin quelsp
 

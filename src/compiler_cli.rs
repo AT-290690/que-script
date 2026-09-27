@@ -10,6 +10,79 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WasmRuntime {
+    Wasmtime,
+    Wasmer,
+    Wamr,
+}
+
+impl WasmRuntime {
+    fn parse(value: &str) -> Result<(Self, String), String> {
+        let executable = match value {
+            "wamr" => "iwasm".to_string(),
+            other => other.to_string(),
+        };
+        let name = Path::new(&executable)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(value)
+            .strip_suffix(".exe")
+            .unwrap_or_else(|| {
+                Path::new(&executable)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(value)
+            });
+        let adapter = match name {
+            "wasmtime" => Self::Wasmtime,
+            "wasmer" => Self::Wasmer,
+            "wamr" | "iwasm" => Self::Wamr,
+            _ => {
+                return Err(format!(
+                    "unsupported WebAssembly runtime '{value}'; use wasmtime, wasmer, iwasm/wamr, or a path to one of those executables"
+                ))
+            }
+        };
+        Ok((adapter, executable))
+    }
+
+    fn command(
+        self,
+        executable: String,
+        wasm: &Path,
+        program_args: &[String],
+        grants_filesystem: bool,
+    ) -> Command {
+        let mut command = Command::new(executable);
+        match self {
+            Self::Wasmtime => {
+                command.arg("run");
+                if grants_filesystem {
+                    command.arg("--dir").arg(".");
+                }
+                command.arg(wasm).args(program_args);
+            }
+            Self::Wasmer => {
+                command.arg("run").arg(wasm);
+                if grants_filesystem {
+                    command.arg("--volume").arg(".:.");
+                }
+                if !program_args.is_empty() {
+                    command.arg("--").args(program_args);
+                }
+            }
+            Self::Wamr => {
+                if grants_filesystem {
+                    command.arg("--dir=.");
+                }
+                command.arg(wasm).args(program_args);
+            }
+        }
+        command
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EmitKind {
     Source,
@@ -27,14 +100,16 @@ Usage:
   quec <program.que> > program.wasm
   quec compile <program.que> [--opt] [--out <program.wasm>]
   quec run <program.que> [arguments ...] [--opt] [--allow <permissions ...>]
-  quec run-wasi <program.que> [arguments ...] [--opt]
+  quec run-wasi <program.que> [arguments ...] [--opt] [--runtime <runtime>]
   quec <program.que> --emit <source|opt-source|wat|wasm|c|types> [--out <file>]
   quec explain <program.que> [--json] [--opt] [--out <file>]
   quec fmt <program.que> [--check|--stdout]
   quec fmt --stdin
 
-`quec run` uses the separately installed wasm2c and C compiler. Wasmtime is not
-linked into quec. Set QUEC_NATIVE_SCRIPT to override the native-C driver path."
+`quec run` uses the separately installed wasm2c and C compiler. `run-wasi` uses
+a user-installed runtime: wasmtime (default), wasmer, or iwasm/WAMR. Select it
+with --runtime or QUE_WASM_RUNTIME. Set QUEC_NATIVE_SCRIPT to override the
+native-C driver path."
 }
 
 pub fn run() -> Result<(), String> {
@@ -194,6 +269,7 @@ fn write_output(path: Option<&str>, bytes: &[u8]) -> Result<(), String> {
 
 fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), String> {
     let opt = take_flag(&mut args, "--opt");
+    let debug = take_flag(&mut args, "--debug");
     let wasi = take_flag(&mut args, "--wasi");
     if wasi {
         env::set_var("QUE_WASI_HOST", "1");
@@ -214,6 +290,8 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
     };
     if opt {
         enable_opt();
+    } else if debug {
+        enable_debug();
     }
     let path = args
         .first()
@@ -281,10 +359,22 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
 
 fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
     let opt = take_flag(&mut args, "--opt");
+    let debug = take_flag(&mut args, "--debug");
+    let no_result = take_flag(&mut args, "--no-result");
+    let runtime = take_value(&mut args, "--runtime")?
+        .or_else(|| env::var("QUE_WASM_RUNTIME").ok())
+        .unwrap_or_else(|| "wasmtime".to_string());
+    let (runtime_adapter, runtime_executable) = WasmRuntime::parse(&runtime)?;
+    env::set_var("QUE_WASI_NO_RESULT", if no_result { "1" } else { "0" });
     let permissions = if let Some(index) = args.iter().position(|arg| arg == "--allow") {
-        let permissions = args[index + 1..].join(",");
-        args.truncate(index);
-        permissions
+        let tail = args.drain(index..).skip(1).collect::<Vec<_>>();
+        if let Some(separator) = tail.iter().position(|arg| arg == "in") {
+            let permissions = tail[..separator].join(",");
+            args.extend_from_slice(&tail[separator + 1..]);
+            permissions
+        } else {
+            tail.join(",")
+        }
     } else {
         String::new()
     };
@@ -303,23 +393,23 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
     ];
     if opt {
         compile.push("--opt".to_string());
+    } else if debug {
+        compile.push("--debug".to_string());
     }
     run_compile(compile, Some(EmitKind::Wasm))?;
     let grants_filesystem = permissions
         .split(',')
         .any(|permission| matches!(permission.trim(), "all" | "*" | "read" | "write" | "delete"));
-    let mut command = Command::new("wasmtime");
-    command.arg("run");
-    if grants_filesystem {
-        command.arg("--dir").arg(".");
-    }
-    let status = command
-        .arg(&wasm)
-        .args(args)
+    let status = runtime_adapter
+        .command(runtime_executable.clone(), &wasm, &args, grants_filesystem)
         .status()
-        .map_err(|error| format!("failed to start external wasmtime: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "failed to start WebAssembly runtime '{runtime_executable}': {error}. Install it or choose another with --runtime"
+            )
+        })?;
     let _ = fs::remove_file(&wasm);
-    status_result(status, "external Wasmtime execution")
+    status_result(status, &format!("external {runtime:?} execution"))
 }
 
 fn run_explain(raw: &[String]) -> Result<(), String> {
@@ -467,4 +557,89 @@ fn run_native(mut args: Vec<String>) -> Result<(), String> {
     let result = status_result(status, "native program");
     let _ = fs::remove_dir_all(&build);
     result
+}
+
+#[cfg(test)]
+mod runtime_adapter_tests {
+    use super::*;
+
+    fn command_parts(command: &Command) -> (String, Vec<String>) {
+        (
+            command.get_program().to_string_lossy().into_owned(),
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn wasmtime_adapter_places_capabilities_before_module() {
+        let (adapter, executable) = WasmRuntime::parse("wasmtime").unwrap();
+        let command = adapter.command(
+            executable,
+            Path::new("program.wasm"),
+            &["hello".into()],
+            true,
+        );
+        assert_eq!(
+            command_parts(&command),
+            (
+                "wasmtime".into(),
+                vec!["run", "--dir", ".", "program.wasm", "hello"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            )
+        );
+    }
+
+    #[test]
+    fn wasmer_adapter_uses_volume_and_argument_separator() {
+        let (adapter, executable) = WasmRuntime::parse("wasmer").unwrap();
+        let command = adapter.command(
+            executable,
+            Path::new("program.wasm"),
+            &["hello".into()],
+            true,
+        );
+        assert_eq!(
+            command_parts(&command),
+            (
+                "wasmer".into(),
+                vec!["run", "program.wasm", "--volume", ".:.", "--", "hello"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            )
+        );
+    }
+
+    #[test]
+    fn wamr_alias_selects_iwasm_adapter() {
+        let (adapter, executable) = WasmRuntime::parse("wamr").unwrap();
+        let command = adapter.command(executable, Path::new("program.wasm"), &[], true);
+        assert_eq!(
+            command_parts(&command),
+            (
+                "iwasm".into(),
+                vec!["--dir=.", "program.wasm"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            )
+        );
+    }
+
+    #[test]
+    fn supported_runtime_path_is_preserved() {
+        let (adapter, executable) = WasmRuntime::parse("/opt/runtime/bin/wasmtime").unwrap();
+        assert_eq!(adapter, WasmRuntime::Wasmtime);
+        assert_eq!(executable, "/opt/runtime/bin/wasmtime");
+    }
+
+    #[test]
+    fn unknown_runtime_is_rejected() {
+        assert!(WasmRuntime::parse("mystery-vm").is_err());
+    }
 }

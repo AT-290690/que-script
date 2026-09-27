@@ -4,8 +4,6 @@ set -euo pipefail
 APP_NAME="que"
 BIN_SOURCE="./target/release/que"
 BIN_PATH="/usr/local/bin/que"
-RUNTIME_SOURCE="./target/release/queio"
-RUNTIME_PATH="/usr/local/bin/que-runtime"
 COMPILER_SOURCE="./target/release/quec"
 COMPILER_PATH="/usr/local/bin/quec"
 LEGACY_ECLISP_PATH="/usr/local/bin/eclisp"
@@ -17,11 +15,10 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/install-local-apple.sh [--no-build]
 
-Builds the macOS Que JIT runner and the lightweight Que compiler.
+Builds the lightweight Que frontend and compiler.
 
 Installs:
   /usr/local/bin/que
-  /usr/local/bin/que-runtime
   /usr/local/bin/quec
   /usr/local/share/que/que-lib.lisp
   /usr/local/share/que/compile-native-c.sh and its C host
@@ -57,13 +54,8 @@ fi
 
 if [ "$BUILD" -eq 1 ]; then
   echo "Building local ${APP_NAME} release binary..."
-  cargo build --release --no-default-features --features io --bin queio
   cargo build --release --no-default-features --bin que
   cargo build --release --no-default-features --features compiler --bin quec
-fi
-if [ ! -x "$RUNTIME_SOURCE" ]; then
-  echo "Missing executable: ${RUNTIME_SOURCE}" >&2
-  exit 1
 fi
 if [ ! -x "$COMPILER_SOURCE" ]; then
   echo "Missing executable: ${COMPILER_SOURCE}" >&2
@@ -84,21 +76,13 @@ if ! command -v wasm2c >/dev/null 2>&1; then
   fi
 fi
 
-if ! command -v wasmtime >/dev/null 2>&1; then
-  echo "Installing the external Wasmtime CLI for the WASI backend..."
-  curl https://wasmtime.dev/install.sh -sSf | bash
-fi
-
 tmp_bin="$(mktemp "/tmp/${APP_NAME}.local.XXXXXX")"
-tmp_runtime="$(mktemp "/tmp/que-runtime.local.XXXXXX")"
 tmp_compiler="$(mktemp "/tmp/quec.local.XXXXXX")"
 tmp_lib="$(mktemp "/tmp/que-lib.local.XXXXXX")"
-trap 'rm -f "$tmp_bin" "$tmp_runtime" "$tmp_compiler" "$tmp_lib"' EXIT
+trap 'rm -f "$tmp_bin" "$tmp_compiler" "$tmp_lib"' EXIT
 
 cp "$BIN_SOURCE" "$tmp_bin"
 chmod +x "$tmp_bin"
-cp "$RUNTIME_SOURCE" "$tmp_runtime"
-chmod +x "$tmp_runtime"
 cp "$COMPILER_SOURCE" "$tmp_compiler"
 chmod +x "$tmp_compiler"
 
@@ -108,8 +92,6 @@ cargo run --release --no-default-features --features repo-tools --bin quebake --
 echo "Installing binary: ${BIN_PATH}"
 sudo mkdir -p "$(dirname "$BIN_PATH")"
 sudo mv "$tmp_bin" "$BIN_PATH"
-echo "Installing external JIT runtime: ${RUNTIME_PATH}"
-sudo mv "$tmp_runtime" "$RUNTIME_PATH"
 echo "Installing compiler: ${COMPILER_PATH}"
 sudo mv "$tmp_compiler" "$COMPILER_PATH"
 if [ -e "$LEGACY_ECLISP_PATH" ]; then
@@ -127,3 +109,5 @@ sudo cp ./miscs/native-c/que_host.c ./miscs/native-c/que_host.h "${LIB_DIR}/nati
 
 echo "Installed local macOS ${APP_NAME}."
 echo "Check with: ${APP_NAME} --version"
+echo "Install a WASI runtime separately: wasmtime (default), wasmer, or iwasm/WAMR."
+echo "Select it with: que program.que --runtime <runtime>"

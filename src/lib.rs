@@ -5,13 +5,9 @@ pub mod compiler_cli;
 pub mod explain;
 #[path = "../miscs/formatter.rs"]
 pub mod formatter;
-#[cfg(feature = "io")]
-pub mod io;
 pub mod lsp_native_core;
 pub mod op;
 pub mod project;
-#[cfg(feature = "runtime")]
-pub mod runtime;
 pub mod static_analysis;
 #[cfg(test)]
 mod tests;

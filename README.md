@@ -331,26 +331,32 @@ quec fmt program.que
 ```
 
 `quec run` translates the Wasm through the separately installed WABT `wasm2c`
-tool and invokes the system C compiler. The small `que` frontend delegates fast
-JIT scripting and `que nvim` to the separately installed `que-runtime` host.
-Only `que-runtime` links Wasmtime; neither `que` nor `quec` does.
+tool and invokes the system C compiler. The small `que` frontend delegates
+compilation to `quec` and executes the resulting WASI module with a runtime
+installed by the user. Neither `que` nor `quec` embeds or installs a runtime.
 
-The in-progress external-Wasmtime backend can be exercised with:
+The external-Wasmtime backend can also be invoked explicitly with:
 
 ```bash
-quec run-wasi program.que --opt
+quec run-wasi program.que --opt                         # Wasmtime (default)
+quec run-wasi program.que --opt --runtime wasmer
+quec run-wasi program.que --opt --runtime iwasm
 ```
 
-It currently lowers Unicode `print!`/`stdin!`, `clear!`, `sleep!`, `time!`, and
-`random!` to WASI. Programs using file operations, argument access, chunked
-input, or serialization still require `que-runtime` until those adapters are
-complete.
+It lowers Que IO, arguments, filesystem operations, chunked input, and concrete
+serialization/deserialization to WASI. Use `--allow` to grant the corresponding
+capabilities. Install one of Wasmtime, Wasmer, or WAMR separately and make its
+CLI available on `PATH`. Wasmtime is the default; choose another with
+`--runtime` or set `QUE_WASM_RUNTIME`. A path to a supported runtime executable
+is accepted too.
 
 ## Build from source
 
 Requirements:
 
 - A current stable Rust toolchain
+- A WASI runtime for executing Que programs (Wasmtime, Wasmer, or WAMR)
+- Wasmtime CLI specifically for running the repository's runtime tests
 - Node.js and npm for building the VS Code extension
 - Optional: WABT for WAT and native-C workflows
 - Optional: Zig and `cargo-zigbuild` for cross-compilation scripts
@@ -364,6 +370,7 @@ Build the local toolchain:
 Run the test suite:
 
 ```bash
+./scripts/install-test-deps.sh # once, if wasmtime is not installed
 cargo test
 ./miscs/native-c/test.sh
 ```
@@ -377,10 +384,8 @@ Build all configured release artifacts:
 The main binaries are:
 
 ```text
-que      lightweight frontend for the external que-runtime JIT host
-que-runtime  Wasmtime JIT host with Que IO permissions
+que      lightweight frontend for quec plus a user-selected WASI runtime
 quec     compiler/tooling and optional external wasm2c native runner
-quer     run compiled programs without the IO host
 quewat   run or inspect WAT
 quelsp   native language server
 ```
