@@ -2,12 +2,6 @@
 
 **A statically typed Lisp toolchain targeting WebAssembly.**
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./que-light.png">
-  <source media="(prefers-color-scheme: light)" srcset="./que.png">
-  <img alt="Que" src="./que.png" width="300">
-</picture>
-
 Que is the reference toolchain for **Eclisp**, a small expression-oriented Lisp
 with Hindley–Milner type inference, macros, first-class functions, explicit
 mutation, and WebAssembly as its compilation target.
