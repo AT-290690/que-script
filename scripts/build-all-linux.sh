@@ -38,9 +38,7 @@ fi
 export "AR_${TARGET_ENV_KEY}=${LINUX_AR}"
 export "CARGO_TARGET_${TARGET_ENV_KEY_UPPER}_AR=${LINUX_AR}"
 
-cargo zigbuild --release --target "${TARGET}" --no-default-features --bin que
-cargo zigbuild --release --target "${TARGET}" --no-default-features --features compiler --bin quec
-cargo zigbuild --release --target "${TARGET}" --no-default-features --features compiler --bin quewat
+cargo zigbuild --release --target "${TARGET}" --no-default-features --features compiler --bin que
 cargo zigbuild --release --target "${TARGET}" --no-default-features --features compiler --bin quelsp
 
 mkdir -p "${OUT_DIR}"
@@ -49,7 +47,5 @@ cargo run --release --no-default-features --features repo-tools --bin quebake --
 
 printf 'Linux release artifacts written to %s\n' "${OUT_DIR}"
 printf '  %s\n' "${OUT_DIR}/que"
-printf '  %s\n' "${OUT_DIR}/quec"
-printf '  %s\n' "${OUT_DIR}/quewat"
 printf '  %s\n' "${OUT_DIR}/quelsp"
 printf '  %s\n' "${OUT_DIR}/que-lib.lisp"

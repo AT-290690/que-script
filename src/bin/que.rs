@@ -1,8 +1,7 @@
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const LEARN: &str = r#"Que quick reference
@@ -54,37 +53,6 @@ const PITFALLS: &str = r#"Que pitfalls
 - deserialize needs a concrete expected type.
 - A partial application is a function value, so a missing argument can look like closure capture.
 - Use grouped lambda parameters: (lambda (a b) body...)."#;
-
-fn compiler_path() -> Result<PathBuf, String> {
-    if let Some(path) = env::var_os("QUE_COMPILER") {
-        return Ok(PathBuf::from(path));
-    }
-    let executable = env::current_exe()
-        .map_err(|error| format!("failed to locate the que executable: {error}"))?;
-    let directory = executable
-        .parent()
-        .ok_or_else(|| "failed to locate the que executable directory".to_string())?;
-    let sibling = directory.join(if cfg!(windows) { "quec.exe" } else { "quec" });
-    if sibling.is_file() {
-        return Ok(sibling);
-    }
-    let development = Path::new(env!("CARGO_MANIFEST_DIR")).join(if cfg!(windows) {
-        "target/debug/quec.exe"
-    } else {
-        "target/debug/quec"
-    });
-    if development.is_file() {
-        return Ok(development);
-    }
-    Err(
-        "Que compiler not found. Reinstall Que or set QUE_COMPILER to the quec executable."
-            .to_string(),
-    )
-}
-
-fn exit_code(status: ExitStatus) -> i32 {
-    status.code().unwrap_or(1)
-}
 
 fn nvim_lua() -> &'static str {
     r#"lua do
@@ -191,10 +159,6 @@ fn run_nvim(mut args: Vec<String>) -> Result<(), String> {
 }
 
 fn main() {
-    if matches!(env::args().nth(1).as_deref(), Some("--version" | "-V")) {
-        println!("que {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
     match env::args().nth(1).as_deref() {
         Some("--learn") => {
             println!("{LEARN}");
@@ -221,33 +185,27 @@ fn main() {
         }
         _ => {}
     }
-    if matches!(env::args().nth(1).as_deref(), Some("--help" | "-h")) {
-        println!(
-            "que — compile Que to WASI and run it with a user-installed runtime\n\n\
-             Usage:\n  que <program.que> [arguments ...] [--opt|--debug] [--allow <permissions ...>] [--runtime <runtime>]\n  \
-             que compile|explain|fmt ...\n\nThe compiler is the sibling `quec` executable. Supported runtimes: wasmtime (default), wasmer, and iwasm/WAMR."
-        );
-        return;
-    }
-    let compiler = compiler_path().unwrap_or_else(|error| {
-        eprintln!("\x1b[31mException: {error}\x1b[0m");
-        std::process::exit(1);
-    });
-    let mut args = env::args_os().skip(1).collect::<Vec<_>>();
-    let compiler_command = args
-        .first()
-        .and_then(|arg| arg.to_str())
-        .is_some_and(|arg| matches!(arg, "compile" | "run" | "run-wasi" | "explain" | "fmt"))
-        || args.iter().any(|arg| arg == "--emit");
+    let mut args = env::args().skip(1).collect::<Vec<_>>();
+    let compiler_command = args.first().is_some_and(|arg| {
+        matches!(
+            arg.as_str(),
+            "--help"
+                | "-h"
+                | "--version"
+                | "-V"
+                | "compile"
+                | "run"
+                | "run-wasi"
+                | "wat"
+                | "explain"
+                | "fmt"
+        )
+    }) || args.iter().any(|arg| arg == "--emit");
     if !compiler_command {
         args.insert(0, "run-wasi".into());
     }
-    let status = Command::new(compiler)
-        .args(args)
-        .status()
-        .unwrap_or_else(|error| {
-            eprintln!("\x1b[31mException: failed to start the Que compiler: {error}\x1b[0m");
-            std::process::exit(1);
-        });
-    std::process::exit(exit_code(status));
+    if let Err(error) = que::compiler_cli::run_with_args(args) {
+        eprintln!("\x1b[31mException: {error}\x1b[0m");
+        std::process::exit(1);
+    }
 }

@@ -49,14 +49,12 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ShareDir | Out-Null
 
 $QueExe = Join-Path $BinDir "que.exe"
-$CompilerExe = Join-Path $BinDir "quec.exe"
 $LibPath = Join-Path $ShareDir "que-lib.lisp"
 
 Write-Host "Installing que.exe..."
 Invoke-WebRequest -Uri (Resolve-ReleaseAsset "que" ".exe") -OutFile $QueExe
-
-Write-Host "Installing quec.exe..."
-Invoke-WebRequest -Uri (Resolve-ReleaseAsset "quec" ".exe") -OutFile $CompilerExe
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir "quec.exe")
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir "quewat.exe")
 
 Write-Host "Installing que-lib.lisp..."
 Invoke-WebRequest -Uri (Resolve-ReleaseAsset "que-lib" ".lisp") -OutFile $LibPath
@@ -65,7 +63,6 @@ Ensure-UserPathContains $BinDir
 
 Write-Host "Installed:"
 Write-Host "  $QueExe"
-Write-Host "  $CompilerExe"
 Write-Host "  $LibPath"
 Write-Host ""
 Write-Host 'Restart the terminal, or in PowerShell run:'

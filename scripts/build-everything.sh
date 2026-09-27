@@ -14,8 +14,6 @@ copy_release_artifacts() {
   local exe_suffix="$3"
 
   cp "${source_dir}/que${exe_suffix}" "releases/que-${target_suffix}${exe_suffix}"
-  cp "${source_dir}/quec${exe_suffix}" "releases/quec-${target_suffix}${exe_suffix}"
-  cp "${source_dir}/quewat${exe_suffix}" "releases/quewat-${target_suffix}${exe_suffix}"
   cp "${source_dir}/quelsp${exe_suffix}" "releases/quelsp-${target_suffix}${exe_suffix}"
   cp "${source_dir}/que-lib.lisp" "releases/que-lib-${target_suffix}.lisp"
 }

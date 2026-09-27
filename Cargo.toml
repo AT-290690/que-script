@@ -16,10 +16,6 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "que"
 path = "src/bin/que.rs"
-
-[[bin]]
-name = "quec"
-path = "src/bin/quec.rs"
 required-features = ["compiler"]
 
 [[bin]]

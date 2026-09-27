@@ -1,4 +1,4 @@
-//! Lightweight compiler CLI used by `quec`.
+//! Compiler and runner commands used by the unified `que` CLI.
 //!
 //! This module deliberately has no dependency on the embedded Wasmtime host.
 
@@ -94,32 +94,37 @@ enum EmitKind {
 }
 
 fn help() -> &'static str {
-    "quec — lightweight Que compiler and optional native-C runner
+    "que — Que compiler, tooling, and runner
 
 Usage:
-  quec <program.que> > program.wasm
-  quec compile <program.que> [--opt] [--out <program.wasm>]
-  quec run <program.que> [arguments ...] [--opt] [--allow <permissions ...>]
-  quec run-wasi <program.que> [arguments ...] [--opt] [--runtime <runtime>]
-  quec <program.que> --emit <source|opt-source|wat|wasm|c|types> [--out <file>]
-  quec explain <program.que> [--json] [--opt] [--out <file>]
-  quec fmt <program.que> [--check|--stdout]
-  quec fmt --stdin
+  que <program.que> [arguments ...] [--opt] [--runtime <runtime>]
+  que compile <program.que> [--opt] [--out <program.wasm>]
+  que run <program.que> [arguments ...] [--opt] [--allow <permissions ...>]
+  que run-wasi <program.que> [arguments ...] [--opt] [--runtime <runtime>]
+  que wat <program.que>
+  que wat --eval <source>
+  que <program.que> --emit <source|opt-source|wat|wasm|c|types> [--out <file>]
+  que explain <program.que> [--json] [--opt] [--out <file>]
+  que fmt <program.que> [--check|--stdout]
+  que fmt --stdin
 
-`quec run` uses the separately installed wasm2c and C compiler. `run-wasi` uses
+`que run` uses the separately installed wasm2c and C compiler. `run-wasi` uses
 a user-installed runtime: wasmtime (default), wasmer, or iwasm/WAMR. Select it
-with --runtime or QUE_WASM_RUNTIME. Set QUEC_NATIVE_SCRIPT to override the
+with --runtime or QUE_WASM_RUNTIME. Set QUE_NATIVE_SCRIPT to override the
 native-C driver path."
 }
 
 pub fn run() -> Result<(), String> {
-    let mut args = env::args().skip(1).collect::<Vec<_>>();
+    run_with_args(env::args().skip(1).collect())
+}
+
+pub fn run_with_args(mut args: Vec<String>) -> Result<(), String> {
     if args.is_empty() || matches!(args[0].as_str(), "--help" | "-h") {
         println!("{}", help());
         return Ok(());
     }
     if matches!(args[0].as_str(), "--version" | "-V") {
-        println!("quec {}", env!("CARGO_PKG_VERSION"));
+        println!("que {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     match args[0].as_str() {
@@ -137,6 +142,10 @@ pub fn run() -> Result<(), String> {
             args.remove(0);
             return run_wasi(args);
         }
+        "wat" => {
+            args.remove(0);
+            return run_wat(args);
+        }
         _ => {}
     }
     if args.iter().any(|arg| arg == "--emit") {
@@ -144,6 +153,23 @@ pub fn run() -> Result<(), String> {
     } else {
         run_compile(args, Some(EmitKind::Wasm))
     }
+}
+
+fn run_wat(mut args: Vec<String>) -> Result<(), String> {
+    if matches!(args.first().map(String::as_str), Some("--eval" | "-e")) {
+        if args.len() != 2 {
+            return Err("wat --eval requires exactly one source argument".into());
+        }
+        let source = args.remove(1);
+        let merged = merged_program(&source)?;
+        let typed = infer_program(&source, &merged)?;
+        let wat = crate::wat::compile_program_to_wat_typed(&typed)?;
+        println!("{wat}");
+        return Ok(());
+    }
+    args.push("--emit".into());
+    args.push("wat".into());
+    run_compile(args, None)
 }
 
 fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
@@ -339,7 +365,7 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
         });
         let wasm =
             wat::parse_str(&wat).map_err(|error| format!("failed to encode Wasm: {error}"))?;
-        let wasm_path = env::temp_dir().join(format!("quec-emit-c-{}.wasm", std::process::id()));
+        let wasm_path = env::temp_dir().join(format!("que-emit-c-{}.wasm", std::process::id()));
         fs::write(&wasm_path, wasm)
             .map_err(|error| format!("failed to stage Wasm for wasm2c: {error}"))?;
         let status = Command::new("wasm2c")
@@ -384,7 +410,7 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
         .cloned()
         .ok_or_else(|| "run-wasi requires a program path".to_string())?;
     args.remove(0);
-    let wasm = env::temp_dir().join(format!("quec-wasi-{}.wasm", std::process::id()));
+    let wasm = env::temp_dir().join(format!("que-wasi-{}.wasm", std::process::id()));
     let mut compile = vec![
         path,
         "--wasi".to_string(),
@@ -478,7 +504,9 @@ fn run_fmt(raw: &[String]) -> Result<(), String> {
 }
 
 fn native_script() -> Result<PathBuf, String> {
-    if let Some(path) = env::var_os("QUEC_NATIVE_SCRIPT") {
+    if let Some(path) =
+        env::var_os("QUE_NATIVE_SCRIPT").or_else(|| env::var_os("QUEC_NATIVE_SCRIPT"))
+    {
         return Ok(PathBuf::from(path));
     }
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/compile-native-c.sh");
@@ -493,7 +521,7 @@ fn native_script() -> Result<PathBuf, String> {
             }
         }
     }
-    Err("native-C driver not found; set QUEC_NATIVE_SCRIPT to compile-native-c.sh".into())
+    Err("native-C driver not found; set QUE_NATIVE_SCRIPT to compile-native-c.sh".into())
 }
 
 fn status_result(status: ExitStatus, operation: &str) -> Result<(), String> {
@@ -520,7 +548,7 @@ fn run_native(mut args: Vec<String>) -> Result<(), String> {
         .first()
         .cloned()
         .ok_or_else(|| "missing program path".to_string())?;
-    let build = env::temp_dir().join(format!("quec-native-{}", std::process::id()));
+    let build = env::temp_dir().join(format!("que-native-{}", std::process::id()));
     fs::create_dir_all(&build)
         .map_err(|error| format!("failed to create native build directory: {error}"))?;
     let script = native_script()?;
@@ -528,7 +556,7 @@ fn run_native(mut args: Vec<String>) -> Result<(), String> {
         .arg(&path)
         .arg(&build)
         .env(
-            "QUEC_COMPILER",
+            "QUE_COMPILER",
             env::current_exe().map_err(|error| error.to_string())?,
         )
         .stdout(Stdio::null())

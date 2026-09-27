@@ -40,34 +40,24 @@ else
   cc_bin="cc"
 fi
 
-if [ -n "${QUEC_COMPILER:-}" ]; then
-  quec_bin="$QUEC_COMPILER"
-  cli_driver=1
-elif command -v quec >/dev/null 2>&1; then
-  quec_bin="quec"
-  cli_driver=0
-elif [ -x "$repo_dir/target/release/quec" ]; then
-  quec_bin="$repo_dir/target/release/quec"
-  cli_driver=0
-elif [ -x "$repo_dir/target/debug/quec" ]; then
-  quec_bin="$repo_dir/target/debug/quec"
-  cli_driver=0
+if [ -n "${QUE_COMPILER:-}" ]; then
+  que_bin="$QUE_COMPILER"
+elif [ -n "${QUEC_COMPILER:-}" ]; then
+  que_bin="$QUEC_COMPILER"
+elif command -v que >/dev/null 2>&1; then
+  que_bin="que"
+elif [ -x "$repo_dir/target/release/que" ]; then
+  que_bin="$repo_dir/target/release/que"
+elif [ -x "$repo_dir/target/debug/que" ]; then
+  que_bin="$repo_dir/target/debug/que"
 else
-  echo "error: quec not found in PATH or $repo_dir/target/{release,debug}/quec" >&2
+  echo "error: que not found in PATH or $repo_dir/target/{release,debug}/que" >&2
   exit 1
 fi
 
 mkdir -p "$output_dir"
 
-type_probe_bin="que"
-if [ "$cli_driver" -eq 1 ]; then
-  type_probe_bin="$quec_bin"
-elif ! command -v "$type_probe_bin" >/dev/null 2>&1; then
-  echo "error: que is required to determine the native result type" >&2
-  exit 1
-fi
-
-result_type="$("$type_probe_bin" "$input_file" --emit types | sed -n 's/^result : //p' | tail -n 1)"
+result_type="$("$que_bin" "$input_file" --emit types | sed -n 's/^result : //p' | tail -n 1)"
 if [ -z "$result_type" ]; then
   echo "error: could not determine Que result type" >&2
   exit 1
@@ -84,11 +74,7 @@ export QUE_INT_OVERFLOW_CHECK="${QUE_INT_OVERFLOW_CHECK:-0}"
 export QUE_DEC_OVERFLOW_CHECK="${QUE_DEC_OVERFLOW_CHECK:-0}"
 export QUE_DIV_ZERO_CHECK="${QUE_DIV_ZERO_CHECK:-0}"
 export QUE_VEC_MIN_CAP="${QUE_VEC_MIN_CAP:-8}"
-if [ "$cli_driver" -eq 1 ]; then
-  "$quec_bin" compile "$input_file" --out "$wasm_file"
-else
-  "$quec_bin" "$input_file" > "$wasm_file"
-fi
+"$que_bin" compile "$input_file" --out "$wasm_file"
 wasm2c "$wasm_file" -n "$module_name" -o "$c_file"
 
 if grep -q 'struct w2c_host' "$output_dir/$module_name.h"; then

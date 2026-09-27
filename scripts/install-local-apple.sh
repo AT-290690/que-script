@@ -4,9 +4,9 @@ set -euo pipefail
 APP_NAME="que"
 BIN_SOURCE="./target/release/que"
 BIN_PATH="/usr/local/bin/que"
-COMPILER_SOURCE="./target/release/quec"
-COMPILER_PATH="/usr/local/bin/quec"
 LEGACY_ECLISP_PATH="/usr/local/bin/eclisp"
+LEGACY_QUEC_PATH="/usr/local/bin/quec"
+LEGACY_QUEWAT_PATH="/usr/local/bin/quewat"
 LIB_DIR="/usr/local/share/que"
 LIB_PATH="${LIB_DIR}/que-lib.lisp"
 BUILD=1
@@ -15,11 +15,10 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/install-local-apple.sh [--no-build]
 
-Builds the lightweight Que frontend and compiler.
+Builds the unified Que compiler and runner.
 
 Installs:
   /usr/local/bin/que
-  /usr/local/bin/quec
   /usr/local/share/que/que-lib.lisp
   /usr/local/share/que/compile-native-c.sh and its C host
 
@@ -54,12 +53,7 @@ fi
 
 if [ "$BUILD" -eq 1 ]; then
   echo "Building local ${APP_NAME} release binary..."
-  cargo build --release --no-default-features --bin que
-  cargo build --release --no-default-features --features compiler --bin quec
-fi
-if [ ! -x "$COMPILER_SOURCE" ]; then
-  echo "Missing executable: ${COMPILER_SOURCE}" >&2
-  exit 1
+  cargo build --release --no-default-features --features compiler --bin que
 fi
 
 if [ ! -x "$BIN_SOURCE" ]; then
@@ -72,19 +66,16 @@ if ! command -v wasm2c >/dev/null 2>&1; then
     echo "Installing WABT (provides the external wasm2c runtime)..."
     brew install wabt
   else
-    echo "warning: wasm2c is not installed; quec can compile Wasm but cannot use `quec run`" >&2
+    echo "warning: wasm2c is not installed; que can compile Wasm but cannot use `que run`" >&2
   fi
 fi
 
 tmp_bin="$(mktemp "/tmp/${APP_NAME}.local.XXXXXX")"
-tmp_compiler="$(mktemp "/tmp/quec.local.XXXXXX")"
 tmp_lib="$(mktemp "/tmp/que-lib.local.XXXXXX")"
-trap 'rm -f "$tmp_bin" "$tmp_compiler" "$tmp_lib"' EXIT
+trap 'rm -f "$tmp_bin" "$tmp_lib"' EXIT
 
 cp "$BIN_SOURCE" "$tmp_bin"
 chmod +x "$tmp_bin"
-cp "$COMPILER_SOURCE" "$tmp_compiler"
-chmod +x "$tmp_compiler"
 
 echo "Baking local que-lib.lisp..."
 cargo run --release --no-default-features --features repo-tools --bin quebake -- --out "$tmp_lib"
@@ -92,11 +83,17 @@ cargo run --release --no-default-features --features repo-tools --bin quebake --
 echo "Installing binary: ${BIN_PATH}"
 sudo mkdir -p "$(dirname "$BIN_PATH")"
 sudo mv "$tmp_bin" "$BIN_PATH"
-echo "Installing compiler: ${COMPILER_PATH}"
-sudo mv "$tmp_compiler" "$COMPILER_PATH"
 if [ -e "$LEGACY_ECLISP_PATH" ]; then
   sudo rm -f "$LEGACY_ECLISP_PATH"
   echo "Removed provisional executable: ${LEGACY_ECLISP_PATH}"
+fi
+if [ -e "$LEGACY_QUEC_PATH" ]; then
+  sudo rm -f "$LEGACY_QUEC_PATH"
+  echo "Removed legacy executable: ${LEGACY_QUEC_PATH}"
+fi
+if [ -e "$LEGACY_QUEWAT_PATH" ]; then
+  sudo rm -f "$LEGACY_QUEWAT_PATH"
+  echo "Removed legacy executable: ${LEGACY_QUEWAT_PATH}"
 fi
 
 echo "Installing library: ${LIB_PATH}"

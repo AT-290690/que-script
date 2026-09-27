@@ -317,30 +317,30 @@ This requires WABT's `wasm2c`. The maintained C host implementation lives in
 
 ## Lightweight compiler and native-C path
 
-`quec` provides compilation, emitted source/WAT/Wasm/types, formatting,
-explanations, and optional native execution without linking Wasmtime into the
-compiler:
+`que` is the single user-facing executable. It provides execution, compilation,
+emitted source/WAT/Wasm/C/types, formatting, explanations, and optional native
+execution without embedding a WebAssembly runtime:
 
 ```bash
-quec program.que > program.wasm
-quec run program.que --opt --allow all
-quec program.que --emit wat --out program.wat
-quec program.que --emit c --out program.c
-quec explain program.que
-quec fmt program.que
+que program.que --opt
+que compile program.que --out program.wasm
+que run program.que --opt --allow all
+que wat program.que > program.wat
+que program.que --emit c --out program.c
+que explain program.que
+que fmt program.que
 ```
 
-`quec run` translates the Wasm through the separately installed WABT `wasm2c`
-tool and invokes the system C compiler. The small `que` frontend delegates
-compilation to `quec` and executes the resulting WASI module with a runtime
-installed by the user. Neither `que` nor `quec` embeds or installs a runtime.
+`que run` translates the Wasm through the separately installed WABT `wasm2c`
+tool and invokes the system C compiler. Normal `que program.que` execution uses
+a runtime installed by the user. Que neither embeds nor installs a runtime.
 
 The external-Wasmtime backend can also be invoked explicitly with:
 
 ```bash
-quec run-wasi program.que --opt                         # Wasmtime (default)
-quec run-wasi program.que --opt --runtime wasmer
-quec run-wasi program.que --opt --runtime iwasm
+que run-wasi program.que --opt                         # Wasmtime (default)
+que run-wasi program.que --opt --runtime wasmer
+que run-wasi program.que --opt --runtime iwasm
 ```
 
 It lowers Que IO, arguments, filesystem operations, chunked input, and concrete
@@ -381,13 +381,11 @@ Build all configured release artifacts:
 ./scripts/build-everything.sh
 ```
 
-The main binaries are:
+The installed binaries are:
 
 ```text
-que      lightweight frontend for quec plus a user-selected WASI runtime
-quec     compiler/tooling and optional external wasm2c native runner
-quewat   run or inspect WAT
-quelsp   native language server
+que      compiler, tooling, native-C path, and user-selected WASI runtime
+quelsp   language server (installed separately with editor tooling)
 ```
 
 ## Repository layout
