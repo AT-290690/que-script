@@ -1680,6 +1680,82 @@ fn state_for_branch(expr: &Expression, facts: &AbstractState, is_true: bool) -> 
     next
 }
 
+fn predicate_truth(
+    expr: &Expression,
+    facts: &AbstractState,
+    expansion_depth: usize,
+) -> Option<bool> {
+    if let Expression::Word(value) = expr {
+        return match value.as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        };
+    }
+    if let Some(known) = known_integer_predicate(expr, facts) {
+        return Some(known);
+    }
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    match items.as_slice() {
+        [Expression::Word(op), inner] if op == "not" => {
+            predicate_truth(inner, facts, expansion_depth).map(|value| !value)
+        }
+        [Expression::Word(op), operands @ ..] if op == "and" => {
+            let mut unknown = false;
+            for operand in operands {
+                match predicate_truth(operand, facts, expansion_depth) {
+                    Some(false) => return Some(false),
+                    Some(true) => {}
+                    None => unknown = true,
+                }
+            }
+            (!unknown).then_some(true)
+        }
+        [Expression::Word(op), operands @ ..] if op == "or" => {
+            let mut unknown = false;
+            for operand in operands {
+                match predicate_truth(operand, facts, expansion_depth) {
+                    Some(true) => return Some(true),
+                    Some(false) => {}
+                    None => unknown = true,
+                }
+            }
+            (!unknown).then_some(false)
+        }
+        [Expression::Word(op), condition, consequent, alternate] if op == "if" => {
+            match predicate_truth(condition, facts, expansion_depth) {
+                Some(true) => predicate_truth(consequent, facts, expansion_depth),
+                Some(false) => predicate_truth(alternate, facts, expansion_depth),
+                None => {
+                    let consequent = predicate_truth(consequent, facts, expansion_depth);
+                    let alternate = predicate_truth(alternate, facts, expansion_depth);
+                    (consequent == alternate).then_some(consequent).flatten()
+                }
+            }
+        }
+        _ if expansion_depth < 16 => {
+            let op = items.first().and_then(word)?;
+            let summary = facts.predicate_summaries.get(op)?;
+            if summary.params.len() != items.len().saturating_sub(1) {
+                return None;
+            }
+            let parsed_body = crate::parser::build(&summary.body).ok()?;
+            let substitutions: HashMap<&str, &Expression> = summary
+                .params
+                .iter()
+                .map(String::as_str)
+                .zip(items.iter().skip(1))
+                .collect();
+            let expanded =
+                substitute_predicate_body(single_built_expression(&parsed_body), &substitutions);
+            predicate_truth(&expanded, facts, expansion_depth + 1)
+        }
+        _ => None,
+    }
+}
+
 fn apply_vector_mutation(items: &[Expression], facts: &mut AbstractState) {
     let Some(op) = items.first().and_then(word) else {
         return;
@@ -2140,6 +2216,7 @@ fn comparisons_for_counter<'a>(expr: &'a Expression, name: &str, out: &mut Vec<(
 fn comparison_detail_for_counter<'a>(
     expr: &'a Expression,
     name: &str,
+    step: CounterStep,
 ) -> Option<(&'a str, bool, &'a Expression)> {
     let Expression::Apply(items) = expr else {
         return None;
@@ -2147,17 +2224,29 @@ fn comparison_detail_for_counter<'a>(
     if let [Expression::Word(op), left, right] = items.as_slice() {
         if matches!(op.as_str(), "<" | "<=" | ">" | ">=") {
             if matches!(left, Expression::Word(var) if var == name) {
-                return Some((op, true, right));
+                let toward_upper = matches!(op.as_str(), "<" | "<=");
+                let toward_lower = matches!(op.as_str(), ">" | ">=");
+                if (toward_upper && step == CounterStep::Increase)
+                    || (toward_lower && step == CounterStep::Decrease)
+                {
+                    return Some((op, true, right));
+                }
             }
             if matches!(right, Expression::Word(var) if var == name) {
-                return Some((op, false, left));
+                let toward_upper = matches!(op.as_str(), ">" | ">=");
+                let toward_lower = matches!(op.as_str(), "<" | "<=");
+                if (toward_upper && step == CounterStep::Increase)
+                    || (toward_lower && step == CounterStep::Decrease)
+                {
+                    return Some((op, false, left));
+                }
             }
         }
     }
     items
         .iter()
         .skip(1)
-        .find_map(|child| comparison_detail_for_counter(child, name))
+        .find_map(|child| comparison_detail_for_counter(child, name, step))
 }
 
 fn analyze_while_termination(
@@ -3021,12 +3110,20 @@ fn validate_static_bounds_expr(
         }
         "if" if items.len() >= 3 => {
             validate_static_bounds_expr(&items[1], facts, diagnostics);
+            let known = predicate_truth(&items[1], facts, 0);
             let mut consequent = state_for_true_branch(&items[1], facts);
-            validate_static_bounds_expr(&items[2], &mut consequent, diagnostics);
-            let mut alternate = state_for_false_branch(&items[1], facts);
-            if let Some(otherwise) = items.get(3) {
-                validate_static_bounds_expr(otherwise, &mut alternate, diagnostics);
+            if known != Some(false) {
+                validate_static_bounds_expr(&items[2], &mut consequent, diagnostics);
             }
+            let mut alternate = state_for_false_branch(&items[1], facts);
+            if known != Some(true) {
+                if let Some(otherwise) = items.get(3) {
+                    validate_static_bounds_expr(otherwise, &mut alternate, diagnostics);
+                }
+            }
+            // Branch refinements remain local even when this pass can decide
+            // which branch is reachable. This keeps guard facts from being
+            // treated as unconditional facts by later expressions.
             *facts = join_states(&consequent, &alternate);
         }
         "while" if items.len() >= 3 => {
@@ -3287,6 +3384,7 @@ fn collect_termination_findings(
                             } else {
                                 "decreases"
                             },
+                            step,
                         )
                     })
             });
@@ -3322,7 +3420,7 @@ fn collect_termination_findings(
                         .to_string(),
                     proof: vec![format!("condition: {}", condition.to_lisp())],
                 });
-            } else if let Some((name, direction)) = scalar_proof {
+            } else if let Some((name, direction, step)) = scalar_proof {
                 let mut proof = Vec::new();
                 if let Some(initial) = integer_constant(&Expression::Word(name.clone()), facts) {
                     proof.push(format!("initial: {name} = {initial}"));
@@ -3331,7 +3429,7 @@ fn collect_termination_findings(
                 if let Some(update) = updates.get(&name).and_then(|values| values.first()) {
                     proof.push(format!("update: {name} = {}", update.to_lisp()));
                 }
-                if let Some((_, _, bound)) = comparison_detail_for_counter(condition, &name) {
+                if let Some((_, _, bound)) = comparison_detail_for_counter(condition, &name, step) {
                     proof.push(format!("bound: {}", bound.to_lisp()));
                 }
                 findings.push(TerminationFinding {
@@ -3359,6 +3457,36 @@ fn collect_termination_findings(
                 });
             }
         }
+    }
+    if op == "while" && items.len() >= 3 {
+        // A nested loop is inspected as if the enclosing loop may already
+        // have completed earlier iterations. Do not carry its entry-time
+        // constants (for example `i = 0`) into every body visit.
+        let mut header = facts.clone();
+        let mut loop_updates = HashMap::new();
+        for body in items.iter().skip(2) {
+            collect_altered_values(body, &mut loop_updates);
+        }
+        for name in loop_updates.keys() {
+            forget_local_name(name, &mut header);
+        }
+        let mut scoped = state_for_true_branch(&items[1], &header);
+        let mut ignored = AnalysisSink::default();
+        for body in items.iter().skip(2) {
+            collect_termination_findings(body, structural_summaries, &scoped, findings);
+            validate_static_bounds_expr(body, &mut scoped, &mut ignored);
+        }
+        return;
+    }
+    if op == "if" && items.len() >= 3 {
+        collect_termination_findings(&items[1], structural_summaries, facts, findings);
+        let then_facts = state_for_true_branch(&items[1], facts);
+        collect_termination_findings(&items[2], structural_summaries, &then_facts, findings);
+        if let Some(else_branch) = items.get(3) {
+            let else_facts = state_for_false_branch(&items[1], facts);
+            collect_termination_findings(else_branch, structural_summaries, &else_facts, findings);
+        }
+        return;
     }
     if op == "letrec" && items.len() == 3 {
         if let (Expression::Word(name), Expression::Apply(lambda)) = (&items[1], &items[2]) {
@@ -4766,6 +4894,19 @@ mod tests {
                 (if (not (add-fits? index 1)) index (+ index 1))))
         "#;
         assert_eq!(analyze(literal_operand, 4), Ok(()));
+
+        let statically_false_guard = r#"
+            (let INT-MIN -2147483648)
+            (let INT-MAX 2147483647)
+            (let add-fits?
+              (lambda (a b)
+                (if (> b 0)
+                    (<= a (- INT-MAX b))
+                    (if (< b 0) (>= a (- INT-MIN b)) true))))
+            (let x INT-MAX)
+            (if (add-fits? x 1) (+ x 1) 0)
+        "#;
+        assert_eq!(analyze(statically_false_guard, 5), Ok(()));
 
         let wrong_upper_guard = r#"
             (let INT-MAX 2147483647)

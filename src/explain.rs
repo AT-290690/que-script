@@ -137,18 +137,28 @@ pub fn explain_program_with_effects_and_source(
     let termination = crate::static_analysis::explain_termination(typed_ast, user_form_count)
         .into_iter()
         .map(|finding| ExplainTermination {
-            subject: finding.subject,
+            subject: crate::lsp_native_core::restore_generated_source_names(&finding.subject),
             status: finding.status,
-            measure: finding.measure,
-            reason: finding.reason,
-            proof: finding.proof,
+            measure: finding
+                .measure
+                .map(|measure| crate::lsp_native_core::restore_generated_source_names(&measure)),
+            reason: crate::lsp_native_core::restore_generated_source_names(&finding.reason),
+            proof: finding
+                .proof
+                .into_iter()
+                .map(|line| crate::lsp_native_core::restore_generated_source_names(&line))
+                .collect(),
         })
         .collect();
     let bounds_proofs = crate::static_analysis::explain_bounds_proofs(typed_ast, user_form_count)
         .into_iter()
         .map(|proof| ExplainBoundsProof {
-            expression: proof.expression,
-            details: proof.details,
+            expression: crate::lsp_native_core::restore_generated_source_names(&proof.expression),
+            details: proof
+                .details
+                .into_iter()
+                .map(|detail| crate::lsp_native_core::restore_generated_source_names(&detail))
+                .collect(),
         })
         .collect();
     let user_effect = user_nodes.into_iter().fold(EffectFlags::PURE, |acc, form| {
@@ -187,7 +197,7 @@ pub fn explain_program_with_effects_and_source(
                 }
             })
         });
-        let finding = finding.message;
+        let finding = crate::lsp_native_core::restore_generated_source_names(&finding.message);
         let mut lines = finding.lines();
         let message = lines.next().unwrap_or(&finding).to_string();
         let suggestion = lines
@@ -1251,6 +1261,41 @@ mod tests {
             finding.status == "proven"
                 && finding.measure.as_deref() == Some("i")
                 && finding.reason.contains("i increases")
+        }));
+    }
+
+    #[test]
+    fn explain_proves_nested_positive_step_loop_and_restores_source_names() {
+        assert_eq!(
+            crate::lsp_native_core::restore_generated_source_names(
+                "while (and (> __block_0_j 0) (<= __block_0_j n))"
+            ),
+            "while (and (> j 0) (<= j n))"
+        );
+        let report = explain_source(
+            "(block
+                (let n 100)
+                (mut i 0)
+                (while (<= i n)
+                  (if (>= i 2)
+                      (block
+                        (mut j (* i i))
+                        (while (and (> j 0) (<= j n))
+                          (alter! j (+ j i)))))
+                  (alter! i (+ i 1))))",
+        );
+        let nested = report
+            .termination
+            .iter()
+            .find(|finding| finding.subject.contains("(and (> j 0) (<= j n))"))
+            .unwrap_or_else(|| panic!("nested loop should be explained: {:?}", report.termination));
+        assert_eq!(nested.status, "proven");
+        assert_eq!(nested.measure.as_deref(), Some("j"));
+        assert!(nested.proof.iter().any(|line| line == "bound: n"));
+        assert!(report.termination.iter().all(|finding| {
+            !finding.subject.contains("__block_")
+                && !finding.reason.contains("__block_")
+                && finding.proof.iter().all(|line| !line.contains("__block_"))
         }));
     }
 

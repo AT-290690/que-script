@@ -427,7 +427,9 @@ fn infer_program(source: &str, merged: &Expression) -> Result<TypedExpression, S
     let (env, next_id) = crate::types::create_builtin_environment(crate::types::TypeEnv::new());
     infer_with_builtins_typed_lsp(merged, (env, next_id), user_form_count(source))
         .map(|(_, typed)| typed)
-        .map_err(|InferErrorInfo { message, .. }| message)
+        .map_err(|InferErrorInfo { message, .. }| {
+            crate::lsp_native_core::normalize_diagnostic_message(&message)
+        })
 }
 
 fn type_lines(typed: &TypedExpression, count: usize) -> String {
@@ -524,7 +526,10 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
             &typed,
             user_form_count(&source),
         ) {
-            eprintln!("Warning: {warning}");
+            eprintln!(
+                "Warning: {}",
+                crate::lsp_native_core::restore_generated_source_names(&warning)
+            );
         }
     }
     if emit == EmitKind::Types {

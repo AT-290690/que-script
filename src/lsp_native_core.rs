@@ -52,7 +52,7 @@ pub fn normalize_signature(signature: &str) -> String {
 }
 
 pub fn normalize_diagnostic_message(message: &str) -> String {
-    strip_numbered_type_var_names(message)
+    restore_generated_source_names(&strip_numbered_type_var_names(message))
 }
 
 fn is_quantifier_prefix(prefix: &str) -> bool {
@@ -783,6 +783,59 @@ fn block_source_name(name: &str) -> &str {
     }
 }
 
+fn friendly_generated_name(name: &str) -> Option<&str> {
+    let block_name = block_source_name(name);
+    if block_name != name {
+        return Some(block_name);
+    }
+    if name.starts_with("_let_temp_vec_") || name.starts_with("_temp_vec_") {
+        return Some("destructured-vector");
+    }
+    if name.starts_with("_let_temp_tuple_") || name.starts_with("_temp_tuple_") {
+        return Some("destructured-tuple");
+    }
+    if name.starts_with("_arg_") || (name.starts_with("_args") && name.contains("__arg_")) {
+        return Some("destructured-argument");
+    }
+    None
+}
+
+/// Removes compiler-generated binding names from text shown to users while
+/// preserving ordinary underscores and user-authored identifiers.
+pub fn restore_generated_source_names(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut token = String::new();
+    let flush = |out: &mut String, token: &mut String| {
+        if token.is_empty() {
+            return;
+        }
+        let mut friendly = token.as_str();
+        while let Some(restored) = friendly_generated_name(friendly) {
+            if restored == friendly {
+                break;
+            }
+            friendly = restored;
+        }
+        out.push_str(friendly);
+        token.clear();
+    };
+    for character in message.chars() {
+        if character.is_whitespace()
+            || matches!(
+                character,
+                '(' | ')' | '[' | ']' | '{' | '}' | '`' | '\'' | '"' | ',' | ':' | ';'
+            )
+        {
+            flush(&mut out, &mut token);
+            out.push(character);
+        } else {
+            token.push(character);
+        }
+    }
+    flush(&mut out, &mut token);
+    out
+}
+
 pub fn symbol_occurrence_index_in_range(
     text: &str,
     symbol: &str,
@@ -1176,7 +1229,7 @@ pub fn static_analysis_diagnostic_snippet(message: &str) -> Option<String> {
     {
         return None;
     }
-    let snippet = restore_block_source_names(message.split('`').nth(1)?);
+    let snippet = restore_generated_source_names(message.split('`').nth(1)?);
     let parsed = parser::build(&snippet).ok()?;
     let parsed = if let Expression::Apply(items) = &parsed {
         if matches!(items.first(), Some(Expression::Word(op)) if op == "do") && items.len() == 2 {
@@ -1192,7 +1245,7 @@ pub fn static_analysis_diagnostic_snippet(message: &str) -> Option<String> {
 
 pub fn static_analysis_diagnostic_summary(message: &str) -> String {
     let first_line = message.lines().next().unwrap_or(message).trim();
-    restore_block_source_names(
+    restore_generated_source_names(
         first_line
             .strip_prefix("static bounds: ")
             .or_else(|| first_line.strip_prefix("static arithmetic: "))
@@ -1209,7 +1262,7 @@ pub fn diagnostic_ranges_in_user_form(
     snippet: &str,
     user_form_index: usize,
 ) -> Vec<CoreRange> {
-    let Some(form_range) = top_level_form_ranges(text).get(user_form_index).copied() else {
+    let Some(form_range) = source_form_range_for_desugared_index(text, user_form_index) else {
         return Vec::new();
     };
     let Some(form_start) = position_to_byte_offset(text, form_range.start) else {
@@ -1232,15 +1285,221 @@ pub fn diagnostic_ranges_in_user_form(
         .collect()
 }
 
+fn source_form_range_for_desugared_index(text: &str, target: usize) -> Option<CoreRange> {
+    let mut expanded_start = 0usize;
+    for (start, end) in top_level_form_byte_ranges(text) {
+        let expanded_count = text
+            .get(start..end)
+            .and_then(desugared_user_form_count)
+            .unwrap_or(1)
+            .max(1);
+        if target < expanded_start + expanded_count {
+            return Some(CoreRange {
+                start: byte_offset_to_position(text, start),
+                end: byte_offset_to_position(text, end),
+            });
+        }
+        expanded_start += expanded_count;
+    }
+    None
+}
+
 pub fn static_analysis_diagnostic_ranges(
     text: &str,
     message: &str,
     user_form_index: usize,
 ) -> Vec<CoreRange> {
+    let destructuring_ranges = destructuring_source_ranges(text, message, user_form_index);
+    if !destructuring_ranges.is_empty() {
+        return destructuring_ranges;
+    }
     let Some(snippet) = static_analysis_diagnostic_snippet(message) else {
         return Vec::new();
     };
     diagnostic_ranges_in_user_form(text, message, &snippet, user_form_index)
+}
+
+fn generated_lambda_argument_index(message: &str) -> Option<usize> {
+    let start = message.find("_args")? + "_args".len();
+    let digits: String = message[start..]
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect();
+    (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
+}
+
+fn destructuring_source_ranges(
+    text: &str,
+    message: &str,
+    user_form_index: usize,
+) -> Vec<CoreRange> {
+    let target = if let Some(index) = generated_lambda_argument_index(message) {
+        DestructuringTarget::LambdaArgument(index)
+    } else if message.contains("_let_temp_vec_") || message.contains("_let_temp_tuple_") {
+        DestructuringTarget::LetPattern
+    } else {
+        return Vec::new();
+    };
+    let search_ranges: Vec<(usize, usize)> =
+        source_form_range_for_desugared_index(text, user_form_index)
+            .and_then(|range| {
+                Some((
+                    position_to_byte_offset(text, range.start)?,
+                    position_to_byte_offset(text, range.end)?,
+                ))
+            })
+            .into_iter()
+            .collect();
+    let mut matches = Vec::new();
+    for (form_start, form_end) in search_ranges {
+        collect_destructuring_ranges(text, form_start, form_end, target, &mut matches);
+    }
+    matches
+        .into_iter()
+        .map(|(start, end)| CoreRange {
+            start: byte_offset_to_position(text, start),
+            end: byte_offset_to_position(text, end),
+        })
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+enum DestructuringTarget {
+    LambdaArgument(usize),
+    LetPattern,
+}
+
+fn collect_destructuring_ranges(
+    text: &str,
+    start: usize,
+    end: usize,
+    target: DestructuringTarget,
+    out: &mut Vec<(usize, usize)>,
+) {
+    let bytes = text.as_bytes();
+    let mut i = start;
+    while i < end {
+        i = skip_ws_and_comments(text, i, end);
+        if i >= end {
+            break;
+        }
+        match bytes[i] {
+            b'"' => i = skip_string_literal(text, i, end),
+            b'\'' => i = skip_char_literal(text, i, end),
+            b'(' | b'[' | b'{' => {
+                let Some(close) = find_matching_surface_list_end_byte(text, i) else {
+                    return;
+                };
+                if bytes[i] == b'(' {
+                    let items = direct_list_item_ranges(text, i, close + 1);
+                    let head = items
+                        .first()
+                        .and_then(|(item_start, item_end)| text.get(*item_start..*item_end));
+                    let pattern = match target {
+                        DestructuringTarget::LambdaArgument(index) if head == Some("lambda") => {
+                            lambda_argument_range(text, &items, index)
+                        }
+                        DestructuringTarget::LetPattern if head == Some("let") => {
+                            items.get(1).copied()
+                        }
+                        _ => None,
+                    };
+                    if let Some((pattern_start, pattern_end)) = pattern {
+                        if matches!(bytes[pattern_start], b'[' | b'{') {
+                            out.push((pattern_start, pattern_end));
+                        }
+                    }
+                }
+                collect_destructuring_ranges(text, i + 1, close, target, out);
+                i = close + 1;
+            }
+            _ => i = skip_token(text, i, end),
+        }
+    }
+}
+
+fn lambda_argument_range(
+    text: &str,
+    lambda_items: &[(usize, usize)],
+    argument_index: usize,
+) -> Option<(usize, usize)> {
+    let first = *lambda_items.get(1)?;
+    if text.as_bytes().get(first.0) == Some(&b'(') {
+        let grouped = direct_list_item_ranges(text, first.0, first.1);
+        grouped.get(argument_index).copied()
+    } else {
+        lambda_items.get(argument_index + 1).copied()
+    }
+}
+
+fn direct_list_item_ranges(text: &str, open: usize, end: usize) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut ranges = Vec::new();
+    let mut i = open + 1;
+    let limit = end.saturating_sub(1);
+    while i < limit {
+        i = skip_ws_and_comments(text, i, limit);
+        if i >= limit {
+            break;
+        }
+        let start = i;
+        i = match bytes[i] {
+            b'(' | b'[' | b'{' => find_matching_surface_list_end_byte(text, i)
+                .map(|close| close + 1)
+                .unwrap_or(limit),
+            b'"' => skip_string_literal(text, i, limit),
+            b'\'' => skip_char_literal(text, i, limit),
+            _ => skip_token(text, i, limit),
+        };
+        ranges.push((start, i));
+    }
+    ranges
+}
+
+fn find_matching_surface_list_end_byte(text: &str, open_idx: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let expected = match *bytes.get(open_idx)? {
+        b'(' => b')',
+        b'[' => b']',
+        b'{' => b'}',
+        _ => return None,
+    };
+    let mut stack = vec![expected];
+    let mut i = open_idx + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b';' => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'"' => i = skip_string_literal(text, i, bytes.len()),
+            b'\'' => i = skip_char_literal(text, i, bytes.len()),
+            b'(' => {
+                stack.push(b')');
+                i += 1;
+            }
+            b'[' => {
+                stack.push(b']');
+                i += 1;
+            }
+            b'{' => {
+                stack.push(b'}');
+                i += 1;
+            }
+            close @ (b')' | b']' | b'}') => {
+                if stack.pop() != Some(close) {
+                    return None;
+                }
+                if stack.is_empty() {
+                    return Some(i);
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 fn flatten_get_source(expr: &Expression) -> String {
@@ -1271,27 +1530,6 @@ fn flatten_get_source(expr: &Expression) -> String {
             .collect::<Vec<_>>()
             .join(" ")
     )
-}
-
-fn restore_block_source_names(expression: &str) -> String {
-    let mut out = String::with_capacity(expression.len());
-    let mut token = String::new();
-    let flush = |out: &mut String, token: &mut String| {
-        if !token.is_empty() {
-            out.push_str(block_source_name(token));
-            token.clear();
-        }
-    };
-    for character in expression.chars() {
-        if character.is_whitespace() || matches!(character, '(' | ')' | '[' | ']' | '{' | '}') {
-            flush(&mut out, &mut token);
-            out.push(character);
-        } else {
-            token.push(character);
-        }
-    }
-    flush(&mut out, &mut token);
-    out
 }
 
 pub fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut HashSet<String>) {

@@ -2684,6 +2684,35 @@ xs)"#,
     }
 
     #[test]
+    fn test_correctness_nested_managed_pipeline_inside_fused_map_sum() {
+        let source = r#"
+            (let rows
+              [{["aaaaa" "bbb" "z" "y" "x"] 123 "abxyz"}
+               {["a" "b" "c" "d" "e" "f" "g" "h"] 987 "abcde"}
+               {["not" "a" "real" "room"] 404 "oarel"}
+               {["totally" "real" "room"] 200 "decoy"}])
+            (|> rows
+              (map (lambda ({ letters id checksum })
+                (let ordered
+                  (|> letters
+                      flat
+                      (map box)
+                      Table/count
+                      Table/entries
+                      (sort (lambda ({ a ac } { b bc })
+                        (if (= ac bc) (String/lt? a b) (>= ac bc))))
+                      (map (lambda ({ [letter] _ }) letter))))
+                (if (match? (slice 0 (length checksum) ordered) checksum) id 0)))
+              sum)
+        "#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true).trim(),
+            "1514"
+        );
+    }
+
+    #[test]
     fn test_runtime_pipe_can_use_single_arg_or_stage_as_partial() {
         let output = run_program_output_with_std_and_opts(r#"(|> false not (or false))"#, true);
         assert_eq!(output, "true");
@@ -5419,6 +5448,55 @@ out"#,
     }
 
     #[test]
+    fn test_lsp_diagnostic_normalization_restores_generated_source_names() {
+        assert_eq!(
+            crate::lsp_native_core::normalize_diagnostic_message(
+                "mut variable '__block_42_current' cannot be captured"
+            ),
+            "mut variable 'current' cannot be captured"
+        );
+        assert_eq!(
+            crate::lsp_native_core::restore_generated_source_names(
+                "while (and (> __block_0_j 0) (<= __block_0_j n))"
+            ),
+            "while (and (> j 0) (<= j n))"
+        );
+        assert_eq!(
+            crate::lsp_native_core::restore_generated_source_names("__block_7___block_0_j"),
+            "j"
+        );
+        assert_eq!(
+            crate::lsp_native_core::normalize_diagnostic_message(
+                "in value '_let_temp_vec_10000_42': index not proven safe"
+            ),
+            "in value 'destructured-vector': index not proven safe"
+        );
+        assert_eq!(
+            crate::lsp_native_core::normalize_diagnostic_message(
+                "cannot unify _let_temp_tuple_10000_7 with _arg_12"
+            ),
+            "cannot unify destructured-tuple with destructured-argument"
+        );
+        assert_eq!(
+            crate::lsp_native_core::normalize_diagnostic_message("unknown value '_private_name'"),
+            "unknown value '_private_name'"
+        );
+    }
+
+    #[test]
+    fn test_lsp_static_analysis_summary_hides_destructuring_temporary() {
+        let message = "static bounds: index not proven safe: `(get _let_temp_vec_10000_42 0)`";
+        assert_eq!(
+            crate::lsp_native_core::static_analysis_diagnostic_summary(message),
+            "index not proven safe: `(get destructured-vector 0)`"
+        );
+        assert_eq!(
+            crate::lsp_native_core::static_analysis_diagnostic_snippet(message).as_deref(),
+            Some("(get destructured-vector 0)")
+        );
+    }
+
+    #[test]
     fn test_lsp_static_analysis_snippet_restores_multi_index_get_sugar() {
         let message = "static bounds: index not proven safe: `(get (get m x) y)`";
         assert_eq!(
@@ -6204,8 +6282,60 @@ parse-value"#;
             })
             .collect();
         assert_eq!(warnings.len(), 1, "{diagnostics_json}");
+        assert_eq!(
+            warnings[0]["message"],
+            serde_json::json!("index not proven safe: `(get xs index)`")
+        );
+        assert!(!diagnostics_json.contains("__block_"), "{diagnostics_json}");
         assert_eq!(warnings[0]["range"]["start"]["line"], serde_json::json!(4));
         assert_eq!(warnings[0]["range"]["end"]["line"], serde_json::json!(4));
+    }
+
+    #[test]
+    fn test_wasm_lsp_destructuring_warning_points_to_source_pattern() {
+        let source = "; use-strict-warnings!\n(let fn (lambda [x . xs] x))";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        let warnings: Vec<_> = diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .filter(|item| item.get("severity") == Some(&serde_json::json!("warning")))
+            .collect();
+        assert!(!warnings.is_empty(), "{diagnostics_json}");
+        assert!(!diagnostics_json.contains("_args"), "{diagnostics_json}");
+        assert!(
+            warnings.iter().all(|warning| {
+                warning["range"]["start"]["line"] == serde_json::json!(1)
+                    && warning["range"]["start"]["character"]
+                        .as_u64()
+                        .is_some_and(|character| character >= 16)
+            }),
+            "{diagnostics_json}"
+        );
+    }
+
+    #[test]
+    fn test_wasm_lsp_let_destructuring_warning_points_to_source_pattern() {
+        let source = "; use-strict-warnings!\n(let values [])\n(let [x . xs] values)\nx";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
+        let warnings: Vec<_> = diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .filter(|item| item.get("severity") == Some(&serde_json::json!("warning")))
+            .collect();
+        assert!(!warnings.is_empty(), "{diagnostics_json}");
+        assert!(
+            warnings.iter().all(|warning| {
+                warning["range"]["start"]["line"] == serde_json::json!(2)
+                    && warning["range"]["start"]["character"] == serde_json::json!(5)
+            }),
+            "{diagnostics_json}"
+        );
     }
 
     #[test]

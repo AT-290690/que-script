@@ -694,7 +694,12 @@ fn fuse_map_filter_reduce_chains_expr(
             // Prioritize whole-chain fusions before rewriting children, so map/filter
             // combos become a single loop rather than nested loop wrappers.
             if let Some(fused) = fuse_terminal_over_map_filter_chain(expr, name_state) {
-                return fuse_map_filter_reduce_chains_expr(&fused, name_state);
+                // The generated loop already contains substituted callable bodies.
+                // Recursing into it can fuse pipelines inside those bodies under a
+                // second synthetic scope, which is not ownership-safe for managed
+                // temporaries. Optimize such nested pipelines at their original AST
+                // boundary instead of rewriting generated code again.
+                return fused;
             }
             if let Some(fused) = fuse_map_filter_chain_to_collect(expr, name_state) {
                 return fused;
@@ -726,6 +731,11 @@ fn fuse_terminal_over_map_filter_chain(
     if !sink_is_fusion_safe(&sink) {
         return None;
     }
+    // Optimize an independent source segment before embedding it in the
+    // generated terminal loop. This preserves fusion on the far side of an
+    // opaque wrapper without recursively rewriting the terminal loop itself
+    // (and, critically, without revisiting substituted lambda bodies there).
+    let base = fuse_map_filter_reduce_chains_expr(&base, name_state);
     let source = parse_fuse_source(base);
     if matches!(source, FuseSource::Zip { .. }) || matches!(sink, FuseSink::Unzip) {
         return None;
