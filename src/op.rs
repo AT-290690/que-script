@@ -59,6 +59,9 @@ enum FuseSink {
     Find {
         predicate: Expression,
     },
+    Count {
+        predicate: Expression,
+    },
 }
 
 #[derive(Clone)]
@@ -892,6 +895,13 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
             },
             items.get(2)?.clone(),
         )),
+        // count pred xs => count matching values without allocating filter output
+        "count" if items.len() == 3 => Some((
+            FuseSink::Count {
+                predicate: items.get(1)?.clone(),
+            },
+            items.get(2)?.clone(),
+        )),
         _ => None,
     }
 }
@@ -1138,7 +1148,10 @@ fn build_direct_fused_loop(
             FuseSink::ReduceUntil { .. } => true,
             FuseSink::Average { .. } => true,
             FuseSink::Unzip => true,
-            FuseSink::Some { .. } | FuseSink::Every { .. } | FuseSink::Find { .. } => true,
+            FuseSink::Some { .. }
+            | FuseSink::Every { .. }
+            | FuseSink::Find { .. }
+            | FuseSink::Count { .. } => true,
         };
         if has_indexed_stage || unsupported_sink {
             return None;
@@ -1186,6 +1199,7 @@ fn build_direct_fused_loop(
         FuseSink::Average { dec } => build_average_loop(source, &hoisted_ops, dec, &suffix),
         FuseSink::Unzip => build_unzip_loop(source, &hoisted_ops, &suffix),
         FuseSink::Find { predicate } => build_find_loop(source, &hoisted_ops, predicate, &suffix),
+        FuseSink::Count { predicate } => build_count_loop(source, &hoisted_ops, predicate, &suffix),
     })?;
     if hoisted_bindings.is_empty() {
         Some(fused)
@@ -1789,6 +1803,65 @@ fn build_average_loop(
         Expression::Apply(vec![Expression::Word("/".to_string()), sum_get, count_get])
     };
     setup_bindings.push(mean_expr);
+
+    let mut do_items = vec![Expression::Word("do".to_string())];
+    do_items.extend(setup_bindings);
+    Some(Expression::Apply(do_items))
+}
+
+fn build_count_loop(
+    source: FuseSource,
+    ops_outer_to_inner: &[MapFilterOp],
+    predicate: Expression,
+    suffix: &str,
+) -> Option<Expression> {
+    let (mut setup_bindings, start_expr, end_expr, value_expr_for_i) =
+        make_loop_source_bindings(source, suffix)?;
+
+    let count_name = fuse_tmp_name("__fuse_count", suffix);
+    let i_name = fuse_tmp_name("__fuse_i", suffix);
+    let i_word = Expression::Word(i_name.clone());
+    let x_expr = value_expr_for_i(&i_word);
+    let count_name_for_sink = count_name.clone();
+    let predicate_for_sink = predicate.clone();
+    let sink_builder = move |mapped: Expression, _logical_i: Expression| {
+        let matches = call_callable_expr(&predicate_for_sink, vec![mapped])?;
+        let increment = Expression::Apply(vec![
+            Expression::Word("alter!".to_string()),
+            Expression::Word(count_name_for_sink.clone()),
+            Expression::Apply(vec![
+                Expression::Word("+".to_string()),
+                Expression::Word(count_name_for_sink.clone()),
+                Expression::Int(1),
+            ]),
+        ]);
+        Some(Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            matches,
+            increment,
+            no_op_unit_expr(),
+        ]))
+    };
+    let process_body = build_non_flatten_chain_process(
+        ops_outer_to_inner,
+        x_expr,
+        i_word,
+        suffix,
+        &mut setup_bindings,
+        &sink_builder,
+    )?;
+    setup_bindings.push(Expression::Apply(vec![
+        Expression::Word("mut".to_string()),
+        Expression::Word(count_name.clone()),
+        Expression::Int(0),
+    ]));
+    setup_bindings.push(build_while_range_body(
+        start_expr,
+        end_expr,
+        &i_name,
+        process_body,
+    ));
+    setup_bindings.push(Expression::Word(count_name));
 
     let mut do_items = vec![Expression::Word("do".to_string())];
     do_items.extend(setup_bindings);
@@ -3211,7 +3284,9 @@ fn sink_is_fusion_safe(sink: &FuseSink) -> bool {
         FuseSink::Some { predicate, .. } | FuseSink::Every { predicate, .. } => {
             is_fusion_safe_callable(predicate)
         }
-        FuseSink::Find { predicate } => is_fusion_safe_callable(predicate),
+        FuseSink::Find { predicate } | FuseSink::Count { predicate } => {
+            is_fusion_safe_callable(predicate)
+        }
     }
 }
 
@@ -3443,6 +3518,14 @@ fn hoist_fusion_callables(
             with_index,
         },
         FuseSink::Find { predicate } => FuseSink::Find {
+            predicate: hoist_fusion_callable_expr(
+                predicate,
+                suffix,
+                &mut counter,
+                &mut hoisted_bindings,
+            ),
+        },
+        FuseSink::Count { predicate } => FuseSink::Count {
             predicate: hoist_fusion_callable_expr(
                 predicate,
                 suffix,

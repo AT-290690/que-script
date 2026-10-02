@@ -1481,6 +1481,57 @@ xs)"#,
             .expect("program should compile")
     }
 
+    fn named_wat_function<'a>(wat: &'a str, name: &str) -> &'a str {
+        let marker = format!("  (func ${name}");
+        let start = wat
+            .find(&marker)
+            .unwrap_or_else(|| panic!("missing WAT function ${name}"));
+        let rest = &wat[start..];
+        let end = rest[marker.len()..]
+            .find("\n  (func ")
+            .map(|offset| marker.len() + offset)
+            .unwrap_or(rest.len());
+        &rest[..end]
+    }
+
+    #[test]
+    fn test_wat_monomorphizes_uniquely_used_polymorphic_vector_builder() {
+        let src = r#"(let wrap (lambda x [x]))
+(get (wrap 7) 0)"#;
+        let wat = compile_std_program_to_wat(src, true);
+        let wrap_wat = named_wat_function(&wat, "v_wrap");
+        assert!(
+            !wrap_wat.contains("call $vec_push_i32"),
+            "a uniquely Int-instantiated polymorphic builder should use an exact scalar allocation:\n{wrap_wat}"
+        );
+        assert!(
+            wrap_wat.contains("i32.store"),
+            "specialized scalar builder should store directly:\n{wrap_wat}"
+        );
+        let debug_wat = compile_std_program_to_wat(src, false);
+        let debug_wrap_wat = named_wat_function(&debug_wat, "v_wrap");
+        assert!(
+            debug_wrap_wat.contains("call $vec_push_i32"),
+            "the debug/unoptimized path should retain conservative generic lowering:\n{debug_wrap_wat}"
+        );
+        assert_eq!(run_program_output_with_std_and_opts(src, true), "7");
+    }
+
+    #[test]
+    fn test_wat_keeps_conflicting_polymorphic_uses_generic() {
+        let src = r#"(let wrap (lambda x [x]))
+(let ints (wrap 7))
+(let nested (wrap [8]))
+(+ (get ints 0) (get (get nested 0) 0))"#;
+        let wat = compile_std_program_to_wat(src, true);
+        let wrap_wat = named_wat_function(&wat, "v_wrap");
+        assert!(
+            wrap_wat.contains("call $vec_push_i32"),
+            "mixed scalar/reference instantiations must retain generic element handling:\n{wrap_wat}"
+        );
+        assert_eq!(run_program_output_with_std_and_opts(src, true), "15");
+    }
+
     fn run_program_error_with_std_unlocked(src: &str, enable_optimizer: bool) -> String {
         let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
         let _result = ScopedEnvVar::set("QUE_WASI_NO_RESULT", "0");
@@ -4812,6 +4863,34 @@ out"#,
     }
 
     #[test]
+    fn test_typed_optimization_count_fuses_without_filter_result() {
+        let expr = crate::parser::parse(
+            "(count (lambda x (= (% x 2) 0))
+               (map (lambda x (+ x 1)) (range 0 100)))",
+        )
+        .expect("input should parse")
+        .remove(0);
+        let fused_lisp = crate::op::fuse_map_filter_reduce_for_test(&expr).to_lisp();
+
+        assert!(
+            fused_lisp.contains("(while"),
+            "count should fuse to a direct loop, got: {fused_lisp}"
+        );
+        assert!(
+            !fused_lisp.contains("(count ")
+                && !fused_lisp.contains("(filter ")
+                && !fused_lisp.contains("(map "),
+            "count/map pipeline should not retain allocating stages, got: {fused_lisp}"
+        );
+
+        let src = "(count (lambda x (= (% x 2) 0)) (map (lambda x (+ x 1)) (range 0 100)))";
+        let plain = run_program_output_with_std_and_opts(src, false);
+        let optimized = run_program_output_with_std_and_opts(src, true);
+        assert_eq!(optimized, plain);
+        assert_eq!(optimized, "50");
+    }
+
+    #[test]
     fn test_typed_optimization_take_drop_aliases_fuse_as_slice_sources() {
         let programs = [
             "(reduce + 0 (map (lambda x x) (take/first 3 (vector 1 2 3 4 5))))",
@@ -7700,6 +7779,32 @@ fn"#;
                 && !clone_wat.contains("call $vec_push_i32"),
             "scalar clone literal should avoid set/push helper runtimes, got:\n{}",
             clone_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_proven_contiguous_scalar_clone_uses_bulk_memory_copy() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let expr = crate::parser::build(
+            "(do
+               (let clone3 (lambda xs [(get xs 0) (get xs 1) (get xs 2)]))
+               (clone3 [4 5 6]))",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let clone_wat = named_wat_function(&wat, "v_clone3");
+
+        assert!(
+            clone_wat.contains("memory.copy"),
+            "a proved contiguous scalar clone should use one bulk copy:\n{clone_wat}"
+        );
+        assert!(
+            clone_wat.contains("call $vec_len"),
+            "the optimized branch must remain guarded by the source length:\n{clone_wat}"
         );
     }
 

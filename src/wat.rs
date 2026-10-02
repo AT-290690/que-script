@@ -8740,6 +8740,20 @@ fn compile_scalar_vector_literal_direct(
         vec_tmp,
         data_tmp
     ));
+    if let Some(source_slot) = contiguous_scalar_clone_source_slot(args, ctx) {
+        out.push(format!(
+            "local.get {data_tmp}\n\
+             local.get {source_slot}\n\
+             i32.const 16\n\
+             i32.add\n\
+             i32.load\n\
+             i32.const {}\n\
+             memory.copy",
+            args.len().saturating_mul(4)
+        ));
+        out.push(format!("local.get {vec_tmp}"));
+        return Ok(out.join("\n"));
+    }
     for (idx, arg) in args.iter().enumerate() {
         let nested_ctx = Ctx {
             fn_sigs: ctx.fn_sigs,
@@ -8776,6 +8790,38 @@ fn compile_scalar_vector_literal_direct(
     }
     out.push(format!("local.get {vec_tmp}"));
     Ok(out.join("\n"))
+}
+
+fn contiguous_scalar_clone_source_slot(args: &[TypedExpression], ctx: &Ctx<'_>) -> Option<usize> {
+    if parse_env_bool_like("QUE_BOUNDS_CHECK", true) || args.is_empty() {
+        return None;
+    }
+    let mut source_name: Option<&str> = None;
+    for (index, arg) in args.iter().enumerate() {
+        let Expression::Apply(items) = &arg.expr else {
+            return None;
+        };
+        let [Expression::Word(op), Expression::Word(name), Expression::Int(source_index)] =
+            &items[..]
+        else {
+            return None;
+        };
+        if op != "get" || usize::try_from(*source_index).ok()? != index {
+            return None;
+        }
+        if source_name.is_some_and(|source| source != name) {
+            return None;
+        }
+        source_name = Some(name);
+    }
+    let source_slot = *ctx.locals.get(source_name?)?;
+    let required_len = i32::try_from(args.len()).ok()?;
+    (ctx.proven_scalar_vec_min_lengths
+        .get(&source_slot)
+        .copied()
+        .unwrap_or(0)
+        >= required_len)
+        .then_some(source_slot)
 }
 
 fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -12766,25 +12812,48 @@ fn is_borrowed_projection_local(name: &str, ctx: &Ctx<'_>) -> bool {
         .contains_key(&format!("__borrowed_projection::{name}"))
 }
 
+#[derive(Clone, Debug)]
+enum CallSpecialization {
+    Unique(Vec<Type>, Type),
+    Conflicting,
+}
+
+fn record_call_specialization(
+    name: &str,
+    params: Vec<Type>,
+    ret: Type,
+    out: &mut HashMap<String, CallSpecialization>,
+) {
+    if params.iter().any(contains_unresolved_type) || contains_unresolved_type(&ret) {
+        return;
+    }
+    match out.get(name) {
+        None => {
+            out.insert(name.to_string(), CallSpecialization::Unique(params, ret));
+        }
+        Some(CallSpecialization::Unique(prev_params, prev_ret))
+            if *prev_params == params && *prev_ret == ret => {}
+        Some(CallSpecialization::Unique(_, _)) => {
+            out.insert(name.to_string(), CallSpecialization::Conflicting);
+        }
+        Some(CallSpecialization::Conflicting) => {}
+    }
+}
+
 fn collect_call_specializations(
     node: &TypedExpression,
     top_def_names: &HashSet<String>,
-    out: &mut HashMap<String, (Vec<Type>, Type)>,
+    out: &mut HashMap<String, CallSpecialization>,
 ) {
-    if let Expression::Apply(items) = &node.expr {
-        if let Some(Expression::Word(name)) = items.first() {
-            if top_def_names.contains(name) {
-                let params = node.children[1..]
-                    .iter()
-                    .map(|n| n.typ.clone().unwrap_or(Type::Int))
-                    .collect::<Vec<_>>();
-                let ret = node.typ.clone().unwrap_or(Type::Int);
-                match out.get(name) {
-                    Some((prev_params, _)) if prev_params.len() >= params.len() => {}
-                    _ => {
-                        out.insert(name.clone(), (params, ret));
-                    }
-                }
+    // The inferred type on a function-valued word represents the complete
+    // instantiation, including uses through higher-order functions and partial
+    // application. Recording those uses makes whole-program specialization
+    // safe: a definition is specialized only when every concrete use agrees.
+    if let Expression::Word(name) = &node.expr {
+        if top_def_names.contains(name) {
+            if let Some(typ @ Type::Function(_, _)) = node.typ.as_ref() {
+                let (params, ret) = function_parts(typ);
+                record_call_specialization(name, params, ret, out);
             }
         }
     }
@@ -13931,8 +14000,10 @@ fn compile_program_to_wat_build_typed_with_opts(
     top_def_names.extend(used_extern_defs.keys().cloned());
     let mut dynamic_partial_specs: HashSet<(usize, usize)> = HashSet::new();
     collect_dynamic_partial_specs(typed_ast, &top_def_names, &mut dynamic_partial_specs);
-    let mut call_specs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
-    collect_call_specializations(typed_ast, &top_def_names, &mut call_specs);
+    let mut call_specs: HashMap<String, CallSpecialization> = HashMap::new();
+    if enable_optimizer {
+        collect_call_specializations(typed_ast, &top_def_names, &mut call_specs);
+    }
     for (name, def) in &top_defs {
         let is_lambda_def = matches!(
             &def.expr,
@@ -13952,7 +14023,14 @@ fn compile_program_to_wat_build_typed_with_opts(
             } else if decl_ps.len() >= syn_arity {
                 decl_ps.truncate(syn_arity);
             }
-            (decl_ps, decl_ret)
+            match call_specs.get(name) {
+                Some(CallSpecialization::Unique(spec_ps, spec_ret))
+                    if spec_ps.len() == decl_ps.len() =>
+                {
+                    (spec_ps.clone(), spec_ret.clone())
+                }
+                _ => (decl_ps, decl_ret),
+            }
         } else {
             let t = def
                 .node
