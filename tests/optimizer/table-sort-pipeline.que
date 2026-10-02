@@ -1,0 +1,8 @@
+; Managed strings and tuple values flowing through a table pipeline.
+(|> ["a" "b" "a" "c" "b" "a"]
+    flat
+    (map box)
+    Table/count
+    Table/entries
+    (map snd)
+    sum)

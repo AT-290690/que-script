@@ -1,0 +1,6 @@
+; A captured scalar closure passed through map/filter and a terminal sink.
+(let make-adder (lambda offset (lambda x (+ x offset))))
+(|> [1 2 3 4]
+    (map (make-adder 7))
+    (filter (lambda x (> x 9)))
+    sum)

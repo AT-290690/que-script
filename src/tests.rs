@@ -1530,6 +1530,71 @@ xs)"#,
         );
     }
 
+    /// Small, source-file-backed programs which must preserve their observable
+    /// result across the optimizer boundary. Keep regressions here when the
+    /// shape is useful beyond one optimizer pass: this is our first line of
+    /// defence against a fast program that quietly computes a different value.
+    fn optimizer_correctness_corpus() -> &'static [(&'static str, &'static str, &'static str)] {
+        &[
+            (
+                "pipeline-basics",
+                include_str!("../tests/optimizer/pipeline-basics.que"),
+                "220",
+            ),
+            (
+                "wrapper-segments",
+                include_str!("../tests/optimizer/wrapper-segments.que"),
+                "15664",
+            ),
+            (
+                "closures-and-managed-values",
+                include_str!("../tests/optimizer/closures-and-managed-values.que"),
+                "21",
+            ),
+            (
+                "table-sort-pipeline",
+                include_str!("../tests/optimizer/table-sort-pipeline.que"),
+                "6",
+            ),
+            (
+                "mutation-and-counted-loops",
+                include_str!("../tests/optimizer/mutation-and-counted-loops.que"),
+                "10416",
+            ),
+            (
+                "structural-recursion",
+                include_str!("../tests/optimizer/structural-recursion.que"),
+                "45",
+            ),
+            (
+                "nested-managed-pipeline",
+                include_str!("../tests/optimizer/nested-managed-pipeline.que"),
+                "1514",
+            ),
+        ]
+    }
+
+    #[test]
+    fn test_optimizer_correctness_corpus_matches_unoptimized_semantics() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        for (name, source, expected) in optimizer_correctness_corpus() {
+            let unoptimized = run_program_output_with_std_and_opts_unlocked(source, false);
+            let optimized = run_program_output_with_std_and_opts_unlocked(source, true);
+            assert_eq!(
+                unoptimized.trim(),
+                *expected,
+                "optimizer corpus fixture '{name}' changed its baseline result"
+            );
+            assert_eq!(
+                optimized, unoptimized,
+                "optimizer changed observable output for corpus fixture '{name}'"
+            );
+        }
+    }
+
     fn run_compiled_wat_no_result(wat_src: &str) {
         let wasm_bytes = wat::parse_str(wat_src).expect("wat should encode to wasm");
         let path = std::env::temp_dir().join(format!("que-bench-{}.wasm", std::process::id()));

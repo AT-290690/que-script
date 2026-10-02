@@ -1,0 +1,7 @@
+; Scalar vector construction, indexed reads, and a mutation-heavy loop.
+(let xs [])
+(loop i (< i 32) (push! xs (* i i)))
+(mut total 0)
+(loop i (< i (length xs))
+  (alter! total (+ total (get xs i))))
+total

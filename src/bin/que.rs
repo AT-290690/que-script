@@ -149,7 +149,7 @@ fn run_nvim(mut args: Vec<String>) -> Result<(), String> {
                 if status.success() {
                     Ok(())
                 } else {
-                    Err(format!("scratch program exited with {status}"))
+                    Err("scratch program failed; see the Que diagnostic above".into())
                 }
             }),
     };

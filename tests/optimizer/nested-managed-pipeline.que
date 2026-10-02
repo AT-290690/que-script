@@ -1,0 +1,20 @@
+; Regression: do not re-fuse a managed nested pipeline after the outer map/sum
+; loop has been generated.
+(let rows
+  [{["aaaaa" "bbb" "z" "y" "x"] 123 "abxyz"}
+   {["a" "b" "c" "d" "e" "f" "g" "h"] 987 "abcde"}
+   {["not" "a" "real" "room"] 404 "oarel"}
+   {["totally" "real" "room"] 200 "decoy"}])
+(|> rows
+  (map (lambda ({ letters id checksum })
+    (let ordered
+      (|> letters
+          flat
+          (map box)
+          Table/count
+          Table/entries
+          (sort (lambda ({ a ac } { b bc })
+            (if (= ac bc) (String/lt? a b) (>= ac bc))))
+          (map (lambda ({ [letter] _ }) letter))))
+    (if (match? (slice 0 (length checksum) ordered) checksum) id 0)))
+  sum)

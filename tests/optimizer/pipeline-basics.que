@@ -1,0 +1,5 @@
+; map/filter/reduce fusion over a scalar range
+(|> (range 1 10)
+    (filter even?)
+    (map square)
+    sum)

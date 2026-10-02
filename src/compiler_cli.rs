@@ -9,7 +9,7 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Command, ExitStatus};
+use std::process::{Command, Output};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WasmRuntime {
@@ -176,8 +176,9 @@ fn run_eval(mut args: Vec<String>) -> Result<(), String> {
     } else {
         run_wasi(args)
     };
-    let _ = fs::remove_file(path);
-    result
+    let _ = fs::remove_file(&path);
+    let staged_path = path.to_string_lossy().into_owned();
+    result.map_err(|error| error.replace(&staged_path, "--eval source"))
 }
 
 fn environment_help() -> &'static str {
@@ -516,11 +517,11 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
         .first()
         .ok_or_else(|| "missing program path".to_string())?;
     let source = read_program(path)?;
-    let merged = merged_program(&source)?;
+    let merged = merged_program(&source).map_err(|error| source_error(path, error))?;
     if emit == EmitKind::Source {
         return write_output(out.as_deref(), format!("{}\n", merged.to_lisp()).as_bytes());
     }
-    let typed = infer_program(&source, &merged)?;
+    let typed = infer_program(&source, &merged).map_err(|error| source_error(path, error))?;
     if env::var("QUEC_DEBUG_ANALYSIS").as_deref() == Ok("1") {
         for warning in crate::static_analysis::analyze_user_program_diagnostics(
             &typed,
@@ -545,12 +546,13 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
             format!("{}\n", optimized.expr.to_lisp()).as_bytes(),
         );
     }
-    let wat = crate::wat::compile_program_to_wat_typed(&typed)?;
+    let wat = crate::wat::compile_program_to_wat_typed(&typed)
+        .map_err(|error| source_error(path, error))?;
     if emit == EmitKind::Wat {
         write_output(out.as_deref(), wat.as_bytes())
     } else {
-        let wasm =
-            wat::parse_str(&wat).map_err(|error| format!("failed to encode Wasm: {error}"))?;
+        let wasm = wat::parse_str(&wat)
+            .map_err(|error| source_error(path, format!("failed to encode Wasm: {error}")))?;
         write_output(out.as_deref(), &wasm)
     }
 }
@@ -584,7 +586,7 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
     args.remove(0);
     let wasm = env::temp_dir().join(format!("que-wasi-{}.wasm", std::process::id()));
     let mut compile = vec![
-        path,
+        path.clone(),
         "--wasi".to_string(),
         "--out".to_string(),
         wasm.to_string_lossy().into_owned(),
@@ -598,19 +600,77 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
     let grants_filesystem = permissions
         .split(',')
         .any(|permission| matches!(permission.trim(), "all" | "*" | "read" | "write" | "delete"));
-    let status = runtime_adapter
+    let output = runtime_adapter
         .command(runtime_executable.clone(), &wasm, &args, grants_filesystem)
-        .status()
+        .output()
         .map_err(|error| {
             format!(
                 "failed to start WebAssembly runtime '{runtime_executable}': {error}. Install it or choose another with --runtime"
             )
         })?;
     let _ = fs::remove_file(&wasm);
-    if matches!(status.code(), Some(70 | 134)) {
-        Err("debug guard trapped; see the diagnostic above".into())
+    write_runtime_output(&output)?;
+    if output.status.success() {
+        Ok(())
     } else {
-        status_result(status, &format!("external {runtime:?} execution"))
+        Err(runtime_failure_message(&output, runtime, &path, debug))
+    }
+}
+
+fn source_error(path: &str, error: impl std::fmt::Display) -> String {
+    format!("in '{path}': {error}")
+}
+
+fn write_runtime_output(output: &Output) -> Result<(), String> {
+    std::io::stdout()
+        .write_all(&output.stdout)
+        .map_err(|error| format!("failed to write program output: {error}"))?;
+    if output.status.success() {
+        std::io::stderr()
+            .write_all(&output.stderr)
+            .map_err(|error| format!("failed to write program diagnostics: {error}"))?;
+    }
+    Ok(())
+}
+
+fn runtime_failure_message(
+    output: &Output,
+    runtime: String,
+    source_path: &str,
+    debug: bool,
+) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let reason = runtime_failure_reason(&stderr, debug);
+    let status = output
+        .status
+        .code()
+        .map(|code| format!("exit code {code}"))
+        .unwrap_or_else(|| "terminated by signal".to_string());
+    format!("in '{source_path}': runtime error using {runtime}: {reason} ({status})")
+}
+
+fn runtime_failure_reason(stderr: &str, debug: bool) -> String {
+    if let Some(guard) = stderr
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("debug.guard_trap:"))
+    {
+        return guard.to_string();
+    }
+
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("out of bounds")
+        || lower.contains("invalid read address")
+        || lower.contains("invalid write address")
+    {
+        "vector access was outside its valid range".to_string()
+    } else if lower.contains("divide by zero") {
+        "division or modulo by zero".to_string()
+    } else if debug {
+        "a debug safety check trapped (check vector bounds, division by zero, and Int overflow)"
+            .to_string()
+    } else {
+        "the WebAssembly program trapped; rerun with --debug for Que safety checks".to_string()
     }
 }
 
@@ -677,14 +737,6 @@ fn run_fmt(raw: &[String]) -> Result<(), String> {
             .map_err(|error| format!("failed to write '{path}': {error}"))?;
     }
     Ok(())
-}
-
-fn status_result(status: ExitStatus, operation: &str) -> Result<(), String> {
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("{operation} failed with {status}"))
-    }
 }
 
 #[cfg(test)]
@@ -769,5 +821,28 @@ mod runtime_adapter_tests {
     #[test]
     fn unknown_runtime_is_rejected() {
         assert!(WasmRuntime::parse("mystery-vm").is_err());
+    }
+
+    #[test]
+    fn runtime_failure_reason_keeps_que_guard_diagnostic() {
+        let stderr = "Error: failed to run\ndebug.guard_trap: integer overflow on mul/square (QUE_INT_OVERFLOW_CHECK)\nwasm backtrace:";
+        assert_eq!(
+            runtime_failure_reason(stderr, true),
+            "debug.guard_trap: integer overflow on mul/square (QUE_INT_OVERFLOW_CHECK)"
+        );
+    }
+
+    #[test]
+    fn runtime_failure_reason_hides_wasm_backtrace_for_debug_traps() {
+        let stderr = "Error: failed to run main module\n\nCaused by:\n    0: error while executing at wasm backtrace:\n    1: wasm trap: wasm `unreachable` instruction executed";
+        let reason = runtime_failure_reason(stderr, true);
+        assert!(reason.contains("debug safety check"), "{reason}");
+        assert!(!reason.contains("backtrace"), "{reason}");
+    }
+
+    #[test]
+    fn runtime_failure_reason_classifies_memory_traps() {
+        let reason = runtime_failure_reason("invalid write address: -2147483632", false);
+        assert_eq!(reason, "vector access was outside its valid range");
     }
 }

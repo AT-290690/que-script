@@ -1,0 +1,7 @@
+; Pipeline segments on either side of an opaque user wrapper.
+(let mymap (lambda fn xs (map square xs)))
+(|> (range 1 10)
+    (filter even?)
+    (mymap square)
+    (map square)
+    (reduce + 0))
