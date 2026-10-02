@@ -2045,6 +2045,69 @@ enum SizeStep {
     Unknown,
 }
 
+/// Describes whether an update happens on some or every control-flow path
+/// through an expression.  Termination needs `must_update`: merely finding an
+/// update in one branch is not enough to prove that a loop makes progress.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PathProgress<Direction> {
+    direction: Direction,
+    may_update: bool,
+    must_update: bool,
+}
+
+impl<Direction: Copy + PartialEq> PathProgress<Direction> {
+    fn unchanged(direction: Direction) -> Self {
+        Self {
+            direction,
+            may_update: false,
+            must_update: false,
+        }
+    }
+
+    fn update(direction: Direction) -> Self {
+        Self {
+            direction,
+            may_update: true,
+            must_update: true,
+        }
+    }
+
+    fn merged_direction(self, other: Self, unknown: Direction) -> Direction {
+        match (self.may_update, other.may_update) {
+            (false, false) => self.direction,
+            (true, false) => self.direction,
+            (false, true) => other.direction,
+            (true, true) if self.direction == other.direction => self.direction,
+            (true, true) => unknown,
+        }
+    }
+
+    /// Both expressions execute.  It is enough for either expression to
+    /// guarantee an update, provided every possible update has one direction.
+    fn then(self, other: Self, unknown: Direction) -> Self {
+        Self {
+            direction: self.merged_direction(other, unknown),
+            may_update: self.may_update || other.may_update,
+            must_update: self.must_update || other.must_update,
+        }
+    }
+
+    /// Exactly one of the alternatives executes.  Progress is guaranteed only
+    /// when both alternatives guarantee it.
+    fn either(self, other: Self, unknown: Direction) -> Self {
+        Self {
+            direction: self.merged_direction(other, unknown),
+            may_update: self.may_update || other.may_update,
+            must_update: self.must_update && other.must_update,
+        }
+    }
+
+    fn optional(mut self) -> Self {
+        self.must_update = false;
+        self
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct StructuralSummary {
     params: Vec<String>,
@@ -2138,18 +2201,6 @@ fn size_guard_exit_direction(condition: &Expression) -> Option<(&str, SizeStep)>
     })
 }
 
-fn combined_size_step(steps: &[SizeStep]) -> SizeStep {
-    let Some(first) = steps.first().copied() else {
-        return SizeStep::Unchanged;
-    };
-    steps
-        .iter()
-        .copied()
-        .skip(1)
-        .try_fold(first, |known, next| (known == next).then_some(known))
-        .unwrap_or(SizeStep::Unknown)
-}
-
 fn counter_step(name: &str, updates: &[Expression], facts: &AbstractState) -> CounterStep {
     let direction = |step: &Expression| {
         let interval = integer_interval(step, facts)?;
@@ -2193,6 +2244,189 @@ fn counter_step(name: &str, updates: &[Expression], facts: &AbstractState) -> Co
         .map(classify)
         .try_fold(first, |known, next| (known == next).then_some(known))
         .unwrap_or(CounterStep::Unknown)
+}
+
+fn counter_progress_sequence<'a>(
+    expressions: impl IntoIterator<Item = &'a Expression>,
+    name: &str,
+    facts: &AbstractState,
+) -> PathProgress<CounterStep> {
+    expressions.into_iter().fold(
+        PathProgress::unchanged(CounterStep::Unchanged),
+        |progress, expression| {
+            progress.then(
+                counter_path_progress(expression, name, facts),
+                CounterStep::Unknown,
+            )
+        },
+    )
+}
+
+fn counter_path_progress(
+    expr: &Expression,
+    name: &str,
+    facts: &AbstractState,
+) -> PathProgress<CounterStep> {
+    let Expression::Apply(items) = expr else {
+        return PathProgress::unchanged(CounterStep::Unchanged);
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return PathProgress::unchanged(CounterStep::Unchanged);
+    }
+
+    if let [Expression::Word(op), Expression::Word(target), value] = items.as_slice() {
+        if op == "alter!" && target == name {
+            let nested = counter_path_progress(value, name, facts);
+            let direction = if nested.may_update {
+                CounterStep::Unknown
+            } else {
+                counter_step(name, std::slice::from_ref(value), facts)
+            };
+            return nested.then(PathProgress::update(direction), CounterStep::Unknown);
+        }
+    }
+
+    let op = items.first().and_then(word).unwrap_or("");
+    match op {
+        "if" if items.len() >= 3 => {
+            let condition = counter_path_progress(&items[1], name, facts);
+            let otherwise = PathProgress::unchanged(CounterStep::Unchanged);
+            let branch = match predicate_truth(&items[1], facts, 0) {
+                Some(true) => counter_path_progress(&items[2], name, facts),
+                Some(false) => items
+                    .get(3)
+                    .map(|expr| counter_path_progress(expr, name, facts))
+                    .unwrap_or(otherwise),
+                None => counter_path_progress(&items[2], name, facts).either(
+                    items
+                        .get(3)
+                        .map(|expr| counter_path_progress(expr, name, facts))
+                        .unwrap_or(otherwise),
+                    CounterStep::Unknown,
+                ),
+            };
+            condition.then(branch, CounterStep::Unknown)
+        }
+        "do" | "block" => counter_progress_sequence(items.iter().skip(1), name, facts),
+        "and" | "or" => {
+            let mut operands = items.iter().skip(1);
+            let Some(first) = operands.next() else {
+                return PathProgress::unchanged(CounterStep::Unchanged);
+            };
+            let mut progress = counter_path_progress(first, name, facts);
+            for operand in operands {
+                progress = progress.then(
+                    counter_path_progress(operand, name, facts).optional(),
+                    CounterStep::Unknown,
+                );
+            }
+            progress
+        }
+        "while" => counter_progress_sequence(items.iter().skip(1), name, facts).optional(),
+        _ => counter_progress_sequence(items.iter().skip(1), name, facts),
+    }
+}
+
+fn size_progress_sequence<'a>(
+    expressions: impl IntoIterator<Item = &'a Expression>,
+    name: &str,
+    summaries: &HashMap<String, StructuralSummary>,
+    facts: &AbstractState,
+) -> PathProgress<SizeStep> {
+    expressions.into_iter().fold(
+        PathProgress::unchanged(SizeStep::Unchanged),
+        |progress, expression| {
+            progress.then(
+                size_path_progress(expression, name, summaries, facts),
+                SizeStep::Unknown,
+            )
+        },
+    )
+}
+
+fn size_path_progress(
+    expr: &Expression,
+    name: &str,
+    summaries: &HashMap<String, StructuralSummary>,
+    facts: &AbstractState,
+) -> PathProgress<SizeStep> {
+    let Expression::Apply(items) = expr else {
+        return PathProgress::unchanged(SizeStep::Unchanged);
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return PathProgress::unchanged(SizeStep::Unchanged);
+    }
+
+    match items.as_slice() {
+        [Expression::Word(op), Expression::Word(target)]
+            if target == name && matches!(op.as_str(), "pop!" | "pop-val!") =>
+        {
+            return PathProgress::update(SizeStep::Shrink);
+        }
+        [Expression::Word(op), Expression::Word(target), _] if target == name && op == "push!" => {
+            return PathProgress::update(SizeStep::Grow);
+        }
+        _ => {}
+    }
+
+    let op = items.first().and_then(word).unwrap_or("");
+    match op {
+        "if" if items.len() >= 3 => {
+            let condition = size_path_progress(&items[1], name, summaries, facts);
+            let otherwise = PathProgress::unchanged(SizeStep::Unchanged);
+            let branch = match predicate_truth(&items[1], facts, 0) {
+                Some(true) => size_path_progress(&items[2], name, summaries, facts),
+                Some(false) => items
+                    .get(3)
+                    .map(|expr| size_path_progress(expr, name, summaries, facts))
+                    .unwrap_or(otherwise),
+                None => size_path_progress(&items[2], name, summaries, facts).either(
+                    items
+                        .get(3)
+                        .map(|expr| size_path_progress(expr, name, summaries, facts))
+                        .unwrap_or(otherwise),
+                    SizeStep::Unknown,
+                ),
+            };
+            condition.then(branch, SizeStep::Unknown)
+        }
+        "do" | "block" => size_progress_sequence(items.iter().skip(1), name, summaries, facts),
+        "and" | "or" => {
+            let mut operands = items.iter().skip(1);
+            let Some(first) = operands.next() else {
+                return PathProgress::unchanged(SizeStep::Unchanged);
+            };
+            let mut progress = size_path_progress(first, name, summaries, facts);
+            for operand in operands {
+                progress = progress.then(
+                    size_path_progress(operand, name, summaries, facts).optional(),
+                    SizeStep::Unknown,
+                );
+            }
+            progress
+        }
+        "while" => size_progress_sequence(items.iter().skip(1), name, summaries, facts).optional(),
+        _ => {
+            let mut progress = size_progress_sequence(items.iter().skip(1), name, summaries, facts);
+            if let Some(summary) = summaries.get(op) {
+                if summary.params.len() == items.len().saturating_sub(1) {
+                    for (argument, effect) in items
+                        .iter()
+                        .skip(1)
+                        .zip(summary.parameter_effects.iter().copied())
+                    {
+                        if matches!(argument, Expression::Word(target) if target == name)
+                            && effect != SizeStep::Unchanged
+                        {
+                            progress =
+                                progress.then(PathProgress::update(effect), SizeStep::Unknown);
+                        }
+                    }
+                }
+            }
+            progress
+        }
+    }
 }
 
 fn comparisons_for_counter<'a>(expr: &'a Expression, name: &str, out: &mut Vec<(&'a str, bool)>) {
@@ -2249,6 +2483,81 @@ fn comparison_detail_for_counter<'a>(
         .find_map(|child| comparison_detail_for_counter(child, name, step))
 }
 
+fn contains_other_altered_scalar(
+    expr: &Expression,
+    counter: &str,
+    altered: &HashSet<&str>,
+) -> bool {
+    match expr {
+        Expression::Word(name) => name != counter && altered.contains(name.as_str()),
+        Expression::Apply(items) => items
+            .iter()
+            .skip(1)
+            .any(|child| contains_other_altered_scalar(child, counter, altered)),
+        _ => false,
+    }
+}
+
+/// Returns whether monotonic movement of `counter` is sufficient to drive the
+/// condition to `target_truth`.  Conjunction needs one false operand to exit;
+/// disjunction needs every operand false.  This prevents a progressing counter
+/// in one arm of `or` from being mistaken for a proof of loop termination.
+fn counter_drives_condition_to(
+    expr: &Expression,
+    counter: &str,
+    step: CounterStep,
+    target_truth: bool,
+    altered: &HashSet<&str>,
+) -> bool {
+    if let Expression::Word(value) = expr {
+        return matches!(value.as_str(), "true" | "false") && ((value == "true") == target_truth);
+    }
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    match items.as_slice() {
+        [Expression::Word(op), inner] if op == "not" => {
+            counter_drives_condition_to(inner, counter, step, !target_truth, altered)
+        }
+        [Expression::Word(op), operands @ ..] if op == "and" => {
+            if target_truth {
+                operands.iter().all(|operand| {
+                    counter_drives_condition_to(operand, counter, step, true, altered)
+                })
+            } else {
+                operands.iter().any(|operand| {
+                    counter_drives_condition_to(operand, counter, step, false, altered)
+                })
+            }
+        }
+        [Expression::Word(op), operands @ ..] if op == "or" => {
+            if target_truth {
+                operands.iter().any(|operand| {
+                    counter_drives_condition_to(operand, counter, step, true, altered)
+                })
+            } else {
+                operands.iter().all(|operand| {
+                    counter_drives_condition_to(operand, counter, step, false, altered)
+                })
+            }
+        }
+        [Expression::Word(op), left, right] if matches!(op.as_str(), "<" | "<=" | ">" | ">=") => {
+            let other = if matches!(left, Expression::Word(name) if name == counter) {
+                right
+            } else if matches!(right, Expression::Word(name) if name == counter) {
+                left
+            } else {
+                return false;
+            };
+            if contains_other_altered_scalar(other, counter, altered) {
+                return false;
+            }
+            guard_direction_for_parameter(expr, counter, target_truth) == Some(step)
+        }
+        _ => false,
+    }
+}
+
 fn analyze_while_termination(
     whole: &Expression,
     items: &[Expression],
@@ -2275,10 +2584,6 @@ fn analyze_while_termination(
     for body in items.iter().skip(2) {
         collect_altered_values(body, &mut updates);
     }
-    let mut size_mutations = HashMap::new();
-    for body in items.iter().skip(2) {
-        collect_size_mutations(body, structural_summaries, &mut size_mutations);
-    }
     let mut guard_words = HashSet::new();
     if simple_guard_words(condition, &mut guard_words)
         && guard_words.iter().all(|name| !updates.contains_key(name))
@@ -2293,39 +2598,21 @@ fn analyze_while_termination(
         return;
     }
     let mut scalar_progress_proven = false;
-    for (name, values) in &updates {
+    let altered_names: HashSet<&str> = updates.keys().map(String::as_str).collect();
+    for name in updates.keys() {
         let mut comparisons = Vec::new();
         comparisons_for_counter(condition, name, &mut comparisons);
         if comparisons.is_empty() {
             continue;
         }
-        let step = counter_step(name, values, &loop_facts);
-        let progresses = comparisons.iter().any(|(comparison, counter_on_left)| {
-            let toward_upper = matches!(
-                (*comparison, *counter_on_left),
-                ("<" | "<=", true) | (">" | ">=", false)
-            );
-            let toward_lower = matches!(
-                (*comparison, *counter_on_left),
-                (">" | ">=", true) | ("<" | "<=", false)
-            );
-            (toward_upper && step == CounterStep::Increase)
-                || (toward_lower && step == CounterStep::Decrease)
-        });
-        let moves_away = comparisons.iter().all(|(comparison, counter_on_left)| {
-            let toward_upper = matches!(
-                (*comparison, *counter_on_left),
-                ("<" | "<=", true) | (">" | ">=", false)
-            );
-            let toward_lower = matches!(
-                (*comparison, *counter_on_left),
-                (">" | ">=", true) | ("<" | "<=", false)
-            );
-            (toward_upper && step == CounterStep::Decrease)
-                || (toward_lower && step == CounterStep::Increase)
-        });
+        let progress = counter_progress_sequence(items.iter().skip(2), name, &loop_facts);
+        let step = progress.direction;
+        let progresses = progress.must_update
+            && counter_drives_condition_to(condition, name, step, false, &altered_names);
+        let moves_away = progress.must_update
+            && counter_drives_condition_to(condition, name, step, true, &altered_names);
         scalar_progress_proven |= progresses;
-        if (!progresses && moves_away) || step == CounterStep::Unchanged {
+        if !progresses && progress.must_update && (moves_away || step == CounterStep::Unchanged) {
             record_diagnostic(
                 diagnostics,
                 format!(
@@ -2334,13 +2621,25 @@ fn analyze_while_termination(
                     condition.to_lisp()
                 ),
             );
+        } else if !progresses {
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "termination: loop counter '{}' is not guaranteed to move toward its exit bound: `{}`",
+                    name,
+                    condition.to_lisp()
+                ),
+            );
         }
     }
     if let Some((name, expected)) = size_guard_exit_direction(condition) {
-        let actual = size_mutations
-            .get(name)
-            .map(|steps| combined_size_step(steps))
-            .unwrap_or(SizeStep::Unchanged);
+        let progress = size_progress_sequence(
+            items.iter().skip(2),
+            name,
+            structural_summaries,
+            &loop_facts,
+        );
+        let actual = progress.direction;
         let moves_away = matches!(
             (expected, actual),
             (SizeStep::Shrink, SizeStep::Grow) | (SizeStep::Grow, SizeStep::Shrink)
@@ -2349,11 +2648,22 @@ fn analyze_while_termination(
         // is a bound rather than the measure. If both sides move in opposite
         // directions, their relative rates are currently unknown, so do not
         // claim either termination or non-termination.
-        if !scalar_progress_proven && (moves_away || actual == SizeStep::Unchanged) {
+        if !scalar_progress_proven && ((progress.must_update && moves_away) || !progress.may_update)
+        {
             record_diagnostic(
                 diagnostics,
                 format!(
                     "termination: length of '{}' does not move toward the loop exit: `{}`",
+                    name,
+                    condition.to_lisp()
+                ),
+            );
+        } else if !scalar_progress_proven && (!progress.must_update || actual == SizeStep::Unknown)
+        {
+            record_diagnostic(
+                diagnostics,
+                format!(
+                    "termination: length of '{}' is not guaranteed to move toward the loop exit: `{}`",
                     name,
                     condition.to_lisp()
                 ),
@@ -3358,58 +3668,47 @@ fn collect_termination_findings(
                 collect_altered_values(body, &mut updates);
             }
             let loop_facts = state_for_true_branch(condition, facts);
-            let scalar_proof = updates.iter().find_map(|(name, values)| {
-                let mut comparisons = Vec::new();
-                comparisons_for_counter(condition, name, &mut comparisons);
-                let step = counter_step(name, values, &loop_facts);
-                comparisons
-                    .iter()
-                    .any(|(comparison, counter_on_left)| {
-                        let toward_upper = matches!(
-                            (*comparison, *counter_on_left),
-                            ("<" | "<=", true) | (">" | ">=", false)
-                        );
-                        let toward_lower = matches!(
-                            (*comparison, *counter_on_left),
-                            (">" | ">=", true) | ("<" | "<=", false)
-                        );
-                        (toward_upper && step == CounterStep::Increase)
-                            || (toward_lower && step == CounterStep::Decrease)
-                    })
-                    .then(|| {
-                        (
-                            name.clone(),
-                            if step == CounterStep::Increase {
-                                "increases"
-                            } else {
-                                "decreases"
-                            },
-                            step,
-                        )
-                    })
+            let altered_names: HashSet<&str> = updates.keys().map(String::as_str).collect();
+            let scalar_proof = updates.keys().find_map(|name| {
+                let progress = counter_progress_sequence(items.iter().skip(2), name, &loop_facts);
+                let step = progress.direction;
+                (progress.must_update
+                    && counter_drives_condition_to(condition, name, step, false, &altered_names))
+                .then(|| {
+                    (
+                        name.clone(),
+                        if step == CounterStep::Increase {
+                            "increases"
+                        } else {
+                            "decreases"
+                        },
+                        step,
+                    )
+                })
             });
-            let mut size_mutations = HashMap::new();
-            for body in items.iter().skip(2) {
-                collect_size_mutations(body, structural_summaries, &mut size_mutations);
-            }
             let competing_bound =
                 size_guard_exit_direction(condition).is_some_and(|(name, expected)| {
-                    let actual = size_mutations
-                        .get(name)
-                        .map(|steps| combined_size_step(steps))
-                        .unwrap_or(SizeStep::Unchanged);
+                    let progress = size_progress_sequence(
+                        items.iter().skip(2),
+                        name,
+                        structural_summaries,
+                        &loop_facts,
+                    );
                     matches!(
-                        (expected, actual),
+                        (expected, progress.direction),
                         (SizeStep::Shrink, SizeStep::Grow) | (SizeStep::Grow, SizeStep::Shrink)
                     )
                 });
             let structural_proof =
                 size_guard_exit_direction(condition).and_then(|(name, expected)| {
-                    let actual = size_mutations
-                        .get(name)
-                        .map(|steps| combined_size_step(steps))
-                        .unwrap_or(SizeStep::Unchanged);
-                    (actual == expected).then(|| name.to_string())
+                    let progress = size_progress_sequence(
+                        items.iter().skip(2),
+                        name,
+                        structural_summaries,
+                        &loop_facts,
+                    );
+                    (progress.must_update && progress.direction == expected)
+                        .then(|| name.to_string())
                 });
             if competing_bound && scalar_proof.is_some() {
                 findings.push(TerminationFinding {
@@ -4203,6 +4502,122 @@ mod tests {
         assert!(!toward
             .iter()
             .any(|message| message.starts_with("termination:")));
+    }
+
+    #[test]
+    fn termination_requires_scalar_progress_on_every_path() {
+        let conditional = diagnostics(
+            "(let run (lambda (move?) (mut i 0) (while (< i 10) (if move? (alter! i (+ i 1)))) i))",
+            1,
+        );
+        assert!(
+            conditional
+                .iter()
+                .any(|message| message.contains("not guaranteed to move")),
+            "{conditional:?}"
+        );
+
+        let both_branches = diagnostics(
+            "(let run (lambda (choose?) (mut i 0) (while (< i 10) (if choose? (alter! i (+ i 1)) (alter! i (+ i 2)))) i))",
+            1,
+        );
+        assert!(
+            !both_branches
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{both_branches:?}"
+        );
+
+        let unconditional_fallback = diagnostics(
+            "(let run (lambda (extra?) (mut i 0) (while (< i 10) (do (if extra? (alter! i (+ i 1))) (alter! i (+ i 1)))) i))",
+            1,
+        );
+        assert!(
+            !unconditional_fallback
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{unconditional_fallback:?}"
+        );
+
+        let conflicting = diagnostics(
+            "(let run (lambda (up?) (mut i 0) (while (< i 10) (if up? (alter! i (+ i 1)) (alter! i (- i 1)))) i))",
+            1,
+        );
+        assert!(
+            conflicting
+                .iter()
+                .any(|message| message.contains("not guaranteed to move")),
+            "{conflicting:?}"
+        );
+    }
+
+    #[test]
+    fn termination_respects_boolean_condition_structure_and_moving_bounds() {
+        let conjunction = diagnostics(
+            "(let run (lambda (keep?) (mut i 0) (while (and (< i 10) keep?) (alter! i (+ i 1))) i))",
+            1,
+        );
+        assert!(
+            !conjunction
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{conjunction:?}"
+        );
+
+        let disjunction = diagnostics(
+            "(let run (lambda (keep?) (mut i 0) (while (or (< i 10) keep?) (alter! i (+ i 1))) i))",
+            1,
+        );
+        assert!(
+            disjunction
+                .iter()
+                .any(|message| message.contains("not guaranteed to move")),
+            "{disjunction:?}"
+        );
+
+        let negated = diagnostics("(mut i 0) (while (not (>= i 10)) (alter! i (+ i 1)))", 2);
+        assert!(
+            !negated
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{negated:?}"
+        );
+
+        let moving_bound = diagnostics(
+            "(mut i 0) (mut n 10) (while (< i n) (do (alter! i (+ i 1)) (alter! n (+ n 1))))",
+            3,
+        );
+        assert!(
+            moving_bound
+                .iter()
+                .any(|message| message.contains("not guaranteed to move")),
+            "{moving_bound:?}"
+        );
+    }
+
+    #[test]
+    fn termination_requires_structural_progress_on_every_path() {
+        let conditional = diagnostics(
+            "(let run (lambda (remove?) (let xs [1 2 3]) (while (> (length xs) 0) (if remove? (pop! xs))) xs))",
+            1,
+        );
+        assert!(
+            conditional
+                .iter()
+                .any(|message| message.contains("not guaranteed to move")),
+            "{conditional:?}"
+        );
+
+        let both_branches = diagnostics(
+            "(let run (lambda (front?) (let xs [1 2 3]) (while (> (length xs) 0) (if front? (pop! xs) (pop! xs))) xs))",
+            1,
+        );
+        assert!(
+            !both_branches
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{both_branches:?}"
+        );
     }
 
     #[test]
