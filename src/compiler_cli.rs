@@ -171,11 +171,18 @@ fn run_eval(mut args: Vec<String>) -> Result<(), String> {
     let path = env::temp_dir().join(format!("que-eval-{}.que", std::process::id()));
     fs::write(&path, source).map_err(|error| format!("failed to stage --eval source: {error}"))?;
     args.insert(0, path.to_string_lossy().into_owned());
+    let previous_label = env::var_os("QUE_INTERNAL_SOURCE_LABEL");
+    env::set_var("QUE_INTERNAL_SOURCE_LABEL", "--eval source");
     let result = if args.iter().any(|arg| arg == "--emit") {
         run_compile(args, None)
     } else {
         run_wasi(args)
     };
+    if let Some(label) = previous_label {
+        env::set_var("QUE_INTERNAL_SOURCE_LABEL", label);
+    } else {
+        env::remove_var("QUE_INTERNAL_SOURCE_LABEL");
+    }
     let _ = fs::remove_file(&path);
     let staged_path = path.to_string_lossy().into_owned();
     result.map_err(|error| error.replace(&staged_path, "--eval source"))
@@ -516,22 +523,16 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
     let path = args
         .first()
         .ok_or_else(|| "missing program path".to_string())?;
+    let display_path = env::var("QUE_INTERNAL_SOURCE_LABEL").unwrap_or_else(|_| path.clone());
     let source = read_program(path)?;
-    let merged = merged_program(&source).map_err(|error| source_error(path, error))?;
+    let merged = merged_program(&source).map_err(|error| source_error(&display_path, error))?;
     if emit == EmitKind::Source {
         return write_output(out.as_deref(), format!("{}\n", merged.to_lisp()).as_bytes());
     }
-    let typed = infer_program(&source, &merged).map_err(|error| source_error(path, error))?;
+    let typed =
+        infer_program(&source, &merged).map_err(|error| source_error(&display_path, error))?;
     if env::var("QUEC_DEBUG_ANALYSIS").as_deref() == Ok("1") {
-        for warning in crate::static_analysis::analyze_user_program_diagnostics(
-            &typed,
-            user_form_count(&source),
-        ) {
-            eprintln!(
-                "Warning: {}",
-                crate::lsp_native_core::restore_generated_source_names(&warning)
-            );
-        }
+        emit_debug_analysis_warnings(&display_path, &source, &typed);
     }
     if emit == EmitKind::Types {
         return write_output(
@@ -547,12 +548,13 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
         );
     }
     let wat = crate::wat::compile_program_to_wat_typed(&typed)
-        .map_err(|error| source_error(path, error))?;
+        .map_err(|error| source_error(&display_path, error))?;
     if emit == EmitKind::Wat {
         write_output(out.as_deref(), wat.as_bytes())
     } else {
-        let wasm = wat::parse_str(&wat)
-            .map_err(|error| source_error(path, format!("failed to encode Wasm: {error}")))?;
+        let wasm = wat::parse_str(&wat).map_err(|error| {
+            source_error(&display_path, format!("failed to encode Wasm: {error}"))
+        })?;
         write_output(out.as_deref(), &wasm)
     }
 }
@@ -619,6 +621,35 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
 
 fn source_error(path: &str, error: impl std::fmt::Display) -> String {
     format!("in '{path}': {error}")
+}
+
+fn emit_debug_analysis_warnings(path: &str, source: &str, typed: &TypedExpression) {
+    for finding in crate::static_analysis::analyze_user_program_diagnostics_detailed(
+        typed,
+        user_form_count(source),
+    ) {
+        let message = crate::lsp_native_core::restore_generated_source_names(&finding.message);
+        let summary = crate::lsp_native_core::static_analysis_diagnostic_summary(&message);
+        let range = crate::lsp_native_core::static_analysis_diagnostic_ranges(
+            source,
+            &finding.message,
+            finding.user_form_index,
+        )
+        .into_iter()
+        .next();
+        if let Some(range) = range {
+            eprintln!(
+                "Warning: {path}:{}:{}: {summary}",
+                range.start.line + 1,
+                range.start.character + 1
+            );
+            if let Some(snippet) = crate::lsp_native_core::text_for_range(source, range) {
+                eprintln!("  {}", snippet.replace('\n', " ").trim());
+            }
+        } else {
+            eprintln!("Warning: {path}: {message}");
+        }
+    }
 }
 
 fn write_runtime_output(output: &Output) -> Result<(), String> {
