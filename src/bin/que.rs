@@ -87,6 +87,49 @@ local function run(extra, terminal, filetype)
     on_stdout=function(_,d) if d then vim.schedule(function() if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_set_lines(buf,-1,-1,false,d) end end) end end,
     on_stderr=function(_,d) if d then vim.schedule(function() if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_set_lines(buf,-1,-1,false,d) end end) end end})
 end
+local function open_library_source(name)
+  local lines = vim.fn.systemlist({vim.env.QUE_NVIM_EXE,'--lib','source',name})
+  if vim.v.shell_error ~= 0 then vim.notify(table.concat(lines,'\n'),vim.log.levels.ERROR); return end
+  vim.cmd('botright new')
+  local buf=vim.api.nvim_get_current_buf()
+  vim.bo[buf].buftype='nofile'; vim.bo[buf].bufhidden='wipe'; vim.bo[buf].swapfile=false; vim.bo[buf].filetype='que'
+  vim.api.nvim_buf_set_lines(buf,0,-1,false,lines)
+  vim.api.nvim_buf_set_name(buf,'que-lib://'..name)
+end
+local function browse_library()
+  vim.ui.input({prompt='Que library pattern: ',default='*'},function(pattern)
+    if not pattern or pattern=='' then return end
+    local lines=vim.fn.systemlist({vim.env.QUE_NVIM_EXE,'--lib','types',pattern})
+    if vim.v.shell_error ~= 0 then vim.notify(table.concat(lines,'\n'),vim.log.levels.ERROR); return end
+    local entries={}
+    for _,line in ipairs(lines) do
+      if line~='' then table.insert(entries,{name=line:match('^([^%s]+)%s+:') or line,text=line}) end
+    end
+    if #entries==0 then vim.notify('No Que library symbols match '..pattern,vim.log.levels.INFO); return end
+    local ok,pickers=pcall(require,'telescope.pickers')
+    local fok,finders=pcall(require,'telescope.finders')
+    local sok,sorters=pcall(require,'telescope.sorters')
+    if ok and fok and sok then
+      pickers.new({}, {
+        prompt_title='Que library types: '..pattern,
+        finder=finders.new_table({results=entries,entry_maker=function(entry) return {value=entry,display=entry.text,ordinal=entry.text} end}),
+        sorter=sorters.get_generic_fuzzy_sorter(),
+        attach_mappings=function(prompt,map)
+          local actions=require('telescope.actions'); local state=require('telescope.actions.state')
+          local function open_selected()
+            local selected=state.get_selected_entry(); actions.close(prompt)
+            if selected and selected.value then open_library_source(selected.value.name) end
+          end
+          map('i','<CR>',open_selected); map('n','<CR>',open_selected); return true
+        end,
+      }):find()
+      return
+    end
+    vim.ui.select(entries,{prompt='Que library types: '..pattern,format_item=function(entry) return entry.text end},function(entry)
+      if entry then open_library_source(entry.name) end
+    end)
+  end)
+end
 local modes={
   QueRun={{'--opt'},true,''}, QueDebug={{'--debug'},true,''},
   QueWat={{'--opt','--emit','wat'},false,'wat'}, QueTypes={{'--opt','--emit','types'},false,'que'},
@@ -96,12 +139,14 @@ for name,mode in pairs(modes) do
   vim.api.nvim_create_user_command(name,function() run(mode[1],mode[2],mode[3]) end,{})
   vim.keymap.set('n','<leader>'..keys[name],'<cmd>'..name..'<CR>',{silent=true,buffer=true})
 end
+vim.api.nvim_create_user_command('QueLib',browse_library,{desc='Browse Que library types'})
+vim.keymap.set('n','<leader>g','<cmd>QueLib<CR>',{silent=true,buffer=true,desc='Browse Que library types'})
 end"#
 }
 
 fn run_nvim(mut args: Vec<String>) -> Result<(), String> {
     if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
-        println!("Usage: que nvim [--code <source>] [program arguments and flags]\n\n<leader>r runs optimized; d debugs; w emits WAT; a types; e explains; z emits source.");
+        println!("Usage: que nvim [--code <source>] [program arguments and flags]\n\n<leader>r runs optimized; d debugs; w emits WAT; a types; e explains; z emits source; g browses library types.");
         return Ok(());
     }
     let initial = if let Some(index) = args.iter().position(|arg| arg == "--code") {

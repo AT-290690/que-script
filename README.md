@@ -294,7 +294,9 @@ que nvim --code "$(cat program.que)"
 
 The Neovim plugin provides LSP integration, formatting, hover and signature
 help, completion, and shortcuts for running, debugging, explaining, and viewing
-generated output.
+generated output. `<Space>g` (or `:QueLib`) opens a fuzzy browser for library
+type signatures; patterns such as `map*` and names ending in `!` are passed
+directly to `que --lib` without shell escaping.
 
 ## Native C output
 

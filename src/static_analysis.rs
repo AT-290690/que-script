@@ -135,6 +135,11 @@ struct ValueSummary {
     body: Expression,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RecursiveRangeSummary {
+    parameter_ranges: Vec<Option<IntInterval>>,
+}
+
 impl PartialEq for ValueSummary {
     fn eq(&self, other: &Self) -> bool {
         self.params == other.params && self.body.to_lisp() == other.body.to_lisp()
@@ -263,6 +268,9 @@ struct AbstractState {
     guard_summaries: HashMap<String, GuardSummary>,
     predicate_summaries: HashMap<String, PredicateSummary>,
     value_summaries: HashMap<String, ValueSummary>,
+    structural_summaries: HashMap<String, StructuralSummary>,
+    recursive_range_summaries: HashMap<String, RecursiveRangeSummary>,
+    nonshrinking_vectors: HashSet<String>,
 }
 
 /// Conservative control-flow merge.  A fact is available after a join only
@@ -395,6 +403,9 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         guard_summaries: left.guard_summaries.clone(),
         predicate_summaries: left.predicate_summaries.clone(),
         value_summaries: left.value_summaries.clone(),
+        structural_summaries: left.structural_summaries.clone(),
+        recursive_range_summaries: left.recursive_range_summaries.clone(),
+        nonshrinking_vectors: left.nonshrinking_vectors.clone(),
     }
 }
 
@@ -1444,6 +1455,16 @@ fn vector_length_info_at_depth(
                 })
         }
         Expression::Apply(items) => match items.as_slice() {
+            [Expression::Word(op), length]
+                if matches!(op.as_str(), "__vec_new_zeroed_i32" | "__vec_new_uninit_i32") =>
+            {
+                let length = integer_constant(length, state)?;
+                let length = usize::try_from(length).ok()?;
+                Some(VectorLengthInfo {
+                    exact: Some(length),
+                    minimum: length,
+                })
+            }
             [Expression::Word(op), value] if op == "cdr" => {
                 let inner = vector_length_info_at_depth(value, state, expansion_depth)?;
                 Some(VectorLengthInfo {
@@ -2351,6 +2372,37 @@ fn apply_vector_mutation(items: &[Expression], facts: &mut AbstractState) {
                 .retain(|_, source| source != &xs && !source.starts_with(&nested_prefix));
         }
         _ => {}
+    }
+
+    let Some(summary) = facts.structural_summaries.get(op).cloned() else {
+        return;
+    };
+    if summary.params.len() != items.len().saturating_sub(1) {
+        return;
+    }
+    for (argument, effect) in items
+        .iter()
+        .skip(1)
+        .zip(summary.parameter_effects.iter().copied())
+    {
+        if effect == SizeStep::Unchanged {
+            continue;
+        }
+        let vector = canonical_access(argument, facts);
+        let nested_prefix = format!("(get {vector} ");
+        facts
+            .fixed_lengths
+            .retain(|name, _| name != &vector && !name.starts_with(&nested_prefix));
+        facts
+            .length_sources
+            .retain(|_, source| source != &vector && !source.starts_with(&nested_prefix));
+        facts
+            .safe_pairs
+            .retain(|(name, _)| name != &vector && !name.starts_with(&nested_prefix));
+        facts.minimum_lengths.retain(|name, _| {
+            (effect == SizeStep::Grow && name == &vector)
+                || (name != &vector && !name.starts_with(&nested_prefix))
+        });
     }
 }
 
@@ -3659,6 +3711,488 @@ fn analyze_termination_expr(
     }
 }
 
+#[derive(Clone)]
+struct RecursiveDefinition {
+    params: Vec<String>,
+    body: Expression,
+}
+
+#[derive(Clone, Default)]
+struct RecursiveEntryEvidence {
+    ranges: Vec<Option<IntInterval>>,
+    unknown: Vec<bool>,
+    found: bool,
+    escaped: bool,
+}
+
+fn collect_recursive_definitions(
+    expressions: &[&Expression],
+) -> HashMap<String, RecursiveDefinition> {
+    expressions
+        .iter()
+        .filter_map(|expression| {
+            let Expression::Apply(binding) = expression else {
+                return None;
+            };
+            let [Expression::Word(keyword), Expression::Word(name), Expression::Apply(lambda)] =
+                binding.as_slice()
+            else {
+                return None;
+            };
+            if keyword != "letrec"
+                || !matches!(lambda.first(), Some(Expression::Word(op)) if op == "lambda")
+                || lambda.len() < 2
+            {
+                return None;
+            }
+            let params = lambda[1..lambda.len() - 1]
+                .iter()
+                .filter_map(word)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            (params.len() == lambda.len() - 2).then(|| {
+                (
+                    name.clone(),
+                    RecursiveDefinition {
+                        params,
+                        body: lambda.last().expect("lambda body exists").clone(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+fn top_level_scalar_facts(expressions: &[&Expression]) -> AbstractState {
+    let mut facts = AbstractState::default();
+    for expression in expressions {
+        let Expression::Apply(binding) = expression else {
+            continue;
+        };
+        let [Expression::Word(keyword), Expression::Word(name), value] = binding.as_slice() else {
+            continue;
+        };
+        if keyword == "let"
+            && !matches!(value, Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda"))
+        {
+            assign_abstract_scalar(name, value, &mut facts);
+        }
+    }
+    facts
+}
+
+fn merge_entry_range(slot: &mut Option<IntInterval>, range: IntInterval) {
+    *slot = Some(match *slot {
+        Some(known) => IntInterval {
+            min: known.min.min(range.min),
+            max: known.max.max(range.max),
+        },
+        None => range,
+    });
+}
+
+fn collect_recursive_entry_evidence(
+    expr: &Expression,
+    definitions: &HashMap<String, RecursiveDefinition>,
+    current_definition: Option<&str>,
+    facts: &AbstractState,
+    evidence: &mut HashMap<String, RecursiveEntryEvidence>,
+) {
+    let Expression::Apply(items) = expr else {
+        if let Expression::Word(name) = expr {
+            if definitions.contains_key(name) {
+                evidence.entry(name.clone()).or_default().escaped = true;
+            }
+        }
+        return;
+    };
+    let head = items.first().and_then(word);
+    if head == Some("letrec") && items.len() == 3 {
+        let nested_name = word(&items[1]);
+        collect_recursive_entry_evidence(&items[2], definitions, nested_name, facts, evidence);
+        return;
+    }
+    if let Some(function) = head.filter(|name| definitions.contains_key(*name)) {
+        if current_definition != Some(function) {
+            let definition = &definitions[function];
+            let entry =
+                evidence
+                    .entry(function.to_string())
+                    .or_insert_with(|| RecursiveEntryEvidence {
+                        ranges: vec![None; definition.params.len()],
+                        unknown: vec![false; definition.params.len()],
+                        ..RecursiveEntryEvidence::default()
+                    });
+            entry.found = true;
+            if items.len() != definition.params.len() + 1 {
+                entry.unknown.fill(true);
+            } else {
+                for (index, argument) in items.iter().skip(1).enumerate() {
+                    if let Some(range) = integer_interval(argument, facts) {
+                        merge_entry_range(&mut entry.ranges[index], range);
+                    } else {
+                        entry.unknown[index] = true;
+                    }
+                }
+            }
+        }
+        for argument in items.iter().skip(1) {
+            collect_recursive_entry_evidence(
+                argument,
+                definitions,
+                current_definition,
+                facts,
+                evidence,
+            );
+        }
+        return;
+    }
+    for child in items.iter().skip(1) {
+        collect_recursive_entry_evidence(child, definitions, current_definition, facts, evidence);
+    }
+}
+
+fn comparison_for_parameter<'a>(
+    condition: &'a Expression,
+    parameter: &str,
+) -> Option<(&'a str, &'a Expression)> {
+    let Expression::Apply(items) = condition else {
+        return None;
+    };
+    let [Expression::Word(op), left, right] = items.as_slice() else {
+        return None;
+    };
+    if !matches!(op.as_str(), "=" | "<" | "<=" | ">" | ">=") {
+        return None;
+    }
+    if matches!(left, Expression::Word(name) if name == parameter) {
+        return Some((op, right));
+    }
+    if matches!(right, Expression::Word(name) if name == parameter) {
+        let reversed = match op.as_str() {
+            "=" => "=",
+            "<" => ">",
+            "<=" => ">=",
+            ">" => "<",
+            ">=" => "<=",
+            _ => unreachable!(),
+        };
+        return Some((reversed, left));
+    }
+    None
+}
+
+fn find_recursive_parameter_guard<'a>(
+    expr: &'a Expression,
+    function: &str,
+    parameter: &str,
+) -> Option<(&'a Expression, bool)> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return None;
+    }
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "if") && items.len() >= 3 {
+        let then_recurses = contains_recursive_call(&items[2], function);
+        let else_recurses = items
+            .get(3)
+            .is_some_and(|branch| contains_recursive_call(branch, function));
+        if then_recurses ^ else_recurses {
+            let recurse_when_true = then_recurses;
+            if comparison_for_parameter(&items[1], parameter).is_some() {
+                return Some((&items[1], recurse_when_true));
+            }
+            let recursive_branch = if recurse_when_true {
+                &items[2]
+            } else {
+                &items[3]
+            };
+            if let Some(found) =
+                find_recursive_parameter_guard(recursive_branch, function, parameter)
+            {
+                return Some(found);
+            }
+        }
+    }
+    items
+        .iter()
+        .skip(1)
+        .find_map(|child| find_recursive_parameter_guard(child, function, parameter))
+}
+
+fn recursive_unit_step(
+    argument: &Expression,
+    parameter: &str,
+    facts: &AbstractState,
+) -> Option<CounterStep> {
+    let Expression::Apply(items) = argument else {
+        return None;
+    };
+    match items.as_slice() {
+        [Expression::Word(op), Expression::Word(name), step]
+            if name == parameter && op == "+" && integer_constant(step, facts) == Some(1) =>
+        {
+            Some(CounterStep::Increase)
+        }
+        [Expression::Word(op), step, Expression::Word(name)]
+            if name == parameter && op == "+" && integer_constant(step, facts) == Some(1) =>
+        {
+            Some(CounterStep::Increase)
+        }
+        [Expression::Word(op), Expression::Word(name), step]
+            if name == parameter && op == "-" && integer_constant(step, facts) == Some(1) =>
+        {
+            Some(CounterStep::Decrease)
+        }
+        _ => None,
+    }
+}
+
+fn all_recursive_calls_have_unit_step(
+    expr: &Expression,
+    function: &str,
+    params: &[String],
+    parameter_index: usize,
+    facts: &AbstractState,
+    found: &mut bool,
+    direction: &mut Option<CounterStep>,
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return true;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return true;
+    }
+    if matches!(items.first(), Some(Expression::Word(name)) if name == function)
+        && items.len() == params.len() + 1
+    {
+        *found = true;
+        let Some(step) =
+            recursive_unit_step(&items[parameter_index + 1], &params[parameter_index], facts)
+        else {
+            return false;
+        };
+        if direction.is_some_and(|known| known != step) {
+            return false;
+        }
+        *direction = Some(step);
+        return true;
+    }
+    items.iter().skip(1).all(|child| {
+        all_recursive_calls_have_unit_step(
+            child,
+            function,
+            params,
+            parameter_index,
+            facts,
+            found,
+            direction,
+        )
+    })
+}
+
+fn comparison_truth(op: &str, left: i64, right: i64) -> bool {
+    match op {
+        "=" => left == right,
+        "<" => left < right,
+        "<=" => left <= right,
+        ">" => left > right,
+        ">=" => left >= right,
+        _ => false,
+    }
+}
+
+fn recursive_exit_value(
+    op: &str,
+    bound: i64,
+    base_truth: bool,
+    direction: CounterStep,
+) -> Option<i64> {
+    let delta = match direction {
+        CounterStep::Increase => 1,
+        CounterStep::Decrease => -1,
+        CounterStep::Unchanged | CounterStep::Unknown => return None,
+    };
+    [bound - 1, bound, bound + 1]
+        .into_iter()
+        .find(|candidate| {
+            comparison_truth(op, *candidate, bound) == base_truth
+                && comparison_truth(op, *candidate - delta, bound) != base_truth
+        })
+        .filter(|value| (i32::MIN as i64..=i32::MAX as i64).contains(value))
+}
+
+fn infer_recursive_range_summaries(
+    expressions: &[&Expression],
+) -> HashMap<String, RecursiveRangeSummary> {
+    let definitions = collect_recursive_definitions(expressions);
+    if definitions.is_empty() {
+        return HashMap::new();
+    }
+    let facts = top_level_scalar_facts(expressions);
+    let mut evidence = definitions
+        .iter()
+        .map(|(name, definition)| {
+            (
+                name.clone(),
+                RecursiveEntryEvidence {
+                    ranges: vec![None; definition.params.len()],
+                    unknown: vec![false; definition.params.len()],
+                    ..RecursiveEntryEvidence::default()
+                },
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    for expression in expressions {
+        collect_recursive_entry_evidence(expression, &definitions, None, &facts, &mut evidence);
+    }
+    definitions
+        .iter()
+        .filter_map(|(function, definition)| {
+            let entries = evidence.get(function)?;
+            if !entries.found || entries.escaped {
+                return None;
+            }
+            let parameter_ranges = definition
+                .params
+                .iter()
+                .enumerate()
+                .map(|(index, parameter)| {
+                    if entries.unknown[index] {
+                        return None;
+                    }
+                    let entry = entries.ranges[index]?;
+                    let (condition, recurse_when_true) =
+                        find_recursive_parameter_guard(&definition.body, function, parameter)?;
+                    let (op, bound_expr) = comparison_for_parameter(condition, parameter)?;
+                    let bound = integer_constant(bound_expr, &facts)? as i64;
+                    let mut found = false;
+                    let mut direction = None;
+                    if !all_recursive_calls_have_unit_step(
+                        &definition.body,
+                        function,
+                        &definition.params,
+                        index,
+                        &facts,
+                        &mut found,
+                        &mut direction,
+                    ) || !found
+                    {
+                        return None;
+                    }
+                    let direction = direction?;
+                    let exit = recursive_exit_value(op, bound, !recurse_when_true, direction)?;
+                    match direction {
+                        CounterStep::Increase if entry.max <= exit => Some(IntInterval {
+                            min: entry.min,
+                            max: exit,
+                        }),
+                        CounterStep::Decrease if entry.min >= exit => Some(IntInterval {
+                            min: exit,
+                            max: entry.max,
+                        }),
+                        _ => None,
+                    }
+                })
+                .collect::<Vec<_>>();
+            parameter_ranges
+                .iter()
+                .any(Option::is_some)
+                .then(|| (function.clone(), RecursiveRangeSummary { parameter_ranges }))
+        })
+        .collect()
+}
+
+fn collect_shrinking_vectors(
+    expr: &Expression,
+    facts: &AbstractState,
+    structural_summaries: &HashMap<String, StructuralSummary>,
+    shrinking: &mut HashSet<String>,
+) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    let Some(op) = items.first().and_then(word) else {
+        return;
+    };
+    if matches!(op, "pop!" | "pop-val!" | "pull!") {
+        if let Some(target) = items.get(1) {
+            shrinking.insert(canonical_access(target, facts));
+        }
+    }
+    if let Some(summary) = structural_summaries.get(op) {
+        if summary.params.len() == items.len().saturating_sub(1) {
+            for (argument, effect) in items
+                .iter()
+                .skip(1)
+                .zip(summary.parameter_effects.iter().copied())
+            {
+                if matches!(effect, SizeStep::Shrink | SizeStep::Unknown) {
+                    shrinking.insert(canonical_access(argument, facts));
+                }
+            }
+        }
+    }
+    for child in items.iter().skip(1) {
+        collect_shrinking_vectors(child, facts, structural_summaries, shrinking);
+    }
+}
+
+fn infer_nonshrinking_vectors(
+    expressions: &[&Expression],
+    value_summaries: &HashMap<String, ValueSummary>,
+    predicate_summaries: &HashMap<String, PredicateSummary>,
+) -> HashSet<String> {
+    let structural_summaries = infer_structural_summaries(expressions, predicate_summaries);
+    let mut facts = AbstractState {
+        value_summaries: value_summaries.clone(),
+        predicate_summaries: predicate_summaries.clone(),
+        ..AbstractState::default()
+    };
+    let mut candidates = HashSet::new();
+    for expression in expressions {
+        let Expression::Apply(binding) = expression else {
+            continue;
+        };
+        let [Expression::Word(keyword), Expression::Word(name), value] = binding.as_slice() else {
+            continue;
+        };
+        if keyword != "let" {
+            continue;
+        }
+        let length_info = vector_length_info(value, &facts);
+        let alias = match value {
+            Expression::Word(_) => Some(canonical_access(value, &facts)),
+            Expression::Apply(rhs) if matches!(rhs.first(), Some(Expression::Word(op)) if op == "get") => {
+                Some(canonical_access(value, &facts))
+            }
+            _ => None,
+        };
+        assign_abstract_scalar(name, value, &mut facts);
+        if let Some(info) = length_info {
+            if let Some(exact) = info.exact {
+                facts.fixed_lengths.insert(name.clone(), exact);
+            }
+            facts.minimum_lengths.insert(name.clone(), info.minimum);
+            candidates.insert(name.clone());
+        }
+        if let Some(alias) = alias {
+            facts.aliases.insert(name.clone(), alias);
+        }
+    }
+    let mut shrinking = HashSet::new();
+    for expression in expressions {
+        collect_shrinking_vectors(expression, &facts, &structural_summaries, &mut shrinking);
+    }
+    candidates
+        .into_iter()
+        .filter(|name| {
+            !shrinking.contains(&canonical_access(&Expression::Word(name.clone()), &facts))
+        })
+        .collect()
+}
+
 fn access_index_is_proven(
     vector: &Expression,
     index: &Expression,
@@ -3703,6 +4237,23 @@ fn access_index_is_proven(
         })
     });
     if index_constant.is_none() || index_has_widened_range {
+        if let (Some(index_ranges), Some(minimum)) = (
+            integer_interval_alternatives(index, facts),
+            facts.minimum_lengths.get(&vector_key).copied(),
+        ) {
+            let maximum = if allow_append {
+                minimum
+            } else {
+                minimum.saturating_sub(1)
+            };
+            if index_ranges.iter().all(|index_range| {
+                index_range.min >= 0
+                    && (minimum > 0 || allow_append)
+                    && index_range.max <= maximum as i64
+            }) {
+                return true;
+            }
+        }
         if let (Some(index_ranges), Some(length)) =
             (integer_interval_alternatives(index, facts), known_length)
         {
@@ -4140,7 +4691,33 @@ fn validate_static_bounds_expr(
             }
             *facts = scoped;
         }
-        "lambda" => {
+        "letrec" if items.len() == 3 => {
+            let (Expression::Word(function), Expression::Apply(lambda)) = (&items[1], &items[2])
+            else {
+                validate_static_bounds_expr(&items[2], facts, diagnostics);
+                apply_vector_mutation(items, facts);
+                return;
+            };
+            if !matches!(lambda.first(), Some(Expression::Word(op)) if op == "lambda")
+                || lambda.len() < 2
+            {
+                validate_static_bounds_expr(&items[2], facts, diagnostics);
+                apply_vector_mutation(items, facts);
+                return;
+            }
+            let summary = facts.recursive_range_summaries.get(function).cloned();
+            let captured_minimum_lengths = facts
+                .minimum_lengths
+                .iter()
+                .filter(|(name, _)| facts.nonshrinking_vectors.contains(*name))
+                .map(|(name, length)| (name.clone(), *length))
+                .collect();
+            let captured_aliases = facts
+                .aliases
+                .iter()
+                .filter(|(name, _)| facts.nonshrinking_vectors.contains(*name))
+                .map(|(name, target)| (name.clone(), target.clone()))
+                .collect();
             // Immutable scalar facts remain valid when captured by a closure.
             // Container/liveness facts do not: the vector may be mutated
             // between closure creation and invocation.
@@ -4155,9 +4732,80 @@ fn validate_static_bounds_expr(
                 affine_upper_bounds: facts.affine_upper_bounds.clone(),
                 product_upper_safe: facts.product_upper_safe.clone(),
                 product_lower_safe: facts.product_lower_safe.clone(),
+                minimum_lengths: captured_minimum_lengths,
+                aliases: captured_aliases,
                 guard_summaries: facts.guard_summaries.clone(),
                 predicate_summaries: facts.predicate_summaries.clone(),
                 value_summaries: facts.value_summaries.clone(),
+                structural_summaries: facts.structural_summaries.clone(),
+                recursive_range_summaries: facts.recursive_range_summaries.clone(),
+                nonshrinking_vectors: facts.nonshrinking_vectors.clone(),
+                ..AbstractState::default()
+            };
+            for parameter in lambda.iter().skip(1).take(lambda.len().saturating_sub(2)) {
+                forget_lambda_parameter(parameter, &mut scoped);
+            }
+            if let Some(summary) = summary {
+                for (parameter, range) in lambda
+                    .iter()
+                    .skip(1)
+                    .take(lambda.len().saturating_sub(2))
+                    .zip(summary.parameter_ranges)
+                {
+                    let (Expression::Word(parameter), Some(range)) = (parameter, range) else {
+                        continue;
+                    };
+                    scoped.integer_ranges.insert(parameter.clone(), range);
+                    scoped
+                        .integer_alternatives
+                        .insert(parameter.clone(), vec![range]);
+                    if range.min >= 0 {
+                        scoped.nonnegative.insert(parameter.clone());
+                    }
+                    if range.excludes_zero() {
+                        scoped.nonzero.insert(parameter.clone());
+                    }
+                }
+            }
+            if let Some(body) = lambda.last() {
+                validate_static_bounds_expr(body, &mut scoped, diagnostics);
+            }
+        }
+        "lambda" => {
+            // Immutable scalar facts remain valid when captured by a closure.
+            // Container/liveness facts do not: the vector may be mutated
+            // between closure creation and invocation.
+            let captured_minimum_lengths = facts
+                .minimum_lengths
+                .iter()
+                .filter(|(name, _)| facts.nonshrinking_vectors.contains(*name))
+                .map(|(name, length)| (name.clone(), *length))
+                .collect();
+            let captured_aliases = facts
+                .aliases
+                .iter()
+                .filter(|(name, _)| facts.nonshrinking_vectors.contains(*name))
+                .map(|(name, target)| (name.clone(), target.clone()))
+                .collect();
+            let mut scoped = AbstractState {
+                nonnegative: facts.nonnegative.clone(),
+                nonzero: facts.nonzero.clone(),
+                integer_constants: facts.integer_constants.clone(),
+                integer_ranges: facts.integer_ranges.clone(),
+                integer_alternatives: facts.integer_alternatives.clone(),
+                scalar_aliases: facts.scalar_aliases.clone(),
+                leq_pairs: facts.leq_pairs.clone(),
+                affine_upper_bounds: facts.affine_upper_bounds.clone(),
+                product_upper_safe: facts.product_upper_safe.clone(),
+                product_lower_safe: facts.product_lower_safe.clone(),
+                minimum_lengths: captured_minimum_lengths,
+                aliases: captured_aliases,
+                guard_summaries: facts.guard_summaries.clone(),
+                predicate_summaries: facts.predicate_summaries.clone(),
+                value_summaries: facts.value_summaries.clone(),
+                structural_summaries: facts.structural_summaries.clone(),
+                recursive_range_summaries: facts.recursive_range_summaries.clone(),
+                nonshrinking_vectors: facts.nonshrinking_vectors.clone(),
                 ..AbstractState::default()
             };
             for parameter in items.iter().skip(1).take(items.len().saturating_sub(2)) {
@@ -4354,12 +5002,18 @@ pub fn analyze_user_program_report(
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
     let value_summaries = infer_value_summaries(&all_expressions);
+    let recursive_range_summaries = infer_recursive_range_summaries(&all_expressions);
+    let nonshrinking_vectors =
+        infer_nonshrinking_vectors(&all_expressions, &value_summaries, &predicate_summaries);
     let structural_summaries = infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
         predicate_summaries,
         value_summaries,
+        structural_summaries: structural_summaries.clone(),
+        recursive_range_summaries,
+        nonshrinking_vectors,
         ..AbstractState::default()
     };
     // Seed facts from bundled/project library forms so public immutable
@@ -4439,10 +5093,17 @@ pub fn analyze_codegen_proofs(typed_program: &TypedExpression) -> Vec<StaticProo
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
     let value_summaries = infer_value_summaries(&all_expressions);
+    let recursive_range_summaries = infer_recursive_range_summaries(&all_expressions);
+    let nonshrinking_vectors =
+        infer_nonshrinking_vectors(&all_expressions, &value_summaries, &predicate_summaries);
+    let structural_summaries = infer_structural_summaries(&all_expressions, &predicate_summaries);
     let mut facts = AbstractState {
         guard_summaries,
         predicate_summaries,
         value_summaries,
+        structural_summaries,
+        recursive_range_summaries,
+        nonshrinking_vectors,
         ..AbstractState::default()
     };
     let mut proofs = Vec::new();
@@ -4523,11 +5184,18 @@ pub fn explain_bounds_proofs(
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
     let value_summaries = infer_value_summaries(&all_expressions);
+    let recursive_range_summaries = infer_recursive_range_summaries(&all_expressions);
+    let nonshrinking_vectors =
+        infer_nonshrinking_vectors(&all_expressions, &value_summaries, &predicate_summaries);
+    let structural_summaries = infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
         predicate_summaries,
         value_summaries,
+        structural_summaries,
+        recursive_range_summaries,
+        nonshrinking_vectors,
         ..AbstractState::default()
     };
     let mut sink = AnalysisSink::default();
@@ -4763,6 +5431,38 @@ fn collect_termination_findings(
                         };
                         let proof = recursive_branch.and_then(|recursive_branch| {
                             params.iter().enumerate().find_map(|(index, parameter)| {
+                                if facts
+                                    .recursive_range_summaries
+                                    .get(name)
+                                    .and_then(|summary| summary.parameter_ranges.get(index))
+                                    .is_some_and(Option::is_some)
+                                {
+                                    let mut found = false;
+                                    let mut direction = None;
+                                    if all_recursive_calls_have_unit_step(
+                                        body,
+                                        name,
+                                        &params,
+                                        index,
+                                        facts,
+                                        &mut found,
+                                        &mut direction,
+                                    ) && found
+                                    {
+                                        let direction = match direction {
+                                            Some(CounterStep::Increase) => "increases",
+                                            Some(CounterStep::Decrease) => "decreases",
+                                            _ => return None,
+                                        };
+                                        return Some((
+                                            parameter.clone(),
+                                            format!(
+                                                "{} {} toward the base-case guard",
+                                                parameter, direction
+                                            ),
+                                        ));
+                                    }
+                                }
                                 if length_base_case(&branch[1], parameter)
                                     && !recursive_calls_fail_to_shrink(
                                         recursive_branch,
@@ -4884,12 +5584,18 @@ pub fn explain_termination(
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
     let value_summaries = infer_value_summaries(&all_expressions);
+    let recursive_range_summaries = infer_recursive_range_summaries(&all_expressions);
+    let nonshrinking_vectors =
+        infer_nonshrinking_vectors(&all_expressions, &value_summaries, &predicate_summaries);
     let structural_summaries = infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
         predicate_summaries,
         value_summaries,
+        structural_summaries: structural_summaries.clone(),
+        recursive_range_summaries,
+        nonshrinking_vectors,
         ..AbstractState::default()
     };
     let mut ignored_diagnostics = AnalysisSink::default();
@@ -5591,6 +6297,59 @@ mod tests {
         )
         .expect("source should infer");
         let _proofs = analyze_codegen_proofs(&typed);
+    }
+
+    #[test]
+    fn recursive_unit_step_range_is_inferred_from_entry_and_base_case() {
+        let source = "(let N 4) (let xs [0 0 0 0]) (letrec walk (lambda i (if (= i N) 0 (do (set! xs i 1) (walk (+ i 1)))))) (walk 0)";
+        let expression = crate::parser::build(source).expect("source should build");
+        let expressions = match &expression {
+            Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
+                items.iter().skip(1).collect::<Vec<_>>()
+            }
+            expression => vec![expression],
+        };
+        let summaries = infer_recursive_range_summaries(&expressions);
+        assert_eq!(
+            summaries
+                .get("walk")
+                .map(|summary| &summary.parameter_ranges),
+            Some(&vec![Some(IntInterval { min: 0, max: 4 })])
+        );
+        assert_eq!(analyze(source, 4), Ok(()));
+        assert!(report(source, 4).proofs.iter().any(|proof| {
+            proof.kind == ProofKind::Termination && proof.status == ProofStatus::ProvenSafe
+        }));
+    }
+
+    #[test]
+    fn recursive_range_proof_rejects_unknown_entries_and_non_unit_steps() {
+        let unknown_entry = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! xs i 1) (walk (+ i 1)))))) (let run (lambda i (walk i))) (run 0)";
+        let unknown_report = report(unknown_entry, 4);
+        assert!(unknown_report.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::BoundsWriteReplacement
+                && proof.expression == "(set! xs i 1)"
+                && proof.status == ProofStatus::Unknown
+        }));
+
+        let skipped_exit = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! xs i 1) (walk (+ i 2)))))) (walk 0)";
+        let skipped_report = report(skipped_exit, 3);
+        assert!(skipped_report.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::BoundsWriteReplacement
+                && proof.expression == "(set! xs i 1)"
+                && proof.status == ProofStatus::Unknown
+        }));
+    }
+
+    #[test]
+    fn captured_minimum_length_is_not_reused_when_vector_can_shrink() {
+        let source = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! xs i 1) (walk (+ i 1)))))) (pop! xs) (walk 0)";
+        let findings = report(source, 4);
+        assert!(findings.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::BoundsWriteReplacement
+                && proof.expression == "(set! xs i 1)"
+                && proof.status == ProofStatus::Unknown
+        }));
     }
 
     #[test]

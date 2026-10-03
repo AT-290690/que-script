@@ -489,6 +489,44 @@ fn rc_release_for_opt_type(t: Option<&Type>) -> &'static str {
     t.map(rc_release_for_type).unwrap_or("$rc_release")
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RcKind {
+    Vector,
+    Dynamic,
+}
+
+impl RcKind {
+    fn for_type(t: &Type) -> Self {
+        match t {
+            Type::List(_) | Type::Tuple(_) => Self::Vector,
+            Type::Function(_, _) | Type::Var(_) => Self::Dynamic,
+            _ => Self::Dynamic,
+        }
+    }
+
+    fn release(self) -> &'static str {
+        match self {
+            Self::Vector => "$rc_release_vec",
+            Self::Dynamic => "$rc_release",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ManagedRefSlot {
+    slot: usize,
+    kind: RcKind,
+}
+
+impl ManagedRefSlot {
+    fn new(slot: usize, typ: &Type) -> Self {
+        Self {
+            slot,
+            kind: RcKind::for_type(typ),
+        }
+    }
+}
+
 fn closure_store_op_for_type(t: &Type) -> &'static str {
     match t {
         Type::Function(_, _) => "closure_set_fun",
@@ -3348,7 +3386,6 @@ fn emit_vector_runtime(
     (local $cap i32)
     (local $ptr i32)
     (local $data i32)
-    (local $i i32)
     local.get $len
     i32.const 1
     i32.lt_s
@@ -3394,27 +3431,16 @@ fn emit_vector_runtime(
     i32.add
     i32.const 1447380017
     i32.store
+    local.get $len
     i32.const 0
-    local.set $i
-    block $done
-      loop $zero
-        local.get $i
-        local.get $len
-        i32.ge_s
-        br_if $done
-        local.get $data
-        local.get $i
-        i32.const 4
-        i32.mul
-        i32.add
-        i32.const 0
-        i32.store
-        local.get $i
-        i32.const 1
-        i32.add
-        local.set $i
-        br $zero
-      end
+    i32.gt_s
+    if
+      local.get $data
+      i32.const 0
+      local.get $len
+      i32.const 4
+      i32.mul
+      memory.fill
     end
     local.get $ptr
   )
@@ -3424,6 +3450,8 @@ fn emit_vector_runtime(
     (local $ptr i32)
     (local $data i32)
     (local $i i32)
+    (local $remaining i32)
+    (local $copy i32)
     local.get $len
     i32.const 1
     i32.lt_s
@@ -3469,26 +3497,61 @@ fn emit_vector_runtime(
     i32.add
     i32.const 1447380017
     i32.store
+    local.get $len
     i32.const 0
-    local.set $i
-    block $done
-      loop $fill
-        local.get $i
-        local.get $len
-        i32.ge_s
-        br_if $done
+    i32.gt_s
+    if
+      local.get $value
+      i32.eqz
+      if
         local.get $data
-        local.get $i
+        i32.const 0
+        local.get $len
         i32.const 4
         i32.mul
-        i32.add
+        memory.fill
+      else
+        local.get $data
         local.get $value
         i32.store
-        local.get $i
         i32.const 1
-        i32.add
         local.set $i
-        br $fill
+        block $done
+          loop $fill
+            local.get $i
+            local.get $len
+            i32.ge_s
+            br_if $done
+            local.get $len
+            local.get $i
+            i32.sub
+            local.set $remaining
+            local.get $i
+            local.get $remaining
+            i32.lt_s
+            if (result i32)
+              local.get $i
+            else
+              local.get $remaining
+            end
+            local.set $copy
+            local.get $data
+            local.get $i
+            i32.const 4
+            i32.mul
+            i32.add
+            local.get $data
+            local.get $copy
+            i32.const 4
+            i32.mul
+            memory.copy
+            local.get $i
+            local.get $copy
+            i32.add
+            local.set $i
+            br $fill
+          end
+        end
       end
     end
     local.get $ptr
@@ -7710,12 +7773,16 @@ fn expr_uses_name_via_local_lambda(
 
 fn append_last_use_releases_for_do_expr(
     parts: &mut Vec<String>,
-    managed_do_locals: &[(String, usize)],
+    managed_do_locals: &[(String, ManagedRefSlot)],
     current_expr: &Expression,
     later_exprs: &[Expression],
     lambda_bindings: &HashMap<String, TypedExpression>,
+    moved_from_slot: Option<usize>,
 ) {
-    for (name, slot) in managed_do_locals {
+    for (name, reference) in managed_do_locals {
+        if moved_from_slot == Some(reference.slot) {
+            continue;
+        }
         if (expr_uses_name_as_value(name, current_expr, false)
             || expr_uses_name_via_local_lambda(name, current_expr, lambda_bindings))
             && !later_exprs.iter().any(|expr| {
@@ -7724,11 +7791,94 @@ fn append_last_use_releases_for_do_expr(
             })
         {
             parts.push(format!(
-                "local.get {}\ncall $rc_release\ndrop\ni32.const 0\nlocal.set {}",
-                slot, slot
+                "local.get {}\ncall {}\ndrop\ni32.const 0\nlocal.set {}",
+                reference.slot,
+                reference.kind.release(),
+                reference.slot
             ));
         }
     }
+}
+
+fn direct_last_use_managed_move_source(
+    value_node: Option<&TypedExpression>,
+    destination_name: &str,
+    managed_do_locals: &[(String, ManagedRefSlot)],
+    later_exprs: &[Expression],
+    lambda_bindings: &HashMap<String, TypedExpression>,
+) -> Option<ManagedRefSlot> {
+    let Expression::Word(source_name) = &value_node?.expr else {
+        return None;
+    };
+    if source_name == destination_name {
+        return None;
+    }
+    let reference = managed_do_locals
+        .iter()
+        .find_map(|(name, reference)| (name == source_name).then_some(*reference))?;
+    if later_exprs.iter().any(|expr| {
+        expr_uses_name_as_value(source_name, expr, false)
+            || expr_uses_name_via_local_lambda(source_name, expr, lambda_bindings)
+    }) {
+        return None;
+    }
+    Some(reference)
+}
+
+fn compile_last_use_managed_alter_move(
+    node: &TypedExpression,
+    later_exprs: &[Expression],
+    managed_do_locals: &[(String, ManagedRefSlot)],
+    lambda_bindings: &HashMap<String, TypedExpression>,
+    ctx: &Ctx<'_>,
+) -> Option<(String, usize)> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let [Expression::Word(op), Expression::Word(target), Expression::Word(source)] =
+        items.as_slice()
+    else {
+        return None;
+    };
+    if op != "alter!" || target == source {
+        return None;
+    }
+    let source_ref = managed_do_locals
+        .iter()
+        .find_map(|(name, reference)| (name == source).then_some(*reference))?;
+    if later_exprs.iter().any(|expr| {
+        expr_uses_name_as_value(source, expr, false)
+            || expr_uses_name_via_local_lambda(source, expr, lambda_bindings)
+    }) {
+        return None;
+    }
+    let target_slot = *ctx.locals.get(target)?;
+    if target_slot == source_ref.slot {
+        return None;
+    }
+    let target_type = ctx.local_types.get(target)?;
+    if !is_managed_local_type(target_type) {
+        return None;
+    }
+    let value_tmp = ctx.tmp_i32;
+    Some((
+        format!(
+            "local.get {}\n\
+             local.set {value_tmp}\n\
+             local.get {target_slot}\n\
+             call {}\n\
+             drop\n\
+             local.get {value_tmp}\n\
+             local.set {target_slot}\n\
+             i32.const 0\n\
+             local.set {}\n\
+             i32.const 0",
+            source_ref.slot,
+            rc_release_for_type(target_type),
+            source_ref.slot,
+        ),
+        source_ref.slot,
+    ))
 }
 
 fn cached_length_vector_before_loop(
@@ -7879,7 +8029,7 @@ fn compile_do(
     let mut scoped_nonnegative_int_locals = ctx.nonnegative_int_locals.clone();
     let mut scoped_proven_scalar_vec_min_lengths = ctx.proven_scalar_vec_min_lengths.clone();
     let mut scoped_exact_int_locals: HashMap<String, i32> = HashMap::new();
-    let managed_do_locals: Vec<(String, usize)> = items
+    let managed_do_locals: Vec<(String, ManagedRefSlot)> = items
         .iter()
         .filter_map(|expr| {
             let Expression::Apply(let_items) = expr else {
@@ -7892,13 +8042,9 @@ fn compile_do(
                 return None;
             }
             let slot = *ctx.locals.get(name)?;
-            let managed = ctx
-                .local_types
-                .get(name)
-                .map(is_managed_local_type)
-                .unwrap_or(false);
-            if managed && !is_borrowed_projection_local(name, ctx) {
-                Some((name.clone(), slot))
+            let typ = ctx.local_types.get(name)?;
+            if is_managed_local_type(typ) && !is_borrowed_projection_local(name, ctx) {
+                Some((name.clone(), ManagedRefSlot::new(slot, typ)))
             } else {
                 None
             }
@@ -8078,8 +8224,20 @@ fn compile_do(
                         let borrowed_rhs = val_node
                             .map(|n| is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings))
                             .unwrap_or(false);
+                        let move_source = managed_local
+                            .then(|| {
+                                direct_last_use_managed_move_source(
+                                    val_node,
+                                    name,
+                                    &managed_do_locals,
+                                    &items[i + 1..],
+                                    &scoped_lambda_bindings,
+                                )
+                            })
+                            .flatten();
                         let value = if managed_local
                             && borrowed_rhs
+                            && move_source.is_none()
                             && !is_borrowed_projection_local(name, ctx)
                         {
                             let tmp_owned = ctx.tmp_i32 + 2;
@@ -8096,6 +8254,9 @@ fn compile_do(
                             value
                         };
                         parts.push(format!("{value}\nlocal.set {}", local_idx));
+                        if let Some(source) = move_source {
+                            parts.push(format!("i32.const 0\nlocal.set {}", source.slot));
+                        }
                         if val_node
                             .map(|n| {
                                 expr_is_definitely_materialized_scalar_vector(
@@ -8138,18 +8299,57 @@ fn compile_do(
                     } else {
                         return Err(format!("Unknown local '{}'", name));
                     }
+                    if let Some(value_node) = val_node {
+                        update_scalar_vec_min_lengths_after_expr(
+                            value_node,
+                            ctx,
+                            &mut scoped_proven_scalar_vec_min_lengths,
+                        );
+                    }
                     append_last_use_releases_for_do_expr(
                         &mut parts,
                         &managed_do_locals,
                         &items[i],
                         &items[i + 1..],
                         &scoped_lambda_bindings,
+                        direct_last_use_managed_move_source(
+                            val_node,
+                            name,
+                            &managed_do_locals,
+                            &items[i + 1..],
+                            &scoped_lambda_bindings,
+                        )
+                        .map(|reference| reference.slot),
                     );
                     continue;
                 }
             }
         }
         if let Some(n) = child_at(i) {
+            if let Some((code, moved_from_slot)) = compile_last_use_managed_alter_move(
+                n,
+                &items[i + 1..],
+                &managed_do_locals,
+                &scoped_lambda_bindings,
+                ctx,
+            ) {
+                parts.push(code);
+                update_scalar_vec_min_lengths_after_expr(
+                    n,
+                    ctx,
+                    &mut scoped_proven_scalar_vec_min_lengths,
+                );
+                collect_altered_int_locals(&n.expr, &mut scoped_exact_int_locals);
+                append_last_use_releases_for_do_expr(
+                    &mut parts,
+                    &managed_do_locals,
+                    &items[i],
+                    &items[i + 1..],
+                    &scoped_lambda_bindings,
+                    Some(moved_from_slot),
+                );
+                continue;
+            }
             let rewritten_loop = match &n.expr {
                 Expression::Apply(loop_items)
                     if matches!(loop_items.as_slice(), [Expression::Word(op), Expression::Apply(condition), _]
@@ -8239,6 +8439,11 @@ fn compile_do(
             if let Some(slot) = scalar_vector_set_target_slot(&n.expr, ctx) {
                 scoped_materialized_scalar_local_slots.insert(slot);
             }
+            update_scalar_vec_min_lengths_after_expr(
+                n,
+                ctx,
+                &mut scoped_proven_scalar_vec_min_lengths,
+            );
             if let Some((slot, added_len)) =
                 append_fill_loop_min_length(n, &scoped_ctx, &scoped_exact_int_locals)
             {
@@ -8255,6 +8460,7 @@ fn compile_do(
             &items[i],
             &items[i + 1..],
             &scoped_lambda_bindings,
+            None,
         );
     }
     let last_node =
@@ -8293,7 +8499,7 @@ fn compile_tail_do(
     ctx: &Ctx<'_>,
     self_name: &str,
     arity: usize,
-    releasable_ref_slots: &[usize],
+    releasable_ref_slots: &[ManagedRefSlot],
 ) -> Result<Option<String>, String> {
     if items.len() <= 1 {
         return Ok(None);
@@ -8317,7 +8523,7 @@ fn compile_tail_do(
     let mut scoped_nonnegative_int_locals = ctx.nonnegative_int_locals.clone();
     let mut scoped_proven_scalar_vec_min_lengths = ctx.proven_scalar_vec_min_lengths.clone();
     let mut scoped_exact_int_locals: HashMap<String, i32> = HashMap::new();
-    let managed_do_locals: Vec<(String, usize)> = items
+    let managed_do_locals: Vec<(String, ManagedRefSlot)> = items
         .iter()
         .filter_map(|expr| {
             let Expression::Apply(let_items) = expr else {
@@ -8330,13 +8536,9 @@ fn compile_tail_do(
                 return None;
             }
             let slot = *ctx.locals.get(name)?;
-            let managed = ctx
-                .local_types
-                .get(name)
-                .map(is_managed_local_type)
-                .unwrap_or(false);
-            if managed && !is_borrowed_projection_local(name, ctx) {
-                Some((name.clone(), slot))
+            let typ = ctx.local_types.get(name)?;
+            if is_managed_local_type(typ) && !is_borrowed_projection_local(name, ctx) {
+                Some((name.clone(), ManagedRefSlot::new(slot, typ)))
             } else {
                 None
             }
@@ -8514,8 +8716,20 @@ fn compile_tail_do(
                         let borrowed_rhs = val_node
                             .map(|n| is_borrowed_managed_rhs_expr(n, &scoped_lambda_bindings))
                             .unwrap_or(false);
+                        let move_source = managed_local
+                            .then(|| {
+                                direct_last_use_managed_move_source(
+                                    val_node,
+                                    name,
+                                    &managed_do_locals,
+                                    &items[i + 1..],
+                                    &scoped_lambda_bindings,
+                                )
+                            })
+                            .flatten();
                         let value = if managed_local
                             && borrowed_rhs
+                            && move_source.is_none()
                             && !is_borrowed_projection_local(name, ctx)
                         {
                             let tmp_owned = ctx.tmp_i32 + 2;
@@ -8532,6 +8746,9 @@ fn compile_tail_do(
                             value
                         };
                         parts.push(format!("{value}\nlocal.set {}", local_idx));
+                        if let Some(source) = move_source {
+                            parts.push(format!("i32.const 0\nlocal.set {}", source.slot));
+                        }
                         if val_node
                             .map(|n| {
                                 expr_is_definitely_materialized_scalar_vector(
@@ -8572,18 +8789,57 @@ fn compile_tail_do(
                     } else {
                         return Err(format!("Unknown local '{}'", name));
                     }
+                    if let Some(value_node) = val_node {
+                        update_scalar_vec_min_lengths_after_expr(
+                            value_node,
+                            ctx,
+                            &mut scoped_proven_scalar_vec_min_lengths,
+                        );
+                    }
                     append_last_use_releases_for_do_expr(
                         &mut parts,
                         &managed_do_locals,
                         &items[i],
                         &items[i + 1..],
                         &scoped_lambda_bindings,
+                        direct_last_use_managed_move_source(
+                            val_node,
+                            name,
+                            &managed_do_locals,
+                            &items[i + 1..],
+                            &scoped_lambda_bindings,
+                        )
+                        .map(|reference| reference.slot),
                     );
                     continue;
                 }
             }
         }
         if let Some(n) = child_at(i) {
+            if let Some((code, moved_from_slot)) = compile_last_use_managed_alter_move(
+                n,
+                &items[i + 1..],
+                &managed_do_locals,
+                &scoped_lambda_bindings,
+                ctx,
+            ) {
+                parts.push(code);
+                update_scalar_vec_min_lengths_after_expr(
+                    n,
+                    ctx,
+                    &mut scoped_proven_scalar_vec_min_lengths,
+                );
+                collect_altered_int_locals(&n.expr, &mut scoped_exact_int_locals);
+                append_last_use_releases_for_do_expr(
+                    &mut parts,
+                    &managed_do_locals,
+                    &items[i],
+                    &items[i + 1..],
+                    &scoped_lambda_bindings,
+                    Some(moved_from_slot),
+                );
+                continue;
+            }
             let scoped_ctx = Ctx {
                 fn_sigs: ctx.fn_sigs,
                 fn_ids: ctx.fn_ids,
@@ -8649,6 +8905,11 @@ fn compile_tail_do(
             if let Some(slot) = scalar_vector_set_target_slot(&n.expr, ctx) {
                 scoped_materialized_scalar_local_slots.insert(slot);
             }
+            update_scalar_vec_min_lengths_after_expr(
+                n,
+                ctx,
+                &mut scoped_proven_scalar_vec_min_lengths,
+            );
             if let Some((slot, added_len)) =
                 append_fill_loop_min_length(n, &scoped_ctx, &scoped_exact_int_locals)
             {
@@ -8665,6 +8926,7 @@ fn compile_tail_do(
             &items[i],
             &items[i + 1..],
             &scoped_lambda_bindings,
+            None,
         );
     }
     let last_node =
@@ -8724,6 +8986,9 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     if elem_ref_flag == 0 && !args.is_empty() {
         return compile_scalar_vector_literal_direct(args, elem_kind, ctx);
     }
+    if elem_ref_flag == 1 && !args.is_empty() {
+        return compile_managed_vector_literal_direct(args, ctx);
+    }
     let mut out = Vec::new();
     let push_op = vec_push_runtime_for_elem_ref(elem_ref_flag);
     out.push(format!(
@@ -8777,9 +9042,8 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     Ok(out.join("\n"))
 }
 
-fn compile_scalar_vector_literal_direct(
+fn compile_managed_vector_literal_direct(
     args: &[TypedExpression],
-    elem_kind: VecElemKind,
     ctx: &Ctx<'_>,
 ) -> Result<String, String> {
     let vec_tmp = ctx.tmp_i32;
@@ -8788,8 +9052,83 @@ fn compile_scalar_vector_literal_direct(
     let mut out = Vec::new();
     out.push(format!(
         "i32.const {}\n\
-         i32.const 0\n\
-         call $vec_new_{}\n\
+         call $vec_new_uninit_i32\n\
+         local.set {vec_tmp}\n\
+         local.get {vec_tmp}\n\
+         i32.const 12\n\
+         i32.add\n\
+         i32.const 1\n\
+         i32.store\n\
+         local.get {vec_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         local.set {data_tmp}",
+        args.len()
+    ));
+
+    for (idx, arg) in args.iter().enumerate() {
+        let nested_ctx = Ctx {
+            fn_sigs: ctx.fn_sigs,
+            fn_ids: ctx.fn_ids,
+            extern_names: ctx.extern_names,
+            lambda_ids: ctx.lambda_ids,
+            closure_defs: ctx.closure_defs,
+            lambda_bindings: ctx.lambda_bindings,
+            current_function: ctx.current_function,
+            locals: ctx.locals.clone(),
+            local_types: ctx.local_types.clone(),
+            materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
+            hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
+            proven_scalar_vec_min_lengths: ctx.proven_scalar_vec_min_lengths.clone(),
+            definitely_materialized_top_level_scalar_names: ctx
+                .definitely_materialized_top_level_scalar_names,
+            proven_scalar_index_loads: ctx.proven_scalar_index_loads,
+            nonnegative_int_locals: ctx.nonnegative_int_locals,
+            tmp_i32: ctx.tmp_i32 + 3,
+        };
+        let value = compile_expr(arg, &nested_ctx)?;
+        out.push(format!("{value}\nlocal.set {val_tmp}"));
+
+        // A fresh managed result already owns one reference, so storing it in
+        // the new vector transfers that ownership directly. Borrowed values
+        // need one retain because the vector becomes an additional owner.
+        if !should_release_set_rhs(arg, ctx.lambda_bindings) {
+            let retain = arg
+                .typ
+                .as_ref()
+                .map(rc_retain_for_type)
+                .unwrap_or("$rc_retain");
+            out.push(format!("local.get {val_tmp}\ncall {retain}\ndrop"));
+        }
+
+        let offset = idx.saturating_mul(4);
+        let offset_code = if offset == 0 {
+            String::new()
+        } else {
+            format!("\ni32.const {offset}\ni32.add")
+        };
+        out.push(format!(
+            "local.get {data_tmp}{offset_code}\nlocal.get {val_tmp}\ni32.store"
+        ));
+    }
+
+    out.push(format!("local.get {vec_tmp}"));
+    Ok(out.join("\n"))
+}
+
+fn compile_scalar_vector_literal_direct(
+    args: &[TypedExpression],
+    _elem_kind: VecElemKind,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
+    let vec_tmp = ctx.tmp_i32;
+    let val_tmp = ctx.tmp_i32 + 1;
+    let data_tmp = ctx.tmp_i32 + 2;
+    let mut out = Vec::new();
+    out.push(format!(
+        "i32.const {}\n\
+         call $vec_new_uninit_i32\n\
          local.set {}\n\
          local.get {}\n\
          i32.const 16\n\
@@ -8797,7 +9136,6 @@ fn compile_scalar_vector_literal_direct(
          i32.load\n\
          local.set {}",
         args.len(),
-        elem_kind.suffix(),
         vec_tmp,
         vec_tmp,
         data_tmp
@@ -9078,20 +9416,48 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
     let a_tmp = ctx.tmp_i32;
     let b_tmp = ctx.tmp_i32 + 1;
     let out_tmp = ctx.tmp_i32 + 2;
+    let data_tmp = ctx.tmp_i32 + 3;
     let mut out = Vec::new();
     out.push(format!("{a}\nlocal.set {}", a_tmp));
     out.push(format!("{b}\nlocal.set {}", b_tmp));
     out.push(format!(
-        "local.get {}\nlocal.get {}\ncall $tuple_new\nlocal.set {}",
-        a_tmp, b_tmp, out_tmp
+        "i32.const 2\n\
+         call $vec_new_uninit_i32\n\
+         local.set {out_tmp}\n\
+         local.get {out_tmp}\n\
+         i32.const 12\n\
+         i32.add\n\
+         i32.const 1\n\
+         i32.store\n\
+         local.get {out_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         local.set {data_tmp}"
     ));
-    if release_a {
-        out.push(emit_release_fresh_owned_temp(a_tmp, a_node.typ.as_ref()));
+    if a_node.typ.as_ref().is_some_and(is_managed_local_type) && !release_a {
+        out.push(format!(
+            "local.get {a_tmp}\ncall {}\ndrop",
+            rc_retain_for_type(a_node.typ.as_ref().expect("managed tuple field type"))
+        ));
     }
-    if release_b {
-        out.push(emit_release_fresh_owned_temp(b_tmp, b_node.typ.as_ref()));
+    if b_node.typ.as_ref().is_some_and(is_managed_local_type) && !release_b {
+        out.push(format!(
+            "local.get {b_tmp}\ncall {}\ndrop",
+            rc_retain_for_type(b_node.typ.as_ref().expect("managed tuple field type"))
+        ));
     }
-    out.push(format!("local.get {}", out_tmp));
+    out.push(format!(
+        "local.get {data_tmp}\n\
+         local.get {a_tmp}\n\
+         i32.store\n\
+         local.get {data_tmp}\n\
+         i32.const 4\n\
+         i32.add\n\
+         local.get {b_tmp}\n\
+         i32.store\n\
+         local.get {out_tmp}"
+    ));
     Ok(out.join("\n"))
 }
 
@@ -10818,6 +11184,83 @@ fn scalar_vector_set_target_slot(expr: &Expression, ctx: &Ctx<'_>) -> Option<usi
     }
 }
 
+fn update_scalar_vec_min_lengths_after_expr(
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    minimums: &mut HashMap<usize, i32>,
+) {
+    if !node.effect.contains(EffectFlags::MUTATE)
+        && !node.effect.contains(EffectFlags::UNKNOWN_CALL)
+    {
+        return;
+    }
+    let Expression::Apply(items) = &node.expr else {
+        minimums.clear();
+        return;
+    };
+    let Some(op) = items.first().and_then(|expr| match expr {
+        Expression::Word(name) => Some(name.as_str()),
+        _ => None,
+    }) else {
+        minimums.clear();
+        return;
+    };
+
+    let argument_slot = |argument: &Expression| match argument {
+        Expression::Word(name) => ctx.locals.get(name).copied(),
+        _ => None,
+    };
+    match op {
+        "push!" => {
+            if let Some(slot) = items.get(1).and_then(argument_slot) {
+                minimums
+                    .entry(slot)
+                    .and_modify(|length| *length = length.saturating_add(1));
+            }
+            return;
+        }
+        "pop!" | "pop-val!" | "pull!" => {
+            if let Some(slot) = items.get(1).and_then(argument_slot) {
+                minimums
+                    .entry(slot)
+                    .and_modify(|length| *length = length.saturating_sub(1));
+            }
+            return;
+        }
+        "set!" => {
+            let Some(slot) = items.get(1).and_then(argument_slot) else {
+                return;
+            };
+            let appends_at_length = items.get(2).is_some_and(|index| {
+                matches!(index, Expression::Apply(length)
+                    if matches!(length.as_slice(), [Expression::Word(name), target]
+                        if name == "length" && argument_slot(target) == Some(slot)))
+            });
+            if appends_at_length {
+                minimums
+                    .entry(slot)
+                    .and_modify(|length| *length = length.saturating_add(1));
+            }
+            return;
+        }
+        "alter!" => return,
+        _ => {}
+    }
+
+    // A direct top-level function cannot capture this function's locals, so
+    // only vector arguments can have changed size. Local/dynamic closures may
+    // capture any local vector and therefore invalidate the whole map.
+    if ctx.fn_sigs.contains_key(op) && !ctx.lambda_bindings.contains_key(op) {
+        for argument in items.iter().skip(1) {
+            if let Some(slot) = argument_slot(argument) {
+                minimums.remove(&slot);
+            }
+        }
+    } else {
+        minimums.clear();
+    }
+}
+
 fn collect_scalar_param_constant_set_requirements(
     expr: &Expression,
     ctx: &Ctx<'_>,
@@ -10831,6 +11274,24 @@ fn collect_scalar_param_constant_set_requirements(
             if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec")
             {
                 return;
+            }
+            if matches!(items.first(), Some(Expression::Word(op)) if op == self_name) {
+                for slot in 0..param_count {
+                    let is_scalar_param = ctx.local_types.iter().any(|(name, ty)| {
+                        ctx.locals.get(name) == Some(&slot) && is_scalar_vector_type(ty)
+                    });
+                    if !is_scalar_param {
+                        continue;
+                    }
+                    let forwards_same_slot =
+                        items.get(slot + 1).and_then(|argument| match argument {
+                            Expression::Word(name) => ctx.locals.get(name).copied(),
+                            _ => None,
+                        }) == Some(slot);
+                    if !forwards_same_slot {
+                        invalid_slots.insert(slot);
+                    }
+                }
             }
             if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
                 if let Some(slot) = ctx.locals.get(target).copied() {
@@ -10856,9 +11317,7 @@ fn collect_scalar_param_constant_set_requirements(
                                     }
                                 }
                             }
-                        } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
-                            || (op.ends_with('!') && op != self_name)
-                        {
+                        } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!") {
                             invalid_slots.insert(slot);
                         }
                     }
@@ -10876,6 +11335,70 @@ fn collect_scalar_param_constant_set_requirements(
             }
         }
         _ => {}
+    }
+}
+
+fn collect_typed_scalar_param_call_invalidations(
+    node: &TypedExpression,
+    ctx: &Ctx<'_>,
+    param_count: usize,
+    self_name: &str,
+    invalid_slots: &mut HashSet<usize>,
+) {
+    let Expression::Apply(items) = &node.expr else {
+        return;
+    };
+    let op = items.first().and_then(|item| match item {
+        Expression::Word(name) => Some(name.as_str()),
+        _ => None,
+    });
+    if matches!(op, Some("lambda" | "letrec")) {
+        return;
+    }
+    let is_language_form = op.is_some_and(|op| {
+        matches!(
+            op,
+            "do" | "block"
+                | "if"
+                | "cond"
+                | "and"
+                | "or"
+                | "let"
+                | "mut"
+                | "alter!"
+                | "while"
+                | "loop"
+                | "loop/range"
+                | "set!"
+                | "push!"
+                | "pop!"
+                | "pop-val!"
+                | "pull!"
+        )
+    });
+    let may_mutate_argument = node.effect.contains(EffectFlags::MUTATE)
+        || node.effect.contains(EffectFlags::UNKNOWN_CALL);
+    if op != Some(self_name) && !is_language_form && may_mutate_argument {
+        for argument in items.iter().skip(1) {
+            let Expression::Word(name) = argument else {
+                continue;
+            };
+            let Some(slot) = ctx.locals.get(name).copied() else {
+                continue;
+            };
+            if slot < param_count && ctx.local_types.get(name).is_some_and(is_scalar_vector_type) {
+                invalid_slots.insert(slot);
+            }
+        }
+    }
+    for child in &node.children {
+        collect_typed_scalar_param_call_invalidations(
+            child,
+            ctx,
+            param_count,
+            self_name,
+            invalid_slots,
+        );
     }
 }
 
@@ -10898,10 +11421,53 @@ fn scalar_param_constant_set_requirements(
         &mut required_min_lengths,
         &mut invalid_slots,
     );
+    collect_typed_scalar_param_call_invalidations(
+        body,
+        ctx,
+        param_count,
+        self_name,
+        &mut invalid_slots,
+    );
     for slot in invalid_slots {
         required_min_lengths.remove(&slot);
     }
     required_min_lengths
+}
+
+fn recursive_calls_forward_guarded_params(
+    expr: &Expression,
+    self_name: &str,
+    params: &[(String, Type)],
+    requirements: &[(usize, i32)],
+    found: &mut bool,
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return true;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return true;
+    }
+    if matches!(items.first(), Some(Expression::Word(name)) if name == self_name) {
+        *found = true;
+        if items.len() != params.len() + 1 {
+            return false;
+        }
+        return requirements.iter().all(|(slot, _)| {
+            params.get(*slot).is_some_and(|(parameter, _)| {
+                matches!(items.get(*slot + 1), Some(Expression::Word(argument)) if argument == parameter)
+            })
+        });
+    }
+    items.iter().skip(1).all(|child| {
+        recursive_calls_forward_guarded_params(child, self_name, params, requirements, found)
+    })
+}
+
+fn redirect_direct_recursive_calls(code: &str, self_name: &str, fast_name: &str) -> String {
+    code.replace(
+        &format!("call ${}", ident(self_name)),
+        &format!("call ${fast_name}"),
+    )
 }
 
 struct GuardedScalarParamBody {
@@ -11097,7 +11663,7 @@ fn compile_guarded_scalar_param_replacement_tail_body(
     ctx: &Ctx<'_>,
     self_name: &str,
     param_count: usize,
-    releasable_ref_slots: &[usize],
+    releasable_ref_slots: &[ManagedRefSlot],
 ) -> Result<Option<GuardedScalarParamBody>, String> {
     compile_guarded_scalar_param_replacement_body_with(
         body,
@@ -13285,7 +13851,7 @@ fn compile_tail_expr(
     ctx: &Ctx<'_>,
     self_name: &str,
     arity: usize,
-    releasable_ref_slots: &[usize],
+    releasable_ref_slots: &[ManagedRefSlot],
 ) -> Result<Option<String>, String> {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() => match &items[0] {
@@ -13541,11 +14107,11 @@ fn compile_lambda_func(
     let ret_is_ref = is_managed_local_type(&ret_ty);
     let mut cleanup_local_defs = Vec::new();
     collect_current_scope_let_locals(body_node, &mut cleanup_local_defs);
-    let mut ref_slots: Vec<usize> = Vec::new();
+    let mut ref_slots: Vec<ManagedRefSlot> = Vec::new();
     for (name, t) in cleanup_local_defs {
         if is_managed_local_type(&t) && !is_borrowed_projection_local(&name, &ctx) {
             if let Some(slot) = ctx.locals.get(&name) {
-                ref_slots.push(*slot);
+                ref_slots.push(ManagedRefSlot::new(*slot, &t));
             }
         }
     }
@@ -13596,6 +14162,86 @@ fn compile_lambda_func(
     emit_i32_locals(&mut out, scratch_i32_locals);
     if let Some(guarded) = guarded_tail_body {
         let fallback_name = format!("__que_scalar_set_fallback_{}", ident(name));
+        let fast_name = format!("__que_scalar_set_fast_{}", ident(name));
+        let mut found_recursive_call = false;
+        let use_recursive_fast_worker = recursive_calls_forward_guarded_params(
+            &body_node.expr,
+            name,
+            &params,
+            &guarded.requirements,
+            &mut found_recursive_call,
+        ) && found_recursive_call;
+        if use_recursive_fast_worker {
+            out.push_str(&format!(
+                "    {}\n",
+                guarded.any_short_guard_code().replace('\n', "\n    ")
+            ));
+            out.push_str(&format!("    if (result {})\n", guarded.result_ty));
+            for i in 0..params.len() {
+                out.push_str(&format!("      local.get {}\n", i));
+            }
+            out.push_str(&format!("      call ${}\n", fallback_name));
+            out.push_str("    else\n");
+            for i in 0..params.len() {
+                out.push_str(&format!("      local.get {}\n", i));
+            }
+            out.push_str(&format!("      call ${}\n", fast_name));
+            out.push_str("    end\n");
+            out.push_str("    return\n");
+            out.push_str("    unreachable\n");
+            out.push_str("  )\n");
+
+            out.push_str(&format!("  (func ${}", fast_name));
+            for (_pname, pty) in &params {
+                out.push_str(&format!(" (param {})", wasm_val_type(pty)?));
+            }
+            out.push_str(&format!(" (result {})\n", wasm_val_type(&ret_ty)?));
+            for (_n, t) in &local_defs {
+                out.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
+            }
+            emit_i32_locals(&mut out, borrowed_top_level_count);
+            emit_i32_locals(&mut out, scratch_i32_locals);
+            if !borrowed_top_level_prelude.is_empty() {
+                out.push_str(&format!(
+                    "    {}\n",
+                    borrowed_top_level_prelude.replace('\n', "\n    ")
+                ));
+            }
+            if !guarded.fast_prelude.is_empty() {
+                out.push_str(&format!(
+                    "    {}\n",
+                    guarded.fast_prelude.replace('\n', "\n    ")
+                ));
+            }
+            let fast_code = redirect_direct_recursive_calls(&guarded.fast_code, name, &fast_name);
+            out.push_str(&format!("    {}\n", fast_code.replace('\n', "\n    ")));
+            out.push_str("    unreachable\n");
+            out.push_str("  )\n");
+
+            out.push_str(&format!("  (func ${}", fallback_name));
+            for (_pname, pty) in &params {
+                out.push_str(&format!(" (param {})", wasm_val_type(pty)?));
+            }
+            out.push_str(&format!(" (result {})\n", wasm_val_type(&ret_ty)?));
+            for (_n, t) in &local_defs {
+                out.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
+            }
+            emit_i32_locals(&mut out, borrowed_top_level_count);
+            emit_i32_locals(&mut out, scratch_i32_locals);
+            if !borrowed_top_level_prelude.is_empty() {
+                out.push_str(&format!(
+                    "    {}\n",
+                    borrowed_top_level_prelude.replace('\n', "\n    ")
+                ));
+            }
+            out.push_str(&format!(
+                "    {}\n",
+                guarded.fallback_code.replace('\n', "\n    ")
+            ));
+            out.push_str("    unreachable\n");
+            out.push_str("  )\n");
+            return Ok(out);
+        }
         out.push_str(&format!(
             "    {}\n",
             guarded.any_short_guard_code().replace('\n', "\n    ")
@@ -13664,13 +14310,13 @@ fn compile_lambda_func(
         return Ok(out);
     }
     out.push_str(&format!("    (local {})\n", wasm_val_type(&ret_ty)?));
+    let ret_slot = base_local_count + scratch_i32_locals;
     if !borrowed_top_level_prelude.is_empty() {
         out.push_str(&format!(
             "    {}\n",
             borrowed_top_level_prelude.replace('\n', "\n    ")
         ));
     }
-    let ret_slot = base_local_count + scratch_i32_locals;
     out.push_str(&format!("    {}\n", body_code.replace('\n', "\n    ")));
     out.push_str(&format!("    local.set {}\n", ret_slot));
     if ret_is_ref
@@ -13796,11 +14442,11 @@ fn compile_closure_func(
     let ret_is_ref = is_managed_local_type(&ret_ty);
     let mut cleanup_local_defs = Vec::new();
     collect_current_scope_let_locals(body_node, &mut cleanup_local_defs);
-    let mut ref_slots: Vec<usize> = Vec::new();
+    let mut ref_slots: Vec<ManagedRefSlot> = Vec::new();
     for (name, t) in cleanup_local_defs {
         if is_managed_local_type(&t) && !is_borrowed_projection_local(&name, &ctx) {
             if let Some(slot) = ctx.locals.get(&name) {
-                ref_slots.push(*slot);
+                ref_slots.push(ManagedRefSlot::new(*slot, &t));
             }
         }
     }
@@ -13845,7 +14491,7 @@ fn compile_closure_func(
 }
 
 fn emit_release_unique_refs(
-    ref_slots: &[usize],
+    ref_slots: &[ManagedRefSlot],
     ret_slot: usize,
     ret_is_ref: bool,
     scratch_slot: usize,
@@ -13858,12 +14504,13 @@ fn emit_release_unique_refs(
 }
 
 fn emit_release_unique_refs_except(
-    ref_slots: &[usize],
+    ref_slots: &[ManagedRefSlot],
     except_slots: &[usize],
     scratch_slot: usize,
 ) -> String {
     let mut out = String::new();
-    for (i, slot) in ref_slots.iter().enumerate() {
+    for (i, reference) in ref_slots.iter().enumerate() {
+        let slot = reference.slot;
         out.push_str("    i32.const 1\n");
         out.push_str(&format!("    local.set {}\n", scratch_slot));
         for except_slot in except_slots {
@@ -13879,7 +14526,7 @@ fn emit_release_unique_refs_except(
             out.push_str(&format!("    local.get {}\n", scratch_slot));
             out.push_str("    if\n");
             out.push_str(&format!("      local.get {}\n", slot));
-            out.push_str(&format!("      local.get {}\n", prev));
+            out.push_str(&format!("      local.get {}\n", prev.slot));
             out.push_str("      i32.eq\n");
             out.push_str("      if\n");
             out.push_str("        i32.const 0\n");
@@ -13890,20 +14537,23 @@ fn emit_release_unique_refs_except(
         out.push_str(&format!("    local.get {}\n", scratch_slot));
         out.push_str("    if\n");
         out.push_str(&format!("      local.get {}\n", slot));
-        out.push_str("      call $rc_release\n");
+        out.push_str(&format!("      call {}\n", reference.kind.release()));
         out.push_str("      drop\n");
         out.push_str("    end\n");
     }
     out
 }
 
-fn managed_ref_slot_names(locals: &HashMap<String, usize>, ref_slots: &[usize]) -> HashSet<String> {
+fn managed_ref_slot_names(
+    locals: &HashMap<String, usize>,
+    ref_slots: &[ManagedRefSlot],
+) -> HashSet<String> {
     ref_slots
         .iter()
-        .filter_map(|slot| {
-            locals
-                .iter()
-                .find_map(|(name, local_slot)| (local_slot == slot).then(|| name.clone()))
+        .filter_map(|reference| {
+            locals.iter().find_map(|(name, local_slot)| {
+                (*local_slot == reference.slot).then(|| name.clone())
+            })
         })
         .collect()
 }
@@ -14015,11 +14665,13 @@ fn compile_value_func(
     let ret_is_ref = is_managed_local_type(ret_ty);
     let mut cleanup_local_defs = Vec::new();
     collect_current_scope_let_locals(value_node, &mut cleanup_local_defs);
-    let ref_slots: Vec<usize> = cleanup_local_defs
+    let ref_slots: Vec<ManagedRefSlot> = cleanup_local_defs
         .iter()
         .filter_map(|(name, t)| {
             if is_managed_local_type(t) {
-                ctx.locals.get(name).copied()
+                ctx.locals
+                    .get(name)
+                    .map(|slot| ManagedRefSlot::new(*slot, t))
             } else {
                 None
             }

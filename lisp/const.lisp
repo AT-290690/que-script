@@ -397,3 +397,13 @@
   (if (and (>=. value const/dec/min-safe) (<=. value const/dec/max-safe)) [value] [0.0])))
 
 (let bool (lambda value [(=? value true)]))
+
+(let string/hash
+  (lambda (s)
+    (mut h 0)
+    (loop i (< i (length s))
+      (alter! h
+        (% (+ (* h 31)
+              (Char->Int (get s i)))
+           65521)))
+    h))

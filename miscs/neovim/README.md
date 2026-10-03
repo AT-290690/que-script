@@ -13,6 +13,7 @@ It provides:
 - theme-native plain-text hover windows with borders and no Markdown colouring or markers
 - automatic signature help, without duplicating Blink's signature window
 - `:QueFormat` and `<Space>f` formatting through `que fmt --stdin`
+- `:QueLib` and `<Space>g` fuzzy browsing of library names and inferred types
 
 The formatter preserves comments, keeps short forms compact, and leaves runs
 of closing delimiters grouped on the final line. Set `format_key` in
@@ -107,6 +108,7 @@ Inside `que nvim`, these buffer-local commands and shortcuts save the scratch fi
 - `:QueTypes` / `<leader>a`: optimized inferred types
 - `:QueExplain` / `<leader>e`: optimized explanation
 - `:QueSource` / `<leader>z`: optimized expanded source
+- `:QueLib` / `<leader>g`: enter a library glob (for example `map*` or `push!`), fuzzy-filter the matching type signatures, and press Enter to open the selected source
 
 The shortcuts use Space as the leader in the preconfigured Que scratch editor.
 Normal and debug runs retain their original interactive terminal splits. Source and inferred

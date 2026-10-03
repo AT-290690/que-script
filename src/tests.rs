@@ -1574,6 +1574,39 @@ xs)"#,
     }
 
     #[test]
+    fn test_wat_recursive_range_proof_elides_scalar_set_helper() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _proofs = ScopedEnvVar::set("QUE_OPT_PROOF_CODEGEN", "1");
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let _tail_calls = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let source = r#"
+(let xs [0 0 0 0])
+(letrec fill! (lambda i
+  (if (= i 4)
+      nil
+      (do
+        (set! xs i 1)
+        (fill! (+ i 1))))))
+(fill! 0)
+xs
+"#;
+        let wat = compile_std_program_to_wat(source, true);
+        let function = named_wat_function(&wat, "v_fill_bang_");
+        assert!(
+            function.contains("i32.store")
+                && !function.contains("call $vec_set_scalar_i32")
+                && !function.contains("call $vec_set_scalar_materialized_i32"),
+            "a closed, unit-step recursive range should lower to a direct scalar store:\n{function}"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts_unlocked(source, true),
+            "[1 1 1 1]"
+        );
+    }
+
+    #[test]
     fn test_wat_opt_proof_keeps_set_append_at_length_semantics() {
         let _lock = runtime_exec_lock()
             .lock()
@@ -1638,8 +1671,9 @@ xs)"#,
         let debug_wat = compile_std_program_to_wat(src, false);
         let debug_wrap_wat = named_wat_function(&debug_wat, "v_wrap");
         assert!(
-            debug_wrap_wat.contains("call $vec_push_i32"),
-            "the debug/unoptimized path should retain conservative generic lowering:\n{debug_wrap_wat}"
+            debug_wrap_wat.contains("call $rc_retain")
+                && !debug_wrap_wat.contains("call $rc_retain_vec"),
+            "the debug/unoptimized path should retain conservative generic element handling:\n{debug_wrap_wat}"
         );
         assert_eq!(run_program_output_with_std_and_opts(src, true), "7");
     }
@@ -1653,7 +1687,8 @@ xs)"#,
         let wat = compile_std_program_to_wat(src, true);
         let wrap_wat = named_wat_function(&wat, "v_wrap");
         assert!(
-            wrap_wat.contains("call $vec_push_i32"),
+            wrap_wat.contains("call $rc_retain")
+                && !wrap_wat.contains("call $rc_retain_vec"),
             "mixed scalar/reference instantiations must retain generic element handling:\n{wrap_wat}"
         );
         assert_eq!(run_program_output_with_std_and_opts(src, true), "15");
@@ -7819,26 +7854,45 @@ fn"#;
     }
 
     #[test]
-    fn test_wat_vector_literal_releases_fresh_nested_managed_value() {
+    fn test_wat_managed_vector_literal_transfers_fresh_nested_ownership() {
         let expr = crate::parser::build("(vector [])").expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
-        eprintln!("{}", wat);
         let main_start = wat
             .find("(func (export \"main\")")
             .expect("main export should exist");
         let main_wat = &wat[main_start..];
 
         assert!(
-            main_wat.contains("call $vec_push_i32"),
-            "expected vector push in main, got:\n{}",
+            main_wat.contains("call $vec_new_uninit_i32"),
+            "the non-empty managed literal should use exact uninitialized construction, got:\n{}",
             main_wat
         );
         assert!(
-            main_wat.contains("call $rc_release"),
-            "expected fresh nested managed vector to be released after push, got:\n{}",
+            !main_wat.contains("call $vec_push_i32"),
+            "exact managed literal construction should not push or grow, got:\n{}",
             main_wat
         );
+        assert!(
+            !main_wat.contains("call $rc_retain") && !main_wat.contains("call $rc_release"),
+            "fresh nested ownership should transfer without RC traffic, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_runtime_exact_managed_vector_literals_preserve_borrowed_and_fresh_values() {
+        let source = r#"(let inner [1 2])
+(let f (lambda x (+ x 1)))
+(let outer [inner inner [3 4]])
+(let fs [f f (lambda x (* x 2))])
+(+ (get (get outer 0) 1)
+   (get (get outer 1) 0)
+   (get (get outer 2) 1)
+   ((get fs 0) 4)
+   ((get fs 2) 4))"#;
+        assert_eq!(run_program_output_with_std_and_opts(source, false), "20");
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "20");
     }
 
     #[test]
@@ -7852,9 +7906,7 @@ fn"#;
         let main_wat = &wat[main_start..];
 
         assert!(
-            main_wat.contains("i32.const 3")
-                && main_wat.contains("i32.const 0")
-                && main_wat.contains("call $vec_new_i32"),
+            main_wat.contains("i32.const 3") && main_wat.contains("call $vec_new_uninit_i32"),
             "scalar vector literal should allocate exact-size scalar backing storage, got:\n{}",
             main_wat
         );
@@ -7889,9 +7941,7 @@ fn"#;
         let clone_wat = &wat[clone_start..];
 
         assert!(
-            clone_wat.contains("i32.const 3")
-                && clone_wat.contains("i32.const 0")
-                && clone_wat.contains("call $vec_new_i32"),
+            clone_wat.contains("i32.const 3") && clone_wat.contains("call $vec_new_uninit_i32"),
             "scalar clone literal should allocate exact-size scalar backing storage, got:\n{}",
             clone_wat
         );
@@ -8013,7 +8063,7 @@ fn"#;
     }
 
     #[test]
-    fn test_wat_tuple_releases_fresh_managed_fields() {
+    fn test_wat_tuple_transfers_fresh_managed_fields() {
         let expr = crate::parser::build("(tuple [] [])").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
         let main_start = wat
@@ -8022,13 +8072,13 @@ fn"#;
         let main_wat = &wat[main_start..];
 
         assert!(
-            main_wat.contains("call $tuple_new"),
-            "expected tuple construction in main, got:\n{}",
+            main_wat.contains("call $vec_new_uninit_i32") && !main_wat.contains("call $tuple_new"),
+            "tuple construction should allocate exact backing storage directly, got:\n{}",
             main_wat
         );
         assert!(
-            main_wat.matches("call $rc_release").count() >= 2,
-            "expected fresh tuple fields to be released after tuple construction, got:\n{}",
+            !main_wat.contains("call $rc_retain") && !main_wat.contains("call $rc_release"),
+            "fresh tuple field ownership should transfer without RC traffic, got:\n{}",
             main_wat
         );
     }
@@ -8109,7 +8159,7 @@ fn"#;
     }
 
     #[test]
-    fn test_wat_tuple_with_one_fresh_side_uses_uniform_temp_lowering() {
+    fn test_wat_tuple_with_one_fresh_side_uses_direct_transfer_lowering() {
         let expr = crate::parser::build("(tuple [] 1)").expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
         let main_start = wat
@@ -8119,15 +8169,29 @@ fn"#;
         let main_flat = main_wat.replace("    ", "");
 
         assert!(
-            main_flat.contains("local.get 0\nlocal.get 1\ncall $tuple_new\nlocal.set 2"),
-            "tuple lowering should materialize both tuple operands in temps before construction, got:\n{}",
+            main_flat.contains("local.set 0\ni32.const 1\nlocal.set 1\ni32.const 2\ncall $vec_new_uninit_i32\nlocal.set 2"),
+            "tuple lowering should evaluate both operands before exact construction, got:\n{}",
             main_wat
         );
         assert!(
-            main_flat.contains("local.get 0\ncall $rc_release_vec\ndrop"),
-            "tuple lowering should still release the fresh-owned side after construction, got:\n{}",
+            !main_flat.contains("call $tuple_new") && !main_flat.contains("call $rc_release_vec"),
+            "the fresh-owned side should transfer directly into the tuple, got:\n{}",
             main_wat
         );
+    }
+
+    #[test]
+    fn test_runtime_direct_tuple_construction_preserves_borrowed_and_fresh_fields() {
+        let source = r#"(let xs [1 2])
+(let f (lambda x (+ x 1)))
+(let pair {xs [3 4]})
+(let fs {f (lambda x (* x 2))})
+(+ (get (fst pair) 1)
+   (get (snd pair) 0)
+   ((fst fs) 4)
+   ((snd fs) 4))"#;
+        assert_eq!(run_program_output_with_std_and_opts(source, false), "18");
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "18");
     }
 
     #[test]
@@ -8229,6 +8293,130 @@ fn"#;
             function_wat
         );
         assert_eq!(run_program_output(source), "6");
+    }
+
+    #[test]
+    fn test_wat_concrete_cleanup_slots_use_static_rc_kind() {
+        let source = r#"(do
+            (let consume-vector (lambda flag (do
+              (let xs (if flag [1 2] [3]))
+              (length xs))))
+            (let consume-closure (lambda n (do
+              (let f (lambda x (+ n x)))
+              (f 1))))
+            (+ (consume-vector true) (consume-closure 4)))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let vector_fn = named_wat_function(&wat, "v_consume_dash_vector");
+        let closure_fn = named_wat_function(&wat, "v_consume_dash_closure");
+
+        assert!(
+            vector_fn.contains("call $rc_release_vec"),
+            "known vector cleanup should call the specialized release, got:\n{}",
+            vector_fn
+        );
+        assert!(
+            !vector_fn
+                .lines()
+                .any(|line| line.trim() == "call $rc_release"),
+            "known vector cleanup should not classify the pointer dynamically, got:\n{}",
+            vector_fn
+        );
+        assert!(
+            closure_fn
+                .lines()
+                .any(|line| line.trim() == "call $rc_release"),
+            "function values may be static IDs or closure pointers and must remain dynamically classified, got:\n{}",
+            closure_fn
+        );
+        assert_eq!(run_program_output(source), "7");
+    }
+
+    #[test]
+    fn test_wat_last_use_managed_local_alias_transfers_ownership() {
+        let source = r#"(do
+            (let move-last (lambda flag (do
+              (let xs (if flag [1 2] [3]))
+              (let ys xs)
+              (length ys))))
+            (let keep-source (lambda flag (do
+              (let xs (if flag [1 2] [3]))
+              (let ys xs)
+              (+ (length xs) (length ys)))))
+            (+ (move-last true) (keep-source false)))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let moved = named_wat_function(&wat, "v_move_dash_last");
+        let retained = named_wat_function(&wat, "v_keep_dash_source");
+
+        assert!(
+            !moved.contains("call $rc_retain_vec"),
+            "a managed local's final use should transfer ownership to its alias, got:\n{}",
+            moved
+        );
+        assert!(
+            retained.contains("call $rc_retain_vec"),
+            "a source used after aliasing must retain independent ownership, got:\n{}",
+            retained
+        );
+        assert_eq!(run_program_output(source), "4");
+    }
+
+    #[test]
+    fn test_wat_last_use_managed_alter_transfers_ownership() {
+        let moved_source = r#"(do
+            (let step (lambda board { [1 2] 1 }))
+            (&mut state [9])
+            (mut acc 0)
+            (mut i 0)
+            (while (< i 100) (do
+              (let {next value} (step (&get state)))
+              (&alter! state next)
+              (alter! acc (+ acc value))
+              (alter! i (+ i 1))))
+            acc)"#;
+        let retained_source = r#"(do
+            (let step (lambda board { [1 2] 1 }))
+            (&mut state [9])
+            (mut acc 0)
+            (mut i 0)
+            (while (< i 100) (do
+              (let {next value} (step (&get state)))
+              (&alter! state next)
+              (alter! acc (+ acc (length next)))
+              (alter! i (+ i 1))))
+            acc)"#;
+        let moved_wat = compile_std_program_to_wat(moved_source, true);
+        let retained_wat = compile_std_program_to_wat(retained_source, true);
+        let moved_main = moved_wat
+            .split("(func (export \"main\")")
+            .nth(1)
+            .expect("main export should exist");
+        let retained_main = retained_wat
+            .split("(func (export \"main\")")
+            .nth(1)
+            .expect("main export should exist");
+
+        assert!(
+            !moved_main.contains("call $rc_retain_vec"),
+            "a managed local's final use should transfer ownership into a mutable local, got:\n{}",
+            moved_main
+        );
+        assert!(
+            retained_main.contains("call $rc_retain_vec"),
+            "replacement must retain a source that remains live, got:\n{}",
+            retained_main
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(moved_source, true),
+            "100"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(retained_source, true),
+            "200"
+        );
     }
 
     #[test]
@@ -8385,6 +8573,27 @@ fn"#;
             "constant replacement after append-fill should use proven length, got:\n{}",
             main_wat
         );
+    }
+
+    #[test]
+    fn test_runtime_bulk_initialized_scalar_vectors_keep_all_values() {
+        let source = r#"
+(let filled [])
+(mut i 0)
+(while (< i 130)
+  (do
+    (set! filled (length filled) 7)
+    (alter! i (+ i 1))))
+(let zeroed [])
+(mut j 0)
+(while (< j 130)
+  (do
+    (set! zeroed (length zeroed) 0)
+    (alter! j (+ j 1))))
+{(+ (get filled 0) (get filled 1) (get filled 64) (get filled 129))
+ (+ (get zeroed 0) (get zeroed 1) (get zeroed 64) (get zeroed 129))}
+"#;
+        assert_eq!(run_program_output(source), "{ 28 0 }");
     }
 
     #[test]
@@ -8916,7 +9125,7 @@ fn"#;
         let wat_flat = wat.replace("    ", "");
 
         assert!(
-            wat_flat.contains("local.get 1\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 1"),
+            wat_flat.contains("local.get 1\ncall $rc_release_vec\ndrop\ni32.const 0\nlocal.set 1"),
             "tuple temp used only for projections should be released early, got:\n{}",
             wat
         );
@@ -9034,7 +9243,7 @@ fn"#;
 
         assert!(
             wat_flat.contains(
-                "local.get 0\ncall $vec_len\ndrop\nlocal.get 0\ncall $rc_release\ndrop\ni32.const 0\nlocal.set 0"
+                "local.get 0\ncall $vec_len\ndrop\nlocal.get 0\ncall $rc_release_vec\ndrop\ni32.const 0\nlocal.set 0"
             ),
             "managed do-local should be released after its last non-final use, got:\n{}",
             wat
@@ -9549,6 +9758,101 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_recursive_guarded_scalar_param_uses_private_fast_worker() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let source = r#"
+(letrec fill! (lambda (xs n)
+  (if (= n 0)
+      (get xs 0)
+      (do
+        (set! xs 0 n)
+        (fill! xs (- n 1))))))
+(fill! [0] 3)
+"#;
+        let wat = compile_std_program_to_wat(source, true);
+        let public = named_wat_function(&wat, "v_fill_bang_");
+        let fast = named_wat_function(&wat, "__que_scalar_set_fast_v_fill_bang_");
+
+        assert!(
+            public.contains("call $__que_scalar_set_fast_v_fill_bang_")
+                && public.contains("call $vec_len"),
+            "the public entry should guard once and enter the private worker:\n{public}"
+        );
+        assert!(
+            fast.contains("i32.store")
+                && !fast.contains("call $vec_len")
+                && !fast.contains("i32.const 1447380017"),
+            "the recursive worker should retain only the proven-fast body:\n{fast}"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts_unlocked(source, true),
+            "1"
+        );
+    }
+
+    #[test]
+    fn test_wat_recursive_guard_does_not_cover_changed_vector_argument() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let source = r#"
+(letrec consume! (lambda (xs n)
+  (if (= n 0)
+      0
+      (do
+        (set! xs 0 n)
+        (consume! (cdr xs) (- n 1))))))
+consume!
+"#;
+        let wat = compile_std_program_to_wat(source, true);
+        assert!(
+            !wat.contains("__que_scalar_set_fast_v_consume_bang_"),
+            "changing a guarded vector argument must disable the recursive fast worker:\n{wat}"
+        );
+    }
+
+    #[test]
+    fn test_wat_guarded_scalar_param_respects_mutating_helpers_without_bang_names() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let source = r#"
+(let shrink (lambda xs (pop! xs)))
+(let replace-after-shrink! (lambda xs
+  (do
+    (shrink xs)
+    (set! xs 1 9)
+    xs)))
+(replace-after-shrink! [1 2])
+"#;
+        let wat = compile_std_program_to_wat(source, false);
+        let function = named_wat_function(&wat, "v_replace_dash_after_dash_shrink_bang_");
+        let shrink_call = function
+            .find("call $v_shrink")
+            .expect("the helper mutation should remain in the function");
+        let fresh_guard = function
+            .find("i32.const 1447380017")
+            .expect("the generic set path should classify the post-mutation vector");
+        assert!(
+            shrink_call < fresh_guard
+                && function.contains("call $vec_set_scalar_i32")
+                && !wat.contains("__que_scalar_set_fast_v_replace_dash_after_dash_shrink_bang_"),
+            "the mutation effect, not a helper-name suffix, must prevent an entry-hoisted stale-length guard:\n{function}"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts_unlocked(source, true),
+            "[1 9]"
+        );
+    }
+
+    #[test]
     fn test_runtime_guarded_scalar_returning_param_set_keeps_short_vector_append_semantics() {
         let _lock = runtime_exec_lock()
             .lock()
@@ -9863,6 +10167,9 @@ fn"#;
 
     #[test]
     fn test_wat_pop_val_builtin_compiles_to_runtime_call() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let expr = crate::parser::build("(do (let xs [1 2 3]) (pop-val! xs))")
             .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)

@@ -212,6 +212,88 @@ local function setup_format(bufnr, opts)
   end
 end
 
+local function open_library_source(executable, name)
+  local lines = vim.fn.systemlist({ executable, "--lib", "source", name })
+  if vim.v.shell_error ~= 0 then
+    vim.notify(table.concat(lines, "\n"), vim.log.levels.ERROR)
+    return
+  end
+  vim.cmd("botright new")
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.bo[bufnr].buftype = "nofile"
+  vim.bo[bufnr].bufhidden = "wipe"
+  vim.bo[bufnr].swapfile = false
+  vim.bo[bufnr].filetype = "que"
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.api.nvim_buf_set_name(bufnr, "que-lib://" .. name)
+end
+
+local function library_picker(executable)
+  vim.ui.input({ prompt = "Que library pattern: ", default = "*" }, function(pattern)
+    if not pattern or pattern == "" then
+      return
+    end
+    local lines = vim.fn.systemlist({ executable, "--lib", "types", pattern })
+    if vim.v.shell_error ~= 0 then
+      vim.notify(table.concat(lines, "\n"), vim.log.levels.ERROR)
+      return
+    end
+    local entries = {}
+    for _, line in ipairs(lines) do
+      if line ~= "" then
+        local name = line:match("^([^%s]+)%s+:") or line
+        table.insert(entries, { name = name, text = line })
+      end
+    end
+    if #entries == 0 then
+      vim.notify("No Que library symbols match " .. pattern, vim.log.levels.INFO)
+      return
+    end
+
+    local ok, pickers = pcall(require, "telescope.pickers")
+    local finder_ok, finders = pcall(require, "telescope.finders")
+    local sorter_ok, sorters = pcall(require, "telescope.sorters")
+    if ok and finder_ok and sorter_ok then
+      pickers.new({}, {
+        prompt_title = "Que library types: " .. pattern,
+        finder = finders.new_table({
+          results = entries,
+          entry_maker = function(entry)
+            return { value = entry, display = entry.text, ordinal = entry.text }
+          end,
+        }),
+        sorter = sorters.get_generic_fuzzy_sorter(),
+        attach_mappings = function(_, map)
+          local actions = require("telescope.actions")
+          local state = require("telescope.actions.state")
+          local function open_selected()
+            local selection = state.get_selected_entry()
+            actions.close(_)
+            if selection and selection.value then
+              open_library_source(executable, selection.value.name)
+            end
+          end
+          map("i", "<CR>", open_selected)
+          map("n", "<CR>", open_selected)
+          return true
+        end,
+      }):find()
+      return
+    end
+
+    vim.ui.select(entries, {
+      prompt = "Que library types: " .. pattern,
+      format_item = function(entry)
+        return entry.text
+      end,
+    }, function(entry)
+      if entry then
+        open_library_source(executable, entry.name)
+      end
+    end)
+  end)
+end
+
 function M.setup(opts)
   opts = opts or {}
 
@@ -255,6 +337,12 @@ function M.setup(opts)
     setup_completion(client, bufnr, opts)
     setup_signature_help(client, bufnr, opts)
     setup_hover(client, bufnr, hover_handler, opts)
+    vim.api.nvim_buf_create_user_command(bufnr, "QueLib", function()
+      library_picker(opts.que_executable or "que")
+    end, { desc = "Browse Que library types" })
+    vim.keymap.set("n", opts.library_key or "<leader>g", function()
+      library_picker(opts.que_executable or "que")
+    end, { buffer = bufnr, silent = true, desc = "Browse Que library types" })
     if user_on_attach then
       user_on_attach(client, bufnr)
     end

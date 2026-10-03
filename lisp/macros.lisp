@@ -324,3 +324,26 @@
 
             (uqs body)
             (++ (uq index))))))))
+
+(letmacro match/string/cases
+  ((h default)
+    (qq (uq default)))
+  ((h word branch . rest)
+    (qq
+      (if
+        (= (uq h) (string/hash (uq word)))
+        (uq branch)
+        (match/string/cases
+          (uq h)
+          (uqs rest))))))
+
+(letmacro match
+  (lambda (value . cases)
+      (let h (gensym))
+      (qq
+        (block
+          (let (uq h)
+            (string/hash (uq value)))
+          (match/string/cases
+            (uq h)
+            (uqs cases))))))

@@ -1379,8 +1379,8 @@ mod tests {
     #[test]
     fn explain_reports_compiled_function_details_for_allocations_and_calls() {
         let report = explain_source(
-            r#"(let make (lambda (a b) [a b]))
-(make 40 2)"#,
+            r#"(let make (lambda a (block (let out []) (push! out a) out)))
+(make [40])"#,
         );
         let text = render_text(&report);
 
@@ -1409,8 +1409,8 @@ mod tests {
     #[test]
     fn explain_reports_ranked_optimization_targets() {
         let report = explain_source(
-            r#"(let make (lambda (a b) [a b]))
-(make 40 2)"#,
+            r#"(let make (lambda a (block (let out []) (push! out a) out)))
+(make [40])"#,
         );
         let text = render_text(&report);
 
