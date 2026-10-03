@@ -9476,8 +9476,8 @@ fn"#;
         );
         assert_eq!(
             fast_wat.matches("call $vec_materialize_i32").count(),
-            1,
-            "guarded param fast path should materialize once before raw stores, got:\n{}",
+            0,
+            "guarded param fast path should require an already-materialized vector, got:\n{}",
             fast_wat
         );
         assert!(
@@ -9485,6 +9485,107 @@ fn"#;
             "guarded param fast path should not call scalar set helper, got:\n{}",
             fast_wat
         );
+    }
+
+    #[test]
+    fn test_wat_guarded_constant_scalar_param_sets_survive_tail_body_lowering() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let expr = crate::parser::build(
+            "(let fill! (lambda (xs choose)
+                (if choose
+                    (do
+                      (set! xs 0 1)
+                      (set! xs 1 2)
+                      (+ (get xs 0) (get xs 1)))
+                    0)))
+             fill!",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let fn_start = wat
+            .find("(func $v_fill_bang_")
+            .expect("fill! function should exist");
+        let fn_end = wat[fn_start + 1..]
+            .find("\n  (func ")
+            .map(|offset| fn_start + 1 + offset)
+            .unwrap_or(wat.len());
+        let fn_wat = &wat[fn_start..fn_end];
+
+        assert!(
+            fn_wat.contains("call $vec_len"),
+            "scalar-returning tail-emitted bodies should retain the guarded vector fast path, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            fn_wat.contains("i32.const 1447380017"),
+            "guarded fast path should check for an already-materialized scalar vector, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            !fn_wat.contains("call $vec_materialize_i32"),
+            "guarded fast path should not call the materializer on every invocation, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            fn_wat.contains("i32.store"),
+            "scalar-returning guarded body should contain raw replacement stores, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            !fn_wat.contains("call $vec_set_scalar_materialized_i32"),
+            "scalar set helpers should be isolated in the cold fallback function, got:\n{}",
+            fn_wat
+        );
+        assert!(
+            wat.contains("(func $__que_scalar_set_fallback_v_fill_bang_"),
+            "guarded tail lowering should emit a separate cold fallback function, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
+    fn test_runtime_guarded_scalar_returning_param_set_keeps_short_vector_append_semantics() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let result = run_program_output_unlocked(
+            "(let fill! (lambda (xs)
+                (if true
+                    (do (set! xs 0 1) (set! xs 1 2) (length xs))
+                    0)))
+             (fill! [])",
+        );
+
+        assert_eq!(result, "2");
+    }
+
+    #[test]
+    fn test_runtime_guarded_scalar_returning_param_set_materializes_vector_views_in_fallback() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let result = run_program_output_with_std_and_opts_unlocked(
+            "(let fill! (lambda (xs)
+                (if true
+                    (do
+                      (set! xs 0 1)
+                      (set! xs 1 2)
+                      (+ (get xs 0) (get xs 1)))
+                    0)))
+             (let base [9 0 0 9])
+             (let view (slice 1 3 base))
+             {(fill! view) view base}",
+            true,
+        );
+
+        assert_eq!(result, "{ 3 { [1 2] [9 0 0 9] } }");
     }
 
     #[test]

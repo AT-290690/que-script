@@ -10904,18 +10904,104 @@ fn scalar_param_constant_set_requirements(
     required_min_lengths
 }
 
-fn compile_guarded_scalar_param_replacement_body(
+struct GuardedScalarParamBody {
+    requirements: Vec<(usize, i32)>,
+    fallback_code: String,
+    fast_prelude: String,
+    fast_code: String,
+    guard_tmp: usize,
+    result_ty: &'static str,
+}
+
+impl GuardedScalarParamBody {
+    fn inline_code(&self) -> String {
+        let guard_code = self
+            .requirements
+            .iter()
+            .map(|(slot, min_len)| {
+                format!(
+                    "local.get {slot}\n\
+                     i32.const 20\n\
+                     i32.add\n\
+                     i32.load\n\
+                     i32.const 1447380017\n\
+                     i32.ne\n\
+                     local.get {slot}\n\
+                     call $vec_len\n\
+                     i32.const {min_len}\n\
+                     i32.lt_s\n\
+                     i32.or\n\
+                     if\n\
+                       i32.const 1\n\
+                       local.set {guard_tmp}\n\
+                     end",
+                    guard_tmp = self.guard_tmp,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        format!(
+            "i32.const 0\n\
+             local.set {guard_tmp}\n\
+             {guard_code}\n\
+             local.get {guard_tmp}\n\
+             if (result {result_ty})\n\
+               {fallback_code}\n\
+             else\n\
+               {fast_prelude}\n\
+               {fast_code}\n\
+             end",
+            guard_tmp = self.guard_tmp,
+            result_ty = self.result_ty,
+            fallback_code = self.fallback_code,
+            fast_prelude = self.fast_prelude,
+            fast_code = self.fast_code,
+        )
+    }
+
+    fn any_short_guard_code(&self) -> String {
+        let mut parts = Vec::new();
+        for (i, (slot, min_len)) in self.requirements.iter().enumerate() {
+            parts.push(format!(
+                "local.get {slot}\n\
+                 i32.const 20\n\
+                 i32.add\n\
+                 i32.load\n\
+                 i32.const 1447380017\n\
+                 i32.ne\n\
+                 local.get {slot}\n\
+                 call $vec_len\n\
+                 i32.const {min_len}\n\
+                 i32.lt_s\n\
+                 i32.or"
+            ));
+            if i > 0 {
+                parts.push("i32.or".to_string());
+            }
+        }
+        parts.join("\n")
+    }
+}
+
+fn compile_guarded_scalar_param_replacement_body_with<F>(
     body: &TypedExpression,
     ctx: &Ctx<'_>,
     self_name: &str,
     param_count: usize,
-) -> Result<Option<String>, String> {
+    mut compile_body: F,
+) -> Result<Option<GuardedScalarParamBody>, String>
+where
+    F: FnMut(&Ctx<'_>) -> Result<Option<String>, String>,
+{
     let requirements = scalar_param_constant_set_requirements(body, ctx, param_count, self_name);
     if requirements.is_empty() {
         return Ok(None);
     }
 
-    let fallback_code = compile_expr(body, ctx)?;
+    let Some(fallback_code) = compile_body(ctx)? else {
+        return Ok(None);
+    };
     let mut proven_min_lengths = ctx.proven_scalar_vec_min_lengths.clone();
     for (slot, min_len) in &requirements {
         proven_min_lengths
@@ -10941,9 +11027,6 @@ fn compile_guarded_scalar_param_replacement_body(
             hoisted_data_slots.insert(**slot, data_slot);
             Some(format!(
                 "local.get {slot}\n\
-                 call $vec_materialize_i32\n\
-                 drop\n\
-                 local.get {slot}\n\
                  i32.const 16\n\
                  i32.add\n\
                  i32.load\n\
@@ -10972,7 +11055,9 @@ fn compile_guarded_scalar_param_replacement_body(
         nonnegative_int_locals: ctx.nonnegative_int_locals,
         tmp_i32: next_tmp_i32,
     };
-    let fast_code = compile_expr(body, &fast_ctx)?;
+    let Some(fast_code) = compile_body(&fast_ctx)? else {
+        return Ok(None);
+    };
     let result_ty = body
         .typ
         .as_ref()
@@ -10980,35 +11065,47 @@ fn compile_guarded_scalar_param_replacement_body(
         .and_then(wasm_val_type)?;
     let mut sorted_requirements = requirements.into_iter().collect::<Vec<_>>();
     sorted_requirements.sort_by_key(|(slot, _)| *slot);
-    let guard_code = sorted_requirements
-        .into_iter()
-        .map(|(slot, min_len)| {
-            format!(
-                "local.get {slot}\n\
-                 call $vec_len\n\
-                 i32.const {min_len}\n\
-                 i32.lt_s\n\
-                 if\n\
-                   i32.const 1\n\
-                   local.set {guard_tmp}\n\
-                 end"
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
 
-    Ok(Some(format!(
-        "i32.const 0\n\
-         local.set {guard_tmp}\n\
-         {guard_code}\n\
-         local.get {guard_tmp}\n\
-         if (result {result_ty})\n\
-           {fallback_code}\n\
-         else\n\
-           {fast_prelude}\n\
-           {fast_code}\n\
-         end"
-    )))
+    Ok(Some(GuardedScalarParamBody {
+        requirements: sorted_requirements,
+        fallback_code,
+        fast_prelude,
+        fast_code,
+        guard_tmp,
+        result_ty,
+    }))
+}
+
+fn compile_guarded_scalar_param_replacement_body(
+    body: &TypedExpression,
+    ctx: &Ctx<'_>,
+    self_name: &str,
+    param_count: usize,
+) -> Result<Option<String>, String> {
+    compile_guarded_scalar_param_replacement_body_with(
+        body,
+        ctx,
+        self_name,
+        param_count,
+        |body_ctx| compile_expr(body, body_ctx).map(Some),
+    )
+    .map(|maybe| maybe.map(|guarded| guarded.inline_code()))
+}
+
+fn compile_guarded_scalar_param_replacement_tail_body(
+    body: &TypedExpression,
+    ctx: &Ctx<'_>,
+    self_name: &str,
+    param_count: usize,
+    releasable_ref_slots: &[usize],
+) -> Result<Option<GuardedScalarParamBody>, String> {
+    compile_guarded_scalar_param_replacement_body_with(
+        body,
+        ctx,
+        self_name,
+        param_count,
+        |body_ctx| compile_tail_expr(body, body_ctx, self_name, param_count, releasable_ref_slots),
+    )
 }
 
 fn collect_loop_materialized_scalar_set_slots(
@@ -13458,7 +13555,20 @@ fn compile_lambda_func(
         TailCallMode::Conservative => !is_managed_local_type(&ret_ty) && !has_managed_locals,
         TailCallMode::Aggressive => true,
     };
-    let tail_body_code = if tco_safe {
+    let guarded_tail_body = if tco_safe {
+        compile_guarded_scalar_param_replacement_tail_body(
+            body_node,
+            &ctx,
+            name,
+            params.len(),
+            &ref_slots,
+        )?
+    } else {
+        None
+    };
+    let tail_body_code = if let Some(guarded) = guarded_tail_body.as_ref() {
+        Some(guarded.inline_code())
+    } else if tco_safe {
         compile_tail_expr(body_node, &ctx, name, params.len(), &ref_slots)?
     } else {
         None
@@ -13484,6 +13594,63 @@ fn compile_lambda_func(
     }
     emit_i32_locals(&mut out, borrowed_top_level_count);
     emit_i32_locals(&mut out, scratch_i32_locals);
+    if let Some(guarded) = guarded_tail_body {
+        let fallback_name = format!("__que_scalar_set_fallback_{}", ident(name));
+        out.push_str(&format!(
+            "    {}\n",
+            guarded.any_short_guard_code().replace('\n', "\n    ")
+        ));
+        out.push_str(&format!("    if (result {})\n", guarded.result_ty));
+        for i in 0..params.len() {
+            out.push_str(&format!("      local.get {}\n", i));
+        }
+        out.push_str(&format!("      call ${}\n", fallback_name));
+        out.push_str("    else\n");
+        if !borrowed_top_level_prelude.is_empty() {
+            out.push_str(&format!(
+                "      {}\n",
+                borrowed_top_level_prelude.replace('\n', "\n      ")
+            ));
+        }
+        if !guarded.fast_prelude.is_empty() {
+            out.push_str(&format!(
+                "      {}\n",
+                guarded.fast_prelude.replace('\n', "\n      ")
+            ));
+        }
+        out.push_str(&format!(
+            "      {}\n",
+            guarded.fast_code.replace('\n', "\n      ")
+        ));
+        out.push_str("    end\n");
+        out.push_str("    return\n");
+        out.push_str("    unreachable\n");
+        out.push_str("  )\n");
+
+        out.push_str(&format!("  (func ${}", fallback_name));
+        for (_pname, pty) in &params {
+            out.push_str(&format!(" (param {})", wasm_val_type(pty)?));
+        }
+        out.push_str(&format!(" (result {})\n", wasm_val_type(&ret_ty)?));
+        for (_n, t) in &local_defs {
+            out.push_str(&format!("    (local {})\n", wasm_val_type(t)?));
+        }
+        emit_i32_locals(&mut out, borrowed_top_level_count);
+        emit_i32_locals(&mut out, scratch_i32_locals);
+        if !borrowed_top_level_prelude.is_empty() {
+            out.push_str(&format!(
+                "    {}\n",
+                borrowed_top_level_prelude.replace('\n', "\n    ")
+            ));
+        }
+        out.push_str(&format!(
+            "    {}\n",
+            guarded.fallback_code.replace('\n', "\n    ")
+        ));
+        out.push_str("    unreachable\n");
+        out.push_str("  )\n");
+        return Ok(out);
+    }
     if let Some(tail_code) = tail_body_code {
         if !borrowed_top_level_prelude.is_empty() {
             out.push_str(&format!(
