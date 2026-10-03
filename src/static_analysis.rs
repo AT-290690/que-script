@@ -17,11 +17,101 @@ pub struct BoundsProof {
     pub details: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AnalysisNodeId {
+    /// Zero-based top-level form in the user's source, excluding bundled forms.
+    pub user_form_index: usize,
+    /// Stable preorder ordinal among checked operations in that form.
+    pub operation_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AnalysisSourcePosition {
+    pub line: u32,
+    pub character: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AnalysisSourceSpan {
+    pub start: AnalysisSourcePosition,
+    pub end: AnalysisSourcePosition,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProofKind {
+    BoundsRead,
+    BoundsWrite,
+    /// The write is proven to replace an existing element, rather than using
+    /// Que's additional append-at-length `set!` case.
+    BoundsWriteReplacement,
+    NonEmpty,
+    IntegerArithmetic,
+    NonZeroDivisor,
+    Termination,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProofStatus {
+    ProvenSafe,
+    DefinitelyInvalid,
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StaticProof {
+    pub id: AnalysisNodeId,
+    pub kind: ProofKind,
+    pub status: ProofStatus,
+    pub expression: String,
+    pub details: Vec<String>,
+    /// Present when the normalized operation can be mapped unambiguously back
+    /// to the original user source. Generated/desugared operations keep their
+    /// stable node ID even when no direct source spelling exists.
+    pub source_span: Option<AnalysisSourceSpan>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StaticAnalysisReport {
+    pub diagnostics: Vec<StaticAnalysisDiagnostic>,
+    pub proofs: Vec<StaticProof>,
+}
+
 #[derive(Default)]
 struct AnalysisSink {
     diagnostics: Vec<String>,
     bounds_proofs: Vec<BoundsProof>,
+    proofs: Vec<StaticProof>,
     capture_proofs: bool,
+    suppress_output: bool,
+    user_form_index: usize,
+    next_operation_index: usize,
+}
+
+impl AnalysisSink {
+    fn record_proof(
+        &mut self,
+        kind: ProofKind,
+        status: ProofStatus,
+        expression: &Expression,
+        details: Vec<String>,
+    ) {
+        if self.suppress_output {
+            return;
+        }
+        let id = AnalysisNodeId {
+            user_form_index: self.user_form_index,
+            operation_index: self.next_operation_index,
+        };
+        self.next_operation_index += 1;
+        self.proofs.push(StaticProof {
+            id,
+            kind,
+            status,
+            expression: expression.to_lisp(),
+            details,
+            source_span: None,
+        });
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -38,6 +128,20 @@ struct PredicateSummary {
     params: Vec<String>,
     body: String,
 }
+
+#[derive(Clone, Debug)]
+struct ValueSummary {
+    params: Vec<String>,
+    body: Expression,
+}
+
+impl PartialEq for ValueSummary {
+    fn eq(&self, other: &Self) -> bool {
+        self.params == other.params && self.body.to_lisp() == other.body.to_lisp()
+    }
+}
+
+impl Eq for ValueSummary {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct IntInterval {
@@ -73,6 +177,58 @@ impl IntInterval {
     }
 }
 
+const MAX_INTERVAL_ALTERNATIVES: usize = 8;
+
+fn normalize_intervals(mut intervals: Vec<IntInterval>) -> Vec<IntInterval> {
+    intervals.retain(|interval| interval.min <= interval.max);
+    intervals.sort_by_key(|interval| (interval.min, interval.max));
+    let mut normalized: Vec<IntInterval> = Vec::new();
+    for interval in intervals {
+        if let Some(previous) = normalized.last_mut() {
+            if interval.min <= previous.max.saturating_add(1) {
+                previous.max = previous.max.max(interval.max);
+                continue;
+            }
+        }
+        normalized.push(interval);
+    }
+    if normalized.len() > MAX_INTERVAL_ALTERNATIVES {
+        let min = normalized.first().expect("nonempty intervals").min;
+        let max = normalized.last().expect("nonempty intervals").max;
+        vec![IntInterval { min, max }]
+    } else {
+        normalized
+    }
+}
+
+fn interval_hull(intervals: &[IntInterval]) -> Option<IntInterval> {
+    Some(IntInterval {
+        min: intervals.iter().map(|interval| interval.min).min()?,
+        max: intervals.iter().map(|interval| interval.max).max()?,
+    })
+}
+
+fn alternatives_for_key(key: &str, state: &AbstractState) -> Option<Vec<IntInterval>> {
+    state
+        .integer_alternatives
+        .get(key)
+        .cloned()
+        .or_else(|| {
+            state
+                .integer_ranges
+                .get(key)
+                .copied()
+                .map(|range| vec![range])
+        })
+        .or_else(|| {
+            state
+                .integer_constants
+                .get(key)
+                .copied()
+                .map(|value| vec![IntInterval::exact(value)])
+        })
+}
+
 /// Abstract state at one program point.  This is deliberately independent of
 /// the runtime representation: later analyses (division, overflow, and so on)
 /// can add domains here without becoming part of WAT lowering.
@@ -82,6 +238,10 @@ struct AbstractState {
     nonnegative: HashSet<String>,
     integer_constants: HashMap<String, i32>,
     integer_ranges: HashMap<String, IntInterval>,
+    /// A bounded disjunction of integer intervals. This preserves holes such
+    /// as `x < 0 || x > 0` that a single interval would collapse back to the
+    /// entire Int domain.
+    integer_alternatives: HashMap<String, Vec<IntInterval>>,
     nonzero: HashSet<String>,
     /// Symbolic integer ordering facts: `(a, b)` means `a <= b`.
     leq_pairs: HashSet<(String, String)>,
@@ -102,6 +262,7 @@ struct AbstractState {
     scalar_aliases: HashMap<String, String>,
     guard_summaries: HashMap<String, GuardSummary>,
     predicate_summaries: HashMap<String, PredicateSummary>,
+    value_summaries: HashMap<String, ValueSummary>,
 }
 
 /// Conservative control-flow merge.  A fact is available after a join only
@@ -119,7 +280,7 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         .filter(|(name, value)| right.integer_constants.get(*name) == Some(*value))
         .map(|(name, value)| (name.clone(), *value))
         .collect();
-    let integer_ranges = left
+    let integer_ranges: HashMap<String, IntInterval> = left
         .integer_ranges
         .iter()
         .filter_map(|(name, left_range)| {
@@ -132,6 +293,14 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
                     },
                 )
             })
+        })
+        .collect();
+    let integer_alternatives = integer_ranges
+        .keys()
+        .filter_map(|name| {
+            let mut alternatives = alternatives_for_key(name, left)?;
+            alternatives.extend(alternatives_for_key(name, right)?);
+            Some((name.clone(), normalize_intervals(alternatives)))
         })
         .collect();
     let length_sources = left
@@ -206,6 +375,7 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
             .collect(),
         integer_constants,
         integer_ranges,
+        integer_alternatives,
         nonzero: left.nonzero.intersection(&right.nonzero).cloned().collect(),
         leq_pairs: left
             .leq_pairs
@@ -224,6 +394,7 @@ fn join_states(left: &AbstractState, right: &AbstractState) -> AbstractState {
         // path-sensitive fact.
         guard_summaries: left.guard_summaries.clone(),
         predicate_summaries: left.predicate_summaries.clone(),
+        value_summaries: left.value_summaries.clone(),
     }
 }
 
@@ -253,6 +424,9 @@ fn widen_loop_state(previous: &AbstractState, next: &AbstractState) -> AbstractS
             },
         };
         widened.integer_ranges.insert(name.clone(), range);
+        widened
+            .integer_alternatives
+            .insert(name.clone(), vec![range]);
         if range.min != range.max {
             widened.integer_constants.remove(name);
         }
@@ -405,6 +579,9 @@ fn refine_bounded_loop_updates(
         };
         if range.fits_i32() {
             header.integer_ranges.insert(name.clone(), range);
+            header
+                .integer_alternatives
+                .insert(name.clone(), vec![range]);
             if range.min != range.max {
                 header.integer_constants.remove(&name);
             }
@@ -805,10 +982,16 @@ fn propagate_relational_ranges(facts: &mut AbstractState) {
             };
             if narrowed_lower != lower_range {
                 facts.integer_ranges.insert(lower.clone(), narrowed_lower);
+                facts
+                    .integer_alternatives
+                    .insert(lower.clone(), vec![narrowed_lower]);
                 changed = true;
             }
             if narrowed_upper != upper_range {
                 facts.integer_ranges.insert(upper.clone(), narrowed_upper);
+                facts
+                    .integer_alternatives
+                    .insert(upper.clone(), vec![narrowed_upper]);
                 changed = true;
             }
         }
@@ -881,6 +1064,121 @@ fn safe_midpoint_interval(
 }
 
 fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInterval> {
+    integer_interval_at_depth(expr, state, 0)
+}
+
+fn integer_interval_alternatives(
+    expr: &Expression,
+    state: &AbstractState,
+) -> Option<Vec<IntInterval>> {
+    integer_interval_alternatives_at_depth(expr, state, 0)
+}
+
+fn integer_interval_alternatives_at_depth(
+    expr: &Expression,
+    state: &AbstractState,
+    expansion_depth: usize,
+) -> Option<Vec<IntInterval>> {
+    match expr {
+        Expression::Int(value) => Some(vec![IntInterval::exact(*value)]),
+        Expression::Word(name) => {
+            let key = canonical_scalar(expr, state);
+            alternatives_for_key(&key, state)
+                .or_else(|| alternatives_for_key(name, state))
+                .or_else(|| {
+                    integer_interval_at_depth(expr, state, expansion_depth).map(|x| vec![x])
+                })
+        }
+        Expression::Apply(items) => match items.as_slice() {
+            [Expression::Word(op), left, right] if matches!(op.as_str(), "+" | "-" | "*") => {
+                let left = integer_interval_alternatives_at_depth(left, state, expansion_depth)?;
+                let right = integer_interval_alternatives_at_depth(right, state, expansion_depth)?;
+                let mut results = Vec::new();
+                for left in left {
+                    for right in &right {
+                        results.push(integer_arithmetic_interval(op, left, *right)?);
+                    }
+                }
+                Some(normalize_intervals(results))
+            }
+            [Expression::Word(op), numerator, divisor] if op == "/" => {
+                let numerator =
+                    integer_interval_alternatives_at_depth(numerator, state, expansion_depth)?;
+                let divisor = integer_constant(divisor, state)?;
+                if divisor == 0 {
+                    return None;
+                }
+                Some(normalize_intervals(
+                    numerator
+                        .into_iter()
+                        .map(|range| {
+                            let a = range.min / divisor as i64;
+                            let b = range.max / divisor as i64;
+                            IntInterval {
+                                min: a.min(b),
+                                max: a.max(b),
+                            }
+                        })
+                        .collect(),
+                ))
+            }
+            [Expression::Word(op), condition, consequent, alternate] if op == "if" => {
+                match predicate_truth(condition, state, 0) {
+                    Some(true) => integer_interval_alternatives_at_depth(
+                        consequent,
+                        &state_for_true_branch(condition, state),
+                        expansion_depth,
+                    ),
+                    Some(false) => integer_interval_alternatives_at_depth(
+                        alternate,
+                        &state_for_false_branch(condition, state),
+                        expansion_depth,
+                    ),
+                    None => {
+                        let mut alternatives = integer_interval_alternatives_at_depth(
+                            consequent,
+                            &state_for_true_branch(condition, state),
+                            expansion_depth,
+                        )?;
+                        alternatives.extend(integer_interval_alternatives_at_depth(
+                            alternate,
+                            &state_for_false_branch(condition, state),
+                            expansion_depth,
+                        )?);
+                        Some(normalize_intervals(alternatives))
+                    }
+                }
+            }
+            [Expression::Word(op), args @ ..] if expansion_depth < 16 => {
+                if let Some(summary) = state.value_summaries.get(op) {
+                    if summary.params.len() == args.len() {
+                        let substitutions: HashMap<&str, &Expression> = summary
+                            .params
+                            .iter()
+                            .map(String::as_str)
+                            .zip(args)
+                            .collect();
+                        let expanded = substitute_predicate_body(&summary.body, &substitutions);
+                        return integer_interval_alternatives_at_depth(
+                            &expanded,
+                            state,
+                            expansion_depth + 1,
+                        );
+                    }
+                }
+                integer_interval_at_depth(expr, state, expansion_depth).map(|range| vec![range])
+            }
+            _ => integer_interval_at_depth(expr, state, expansion_depth).map(|range| vec![range]),
+        },
+        Expression::Dec(_) => None,
+    }
+}
+
+fn integer_interval_at_depth(
+    expr: &Expression,
+    state: &AbstractState,
+    expansion_depth: usize,
+) -> Option<IntInterval> {
     match expr {
         Expression::Int(value) => Some(IntInterval::exact(*value)),
         Expression::Word(name) => {
@@ -929,8 +1227,8 @@ fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInter
                         return Some(midpoint);
                     }
                 }
-                let left_range = integer_interval(left, state)?;
-                let right_range = integer_interval(right, state)?;
+                let left_range = integer_interval_at_depth(left, state, expansion_depth)?;
+                let right_range = integer_interval_at_depth(right, state, expansion_depth)?;
                 let mut result = integer_arithmetic_interval(op, left_range, right_range)?;
                 if op == "-" {
                     if relation_is_known_leq(&items[2], &items[1], state) {
@@ -943,7 +1241,7 @@ fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInter
                 Some(result)
             }
             [Expression::Word(op), numerator, divisor] if op == "/" => {
-                let numerator = integer_interval(numerator, state)?;
+                let numerator = integer_interval_at_depth(numerator, state, expansion_depth)?;
                 let divisor = integer_constant(divisor, state)?;
                 if divisor == 0 {
                     return None;
@@ -954,6 +1252,71 @@ fn integer_interval(expr: &Expression, state: &AbstractState) -> Option<IntInter
                     min: a.min(b),
                     max: a.max(b),
                 })
+            }
+            [Expression::Word(op), condition, consequent, alternate] if op == "if" => {
+                match predicate_truth(condition, state, 0) {
+                    Some(true) => integer_interval_at_depth(
+                        consequent,
+                        &state_for_true_branch(condition, state),
+                        expansion_depth,
+                    ),
+                    Some(false) => integer_interval_at_depth(
+                        alternate,
+                        &state_for_false_branch(condition, state),
+                        expansion_depth,
+                    ),
+                    None => {
+                        let consequent = integer_interval_at_depth(
+                            consequent,
+                            &state_for_true_branch(condition, state),
+                            expansion_depth,
+                        )?;
+                        let alternate = integer_interval_at_depth(
+                            alternate,
+                            &state_for_false_branch(condition, state),
+                            expansion_depth,
+                        )?;
+                        Some(IntInterval {
+                            min: consequent.min.min(alternate.min),
+                            max: consequent.max.max(alternate.max),
+                        })
+                    }
+                }
+            }
+            [Expression::Word(op), sequence @ ..] if matches!(op.as_str(), "do" | "block") => {
+                let mut scoped = state.clone();
+                let mut result = None;
+                for item in sequence {
+                    result = integer_interval_at_depth(item, &scoped, expansion_depth);
+                    if let Expression::Apply(binding) = item {
+                        if let [Expression::Word(bind), Expression::Word(name), value] =
+                            binding.as_slice()
+                        {
+                            if matches!(bind.as_str(), "let" | "mut" | "alter!") {
+                                assign_abstract_scalar(name, value, &mut scoped);
+                            }
+                        }
+                    }
+                }
+                result
+            }
+            [Expression::Word(op), args @ ..] if expansion_depth < 16 => {
+                if let Some(summary) = state.value_summaries.get(op) {
+                    if summary.params.len() == args.len() {
+                        let substitutions: HashMap<&str, &Expression> = summary
+                            .params
+                            .iter()
+                            .map(String::as_str)
+                            .zip(args)
+                            .collect();
+                        let expanded = substitute_predicate_body(&summary.body, &substitutions);
+                        return integer_interval_at_depth(&expanded, state, expansion_depth + 1);
+                    }
+                }
+                state
+                    .integer_ranges
+                    .get(&canonical_scalar(expr, state))
+                    .copied()
             }
             _ => state
                 .integer_ranges
@@ -997,7 +1360,8 @@ fn integer_arithmetic_interval(
 fn divisor_is_proven_nonzero(expr: &Expression, state: &AbstractState) -> bool {
     let key = canonical_scalar(expr, state);
     state.nonzero.contains(&key)
-        || integer_interval(expr, state).is_some_and(IntInterval::excludes_zero)
+        || integer_interval_alternatives(expr, state)
+            .is_some_and(|alternatives| alternatives.iter().all(|range| range.excludes_zero()))
 }
 
 fn canonical_access(expr: &Expression, state: &AbstractState) -> String {
@@ -1037,6 +1401,127 @@ fn literal_vector_length(expr: &Expression) -> Option<usize> {
             Some(items.len().saturating_sub(1))
         }
         _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VectorLengthInfo {
+    exact: Option<usize>,
+    minimum: usize,
+}
+
+fn vector_length_info(expr: &Expression, state: &AbstractState) -> Option<VectorLengthInfo> {
+    vector_length_info_at_depth(expr, state, 0)
+}
+
+fn vector_length_info_at_depth(
+    expr: &Expression,
+    state: &AbstractState,
+    expansion_depth: usize,
+) -> Option<VectorLengthInfo> {
+    if let Some(length) = literal_vector_length(expr) {
+        return Some(VectorLengthInfo {
+            exact: Some(length),
+            minimum: length,
+        });
+    }
+    match expr {
+        Expression::Word(_) => {
+            let key = canonical_access(expr, state);
+            if let Some(length) = state.fixed_lengths.get(&key).copied() {
+                return Some(VectorLengthInfo {
+                    exact: Some(length),
+                    minimum: length,
+                });
+            }
+            state
+                .minimum_lengths
+                .get(&key)
+                .copied()
+                .map(|minimum| VectorLengthInfo {
+                    exact: None,
+                    minimum,
+                })
+        }
+        Expression::Apply(items) => match items.as_slice() {
+            [Expression::Word(op), value] if op == "cdr" => {
+                let inner = vector_length_info_at_depth(value, state, expansion_depth)?;
+                Some(VectorLengthInfo {
+                    exact: inner.exact.map(|length| length.saturating_sub(1)),
+                    minimum: inner.minimum.saturating_sub(1),
+                })
+            }
+            [Expression::Word(op), left, right] if op == "cons" => {
+                let left = vector_length_info_at_depth(left, state, expansion_depth)?;
+                let right = vector_length_info_at_depth(right, state, expansion_depth)?;
+                Some(VectorLengthInfo {
+                    exact: left
+                        .exact
+                        .zip(right.exact)
+                        .and_then(|(left, right)| left.checked_add(right)),
+                    minimum: left.minimum.saturating_add(right.minimum),
+                })
+            }
+            [Expression::Word(op), condition, consequent, alternate] if op == "if" => {
+                let consequent = vector_length_info_at_depth(
+                    consequent,
+                    &state_for_true_branch(condition, state),
+                    expansion_depth,
+                )?;
+                let alternate = vector_length_info_at_depth(
+                    alternate,
+                    &state_for_false_branch(condition, state),
+                    expansion_depth,
+                )?;
+                Some(VectorLengthInfo {
+                    exact: (consequent.exact == alternate.exact)
+                        .then_some(consequent.exact)
+                        .flatten(),
+                    minimum: consequent.minimum.min(alternate.minimum),
+                })
+            }
+            [Expression::Word(op), sequence @ ..] if matches!(op.as_str(), "do" | "block") => {
+                let mut scoped = state.clone();
+                let mut result = None;
+                for item in sequence {
+                    result = vector_length_info_at_depth(item, &scoped, expansion_depth);
+                    if let Expression::Apply(binding) = item {
+                        if let [Expression::Word(bind), Expression::Word(name), value] =
+                            binding.as_slice()
+                        {
+                            if matches!(bind.as_str(), "let" | "mut" | "alter!") {
+                                let length_info =
+                                    vector_length_info_at_depth(value, &scoped, expansion_depth);
+                                assign_abstract_scalar(name, value, &mut scoped);
+                                if let Some(info) = length_info {
+                                    if let Some(exact) = info.exact {
+                                        scoped.fixed_lengths.insert(name.clone(), exact);
+                                    }
+                                    scoped.minimum_lengths.insert(name.clone(), info.minimum);
+                                }
+                            }
+                        }
+                    }
+                }
+                result
+            }
+            [Expression::Word(op), args @ ..] if expansion_depth < 16 => {
+                let summary = state.value_summaries.get(op)?;
+                if summary.params.len() != args.len() {
+                    return None;
+                }
+                let substitutions: HashMap<&str, &Expression> = summary
+                    .params
+                    .iter()
+                    .map(String::as_str)
+                    .zip(args)
+                    .collect();
+                let expanded = substitute_predicate_body(&summary.body, &substitutions);
+                vector_length_info_at_depth(&expanded, state, expansion_depth + 1)
+            }
+            _ => None,
+        },
+        Expression::Int(_) | Expression::Dec(_) => None,
     }
 }
 
@@ -1352,21 +1837,61 @@ fn known_integer_predicate(expr: &Expression, state: &AbstractState) -> Option<b
 
 fn constrain_integer_range(expr: &Expression, facts: &mut AbstractState, constraint: IntInterval) {
     let key = canonical_scalar(expr, facts);
-    let current = integer_interval(expr, facts).unwrap_or(IntInterval::I32);
-    let mut narrowed = IntInterval {
-        min: current.min.max(constraint.min),
-        max: current.max.min(constraint.max),
-    };
-    if facts.nonzero.contains(&key) {
-        if narrowed.min == 0 && narrowed.max > 0 {
-            narrowed.min = 1;
-        } else if narrowed.max == 0 && narrowed.min < 0 {
-            narrowed.max = -1;
+    let current =
+        integer_interval_alternatives(expr, facts).unwrap_or_else(|| vec![IntInterval::I32]);
+    let mut narrowed = Vec::new();
+    for range in current {
+        let intersection = IntInterval {
+            min: range.min.max(constraint.min),
+            max: range.max.min(constraint.max),
+        };
+        if intersection.min <= intersection.max {
+            narrowed.push(intersection);
         }
     }
-    if narrowed.min <= narrowed.max {
-        facts.integer_ranges.insert(key.clone(), narrowed);
-        if narrowed.excludes_zero() {
+    let narrowed = normalize_intervals(narrowed);
+    if let Some(hull) = interval_hull(&narrowed) {
+        facts.integer_ranges.insert(key.clone(), hull);
+        facts
+            .integer_alternatives
+            .insert(key.clone(), narrowed.clone());
+        if narrowed.iter().all(|range| range.excludes_zero()) {
+            facts.nonzero.insert(key);
+        }
+    }
+}
+
+fn exclude_integer_value(expr: &Expression, facts: &mut AbstractState, excluded: i32) {
+    let key = canonical_scalar(expr, facts);
+    let current =
+        integer_interval_alternatives(expr, facts).unwrap_or_else(|| vec![IntInterval::I32]);
+    let excluded = i64::from(excluded);
+    let mut alternatives = Vec::new();
+    for range in current {
+        if excluded < range.min || excluded > range.max {
+            alternatives.push(range);
+            continue;
+        }
+        if range.min < excluded {
+            alternatives.push(IntInterval {
+                min: range.min,
+                max: excluded - 1,
+            });
+        }
+        if excluded < range.max {
+            alternatives.push(IntInterval {
+                min: excluded + 1,
+                max: range.max,
+            });
+        }
+    }
+    let alternatives = normalize_intervals(alternatives);
+    if let Some(hull) = interval_hull(&alternatives) {
+        facts.integer_ranges.insert(key.clone(), hull);
+        facts
+            .integer_alternatives
+            .insert(key.clone(), alternatives.clone());
+        if alternatives.iter().all(|range| range.excludes_zero()) {
             facts.nonzero.insert(key);
         }
     }
@@ -1569,25 +2094,7 @@ fn collect_numeric_guard_facts(
             record_product_comparison(left, right, effective, facts);
             match effective {
                 "=" => constrain_integer_range(value, facts, IntInterval::exact(bound)),
-                "!=" if bound == 0 => {
-                    facts.nonzero.insert(canonical_scalar(value, facts));
-                }
-                "!=" if bound == i32::MAX => constrain_integer_range(
-                    value,
-                    facts,
-                    IntInterval {
-                        min: i32::MIN as i64,
-                        max: (i32::MAX as i64) - 1,
-                    },
-                ),
-                "!=" if bound == i32::MIN => constrain_integer_range(
-                    value,
-                    facts,
-                    IntInterval {
-                        min: (i32::MIN as i64) + 1,
-                        max: i32::MAX as i64,
-                    },
-                ),
+                "!=" => exclude_integer_value(value, facts, bound),
                 ">" => constrain_integer_range(
                     value,
                     facts,
@@ -1872,11 +2379,20 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     let remains_nonnegative = expression_is_nonnegative(value, facts);
     let constant = integer_constant(value, facts);
     let interval = integer_interval(value, facts).filter(|range| range.fits_i32());
+    let alternatives = integer_interval_alternatives(value, facts).map(|ranges| {
+        normalize_intervals(
+            ranges
+                .into_iter()
+                .filter(|interval| interval.fits_i32())
+                .collect(),
+        )
+    });
     let remains_nonzero = divisor_is_proven_nonzero(value, facts);
     facts.safe_pairs.retain(|(_, index)| index != name);
     facts.nonnegative.remove(name);
     facts.integer_constants.remove(name);
     facts.integer_ranges.remove(name);
+    facts.integer_alternatives.remove(name);
     facts.nonzero.remove(name);
     facts.fixed_lengths.remove(name);
     facts.minimum_lengths.remove(name);
@@ -1905,6 +2421,11 @@ fn assign_abstract_scalar(name: &str, value: &Expression, facts: &mut AbstractSt
     if let Some(interval) = interval {
         facts.integer_ranges.insert(name.to_string(), interval);
     }
+    if let Some(alternatives) = alternatives.filter(|ranges| !ranges.is_empty()) {
+        facts
+            .integer_alternatives
+            .insert(name.to_string(), alternatives);
+    }
     if remains_nonzero {
         facts.nonzero.insert(name.to_string());
     }
@@ -1927,6 +2448,7 @@ fn forget_lambda_parameter(expr: &Expression, facts: &mut AbstractState) {
             facts.nonzero.remove(name);
             facts.integer_constants.remove(name);
             facts.integer_ranges.remove(name);
+            facts.integer_alternatives.remove(name);
             facts.scalar_aliases.remove(name);
             facts
                 .leq_pairs
@@ -1957,6 +2479,7 @@ fn forget_local_name(name: &str, facts: &mut AbstractState) {
     facts.nonnegative.remove(name);
     facts.integer_constants.remove(name);
     facts.integer_ranges.remove(name);
+    facts.integer_alternatives.remove(name);
     facts.nonzero.remove(name);
     facts.fixed_lengths.remove(name);
     facts.minimum_lengths.remove(name);
@@ -1978,6 +2501,9 @@ fn forget_local_name(name: &str, facts: &mut AbstractState) {
 }
 
 fn record_diagnostic(diagnostics: &mut AnalysisSink, message: String) {
+    if diagnostics.suppress_output {
+        return;
+    }
     if !diagnostics.diagnostics.contains(&message) {
         diagnostics.diagnostics.push(message);
     }
@@ -2908,6 +3434,44 @@ fn recursive_calls_move_away_from_guard(
     })
 }
 
+fn recursive_calls_all_move_toward_guard(
+    expr: &Expression,
+    function: &str,
+    params: &[String],
+    parameter_index: usize,
+    expected: CounterStep,
+    facts: &AbstractState,
+    found: &mut bool,
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return true;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return true;
+    }
+    if matches!(items.first(), Some(Expression::Word(name)) if name == function)
+        && items.len() == params.len() + 1
+    {
+        *found = true;
+        return recursive_argument_step(
+            &items[parameter_index + 1],
+            &params[parameter_index],
+            facts,
+        ) == expected;
+    }
+    items.iter().skip(1).all(|child| {
+        recursive_calls_all_move_toward_guard(
+            child,
+            function,
+            params,
+            parameter_index,
+            expected,
+            facts,
+            found,
+        )
+    })
+}
+
 fn analyze_recursive_progress(
     body: &Expression,
     function: &str,
@@ -2954,13 +3518,14 @@ fn analyze_recursive_progress(
             } else {
                 (&items[3], false)
             };
+            let recursive_facts = state_for_branch(&items[1], facts, recurse_when_true);
             if recursive_calls_move_away_from_guard(
                 recursive_branch,
                 function,
                 params,
                 &items[1],
                 recurse_when_true,
-                &state_for_branch(&items[1], facts, recurse_when_true),
+                &recursive_facts,
             ) {
                 record_diagnostic(
                     diagnostics,
@@ -2970,6 +3535,33 @@ fn analyze_recursive_progress(
                         recursive_branch.to_lisp()
                     ),
                 );
+            }
+            for (index, parameter) in params.iter().enumerate() {
+                let Some(expected) =
+                    guard_direction_for_parameter(&items[1], parameter, !recurse_when_true)
+                else {
+                    continue;
+                };
+                let mut found = false;
+                if !recursive_calls_all_move_toward_guard(
+                    recursive_branch,
+                    function,
+                    params,
+                    index,
+                    expected,
+                    &recursive_facts,
+                    &mut found,
+                ) {
+                    record_diagnostic(
+                        diagnostics,
+                        format!(
+                            "termination: not every recursive call to '{}' moves '{}' toward its base-case guard: `{}`",
+                            function,
+                            parameter,
+                            recursive_branch.to_lisp()
+                        ),
+                    );
+                }
             }
             if !recurse_when_true {
                 for (index, parameter) in params.iter().enumerate() {
@@ -3111,16 +3703,19 @@ fn access_index_is_proven(
         })
     });
     if index_constant.is_none() || index_has_widened_range {
-        if let (Some(index_range), Some(length)) = (integer_interval(index, facts), known_length) {
+        if let (Some(index_ranges), Some(length)) =
+            (integer_interval_alternatives(index, facts), known_length)
+        {
             let maximum = if allow_append {
                 length
             } else {
                 length.saturating_sub(1)
             };
-            if index_range.min >= 0
-                && (length > 0 || allow_append)
-                && index_range.max <= maximum as i64
-            {
+            if index_ranges.iter().all(|index_range| {
+                index_range.min >= 0
+                    && (length > 0 || allow_append)
+                    && index_range.max <= maximum as i64
+            }) {
                 return true;
             }
         }
@@ -3156,6 +3751,77 @@ fn access_index_is_proven(
         .is_some_and(|len| index < len || (allow_append && index == len))
 }
 
+fn access_index_status(
+    vector: &Expression,
+    index: &Expression,
+    facts: &AbstractState,
+    allow_append: bool,
+) -> ProofStatus {
+    if access_index_is_proven(vector, index, facts, allow_append) {
+        return ProofStatus::ProvenSafe;
+    }
+    let vector_key = canonical_access(vector, facts);
+    let known_length = facts
+        .fixed_lengths
+        .get(&vector_key)
+        .copied()
+        .or_else(|| literal_vector_length(vector));
+    let Some(index_ranges) = integer_interval_alternatives(index, facts) else {
+        return ProofStatus::Unknown;
+    };
+    if index_ranges.iter().all(|range| range.max < 0) {
+        return ProofStatus::DefinitelyInvalid;
+    }
+    let Some(length) = known_length else {
+        return ProofStatus::Unknown;
+    };
+    let largest_valid = if allow_append {
+        length as i64
+    } else if length == 0 {
+        -1
+    } else {
+        length.saturating_sub(1) as i64
+    };
+    if index_ranges
+        .iter()
+        .all(|range| range.max < 0 || range.min > largest_valid)
+    {
+        ProofStatus::DefinitelyInvalid
+    } else {
+        ProofStatus::Unknown
+    }
+}
+
+fn access_proof_details(
+    vector: &Expression,
+    index: &Expression,
+    facts: &AbstractState,
+) -> Vec<String> {
+    let vector_key = canonical_access(vector, facts);
+    let mut details = Vec::new();
+    if let Some(length) = facts
+        .fixed_lengths
+        .get(&vector_key)
+        .copied()
+        .or_else(|| literal_vector_length(vector))
+    {
+        details.push(format!("length({vector_key}) = {length}"));
+    } else if let Some(minimum) = facts.minimum_lengths.get(&vector_key) {
+        details.push(format!("length({vector_key}) >= {minimum}"));
+    }
+    if let Some(ranges) = integer_interval_alternatives(index, facts) {
+        details.push(format!(
+            "index range = {}",
+            ranges
+                .iter()
+                .map(|range| format!("{}..{}", range.min, range.max))
+                .collect::<Vec<_>>()
+                .join(" or ")
+        ));
+    }
+    details
+}
+
 fn validate_static_bounds_expr(
     expr: &Expression,
     facts: &mut AbstractState,
@@ -3167,11 +3833,45 @@ fn validate_static_bounds_expr(
     let op = items.first().and_then(word).unwrap_or("");
 
     if matches!(op, "/" | "%") && items.len() == 3 {
-        if !divisor_is_proven_nonzero(&items[2], facts) {
+        let divisor_alternatives = integer_interval_alternatives(&items[2], facts);
+        let divisor_status = if divisor_is_proven_nonzero(&items[2], facts) {
+            ProofStatus::ProvenSafe
+        } else if divisor_alternatives.as_ref().is_some_and(|alternatives| {
+            alternatives
+                .iter()
+                .all(|range| *range == IntInterval::exact(0))
+        }) {
+            ProofStatus::DefinitelyInvalid
+        } else {
+            ProofStatus::Unknown
+        };
+        diagnostics.record_proof(
+            ProofKind::NonZeroDivisor,
+            divisor_status,
+            expr,
+            divisor_alternatives
+                .map(|ranges| {
+                    vec![format!(
+                        "divisor range = {}",
+                        ranges
+                            .iter()
+                            .map(|range| format!("{}..{}", range.min, range.max))
+                            .collect::<Vec<_>>()
+                            .join(" or ")
+                    )]
+                })
+                .unwrap_or_default(),
+        );
+        if divisor_status != ProofStatus::ProvenSafe {
+            let certainty = if divisor_status == ProofStatus::DefinitelyInvalid {
+                "divisor may be zero (definitely zero)"
+            } else {
+                "divisor may be zero"
+            };
             record_diagnostic(
                 diagnostics,
                 format!(
-                    "static arithmetic: divisor may be zero: `{}`\nhelp: guard it with `(not (= divisor 0))`",
+                    "static arithmetic: {certainty}: `{}`\nhelp: guard it with `(not (= divisor 0))`",
                     expr.to_lisp()
                 ),
             );
@@ -3206,13 +3906,48 @@ fn validate_static_bounds_expr(
             integer_arithmetic_interval(op, left, right)
                 .expect("validated integer arithmetic operator")
         });
+        let result_alternatives = normalize_intervals(
+            integer_interval_alternatives(expr, facts)
+                .unwrap_or_else(|| vec![result])
+                .into_iter()
+                .filter_map(|range| {
+                    let intersection = IntInterval {
+                        min: range.min.max(result.min),
+                        max: range.max.min(result.max),
+                    };
+                    (intersection.min <= intersection.max).then_some(intersection)
+                })
+                .collect(),
+        );
+        let result_alternatives = if result_alternatives.is_empty() {
+            vec![result]
+        } else {
+            result_alternatives
+        };
         let product_is_proven_safe = if op == "*" {
             let pair = canonical_product_pair(&items[1], &items[2], facts);
             product_upper_is_safe(&pair, facts) && product_lower_is_safe(&pair, facts)
         } else {
             false
         };
-        if !result.fits_i32() && !product_is_proven_safe {
+        let all_fit = result_alternatives.iter().all(|range| range.fits_i32());
+        let all_invalid = result_alternatives
+            .iter()
+            .all(|range| range.max < IntInterval::I32.min || range.min > IntInterval::I32.max);
+        let arithmetic_status = if all_fit || product_is_proven_safe {
+            ProofStatus::ProvenSafe
+        } else if all_invalid {
+            ProofStatus::DefinitelyInvalid
+        } else {
+            ProofStatus::Unknown
+        };
+        diagnostics.record_proof(
+            ProofKind::IntegerArithmetic,
+            arithmetic_status,
+            expr,
+            vec![format!("result range = {}..{}", result.min, result.max)],
+        );
+        if !all_fit && !product_is_proven_safe {
             let kind = match (
                 result.min < IntInterval::I32.min,
                 result.max > IntInterval::I32.max,
@@ -3269,12 +4004,23 @@ fn validate_static_bounds_expr(
     }
 
     if op == "get" && items.len() == 3 {
-        let proven = access_index_is_proven(&items[1], &items[2], facts, false);
-        if !proven {
+        let status = access_index_status(&items[1], &items[2], facts, false);
+        diagnostics.record_proof(
+            ProofKind::BoundsRead,
+            status,
+            expr,
+            access_proof_details(&items[1], &items[2], facts),
+        );
+        if status != ProofStatus::ProvenSafe {
+            let certainty = if status == ProofStatus::DefinitelyInvalid {
+                "index not proven safe (definitely out of bounds)"
+            } else {
+                "index not proven safe"
+            };
             record_diagnostic(
                 diagnostics,
                 format!(
-                    "static bounds: index not proven safe: `{}`\nhelp: guard it with `(and (>= index 0) (< index (length xs)))`",
+                    "static bounds: {certainty}: `{}`\nhelp: guard it with `(and (>= index 0) (< index (length xs)))`",
                     expr.to_lisp()
                 ),
             );
@@ -3305,12 +4051,30 @@ fn validate_static_bounds_expr(
     }
 
     if op == "set!" && items.len() == 4 {
-        let proven = access_index_is_proven(&items[1], &items[2], facts, true);
-        if !proven {
+        let status = access_index_status(&items[1], &items[2], facts, true);
+        let replacement_status = access_index_status(&items[1], &items[2], facts, false);
+        diagnostics.record_proof(
+            ProofKind::BoundsWrite,
+            status,
+            expr,
+            access_proof_details(&items[1], &items[2], facts),
+        );
+        diagnostics.record_proof(
+            ProofKind::BoundsWriteReplacement,
+            replacement_status,
+            expr,
+            access_proof_details(&items[1], &items[2], facts),
+        );
+        if status != ProofStatus::ProvenSafe {
+            let certainty = if status == ProofStatus::DefinitelyInvalid {
+                "set! index not proven safe (definitely out of bounds)"
+            } else {
+                "set! index not proven safe"
+            };
             record_diagnostic(
                 diagnostics,
                 format!(
-                    "static bounds: set! index not proven safe: `{}`\nhelp: guard replacement with `0 <= index < length`, or append at `(length xs)`",
+                    "static bounds: {certainty}: `{}`\nhelp: guard replacement with `0 <= index < length`, or append at `(length xs)`",
                     expr.to_lisp()
                 ),
             );
@@ -3319,11 +4083,23 @@ fn validate_static_bounds_expr(
 
     if matches!(op, "car" | "pop-val!") && items.len() == 2 {
         let zero = Expression::Int(0);
-        if !access_index_is_proven(&items[1], &zero, facts, false) {
+        let status = access_index_status(&items[1], &zero, facts, false);
+        diagnostics.record_proof(
+            ProofKind::NonEmpty,
+            status,
+            expr,
+            access_proof_details(&items[1], &zero, facts),
+        );
+        if status != ProofStatus::ProvenSafe {
+            let certainty = if status == ProofStatus::DefinitelyInvalid {
+                "vector may be empty (definitely empty)"
+            } else {
+                "vector may be empty"
+            };
             record_diagnostic(
                 diagnostics,
                 format!(
-                    "static bounds: vector may be empty: `{}`\nhelp: guard it with `(> (length xs) 0)`",
+                    "static bounds: {certainty}: `{}`\nhelp: guard it with `(> (length xs) 0)`",
                     expr.to_lisp()
                 ),
             );
@@ -3373,6 +4149,7 @@ fn validate_static_bounds_expr(
                 nonzero: facts.nonzero.clone(),
                 integer_constants: facts.integer_constants.clone(),
                 integer_ranges: facts.integer_ranges.clone(),
+                integer_alternatives: facts.integer_alternatives.clone(),
                 scalar_aliases: facts.scalar_aliases.clone(),
                 leq_pairs: facts.leq_pairs.clone(),
                 affine_upper_bounds: facts.affine_upper_bounds.clone(),
@@ -3380,6 +4157,7 @@ fn validate_static_bounds_expr(
                 product_lower_safe: facts.product_lower_safe.clone(),
                 guard_summaries: facts.guard_summaries.clone(),
                 predicate_summaries: facts.predicate_summaries.clone(),
+                value_summaries: facts.value_summaries.clone(),
                 ..AbstractState::default()
             };
             for parameter in items.iter().skip(1).take(items.len().saturating_sub(2)) {
@@ -3400,9 +4178,13 @@ fn validate_static_bounds_expr(
                     }
                     _ => None,
                 };
+                let length_info = vector_length_info(&items[2], facts);
                 assign_abstract_scalar(name, &items[2], facts);
-                if let Some(len) = literal_vector_length(&items[2]) {
-                    facts.fixed_lengths.insert(name.clone(), len);
+                if let Some(info) = length_info {
+                    if let Some(length) = info.exact {
+                        facts.fixed_lengths.insert(name.clone(), length);
+                    }
+                    facts.minimum_lengths.insert(name.clone(), info.minimum);
                 }
                 if let Some(alias) = alias {
                     facts.aliases.insert(name.clone(), alias);
@@ -3447,7 +4229,10 @@ fn validate_static_bounds_expr(
                 // Fixed-point iterations are speculative. Diagnostics emitted
                 // before widening stabilizes would describe an intermediate
                 // state rather than the actual loop invariant.
-                let mut speculative_diagnostics = AnalysisSink::default();
+                let mut speculative_diagnostics = AnalysisSink {
+                    suppress_output: true,
+                    ..AnalysisSink::default()
+                };
                 validate_static_bounds_expr(&items[1], &mut header, &mut speculative_diagnostics);
                 let mut body_exit = state_for_true_branch(&items[1], &header);
                 for child in items.iter().skip(2) {
@@ -3553,6 +4338,13 @@ pub fn analyze_user_program_diagnostics_detailed(
     typed_program: &TypedExpression,
     user_form_count: usize,
 ) -> Vec<StaticAnalysisDiagnostic> {
+    analyze_user_program_report(typed_program, user_form_count).diagnostics
+}
+
+pub fn analyze_user_program_report(
+    typed_program: &TypedExpression,
+    user_form_count: usize,
+) -> StaticAnalysisReport {
     let all_expressions: Vec<&Expression> = match &typed_program.expr {
         Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
             items.iter().skip(1).collect()
@@ -3561,11 +4353,13 @@ pub fn analyze_user_program_diagnostics_detailed(
     };
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
+    let value_summaries = infer_value_summaries(&all_expressions);
     let structural_summaries = infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
         predicate_summaries,
+        value_summaries,
         ..AbstractState::default()
     };
     // Seed facts from bundled/project library forms so public immutable
@@ -3575,19 +4369,145 @@ pub fn analyze_user_program_diagnostics_detailed(
     for expression in &all_expressions[..start] {
         validate_static_bounds_expr(expression, &mut facts, &mut ignored_library_diagnostics);
     }
-    let mut detailed = Vec::new();
+    let mut report = StaticAnalysisReport::default();
     for (user_form_index, expression) in all_expressions[start..].iter().enumerate() {
-        let mut diagnostics = AnalysisSink::default();
+        let mut diagnostics = AnalysisSink {
+            user_form_index,
+            ..AnalysisSink::default()
+        };
+        let entry_facts = facts.clone();
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
-        analyze_termination_expr(expression, &structural_summaries, &facts, &mut diagnostics);
-        detailed.extend(diagnostics.diagnostics.into_iter().map(|message| {
-            StaticAnalysisDiagnostic {
-                message,
-                user_form_index,
-            }
-        }));
+        analyze_termination_expr(
+            expression,
+            &structural_summaries,
+            &entry_facts,
+            &mut diagnostics,
+        );
+        let mut termination = Vec::new();
+        collect_termination_findings(
+            expression,
+            &structural_summaries,
+            &entry_facts,
+            &mut termination,
+        );
+        for finding in termination {
+            let status = match finding.status.as_str() {
+                "proven" => ProofStatus::ProvenSafe,
+                "warning"
+                    if finding.reason.contains("no program-controlled exit")
+                        || finding.reason.contains("condition cannot change") =>
+                {
+                    ProofStatus::DefinitelyInvalid
+                }
+                _ => ProofStatus::Unknown,
+            };
+            diagnostics.record_proof(
+                ProofKind::Termination,
+                status,
+                expression,
+                std::iter::once(finding.reason)
+                    .chain(finding.proof)
+                    .collect(),
+            );
+        }
+        report
+            .diagnostics
+            .extend(
+                diagnostics
+                    .diagnostics
+                    .into_iter()
+                    .map(|message| StaticAnalysisDiagnostic {
+                        message,
+                        user_form_index,
+                    }),
+            );
+        report.proofs.extend(diagnostics.proofs);
     }
-    detailed
+    report
+}
+
+/// Proof-only analysis for lowering. It deliberately skips termination and
+/// diagnostic/source presentation work, keeping optimized compilation close
+/// to one abstract-interpretation pass over the program.
+pub fn analyze_codegen_proofs(typed_program: &TypedExpression) -> Vec<StaticProof> {
+    let all_expressions: Vec<&Expression> = match &typed_program.expr {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
+            items.iter().skip(1).collect()
+        }
+        expression => vec![expression],
+    };
+    let guard_summaries = infer_guard_summaries(&all_expressions);
+    let predicate_summaries = infer_predicate_summaries(&all_expressions);
+    let value_summaries = infer_value_summaries(&all_expressions);
+    let mut facts = AbstractState {
+        guard_summaries,
+        predicate_summaries,
+        value_summaries,
+        ..AbstractState::default()
+    };
+    let mut proofs = Vec::new();
+    for (user_form_index, expression) in all_expressions.into_iter().enumerate() {
+        let mut sink = AnalysisSink {
+            user_form_index,
+            ..AnalysisSink::default()
+        };
+        validate_static_bounds_expr(expression, &mut facts, &mut sink);
+        proofs.extend(sink.proofs);
+    }
+    proofs
+}
+
+/// Runs the analysis and maps proof nodes back to their original source when
+/// possible. Mapping is deliberately a presentation step: the proof identity
+/// remains valid for compiler consumers that do not have source text.
+pub fn analyze_user_program_report_with_source(
+    typed_program: &TypedExpression,
+    user_form_count: usize,
+    source: &str,
+) -> StaticAnalysisReport {
+    let mut report = analyze_user_program_report(typed_program, user_form_count);
+    attach_source_spans(source, &mut report);
+    report
+}
+
+pub fn attach_source_spans(source: &str, report: &mut StaticAnalysisReport) {
+    let mut occurrences: HashMap<(u32, u32, String), usize> = HashMap::new();
+    for proof in &mut report.proofs {
+        let form_start = crate::lsp_native_core::source_form_range_for_desugared_index(
+            source,
+            proof.id.user_form_index,
+        )
+        .map(|range| (range.start.line, range.start.character))
+        .unwrap_or((u32::MAX, proof.id.user_form_index as u32));
+        let key = (form_start.0, form_start.1, proof.expression.clone());
+        let occurrence = occurrences.entry(key).or_default();
+        let synthetic_message = format!(
+            "static bounds: index not proven safe: `{}`",
+            proof.expression
+        );
+        let ranges = crate::lsp_native_core::static_analysis_diagnostic_ranges(
+            source,
+            &synthetic_message,
+            proof.id.user_form_index,
+        );
+        let range = ranges
+            .get(*occurrence)
+            .copied()
+            .or_else(|| (ranges.len() == 1).then(|| ranges[0]));
+        if let Some(range) = range {
+            proof.source_span = Some(AnalysisSourceSpan {
+                start: AnalysisSourcePosition {
+                    line: range.start.line,
+                    character: range.start.character,
+                },
+                end: AnalysisSourcePosition {
+                    line: range.end.line,
+                    character: range.end.character,
+                },
+            });
+        }
+        *occurrence += 1;
+    }
 }
 
 pub fn explain_bounds_proofs(
@@ -3602,10 +4522,12 @@ pub fn explain_bounds_proofs(
     };
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
+    let value_summaries = infer_value_summaries(&all_expressions);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
         predicate_summaries,
+        value_summaries,
         ..AbstractState::default()
     };
     let mut sink = AnalysisSink::default();
@@ -3839,57 +4761,58 @@ fn collect_termination_findings(
                         } else {
                             None
                         };
-                        let proof = recursive_branch
-                            .and_then(|recursive_branch| first_recursive_call(recursive_branch, name))
-                            .and_then(|call| {
-                                params.iter().enumerate().find_map(|(index, parameter)| {
-                                    let argument = call.get(index + 1)?;
-                                    if length_base_case(&branch[1], parameter)
-                                        && recursive_argument_size_step(
-                                            argument,
-                                            parameter,
-                                            structural_summaries,
-                                        ) == SizeStep::Shrink
-                                    {
-                                        return Some((
-                                            format!("length({parameter})"),
-                                            format!(
-                                                "length({parameter}) decreases on the recursive path"
-                                            ),
-                                        ));
-                                    }
-                                    let recurse_when_true = then_recurses;
-                                    let expected = guard_direction_for_parameter(
-                                        &branch[1],
-                                        parameter,
-                                        !recurse_when_true,
-                                    )?;
-                                    let recursive_facts = state_for_branch(
-                                        &branch[1],
-                                        facts,
-                                        then_recurses,
-                                    );
-                                    let actual = recursive_argument_step(
-                                        argument,
-                                        parameter,
-                                        &recursive_facts,
-                                    );
-                                    (actual == expected).then(|| {
-                                        let direction = if actual == CounterStep::Increase {
-                                            "increases"
-                                        } else {
-                                            "decreases"
-                                        };
-                                        (
-                                            parameter.clone(),
-                                            format!(
-                                                "{} {} toward the base-case guard",
-                                                parameter, direction
-                                            ),
-                                        )
-                                    })
+                        let proof = recursive_branch.and_then(|recursive_branch| {
+                            params.iter().enumerate().find_map(|(index, parameter)| {
+                                if length_base_case(&branch[1], parameter)
+                                    && !recursive_calls_fail_to_shrink(
+                                        recursive_branch,
+                                        name,
+                                        &params,
+                                        index,
+                                        structural_summaries,
+                                    )
+                                {
+                                    return Some((
+                                        format!("length({parameter})"),
+                                        format!(
+                                            "length({parameter}) decreases on the recursive path"
+                                        ),
+                                    ));
+                                }
+                                let recurse_when_true = then_recurses;
+                                let expected = guard_direction_for_parameter(
+                                    &branch[1],
+                                    parameter,
+                                    !recurse_when_true,
+                                )?;
+                                let recursive_facts =
+                                    state_for_branch(&branch[1], facts, then_recurses);
+                                let mut found = false;
+                                let all_progress = recursive_calls_all_move_toward_guard(
+                                    recursive_branch,
+                                    name,
+                                    &params,
+                                    index,
+                                    expected,
+                                    &recursive_facts,
+                                    &mut found,
+                                );
+                                (found && all_progress).then(|| {
+                                    let direction = if expected == CounterStep::Increase {
+                                        "increases"
+                                    } else {
+                                        "decreases"
+                                    };
+                                    (
+                                        parameter.clone(),
+                                        format!(
+                                            "{} {} toward the base-case guard",
+                                            parameter, direction
+                                        ),
+                                    )
                                 })
-                            });
+                            })
+                        });
                         if let Some((measure, reason)) = proof {
                             findings.push(TerminationFinding {
                                 subject: name.clone(),
@@ -3960,11 +4883,13 @@ pub fn explain_termination(
     };
     let guard_summaries = infer_guard_summaries(&all_expressions);
     let predicate_summaries = infer_predicate_summaries(&all_expressions);
+    let value_summaries = infer_value_summaries(&all_expressions);
     let structural_summaries = infer_structural_summaries(&all_expressions, &predicate_summaries);
     let start = all_expressions.len().saturating_sub(user_form_count);
     let mut facts = AbstractState {
         guard_summaries,
         predicate_summaries,
+        value_summaries,
         ..AbstractState::default()
     };
     let mut ignored_diagnostics = AnalysisSink::default();
@@ -3996,6 +4921,65 @@ fn substitute_predicate_body(
         ),
         _ => expr.clone(),
     }
+}
+
+fn infer_value_summaries(expressions: &[&Expression]) -> HashMap<String, ValueSummary> {
+    let mut summaries: HashMap<String, ValueSummary> = HashMap::new();
+    for _ in 0..expressions.len().max(1) {
+        let mut changed = false;
+        for expression in expressions {
+            let Expression::Apply(binding) = expression else {
+                continue;
+            };
+            let [Expression::Word(keyword), Expression::Word(name), rhs] = binding.as_slice()
+            else {
+                continue;
+            };
+            if keyword != "let" && keyword != "letrec" {
+                continue;
+            }
+            if let Expression::Word(alias) = rhs {
+                if let Some(summary) = summaries.get(alias).cloned() {
+                    changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
+                }
+                continue;
+            }
+            let Expression::Apply(lambda) = rhs else {
+                continue;
+            };
+            if !matches!(lambda.first(), Some(Expression::Word(op)) if op == "lambda")
+                || lambda.len() < 2
+            {
+                continue;
+            }
+            let params: Vec<String> = lambda[1..lambda.len() - 1]
+                .iter()
+                .filter_map(word)
+                .map(str::to_string)
+                .collect();
+            if params.len() != lambda.len() - 2 {
+                continue;
+            }
+            let body = lambda.last().expect("lambda has a body");
+            // Expanding a recursive body is not a result summary: every use
+            // embeds the function inside itself. Large recursive functions can
+            // otherwise make analysis exponential and exhaust the compiler's
+            // stack. Inferring recursive postconditions needs a fixed point;
+            // until then their result remains conservatively unknown.
+            if keyword == "letrec" || contains_recursive_call(body, name) {
+                continue;
+            }
+            let summary = ValueSummary {
+                params,
+                body: body.clone(),
+            };
+            changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
+        }
+        if !changed {
+            break;
+        }
+    }
+    summaries
 }
 
 fn infer_predicate_summaries(expressions: &[&Expression]) -> HashMap<String, PredicateSummary> {
@@ -4030,6 +5014,9 @@ fn infer_predicate_summaries(expressions: &[&Expression]) -> HashMap<String, Pre
             let Some(body) = lambda.last() else {
                 continue;
             };
+            if keyword == "letrec" || contains_recursive_call(body, name) {
+                continue;
+            }
             let params: Vec<String> = lambda[1..lambda.len() - 1]
                 .iter()
                 .filter_map(word)
@@ -4383,11 +5370,15 @@ fn infer_guard_summaries(expressions: &[&Expression]) -> HashMap<String, GuardSu
                 .iter()
                 .filter_map(word)
                 .collect();
+            let body = lambda.last().expect("lambda has a body");
+            if keyword == "letrec" || contains_recursive_call(body, name) {
+                continue;
+            }
             let mut facts = AbstractState {
                 guard_summaries: summaries.clone(),
                 ..AbstractState::default()
             };
-            facts = state_for_true_branch(lambda.last().expect("lambda has a body"), &facts);
+            facts = state_for_true_branch(body, &facts);
             let mut summary = Vec::new();
             for (vector, index) in &facts.safe_pairs {
                 let Some(index_arg) = params.iter().position(|param| *param == index) else {
@@ -4476,6 +5467,160 @@ mod tests {
         )
         .expect("source should infer");
         analyze_user_program_diagnostics(&typed, user_form_count)
+    }
+
+    fn report(source: &str, user_form_count: usize) -> StaticAnalysisReport {
+        let expression = crate::parser::build(source).expect("source should build");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        analyze_user_program_report(&typed, user_form_count)
+    }
+
+    #[test]
+    fn structured_proofs_distinguish_safe_invalid_and_unknown_operations() {
+        let findings = report(
+            "(let xs [1 2]) (get xs 1) (get xs 9) (let divide (lambda x (/ 10 x))) (+ 2147483647 1)",
+            5,
+        );
+        assert!(findings.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::BoundsRead
+                && proof.status == ProofStatus::ProvenSafe
+                && proof.expression == "(get xs 1)"
+        }));
+        assert!(findings.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::BoundsRead
+                && proof.status == ProofStatus::DefinitelyInvalid
+                && proof.expression == "(get xs 9)"
+        }));
+        assert!(findings.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::NonZeroDivisor
+                && proof.status == ProofStatus::Unknown
+                && proof.expression == "(/ 10 x)"
+        }));
+        assert!(findings.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::IntegerArithmetic
+                && proof.status == ProofStatus::DefinitelyInvalid
+                && proof.expression == "(+ 2147483647 1)"
+        }));
+        let ids = findings
+            .proofs
+            .iter()
+            .map(|proof| proof.id)
+            .collect::<HashSet<_>>();
+        assert_eq!(ids.len(), findings.proofs.len(), "{:#?}", findings.proofs);
+    }
+
+    #[test]
+    fn structured_proofs_have_stable_distinct_source_spans() {
+        let source = "(let xs [1])\n(do\n  (get xs 0)\n  (get xs 0))";
+        let expression = crate::parser::build(source).expect("source should build");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        let findings = analyze_user_program_report_with_source(
+            &typed,
+            crate::lsp_native_core::desugared_user_form_count(source)
+                .expect("desugared form count"),
+            source,
+        );
+        let reads = findings
+            .proofs
+            .iter()
+            .filter(|proof| proof.kind == ProofKind::BoundsRead)
+            .collect::<Vec<_>>();
+        assert_eq!(reads.len(), 2, "{:#?}", findings.proofs);
+        assert_ne!(reads[0].id, reads[1].id);
+        assert_eq!(
+            reads[0].source_span.expect("first source span").start.line,
+            2
+        );
+        assert_eq!(
+            reads[1].source_span.expect("second source span").start.line,
+            3
+        );
+    }
+
+    #[test]
+    fn function_postconditions_preserve_ranges_nonzero_and_vector_lengths() {
+        let findings = diagnostics(
+            "(let clamp (lambda x (if (< x 0) 0 (if (> x 1) 1 x)))) (let pair (lambda x [x x])) (let i (clamp 99)) (let xs (pair 7)) {(get xs i) (/ 10 (if (= i 0) 1 i))}",
+            5,
+        );
+        assert!(
+            !findings
+                .iter()
+                .any(|message| message.starts_with("static bounds:")),
+            "{findings:?}"
+        );
+        assert!(
+            !findings
+                .iter()
+                .any(|message| message.contains("divisor may be zero")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn recursive_functions_are_not_expanded_as_value_postconditions() {
+        let source = "(letrec branch (lambda (n) (if (<= n 0) 0 (+ (branch (- n 1)) (branch (- n 1)))))) (branch 4)";
+        let expression = crate::parser::build(source).expect("source should build");
+        let expressions = match &expression {
+            Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
+                items.iter().skip(1).collect::<Vec<_>>()
+            }
+            expression => vec![expression],
+        };
+        assert!(
+            !infer_value_summaries(&expressions).contains_key("branch"),
+            "recursive bodies require a fixed-point summary"
+        );
+        assert!(
+            !infer_predicate_summaries(&expressions).contains_key("branch")
+                && !infer_guard_summaries(&expressions).contains_key("branch"),
+            "recursive predicates and guards also require fixed-point summaries"
+        );
+
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        let _proofs = analyze_codegen_proofs(&typed);
+    }
+
+    #[test]
+    fn disjunctive_ranges_preserve_holes_across_control_flow() {
+        let findings = report(
+            "(let divide (lambda x (if (or (= x 0) (= x 2)) (/ 10 (- x 1)) 0))) (let bad (lambda x (if (or (= x -1) (= x 5)) (get [1 2 3] x) 0)))",
+            2,
+        );
+        assert!(
+            !findings
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("divisor may be zero")),
+            "{:#?}",
+            findings.diagnostics
+        );
+        assert!(findings.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::NonZeroDivisor
+                && proof.status == ProofStatus::ProvenSafe
+                && proof.expression == "(/ 10 (- x 1))"
+        }));
+        assert!(
+            findings.proofs.iter().any(|proof| {
+                proof.kind == ProofKind::BoundsRead
+                    && proof.status == ProofStatus::DefinitelyInvalid
+                    && proof.expression == "(get (vector 1 2 3) x)"
+            }),
+            "{:#?}",
+            findings.proofs
+        );
     }
 
     #[test]
@@ -4854,6 +5999,58 @@ mod tests {
     }
 
     #[test]
+    fn recursive_termination_requires_every_recursive_call_to_progress() {
+        let mixed = diagnostics(
+            "(letrec walk (lambda (n m) (if (<= n 0) 0 (do (walk (- n 1) m) (walk n (+ m 1))))))",
+            1,
+        );
+        assert!(
+            mixed
+                .iter()
+                .any(|message| message.contains("not every recursive call")),
+            "{mixed:?}"
+        );
+
+        let all_decrease = diagnostics(
+            "(letrec walk (lambda (n m) (if (<= n 0) 0 (do (walk (- n 1) m) (walk (- n 2) (+ m 1))))))",
+            1,
+        );
+        assert!(
+            !all_decrease
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{all_decrease:?}"
+        );
+
+        let expression = crate::parser::build(
+            "(letrec walk (lambda (n m) (if (<= n 0) 0 (do (walk (- n 1) m) (walk n (+ m 1))))))",
+        )
+        .expect("source should build");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        assert!(explain_termination(&typed, 1)
+            .iter()
+            .all(|finding| finding.status != "proven"));
+    }
+
+    #[test]
+    fn structural_recursive_termination_requires_every_call_to_shrink() {
+        let mixed = diagnostics(
+            "(letrec drain (lambda (xs n) (if (= (length xs) 0) 0 (do (drain (cdr xs) n) (drain xs (- n 1))))))",
+            1,
+        );
+        assert!(
+            mixed
+                .iter()
+                .any(|message| message.contains("does not shrink 'xs'")),
+            "{mixed:?}"
+        );
+    }
+
+    #[test]
     fn termination_tracks_structural_vector_recursion() {
         let shrinking = diagnostics(
             "(letrec drain (lambda (xs) (if (= (length xs) 0) 0 (drain (cdr xs)))))",
@@ -5155,6 +6352,31 @@ mod tests {
             Ok(())
         );
         assert_eq!(analyze("(let xs [1]) (set! xs 1 2)", 2), Ok(()));
+    }
+
+    #[test]
+    fn set_proofs_distinguish_replacement_from_append_at_length() {
+        let replacement = report(
+            "(let replace! (lambda (xs i) (if (and (>= i 0) (< i (length xs))) (set! xs i 7) nil)))",
+            1,
+        );
+        assert!(replacement.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::BoundsWriteReplacement
+                && proof.status == ProofStatus::ProvenSafe
+                && proof.expression == "(set! xs i 7)"
+        }));
+
+        let append = report("(let xs []) (set! xs (length xs) 7)", 2);
+        assert!(append.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::BoundsWrite
+                && proof.status == ProofStatus::ProvenSafe
+                && proof.expression == "(set! xs (length xs) 7)"
+        }));
+        assert!(append.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::BoundsWriteReplacement
+                && proof.status != ProofStatus::ProvenSafe
+                && proof.expression == "(set! xs (length xs) 7)"
+        }));
     }
 
     #[test]

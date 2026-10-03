@@ -403,6 +403,7 @@ fn enable_opt() {
     env::set_var("QUE_INT_OVERFLOW_CHECK", "0");
     env::set_var("QUE_DEC_OVERFLOW_CHECK", "0");
     env::set_var("QUE_DIV_ZERO_CHECK", "0");
+    env::set_var("QUE_OPT_PROOF_CODEGEN", "1");
 }
 
 fn enable_debug() {

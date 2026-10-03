@@ -1285,7 +1285,7 @@ pub fn diagnostic_ranges_in_user_form(
         .collect()
 }
 
-fn source_form_range_for_desugared_index(text: &str, target: usize) -> Option<CoreRange> {
+pub fn source_form_range_for_desugared_index(text: &str, target: usize) -> Option<CoreRange> {
     let mut expanded_start = 0usize;
     for (start, end) in top_level_form_byte_ranges(text) {
         let expanded_count = text

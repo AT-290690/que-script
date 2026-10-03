@@ -1495,6 +1495,133 @@ xs)"#,
     }
 
     #[test]
+    fn test_wat_static_proofs_remove_only_proven_debug_arithmetic_guards() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _overflow = ScopedEnvVar::set("QUE_INT_OVERFLOW_CHECK", "1");
+        let _analysis = ScopedEnvVar::set("QUEC_DEBUG_ANALYSIS", "1");
+        let source = "(let safeadd (lambda x (if (and (>= x 0) (< x 10)) (+ x 2) x))) (let unknownadd (lambda y (+ y 1))) {(safeadd 1) (unknownadd 1)}";
+        let wat = compile_std_program_to_wat(source, false);
+        let safe = named_wat_function(&wat, "v_safeadd");
+        let unknown = named_wat_function(&wat, "v_unknownadd");
+        assert!(safe.contains("i32.add"), "{safe}");
+        assert!(
+            !safe.contains("i32.xor"),
+            "proven arithmetic should omit its debug overflow guard:\n{safe}"
+        );
+        assert!(
+            unknown.contains("i32.xor"),
+            "unknown arithmetic must retain its debug overflow guard:\n{unknown}"
+        );
+    }
+
+    #[test]
+    fn test_wat_static_proofs_remove_only_proven_debug_bounds_guards() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
+        let _analysis = ScopedEnvVar::set("QUEC_DEBUG_ANALYSIS", "1");
+        let source = "(let safeget (lambda xs i (if (and (>= i 0) (< i (length xs))) (get xs i) 0))) (let unknownget (lambda ys j (get ys j))) {(safeget [1] 0) (unknownget [1] 0)}";
+        let wat = compile_std_program_to_wat(source, false);
+        let safe = named_wat_function(&wat, "v_safeget");
+        let unknown = named_wat_function(&wat, "v_unknownget");
+        assert!(safe.contains("i32.load"), "{safe}");
+        assert_eq!(
+            safe.matches("unreachable").count(),
+            1,
+            "proven access should omit its debug bounds guard (the remaining unreachable is the function tail sentinel):\n{safe}"
+        );
+        assert!(
+            !safe.contains("call $vec_get_i32") && unknown.contains("call $vec_get_i32"),
+            "unknown access must retain its debug bounds guard:\n{unknown}"
+        );
+    }
+
+    #[test]
+    fn test_wat_opt_proof_elides_only_proven_scalar_replacement_checks() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _proofs = ScopedEnvVar::set("QUE_OPT_PROOF_CODEGEN", "1");
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let source = r#"
+(let replace! (lambda (xs i)
+  (if (and (>= i 0) (< i (length xs)))
+      (set! xs i 7)
+      nil)))
+(let unknown! (lambda (ys j) (set! ys j 8)))
+{(replace! [1 2] 1) (unknown! [3 4] 1)}
+"#;
+        let wat = compile_std_program_to_wat(source, true);
+        let proven = named_wat_function(&wat, "v_replace_bang_");
+        let unknown = named_wat_function(&wat, "v_unknown_bang_");
+        assert!(
+            proven.contains("i32.store"),
+            "proven replacement should lower to a direct store:\n{proven}"
+        );
+        assert!(
+            !proven.contains("i32.ne"),
+            "proven replacement should omit the index-versus-length append check:\n{proven}"
+        );
+        assert!(
+            unknown.contains("i32.ne")
+                && (unknown.contains("call $vec_set_scalar_i32")
+                    || unknown.contains("call $vec_set_scalar_materialized_i32")),
+            "an unproved write must retain the append distinction and runtime setter:\n{unknown}"
+        );
+    }
+
+    #[test]
+    fn test_wat_opt_proof_keeps_set_append_at_length_semantics() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _proofs = ScopedEnvVar::set("QUE_OPT_PROOF_CODEGEN", "1");
+        let source = "(let xs []) (set! xs (length xs) 7) {xs (length xs)}";
+        let wat = compile_std_program_to_wat(source, true);
+        let main = wat
+            .split("(func (export \"main\")")
+            .nth(1)
+            .expect("main export should exist");
+        assert!(
+            main.contains("call $vec_set_scalar_materialized_i32")
+                || main.contains("call $vec_set_scalar_i32"),
+            "append-at-length must retain the growing setter:\n{main}"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts_unlocked(source, true),
+            "{ [7] 1 }"
+        );
+    }
+
+    #[test]
+    fn test_wat_opt_proof_inlines_proven_nonempty_pop_val() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _proofs = ScopedEnvVar::set("QUE_OPT_PROOF_CODEGEN", "1");
+        let source = r#"
+(let take-last! (lambda (xs)
+  (if (> (length xs) 0) (pop-val! xs) -1)))
+(let xs [1 2 3])
+{(take-last! xs) xs}
+"#;
+        let wat = compile_std_program_to_wat(source, true);
+        let function = named_wat_function(&wat, "v_take_dash_last_bang_");
+        assert!(
+            function.contains("call $vec_materialize_i32")
+                && !function.contains("call $vec_pop_val_i32"),
+            "a proven nonempty pop-val! should inline the transfer:\n{function}"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts_unlocked(source, true),
+            "{ 3 [1 2] }"
+        );
+    }
+
+    #[test]
     fn test_wat_monomorphizes_uniquely_used_polymorphic_vector_builder() {
         let src = r#"(let wrap (lambda x [x]))
 (get (wrap 7) 0)"#;
@@ -7866,6 +7993,10 @@ fn"#;
 
     #[test]
     fn test_wat_ref_get_keeps_vec_get_runtime_call() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
         let expr = crate::parser::build("(get [[]] 0)").expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
@@ -9060,7 +9191,7 @@ fn"#;
     }
 
     #[test]
-    fn test_wat_managed_vector_loop_with_alias_mutation_keeps_get_helper() {
+    fn test_wat_managed_vector_loop_with_alias_mutation_reloads_data_pointer() {
         let _lock = runtime_exec_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -9088,8 +9219,10 @@ fn"#;
         let loop_wat = &main_wat[loop_start..];
 
         assert!(
-            loop_wat.contains("call $vec_get_i32"),
-            "a possible alias mutation must keep the managed get helper, got:\n{}",
+            !loop_wat.contains("call $vec_get_i32")
+                && loop_wat.contains("i32.const 16")
+                && loop_wat.contains("i32.load"),
+            "an unchecked managed get may inline, but a possible alias mutation must reload the current data pointer inside the loop, got:\n{}",
             main_wat
         );
     }

@@ -13,6 +13,60 @@ struct WasiOverrides {
 
 thread_local! {
     static WASI_OVERRIDES: RefCell<WasiOverrides> = RefCell::new(WasiOverrides::default());
+    static STATIC_PROOF_INDEX: RefCell<Option<StaticProofIndex>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Default)]
+struct StaticProofIndex {
+    proven_safe: HashSet<(crate::static_analysis::ProofKind, String)>,
+}
+
+impl StaticProofIndex {
+    fn from_typed_ast(typed_ast: &TypedExpression) -> Self {
+        let mut grouped: HashMap<(crate::static_analysis::ProofKind, String), (usize, usize)> =
+            HashMap::new();
+        for proof in crate::static_analysis::analyze_codegen_proofs(typed_ast) {
+            let counts = grouped.entry((proof.kind, proof.expression)).or_default();
+            counts.0 += 1;
+            if proof.status == crate::static_analysis::ProofStatus::ProvenSafe {
+                counts.1 += 1;
+            }
+        }
+        Self {
+            proven_safe: grouped
+                .into_iter()
+                .filter_map(|(key, (total, safe))| (total == safe).then_some(key))
+                .collect(),
+        }
+    }
+}
+
+struct StaticProofIndexGuard(Option<StaticProofIndex>);
+
+impl StaticProofIndexGuard {
+    fn install(typed_ast: &TypedExpression) -> Self {
+        STATIC_PROOF_INDEX.with(|cell| {
+            let previous = cell.replace(Some(StaticProofIndex::from_typed_ast(typed_ast)));
+            Self(previous)
+        })
+    }
+}
+
+impl Drop for StaticProofIndexGuard {
+    fn drop(&mut self) {
+        STATIC_PROOF_INDEX.with(|cell| {
+            cell.replace(self.0.take());
+        });
+    }
+}
+
+fn static_proof_is_safe(kind: crate::static_analysis::ProofKind, expr: &Expression) -> bool {
+    let key = (kind, expr.to_lisp());
+    STATIC_PROOF_INDEX.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|index| index.proven_safe.contains(&key))
+    })
 }
 
 pub struct WasiOverrideGuard(WasiOverrides);
@@ -6753,6 +6807,14 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     }
 
     let checks = arithmetic_check_config();
+    let integer_arithmetic_is_proven_safe = static_proof_is_safe(
+        crate::static_analysis::ProofKind::IntegerArithmetic,
+        &node.expr,
+    );
+    let divisor_is_proven_nonzero = static_proof_is_safe(
+        crate::static_analysis::ProofKind::NonZeroDivisor,
+        &node.expr,
+    );
     let lhs_local = ctx.tmp_i32;
     let rhs_local = ctx.tmp_i32 + 1;
     let res_local = ctx.tmp_i32 + 2;
@@ -6768,7 +6830,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         .and_then(|n| compile_expr(n, ctx))?;
     let code = match op {
         "+" | "+#" => {
-            if checks.int_overflow_check {
+            if checks.int_overflow_check && !integer_arithmetic_is_proven_safe {
                 return Ok(
                     format!(
                         "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.add\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
@@ -6779,7 +6841,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             "i32.add"
         }
         "-" | "-#" => {
-            if checks.int_overflow_check {
+            if checks.int_overflow_check && !integer_arithmetic_is_proven_safe {
                 return Ok(
                     format!(
                         "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.sub\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
@@ -6790,7 +6852,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             "i32.sub"
         }
         "*" | "*#" => {
-            if checks.int_overflow_check {
+            if checks.int_overflow_check && !integer_arithmetic_is_proven_safe {
                 return Ok(
                     format!(
                         "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.mul\nlocal.set {res_local}\n{}\nlocal.get {res_local}",
@@ -6801,7 +6863,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             "i32.mul"
         }
         "/" | "/#" => {
-            if checks.div_zero_check {
+            if checks.div_zero_check && !divisor_is_proven_nonzero {
                 return Ok(
                     format!(
                         "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.div_s",
@@ -6812,7 +6874,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             "i32.div_s"
         }
         "%" => {
-            if checks.div_zero_check {
+            if checks.div_zero_check && !divisor_is_proven_nonzero {
                 return Ok(
                     format!(
                         "{a}\n{b}\nlocal.set {rhs_local}\nlocal.set {lhs_local}\n{}\nlocal.get {lhs_local}\nlocal.get {rhs_local}\ni32.rem_s",
@@ -9331,9 +9393,10 @@ fn emit_constant_scalar_get(
     index: i32,
     tmp_ptr: usize,
     release_xs_after: bool,
+    check_bounds: bool,
 ) -> String {
     let offset = index.saturating_mul(4);
-    let upper_check = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+    let upper_check = if check_bounds {
         if index < 0 {
             "unreachable".to_string()
         } else {
@@ -9617,6 +9680,65 @@ fn emit_dynamic_scalar_set(
     out
 }
 
+fn emit_dynamic_scalar_set_proven_replacement(
+    target_prefix: &str,
+    index: &str,
+    value: &str,
+    target_tmp: usize,
+    index_tmp: usize,
+    value_tmp: usize,
+    release_target_code: &str,
+    target_already_materialized: bool,
+) -> String {
+    let replacement = format!(
+        "local.get {target_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         local.get {index_tmp}\n\
+         i32.const 4\n\
+         i32.mul\n\
+         i32.add\n\
+         local.get {value_tmp}\n\
+         i32.store\n\
+         i32.const 0"
+    );
+    let body = if target_already_materialized {
+        replacement
+    } else {
+        format!(
+            "local.get {target_tmp}\n\
+             i32.const 20\n\
+             i32.add\n\
+             i32.load\n\
+             i32.const 1447380017\n\
+             i32.eq\n\
+             if (result i32)\n\
+               {replacement}\n\
+             else\n\
+               local.get {target_tmp}\n\
+               local.get {index_tmp}\n\
+               local.get {value_tmp}\n\
+               call $vec_set_scalar_i32\n\
+             end"
+        )
+    };
+    let mut out = format!(
+        "{target_prefix}\n\
+         local.set {target_tmp}\n\
+         {index}\n\
+         local.set {index_tmp}\n\
+         {value}\n\
+         local.set {value_tmp}\n\
+         {body}"
+    );
+    if !release_target_code.is_empty() {
+        out.push('\n');
+        out.push_str(release_target_code);
+    }
+    out
+}
+
 fn emit_dynamic_scalar_set_from_data_slot(
     index: &str,
     value: &str,
@@ -9690,6 +9812,10 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             return Err("get missing return type".to_string());
         }
     };
+    let statically_in_bounds =
+        static_proof_is_safe(crate::static_analysis::ProofKind::BoundsRead, &node.expr);
+    let runtime_bounds_check =
+        parse_env_bool_like("QUE_BOUNDS_CHECK", true) && !statically_in_bounds;
     if node.typ.as_ref().map(|t| !is_ref_type(t)).unwrap_or(false) {
         if let Some((xs_slot, idx_slot)) = scalar_get_is_proven_in_bounds(node, ctx) {
             if let Some(data_slot) = ctx.hoisted_scalar_vec_data_slots.get(&xs_slot).copied() {
@@ -9708,9 +9834,10 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 *index,
                 ctx.tmp_i32,
                 release_xs_after,
+                runtime_bounds_check,
             ));
         }
-        let bounds = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        let bounds = if runtime_bounds_check {
             format!(
                 "{xs}\n\
                  local.set {}\n\
@@ -9771,7 +9898,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 ctx.tmp_i32 + 1
             )
         };
-        if !parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        if !runtime_bounds_check {
             if let Some(data_slot) = hoisted_scalar_vec_data_slot(xs_node, ctx) {
                 return Ok(emit_dynamic_scalar_get_from_data_slot(
                     &idx,
@@ -9788,7 +9915,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         }
         return Ok(bounds);
     }
-    if !parse_env_bool_like("QUE_BOUNDS_CHECK", true) && !release_xs_after {
+    if !runtime_bounds_check && !release_xs_after {
         if let Some(data_slot) = hoisted_scalar_vec_data_slot(xs_node, ctx) {
             if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
                 return Ok(emit_constant_scalar_get_from_data_slot(data_slot, *index));
@@ -9799,6 +9926,24 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                 ctx.tmp_i32 + 1,
             ));
         }
+    }
+    if !runtime_bounds_check {
+        let load = format!(
+            "{xs}\nlocal.set {}\n{idx}\nlocal.set {}\nlocal.get {}\ni32.const 16\ni32.add\ni32.load\nlocal.get {}\ni32.const 4\ni32.mul\ni32.add\ni32.load",
+            ctx.tmp_i32,
+            ctx.tmp_i32 + 1,
+            ctx.tmp_i32,
+            ctx.tmp_i32 + 1,
+        );
+        if release_xs_after {
+            return Ok(format!(
+                "{load}\nlocal.set {}\nlocal.get {}\ncall $rc_release_vec\ndrop\nlocal.get {}",
+                ctx.tmp_i32 + 2,
+                ctx.tmp_i32,
+                ctx.tmp_i32 + 2
+            ));
+        }
+        return Ok(load);
     }
     if release_xs_after {
         Ok(format!(
@@ -9913,6 +10058,10 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     } else {
         String::new()
     };
+    let proven_replacement = static_proof_is_safe(
+        crate::static_analysis::ProofKind::BoundsWriteReplacement,
+        &node.expr,
+    );
     if is_scalar_value {
         if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
             if *index >= 0 {
@@ -9947,6 +10096,17 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                     }
                 }
             }
+            if proven_replacement && *index >= 0 {
+                return Ok(emit_constant_scalar_set_unchecked_replacement(
+                    &target_prefix,
+                    &v,
+                    *index,
+                    target_tmp,
+                    ctx.tmp_i32 + 1,
+                    &target_release,
+                    definitely_materialized_scalar_target,
+                ));
+            }
             return Ok(emit_constant_scalar_set(
                 &target_prefix,
                 &v,
@@ -9977,6 +10137,34 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
                     }
                 }
             }
+        }
+        if proven_replacement {
+            if let Expression::Word(xs_name) = &xs_node.expr {
+                if let Some(data_slot) = ctx
+                    .locals
+                    .get(xs_name)
+                    .and_then(|slot| ctx.hoisted_scalar_vec_data_slots.get(slot))
+                    .copied()
+                {
+                    return Ok(emit_dynamic_scalar_set_from_data_slot(
+                        &idx,
+                        &v,
+                        data_slot,
+                        ctx.tmp_i32 + 2,
+                        ctx.tmp_i32 + 1,
+                    ));
+                }
+            }
+            return Ok(emit_dynamic_scalar_set_proven_replacement(
+                &target_prefix,
+                &idx,
+                &v,
+                target_tmp,
+                ctx.tmp_i32 + 2,
+                ctx.tmp_i32 + 1,
+                &target_release,
+                definitely_materialized_scalar_target,
+            ));
         }
         return Ok(emit_dynamic_scalar_set(
             &target_prefix,
@@ -11000,6 +11188,37 @@ fn compile_pop_val(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, Stri
             .ok_or_else(|| "pop-val! missing vector".to_string())?,
         ctx,
     )?;
+    if static_proof_is_safe(crate::static_analysis::ProofKind::NonEmpty, &node.expr) {
+        let ptr = ctx.tmp_i32;
+        let new_len = ctx.tmp_i32 + 1;
+        let value = ctx.tmp_i32 + 2;
+        return Ok(format!(
+            "{xs}\n\
+             local.set {ptr}\n\
+             local.get {ptr}\n\
+             call $vec_materialize_i32\n\
+             drop\n\
+             local.get {ptr}\n\
+             i32.load\n\
+             i32.const 1\n\
+             i32.sub\n\
+             local.set {new_len}\n\
+             local.get {ptr}\n\
+             i32.const 16\n\
+             i32.add\n\
+             i32.load\n\
+             local.get {new_len}\n\
+             i32.const 4\n\
+             i32.mul\n\
+             i32.add\n\
+             i32.load\n\
+             local.set {value}\n\
+             local.get {ptr}\n\
+             local.get {new_len}\n\
+             i32.store\n\
+             local.get {value}"
+        ));
+    }
     Ok(format!("{xs}\ncall $vec_pop_val_i32"))
 }
 
@@ -12569,6 +12788,15 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                     return Err("car missing return type".to_string());
                                 }
                             };
+                            if static_proof_is_safe(
+                                crate::static_analysis::ProofKind::NonEmpty,
+                                &node.expr,
+                            ) || !parse_env_bool_like("QUE_BOUNDS_CHECK", true)
+                            {
+                                return Ok(format!(
+                                    "{xs}\ni32.const 16\ni32.add\ni32.load\ni32.load"
+                                ));
+                            }
                             Ok(format!(
                                 "{xs}\ni32.const 0\ncall $vec_get_{}",
                                 elem.suffix()
@@ -13821,6 +14049,12 @@ fn compile_program_to_wat_build_typed_with_opts(
         None
     };
     let typed_ast = optimized_typed_ast.as_ref().unwrap_or(typed_ast);
+    // The analyzer and lowerer inspect the exact same optimized tree. Proven
+    // facts may remove debug checks; unknown or conflicting occurrences keep
+    // the conservative runtime guard.
+    let _static_proof_guard = (parse_env_bool_like("QUE_OPT_PROOF_CODEGEN", false)
+        || parse_env_bool_like("QUEC_DEBUG_ANALYSIS", false))
+    .then(|| StaticProofIndexGuard::install(typed_ast));
     validate_no_rc_cycles(typed_ast)?;
 
     let (top_defs, extern_defs, main_expr, main_node) = match &typed_ast.expr {
