@@ -104,6 +104,9 @@ install_wasmtime() {
     return
   fi
   echo "Installing wasmtime (Que's default external WASI runtime)..."
+  # Fresh cloud images sometimes have no shell startup file. Wasmtime's
+  # installer expects one when it records WASMTIME_HOME.
+  touch "$HOME/.profile"
   curl --proto '=https' --tlsv1.2 -fsSL https://wasmtime.dev/install.sh | bash
   local wasmtime_bin="$HOME/.wasmtime/bin"
   if [[ -x "$wasmtime_bin/wasmtime" ]]; then
