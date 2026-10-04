@@ -142,7 +142,7 @@ fn compile_curried_call(func_js: String, args_js: &[String]) -> String {
 fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
     match expr {
         Expression::Int(n) => format!("{}", n),
-        Expression::Dec(n) => format!("{}", n),
+        Expression::Dec(n) => n.to_string(),
         Expression::Word(w) => match w.as_str() {
             "nil" => "0".to_string(),
             _ => ident(w, 0),

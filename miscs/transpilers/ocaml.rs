@@ -262,7 +262,7 @@ fn compile_typed_body(
 fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> String {
     match &node.expr {
         Expression::Int(n) => format!("{}", n),
-        Expression::Dec(n) => format!("{:?}", n),
+        Expression::Dec(n) => n.to_string(),
         Expression::Word(w) => match w.as_str() {
             "nil" => "0".to_string(),
             "true" => "true".to_string(),

@@ -195,6 +195,13 @@ Char                Unicode scalar value
 A -> B              function
 ```
 
+`Dec` uses a scaled signed `i32` at runtime (scale `1000` by default, selected
+with `QUE_DECIMAL_SCALE` when compiling). Source literals are parsed as exact
+base-10 values and quantized with round-half-even; they never pass through a
+binary floating-point representation. Decimal multiplication and division use
+`i64` intermediates and truncate their result toward zero at the configured
+scale.
+
 Use `sig` when an external boundary or polymorphic operation needs an explicit
 type:
 

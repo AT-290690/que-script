@@ -1,5 +1,5 @@
 use crate::infer::{EffectFlags, TypedExpression};
-use crate::parser::Expression;
+use crate::parser::{DecimalLiteral, Expression};
 use crate::types::Type;
 use std::collections::{HashMap, HashSet};
 
@@ -824,7 +824,7 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
         "sum/dec" if items.len() == 2 => Some((
             FuseSink::Reduce {
                 reduce_fn: Expression::Word("+.".to_string()),
-                init_expr: Expression::Dec(0.0),
+                init_expr: Expression::Dec(DecimalLiteral::integer(0)),
                 with_index: false,
             },
             items.get(1)?.clone(),
@@ -842,7 +842,7 @@ fn parse_terminal_call(expr: &Expression) -> Option<(FuseSink, Expression)> {
         "product/dec" if items.len() == 2 => Some((
             FuseSink::Reduce {
                 reduce_fn: Expression::Word("*.".to_string()),
-                init_expr: Expression::Dec(1.0),
+                init_expr: Expression::Dec(DecimalLiteral::integer(1)),
                 with_index: false,
             },
             items.get(1)?.clone(),
@@ -1762,7 +1762,7 @@ fn build_average_loop(
         Expression::Apply(vec![
             Expression::Word("vector".to_string()),
             if dec {
-                Expression::Dec(0.0)
+                Expression::Dec(DecimalLiteral::integer(0))
             } else {
                 Expression::Int(0)
             },
@@ -3649,20 +3649,16 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         "<=" | "<=#" => fold_int_cmp(node, &items, |a, b| a <= b),
         ">=" | ">=#" => fold_int_cmp(node, &items, |a, b| a >= b),
 
-        "+." => fold_float_bin(node, &items, "+.", |a, b| a + b),
-        "-." => fold_float_bin(node, &items, "-.", |a, b| a - b),
-        "*." => fold_float_bin(node, &items, "*.", |a, b| a * b),
-        "/." => fold_float_bin(node, &items, "/.", |a, b| a / b),
-        "%." => fold_float_bin(node, &items, "%.", |a, b| a - (a / b).trunc() * b),
+        "+." | "-." | "*." | "/." | "%." => fold_dec_bin(node, &items, op),
 
-        "=." => fold_float_cmp(node, &items, |a, b| a == b),
-        "<." => fold_float_cmp(node, &items, |a, b| a < b),
-        ">." => fold_float_cmp(node, &items, |a, b| a > b),
-        "<=." => fold_float_cmp(node, &items, |a, b| a <= b),
-        ">=." => fold_float_cmp(node, &items, |a, b| a >= b),
+        "=." => fold_dec_cmp(node, &items, |a, b| a == b),
+        "<." => fold_dec_cmp(node, &items, |a, b| a < b),
+        ">." => fold_dec_cmp(node, &items, |a, b| a > b),
+        "<=." => fold_dec_cmp(node, &items, |a, b| a <= b),
+        ">=." => fold_dec_cmp(node, &items, |a, b| a >= b),
 
-        "Int->Dec" => fold_int_to_float(node, &items),
-        "Dec->Int" => fold_float_to_int(node, &items),
+        "Int->Dec" => fold_int_to_dec(node, &items),
+        "Dec->Int" => fold_dec_to_int(node, &items),
 
         _ => node,
     }
@@ -4615,42 +4611,48 @@ fn fold_int_cmp(
     )
 }
 
-fn fold_float_bin(
-    node: TypedExpression,
-    items: &[Expression],
-    op: &str,
-    f: fn(f32, f32) -> f32,
-) -> TypedExpression {
+fn fold_dec_bin(node: TypedExpression, items: &[Expression], op: &str) -> TypedExpression {
     let (Some(a), Some(b)) = (
-        items.get(1).and_then(float_literal),
-        items.get(2).and_then(float_literal),
+        items.get(1).and_then(dec_literal_scaled),
+        items.get(2).and_then(dec_literal_scaled),
     ) else {
         return node;
     };
-    if parse_env_bool_like("QUE_DIV_ZERO_CHECK", false) && (op == "/." || op == "%.") && b == 0.0 {
+    if (op == "/." || op == "%.") && b == 0 {
         return node;
     }
-    let result = f(a, b);
+    let scale = decimal_scale_i64();
+    let wide = match op {
+        "+." => (a as i64) + (b as i64),
+        "-." => (a as i64) - (b as i64),
+        "*." => ((a as i64) * (b as i64)) / scale,
+        "/." => ((a as i64) * scale) / (b as i64),
+        "%." => match a.checked_rem(b) {
+            Some(value) => value as i64,
+            None => return node,
+        },
+        _ => return node,
+    };
     if parse_env_bool_like("QUE_DEC_OVERFLOW_CHECK", false)
-        && (!result.is_finite() || !decimal_fits_i32_storage(result))
+        && !(i32::MIN as i64..=i32::MAX as i64).contains(&wide)
     {
         return node;
     }
     make_folded_literal(
         &node,
-        Expression::Dec(quantize_float_literal(result)),
+        Expression::Dec(DecimalLiteral::from_scaled(wide as i32 as i64, scale)),
         Type::Dec,
     )
 }
 
-fn fold_float_cmp(
+fn fold_dec_cmp(
     node: TypedExpression,
     items: &[Expression],
-    f: fn(f32, f32) -> bool,
+    f: fn(i32, i32) -> bool,
 ) -> TypedExpression {
     let (Some(a), Some(b)) = (
-        items.get(1).and_then(float_literal),
-        items.get(2).and_then(float_literal),
+        items.get(1).and_then(dec_literal_scaled),
+        items.get(2).and_then(dec_literal_scaled),
     ) else {
         return node;
     };
@@ -4661,7 +4663,7 @@ fn fold_float_cmp(
     )
 }
 
-fn fold_int_to_float(node: TypedExpression, items: &[Expression]) -> TypedExpression {
+fn fold_int_to_dec(node: TypedExpression, items: &[Expression]) -> TypedExpression {
     let Some(a) = items.get(1).and_then(int_literal) else {
         return node;
     };
@@ -4673,16 +4675,23 @@ fn fold_int_to_float(node: TypedExpression, items: &[Expression]) -> TypedExpres
     }
     make_folded_literal(
         &node,
-        Expression::Dec(quantize_float_literal(a as f32)),
+        Expression::Dec(DecimalLiteral::from_scaled(
+            (a as i64 * decimal_scale_i64()) as i32 as i64,
+            decimal_scale_i64(),
+        )),
         Type::Dec,
     )
 }
 
-fn fold_float_to_int(node: TypedExpression, items: &[Expression]) -> TypedExpression {
-    let Some(a) = items.get(1).and_then(float_literal) else {
+fn fold_dec_to_int(node: TypedExpression, items: &[Expression]) -> TypedExpression {
+    let Some(a) = items.get(1).and_then(dec_literal_scaled) else {
         return node;
     };
-    make_folded_literal(&node, Expression::Int(a.trunc() as i32), Type::Int)
+    make_folded_literal(
+        &node,
+        Expression::Int(a / decimal_scale_i64() as i32),
+        Type::Int,
+    )
 }
 
 fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
@@ -4942,7 +4951,7 @@ fn is_empty_vector_expr(expr: &Expression) -> bool {
 fn is_zero_scalar_literal_expr(expr: &Expression) -> bool {
     match expr {
         Expression::Int(0) => true,
-        Expression::Dec(n) => *n == 0.0,
+        Expression::Dec(n) => n.is_zero(),
         Expression::Word(w) if w == "false" || w == "nil" => true,
         _ => false,
     }
@@ -5098,25 +5107,13 @@ fn int_literal(expr: &Expression) -> Option<i32> {
     }
 }
 
-fn float_literal(expr: &Expression) -> Option<f32> {
+fn dec_literal_scaled(expr: &Expression) -> Option<i32> {
     match expr {
-        Expression::Dec(v) => Some(quantize_float_literal(*v)),
+        Expression::Dec(value) => value
+            .scaled_i64(decimal_scale_i64())
+            .and_then(|scaled| i32::try_from(scaled).ok()),
         _ => None,
     }
-}
-
-fn quantize_float_literal(v: f32) -> f32 {
-    let scale = decimal_scale_f32();
-    (v * scale).round() / scale
-}
-
-fn decimal_fits_i32_storage(v: f32) -> bool {
-    let scaled = ((v as f64) * (decimal_scale_i64() as f64)).round();
-    scaled >= i32::MIN as f64 && scaled <= i32::MAX as f64
-}
-
-fn decimal_scale_f32() -> f32 {
-    decimal_scale_i64() as f32
 }
 
 fn decimal_scale_i64() -> i64 {
@@ -7022,7 +7019,7 @@ fn scalar_default_typed_expr(typ: &Type) -> Option<TypedExpression> {
             children: Vec::new(),
         }),
         Type::Dec => Some(TypedExpression {
-            expr: Expression::Dec(0.0),
+            expr: Expression::Dec(DecimalLiteral::integer(0)),
             typ: Some(Type::Dec),
             effect: EffectFlags::PURE,
             children: Vec::new(),

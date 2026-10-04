@@ -1,5 +1,5 @@
 use crate::infer::{EffectFlags, TypedExpression};
-use crate::parser::Expression;
+use crate::parser::{DecimalLiteral, Expression};
 use crate::types::Type;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -269,6 +269,18 @@ fn decimal_scale_i32() -> i32 {
 
 fn decimal_scale_i64() -> i64 {
     decimal_scale_i32() as i64
+}
+
+fn decimal_literal_i32(value: &DecimalLiteral) -> Result<i32, String> {
+    let scaled = value
+        .scaled_i64(decimal_scale_i64())
+        .ok_or_else(|| format!("Dec literal `{value}` is too large"))?;
+    i32::try_from(scaled).map_err(|_| {
+        format!(
+            "Dec literal `{value}` is outside the range supported at scale {}",
+            decimal_scale_i64()
+        )
+    })
 }
 
 fn is_power_of_ten_i32(n: i32) -> bool {
@@ -9261,10 +9273,7 @@ fn compile_trusted_string_literal_expr(expr: &Expression, ctx: &Ctx<'_>) -> Resu
             Expression::Int(n) => format!("i32.const {}", n),
             Expression::Word(w) if w == "true" => "i32.const 1".to_string(),
             Expression::Word(w) if w == "false" || w == "nil" => "i32.const 0".to_string(),
-            Expression::Dec(n) => {
-                let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
-                format!("i32.const {}", scaled as i32)
-            }
+            Expression::Dec(n) => format!("i32.const {}", decimal_literal_i32(n)?),
             Expression::Apply(_) => {
                 let fake_node = TypedExpression {
                     expr: item.clone(),
@@ -9310,10 +9319,7 @@ fn compile_trusted_typed_vector_literal(
                 _ => Err("bools expects boolean literal elements".to_string()),
             }),
             "decimals" => (0, |expr, _ctx| match expr {
-                Expression::Dec(n) => {
-                    let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
-                    Ok(format!("i32.const {}", scaled as i32))
-                }
+                Expression::Dec(n) => Ok(format!("i32.const {}", decimal_literal_i32(n)?)),
                 _ => Err("decimals expects decimal literal elements".to_string()),
             }),
             "strings" => (1, compile_trusted_string_literal_expr),
@@ -13326,10 +13332,7 @@ fn compile_lambda_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
 fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     match &node.expr {
         Expression::Int(n) => Ok(format!("i32.const {}", n)),
-        Expression::Dec(n) => {
-            let scaled = ((*n as f64) * (decimal_scale_i64() as f64)).round() as i64;
-            Ok(format!("i32.const {}", scaled as i32))
-        }
+        Expression::Dec(n) => Ok(format!("i32.const {}", decimal_literal_i32(n)?)),
         Expression::Word(w) => match w.as_str() {
             "true" => Ok("i32.const 1".to_string()),
             "false" => Ok("i32.const 0".to_string()),

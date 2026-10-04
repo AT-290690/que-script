@@ -183,7 +183,7 @@ fn compile_do_tail(items: &[Expression], mut_vars: &HashSet<String>, in_fn_body:
 fn compile_expr_inner(expr: &Expression, mut_vars: &HashSet<String>, in_fn_body: bool) -> String {
     match expr {
         Expression::Int(n) => n.to_string(),
-        Expression::Dec(n) => format!("{:?}", n),
+        Expression::Dec(n) => n.to_string(),
         Expression::Word(w) => match w.as_str() {
             "nil" => "0".to_string(),
             "true" => "true".to_string(),

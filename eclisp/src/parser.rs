@@ -575,11 +575,8 @@ fn parse_expr(tokens: &[String], i: &mut usize) -> Result<Expression, String> {
                 .parse()
                 .map_err(|e| format!("Bad integer '{}': {}", tok, e))?;
             Ok(Expression::Int(n))
-        } else if is_float(tok) {
-            let n: f32 = tok
-                .parse()
-                .map_err(|e| format!("Bad dec '{}': {}", tok, e))?;
-            Ok(Expression::Dec(n))
+        } else if is_decimal(tok) {
+            Ok(Expression::Dec(DecimalLiteral::parse(tok)?))
         } else {
             Ok(Expression::Word(tok.clone()))
         }
@@ -1650,7 +1647,7 @@ fn desugar_with_counter(
                     "&alter!" => Ok(cell_setter_transform(exprs)?),
                     "&mut" | "variable" => Ok(variable_transform(exprs)?),
                     "integer" => Ok(integer_transform(exprs)?),
-                    "fixed" => Ok(float_transform(exprs)?),
+                    "fixed" => Ok(dec_transform(exprs)?),
                     "boolean" => boolean_transform(exprs),
                     "while" => Ok(loop_while_transform(exprs, binding_counter)?),
                     "lambda" => lambda_destructure_transform(exprs, binding_counter),
@@ -2309,7 +2306,7 @@ fn integer_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
         Expression::Apply(vec![Expression::Word("int".to_string()), exprs[1].clone()]),
     ]))
 }
-fn float_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+fn dec_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     if exprs.len() != 3 {
         return Err("fixed requires exactly 2 arguments: a name and a value".to_string());
     }
@@ -2392,7 +2389,7 @@ fn minusf_transform(mut exprs: Vec<Expression>) -> Expression {
         1 => Expression::Apply(vec![
             Expression::Word("*.".to_string()),
             exprs.remove(0),
-            Expression::Dec(-1.0),
+            Expression::Dec(DecimalLiteral::integer(-1)),
         ]),
         _ => {
             let first = exprs.remove(0);
@@ -2421,7 +2418,7 @@ fn plusf_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Dec(1.0),
+        0 => Expression::Dec(DecimalLiteral::integer(1)),
         1 => right_partial_transform("+.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
@@ -2813,7 +2810,7 @@ fn multf_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Dec(1.0),
+        0 => Expression::Dec(DecimalLiteral::integer(1)),
         1 => right_partial_transform("*.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
@@ -2841,7 +2838,7 @@ fn divf_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
 
     match exprs.len() {
-        0 => Expression::Dec(1.0),
+        0 => Expression::Dec(DecimalLiteral::integer(1)),
         1 => right_partial_transform("/.", exprs.remove(0)),
         _ => {
             let first = exprs.remove(0);
@@ -2945,7 +2942,7 @@ fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Result<Expression, String
 //     inp
 // }
 
-fn is_float(s: &str) -> bool {
+fn is_decimal(s: &str) -> bool {
     if s == "-" || s == "+" {
         return false;
     }
@@ -3016,10 +3013,119 @@ macro_rules! s {
     };
 }
 
+/// An exact base-10 literal as written in Que source.
+///
+/// Runtime `Dec` values are scaled i32 integers, but keeping the source value
+/// in decimal form until lowering avoids routing literals through binary
+/// floating point and losing precision before they reach that representation.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct DecimalLiteral {
+    mantissa: i128,
+    fractional_digits: u32,
+}
+
+impl DecimalLiteral {
+    pub fn parse(source: &str) -> Result<Self, String> {
+        let (negative, unsigned) = match source.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, source),
+        };
+        let (whole, fraction) = unsigned
+            .split_once('.')
+            .ok_or_else(|| format!("Bad dec '{}': missing decimal point", source))?;
+        let digits = format!("{}{}", if whole.is_empty() { "0" } else { whole }, fraction);
+        let magnitude = digits
+            .parse::<i128>()
+            .map_err(|error| format!("Bad dec '{}': {}", source, error))?;
+        let mantissa = if negative {
+            magnitude
+                .checked_neg()
+                .ok_or_else(|| format!("Bad dec '{}': value is too large", source))?
+        } else {
+            magnitude
+        };
+        Ok(Self {
+            mantissa,
+            fractional_digits: fraction.len() as u32,
+        })
+    }
+
+    pub const fn integer(value: i64) -> Self {
+        Self {
+            mantissa: value as i128,
+            fractional_digits: 0,
+        }
+    }
+
+    pub fn from_scaled(value: i64, scale: i64) -> Self {
+        debug_assert!(scale > 0);
+        let mut digits = 0;
+        let mut remaining = scale;
+        while remaining > 1 && remaining % 10 == 0 {
+            remaining /= 10;
+            digits += 1;
+        }
+        debug_assert_eq!(remaining, 1);
+        Self {
+            mantissa: value as i128,
+            fractional_digits: digits,
+        }
+    }
+
+    /// Quantize to a runtime fixed-point integer using decimal round-half-even.
+    /// This makes exact halfway literals deterministic without inheriting a
+    /// binary floating-point approximation's accidental rounding direction.
+    pub fn scaled_i64(self, scale: i64) -> Option<i64> {
+        let denominator = 10_i128.checked_pow(self.fractional_digits)?;
+        let numerator = self.mantissa.checked_mul(scale as i128)?;
+        let quotient = numerator / denominator;
+        let remainder = numerator % denominator;
+        let twice_remainder = remainder.checked_abs()?.checked_mul(2)?;
+        let rounds_away = twice_remainder > denominator
+            || (twice_remainder == denominator && quotient % 2 != 0);
+        let rounded = if rounds_away {
+            quotient.checked_add(if numerator < 0 { -1 } else { 1 })?
+        } else {
+            quotient
+        };
+        i64::try_from(rounded).ok()
+    }
+
+    pub const fn is_zero(self) -> bool {
+        self.mantissa == 0
+    }
+}
+
+impl std::fmt::Display for DecimalLiteral {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let negative = self.mantissa < 0;
+        let magnitude = self.mantissa.unsigned_abs().to_string();
+        if negative {
+            write!(f, "-")?;
+        }
+        if self.fractional_digits == 0 {
+            return write!(f, "{}.0", magnitude);
+        }
+        let digits = self.fractional_digits as usize;
+        if magnitude.len() <= digits {
+            write!(f, "0.{:0>width$}", magnitude, width = digits)
+        } else {
+            let split = magnitude.len() - digits;
+            write!(f, "{}.{}", &magnitude[..split], &magnitude[split..])
+        }
+    }
+}
+
+impl std::fmt::Debug for DecimalLiteral {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Expression {
     Int(i32),
-    Dec(f32),
+    Dec(DecimalLiteral),
     Word(String),
     Apply(Vec<Expression>),
 }
@@ -3040,7 +3146,7 @@ impl Expression {
         match self {
             Expression::Word(w) => w.clone(),
             Expression::Int(a) => a.to_string(),
-            Expression::Dec(a) => format!("{:?}", a),
+            Expression::Dec(a) => a.to_string(),
             Expression::Apply(items) => {
                 if items.is_empty() {
                     return "()".to_string();

@@ -4,7 +4,7 @@ pub mod parser;
 pub mod types;
 
 pub use infer::{EffectFlags, InferErrorInfo, TypedExpression};
-pub use parser::Expression;
+pub use parser::{DecimalLiteral, Expression};
 pub use types::{Type, TypeEnv, TypeScheme, TypeVar};
 
 pub fn parse(source: &str) -> Result<Vec<Expression>, String> {
@@ -56,5 +56,25 @@ mod tests {
         let err = check("(+ 1 true)").expect_err("program should fail type-checking");
 
         assert!(err.contains("expected Int but got Bool"), "got: {err}");
+    }
+
+    #[test]
+    fn decimal_literals_remain_exact_until_runtime_quantization() {
+        let values = parse("1000000.001 1000000.002 3.1425 -3.1435")
+            .expect("decimal literals should parse");
+        let rendered = values.iter().map(Expression::to_lisp).collect::<Vec<_>>();
+        assert_eq!(
+            rendered,
+            ["1000000.001", "1000000.002", "3.1425", "-3.1435"]
+        );
+
+        let scaled = values
+            .iter()
+            .map(|value| match value {
+                Expression::Dec(value) => value.scaled_i64(1000).unwrap(),
+                _ => panic!("expected Dec literal"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(scaled, [1_000_000_001, 1_000_000_002, 3_142, -3_144]);
     }
 }

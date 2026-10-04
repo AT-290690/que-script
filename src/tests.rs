@@ -2876,6 +2876,37 @@ xs
     }
 
     #[test]
+    fn test_decimal_literals_do_not_lose_precision_through_f32() {
+        let source = r#"[1000000.001 1000000.002
+            (+. 1000000.001 0.001)
+            (*. 1.234 2.0)
+            (/. 7.5 2.5)]"#;
+        let unoptimized = run_program_output_with_std_and_opts(source, false);
+        let optimized = run_program_output_with_std_and_opts(source, true);
+        assert_eq!(unoptimized, "[1000000.001 1000000.002 1000000.002 2.468 3]");
+        assert_eq!(optimized, unoptimized);
+    }
+
+    #[test]
+    fn test_decimal_literal_outside_scaled_i32_range_is_rejected() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _scale = ScopedEnvVar::set("QUE_DECIMAL_SCALE", "1000");
+
+        let minimum = crate::parser::build("-2147483.648").expect("minimum Dec should parse");
+        crate::wat::compile_program_to_wat(&minimum).expect("minimum Dec should compile");
+
+        let too_large = crate::parser::build("2147483.648").expect("literal should parse exactly");
+        let error = crate::wat::compile_program_to_wat(&too_large)
+            .expect_err("out-of-range Dec must not silently wrap");
+        assert!(
+            error.contains("outside the range supported at scale 1000"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
     fn test_decimal_int_conversions() {
         let output = run_program_output(
             r#"(do
