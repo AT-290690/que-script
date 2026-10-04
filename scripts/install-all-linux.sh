@@ -21,17 +21,12 @@ NVIM_INIT_URL="${QUE_NVIM_INIT_URL:-$REPO_RAW/scripts/que-init.lua}"
 
 clean_old_neovim() {
   [[ "${QUE_CLEAN_NVIM:-0}" == "1" ]] || return
-  local backup_root="$HOME/.que-nvim-backup-$(date +%Y%m%d%H%M%S)"
-  mkdir -p "$backup_root"
-  if [[ -e "$NVIM_CONFIG_DIR" ]]; then
-    mv "$NVIM_CONFIG_DIR" "$backup_root/config"
-  fi
   local nvim_data="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
-  if [[ -e "$nvim_data" ]]; then
-    mv "$nvim_data" "$backup_root/data"
-  fi
+  local nvim_state="${XDG_STATE_HOME:-$HOME/.local/state}/nvim"
+  local nvim_cache="${XDG_CACHE_HOME:-$HOME/.cache}/nvim"
+  rm -rf "$NVIM_CONFIG_DIR" "$nvim_data" "$nvim_state" "$nvim_cache"
   mkdir -p "$NVIM_CONFIG_DIR"
-  echo "Old Neovim config and plugin state moved to: $backup_root"
+  echo "Removed old Neovim config, plugins, state, and cache."
 }
 
 as_root() {
