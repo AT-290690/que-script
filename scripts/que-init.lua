@@ -36,6 +36,14 @@ require("lazy").setup({
       vim.keymap.set("n", "<leader>/", builtin.current_buffer_fuzzy_find, { desc = "Search buffer" })
     end,
   },
+  {
+    "folke/which-key.nvim",
+    event = "VeryLazy",
+    opts = {
+      delay = 0,
+      icons = { mappings = false, keys = {} },
+    },
+  },
   { "neovim/nvim-lspconfig" },
   { "folke/tokyonight.nvim", priority = 1000, config = function() vim.cmd.colorscheme("tokyonight-night") end },
 })
@@ -46,7 +54,17 @@ local que_plugin_lua = vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim/
 package.path = que_plugin_lua .. "/?.lua;" .. que_plugin_lua .. "/?/init.lua;" .. package.path
 
 local que_plugin = dofile(que_plugin_lua .. "/que/init.lua")
-que_plugin.setup({})
+que_plugin.setup({
+  completion_icons = {
+    Text = "≡", Method = "ƒ", Function = "λ", Constructor = "+",
+    Field = "·", Variable = "α", Class = "C", Interface = "I",
+    Module = "m", Property = "·", Unit = "()", Value = "◇",
+    Enum = "E", Keyword = "β", Snippet = "⋯", Color = "■",
+    File = "#", Reference = "↗", Folder = "/*", EnumMember = "◇",
+    Constant = "π", Struct = "{}", Event = "!", Operator = "●",
+    TypeParameter = "T",
+  },
+})
 
 -- Basic LSP navigation and diagnostics.
 vim.diagnostic.config({
@@ -59,3 +77,20 @@ vim.keymap.set("n", "gd", vim.lsp.buf.definition, { desc = "LSP definition" })
 vim.keymap.set("n", "<leader>q", vim.diagnostic.setloclist, { desc = "Diagnostics" })
 
 -- The Que plugin provides <leader>r/d/e/w/a/z/g in Que buffers.
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = { "que", "eclisp" },
+  callback = function()
+    local ok, wk = pcall(require, "which-key")
+    if ok then
+      wk.add({
+        { "<leader>r", desc = "Que run" },
+        { "<leader>d", desc = "Que debug" },
+        { "<leader>w", desc = "Que WAT" },
+        { "<leader>a", desc = "Que types" },
+        { "<leader>e", desc = "Que explain" },
+        { "<leader>z", desc = "Que source" },
+        { "<leader>g", desc = "Que library" },
+      })
+    end
+  end,
+})
