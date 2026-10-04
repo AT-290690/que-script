@@ -190,13 +190,18 @@ clean_old_neovim
 install_que_plugin
 
 mkdir -p "$NVIM_CONFIG_DIR"
-if [[ -e "$NVIM_INIT" && "${QUE_OVERWRITE_NVIM:-0}" != "1" ]]; then
+managed_config=0
+if [[ -f "$NVIM_INIT" ]] && grep -Fq 'Que workstation configuration installed by scripts/install-all-linux.sh' "$NVIM_INIT"; then
+  managed_config=1
+fi
+
+if [[ -e "$NVIM_INIT" && "${QUE_OVERWRITE_NVIM:-0}" != "1" && "$managed_config" -ne 1 ]]; then
   backup="$NVIM_INIT.que-backup-$(date +%Y%m%d%H%M%S)"
   cp "$NVIM_INIT" "$backup"
   echo "Existing Neovim config preserved at $backup"
 fi
 
-if [[ ! -e "$NVIM_INIT" || "${QUE_OVERWRITE_NVIM:-0}" == "1" ]]; then
+if [[ ! -e "$NVIM_INIT" || "${QUE_OVERWRITE_NVIM:-0}" == "1" || "$managed_config" -eq 1 ]]; then
   curl -fsSL "$NVIM_INIT_URL" -o "$NVIM_INIT"
   echo "Installed Neovim config: $NVIM_INIT"
 else
