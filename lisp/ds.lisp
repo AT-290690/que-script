@@ -1338,7 +1338,9 @@ q)))
     (mut hash 0)
     (let len (length key))
     (while (< i len) (do
-      (alter! hash (% (+ (% (+ (* hash 131) (as (get key i) Int)) cap) cap) cap))
+      (alter! hash (Int/euclidean-mod
+        (+ (* hash 131) (as (get key i) Int))
+        cap))
       (alter! i (+ i 1))))
     hash)))))
 
@@ -1486,21 +1488,49 @@ q)))
   out)))
 
 (let Table/update! (lambda table key init f (do
-  (if (Table/has/raw? table key)
-      (Table/set/raw! table key (f (snd (get (Table/get/raw table key) 0))))
-      (Table/set/raw! table key init))
+  (if (= (length table) 0) (do (Table/resize/raw! table 32) nil) nil)
+  (let idx (Table/hash table key))
+  (let bucket (get table idx))
+  (let index (Table/find-index bucket key))
+  (if (>= index 0)
+      (set! bucket index
+        { (fst (get bucket index))
+          (f (snd (get bucket index))) })
+      (do
+        (set! bucket (length bucket) { key init })
+        (if (> (length bucket) 8)
+            (do (Table/resize/raw! table (* (length table) 2)) nil)
+            nil)))
   nil)))
 
 (let Table/update-or! (lambda table key missing present (do
-  (if (Table/has/raw? table key)
-      (Table/set/raw! table key (present (snd (get (Table/get/raw table key) 0))))
-      (Table/set/raw! table key (missing)))
+  (if (= (length table) 0) (do (Table/resize/raw! table 32) nil) nil)
+  (let idx (Table/hash table key))
+  (let bucket (get table idx))
+  (let index (Table/find-index bucket key))
+  (if (>= index 0)
+      (set! bucket index
+        { (fst (get bucket index))
+          (present (snd (get bucket index))) })
+      (do
+        (set! bucket (length bucket) { key (missing) })
+        (if (> (length bucket) 8)
+            (do (Table/resize/raw! table (* (length table) 2)) nil)
+            nil)))
   nil)))
 
 (let Table/push-or! (lambda table key value (do
-  (if (Table/has/raw? table key)
-      (do (push! (snd (get (Table/get/raw table key) 0)) value) nil)
-      (do (Table/set/raw! table key [value]) nil))
+  (if (= (length table) 0) (do (Table/resize/raw! table 32) nil) nil)
+  (let idx (Table/hash table key))
+  (let bucket (get table idx))
+  (let index (Table/find-index bucket key))
+  (if (>= index 0)
+      (push! (snd (get bucket index)) value)
+      (do
+        (set! bucket (length bucket) { key [value] })
+        (if (> (length bucket) 8)
+            (do (Table/resize/raw! table (* (length table) 2)) nil)
+            nil)))
   nil)))
 
 (let Table/entries (lambda table (do
@@ -1534,10 +1564,18 @@ q)))
   (let len (length arr))
   (while (< i len) (do
     (let key (get arr i))
-    (let hit (Table/get/raw table key))
-    (if (= (length hit) 0)
-        (Table/set/raw! table key 1)
-        (Table/set/raw! table key (+ (snd (get hit 0)) 1)))
+    (let idx (Table/hash table key))
+    (let bucket (get table idx))
+    (let index (Table/find-index bucket key))
+    (if (>= index 0)
+        (set! bucket index
+          { (fst (get bucket index))
+            (+ (snd (get bucket index)) 1) })
+        (do
+          (set! bucket (length bucket) { key 1 })
+          (if (> (length bucket) 8)
+              (do (Table/resize/raw! table (* (length table) 2)) nil)
+              nil)))
     (alter! i (+ i 1))))
   table)))
 
@@ -1547,10 +1585,18 @@ q)))
   (let len (length xs))
   (while (< i len) (do
     (let key [(get xs i)])
-    (let hit (Table/get/raw table key))
-    (if (= (length hit) 0)
-        (Table/set/raw! table key 1)
-        (Table/set/raw! table key (+ (snd (get hit 0)) 1)))
+    (let idx (Table/hash table key))
+    (let bucket (get table idx))
+    (let index (Table/find-index bucket key))
+    (if (>= index 0)
+        (set! bucket index
+          { (fst (get bucket index))
+            (+ (snd (get bucket index)) 1) })
+        (do
+          (set! bucket (length bucket) { key 1 })
+          (if (> (length bucket) 8)
+              (do (Table/resize/raw! table (* (length table) 2)) nil)
+              nil)))
     (alter! i (+ i 1))))
   table)))
 
