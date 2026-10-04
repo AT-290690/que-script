@@ -1271,7 +1271,7 @@ pub fn diagnostic_ranges_in_user_form(
     let Some(form_end) = position_to_byte_offset(text, form_range.end) else {
         return Vec::new();
     };
-    infer_error_ranges(text, message, None, Some(snippet))
+    let ranges: Vec<CoreRange> = infer_error_ranges(text, message, None, Some(snippet))
         .into_iter()
         .filter(|range| {
             let Some(start) = position_to_byte_offset(text, range.start) else {
@@ -1281,6 +1281,41 @@ pub fn diagnostic_ranges_in_user_form(
                 return false;
             };
             start >= form_start && end <= form_end
+        })
+        .collect();
+    if !ranges.is_empty() {
+        return ranges;
+    }
+
+    // Static-analysis expressions describe the desugared call. A bare pipe
+    // stage such as `(|> parts pop-val!)` therefore arrives here as
+    // `(pop-val! parts)`, which cannot be found verbatim in the surface source.
+    // Recover the call head, but keep the search inside the originating form so
+    // repeated stages elsewhere in the file do not receive the diagnostic.
+    find_bare_pipeline_stage_ranges_in_bytes(text, snippet, form_start, form_end)
+}
+
+fn find_bare_pipeline_stage_ranges_in_bytes(
+    text: &str,
+    snippet: &str,
+    start: usize,
+    end: usize,
+) -> Vec<CoreRange> {
+    let Some(head) = extract_call_prefix_tokens(snippet, 1).into_iter().next() else {
+        return Vec::new();
+    };
+    find_symbol_ranges(text, &head)
+        .into_iter()
+        .filter(|range| {
+            let Some(candidate_start) = position_to_byte_offset(text, range.start) else {
+                return false;
+            };
+            let Some(candidate_end) = position_to_byte_offset(text, range.end) else {
+                return false;
+            };
+            candidate_start >= start
+                && candidate_end <= end
+                && is_bare_pipeline_stage_at(text, candidate_start)
         })
         .collect()
 }

@@ -5893,6 +5893,26 @@ out"#,
     }
 
     #[test]
+    fn test_lsp_static_analysis_bare_pipeline_stage_points_to_stage() {
+        let source = "(let result (|> parts pop-val!))";
+        let message = "static bounds: vector may be empty: `(pop-val! parts)`";
+        let ranges = crate::lsp_native_core::static_analysis_diagnostic_ranges(source, message, 0);
+        assert_eq!(
+            ranges.len(),
+            1,
+            "expected the bare pipeline stage: {ranges:?}"
+        );
+        let range = ranges[0];
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 22);
+        assert_eq!(range.end.character, 30);
+        assert_eq!(
+            &source[range.start.character as usize..range.end.character as usize],
+            "pop-val!"
+        );
+    }
+
+    #[test]
     fn test_lsp_type_error_range_is_scoped_to_originating_function() {
         let source = "(let f (lambda (x) (+ x true)))\n(let g (lambda (x) (+ x true)))";
         let scope = crate::infer::InferErrorScope {
