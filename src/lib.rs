@@ -9,7 +9,10 @@ pub mod lsp_native_core;
 pub mod op;
 pub mod project;
 pub mod static_analysis;
-#[cfg(test)]
+// The repository-wide integration suite exercises the WAT compiler and its
+// optional `wat` dependency. Module-local parser, LSP, and analysis tests still
+// run without default features; only this compiler-specific suite is gated.
+#[cfg(all(test, feature = "compiler"))]
 mod tests;
 pub mod wasm_api;
 #[cfg(feature = "compiler")]

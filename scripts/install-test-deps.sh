@@ -8,6 +8,15 @@ if command -v wasmtime >/dev/null 2>&1; then
 fi
 
 echo "Installing the external Wasmtime CLI required by runtime tests..."
-curl https://wasmtime.dev/install.sh -sSf | bash
+touch "$HOME/.profile"
+curl --proto '=https' --tlsv1.2 -fsSL https://wasmtime.dev/install.sh \
+  | PROFILE="$HOME/.profile" bash
 
-echo "Wasmtime was installed. Restart your shell if it is not yet on PATH."
+wasmtime_bin="$HOME/.wasmtime/bin/wasmtime"
+if [[ ! -x "$wasmtime_bin" ]]; then
+  echo "Wasmtime installation completed, but $wasmtime_bin was not created." >&2
+  exit 1
+fi
+
+"$wasmtime_bin" --version
+echo 'Wasmtime was installed. Run `source "$HOME/.profile"` if it is not yet on PATH.'

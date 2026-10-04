@@ -3537,7 +3537,7 @@ fn hoist_fusion_callables(
     (hoisted_bindings, hoisted_ops, hoisted_sink)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "compiler"))]
 pub(crate) fn fuse_map_filter_reduce_for_test(expr: &Expression) -> Expression {
     let mut name_state = FuseNameState::default();
     fuse_map_filter_reduce_chains_expr(expr, &mut name_state)

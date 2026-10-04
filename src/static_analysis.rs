@@ -1113,8 +1113,12 @@ fn integer_interval_alternatives_at_depth(
                 Some(normalize_intervals(results))
             }
             [Expression::Word(op), numerator, divisor] if op == "/" => {
+                // The typed `/` builtin guarantees an Int numerator. Even
+                // without a narrower symbolic fact its range is therefore
+                // i32, which a constant divisor can still narrow materially.
                 let numerator =
-                    integer_interval_alternatives_at_depth(numerator, state, expansion_depth)?;
+                    integer_interval_alternatives_at_depth(numerator, state, expansion_depth)
+                        .unwrap_or_else(|| vec![IntInterval::I32]);
                 let divisor = integer_constant(divisor, state)?;
                 if divisor == 0 {
                     return None;
@@ -1252,7 +1256,11 @@ fn integer_interval_at_depth(
                 Some(result)
             }
             [Expression::Word(op), numerator, divisor] if op == "/" => {
-                let numerator = integer_interval_at_depth(numerator, state, expansion_depth)?;
+                // `/` has already type-checked as Int arithmetic. Preserve
+                // that full i32 domain when no more precise fact is known so
+                // division by a constant still refines the result.
+                let numerator = integer_interval_at_depth(numerator, state, expansion_depth)
+                    .unwrap_or(IntInterval::I32);
                 let divisor = integer_constant(divisor, state)?;
                 if divisor == 0 {
                     return None;
@@ -4427,17 +4435,50 @@ fn validate_static_bounds_expr(
                 ),
             );
         }
-        if op == "/"
-            && integer_interval(&items[1], facts) == Some(IntInterval::exact(i32::MIN))
-            && integer_interval(&items[2], facts) == Some(IntInterval::exact(-1))
-        {
-            record_diagnostic(
-                diagnostics,
-                format!(
-                    "static arithmetic: Int overflow: `{}`\nhelp: minimum Int cannot be divided by -1",
-                    expr.to_lisp()
-                ),
+        if op == "/" {
+            let numerator_ranges = integer_interval_alternatives(&items[1], facts)
+                .unwrap_or_else(|| vec![IntInterval::I32]);
+            let divisor_ranges = integer_interval_alternatives(&items[2], facts)
+                .unwrap_or_else(|| vec![IntInterval::I32]);
+            let contains =
+                |range: &IntInterval, value: i64| range.min <= value && value <= range.max;
+            let overflow_possible = numerator_ranges
+                .iter()
+                .any(|range| contains(range, i32::MIN as i64))
+                && divisor_ranges.iter().any(|range| contains(range, -1));
+            let overflow_certain = numerator_ranges
+                .iter()
+                .all(|range| *range == IntInterval::exact(i32::MIN))
+                && divisor_ranges
+                    .iter()
+                    .all(|range| *range == IntInterval::exact(-1));
+            let overflow_status = if overflow_certain {
+                ProofStatus::DefinitelyInvalid
+            } else if overflow_possible {
+                ProofStatus::Unknown
+            } else {
+                ProofStatus::ProvenSafe
+            };
+            diagnostics.record_proof(
+                ProofKind::IntegerArithmetic,
+                overflow_status,
+                expr,
+                vec!["minimum Int divided by -1 is the only signed division overflow".to_string()],
             );
+            if overflow_possible {
+                let certainty = if overflow_certain {
+                    "Int overflow"
+                } else {
+                    "Int overflow possible"
+                };
+                record_diagnostic(
+                    diagnostics,
+                    format!(
+                        "static arithmetic: {certainty}: `{}`\nhelp: minimum Int cannot be divided by -1",
+                        expr.to_lisp()
+                    ),
+                );
+            }
         }
     }
 
@@ -7220,15 +7261,56 @@ mod tests {
     }
 
     #[test]
+    fn constant_division_narrows_an_unknown_int_before_later_arithmetic() {
+        let safe = "(let req (lambda (x) (- (/ x 3) 2)))";
+        assert_eq!(analyze(safe, 1), Ok(()));
+
+        let unsafe_identity = "(let req (lambda (x) (- (/ x 1) 2)))";
+        assert!(analyze(unsafe_identity, 1)
+            .expect_err("division by one must retain the possible underflow")
+            .contains("underflow"));
+    }
+
+    #[test]
+    fn division_tracks_the_minimum_int_over_negative_one_overflow() {
+        let possible = diagnostics("(let negate (lambda (x) (/ x -1)))", 1);
+        assert!(possible
+            .iter()
+            .any(|message| message.contains("Int overflow possible")));
+
+        let certain = diagnostics("(/ -2147483648 -1)", 1);
+        assert!(certain
+            .iter()
+            .any(|message| message.contains("Int overflow:")));
+
+        assert_eq!(
+            analyze("(let halve-negated (lambda (x) (/ x -2)))", 1),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn branch_facts_prove_division_is_nonzero() {
         let guarded = "(let divide (lambda x divisor (if (= divisor 0) 0 (/ x divisor))))";
-        assert_eq!(analyze(guarded, 1), Ok(()));
+        let guarded_diagnostics = diagnostics(guarded, 1);
+        assert!(!guarded_diagnostics
+            .iter()
+            .any(|message| message.contains("divisor may be zero")));
+        assert!(guarded_diagnostics
+            .iter()
+            .any(|message| message.contains("Int overflow possible")));
 
         let positive = "(let divide (lambda x divisor (if (> divisor 0) (/ x divisor) 0)))";
         assert_eq!(analyze(positive, 1), Ok(()));
 
         let predicate = "(let nonzero? (lambda x (not (= x 0)))) (let divide (lambda x divisor (if (nonzero? divisor) (/ x divisor) 0)))";
-        assert_eq!(analyze(predicate, 2), Ok(()));
+        let predicate_diagnostics = diagnostics(predicate, 2);
+        assert!(!predicate_diagnostics
+            .iter()
+            .any(|message| message.contains("divisor may be zero")));
+        assert!(predicate_diagnostics
+            .iter()
+            .any(|message| message.contains("Int overflow possible")));
     }
 
     #[test]
@@ -7426,7 +7508,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_integer_ranges_report_both_bounds_and_arithmetic_risks() {
+    fn constant_division_narrows_unknown_ranges_before_offset_arithmetic() {
         let source = "(let inspect (lambda xs left right (block (let index (/ (+ left right) 2)) (let current (get xs index)) {(+ index 1) (- index 1)})))";
         let expression = crate::parser::build(source).expect("source should parse");
         let (_typ, typed) = crate::infer::infer_with_builtins_typed(
@@ -7443,14 +7525,12 @@ mod tests {
             .any(|message| message.contains("(+ left right)")
                 && message.contains("overflow/underflow")));
         assert!(
-            diagnostics
-                .iter()
-                .any(|message| message.contains("Int overflow possible")),
-            "{diagnostics:?}"
+            diagnostics.iter().all(|message| {
+                !(message.contains("(+ __block_0_index 1)")
+                    || message.contains("(- __block_0_index 1)"))
+            }),
+            "division by two should narrow the index enough to prove both offsets safe: {diagnostics:?}"
         );
-        assert!(diagnostics
-            .iter()
-            .any(|message| message.contains("Int underflow possible")));
     }
 
     #[test]

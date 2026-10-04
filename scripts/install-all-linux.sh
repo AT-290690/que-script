@@ -80,8 +80,8 @@ ensure_modern_neovim() {
     minor="$(nvim --clean --headless +'lua io.write(vim.version().minor)' +qa 2>/dev/null || echo 0)"
   fi
 
-  # The supplied config uses vim.pack/PackChanged.  Those APIs require the
-  # current Neovim development release; distro packages are often much older.
+  # The supplied editor stack targets current Neovim APIs; distro packages are
+  # often much older than the supported release.
   if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 12 )); then
     return
   fi
@@ -146,14 +146,14 @@ install_wasmtime() {
   }
 }
 
-download_and_run() {
+download_and_run() (
   local name="$1"
   local tmp
   tmp="$(mktemp)"
-  trap 'rm -f "$tmp"' RETURN
+  trap 'rm -f "$tmp"' EXIT
   curl -fsSL -H 'Cache-Control: no-cache' "$REPO_RAW/scripts/$name" -o "$tmp"
   bash "$tmp"
-}
+)
 
 echo "Installing Linux dependencies..."
 install_packages
@@ -167,7 +167,7 @@ download_and_run install-nvim.sh
 
 test -x /usr/local/bin/que
 test -x /usr/local/bin/quelsp
-test -f "$HOME/.local/share/nvim/site/pack/que/start/que-nvim/lua/que/init.lua"
+test -f "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/que/start/que-nvim/lua/que/init.lua"
 
 echo
 echo "Installation complete. Everything needed by the Que Neovim environment is installed."
