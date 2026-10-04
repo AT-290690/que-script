@@ -1919,19 +1919,7 @@ fn is_logical_operator(name: &str) -> bool {
 fn is_arithmetic_operator(name: &str) -> bool {
     matches!(
         name,
-        "+" | "+#"
-            | "+."
-            | "-"
-            | "-#"
-            | "-."
-            | "*"
-            | "*#"
-            | "*."
-            | "/"
-            | "/#"
-            | "/."
-            | "%"
-            | "%."
+        "+" | "+#" | "+." | "-" | "-#" | "-." | "*" | "*#" | "*." | "/" | "/#" | "/." | "%" | "%."
     )
 }
 
@@ -2991,10 +2979,8 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         let tv = ctx.fresh_var();
 
         let recursive_type = declared_type.clone().unwrap_or(tv);
-        ctx.env.insert(
-            name.clone(),
-            TypeScheme::monotype(recursive_type.clone()),
-        )?;
+        ctx.env
+            .insert(name.clone(), TypeScheme::monotype(recursive_type.clone()))?;
 
         let value_type = infer_expr(value_expr, ctx)?;
 

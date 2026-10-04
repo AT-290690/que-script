@@ -1570,14 +1570,9 @@ fn preprocess(source: &str) -> Result<String, String> {
                     chars.next();
                     if escaped {
                         let decoded = match next {
-                            'n' | 'r' | 't' | '0' | '\\' | '"' | '\'' => {
-                                decode_escape_char(next)
-                            }
+                            'n' | 'r' | 't' | '0' | '\\' | '"' | '\'' => decode_escape_char(next),
                             other => {
-                                return Err(format!(
-                                    "Unknown character escape: \\{}",
-                                    other
-                                ));
+                                return Err(format!("Unknown character escape: \\{}", other));
                             }
                         };
                         s.push(decoded);

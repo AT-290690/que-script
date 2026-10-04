@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
 use crate::parser::Expression;
-use crate::types::{Type, TypeScheme};
 #[cfg(feature = "io")]
 use crate::types::TypeVar;
+use crate::types::{Type, TypeScheme};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinHostExternSpec {

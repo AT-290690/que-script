@@ -43,6 +43,17 @@ Quick install script:
 curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/main/scripts/install-nvim.sh | bash
 ```
 
+For a fresh Linux/SSH machine, the all-in-one bootstrap also installs Que,
+`quelsp`, Wasmtime, Neovim, Telescope, and a portable starter config:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/main/scripts/install-all-linux.sh | bash
+```
+
+It preserves an existing `~/.config/nvim/init.lua`; set
+`QUE_OVERWRITE_NVIM=1` to replace it. To provide your own init file, set
+`QUE_NVIM_INIT_URL` to a URL before running the installer.
+
 Example with `lazy.nvim`:
 
 ```lua
