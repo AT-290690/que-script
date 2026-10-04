@@ -418,11 +418,33 @@ fn read_program(path: &str) -> Result<String, String> {
     fs::read_to_string(path).map_err(|error| format!("failed to read '{path}': {error}"))
 }
 
-fn merged_program(source: &str) -> Result<Expression, String> {
+fn merged_program_with_definitions(
+    source: &str,
+    extra_definitions: Vec<Expression>,
+) -> Result<Expression, String> {
     let std_ast = crate::baked::load_ast();
     let mut definitions = crate::baked::ast_to_definitions(std_ast, "active library")?;
     crate::externals::extend_with_builtin_host_externs(&mut definitions)?;
+    definitions.extend(extra_definitions);
     crate::parser::merge_std_and_program(source, definitions)
+}
+
+fn merged_program(source: &str) -> Result<Expression, String> {
+    merged_program_with_definitions(source, Vec::new())
+}
+
+fn merged_project_program(path: &str, source: &str) -> Result<Expression, String> {
+    let script = fs::canonicalize(path).unwrap_or_else(|_| Path::new(path).to_path_buf());
+    let start = script.parent().unwrap_or_else(|| Path::new("."));
+    let Some(project) = crate::project::discover_project_config(start)? else {
+        return merged_program(source);
+    };
+    for (key, value) in &project.config.env {
+        env::set_var(key, value);
+    }
+    let definitions =
+        crate::project::load_bundle_definitions(&project.root_dir, &project.config.deps)?;
+    merged_program_with_definitions(source, definitions)
 }
 
 fn user_form_count(source: &str) -> usize {
@@ -526,7 +548,8 @@ fn run_compile(mut args: Vec<String>, default: Option<EmitKind>) -> Result<(), S
         .ok_or_else(|| "missing program path".to_string())?;
     let display_path = env::var("QUE_INTERNAL_SOURCE_LABEL").unwrap_or_else(|_| path.clone());
     let source = read_program(path)?;
-    let merged = merged_program(&source).map_err(|error| source_error(&display_path, error))?;
+    let merged = merged_project_program(path, &source)
+        .map_err(|error| source_error(&display_path, error))?;
     if emit == EmitKind::Source {
         return write_output(out.as_deref(), format!("{}\n", merged.to_lisp()).as_bytes());
     }
@@ -718,7 +741,7 @@ fn run_explain(raw: &[String]) -> Result<(), String> {
         .first()
         .ok_or_else(|| "explain requires a program path".to_string())?;
     let source = read_program(path)?;
-    let merged = merged_program(&source)?;
+    let merged = merged_project_program(path, &source)?;
     let typed = infer_program(&source, &merged)?;
     let count = user_form_count(&source);
     let wat = crate::wat::compile_program_to_split_wat_typed(&typed)?;

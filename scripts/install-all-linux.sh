@@ -49,6 +49,7 @@ install_packages() {
   command -v make >/dev/null 2>&1 || packages+=(make)
   command -v gcc >/dev/null 2>&1 || packages+=(gcc)
   command -v g++ >/dev/null 2>&1 || packages+=(g++)
+  command -v wasm2c >/dev/null 2>&1 || packages+=(wabt)
 
   if [[ ${#packages[@]} -eq 0 ]]; then
     echo "Linux dependencies are already installed."
@@ -132,18 +133,23 @@ install_wasmtime() {
   if command -v wasmtime >/dev/null 2>&1; then
     return
   fi
-  echo "Installing wasmtime (Que's default external WASI runtime)..."
-  # Fresh cloud images sometimes have no shell startup file. Wasmtime's
-  # installer expects one when it records WASMTIME_HOME.
-  touch "$HOME/.profile"
-  curl --proto '=https' --tlsv1.2 -fsSL https://wasmtime.dev/install.sh | bash
   local wasmtime_bin="$HOME/.wasmtime/bin"
+  if [[ ! -x "$wasmtime_bin/wasmtime" ]]; then
+    echo "Installing wasmtime (Que's default external WASI runtime)..."
+    # The upstream installer only considers .bashrc for a detected Bash shell,
+    # even when .profile exists. Explicitly select the profile so fresh cloud
+    # images do not fail after the binary has already been extracted.
+    touch "$HOME/.profile"
+    curl --proto '=https' --tlsv1.2 -fsSL https://wasmtime.dev/install.sh \
+      | PROFILE="$HOME/.profile" bash
+  fi
   if [[ -x "$wasmtime_bin/wasmtime" ]]; then
     export PATH="$wasmtime_bin:$PATH"
     as_root ln -sf "$wasmtime_bin/wasmtime" /usr/local/bin/wasmtime
     mkdir -p "$HOME/.config"
     touch "$HOME/.profile"
-    if ! grep -Fq "$wasmtime_bin" "$HOME/.profile"; then
+    if ! grep -Fq 'WASMTIME_HOME' "$HOME/.profile" \
+      && ! grep -Fq '.wasmtime/bin' "$HOME/.profile"; then
       printf '\n# Wasmtime installed for Que\nexport PATH="$HOME/.wasmtime/bin:$PATH"\n' >> "$HOME/.profile"
     fi
   fi

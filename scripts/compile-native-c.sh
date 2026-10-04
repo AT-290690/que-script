@@ -209,7 +209,10 @@ cat >> "$host_file" <<'EOF'
 }
 EOF
 
-"$cc_bin" -O3 -DNDEBUG -flto -march=native -fno-math-errno -fno-trapping-math \
+cflags="${QUEC_NATIVE_CFLAGS:--O3 -DNDEBUG -flto -march=native -fno-math-errno -fno-trapping-math}"
+# Intentional word splitting lets callers replace the complete native flag set.
+# shellcheck disable=SC2086
+"$cc_bin" $cflags \
   -I "$output_dir" \
   -I "$native_host_dir" \
   -I "$wasm2c_include_dir" \
