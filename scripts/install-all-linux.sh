@@ -89,6 +89,9 @@ ensure_modern_neovim() {
     "https://github.com/neovim/neovim/releases/download/nightly/nvim-linux-$arch.tar.gz" \
     | tar -xzf - -C "$archive_dir"
   ln -sf "$install_dir/bin/nvim" "$HOME/.local/bin/nvim"
+  # Make the upgraded editor visible to commands launched after this script
+  # exits, without requiring the user to modify PATH manually.
+  as_root ln -sf "$install_dir/bin/nvim" /usr/local/bin/nvim
   export PATH="$HOME/.local/bin:$PATH"
   touch "$HOME/.profile"
   if ! grep -Fq 'HOME/.local/bin' "$HOME/.profile"; then
@@ -110,6 +113,7 @@ install_wasmtime() {
   local wasmtime_bin="$HOME/.wasmtime/bin"
   if [[ -x "$wasmtime_bin/wasmtime" ]]; then
     export PATH="$wasmtime_bin:$PATH"
+    as_root ln -sf "$wasmtime_bin/wasmtime" /usr/local/bin/wasmtime
     mkdir -p "$HOME/.config"
     touch "$HOME/.profile"
     if ! grep -Fq "$wasmtime_bin" "$HOME/.profile"; then
@@ -131,6 +135,22 @@ download_and_run() {
   bash "$tmp"
 }
 
+install_que_plugin() {
+  local root="$HOME/.local/share/nvim/site/pack/que/start/que-nvim"
+  local files=(
+    README.md
+    ftdetect/que.lua
+    ftplugin/que.lua
+    lua/que/init.lua
+    syntax/que.vim
+  )
+  echo "Installing Que's Neovim plugin..."
+  for file in "${files[@]}"; do
+    mkdir -p "$root/$(dirname "$file")"
+    curl -fsSL "$REPO_RAW/miscs/neovim/$file" -o "$root/$file"
+  done
+}
+
 echo "Installing Linux dependencies..."
 install_packages
 ensure_modern_neovim
@@ -140,7 +160,7 @@ echo "Installing Que and the language server..."
 download_and_run install.sh
 download_and_run lsp.sh
 clean_old_neovim
-download_and_run install-nvim.sh
+install_que_plugin
 
 mkdir -p "$NVIM_CONFIG_DIR"
 if [[ -e "$NVIM_INIT" && "${QUE_OVERWRITE_NVIM:-0}" != "1" ]]; then
