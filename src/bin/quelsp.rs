@@ -827,9 +827,10 @@ impl ServerState {
             });
         }
 
-        if inferred_signatures.is_empty() {
-            self.extend_global_fallback_completion_items(items);
-        }
+        // Local bindings supplement the language/library environment; they do
+        // not replace it.  Always include global symbols so adding `(let xs
+        // ...)` cannot make functions such as `map` disappear from completion.
+        self.extend_global_fallback_completion_items(items);
     }
 
     fn extend_global_fallback_completion_items(&self, items: &mut Vec<CompletionItem>) {
@@ -2153,11 +2154,30 @@ fn format_literal_hover(text: &str, range: Range, literal_type: &str) -> String 
 mod tests {
     use super::*;
 
+    fn test_server_state() -> ServerState {
+        let (connection, _peer) = Connection::memory();
+        ServerState {
+            connection,
+            documents: HashMap::new(),
+            core: RefCell::new(None),
+            pending_changes: HashMap::new(),
+            project_config_cache: RefCell::new(HashMap::new()),
+            project_defs_cache: RefCell::new(HashMap::new()),
+        }
+    }
+
     #[test]
     fn completion_hides_internal_and_std_compatibility_symbols() {
         assert!(should_hide_completion_symbol("_internal"));
         assert!(should_hide_completion_symbol("std/vector/map"));
         assert!(!should_hide_completion_symbol("map"));
+    }
+
+    #[test]
+    fn completion_keeps_library_functions_when_document_has_local_bindings() {
+        let state = test_server_state();
+        let items = state.completion_items_for_text("(let xs [1 2 3])\nma", Position::new(1, 2));
+        assert!(items.iter().any(|item| item.label == "map"), "{items:#?}");
     }
 
     #[test]

@@ -5939,6 +5939,22 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_completion_keeps_library_functions_with_local_bindings() {
+        let completions_json =
+            crate::wasm_api::lsp_completions_at("(let xs [1 2 3])\nma".to_string(), 1, 2);
+        let completions: serde_json::Value = serde_json::from_str(&completions_json)
+            .expect("completions response should be valid JSON");
+        assert!(
+            completions
+                .as_array()
+                .expect("completions should be an array")
+                .iter()
+                .any(|item| item["label"] == serde_json::json!("map")),
+            "{completions_json}"
+        );
+    }
+
+    #[test]
     fn test_static_analysis_user_form_count_includes_destructuring_expansion() {
         let source = r#"(let inp "1,2")
 (let [a b] (split "," inp))

@@ -430,23 +430,22 @@ fn lsp_completions_with_prefix(
             });
         }
 
-        if inferred_signatures.is_empty() {
-            for name in &core.std_fallback_names {
-                if should_hide_completion_symbol(name) {
-                    continue;
-                }
-                let detail = core.global_signatures.get(name).cloned();
-                let kind = if detail.as_ref().map(|s| s.contains("->")).unwrap_or(true) {
-                    "function"
-                } else {
-                    "constant"
-                };
-                items.push(JsonCompletionItem {
-                    label: name.clone(),
-                    detail: detail.as_ref().map(|sig| normalize_signature(sig)),
-                    kind: kind.to_string(),
-                });
+        // Local bindings supplement rather than replace the global library.
+        for name in &core.std_fallback_names {
+            if should_hide_completion_symbol(name) {
+                continue;
             }
+            let detail = core.global_signatures.get(name).cloned();
+            let kind = if detail.as_ref().map(|s| s.contains("->")).unwrap_or(true) {
+                "function"
+            } else {
+                "constant"
+            };
+            items.push(JsonCompletionItem {
+                label: name.clone(),
+                detail: detail.as_ref().map(|sig| normalize_signature(sig)),
+                kind: kind.to_string(),
+            });
         }
 
         items.sort_by(|a, b| a.label.cmp(&b.label));

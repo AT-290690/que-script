@@ -15,19 +15,6 @@ if [[ "$(uname -s)" != "Linux" ]]; then
 fi
 
 REPO_RAW="${QUE_REPO_RAW:-https://raw.githubusercontent.com/AT-290690/que-script/main}"
-NVIM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
-NVIM_INIT="$NVIM_CONFIG_DIR/init.lua"
-NVIM_INIT_URL="${QUE_NVIM_INIT_URL:-$REPO_RAW/scripts/que-init.lua}"
-
-clean_old_neovim() {
-  [[ "${QUE_CLEAN_NVIM:-0}" == "1" ]] || return
-  local nvim_data="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
-  local nvim_state="${XDG_STATE_HOME:-$HOME/.local/state}/nvim"
-  local nvim_cache="${XDG_CACHE_HOME:-$HOME/.cache}/nvim"
-  rm -rf "$NVIM_CONFIG_DIR" "$nvim_data" "$nvim_state" "$nvim_cache"
-  mkdir -p "$NVIM_CONFIG_DIR"
-  echo "Removed old Neovim config, plugins, state, and cache."
-}
 
 as_root() {
   if [[ "$(id -u)" -eq 0 ]]; then
@@ -164,24 +151,8 @@ download_and_run() {
   local tmp
   tmp="$(mktemp)"
   trap 'rm -f "$tmp"' RETURN
-  curl -fsSL "$REPO_RAW/scripts/$name" -o "$tmp"
+  curl -fsSL -H 'Cache-Control: no-cache' "$REPO_RAW/scripts/$name" -o "$tmp"
   bash "$tmp"
-}
-
-install_que_plugin() {
-  local root="$HOME/.local/share/nvim/site/pack/que/start/que-nvim"
-  local files=(
-    README.md
-    ftdetect/que.lua
-    ftplugin/que.lua
-    lua/que/init.lua
-    syntax/que.vim
-  )
-  echo "Installing Que's Neovim plugin..."
-  for file in "${files[@]}"; do
-    mkdir -p "$root/$(dirname "$file")"
-    curl -fsSL "$REPO_RAW/miscs/neovim/$file" -o "$root/$file"
-  done
 }
 
 echo "Installing Linux dependencies..."
@@ -192,38 +163,7 @@ install_wasmtime
 echo "Installing Que and the language server..."
 download_and_run install.sh
 download_and_run lsp.sh
-clean_old_neovim
-install_que_plugin
-
-mkdir -p "$NVIM_CONFIG_DIR"
-managed_config=0
-if [[ -f "$NVIM_INIT" ]] && grep -Fq 'Que workstation configuration installed by scripts/install-all-linux.sh' "$NVIM_INIT"; then
-  managed_config=1
-fi
-
-if [[ -e "$NVIM_INIT" && "${QUE_OVERWRITE_NVIM:-0}" != "1" && "$managed_config" -ne 1 ]]; then
-  backup="$NVIM_INIT.que-backup-$(date +%Y%m%d%H%M%S)"
-  cp "$NVIM_INIT" "$backup"
-  echo "Existing Neovim config preserved at $backup"
-fi
-
-if [[ ! -e "$NVIM_INIT" || "${QUE_OVERWRITE_NVIM:-0}" == "1" || "$managed_config" -eq 1 ]]; then
-  curl -fsSL "$NVIM_INIT_URL" -o "$NVIM_INIT"
-  echo "Installed Neovim config: $NVIM_INIT"
-else
-  echo "Kept existing Neovim config. Set QUE_OVERWRITE_NVIM=1 to install the Que config."
-fi
-
-echo "Installing Neovim plugins..."
-nvim --headless "+Lazy! sync" "+qa"
-
-echo "Verifying the installed Neovim experience..."
-nvim --headless \
-  "+lua assert(vim.g.que_workstation_config == true, 'managed Que init.lua is not active')" \
-  "+lua assert(vim.g.colors_name == 'catppuccin', 'Catppuccin is not active')" \
-  "+lua assert(vim.o.tabstop == 2 and vim.o.shiftwidth == 2 and vim.o.softtabstop == 2 and vim.o.expandtab, 'Que tab settings are not active')" \
-  "+lua local c=require('blink.cmp.config'); assert(c.appearance.kind_icons.Function == 'λ', 'Que completion label style is not active')" \
-  "+qa"
+download_and_run install-nvim.sh
 
 test -x /usr/local/bin/que
 test -x /usr/local/bin/quelsp
