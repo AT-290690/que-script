@@ -1180,9 +1180,6 @@ fn collect_main_mutated_top_level_let_names_in_expr(
     let Expression::Apply(items) = expr else {
         return;
     };
-    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda") {
-        return;
-    }
     if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
         if top_level_let_names.contains(target)
             && (matches!(

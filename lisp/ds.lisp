@@ -1554,6 +1554,7 @@ q)))
     (alter! i (+ i 1))))
   table)))
 
+(let Table->Vector Table/entries)
 (let Vector->Table (lambda entries (do
   (let out (Table/create (max 32 (length entries))))
   (mut i 0)

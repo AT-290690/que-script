@@ -8540,6 +8540,26 @@ fn"#;
     }
 
     #[test]
+    fn test_top_level_value_after_callback_capture_is_not_eagerly_cached() {
+        let source = r#"(let xs [])
+((lambda () (push! xs 1)))
+(let n (length xs))
+n"#;
+        assert_eq!(run_program_output_with_std_and_opts(source, false), "1");
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
+
+        let wat = compile_std_program_to_wat(source, true);
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        assert!(
+            !wat[..main_start].contains("(func $v_n "),
+            "a value depending on callback-mutated state must stay sequenced in main:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_wat_append_fill_loop_uses_filled_scalar_vector_constructor() {
         let _lock = runtime_exec_lock()
             .lock()

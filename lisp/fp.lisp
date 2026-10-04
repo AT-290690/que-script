@@ -1106,13 +1106,11 @@ out)))
             (alter! i (+ i 1))))
      out))))
 
-(let each (lambda xs fn (do (for fn xs) xs)))
-(let each/i (lambda xs fn (do (for/i fn xs) xs)))
-
+(let each (lambda fn xs (do (for fn xs) xs)))
+(let each/i (lambda fn xs (do (for/i fn xs) xs)))
 
 (let exclude (lambda fn? xs (filter (lambda x (not (fn? x))) xs)))
 (let select filter)
-
 
 (let range/int range)
 (let range. range/dec)
