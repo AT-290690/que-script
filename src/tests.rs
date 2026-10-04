@@ -897,6 +897,38 @@ xs)"#,
             error.contains("&mut requires exactly 2 arguments"),
             "unexpected malformed &mut error: {error}"
         );
+        assert!(
+            error.lines().any(|line| line.trim() == "(let x (&mut 10))"),
+            "parser errors should retain the original source form: {error}"
+        );
+    }
+
+    #[test]
+    fn test_parser_malformed_desugar_forms_return_errors_instead_of_panicking() {
+        for (source, expected) in [
+            ("(set!)", "set! requires at least 3 arguments"),
+            ("(integer x)", "integer requires exactly 2 arguments"),
+            ("(fixed x)", "fixed requires exactly 2 arguments"),
+            (
+                "(boolean x ())",
+                "Boolean value must be a boolean expression",
+            ),
+            (
+                "(|>)",
+                "|> requires a value and at least one function stage",
+            ),
+            (
+                "(<|)",
+                "<| requires a value and at least one function stage",
+            ),
+        ] {
+            let error = crate::parser::build(source)
+                .expect_err("malformed desugar form should be rejected");
+            assert!(
+                error.contains(expected),
+                "{source} produced an unexpected error: {error}"
+            );
+        }
     }
 
     #[test]

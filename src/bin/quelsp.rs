@@ -2267,4 +2267,56 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    fn analyze_lsp_test_source(source: &str) -> DocAnalysis {
+        let core = build_lsp_core();
+        analyze_document_text_safe(
+            source,
+            &[],
+            &core.std_defs,
+            &core.base_env,
+            core.base_next_id,
+            &core.global_signatures,
+            &core.global_effects,
+            &core.std_fallback_names,
+        )
+    }
+
+    #[test]
+    fn diagnostics_for_malformed_desugaring_point_to_the_original_form() {
+        let source = "(let x (&mut 10))";
+        let analysis = analyze_lsp_test_source(source);
+        assert_eq!(analysis.diagnostics.len(), 1);
+        let diagnostic = &analysis.diagnostics[0];
+        assert!(diagnostic
+            .message
+            .contains("&mut requires exactly 2 arguments"));
+        assert_eq!(diagnostic.range.start, Position::new(0, 0));
+        assert_eq!(diagnostic.range.end, Position::new(0, source.len() as u32));
+    }
+
+    #[test]
+    fn macro_arity_errors_point_to_the_macro_call() {
+        let source = "(letmacro one (lambda x x))\n(one 1 2)";
+        let analysis = analyze_lsp_test_source(source);
+        assert_eq!(analysis.diagnostics.len(), 1);
+        let diagnostic = &analysis.diagnostics[0];
+        assert!(diagnostic.message.contains("Macro 'one' expected"));
+        assert_eq!(diagnostic.range.start, Position::new(1, 0));
+        assert_eq!(diagnostic.range.end, Position::new(1, 9));
+    }
+
+    #[test]
+    fn generated_names_are_hidden_in_end_to_end_static_diagnostics() {
+        let source = "; use-strict-warnings!\n(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get xs index))))";
+        let analysis = analyze_lsp_test_source(source);
+        let warning = analysis
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("index not proven safe"))
+            .expect("expected static bounds warning");
+        assert!(!warning.message.contains("__block_"));
+        assert!(warning.message.contains("(get xs index)"));
+        assert_eq!(warning.range.start.line, 4);
+    }
 }

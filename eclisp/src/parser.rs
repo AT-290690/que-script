@@ -857,7 +857,7 @@ fn eval_macro_expr_in_env(
                             gensym_counter,
                         )?);
                     }
-                    Ok(last.expect("do body checked to be non-empty"))
+                    last.ok_or_else(|| "compile-time do requires a body".to_string())
                 }
                 Some(Expression::Word(head)) if head == "let" => {
                     if items.len() != 3 {
@@ -912,17 +912,17 @@ fn eval_macro_expr_in_env(
                     eval_compile_time_bool_op(head, &items[1..], bindings, macros, gensym_counter)
                 }
                 Some(Expression::Word(head)) if macros.contains_key(head) => {
+                    let Some(macro_def) = macros.get(head) else {
+                        return Err(format!(
+                            "macro '{}' was not available during expansion",
+                            head
+                        ));
+                    };
                     let evaluated_args = items[1..]
                         .iter()
                         .map(|arg| eval_macro_arg(arg, bindings, macros, gensym_counter))
                         .collect::<Result<Vec<_>, _>>()?;
-                    expand_macro_call(
-                        head,
-                        macros.get(head).expect("macro exists"),
-                        &evaluated_args,
-                        macros,
-                        gensym_counter,
-                    )
+                    expand_macro_call(head, macro_def, &evaluated_args, macros, gensym_counter)
                 }
                 _ => Ok(Expression::Apply(
                     items
@@ -1096,11 +1096,21 @@ fn eval_compile_time_int_op(
                 "<=" => a <= b,
                 ">" => a > b,
                 ">=" => a >= b,
-                _ => unreachable!(),
+                _ => {
+                    return Err(format!(
+                        "unsupported compile-time integer operator '{}', expected a known operator",
+                        op
+                    ));
+                }
             };
             Ok(Expression::Word(result.to_string()))
         }
-        _ => unreachable!("checked by is_compile_time_int_op"),
+        _ => {
+            return Err(format!(
+                "unsupported compile-time integer operator '{}', expected a known operator",
+                op
+            ));
+        }
     }
 }
 
@@ -1147,7 +1157,12 @@ fn eval_compile_time_bool_op(
             }
             false
         }
-        _ => unreachable!("checked by is_compile_time_bool_op"),
+        _ => {
+            return Err(format!(
+                "unsupported compile-time boolean operator '{}', expected a known operator",
+                op
+            ));
+        }
     };
     Ok(Expression::Word(result.to_string()))
 }
@@ -1620,8 +1635,8 @@ fn desugar_with_counter(
             let exprs = desugared_exprs;
             if let Expression::Word(ref name) = exprs[0] {
                 match name.as_str() {
-                    "<|" => Ok(pipe_data_first_curry_transform(exprs)),
-                    "|>" => Ok(pipe_curry_transform(exprs)),
+                    "<|" => Ok(pipe_data_first_curry_transform(exprs)?),
+                    "|>" => Ok(pipe_curry_transform(exprs)?),
                     "if" => Ok(if_transform(exprs)?),
                     "-" => Ok(minus_transform(exprs)),
                     "-." => Ok(minusf_transform(exprs)),
@@ -1639,8 +1654,8 @@ fn desugar_with_counter(
                     "set!" => Ok(setter_transform(exprs)?),
                     "&alter!" => Ok(cell_setter_transform(exprs)?),
                     "&mut" | "variable" => Ok(variable_transform(exprs)?),
-                    "integer" => Ok(integer_transform(exprs)),
-                    "fixed" => Ok(float_transform(exprs)),
+                    "integer" => Ok(integer_transform(exprs)?),
+                    "fixed" => Ok(float_transform(exprs)?),
                     "boolean" => boolean_transform(exprs),
                     "while" => Ok(loop_while_transform(exprs, binding_counter)?),
                     "lambda" => lambda_destructure_transform(exprs, binding_counter),
@@ -2235,17 +2250,16 @@ fn cell_accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, Str
 }
 
 fn setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    if exprs.len() < 4 {
+        return Err("set! requires at least 3 arguments".to_string());
+    }
     if exprs.len() == 4 {
         return Ok(Expression::Apply(exprs));
     }
     exprs.remove(0);
-    let len = exprs.len();
     let last = exprs.pop().unwrap();
     let set_idx = exprs.pop().unwrap();
     let mut iter = exprs.into_iter();
-    if len < 3 {
-        return Err("set! requires at least 3 arguments".to_string());
-    }
     let first = iter.next().unwrap();
     let mut acc = first;
     for e in iter {
@@ -2289,23 +2303,32 @@ fn variable_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> 
         Expression::Apply(vec![Expression::Word("box".to_string()), exprs[1].clone()]),
     ]))
 }
-fn integer_transform(mut exprs: Vec<Expression>) -> Expression {
+fn integer_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    if exprs.len() != 3 {
+        return Err("integer requires exactly 2 arguments: a name and a value".to_string());
+    }
     exprs.remove(0);
-    Expression::Apply(vec![
+    Ok(Expression::Apply(vec![
         Expression::Word("let".to_string()),
         exprs[0].clone(),
         Expression::Apply(vec![Expression::Word("int".to_string()), exprs[1].clone()]),
-    ])
+    ]))
 }
-fn float_transform(mut exprs: Vec<Expression>) -> Expression {
+fn float_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    if exprs.len() != 3 {
+        return Err("fixed requires exactly 2 arguments: a name and a value".to_string());
+    }
     exprs.remove(0);
-    Expression::Apply(vec![
+    Ok(Expression::Apply(vec![
         Expression::Word("let".to_string()),
         exprs[0].clone(),
         Expression::Apply(vec![Expression::Word("dec".to_string()), exprs[1].clone()]),
-    ])
+    ]))
 }
 fn boolean_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    if exprs.len() != 3 {
+        return Err("boolean requires exactly 2 arguments: a name and a value".to_string());
+    }
     exprs.remove(0);
     match &exprs[1] {
         Expression::Word(x) => {
@@ -2316,29 +2339,25 @@ fn boolean_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
                 ));
             }
         }
-        Expression::Apply(x) => match &x[0] {
-            Expression::Word(y) => {
-                if y != "="
-                    && y != ">"
-                    && y != "<"
-                    && y != "<="
-                    && y != ">="
-                    && y != "not"
-                    && y != "or"
-                    && y != "and"
-                {
-                    return Err(
-                            format!("Booleans variables only be assigned to results of boolean expressions but got: {}", y)
-                        );
-                }
-            }
-            _ => {
+        Expression::Apply(x) => {
+            let Some(Expression::Word(y)) = x.first() else {
+                return Err("Boolean value must be a boolean expression".to_string());
+            };
+            if y != "="
+                && y != ">"
+                && y != "<"
+                && y != "<="
+                && y != ">="
+                && y != "not"
+                && y != "or"
+                && y != "and"
+            {
                 return Err(format!(
-                    "Booleans variables only be assigned to true or false but got: {:?}",
-                    x[0]
+                    "Booleans variables only be assigned to results of boolean expressions but got: {}",
+                    y
                 ));
             }
-        },
+        }
         x => {
             return Err(format!(
                 "Booleans variables only be assigned to true or false but got : {:?}",
@@ -2856,7 +2875,10 @@ fn if_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
         },
     ]))
 }
-fn pipe_data_first_curry_transform(mut exprs: Vec<Expression>) -> Expression {
+fn pipe_data_first_curry_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    if exprs.len() < 2 {
+        return Err("<| requires a value and at least one function stage".to_string());
+    }
     let mut inp = exprs.remove(1); // piped value
 
     for stage in exprs.into_iter().skip(1) {
@@ -2876,10 +2898,13 @@ fn pipe_data_first_curry_transform(mut exprs: Vec<Expression>) -> Expression {
         }
     }
 
-    inp
+    Ok(inp)
 }
 
-fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
+fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    if exprs.len() < 2 {
+        return Err("|> requires a value and at least one function stage".to_string());
+    }
     let mut inp = exprs.remove(1);
 
     for stage in exprs.into_iter().skip(1) {
@@ -2902,7 +2927,7 @@ fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Expression {
         }
     }
 
-    inp
+    Ok(inp)
 }
 
 // fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
@@ -3059,18 +3084,20 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                 let mut desugared_std = Vec::new();
                 let mut binding_counter = 0usize;
                 for expr in std {
+                    let source_form = expr.to_lisp();
                     match desugar_with_counter(expr, &mut binding_counter) {
                         Ok(expr) => desugared_std.push(expr),
                         Err(e) => {
-                            return Err(e);
+                            return Err(with_source_form(e, &source_form));
                         }
                     }
                 }
                 for expr in exprs {
+                    let source_form = expr.to_lisp();
                     match desugar_with_counter(expr, &mut binding_counter) {
                         Ok(expr) => desugared.push(expr),
                         Err(e) => {
-                            return Err(e);
+                            return Err(with_source_form(e, &source_form));
                         }
                     }
                 }
@@ -3129,11 +3156,28 @@ pub fn build(program: &str) -> Result<Expression, String> {
     let mut desugared = Vec::new();
     let mut binding_counter = 0usize;
     for expr in exprs {
-        desugared.push(desugar_with_counter(expr, &mut binding_counter)?);
+        let source_form = expr.to_lisp();
+        desugared.push(
+            desugar_with_counter(expr, &mut binding_counter)
+                .map_err(|error| with_source_form(error, &source_form))?,
+        );
     }
 
     let top_level = transform_let_destructuring_in_do(desugared, &mut binding_counter)?;
     Ok(wrap_runtime_top_level_do(top_level))
+}
+
+/// Attach the original surface form to a desugaring error.  Desugaring creates
+/// temporary names and rewrites applications, so reporting only the internal
+/// error often leaves the LSP with no text it can map back to the user file.
+/// Keeping the form on its own line also lets the existing diagnostic range
+/// extractor highlight the complete source expression.
+fn with_source_form(error: String, source_form: &str) -> String {
+    if error.lines().any(|line| line.trim() == source_form) {
+        error
+    } else {
+        format!("{}\n{}", error, source_form)
+    }
 }
 
 pub fn build_library(program: &str) -> Result<Expression, String> {
