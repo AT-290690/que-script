@@ -205,25 +205,6 @@ require("lazy").setup({
       } },
     },
   },
-  {
-    "nvim-treesitter/nvim-treesitter",
-    branch = "main",
-    build = ":TSUpdate",
-    config = function()
-      local treesitter = require("nvim-treesitter")
-      treesitter.install({ "bash", "c", "diff", "html", "lua", "luadoc", "markdown", "markdown_inline", "query", "vim", "vimdoc" })
-      vim.api.nvim_create_autocmd("FileType", {
-        callback = function(args)
-          local language = vim.treesitter.language.get_lang(args.match)
-          if not language then return end
-          local installed = treesitter.get_installed("parsers")
-          if vim.tbl_contains(installed, language) and vim.treesitter.language.add(language) then
-            vim.treesitter.start(args.buf, language)
-          end
-        end,
-      })
-    end,
-  },
 }, {
   concurrency = 2,
   checker = { enabled = false },
