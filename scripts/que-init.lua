@@ -12,6 +12,8 @@ vim.opt.splitbelow = true
 vim.opt.ignorecase = true
 vim.opt.smartcase = true
 vim.opt.whichwrap:append("<,>,[,]")
+vim.cmd("filetype plugin indent on")
+vim.cmd("syntax enable")
 
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
@@ -43,7 +45,8 @@ vim.opt.rtp:prepend(vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim")
 local que_plugin_lua = vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim/lua"
 package.path = que_plugin_lua .. "/?.lua;" .. que_plugin_lua .. "/?/init.lua;" .. package.path
 
-require("que").setup({})
+local que_plugin = dofile(que_plugin_lua .. "/que/init.lua")
+que_plugin.setup({})
 
 -- Basic LSP navigation and diagnostics.
 vim.diagnostic.config({
