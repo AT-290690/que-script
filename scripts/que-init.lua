@@ -189,7 +189,6 @@ require("lazy").setup({
       } },
     },
   },
-  { "windwp/nvim-autopairs", event = "InsertEnter", opts = {} },
   {
     "nvim-treesitter/nvim-treesitter",
     branch = "main",

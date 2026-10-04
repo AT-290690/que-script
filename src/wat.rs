@@ -11911,9 +11911,16 @@ fn compile_generic_while_loop(
     ctx: &Ctx<'_>,
 ) -> Result<String, String> {
     let cond = compile_expr(cond_node, ctx)?;
+    // The condition is emitted both before and inside the loop. Its scratch
+    // locals must not overlap persistent data pointers hoisted for the body;
+    // otherwise re-evaluating a compound condition corrupts those pointers.
+    let hoist_base = max_local_index_in_code(&cond)
+        .map(|index| index + 1)
+        .unwrap_or(ctx.tmp_i32)
+        .max(ctx.tmp_i32);
     let (materialized_slots, materialize_once) = loop_materialize_once_plan(body_node, ctx);
     let (hoisted_data_slots, hoist_data_pointers, next_tmp_i32) =
-        loop_hoisted_data_pointer_plan(body_node, ctx, ctx.tmp_i32);
+        loop_hoisted_data_pointer_plan(body_node, ctx, hoist_base);
     let nested_ctx = Ctx {
         fn_sigs: ctx.fn_sigs,
         fn_ids: ctx.fn_ids,

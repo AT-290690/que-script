@@ -9995,6 +9995,31 @@ consume!
     }
 
     #[test]
+    fn test_runtime_unchecked_compound_loop_condition_preserves_hoisted_vector_data() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let result = run_program_output_with_std_and_opts_unlocked(
+            r#"
+(let parse2 (lambda (raw)
+  (let parts (split "\"value\":" raw))
+  (let value (get parts 1))
+  (mut i 0)
+  (mut result 0)
+  (while (and (< i (length value)) (digit? (get value i)))
+    (alter! result (+ (* result 10) (as (-# (get value i) '0') Int)))
+    (alter! i (+ i 1)))
+  (+ result (* (length parts) 0))))
+(parse2 "{\"value\":21}")
+"#,
+            true,
+        );
+
+        assert_eq!(result, "21");
+    }
+
+    #[test]
     fn test_wat_scalar_set_on_slice_keeps_materializing_runtime() {
         let expr = crate::parser::build(
             "((lambda (do (let xs [1 2]) (let ys (cdr xs 1)) (set! ys 0 3) ys)))",
