@@ -154,7 +154,7 @@ require("lazy").setup({
       "WhoIsSethDaniel/mason-tool-installer.nvim",
     },
     config = function()
-      require("mason").setup({})
+      require("mason").setup({ max_concurrent_installers = 1 })
       require("mason-lspconfig").setup({ automatic_enable = false })
       require("mason-tool-installer").setup({ ensure_installed = { "rust-analyzer", "lua-language-server", "stylua" } })
     end,
@@ -209,7 +209,11 @@ require("lazy").setup({
       })
     end,
   },
-}, { checker = { enabled = false }, change_detection = { notify = false } })
+}, {
+  concurrency = 2,
+  checker = { enabled = false },
+  change_detection = { notify = false },
+})
 
 vim.diagnostic.config({
   update_in_insert = false,

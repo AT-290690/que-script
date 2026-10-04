@@ -41,16 +41,45 @@ as_root() {
 }
 
 install_packages() {
-  local packages=(ca-certificates curl git ripgrep make gcc g++)
+  local packages=()
+  [[ -f /etc/ssl/certs/ca-certificates.crt ]] || packages+=(ca-certificates)
+  command -v curl >/dev/null 2>&1 || packages+=(curl)
+  command -v git >/dev/null 2>&1 || packages+=(git)
+  command -v rg >/dev/null 2>&1 || packages+=(ripgrep)
+  command -v make >/dev/null 2>&1 || packages+=(make)
+  command -v gcc >/dev/null 2>&1 || packages+=(gcc)
+  command -v g++ >/dev/null 2>&1 || packages+=(g++)
+
+  if [[ ${#packages[@]} -eq 0 ]]; then
+    echo "Linux dependencies are already installed."
+    return
+  fi
+
+  echo "Installing missing packages: ${packages[*]}"
   if command -v apt-get >/dev/null 2>&1; then
-    as_root apt-get update
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y neovim "${packages[@]}"
+    local apt_updated=0
+    local package
+    for package in "${packages[@]}"; do
+      if ! as_root env DEBIAN_FRONTEND=noninteractive apt-get \
+        -o APT::Install-Recommends=false \
+        -o APT::Install-Suggests=false \
+        install -y "$package"; then
+        if [[ "$apt_updated" -eq 0 ]]; then
+          as_root apt-get -o Acquire::Languages=none update
+          apt_updated=1
+        fi
+        as_root env DEBIAN_FRONTEND=noninteractive apt-get \
+          -o APT::Install-Recommends=false \
+          -o APT::Install-Suggests=false \
+          install -y "$package"
+      fi
+    done
   elif command -v dnf >/dev/null 2>&1; then
-    as_root dnf install -y neovim "${packages[@]}"
+    as_root dnf install -y "${packages[@]}"
   elif command -v yum >/dev/null 2>&1; then
-    as_root yum install -y neovim "${packages[@]}"
+    as_root yum install -y "${packages[@]}"
   elif command -v pacman >/dev/null 2>&1; then
-    as_root pacman -Sy --needed --noconfirm neovim "${packages[@]}"
+    as_root pacman -Sy --needed --noconfirm "${packages[@]}"
   else
     echo "No supported package manager found. Install neovim, git, curl, ripgrep and a C build tool, then rerun." >&2
     exit 1
