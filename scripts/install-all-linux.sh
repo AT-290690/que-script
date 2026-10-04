@@ -19,6 +19,21 @@ NVIM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
 NVIM_INIT="$NVIM_CONFIG_DIR/init.lua"
 NVIM_INIT_URL="${QUE_NVIM_INIT_URL:-$REPO_RAW/scripts/que-init.lua}"
 
+clean_old_neovim() {
+  [[ "${QUE_CLEAN_NVIM:-0}" == "1" ]] || return
+  local backup_root="$HOME/.que-nvim-backup-$(date +%Y%m%d%H%M%S)"
+  mkdir -p "$backup_root"
+  if [[ -e "$NVIM_CONFIG_DIR" ]]; then
+    mv "$NVIM_CONFIG_DIR" "$backup_root/config"
+  fi
+  local nvim_data="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
+  if [[ -e "$nvim_data" ]]; then
+    mv "$nvim_data" "$backup_root/data"
+  fi
+  mkdir -p "$NVIM_CONFIG_DIR"
+  echo "Old Neovim config and plugin state moved to: $backup_root"
+}
+
 as_root() {
   if [[ "$(id -u)" -eq 0 ]]; then
     "$@"
@@ -124,6 +139,7 @@ install_wasmtime
 echo "Installing Que and the language server..."
 download_and_run install.sh
 download_and_run lsp.sh
+clean_old_neovim
 download_and_run install-nvim.sh
 
 mkdir -p "$NVIM_CONFIG_DIR"

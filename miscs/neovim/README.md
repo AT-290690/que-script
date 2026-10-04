@@ -54,6 +54,14 @@ It preserves an existing `~/.config/nvim/init.lua`; set
 `QUE_OVERWRITE_NVIM=1` to replace it. To provide your own init file, set
 `QUE_NVIM_INIT_URL` to a URL before running the installer.
 
+To reset an old Neovim installation safely, moving its config and plugin cache
+to a timestamped backup instead of deleting them, use:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/main/scripts/install-all-linux.sh \
+  | env QUE_CLEAN_NVIM=1 QUE_OVERWRITE_NVIM=1 bash
+```
+
 Example with `lazy.nvim`:
 
 ```lua
