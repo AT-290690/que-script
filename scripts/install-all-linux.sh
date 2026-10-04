@@ -47,6 +47,45 @@ install_packages() {
   fi
 }
 
+ensure_modern_neovim() {
+  local minor=0
+  if command -v nvim >/dev/null 2>&1; then
+    minor="$(nvim --clean --headless +'lua io.write(vim.version().minor)' +qa 2>/dev/null || echo 0)"
+  fi
+
+  # The supplied config uses vim.pack/PackChanged.  Those APIs require the
+  # current Neovim development release; distro packages are often much older.
+  if [[ "$minor" =~ ^[0-9]+$ ]] && (( minor >= 12 )); then
+    return
+  fi
+
+  local arch archive_dir install_dir
+  case "$(uname -m)" in
+    x86_64|amd64) arch="x86_64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) echo "Unsupported Linux architecture for Neovim: $(uname -m)" >&2; exit 1 ;;
+  esac
+
+  archive_dir="$HOME/.local/opt"
+  install_dir="$archive_dir/nvim-linux-$arch"
+  mkdir -p "$archive_dir" "$HOME/.local/bin"
+  echo "Installing modern Neovim (the distro package is too old)..."
+  curl --proto '=https' --tlsv1.2 -fsSL \
+    "https://github.com/neovim/neovim/releases/download/nightly/nvim-linux-$arch.tar.gz" \
+    | tar -xzf - -C "$archive_dir"
+  ln -sf "$install_dir/bin/nvim" "$HOME/.local/bin/nvim"
+  export PATH="$HOME/.local/bin:$PATH"
+  touch "$HOME/.profile"
+  if ! grep -Fq 'HOME/.local/bin' "$HOME/.profile"; then
+    printf '\n# User-installed tools\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.profile"
+  fi
+
+  command -v nvim >/dev/null 2>&1 || {
+    echo "Neovim installation completed, but nvim is not on PATH." >&2
+    exit 1
+  }
+}
+
 install_wasmtime() {
   if command -v wasmtime >/dev/null 2>&1; then
     return
@@ -79,6 +118,7 @@ download_and_run() {
 
 echo "Installing Linux dependencies..."
 install_packages
+ensure_modern_neovim
 install_wasmtime
 
 echo "Installing Que and the language server..."
