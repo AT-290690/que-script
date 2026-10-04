@@ -890,6 +890,16 @@ xs)"#,
     }
 
     #[test]
+    fn test_parser_malformed_mut_cell_reports_error_instead_of_panicking() {
+        let error = crate::parser::build("(let x (&mut 10))")
+            .expect_err("malformed &mut should be rejected");
+        assert!(
+            error.contains("&mut requires exactly 2 arguments"),
+            "unexpected malformed &mut error: {error}"
+        );
+    }
+
+    #[test]
     fn test_runtime_tuple_return_destructure_inside_loop_does_not_shadow_outer_mut() {
         let output = run_program_output_with_std_and_opts(
             r#"(do

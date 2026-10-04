@@ -1638,7 +1638,7 @@ fn desugar_with_counter(
                     "cdr" => Ok(cdr_transform(exprs)?),
                     "set!" => Ok(setter_transform(exprs)?),
                     "&alter!" => Ok(cell_setter_transform(exprs)?),
-                    "&mut" | "variable" => Ok(variable_transform(exprs)),
+                    "&mut" | "variable" => Ok(variable_transform(exprs)?),
                     "integer" => Ok(integer_transform(exprs)),
                     "fixed" => Ok(float_transform(exprs)),
                     "boolean" => boolean_transform(exprs),
@@ -2272,13 +2272,22 @@ fn cell_setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, Strin
     ]))
 }
 
-fn variable_transform(mut exprs: Vec<Expression>) -> Expression {
+fn variable_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
+    let op = match exprs.first() {
+        Some(Expression::Word(name)) => name.as_str(),
+        _ => "&mut",
+    };
+    if exprs.len() != 3 {
+        return Err(format!(
+            "{op} requires exactly 2 arguments: a cell name and an initial value"
+        ));
+    }
     exprs.remove(0);
-    Expression::Apply(vec![
+    Ok(Expression::Apply(vec![
         Expression::Word("let".to_string()),
         exprs[0].clone(),
         Expression::Apply(vec![Expression::Word("box".to_string()), exprs[1].clone()]),
-    ])
+    ]))
 }
 fn integer_transform(mut exprs: Vec<Expression>) -> Expression {
     exprs.remove(0);
