@@ -13,12 +13,6 @@ vim.opt.ignorecase = true
 vim.opt.smartcase = true
 vim.opt.whichwrap:append("<,>,[,]")
 
--- Keep the Que plugin discoverable even on Neovim builds with a customized
--- packpath (some distro packages omit ~/.local/share/nvim/site from it).
-vim.opt.rtp:prepend(vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim")
-local que_plugin_lua = vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim/lua"
-package.path = que_plugin_lua .. "/?.lua;" .. que_plugin_lua .. "/?/init.lua;" .. package.path
-
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
   vim.fn.system({ "git", "clone", "--filter=blob:none", "https://github.com/folke/lazy.nvim.git", lazypath })
@@ -44,7 +38,11 @@ require("lazy").setup({
   { "folke/tokyonight.nvim", priority = 1000, config = function() vim.cmd.colorscheme("tokyonight-night") end },
 })
 
--- Que's plugin is installed by install-nvim.sh.
+-- Lazy.nvim rebuilds Lua's search paths. Add Que after Lazy has initialized.
+vim.opt.rtp:prepend(vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim")
+local que_plugin_lua = vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim/lua"
+package.path = que_plugin_lua .. "/?.lua;" .. que_plugin_lua .. "/?/init.lua;" .. package.path
+
 require("que").setup({})
 
 -- Basic LSP navigation and diagnostics.
