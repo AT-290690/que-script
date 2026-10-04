@@ -5910,6 +5910,35 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_type_error_in_bare_pipeline_stage_points_to_stage() {
+        let source = "(let xs (range 1 100))\n\n(|> xs avg)";
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+        let diagnostic = diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .find(|item| {
+                item.get("message")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|message| message.contains("Argument 1 of avg"))
+            })
+            .unwrap_or_else(|| panic!("expected avg diagnostic, got: {diagnostics_json}"));
+
+        assert_eq!(diagnostic["range"]["start"]["line"], serde_json::json!(2));
+        assert_eq!(
+            diagnostic["range"]["start"]["character"],
+            serde_json::json!(7)
+        );
+        assert_eq!(diagnostic["range"]["end"]["line"], serde_json::json!(2));
+        assert_eq!(
+            diagnostic["range"]["end"]["character"],
+            serde_json::json!(10)
+        );
+    }
+
+    #[test]
     fn test_static_analysis_user_form_count_includes_destructuring_expansion() {
         let source = r#"(let inp "1,2")
 (let [a b] (split "," inp))

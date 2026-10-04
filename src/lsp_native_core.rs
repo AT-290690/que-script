@@ -1623,6 +1623,10 @@ pub fn infer_error_ranges(
                 if !scoped.is_empty() {
                     return scoped;
                 }
+                let pipeline_stages = find_bare_pipeline_stage_ranges(text, &snippet, scope_meta);
+                if !pipeline_stages.is_empty() {
+                    return pipeline_stages;
+                }
                 if ranges.len() == 1 {
                     // Scope path can drift from original source ordering after desugaring
                     // (for example |> rewrite). A unique snippet match is still trustworthy.
@@ -1634,6 +1638,12 @@ pub fn infer_error_ranges(
                 }
             }
             return ranges;
+        }
+        if let Some(scope_meta) = scope {
+            let pipeline_stages = find_bare_pipeline_stage_ranges(text, &snippet, scope_meta);
+            if !pipeline_stages.is_empty() {
+                return pipeline_stages;
+            }
         }
         // The infer snippet could not be mapped back to source (often due to desugared shape
         // mismatch). Avoid a misleading scope fallback and let callers use full-file fallback.
@@ -1669,6 +1679,98 @@ pub fn infer_error_ranges(
 
     // Ambiguous/unresolved location: let caller fallback to whole-file diagnostic range.
     Vec::new()
+}
+
+/// A bare pipeline stage such as `avg` is inferred after desugaring as
+/// `(avg xs)`, so the inferred snippet does not occur verbatim in user source.
+/// Recover the stage by its call head, but only inside the inferred scope and
+/// only when the symbol is a direct pipeline element after the input.
+fn find_bare_pipeline_stage_ranges(
+    text: &str,
+    snippet: &str,
+    scope: &InferErrorScope,
+) -> Vec<CoreRange> {
+    let Some(head) = extract_call_prefix_tokens(snippet, 1).into_iter().next() else {
+        return Vec::new();
+    };
+    let candidates = find_symbol_ranges(text, &head);
+    filter_ranges_to_scope(text, &candidates, scope)
+        .into_iter()
+        .filter(|range| {
+            position_to_byte_offset(text, range.start)
+                .is_some_and(|start| is_bare_pipeline_stage_at(text, start))
+        })
+        .collect()
+}
+
+fn is_bare_pipeline_stage_at(text: &str, target: usize) -> bool {
+    let bytes = text.as_bytes();
+    let mut stack = Vec::new();
+    let mut in_string = false;
+    let mut in_comment = false;
+    let mut i = 0usize;
+    while i < target.min(bytes.len()) {
+        let byte = bytes[i];
+        if in_comment {
+            if byte == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+        if !in_string && byte == b';' {
+            in_comment = true;
+            i += 1;
+            continue;
+        }
+        if byte == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_string = !in_string;
+            i += 1;
+            continue;
+        }
+        if !in_string {
+            match byte {
+                b'(' => stack.push(i),
+                b')' => {
+                    let _ = stack.pop();
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+
+    let Some(&pipe_open) = stack.last() else {
+        return false;
+    };
+    if list_head_at(text, pipe_open) != Some("|>") {
+        return false;
+    }
+    direct_list_element_index(text, pipe_open, target).is_some_and(|index| index >= 2)
+}
+
+fn direct_list_element_index(text: &str, open: usize, target: usize) -> Option<usize> {
+    let close = find_matching_paren_byte(text, open)?;
+    let bytes = text.as_bytes();
+    let mut i = open + 1;
+    let mut element_index = 0usize;
+    while i < close {
+        i = skip_ws_and_comments(text, i, close);
+        if i >= close {
+            break;
+        }
+        if i == target {
+            return Some(element_index);
+        }
+        i = match bytes[i] {
+            b'(' | b'[' | b'{' => find_matching_list_end_byte(text, i)? + 1,
+            b'"' => skip_string_literal(text, i, close),
+            b'\'' => skip_char_literal(text, i, close),
+            _ => skip_token(text, i, close),
+        };
+        element_index += 1;
+    }
+    None
 }
 
 pub fn infer_error_range(text: &str, message: &str) -> Option<CoreRange> {

@@ -6,6 +6,15 @@ vim.g.maplocalleader = " "
 vim.g.have_nerd_font = false
 vim.g.que_workstation_config = true
 
+-- Some SSH clients incorrectly echo Neovim's OSC-52/XTGETTCAP probe as
+-- visible `+q4D73` text. Disable that terminal feature before runtime plugins
+-- load; local desktop Neovim keeps its normal clipboard integration.
+if vim.env.SSH_CONNECTION or vim.env.SSH_TTY then
+  local termfeatures = vim.g.termfeatures or {}
+  termfeatures.osc52 = false
+  vim.g.termfeatures = termfeatures
+end
+
 vim.o.number = true
 vim.o.mouse = "a"
 vim.o.showmode = false
@@ -32,7 +41,26 @@ vim.opt.expandtab = true
 vim.opt.smartindent = false
 vim.opt.autoindent = false
 vim.opt.fillchars:append({ eob = " " })
-vim.schedule(function() vim.o.clipboard = "unnamedplus" end)
+if not (vim.env.SSH_CONNECTION or vim.env.SSH_TTY) then
+  vim.schedule(function() vim.o.clipboard = "unnamedplus" end)
+end
+
+-- Match the local workstation exactly: Neovim 0.12 ships this Catppuccin
+-- colorscheme. Do not substitute the separate catppuccin/nvim plugin, whose
+-- palette and highlight definitions are different.
+vim.o.background = "dark"
+vim.cmd.colorscheme("catppuccin")
+local function style_floats()
+  vim.api.nvim_set_hl(0, "NormalFloat", { link = "Pmenu" })
+  local float = vim.api.nvim_get_hl(0, { name = "NormalFloat", link = false })
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  vim.api.nvim_set_hl(0, "FloatBorder", { fg = normal.fg, bg = float.bg })
+end
+style_floats()
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = vim.api.nvim_create_augroup("que-float-style", { clear = true }),
+  callback = style_floats,
+})
 
 vim.keymap.set("n", "<Esc>", "<cmd>nohlsearch<CR>")
 vim.keymap.set({ "n", "i", "v" }, "<C-s>", "<Esc>:w<CR>", { desc = "Save file" })
@@ -90,28 +118,6 @@ require("lazy").setup({
         { "gr", group = "LSP Actions" },
       },
     },
-  },
-  {
-    "catppuccin/nvim",
-    name = "catppuccin",
-    priority = 1000,
-    lazy = false,
-    config = function()
-      require("catppuccin").setup({ styles = { comments = {} } })
-      vim.o.background = "dark"
-      vim.cmd.colorscheme("catppuccin")
-      local function style_floats()
-        vim.api.nvim_set_hl(0, "NormalFloat", { link = "Pmenu" })
-        local float = vim.api.nvim_get_hl(0, { name = "NormalFloat", link = false })
-        local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
-        vim.api.nvim_set_hl(0, "FloatBorder", { fg = normal.fg, bg = float.bg })
-      end
-      style_floats()
-      vim.api.nvim_create_autocmd("ColorScheme", {
-        group = vim.api.nvim_create_augroup("que-float-style", { clear = true }),
-        callback = style_floats,
-      })
-    end,
   },
   { "folke/todo-comments.nvim", dependencies = { "nvim-lua/plenary.nvim" }, opts = { signs = false } },
   { "kylechui/nvim-surround", version = "*", opts = {} },

@@ -297,6 +297,15 @@ end
 function M.setup(opts)
   opts = opts or {}
 
+  -- Completion presentation is editor configuration, not an LSP capability.
+  -- Apply Blink's Que labels immediately so they do not depend on whether the
+  -- language server has attached yet. on_attach repeats this harmlessly for
+  -- configurations that load Blink after que.nvim.
+  if opts.completion_icons ~= false then
+    local icons = vim.tbl_extend("force", M.completion_icons, opts.completion_icons or {})
+    setup_blink_completion(icons)
+  end
+
   local ok_lspconfig, lspconfig = pcall(require, "lspconfig")
   if not ok_lspconfig then
     error("que.nvim requires nvim-lspconfig")
