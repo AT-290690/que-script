@@ -13,6 +13,10 @@ vim.opt.ignorecase = true
 vim.opt.smartcase = true
 vim.opt.whichwrap:append("<,>,[,]")
 
+-- Keep the Que plugin discoverable even on Neovim builds with a customized
+-- packpath (some distro packages omit ~/.local/share/nvim/site from it).
+vim.opt.rtp:prepend(vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim")
+
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
   vim.fn.system({ "git", "clone", "--filter=blob:none", "https://github.com/folke/lazy.nvim.git", lazypath })
