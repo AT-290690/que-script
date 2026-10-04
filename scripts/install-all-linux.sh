@@ -174,10 +174,15 @@ else
   echo "Kept existing Neovim config. Set QUE_OVERWRITE_NVIM=1 to install the Que config."
 fi
 
+echo "Installing Neovim plugins..."
+nvim --headless "+Lazy! sync" "+qa"
+
+test -x /usr/local/bin/que
+test -x /usr/local/bin/quelsp
+test -f "$HOME/.local/share/nvim/site/pack/que/start/que-nvim/lua/que/init.lua"
+
 echo
-echo "Installation complete. Open a new shell (or run: source ~/.profile), then try:"
+echo "Installation complete. Everything needed by the Que Neovim environment is installed."
 echo "  que --version"
 echo "  nvim --version"
 echo "  que nvim --allow all"
-echo
-echo "The first Neovim start downloads Telescope and the LSP plugins."
