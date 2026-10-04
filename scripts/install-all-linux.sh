@@ -217,6 +217,14 @@ fi
 echo "Installing Neovim plugins..."
 nvim --headless "+Lazy! sync" "+qa"
 
+echo "Verifying the installed Neovim experience..."
+nvim --headless \
+  "+lua assert(vim.g.que_workstation_config == true, 'managed Que init.lua is not active')" \
+  "+lua assert(vim.g.colors_name == 'catppuccin', 'Catppuccin is not active')" \
+  "+lua assert(vim.o.tabstop == 2 and vim.o.shiftwidth == 2 and vim.o.softtabstop == 2 and vim.o.expandtab, 'Que tab settings are not active')" \
+  "+lua local c=require('blink.cmp.config'); assert(c.appearance.kind_icons.Function == 'λ', 'Que completion label style is not active')" \
+  "+qa"
+
 test -x /usr/local/bin/que
 test -x /usr/local/bin/quelsp
 test -f "$HOME/.local/share/nvim/site/pack/que/start/que-nvim/lua/que/init.lua"

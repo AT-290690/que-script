@@ -1,9 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-REPO_BASE="https://raw.githubusercontent.com/AT-290690/que-script/main"
+REPO_BASE="${QUE_REPO_RAW:-https://raw.githubusercontent.com/AT-290690/que-script/main}"
 # Neovim's data pack path is present in distro, AppImage, and nightly builds.
 INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/que/start/que-nvim"
+NVIM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
+NVIM_INIT="$NVIM_CONFIG_DIR/init.lua"
 
 download_file() {
   local src="$1"
@@ -31,14 +33,23 @@ download_file \
   "$REPO_BASE/miscs/neovim/syntax/que.vim" \
   "$INSTALL_ROOT/syntax/que.vim"
 
+mkdir -p "$NVIM_CONFIG_DIR"
+managed_config=0
+if [[ -f "$NVIM_INIT" ]] && grep -Fq 'Que workstation configuration installed by scripts/install-all-linux.sh' "$NVIM_INIT"; then
+  managed_config=1
+fi
+
+if [[ ! -e "$NVIM_INIT" || "${QUE_OVERWRITE_NVIM:-0}" == "1" || "$managed_config" -eq 1 ]]; then
+  download_file "$REPO_BASE/scripts/que-init.lua" "$NVIM_INIT"
+  echo "Installed Que workstation config: $NVIM_INIT"
+else
+  echo "Kept existing Neovim config. Set QUE_OVERWRITE_NVIM=1 to replace it with the Que workstation config."
+fi
+
 cat <<EOF
 Installed que-nvim to:
   $INSTALL_ROOT
 
-Next steps:
-  1. Make sure 'quelsp' is installed and on your PATH.
-  2. Make sure 'nvim-lspconfig' is installed in Neovim.
-  3. Add this to your Neovim config:
-
-require("que").setup()
+The managed config includes Catppuccin, Telescope, Que completion labels,
+and the two-space indentation settings. Make sure 'quelsp' is on PATH.
 EOF

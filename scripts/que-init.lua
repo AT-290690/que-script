@@ -4,6 +4,7 @@ vim.loader.enable()
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 vim.g.have_nerd_font = false
+vim.g.que_workstation_config = true
 
 vim.o.number = true
 vim.o.mouse = "a"
@@ -94,13 +95,22 @@ require("lazy").setup({
     "catppuccin/nvim",
     name = "catppuccin",
     priority = 1000,
+    lazy = false,
     config = function()
       require("catppuccin").setup({ styles = { comments = {} } })
+      vim.o.background = "dark"
       vim.cmd.colorscheme("catppuccin")
-      vim.api.nvim_set_hl(0, "NormalFloat", { link = "Pmenu" })
-      local float = vim.api.nvim_get_hl(0, { name = "NormalFloat", link = false })
-      local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
-      vim.api.nvim_set_hl(0, "FloatBorder", { fg = normal.fg, bg = float.bg })
+      local function style_floats()
+        vim.api.nvim_set_hl(0, "NormalFloat", { link = "Pmenu" })
+        local float = vim.api.nvim_get_hl(0, { name = "NormalFloat", link = false })
+        local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+        vim.api.nvim_set_hl(0, "FloatBorder", { fg = normal.fg, bg = float.bg })
+      end
+      style_floats()
+      vim.api.nvim_create_autocmd("ColorScheme", {
+        group = vim.api.nvim_create_augroup("que-float-style", { clear = true }),
+        callback = style_floats,
+      })
     end,
   },
   { "folke/todo-comments.nvim", dependencies = { "nvim-lua/plenary.nvim" }, opts = { signs = false } },
