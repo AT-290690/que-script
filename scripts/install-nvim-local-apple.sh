@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PLUGIN_SOURCE_DIR="./miscs/neovim"
-INSTALL_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/pack/que/start/que-nvim"
+INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/que/start/que-nvim"
 
 usage() {
   cat <<'EOF'
@@ -11,7 +11,7 @@ Usage: ./scripts/install-nvim-local-apple.sh
 Installs the local Que / Eclisp Neovim plugin from this checkout onto this macOS machine.
 
 Installs:
-  ~/.config/nvim/pack/que/start/que-nvim
+  ~/.local/share/nvim/site/pack/que/start/que-nvim
 
 Notes:
   - This copies files from ./miscs/neovim

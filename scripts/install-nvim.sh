@@ -2,7 +2,8 @@
 set -euo pipefail
 
 REPO_BASE="https://raw.githubusercontent.com/AT-290690/que-script/main"
-INSTALL_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/pack/que/start/que-nvim"
+# Neovim's data pack path is present in distro, AppImage, and nightly builds.
+INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/que/start/que-nvim"
 
 download_file() {
   local src="$1"
