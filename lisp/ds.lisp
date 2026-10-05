@@ -741,8 +741,8 @@ q)))
        (get (get q 1) index)
        (get (get q 0) index)))))
 
-(let Vector->Que (lambda initial (do
- (let q (Que/new))
+(let Vector->Que (lambda init initial (do
+ (let q (Que/new init))
  (let half (/ (length initial) 2))
  (mut left (- half 1))
  (while (>= left 0) (do
