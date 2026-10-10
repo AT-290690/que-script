@@ -13,59 +13,36 @@ struct WasiOverrides {
 
 thread_local! {
     static WASI_OVERRIDES: RefCell<WasiOverrides> = RefCell::new(WasiOverrides::default());
-    static STATIC_PROOF_INDEX: RefCell<Option<StaticProofIndex>> = const { RefCell::new(None) };
+    static STATIC_PROOF_FACTS: RefCell<Option<crate::static_analysis::ProofFacts>> =
+        const { RefCell::new(None) };
 }
 
-#[derive(Clone, Default)]
-struct StaticProofIndex {
-    proven_safe: HashSet<(crate::static_analysis::ProofKind, String)>,
-}
+struct StaticProofFactsGuard(Option<crate::static_analysis::ProofFacts>);
 
-impl StaticProofIndex {
-    fn from_typed_ast(typed_ast: &TypedExpression) -> Self {
-        let mut grouped: HashMap<(crate::static_analysis::ProofKind, String), (usize, usize)> =
-            HashMap::new();
-        for proof in crate::static_analysis::analyze_codegen_proofs(typed_ast) {
-            let counts = grouped.entry((proof.kind, proof.expression)).or_default();
-            counts.0 += 1;
-            if proof.status == crate::static_analysis::ProofStatus::ProvenSafe {
-                counts.1 += 1;
-            }
-        }
-        Self {
-            proven_safe: grouped
-                .into_iter()
-                .filter_map(|(key, (total, safe))| (total == safe).then_some(key))
-                .collect(),
-        }
-    }
-}
-
-struct StaticProofIndexGuard(Option<StaticProofIndex>);
-
-impl StaticProofIndexGuard {
+impl StaticProofFactsGuard {
     fn install(typed_ast: &TypedExpression) -> Self {
-        STATIC_PROOF_INDEX.with(|cell| {
-            let previous = cell.replace(Some(StaticProofIndex::from_typed_ast(typed_ast)));
+        STATIC_PROOF_FACTS.with(|cell| {
+            let previous = cell.replace(Some(crate::static_analysis::ProofFacts::from_typed_ast(
+                typed_ast,
+            )));
             Self(previous)
         })
     }
 }
 
-impl Drop for StaticProofIndexGuard {
+impl Drop for StaticProofFactsGuard {
     fn drop(&mut self) {
-        STATIC_PROOF_INDEX.with(|cell| {
+        STATIC_PROOF_FACTS.with(|cell| {
             cell.replace(self.0.take());
         });
     }
 }
 
 fn static_proof_is_safe(kind: crate::static_analysis::ProofKind, expr: &Expression) -> bool {
-    let key = (kind, expr.to_lisp());
-    STATIC_PROOF_INDEX.with(|cell| {
+    STATIC_PROOF_FACTS.with(|cell| {
         cell.borrow()
             .as_ref()
-            .is_some_and(|index| index.proven_safe.contains(&key))
+            .is_some_and(|facts| facts.is_proven_safe(kind, expr))
     })
 }
 
@@ -14880,7 +14857,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     // the conservative runtime guard.
     let _static_proof_guard = (parse_env_bool_like("QUE_OPT_PROOF_CODEGEN", false)
         || parse_env_bool_like("QUEC_DEBUG_ANALYSIS", false))
-    .then(|| StaticProofIndexGuard::install(typed_ast));
+    .then(|| StaticProofFactsGuard::install(typed_ast));
     validate_no_rc_cycles(typed_ast)?;
 
     let (top_defs, extern_defs, main_expr, main_node) = match &typed_ast.expr {

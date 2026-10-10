@@ -70,6 +70,42 @@ pub struct StaticProof {
     pub source_span: Option<AnalysisSourceSpan>,
 }
 
+/// Facts that are safe for compiler consumers to use when removing runtime
+/// checks. A fact is accepted only when every occurrence of the same proof
+/// identity in the analyzed tree is proven safe; an ambiguous occurrence stays
+/// conservative.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProofFacts {
+    proven_safe: HashSet<(ProofKind, String)>,
+}
+
+impl ProofFacts {
+    pub fn from_proofs(proofs: impl IntoIterator<Item = StaticProof>) -> Self {
+        let mut grouped: HashMap<(ProofKind, String), (usize, usize)> = HashMap::new();
+        for proof in proofs {
+            let counts = grouped.entry((proof.kind, proof.expression)).or_default();
+            counts.0 += 1;
+            if proof.status == ProofStatus::ProvenSafe {
+                counts.1 += 1;
+            }
+        }
+        Self {
+            proven_safe: grouped
+                .into_iter()
+                .filter_map(|(key, (total, safe))| (total == safe).then_some(key))
+                .collect(),
+        }
+    }
+
+    pub fn from_typed_ast(typed_ast: &TypedExpression) -> Self {
+        Self::from_proofs(analyze_codegen_proofs(typed_ast))
+    }
+
+    pub fn is_proven_safe(&self, kind: ProofKind, expression: &Expression) -> bool {
+        self.proven_safe.contains(&(kind, expression.to_lisp()))
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StaticAnalysisReport {
     pub diagnostics: Vec<StaticAnalysisDiagnostic>,
@@ -6224,6 +6260,30 @@ mod tests {
         )
         .expect("source should infer");
         analyze_user_program_report(&typed, user_form_count)
+    }
+
+    #[test]
+    fn proof_facts_are_conservative_across_repeated_proof_keys() {
+        let expression = crate::parser::build("(get xs i)").expect("expression should build");
+        let safe = StaticProof {
+            id: AnalysisNodeId {
+                user_form_index: 0,
+                operation_index: 0,
+            },
+            kind: ProofKind::BoundsRead,
+            status: ProofStatus::ProvenSafe,
+            expression: expression.to_lisp(),
+            details: Vec::new(),
+            source_span: None,
+        };
+        let facts = ProofFacts::from_proofs(vec![safe.clone()]);
+        assert!(facts.is_proven_safe(ProofKind::BoundsRead, &expression));
+
+        let mut unknown = safe;
+        unknown.id.operation_index = 1;
+        unknown.status = ProofStatus::Unknown;
+        let facts = ProofFacts::from_proofs(vec![unknown]);
+        assert!(!facts.is_proven_safe(ProofKind::BoundsRead, &expression));
     }
 
     #[test]

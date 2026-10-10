@@ -3081,8 +3081,8 @@ impl DecimalLiteral {
         let quotient = numerator / denominator;
         let remainder = numerator % denominator;
         let twice_remainder = remainder.checked_abs()?.checked_mul(2)?;
-        let rounds_away = twice_remainder > denominator
-            || (twice_remainder == denominator && quotient % 2 != 0);
+        let rounds_away =
+            twice_remainder > denominator || (twice_remainder == denominator && quotient % 2 != 0);
         let rounded = if rounds_away {
             quotient.checked_add(if numerator < 0 { -1 } else { 1 })?
         } else {

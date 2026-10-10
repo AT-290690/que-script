@@ -60,8 +60,8 @@ mod tests {
 
     #[test]
     fn decimal_literals_remain_exact_until_runtime_quantization() {
-        let values = parse("1000000.001 1000000.002 3.1425 -3.1435")
-            .expect("decimal literals should parse");
+        let values =
+            parse("1000000.001 1000000.002 3.1425 -3.1435").expect("decimal literals should parse");
         let rendered = values.iter().map(Expression::to_lisp).collect::<Vec<_>>();
         assert_eq!(
             rendered,
