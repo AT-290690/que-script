@@ -394,6 +394,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "pop!" => Some(22),
         "pop-val!" => Some(38),
         "push!" => Some(39),
+        "empty!" => Some(40),
         "fst" => Some(23),
         "snd" => Some(24),
         "+." => Some(25),
@@ -418,13 +419,13 @@ fn builtin_tag_arity(tag: i32) -> Option<usize> {
         1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 25 | 26
         | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 37 | 39 => Some(2),
         21 => Some(3),
-        18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 | 38 => Some(1),
+        18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 | 38 | 40 => Some(1),
         _ => None,
     }
 }
 
 fn builtin_tag_first_param_is_ref(tag: i32) -> bool {
-    matches!(tag, 21 | 37 | 39)
+    matches!(tag, 21 | 37 | 39 | 40)
 }
 
 fn is_i32ish_type(t: &Type) -> bool {
@@ -4397,6 +4398,71 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
+  ;; Clearing scalar storage is O(1): retain its capacity and reset only its
+  ;; logical length. Managed elements still need individual releases.
+  (func $vec_clear_i32 (param $ptr i32) (result i32)
+    (local $len i32)
+    (local $elem_ref i32)
+    (local $data i32)
+    (local $i i32)
+    local.get $ptr
+    call $vec_materialize_i32
+    drop
+    local.get $ptr
+    i32.const 12
+    i32.add
+    i32.load
+    local.set $elem_ref
+    local.get $elem_ref
+    i32.const 0
+    i32.ne
+    if
+      local.get $ptr
+      i32.load
+      local.set $len
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      local.set $data
+      block $done
+        loop $release
+          local.get $i
+          local.get $len
+          i32.ge_s
+          br_if $done
+          local.get $data
+          local.get $i
+          i32.const 4
+          i32.mul
+          i32.add
+          i32.load
+          call $rc_release
+          drop
+          local.get $i
+          i32.const 1
+          i32.add
+          local.set $i
+          br $release
+        end
+      end
+    end
+    local.get $ptr
+    i32.const 0
+    i32.store
+    i32.const 0
+  )
+
+  (func $vec_clear_scalar_i32 (param $ptr i32) (result i32)
+    local.get $ptr
+    call $vec_materialize_i32
+    drop
+    local.get $ptr
+    i32.const 0
+    i32.store
+    i32.const 0
+  )
+
   (func $vec_pop_val_i32 (param $ptr i32) (result i32)
     (local $len i32)
     (local $addr i32)
@@ -4703,6 +4769,13 @@ fn emit_vector_runtime(
       call $vec_pop_i32
     else
     local.get $f
+    i32.const 40
+    i32.eq
+    if (result i32)
+      local.get $a
+      call $vec_clear_i32
+    else
+    local.get $f
     i32.const 38
     i32.eq
     if (result i32)
@@ -4756,6 +4829,7 @@ fn emit_vector_runtime(
           end
         end
       end
+    end
     end
     end
     end
@@ -11824,6 +11898,24 @@ fn compile_pop(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     Ok(format!("{xs}\ncall $vec_pop_i32"))
 }
 
+fn compile_vec_clear(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let vector = node
+        .children
+        .get(1)
+        .ok_or_else(|| "empty! missing vector".to_string())?;
+    let xs = compile_expr(vector, ctx)?;
+    let scalar = matches!(
+        vector.typ.as_ref(),
+        Some(Type::List(element)) if !is_ref_type(element)
+    );
+    let helper = if scalar {
+        "$vec_clear_scalar_i32"
+    } else {
+        "$vec_clear_i32"
+    };
+    Ok(format!("{xs}\ncall {helper}"))
+}
+
 fn compile_pop_val(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs = compile_expr(
         node.children
@@ -13454,6 +13546,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "alter!" => compile_alter(node, ctx),
                         "pop!" => compile_pop(node, ctx),
                         "pop-val!" => compile_pop_val(node, ctx),
+                        "empty!" => compile_vec_clear(node, ctx),
                         "while" => compile_loop_while(node, ctx),
                         "not" => {
                             let a = compile_expr(

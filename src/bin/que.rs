@@ -10,7 +10,7 @@ Bindings: (let x value), (mut x value), (alter! x value), (letrec f (lambda ...)
 Functions: (lambda (a b) body...), called as (f a b); extra body forms are sequenced.
 Data: vectors [1 2 3], tuples {a b}, strings "text", characters 'x'.
 Control: (if test yes no), (cond test value ... default), (while test body...), (loop i test body...).
-Mutation: (push! xs x), (set! xs i x), (pop! xs), (&mut cell), (&alter! cell value).
+Mutation: (push! xs x), (set! xs i x), (pop! xs), (empty! xs), (&mut cell), (&alter! cell value).
 Pipelines pass data last: (|> xs (map f) (select pred)).
 Use (block ...) for lexical branch/loop scopes so repeated local names do not collide.
 Comments begin with ; and continue to the end of the line.

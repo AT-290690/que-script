@@ -10370,6 +10370,76 @@ consume!
     }
 
     #[test]
+    fn test_wat_empty_builtin_uses_constant_time_scalar_clear() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (empty! xs) (length xs))")
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_clear_scalar_i32"),
+            "empty! on a scalar vector should use O(1) clear, got:\n{}",
+            main_wat
+        );
+        assert!(
+            !main_wat.contains("call $vec_pop_i32"),
+            "empty! must not lower to a pop loop, got:\n{}",
+            main_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_empty_builtin_releases_managed_vector_elements() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let expr = crate::parser::build("(do (let xs [[1] [2]]) (empty! xs) (length xs))")
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+
+        assert!(
+            main_wat.contains("call $vec_clear_i32"),
+            "empty! on managed elements must retain release semantics, got:\n{}",
+            main_wat
+        );
+        let clear = named_wat_function(&wat, "vec_clear_i32");
+        assert!(
+            clear.contains("call $rc_release"),
+            "managed clear must release every removed element:\n{clear}"
+        );
+    }
+
+    #[test]
+    fn test_wat_empty_builtin_can_be_used_as_a_function_value() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let expr = crate::parser::build(
+            "(do (let xs [1 2 3]) (let clear empty!) (clear xs) (length xs))",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        wat::parse_str(&wat).expect("empty! function value should generate valid WAT");
+        assert!(
+            wat.contains("i32.const 40") && wat.contains("call $vec_clear_i32"),
+            "dynamic empty! must dispatch to clear semantics:\n{wat}"
+        );
+    }
+
+    #[test]
     fn test_wat_set_releases_fresh_managed_call_rhs_after_vector_retain() {
         let expr = crate::parser::build(
             "(do (let make (lambda a (lambda x (+ x a)))) (let xs []) (set! xs 0 (make 1)) 0)",

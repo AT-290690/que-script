@@ -526,9 +526,7 @@ q)))
 
 (let Vector/push! (lambda xs x (do (set! xs (length xs) x) xs)))
 
-(let Heap/empty! (lambda xs (if (empty? xs) xs (do
-     (while (not (empty? xs)) (pop! xs))
-     xs))))
+(let Heap/empty! (lambda xs (do (empty! xs) xs)))
 
 (let Vector/overwrite! (lambda (xs ys) (Heap/empty! xs) (loop i (< i (length ys)) (set! xs i (get ys i)))))
 

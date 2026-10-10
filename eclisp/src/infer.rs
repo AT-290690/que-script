@@ -127,7 +127,7 @@ fn collect_top_level_extern_names(root: &TypedExpression) -> HashSet<String> {
 fn is_mutating_op(op: &str) -> bool {
     matches!(
         op,
-        "set!" | "alter!" | "&alter!" | "push!" | "pop!" | "pop-val!"
+        "set!" | "alter!" | "&alter!" | "push!" | "pop!" | "pop-val!" | "empty!"
     )
 }
 
@@ -196,6 +196,7 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             | "push!"
             | "pop!"
             | "pop-val!"
+            | "empty!"
             | "get"
             | "&get"
             | "&mut"
@@ -1391,6 +1392,7 @@ fn builtin_bang_contract_min_arity(op: &str) -> Option<usize> {
         "pop!" => Some(1),
         "pop-val!" => Some(1),
         "push!" => Some(2),
+        "empty!" => Some(1),
         _ => None,
     }
 }

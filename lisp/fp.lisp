@@ -1600,7 +1600,6 @@ out)))
       (set! xs i (fn (get xs (- i 1)) (get xs i)))
       (alter! i (+ i 1))))) nil)
   nil)))
-(let empty! (lambda xs (do (Heap/empty! xs) nil)))
 (let reverse! Vector/reverse!)
 (let overwrite! Vector/overwrite!)
 
