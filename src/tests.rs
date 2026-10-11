@@ -8158,7 +8158,7 @@ fn"#;
             "a proved contiguous scalar clone should use one bulk copy:\n{clone_wat}"
         );
         assert!(
-            clone_wat.contains("call $vec_len"),
+            clone_wat.contains("i32.load\n    i32.const 3\n    i32.lt_s"),
             "the optimized branch must remain guarded by the source length:\n{clone_wat}"
         );
     }
@@ -8903,9 +8903,9 @@ n"#;
             main_wat
         );
         assert_eq!(
-            main_wat.matches("call $vec_len").count(),
+            main_wat.matches("i32.load\n    i32.lt_s").count(),
             1,
-            "proven loop should hoist length out of the loop, got:\n{}",
+            "proven loop should read the vector header once for its exit condition, got:\n{}",
             main_wat
         );
     }
@@ -9441,7 +9441,7 @@ n"#;
 
         assert!(
             wat_flat.contains(
-                "local.get 0\ncall $vec_len\ndrop\nlocal.get 0\ncall $rc_release_vec\ndrop\ni32.const 0\nlocal.set 0"
+                "local.get 0\ni32.load\ndrop\nlocal.get 0\ncall $rc_release_vec\ndrop\ni32.const 0\nlocal.set 0"
             ),
             "managed do-local should be released after its last non-final use, got:\n{}",
             wat
@@ -9872,7 +9872,7 @@ n"#;
         let fast_wat = &fn_wat[fast_start..];
 
         assert!(
-            fn_wat.contains("call $vec_len"),
+            fn_wat.contains("i32.load"),
             "guarded param fast path should check vector length once, got:\n{}",
             fn_wat
         );
@@ -9924,7 +9924,7 @@ n"#;
         let fn_wat = &wat[fn_start..fn_end];
 
         assert!(
-            fn_wat.contains("call $vec_len"),
+            fn_wat.contains("i32.load"),
             "scalar-returning tail-emitted bodies should retain the guarded vector fast path, got:\n{}",
             fn_wat
         );
@@ -9977,7 +9977,7 @@ n"#;
 
         assert!(
             public.contains("call $__que_scalar_set_fast_v_fill_bang_")
-                && public.contains("call $vec_len"),
+                && public.contains("i32.load"),
             "the public entry should guard once and enter the private worker:\n{public}"
         );
         assert!(
@@ -9989,6 +9989,43 @@ n"#;
         assert_eq!(
             run_program_output_with_std_and_opts_unlocked(source, true),
             "1"
+        );
+    }
+
+    #[test]
+    fn test_wat_recursive_scalar_param_append_uses_guarded_fast_worker() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let source = r#"
+(letrec append-n! (lambda (xs n)
+  (if (= n 0)
+      xs
+      (do
+        (push! xs n)
+        (append-n! xs (- n 1))))))
+(append-n! [] 3)
+"#;
+        let wat = compile_std_program_to_wat(source, true);
+        let public = named_wat_function(&wat, "v_append_dash_n_bang_");
+        let fast = named_wat_function(&wat, "__que_scalar_set_fast_v_append_dash_n_bang_");
+
+        assert!(
+            public.contains("call $__que_scalar_set_fast_v_append_dash_n_bang_")
+                && public.contains("i32.const 1447380017"),
+            "the public append helper should guard the vector representation once:\n{public}"
+        );
+        assert!(
+            fast.contains("i32.gt_s")
+                && fast.contains("i32.store")
+                && !fast.contains("call $vec_set_scalar_i32"),
+            "the private worker should inline append when capacity remains:\n{fast}"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts_unlocked(source, true),
+            "[3 2 1]"
         );
     }
 
@@ -10476,6 +10513,53 @@ consume!
         assert!(
             wat.contains("i32.const 40") && wat.contains("call $vec_clear_i32"),
             "dynamic empty! must dispatch to clear semantics:\n{wat}"
+        );
+    }
+
+    #[test]
+    fn test_wat_length_of_vector_is_an_inline_header_load() {
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (length xs))")
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        wat::parse_str(&wat).expect("length program should generate valid WAT");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+        assert!(
+            !main_wat.contains("call $vec_len"),
+            "length should read the vector header directly, got:\n{main_wat}"
+        );
+        assert!(
+            main_wat.contains("i32.load"),
+            "inline length should load the logical-length header, got:\n{main_wat}"
+        );
+    }
+
+    #[test]
+    fn test_materialized_scalar_append_keeps_growth_and_evaluation_order() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // The first append fits the requested capacity. The later appends must
+        // take the ordinary growth path, without changing observable results.
+        assert_eq!(
+            run_program_output_unlocked(
+                "(do (let xs []) (capacity! xs 1) (push! xs 10) (push! xs 20) (push! xs 30) xs)",
+            ),
+            "[10 20 30]"
+        );
+
+        // `set!` evaluates its index before its value. A mutating RHS may
+        // therefore change the vector before the final write. It must remain
+        // on the general path rather than using the append specialization.
+        assert_eq!(
+            run_program_output_unlocked(
+                "(do (let xs []) (push! xs 1) (set! xs (length xs) (block (push! xs 2) 3)) xs)",
+            ),
+            "[1 3]"
         );
     }
 

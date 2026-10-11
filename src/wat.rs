@@ -10467,6 +10467,75 @@ fn emit_dynamic_scalar_set_from_data_slot(
     )
 }
 
+fn is_append_at_own_length(index: &Expression, target: &str) -> bool {
+    matches!(
+        index,
+        Expression::Apply(items)
+            if matches!(items.as_slice(), [Expression::Word(op), Expression::Word(name)]
+                if op == "length" && name == target)
+    )
+}
+
+/// Append to a known materialized scalar vector without entering the general
+/// `set!` helper. The helper remains the fallback when the backing store is
+/// full, preserving ordinary vector growth semantics.
+///
+/// This is deliberately restricted to a pure RHS. In `(set! xs (length xs)
+/// rhs)`, a mutating RHS could change `xs` after its index has been evaluated.
+/// Keeping that shape on the general path preserves evaluation order exactly.
+fn emit_materialized_scalar_append(
+    target_prefix: &str,
+    value: &str,
+    target_tmp: usize,
+    len_tmp: usize,
+    value_tmp: usize,
+    release_target_code: &str,
+) -> String {
+    let mut out = format!(
+        "{target_prefix}\n\
+         local.set {target_tmp}\n\
+         local.get {target_tmp}\n\
+         i32.load\n\
+         local.set {len_tmp}\n\
+         {value}\n\
+         local.set {value_tmp}\n\
+         local.get {target_tmp}\n\
+         i32.const 4\n\
+         i32.add\n\
+         i32.load\n\
+         local.get {len_tmp}\n\
+         i32.gt_s\n\
+         if (result i32)\n\
+           local.get {target_tmp}\n\
+           i32.const 16\n\
+           i32.add\n\
+           i32.load\n\
+           local.get {len_tmp}\n\
+           i32.const 4\n\
+           i32.mul\n\
+           i32.add\n\
+           local.get {value_tmp}\n\
+           i32.store\n\
+           local.get {target_tmp}\n\
+           local.get {len_tmp}\n\
+           i32.const 1\n\
+           i32.add\n\
+           i32.store\n\
+           i32.const 0\n\
+         else\n\
+           local.get {target_tmp}\n\
+           local.get {len_tmp}\n\
+           local.get {value_tmp}\n\
+           call $vec_set_scalar_materialized_i32\n\
+         end"
+    );
+    if !release_target_code.is_empty() {
+        out.push('\n');
+        out.push_str(release_target_code);
+    }
+    out
+}
+
 fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs_node = node
         .children
@@ -10768,6 +10837,21 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         &node.expr,
     );
     if is_scalar_value {
+        if definitely_materialized_scalar_target
+            && !val_node.effect.contains(EffectFlags::MUTATE)
+            && !val_node.effect.contains(EffectFlags::UNKNOWN_CALL)
+            && matches!(&xs_node.expr, Expression::Word(target_name)
+                if node.children.get(2).is_some_and(|index| is_append_at_own_length(&index.expr, target_name)))
+        {
+            return Ok(emit_materialized_scalar_append(
+                &target_prefix,
+                &v,
+                target_tmp,
+                ctx.tmp_i32 + 2,
+                ctx.tmp_i32 + 1,
+                &target_release,
+            ));
+        }
         if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
             if *index >= 0 {
                 if let Expression::Word(xs_name) = &xs_node.expr {
@@ -11642,6 +11726,10 @@ fn collect_scalar_param_constant_set_requirements(
                             .unwrap_or(false);
                     if is_scalar_param {
                         if op == "get" || op == "set!" {
+                            let append_at_own_length = op == "set!"
+                                && matches!(items.get(2), Some(Expression::Apply(length))
+                                    if matches!(length.as_slice(), [Expression::Word(name), Expression::Word(vector)]
+                                        if name == "length" && vector == target));
                             match items.get(2) {
                                 Some(Expression::Int(index)) if *index >= 0 => {
                                     let needed = index.saturating_add(1);
@@ -11650,11 +11738,17 @@ fn collect_scalar_param_constant_set_requirements(
                                         .and_modify(|min| *min = (*min).max(needed))
                                         .or_insert(needed);
                                 }
-                                _ => {
-                                    if op == "set!" {
-                                        invalid_slots.insert(slot);
-                                    }
+                                _ if append_at_own_length => {
+                                    // Appending needs no minimum logical length, but it
+                                    // does need a materialized backing store.  A zero
+                                    // requirement emits exactly that entry guard and lets
+                                    // the fast branch use the inline append path.
+                                    required_min_lengths.entry(slot).or_insert(0);
                                 }
+                                _ if op == "set!" => {
+                                    invalid_slots.insert(slot);
+                                }
+                                _ => {}
                             }
                         } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!") {
                             invalid_slots.insert(slot);
@@ -11832,7 +11926,7 @@ impl GuardedScalarParamBody {
                      i32.const 1447380017\n\
                      i32.ne\n\
                      local.get {slot}\n\
-                     call $vec_len\n\
+                     i32.load\n\
                      i32.const {min_len}\n\
                      i32.lt_s\n\
                      i32.or\n\
@@ -11876,7 +11970,7 @@ impl GuardedScalarParamBody {
                  i32.const 1447380017\n\
                  i32.ne\n\
                  local.get {slot}\n\
-                 call $vec_len\n\
+                 i32.load\n\
                  i32.const {min_len}\n\
                  i32.lt_s\n\
                  i32.or"
@@ -13832,7 +13926,13 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                     .ok_or_else(|| "length missing arg".to_string())?,
                                 ctx,
                             )?;
-                            Ok(format!("{a}\ncall $vec_len"))
+                            // `$vec_len` is exactly `local.get $ptr; i32.load`.
+                            // Keeping this load inline matters in append-heavy code:
+                            // `push!` is lowered through `(length xs)`, so a
+                            // million appends otherwise become a million tiny
+                            // Wasm-to-Wasm calls.  Every Que vector stores its
+                            // logical length at offset zero, including views.
+                            Ok(format!("{a}\ni32.load"))
                         }
                         "get" => compile_get(node, ctx),
                         "fst" => compile_fst(node, ctx),
