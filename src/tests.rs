@@ -5321,6 +5321,46 @@ out"#,
     }
 
     #[test]
+    fn test_wat_direct_main_helper_group_lifts_sibling_captures() {
+        let program = r#"
+            (let xs [])
+            (let add! (lambda x (push! xs x)))
+            (letrec fill! (lambda n
+              (if (= n 0)
+                  0
+                  (do (add! n) (fill! (- n 1))))))
+            (fill! 3)
+            (length xs)
+        "#;
+        let wat = compile_std_program_to_wat(program, true);
+
+        if std::env::var("QUE_DEVIRTUALIZE")
+            .map(|v| v.eq_ignore_ascii_case("off") || v == "0" || v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+        let fill_wat = named_wat_function(&wat, "v_fill_bang_");
+        for (label, generated) in [("main", main_wat), ("fill!", fill_wat)] {
+            assert!(
+                !generated.contains("call $closure_new"),
+                "direct-only helper group should not allocate closures in {label}, got:\n{}",
+                generated
+            );
+            assert!(
+                !generated.contains("call $apply1_i32"),
+                "direct-only helper group should not dynamically dispatch in {label}, got:\n{}",
+                generated
+            );
+        }
+    }
+
+    #[test]
     fn test_wat_closure_runtime_uses_header_check_not_sign_bit_tagging() {
         let program = "(do (let mk (lambda x (lambda y (+ x y)))) (let f (mk 2)) (f 5))";
         let std_ast = crate::baked::load_ast();

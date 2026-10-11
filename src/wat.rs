@@ -128,6 +128,10 @@ struct ClosureDef {
     name: String,
     captures: Vec<String>,
     user_arity: usize,
+    // True when this is one member of a top-level named helper group that is
+    // only ever called directly. Such helpers can omit captured helper
+    // closures and pass their concrete state directly instead.
+    direct_only: bool,
 }
 
 #[derive(Clone, Default)]
@@ -1248,6 +1252,140 @@ fn collect_top_level_lambda_bindings(
             break;
         }
     }
+}
+
+// Main-local named lambdas normally become closures because they may refer to
+// another main-local lambda.  That is necessary when a function value can
+// escape, but it is needless for the common "private helper" shape:
+//
+//   (let state [])
+//   (let push-state! (lambda x ...))
+//   (letrec walk (lambda n (push-state! n) ...))
+//
+// If every member is only ever used as the head of a call, it cannot escape.
+// We can therefore call helpers directly and replace a helper capture with
+// that helper's concrete captures.  This is a small closure-conversion pass,
+// deliberately limited to the outer program scope where names cannot be
+// shadowed by an enclosing local binding.
+fn expr_uses_name_as_noncall(name: &str, expr: &Expression) -> bool {
+    match expr {
+        Expression::Word(w) => w == name,
+        Expression::Apply(items) => {
+            if items.is_empty() {
+                return false;
+            }
+            if matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") {
+                let mut bound = HashSet::new();
+                for param in items.iter().skip(1).take(items.len().saturating_sub(2)) {
+                    collect_pattern_words(param, &mut bound);
+                }
+                return !bound.contains(name)
+                    && items
+                        .last()
+                        .map(|body| expr_uses_name_as_noncall(name, body))
+                        .unwrap_or(false);
+            }
+            if matches!(items.first(), Some(Expression::Word(w)) if w == name) {
+                return items[1..]
+                    .iter()
+                    .any(|item| expr_uses_name_as_noncall(name, item));
+            }
+            items
+                .iter()
+                .any(|item| expr_uses_name_as_noncall(name, item))
+        }
+        _ => false,
+    }
+}
+
+fn collect_direct_main_lambda_bindings(main_node: &TypedExpression) -> HashMap<String, TypedExpression> {
+    let Expression::Apply(items) = &main_node.expr else {
+        return HashMap::new();
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
+        return HashMap::new();
+    }
+
+    let mut out = HashMap::new();
+    for item_idx in 1..items.len() {
+        let Some(Expression::Apply(let_items)) = items.get(item_idx) else {
+            continue;
+        };
+        let [Expression::Word(kw), Expression::Word(name), _] = &let_items[..] else {
+            continue;
+        };
+        if kw != "let" && kw != "letrec" {
+            continue;
+        }
+        let Some(node) = main_node.children.get(item_idx - 1) else {
+            continue;
+        };
+        let Some(rhs) = node.children.get(2) else {
+            continue;
+        };
+        if !matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")) {
+            continue;
+        }
+        if expr_uses_name_as_noncall(name, &rhs.expr)
+            || items[item_idx + 1..]
+                .iter()
+                .any(|following| expr_uses_name_as_noncall(name, following))
+        {
+            continue;
+        }
+        out.insert(name.clone(), rhs.clone());
+    }
+    out
+}
+
+fn lifted_main_lambda_capture_names(
+    node: &TypedExpression,
+    top_defs: &HashMap<String, TopDef>,
+    direct_main_lambdas: &HashMap<String, TypedExpression>,
+) -> Vec<String> {
+    fn expand(
+        name: &str,
+        top_defs: &HashMap<String, TopDef>,
+        direct_main_lambdas: &HashMap<String, TypedExpression>,
+        expanding: &mut HashSet<String>,
+        out: &mut HashSet<String>,
+    ) {
+        let Some(lambda) = direct_main_lambdas.get(name) else {
+            out.insert(name.to_string());
+            return;
+        };
+        // Direct recursion and mutually-recursive helper calls need no
+        // closure value. Their concrete state is accumulated from the other
+        // captures in the group.
+        if !expanding.insert(name.to_string()) {
+            return;
+        }
+        for capture in lambda_capture_names(lambda, top_defs) {
+            expand(
+                &capture,
+                top_defs,
+                direct_main_lambdas,
+                expanding,
+                out,
+            );
+        }
+        expanding.remove(name);
+    }
+
+    let mut out = HashSet::new();
+    let mut expanding = HashSet::new();
+    for capture in lambda_capture_names(node, top_defs) {
+        expand(
+            &capture,
+            top_defs,
+            direct_main_lambdas,
+            &mut expanding,
+            &mut out,
+        );
+    }
+    let mut captures = out.into_iter().collect::<Vec<_>>();
+    captures.sort();
+    captures
 }
 
 fn lambda_is_hoistable(node: &TypedExpression, _top_defs: &HashMap<String, TopDef>) -> bool {
@@ -8146,7 +8284,14 @@ fn compile_do(
                                 )
                             })
                             .unwrap_or(false) &&
-                        !local_lambda_binding_needs_runtime_value(name, &items[i + 1..]);
+                        (val_node
+                            .and_then(|n| ctx.closure_defs.get(&n.expr.to_lisp()))
+                            .map(|def| def.direct_only)
+                            .unwrap_or(false)
+                            || !local_lambda_binding_needs_runtime_value(
+                                name,
+                                &items[i + 1..],
+                            ));
                     if let Some(n) = val_node {
                         match &n.expr {
                             Expression::Apply(xs)
@@ -8639,7 +8784,14 @@ fn compile_tail_do(
                                 )
                             })
                             .unwrap_or(false) &&
-                        !local_lambda_binding_needs_runtime_value(name, &items[i + 1..]);
+                        (val_node
+                            .and_then(|n| ctx.closure_defs.get(&n.expr.to_lisp()))
+                            .map(|def| def.direct_only)
+                            .unwrap_or(false)
+                            || !local_lambda_binding_needs_runtime_value(
+                                name,
+                                &items[i + 1..],
+                            ));
                     if let Some(n) = val_node {
                         match &n.expr {
                             Expression::Apply(xs)
@@ -13454,6 +13606,20 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 compile_dynamic_call(node, ctx)
                             }
                         }
+                        // A direct-only main helper is intentionally not a
+                        // local closure value in another lifted helper.  It
+                        // remains in the lexical lambda map so calls can pass
+                        // its concrete captures and target its generated
+                        // function directly.
+                        _ if ctx.lambda_bindings.contains_key(op_full) => {
+                            if let Some(call) =
+                                compile_direct_local_closure_call(node, op_full, ctx)?
+                            {
+                                Ok(call)
+                            } else {
+                                compile_call(node, op_full, ctx)
+                            }
+                        }
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
@@ -15194,6 +15360,33 @@ fn compile_program_to_wat_build_typed_with_opts(
     collect_lambda_nodes(typed_ast, &mut lambda_nodes);
     let mut lambda_bindings: HashMap<String, TypedExpression> = HashMap::new();
     collect_top_level_lambda_bindings(&top_defs, &mut lambda_bindings);
+    let direct_main_lambda_candidates = if devirtualize_mode_from_env()? == DevirtualizeMode::Off {
+        HashMap::new()
+    } else {
+        collect_direct_main_lambda_bindings(&main_node)
+    };
+    let direct_main_lambdas: HashMap<String, TypedExpression> = direct_main_lambda_candidates
+        .iter()
+        .filter(|(_, node)| {
+            let key = node.expr.to_lisp();
+            let candidate_count = direct_main_lambda_candidates
+                .values()
+                .filter(|candidate| candidate.expr.to_lisp() == key)
+                .count();
+            let occurrence_count = lambda_nodes
+                .iter()
+                .filter(|candidate| candidate.expr.to_lisp() == key)
+                .count();
+            candidate_count == occurrence_count
+        })
+        .map(|(name, node)| (name.clone(), node.clone()))
+        .collect();
+    // Make direct-only main helpers visible while compiling another member of
+    // the group.  Their calls are lowered to the generated function, not to a
+    // closure value.
+    for (name, node) in &direct_main_lambdas {
+        lambda_bindings.insert(name.clone(), node.clone());
+    }
     let mut lambda_names: HashMap<String, String> = HashMap::new();
     let mut closure_defs: HashMap<String, ClosureDef> = HashMap::new();
     let mut dynamic_partial_helpers: Vec<DynamicPartialHelper> = Vec::new();
@@ -15233,7 +15426,14 @@ fn compile_program_to_wat_build_typed_with_opts(
                 } else if ps.len() >= syn_arity {
                     ps.truncate(syn_arity);
                 }
-                let captures = lambda_capture_names(node, &top_defs);
+                let direct_only = direct_main_lambdas
+                    .values()
+                    .any(|candidate| candidate.expr.to_lisp() == key);
+                let captures = if direct_only {
+                    lifted_main_lambda_capture_names(node, &top_defs, &direct_main_lambdas)
+                } else {
+                    lambda_capture_names(node, &top_defs)
+                };
                 let mut all_ps = vec![Type::Int; captures.len()];
                 all_ps.extend(ps.clone());
                 fn_sigs.insert(name.clone(), (all_ps, ret));
@@ -15244,6 +15444,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                         name,
                         captures,
                         user_arity: ps.len(),
+                        direct_only,
                     },
                 );
             }
@@ -15295,6 +15496,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                 name: name.clone(),
                 captures,
                 user_arity: total - provided,
+                direct_only: false,
             },
         );
         dynamic_partial_helpers.push(DynamicPartialHelper {
