@@ -399,6 +399,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "pop-val!" => Some(38),
         "push!" => Some(39),
         "empty!" => Some(40),
+        "capacity!" => Some(41),
         "fst" => Some(23),
         "snd" => Some(24),
         "+." => Some(25),
@@ -421,7 +422,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
 fn builtin_tag_arity(tag: i32) -> Option<usize> {
     match tag {
         1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 25 | 26
-        | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 37 | 39 => Some(2),
+        | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 37 | 39 | 41 => Some(2),
         21 => Some(3),
         18 | 19 | 20 | 22 | 23 | 24 | 35 | 36 | 38 | 40 => Some(1),
         _ => None,
@@ -429,7 +430,7 @@ fn builtin_tag_arity(tag: i32) -> Option<usize> {
 }
 
 fn builtin_tag_first_param_is_ref(tag: i32) -> bool {
-    matches!(tag, 21 | 37 | 39 | 40)
+    matches!(tag, 21 | 37 | 39 | 40 | 41)
 }
 
 fn is_i32ish_type(t: &Type) -> bool {
@@ -3983,6 +3984,129 @@ fn emit_vector_runtime(
     i32.const 0
   )
 
+  ;; Adjust backing capacity while preserving the vector's logical contents.
+  ;; A raw move transfers element ownership from the old backing store.
+  (func $vec_capacity_i32 (param $ptr i32) (param $requested i32) (result i32)
+    (local $len i32)
+    (local $old_cap i32)
+    (local $target i32)
+    (local $old_data i32)
+    (local $new_data i32)
+    (local $i i32)
+    (local $v i32)
+    local.get $requested
+    i32.const 0
+    i32.lt_s
+    if
+      unreachable
+    end
+    local.get $ptr
+    call $vec_materialize_i32
+    drop
+    local.get $ptr
+    i32.load
+    local.set $len
+    local.get $requested
+    local.get $len
+    i32.lt_s
+    if (result i32)
+      local.get $len
+    else
+      local.get $requested
+    end
+    local.set $target
+    local.get $target
+    i32.const 536870911
+    i32.gt_s
+    if
+      unreachable
+    end
+    local.get $ptr
+    i32.const 4
+    i32.add
+    i32.load
+    local.set $old_cap
+    local.get $target
+    local.get $old_cap
+    i32.eq
+    if
+      local.get $ptr
+      return
+    end
+    local.get $ptr
+    i32.const 16
+    i32.add
+    i32.load
+    local.set $old_data
+    local.get $target
+    i32.eqz
+    if
+      local.get $old_data
+      call $free
+      drop
+      local.get $ptr
+      i32.const 4
+      i32.add
+      i32.const 0
+      i32.store
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.const 0
+      i32.store
+      local.get $ptr
+      return
+    end
+    local.get $target
+    i32.const 4
+    i32.mul
+    call $alloc
+    local.set $new_data
+    i32.const 0
+    local.set $i
+    block $done
+      loop $copy
+        local.get $i
+        local.get $len
+        i32.ge_s
+        br_if $done
+        local.get $old_data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        i32.load
+        local.set $v
+        local.get $new_data
+        local.get $i
+        i32.const 4
+        i32.mul
+        i32.add
+        local.get $v
+        i32.store
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $copy
+      end
+    end
+    local.get $old_data
+    call $free
+    drop
+    local.get $ptr
+    i32.const 4
+    i32.add
+    local.get $target
+    i32.store
+    local.get $ptr
+    i32.const 16
+    i32.add
+    local.get $new_data
+    i32.store
+    local.get $ptr
+  )
+
   (func $vec_push_i32 (param $ptr i32) (param $v i32) (result i32)
     (local $len i32)
     (local $cap i32)
@@ -4864,7 +4988,7 @@ fn emit_vector_runtime(
         }
         let builtin_apply1_partial_tags = [
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30,
-            31, 32, 33, 34, 37,
+            31, 32, 33, 34, 37, 41,
         ];
         for tag in builtin_apply1_partial_tags {
             if let Some(arity) = builtin_tag_arity(tag) {
@@ -5050,6 +5174,14 @@ fn emit_vector_runtime(
         }
         out.push_str(
             r#"
+    local.get $f
+    i32.const 41
+    i32.eq
+    if (result i32)
+      local.get $a
+      local.get $b
+      call $vec_capacity_i32
+    else
     local.get $f
     i32.const 39
     i32.eq
@@ -5326,6 +5458,7 @@ fn emit_vector_runtime(
           end
         end
       end
+    end
     end
     end
   "#,
@@ -12068,6 +12201,20 @@ fn compile_vec_clear(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, St
     Ok(format!("{xs}\ncall {helper}"))
 }
 
+fn compile_vec_capacity(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let vector = node
+        .children
+        .get(1)
+        .ok_or_else(|| "capacity! missing vector".to_string())?;
+    let requested = node
+        .children
+        .get(2)
+        .ok_or_else(|| "capacity! missing capacity".to_string())?;
+    let xs = compile_expr(vector, ctx)?;
+    let n = compile_expr(requested, ctx)?;
+    Ok(format!("{xs}\n{n}\ncall $vec_capacity_i32"))
+}
+
 fn compile_pop_val(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs = compile_expr(
         node.children
@@ -13606,6 +13753,16 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 compile_dynamic_call(node, ctx)
                             }
                         }
+                        // Cast forms are compiler primitives.  The standard
+                        // library also defines `as`/`char` as type-level
+                        // placeholders, but that binding must not turn a
+                        // cast such as `(as digit Int)` into an ordinary call
+                        // which evaluates `Int` to its runtime placeholder.
+                        "as" | "char" => node
+                            .children
+                            .get(1)
+                            .map(|n| compile_expr(n, ctx))
+                            .unwrap_or_else(|| Ok("i32.const 0".to_string())),
                         // A direct-only main helper is intentionally not a
                         // local closure value in another lifted helper.  It
                         // remains in the lexical lambda map so calls can pass
@@ -13713,6 +13870,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "pop!" => compile_pop(node, ctx),
                         "pop-val!" => compile_pop_val(node, ctx),
                         "empty!" => compile_vec_clear(node, ctx),
+                        "capacity!" => compile_vec_capacity(node, ctx),
                         "while" => compile_loop_while(node, ctx),
                         "not" => {
                             let a = compile_expr(
@@ -13751,11 +13909,6 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(format!("{a}\ncall $dec_to_int"))
                         }
-                        "as" | "char" => node
-                            .children
-                            .get(1)
-                            .map(|n| compile_expr(n, ctx))
-                            .unwrap_or_else(|| Ok("i32.const 0".to_string())),
                         op if builtin_fn_tag(op)
                             .and_then(builtin_tag_arity)
                             .map(|arity| node.children.len().saturating_sub(1) != arity)
@@ -15460,7 +15613,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     }
     for tag in [
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30, 31,
-        32, 33, 34,
+        32, 33, 34, 41,
     ] {
         if let Some(arity) = builtin_tag_arity(tag) {
             if arity > 1 {

@@ -10480,6 +10480,32 @@ consume!
     }
 
     #[test]
+    fn test_wat_capacity_builtin_preserves_vector_value_and_uses_runtime_resize() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let expr = crate::parser::build(
+            "(do (let xs [1 2 3]) (let same (capacity! xs 1)) (push! same 4) xs)",
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        wat::parse_str(&wat).expect("capacity! program should generate valid WAT");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main_wat = &wat[main_start..];
+        assert!(
+            main_wat.contains("call $vec_capacity_i32"),
+            "capacity! must lower to the backing-store resize primitive, got:\n{main_wat}"
+        );
+        assert!(
+            wat.contains("(func $vec_capacity_i32"),
+            "capacity! runtime helper should be emitted, got:\n{wat}"
+        );
+    }
+
+    #[test]
     fn test_wat_set_releases_fresh_managed_call_rhs_after_vector_retain() {
         let expr = crate::parser::build(
             "(do (let make (lambda a (lambda x (+ x a)))) (let xs []) (set! xs 0 (make 1)) 0)",

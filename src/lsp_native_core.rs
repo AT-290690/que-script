@@ -653,7 +653,7 @@ pub fn known_symbol_effect(symbol: &str) -> Option<EffectFlags> {
     }
     if matches!(
         symbol,
-        "set!" | "&alter!" | "alter!" | "push!" | "pop!" | "pop-val!"
+        "set!" | "&alter!" | "alter!" | "push!" | "pop!" | "pop-val!" | "capacity!"
     ) {
         return Some(EffectFlags::MUTATE);
     }

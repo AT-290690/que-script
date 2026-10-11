@@ -723,5 +723,22 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
         TypeScheme::monotype(Type::Function(Box::new(Type::Int), Box::new(Type::Int))),
     );
 
+    {
+        let a: Type = fresh_var();
+        let _ = env.insert(
+            "capacity!".to_string(),
+            TypeScheme::new(
+                vec![a.var_id().unwrap()],
+                Type::Function(
+                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::Function(
+                        Box::new(Type::Int),
+                        Box::new(Type::List(Box::new(a))),
+                    )),
+                ),
+            ),
+        );
+    }
+
     (env, fresh_id) // return env with built-ins and also return next fresh ID
 }

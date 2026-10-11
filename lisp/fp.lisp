@@ -547,6 +547,14 @@
       (alter! i (+ i 1))))
     out)))
 
+; Resize a vector's backing allocation. `capacity` preserves its input;
+; `compact!` releases unused backing slots in place.
+(let capacity (lambda n xs (do
+  (let out (copy xs))
+  (capacity! out n))))
+
+(let compact! (lambda xs (capacity! xs (length xs))))
+
 (let fill (lambda n fn (do
   (let out [])
   (mut i n)
