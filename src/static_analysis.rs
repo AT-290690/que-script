@@ -171,6 +171,15 @@ struct ValueSummary {
     body: Expression,
 }
 
+/// Where a vector-valued call result comes from. This is deliberately separate
+/// from its element type: `[T] -> [T]` does not establish that both vectors
+/// share storage, while `Parameter(0)` does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResultOrigin {
+    Parameter(usize),
+    Unknown,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RecursiveRangeSummary {
     parameter_ranges: Vec<Option<IntInterval>>,
@@ -1498,94 +1507,104 @@ fn vector_length_info_at_depth(
                     minimum,
                 })
         }
-        Expression::Apply(items) => match items.as_slice() {
-            [Expression::Word(op), length]
-                if matches!(op.as_str(), "__vec_new_zeroed_i32" | "__vec_new_uninit_i32") =>
-            {
-                let length = integer_constant(length, state)?;
-                let length = usize::try_from(length).ok()?;
-                Some(VectorLengthInfo {
-                    exact: Some(length),
-                    minimum: length,
-                })
+        Expression::Apply(items) => {
+            if let Some(source) = returned_alias_source(expr, &state.structural_summaries) {
+                if let Some(info) = vector_length_info_at_depth(source, state, expansion_depth) {
+                    return Some(info);
+                }
             }
-            [Expression::Word(op), value] if op == "cdr" => {
-                let inner = vector_length_info_at_depth(value, state, expansion_depth)?;
-                Some(VectorLengthInfo {
-                    exact: inner.exact.map(|length| length.saturating_sub(1)),
-                    minimum: inner.minimum.saturating_sub(1),
-                })
-            }
-            [Expression::Word(op), left, right] if op == "cons" => {
-                let left = vector_length_info_at_depth(left, state, expansion_depth)?;
-                let right = vector_length_info_at_depth(right, state, expansion_depth)?;
-                Some(VectorLengthInfo {
-                    exact: left
-                        .exact
-                        .zip(right.exact)
-                        .and_then(|(left, right)| left.checked_add(right)),
-                    minimum: left.minimum.saturating_add(right.minimum),
-                })
-            }
-            [Expression::Word(op), condition, consequent, alternate] if op == "if" => {
-                let consequent = vector_length_info_at_depth(
-                    consequent,
-                    &state_for_true_branch(condition, state),
-                    expansion_depth,
-                )?;
-                let alternate = vector_length_info_at_depth(
-                    alternate,
-                    &state_for_false_branch(condition, state),
-                    expansion_depth,
-                )?;
-                Some(VectorLengthInfo {
-                    exact: (consequent.exact == alternate.exact)
-                        .then_some(consequent.exact)
-                        .flatten(),
-                    minimum: consequent.minimum.min(alternate.minimum),
-                })
-            }
-            [Expression::Word(op), sequence @ ..] if matches!(op.as_str(), "do" | "block") => {
-                let mut scoped = state.clone();
-                let mut result = None;
-                for item in sequence {
-                    result = vector_length_info_at_depth(item, &scoped, expansion_depth);
-                    if let Expression::Apply(binding) = item {
-                        if let [Expression::Word(bind), Expression::Word(name), value] =
-                            binding.as_slice()
-                        {
-                            if matches!(bind.as_str(), "let" | "mut" | "alter!") {
-                                let length_info =
-                                    vector_length_info_at_depth(value, &scoped, expansion_depth);
-                                assign_abstract_scalar(name, value, &mut scoped);
-                                if let Some(info) = length_info {
-                                    if let Some(exact) = info.exact {
-                                        scoped.fixed_lengths.insert(name.clone(), exact);
+            match items.as_slice() {
+                [Expression::Word(op), length]
+                    if matches!(op.as_str(), "__vec_new_zeroed_i32" | "__vec_new_uninit_i32") =>
+                {
+                    let length = integer_constant(length, state)?;
+                    let length = usize::try_from(length).ok()?;
+                    Some(VectorLengthInfo {
+                        exact: Some(length),
+                        minimum: length,
+                    })
+                }
+                [Expression::Word(op), value] if op == "cdr" => {
+                    let inner = vector_length_info_at_depth(value, state, expansion_depth)?;
+                    Some(VectorLengthInfo {
+                        exact: inner.exact.map(|length| length.saturating_sub(1)),
+                        minimum: inner.minimum.saturating_sub(1),
+                    })
+                }
+                [Expression::Word(op), left, right] if op == "cons" => {
+                    let left = vector_length_info_at_depth(left, state, expansion_depth)?;
+                    let right = vector_length_info_at_depth(right, state, expansion_depth)?;
+                    Some(VectorLengthInfo {
+                        exact: left
+                            .exact
+                            .zip(right.exact)
+                            .and_then(|(left, right)| left.checked_add(right)),
+                        minimum: left.minimum.saturating_add(right.minimum),
+                    })
+                }
+                [Expression::Word(op), condition, consequent, alternate] if op == "if" => {
+                    let consequent = vector_length_info_at_depth(
+                        consequent,
+                        &state_for_true_branch(condition, state),
+                        expansion_depth,
+                    )?;
+                    let alternate = vector_length_info_at_depth(
+                        alternate,
+                        &state_for_false_branch(condition, state),
+                        expansion_depth,
+                    )?;
+                    Some(VectorLengthInfo {
+                        exact: (consequent.exact == alternate.exact)
+                            .then_some(consequent.exact)
+                            .flatten(),
+                        minimum: consequent.minimum.min(alternate.minimum),
+                    })
+                }
+                [Expression::Word(op), sequence @ ..] if matches!(op.as_str(), "do" | "block") => {
+                    let mut scoped = state.clone();
+                    let mut result = None;
+                    for item in sequence {
+                        result = vector_length_info_at_depth(item, &scoped, expansion_depth);
+                        if let Expression::Apply(binding) = item {
+                            if let [Expression::Word(bind), Expression::Word(name), value] =
+                                binding.as_slice()
+                            {
+                                if matches!(bind.as_str(), "let" | "mut" | "alter!") {
+                                    let length_info = vector_length_info_at_depth(
+                                        value,
+                                        &scoped,
+                                        expansion_depth,
+                                    );
+                                    assign_abstract_scalar(name, value, &mut scoped);
+                                    if let Some(info) = length_info {
+                                        if let Some(exact) = info.exact {
+                                            scoped.fixed_lengths.insert(name.clone(), exact);
+                                        }
+                                        scoped.minimum_lengths.insert(name.clone(), info.minimum);
                                     }
-                                    scoped.minimum_lengths.insert(name.clone(), info.minimum);
                                 }
                             }
                         }
                     }
+                    result
                 }
-                result
-            }
-            [Expression::Word(op), args @ ..] if expansion_depth < 16 => {
-                let summary = state.value_summaries.get(op)?;
-                if summary.params.len() != args.len() {
-                    return None;
+                [Expression::Word(op), args @ ..] if expansion_depth < 16 => {
+                    let summary = state.value_summaries.get(op)?;
+                    if summary.params.len() != args.len() {
+                        return None;
+                    }
+                    let substitutions: HashMap<&str, &Expression> = summary
+                        .params
+                        .iter()
+                        .map(String::as_str)
+                        .zip(args)
+                        .collect();
+                    let expanded = substitute_predicate_body(&summary.body, &substitutions);
+                    vector_length_info_at_depth(&expanded, state, expansion_depth + 1)
                 }
-                let substitutions: HashMap<&str, &Expression> = summary
-                    .params
-                    .iter()
-                    .map(String::as_str)
-                    .zip(args)
-                    .collect();
-                let expanded = substitute_predicate_body(&summary.body, &substitutions);
-                vector_length_info_at_depth(&expanded, state, expansion_depth + 1)
+                _ => None,
             }
-            _ => None,
-        },
+        }
         Expression::Int(_) | Expression::Dec(_) => None,
     }
 }
@@ -2735,6 +2754,106 @@ struct StructuralSummary {
     params: Vec<String>,
     parameter_effects: Vec<SizeStep>,
     result_relations: Vec<SizeStep>,
+    result_origin: ResultOrigin,
+}
+
+/// Opaque runtime primitives have no Que body from which to infer a result
+/// origin. Keep their contracts in one place, in the same form used by
+/// summaries inferred for ordinary Que functions.
+fn intrinsic_result_origin(op: &str) -> ResultOrigin {
+    match op {
+        // Reallocation may change backing storage, but it returns the same
+        // logical vector and does not change its length.
+        "capacity!" => ResultOrigin::Parameter(0),
+        _ => ResultOrigin::Unknown,
+    }
+}
+
+fn call_result_origin(
+    items: &[Expression],
+    summaries: &HashMap<String, StructuralSummary>,
+) -> Option<usize> {
+    let op = items.first().and_then(word)?;
+    let origin = match intrinsic_result_origin(op) {
+        ResultOrigin::Unknown => summaries
+            .get(op)
+            .map(|summary| summary.result_origin)
+            .unwrap_or(ResultOrigin::Unknown),
+        origin => origin,
+    };
+    match origin {
+        ResultOrigin::Parameter(index) if items.len() > index.saturating_add(1) => Some(index),
+        ResultOrigin::Unknown | ResultOrigin::Parameter(_) => None,
+    }
+}
+
+fn returned_alias_source<'a>(
+    expr: &'a Expression,
+    summaries: &HashMap<String, StructuralSummary>,
+) -> Option<&'a Expression> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    call_result_origin(items, summaries).and_then(|index| items.get(index + 1))
+}
+
+fn has_symbolic_vector_identity(expr: &Expression) -> bool {
+    matches!(expr, Expression::Word(_))
+        || matches!(expr, Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "get"))
+}
+
+fn result_origin_from_expr(
+    expr: &Expression,
+    parameter_origins: &HashMap<String, usize>,
+    summaries: &HashMap<String, StructuralSummary>,
+) -> ResultOrigin {
+    match expr {
+        Expression::Word(name) => parameter_origins
+            .get(name)
+            .copied()
+            .map(ResultOrigin::Parameter)
+            .unwrap_or(ResultOrigin::Unknown),
+        Expression::Apply(items) => match items.as_slice() {
+            [Expression::Word(op), sequence @ ..] if matches!(op.as_str(), "do" | "block") => {
+                let mut local_origins = parameter_origins.clone();
+                let Some((last, prefix)) = sequence.split_last() else {
+                    return ResultOrigin::Unknown;
+                };
+                for expression in prefix {
+                    if let Expression::Apply(binding) = expression {
+                        if let [Expression::Word(keyword), Expression::Word(name), value] =
+                            binding.as_slice()
+                        {
+                            if keyword == "let" {
+                                match result_origin_from_expr(value, &local_origins, summaries) {
+                                    ResultOrigin::Parameter(index) => {
+                                        local_origins.insert(name.clone(), index);
+                                    }
+                                    ResultOrigin::Unknown => {
+                                        local_origins.remove(name);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                result_origin_from_expr(last, &local_origins, summaries)
+            }
+            [Expression::Word(op), _, consequent, alternate] if op == "if" => {
+                let consequent = result_origin_from_expr(consequent, parameter_origins, summaries);
+                let alternate = result_origin_from_expr(alternate, parameter_origins, summaries);
+                (consequent == alternate)
+                    .then_some(consequent)
+                    .unwrap_or(ResultOrigin::Unknown)
+            }
+            _ => call_result_origin(items, summaries)
+                .and_then(|index| items.get(index + 1))
+                .map(|argument| result_origin_from_expr(argument, parameter_origins, summaries))
+                .unwrap_or(ResultOrigin::Unknown),
+        },
+        Expression::Int(_) | Expression::Dec(_) => ResultOrigin::Unknown,
+    }
 }
 
 fn collect_size_mutations(
@@ -4901,7 +5020,9 @@ fn validate_static_bounds_expr(
                     Expression::Apply(rhs) if matches!(rhs.first(), Some(Expression::Word(op)) if op == "get") => {
                         Some(canonical_access(&items[2], facts))
                     }
-                    _ => None,
+                    _ => returned_alias_source(&items[2], &facts.structural_summaries)
+                        .filter(|source| has_symbolic_vector_identity(source))
+                        .map(|source| canonical_access(source, facts)),
                 };
                 let length_info = vector_length_info(&items[2], facts);
                 assign_abstract_scalar(name, &items[2], facts);
@@ -6098,6 +6219,11 @@ fn infer_structural_summaries(
                 continue;
             }
             let body = lambda.last().expect("lambda has a body");
+            let parameter_origins = params
+                .iter()
+                .enumerate()
+                .map(|(index, parameter)| (parameter.clone(), index))
+                .collect();
             let summary = StructuralSummary {
                 parameter_effects: params
                     .iter()
@@ -6109,6 +6235,7 @@ fn infer_structural_summaries(
                     .iter()
                     .map(|param| structural_result_relation(body, param, &summaries))
                     .collect(),
+                result_origin: result_origin_from_expr(body, &parameter_origins, &summaries),
                 params,
             };
             changed |= summaries.insert(name.clone(), summary.clone()) != Some(summary);
@@ -6804,6 +6931,51 @@ mod tests {
                 .any(|message| message.starts_with("static bounds:")),
             "{findings:?}"
         );
+    }
+
+    #[test]
+    fn capacity_result_preserves_empty_vector_length_for_counted_appends() {
+        let source = "(let n 10) (let paths (capacity! [] (+ n 1))) (mut i 0) (while (<= i n) (do (push! paths 1) (alter! i (+ i 1)))) (mut col 1) (while (<= col n) (do (let left (get paths (- col 1))) (let current (get paths col)) (set! paths col (+ current left)) (alter! col (+ col 1)))) (get paths (- (length paths) 1))";
+        let findings = diagnostics(source, 99);
+        assert!(
+            !findings
+                .iter()
+                .any(|message| message.starts_with("static bounds:")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn inferred_result_origin_preserves_vector_length_through_helper() {
+        let source = "(let reserve (lambda xs n (capacity! xs n))) (let n 10) (let paths (reserve [] (+ n 1))) (mut i 0) (while (<= i n) (do (push! paths 1) (alter! i (+ i 1)))) (mut k 0) (while (<= k n) (do (get paths k) (alter! k (+ k 1)))) (get paths (- (length paths) 1))";
+        let findings = diagnostics(source, 99);
+        assert!(
+            !findings
+                .iter()
+                .any(|message| message.starts_with("static bounds:")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn inferred_result_origin_tracks_plain_identity_helpers() {
+        let source = "(let id (lambda xs xs)) (let paths (id [])) (push! paths 42) (get paths 0)";
+        assert_eq!(analyze(source, 99), Ok(()));
+    }
+
+    #[test]
+    fn result_origin_aliases_a_named_vector_argument() {
+        let source = "(let xs []) (let ys (capacity! xs 16)) (push! ys 42) (get xs 0)";
+        assert_eq!(analyze(source, 99), Ok(()));
+    }
+
+    #[test]
+    fn same_vector_type_does_not_imply_result_aliasing() {
+        let source =
+            "(let fresh (lambda xs [])) (let xs []) (let ys (fresh xs)) (push! ys 42) (get xs 0)";
+        assert!(analyze(source, 99)
+            .expect_err("a fresh [T] must not be treated as the input [T]")
+            .contains("index not proven safe"));
     }
 
     #[test]
