@@ -731,10 +731,7 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
                 vec![a.var_id().unwrap()],
                 Type::Function(
                     Box::new(Type::List(Box::new(a.clone()))),
-                    Box::new(Type::Function(
-                        Box::new(Type::Int),
-                        Box::new(Type::List(Box::new(a))),
-                    )),
+                    Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Unit))),
                 ),
             ),
         );

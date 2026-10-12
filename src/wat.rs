@@ -12306,7 +12306,12 @@ fn compile_vec_capacity(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
         .ok_or_else(|| "capacity! missing capacity".to_string())?;
     let xs = compile_expr(vector, ctx)?;
     let n = compile_expr(requested, ctx)?;
-    Ok(format!("{xs}\n{n}\ncall $vec_capacity_i32"))
+    // The runtime helper returns the vector pointer for its own control-flow
+    // convenience. `capacity!` is a mutation operation, however, so its Que
+    // value is `nil`, just like `push!`, `set!`, and `empty!`.
+    Ok(format!(
+        "{xs}\n{n}\ncall $vec_capacity_i32\ndrop\ni32.const 0"
+    ))
 }
 
 fn compile_pop_val(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {

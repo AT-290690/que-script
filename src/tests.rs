@@ -10564,12 +10564,12 @@ consume!
     }
 
     #[test]
-    fn test_wat_capacity_builtin_preserves_vector_value_and_uses_runtime_resize() {
+    fn test_wat_capacity_builtin_returns_nil_and_uses_runtime_resize() {
         let _lock = runtime_exec_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let expr = crate::parser::build(
-            "(do (let xs [1 2 3]) (let same (capacity! xs 1)) (push! same 4) xs)",
+            "(do (let xs [1 2 3]) (capacity! xs 1) (push! xs 4) xs)",
         )
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
@@ -10586,6 +10586,21 @@ consume!
         assert!(
             wat.contains("(func $vec_capacity_i32"),
             "capacity! runtime helper should be emitted, got:\n{wat}"
+        );
+        assert_eq!(
+            run_program_output_unlocked("(do (let xs []) (capacity! xs 32))"),
+            "0",
+            "capacity! is a mutation operation and must return the unit value"
+        );
+        assert_eq!(
+            run_program_output_unlocked("(do (let xs [1 2 3]) (capacity! xs 1) (push! xs 4) xs)",),
+            "[1 2 3 4]",
+            "capacity! must still resize the original vector"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts_unlocked("(capacity 32 [1 2 3])", true),
+            "[1 2 3]",
+            "the immutable capacity wrapper must return its fresh copy"
         );
     }
 

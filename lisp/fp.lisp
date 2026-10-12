@@ -551,7 +551,8 @@
 ; `compact!` releases unused backing slots in place.
 (let capacity (lambda n xs (do
   (let out (copy xs))
-  (capacity! out n))))
+  (capacity! out n)
+  out)))
 
 (let compact! (lambda xs (capacity! xs (length xs))))
 
