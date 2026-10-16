@@ -3347,6 +3347,203 @@ fn recursive_argument_step(
     counter_step(parameter, std::slice::from_ref(arg), facts)
 }
 
+/// A binary-search exit condition has two coordinated bounds.  Neither one
+/// needs to move on every recursive branch: the measure is `upper - lower`.
+///
+/// We deliberately recognize only the strict empty-interval form.  This keeps
+/// the proof small and conservative while covering ordinary binary search.
+fn strict_interval_bounds(condition: &Expression, params: &[String]) -> Option<(usize, usize)> {
+    let Expression::Apply(items) = condition else {
+        return None;
+    };
+    let [Expression::Word(op), Expression::Word(left), Expression::Word(right)] = items.as_slice()
+    else {
+        return None;
+    };
+    let lower = params.iter().position(|param| param == left)?;
+    let upper = params.iter().position(|param| param == right)?;
+    (op == ">" && lower != upper).then_some((lower, upper))
+}
+
+fn positive_integer(expr: &Expression, facts: &AbstractState) -> bool {
+    integer_interval(expr, facts).is_some_and(|interval| interval.min > 0)
+}
+
+fn midpoint_of_bounds(
+    expr: &Expression,
+    lower: &str,
+    upper: &str,
+    bindings: &HashMap<String, Expression>,
+    facts: &AbstractState,
+    depth: usize,
+) -> bool {
+    if depth >= 8 {
+        return false;
+    }
+    if let Expression::Word(name) = expr {
+        if let Some(value) = bindings.get(name) {
+            return midpoint_of_bounds(value, lower, upper, bindings, facts, depth + 1);
+        }
+    }
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    match items.as_slice() {
+        [Expression::Word(op), sum, divisor]
+            if op == "/" && integer_constant(divisor, facts) == Some(2) =>
+        {
+            matches!(sum, Expression::Apply(terms)
+                if matches!(terms.as_slice(), [Expression::Word(add), Expression::Word(left), Expression::Word(right)]
+                    if add == "+" && left == lower && right == upper
+                        || add == "+" && left == upper && right == lower))
+        }
+        [Expression::Word(op), Expression::Word(left), offset] if op == "+" && left == lower => {
+            matches!(offset, Expression::Apply(parts)
+                if matches!(parts.as_slice(), [Expression::Word(div), Expression::Apply(delta), divisor]
+                    if div == "/" && integer_constant(divisor, facts) == Some(2)
+                        && matches!(delta.as_slice(), [Expression::Word(sub), Expression::Word(right), Expression::Word(inner_left)]
+                            if sub == "-" && right == upper && inner_left == lower)))
+        }
+        _ => false,
+    }
+}
+
+fn midpoint_plus_positive(
+    expr: &Expression,
+    lower: &str,
+    upper: &str,
+    bindings: &HashMap<String, Expression>,
+    facts: &AbstractState,
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    matches!(items.as_slice(),
+        [Expression::Word(op), midpoint, step] | [Expression::Word(op), step, midpoint]
+            if op == "+"
+                && positive_integer(step, facts)
+                && midpoint_of_bounds(midpoint, lower, upper, bindings, facts, 0))
+}
+
+fn midpoint_minus_positive(
+    expr: &Expression,
+    lower: &str,
+    upper: &str,
+    bindings: &HashMap<String, Expression>,
+    facts: &AbstractState,
+) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    matches!(items.as_slice(),
+        [Expression::Word(op), midpoint, step]
+            if op == "-"
+                && positive_integer(step, facts)
+                && midpoint_of_bounds(midpoint, lower, upper, bindings, facts, 0))
+}
+
+fn recursive_call_shrinks_interval(
+    items: &[Expression],
+    lower_index: usize,
+    upper_index: usize,
+    params: &[String],
+    bindings: &HashMap<String, Expression>,
+    facts: &AbstractState,
+) -> bool {
+    let (Some(lower_arg), Some(upper_arg)) =
+        (items.get(lower_index + 1), items.get(upper_index + 1))
+    else {
+        return false;
+    };
+    let lower = &params[lower_index];
+    let upper = &params[upper_index];
+    let upper_unchanged = matches!(upper_arg, Expression::Word(name) if name == upper);
+    let lower_unchanged = matches!(lower_arg, Expression::Word(name) if name == lower);
+    (upper_unchanged
+        && (recursive_argument_step(lower_arg, lower, facts) == CounterStep::Increase
+            || midpoint_plus_positive(lower_arg, lower, upper, bindings, facts)))
+        || (lower_unchanged
+            && (recursive_argument_step(upper_arg, upper, facts) == CounterStep::Decrease
+                || midpoint_minus_positive(upper_arg, lower, upper, bindings, facts)))
+}
+
+/// Returns `(found_recursive_call, every_recursive_call_shrinks_the_interval)`.
+fn recursive_calls_all_shrink_interval(
+    expr: &Expression,
+    function: &str,
+    params: &[String],
+    lower_index: usize,
+    upper_index: usize,
+    bindings: &HashMap<String, Expression>,
+    facts: &AbstractState,
+) -> (bool, bool) {
+    let Expression::Apply(items) = expr else {
+        return (false, true);
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "letrec") {
+        return (false, true);
+    }
+    if matches!(items.first(), Some(Expression::Word(name)) if name == function)
+        && items.len() == params.len() + 1
+    {
+        return (
+            true,
+            recursive_call_shrinks_interval(
+                items,
+                lower_index,
+                upper_index,
+                params,
+                bindings,
+                facts,
+            ),
+        );
+    }
+    if matches!(items.first(), Some(Expression::Word(op)) if matches!(op.as_str(), "do" | "block"))
+    {
+        let mut scoped = bindings.clone();
+        let mut found = false;
+        let mut all_shrink = true;
+        for child in items.iter().skip(1) {
+            let (child_found, child_all_shrink) = recursive_calls_all_shrink_interval(
+                child,
+                function,
+                params,
+                lower_index,
+                upper_index,
+                &scoped,
+                facts,
+            );
+            found |= child_found;
+            all_shrink &= child_all_shrink;
+            if let Expression::Apply(binding) = child {
+                if let [Expression::Word(keyword), Expression::Word(name), value] =
+                    binding.as_slice()
+                {
+                    if keyword == "let" {
+                        scoped.insert(name.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        return (found, all_shrink);
+    }
+    items
+        .iter()
+        .skip(1)
+        .fold((false, true), |(found, all), child| {
+            let (child_found, child_all_shrink) = recursive_calls_all_shrink_interval(
+                child,
+                function,
+                params,
+                lower_index,
+                upper_index,
+                bindings,
+                facts,
+            );
+            (found || child_found, all && child_all_shrink)
+        })
+}
+
 fn recursive_argument_size_step(
     arg: &Expression,
     parameter: &str,
@@ -3615,6 +3812,22 @@ fn analyze_recursive_progress(
                 (&items[3], false)
             };
             let recursive_facts = state_for_branch(&items[1], facts, recurse_when_true);
+            // A strict two-bound interval is a single measure.  Binary-search
+            // style recursion legitimately moves only one endpoint per branch,
+            // so do not require every parameter independently to progress.
+            let interval_progress_proven = !recurse_when_true
+                && strict_interval_bounds(&items[1], params).is_some_and(|(lower, upper)| {
+                    let (found, every_call_shrinks) = recursive_calls_all_shrink_interval(
+                        recursive_branch,
+                        function,
+                        params,
+                        lower,
+                        upper,
+                        &HashMap::new(),
+                        &recursive_facts,
+                    );
+                    found && every_call_shrinks
+                });
             if recursive_calls_move_away_from_guard(
                 recursive_branch,
                 function,
@@ -3632,31 +3845,33 @@ fn analyze_recursive_progress(
                     ),
                 );
             }
-            for (index, parameter) in params.iter().enumerate() {
-                let Some(expected) =
-                    guard_direction_for_parameter(&items[1], parameter, !recurse_when_true)
-                else {
-                    continue;
-                };
-                let mut found = false;
-                if !recursive_calls_all_move_toward_guard(
-                    recursive_branch,
-                    function,
-                    params,
-                    index,
-                    expected,
-                    &recursive_facts,
-                    &mut found,
-                ) {
-                    record_diagnostic(
-                        diagnostics,
-                        format!(
-                            "termination: not every recursive call to '{}' moves '{}' toward its base-case guard: `{}`",
-                            function,
-                            parameter,
-                            recursive_branch.to_lisp()
-                        ),
-                    );
+            if !interval_progress_proven {
+                for (index, parameter) in params.iter().enumerate() {
+                    let Some(expected) =
+                        guard_direction_for_parameter(&items[1], parameter, !recurse_when_true)
+                    else {
+                        continue;
+                    };
+                    let mut found = false;
+                    if !recursive_calls_all_move_toward_guard(
+                        recursive_branch,
+                        function,
+                        params,
+                        index,
+                        expected,
+                        &recursive_facts,
+                        &mut found,
+                    ) {
+                        record_diagnostic(
+                            diagnostics,
+                            format!(
+                                "termination: not every recursive call to '{}' moves '{}' toward its base-case guard: `{}`",
+                                function,
+                                parameter,
+                                recursive_branch.to_lisp()
+                            ),
+                        );
+                    }
                 }
             }
             if !recurse_when_true {
@@ -5507,6 +5722,34 @@ fn collect_termination_findings(
                             None
                         };
                         let proof = recursive_branch.and_then(|recursive_branch| {
+                            if !then_recurses {
+                                if let Some((lower, upper)) =
+                                    strict_interval_bounds(&branch[1], &params)
+                                {
+                                    let recursive_facts =
+                                        state_for_branch(&branch[1], facts, false);
+                                    let (found, every_call_shrinks) =
+                                        recursive_calls_all_shrink_interval(
+                                            recursive_branch,
+                                            name,
+                                            &params,
+                                            lower,
+                                            upper,
+                                            &HashMap::new(),
+                                            &recursive_facts,
+                                        );
+                                    if found && every_call_shrinks {
+                                        let lower = &params[lower];
+                                        let upper = &params[upper];
+                                        return Some((
+                                            format!("{upper} - {lower}"),
+                                            format!(
+                                                "the strict interval {upper} - {lower} shrinks on every recursive call"
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
                             params.iter().enumerate().find_map(|(index, parameter)| {
                                 if facts
                                     .recursive_range_summaries
@@ -6856,6 +7099,55 @@ mod tests {
         assert!(unconditional
             .iter()
             .any(|message| message.contains("no conditional exit path")));
+    }
+
+    #[test]
+    fn termination_proves_recursion_that_strictly_shrinks_an_interval() {
+        let source = r#"
+                (letrec search
+                  (lambda (left right)
+                    (if (> left right)
+                        false
+                        (block
+                          (let middle (/ (+ left right) 2))
+                          (if (= middle 0)
+                              (search (+ middle 1) right)
+                              (search left (- middle 1)))))))
+            "#;
+        let binary_search = diagnostics(source, 1);
+        assert!(
+            !binary_search
+                .iter()
+                .any(|message| message.starts_with("termination:")),
+            "{binary_search:?}"
+        );
+
+        let expression = crate::parser::build(source).expect("source should build");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        let explained = explain_termination(&typed, 1);
+        assert!(
+            explained.iter().any(|finding| {
+                finding.subject == "search"
+                    && finding.status == "proven"
+                    && finding.measure.as_deref() == Some("right - left")
+            }),
+            "{explained:?}"
+        );
+
+        let unchanged_interval = diagnostics(
+            "(letrec stuck (lambda (left right) (if (> left right) false (stuck left right))))",
+            1,
+        );
+        assert!(
+            unchanged_interval
+                .iter()
+                .any(|message| message.contains("not every recursive call")),
+            "{unchanged_interval:?}"
+        );
     }
 
     #[test]
