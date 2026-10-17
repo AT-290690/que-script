@@ -381,6 +381,18 @@ cargo test
 ./miscs/native-c/test.sh
 ```
 
+Run the cross-target differential corpus:
+
+```bash
+./scripts/test-differential.sh
+```
+
+This generates a deterministic set of Que programs and checks that `--debug`,
+`--opt`, and the `wasm2c`/native-C path have the same observable result. It
+also checks that a program which fails at runtime fails on every target. The
+runner needs Wasmtime, WABT's `wasm2c`, and `clang` or `cc`, so it remains
+separate from the normal Rust test suite.
+
 Build all configured release artifacts:
 
 ```bash
