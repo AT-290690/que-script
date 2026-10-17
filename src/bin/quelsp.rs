@@ -210,7 +210,10 @@ fn run() -> Result<(), String> {
 }
 
 fn build_lsp_core() -> LspCore {
-    let std_defs = load_std_definitions();
+    build_lsp_core_from_std_defs(load_std_definitions())
+}
+
+fn build_lsp_core_from_std_defs(std_defs: Vec<Expression>) -> LspCore {
     let (base_env, base_next_id, global_signatures, global_effects) =
         build_base_environment(&std_defs);
     let mut std_fallback_names = collect_std_top_level_let_names(&std_defs);
@@ -2291,7 +2294,18 @@ mod tests {
     }
 
     fn analyze_lsp_test_source(source: &str) -> DocAnalysis {
-        let core = build_lsp_core();
+        let source_library = format!(
+            "{}\n{}\n{}\n{}",
+            include_str!("../../lisp/const.lisp"),
+            include_str!("../../lisp/macros.lisp"),
+            include_str!("../../lisp/fp.lisp"),
+            include_str!("../../lisp/ds.lisp"),
+        );
+        let ast = que::parser::build_library(&source_library)
+            .expect("current source library should parse");
+        let defs = que::baked::ast_to_definitions(ast, "current source library")
+            .expect("current source library definitions should load");
+        let core = build_lsp_core_from_std_defs(defs);
         analyze_document_text_safe(
             source,
             &[],
@@ -2305,16 +2319,18 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_for_malformed_desugaring_point_to_the_original_form() {
+    fn diagnostics_for_malformed_cell_macro_point_to_the_macro_call() {
         let source = "(let x (&mut 10))";
         let analysis = analyze_lsp_test_source(source);
         assert_eq!(analysis.diagnostics.len(), 1);
         let diagnostic = &analysis.diagnostics[0];
         assert!(diagnostic
             .message
-            .contains("&mut requires exactly 2 arguments"));
-        assert_eq!(diagnostic.range.start, Position::new(0, 0));
-        assert_eq!(diagnostic.range.end, Position::new(0, source.len() as u32));
+            .contains("Macro '&mut' expected"),
+            "unexpected diagnostic: {}",
+            diagnostic.message);
+        assert_eq!(diagnostic.range.start, Position::new(0, 7));
+        assert_eq!(diagnostic.range.end, Position::new(0, 16));
     }
 
     #[test]

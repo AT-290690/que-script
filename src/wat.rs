@@ -1179,7 +1179,7 @@ fn collect_main_mutated_top_level_let_names_in_expr(
         if top_level_let_names.contains(target)
             && (matches!(
                 op.as_str(),
-                "set!" | "push!" | "pop!" | "pop-val!" | "pull!" | "alter!" | "&alter!"
+                "set!" | "push!" | "pop!" | "pop-val!" | "pull!" | "alter!"
             ) || op.ends_with('!'))
         {
             out.insert(target.clone());
@@ -11413,7 +11413,7 @@ fn collect_altered_int_locals(expr: &Expression, exact_int_locals: &mut HashMap<
     match expr {
         Expression::Apply(items) => {
             if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
-                if op == "alter!" || op == "&alter!" {
+                if op == "alter!" {
                     exact_int_locals.remove(target);
                 }
             }
@@ -12853,7 +12853,7 @@ fn compile_fast_cell_helper(
 ) -> Option<Result<String, String>> {
     match op {
         "box" | "int" | "dec" | "bool" => Some(compile_fast_box_ctor(op, node, ctx)),
-        "&alter!" | "set" | "=!" => Some(compile_fast_cell_set(op, node, ctx, false)),
+        "set" | "=!" => Some(compile_fast_cell_set(op, node, ctx, false)),
         "true?" => Some(compile_fast_truthy(op, node, ctx, false)),
         "false?" => Some(compile_fast_truthy(op, node, ctx, true)),
         _ => None,

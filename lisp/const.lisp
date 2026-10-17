@@ -152,9 +152,6 @@
 (let cos (lambda x (const/dec/cos/terms x 8)))
 
 (let &box (lambda value [ value ]))
-(let &alter! (lambda vrbl x (set! vrbl 0 x)))
-(let &get (lambda vrbl (get vrbl 0)))
-
 
 ; Mulberry32 implemented in Que with explicit 32-bit unsigned arithmetic.
 ; Run:

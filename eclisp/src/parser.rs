@@ -1747,11 +1747,8 @@ fn desugar_with_counter(
                     "and" => Ok(and_transform(exprs)),
                     "or" => Ok(or_transform(exprs)),
                     "get" => Ok(accessor_transform(exprs)?),
-                    "&get" => Ok(cell_accessor_transform(exprs)?),
                     "cdr" => Ok(cdr_transform(exprs)?),
                     "set!" => Ok(setter_transform(exprs)?),
-                    "&alter!" => Ok(cell_setter_transform(exprs)?),
-                    "&mut" | "variable" => Ok(variable_transform(exprs)?),
                     "integer" => Ok(integer_transform(exprs)?),
                     "fixed" => Ok(dec_transform(exprs)?),
                     "boolean" => boolean_transform(exprs),
@@ -2333,17 +2330,6 @@ fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> 
     Ok(acc)
 }
 
-fn cell_accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    exprs.remove(0);
-    if exprs.len() != 1 {
-        return Err("&get requires exactly 1 argument".to_string());
-    }
-    Ok(Expression::Apply(vec![
-        Expression::Word("car".to_string()),
-        exprs[0].clone(),
-    ]))
-}
-
 fn setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     if exprs.len() < 4 {
         return Err("set! requires at least 3 arguments".to_string());
@@ -2368,36 +2354,6 @@ fn setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     ]))
 }
 
-fn cell_setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    exprs.remove(0);
-    if exprs.len() != 2 {
-        return Err("&alter! requires exactly 2 arguments".to_string());
-    }
-    Ok(Expression::Apply(vec![
-        Expression::Word("set!".to_string()),
-        exprs[0].clone(),
-        Expression::Int(0),
-        exprs[1].clone(),
-    ]))
-}
-
-fn variable_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    let op = match exprs.first() {
-        Some(Expression::Word(name)) => name.as_str(),
-        _ => "&mut",
-    };
-    if exprs.len() != 3 {
-        return Err(format!(
-            "{op} requires exactly 2 arguments: a cell name and an initial value"
-        ));
-    }
-    exprs.remove(0);
-    Ok(Expression::Apply(vec![
-        Expression::Word("let".to_string()),
-        exprs[0].clone(),
-        Expression::Apply(vec![Expression::Word("box".to_string()), exprs[1].clone()]),
-    ]))
-}
 fn integer_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     if exprs.len() != 3 {
         return Err("integer requires exactly 2 arguments: a name and a value".to_string());

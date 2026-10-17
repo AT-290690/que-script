@@ -3384,7 +3384,7 @@ fn expression_contains_fusion_unsafe_effect(expr: &Expression) -> bool {
             if let Some(Expression::Word(head)) = items.first() {
                 if matches!(
                     head.as_str(),
-                    "set!" | "push!" | "pop!" | "pop-val!" | "pull!" | "&alter!"
+                    "set!" | "push!" | "pop!" | "pop-val!" | "pull!"
                 ) || head.ends_with('!')
                 {
                     return true;
@@ -4250,7 +4250,7 @@ fn rewrite_local_cell_uses_in_typed_expr(
                             ],
                         });
                     }
-                    "set" | "=!" | "&alter!"
+                    "set" | "=!"
                         if items.len() == 3
                             && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
                     {
@@ -5566,7 +5566,7 @@ fn mutates_or_binds_any_word(expr: &Expression, names: &HashSet<String>) -> bool
         Expression::Apply(items) => {
             if let Some(Expression::Word(kw)) = items.first() {
                 match kw.as_str() {
-                    "let" | "letrec" | "mut" | "alter!" | "&alter!" | "set" | "=!" => {
+                    "let" | "letrec" | "mut" | "alter!" | "set" | "=!" => {
                         if matches!(items.get(1), Some(Expression::Word(target)) if names.contains(target))
                         {
                             return true;
@@ -5977,7 +5977,7 @@ fn mutates_name_expr(expr: &Expression, name: &str) -> bool {
         Expression::Apply(items) => {
             if matches!(items.as_slice(),
                 [Expression::Word(kw), Expression::Word(target), ..]
-                if (kw == "alter!" || kw == "&alter!") && target == name)
+                if kw == "alter!" && target == name)
             {
                 return true;
             }
@@ -7147,7 +7147,7 @@ fn local_mutate_expr_safe(
                     .iter()
                     .skip(1)
                     .all(|item| local_mutate_expr_safe(item, &mut locals.clone(), params)),
-                "set!" | "push!" | "pop!" | "&alter!" | "set" | "=!" => false,
+                "set!" | "push!" | "pop!" | "set" | "=!" => false,
                 _ if head.ends_with('!') => false,
                 _ => items
                     .iter()

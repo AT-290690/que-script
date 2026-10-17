@@ -897,9 +897,18 @@ xs)"#,
     }
 
     #[test]
-    fn test_parser_cell_helpers_desugar_to_core_ops() {
-        let expr = crate::parser::build(
-            r#"(do (&mut code "Hello") (let out (&get code)) (&alter! code "World") out)"#,
+    fn test_baked_cell_helper_macros_expand_to_core_ops() {
+        let std_ast = crate::baked::load_ast();
+        let defs = crate::baked::ast_to_definitions(std_ast, "active library")
+            .expect("active library definitions should load");
+        let expr = crate::parser::merge_std_and_program(
+            r#"(do
+                (&mut code "Hello")
+                (let out (&get code))
+                (&alter! code "World")
+                (variable legacy 9)
+                (+ (car legacy) (car code)))"#,
+            defs,
         )
         .expect("program should build");
         let lisp = expr.to_lisp();
@@ -918,19 +927,27 @@ xs)"#,
             "expected &alter! to desugar to set! index 0, got: {}",
             lisp
         );
+        assert!(
+            lisp.contains("(let legacy (box 9))"),
+            "expected variable to desugar through box, got: {}",
+            lisp
+        );
     }
 
     #[test]
-    fn test_parser_malformed_mut_cell_reports_error_instead_of_panicking() {
-        let error = crate::parser::build("(let x (&mut 10))")
+    fn test_baked_malformed_mut_cell_macro_reports_error_instead_of_panicking() {
+        let std_ast = crate::baked::load_ast();
+        let defs = crate::baked::ast_to_definitions(std_ast, "active library")
+            .expect("active library definitions should load");
+        let error = crate::parser::merge_std_and_program("(let x (&mut 10))", defs)
             .expect_err("malformed &mut should be rejected");
         assert!(
-            error.contains("&mut requires exactly 2 arguments"),
+            error.contains("Macro '&mut' expected one of [2] args, got 1"),
             "unexpected malformed &mut error: {error}"
         );
         assert!(
-            error.lines().any(|line| line.trim() == "(let x (&mut 10))"),
-            "parser errors should retain the original source form: {error}"
+            error.contains("in call (&mut 10)"),
+            "macro errors should retain the malformed source call: {error}"
         );
     }
 

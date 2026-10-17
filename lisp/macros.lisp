@@ -36,6 +36,24 @@
   (lambda name typ
     (qq (letype (uq name) (uq typ)))))
 
+; Mutable cells are ordinary one-element vectors. Keeping this sugar here
+; makes the representation explicit without reserving parser forms.
+(letmacro &mut
+  (lambda name value
+    (qq (let (uq name) (box (uq value))))))
+
+(letmacro variable
+  (lambda name value
+    (qq (let (uq name) (box (uq value))))))
+
+(letmacro &get
+  (lambda cell
+    (qq (car (uq cell)))))
+
+(letmacro &alter!
+  (lambda cell value
+    (qq (set! (uq cell) 0 (uq value)))))
+
 ; `apply` is source-level application splicing, not runtime vector unpacking.
 ; Keep the one-argument form as the function expression itself.
 (letmacro apply
