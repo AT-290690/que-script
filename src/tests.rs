@@ -14049,8 +14049,6 @@ humidity-to-location map:
         ];
         let std_ast = crate::baked::load_ast();
         for (inp, out) in &test_cases {
-            // Temporary xfail: loop-callback lowering regression affects this BFS case.
-            // Keep the case in table for visibility, but skip until the bug is fixed.
             if let crate::parser::Expression::Apply(items) = &std_ast {
                 match crate::parser::merge_std_and_program(&inp, items[1..].to_vec()) {
                     Ok(exprs) => {
@@ -14061,7 +14059,6 @@ humidity-to-location map:
                         .map(|(typ, _)| typ)
                         {
                             Ok(_) => {
-                                // match crate::vm::run(&exprs, crate::vm::VM::new()) {
                                 match crate::wat::compile_program_to_wat(&exprs) {
                                     Ok(result) => {
                                         let run_result = run_external_wat(&result);
