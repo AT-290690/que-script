@@ -4319,7 +4319,7 @@ fn collect_shrinking_vectors(
     let Some(op) = items.first().and_then(word) else {
         return;
     };
-    if matches!(op, "pop!" | "pop-val!" | "pull!") {
+    if matches!(op, "pop!" | "pop-val!") {
         if let Some(target) = items.get(1) {
             shrinking.insert(canonical_access(target, facts));
         }

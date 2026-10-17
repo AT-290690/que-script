@@ -1179,7 +1179,7 @@ fn collect_main_mutated_top_level_let_names_in_expr(
         if top_level_let_names.contains(target)
             && (matches!(
                 op.as_str(),
-                "set!" | "push!" | "pop!" | "pop-val!" | "pull!" | "alter!"
+                "set!" | "push!" | "pop!" | "pop-val!" | "alter!"
             ) || op.ends_with('!'))
         {
             out.insert(target.clone());
@@ -11388,7 +11388,7 @@ fn collect_loop_append_by_length_set_vector_slots(
                             out.insert(target.clone(), *slot);
                         }
                     }
-                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
+                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!")
                     || op.ends_with('!')
                 {
                     if ctx
@@ -11451,7 +11451,7 @@ fn expr_mutates_vector_name_except_self(
             if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
                 if matches!(
                     op.as_str(),
-                    "set!" | "push!" | "pop!" | "pop-val!" | "pull!"
+                    "set!" | "push!" | "pop!" | "pop-val!"
                 ) && target == name
                 {
                     return true;
@@ -11508,7 +11508,7 @@ fn vector_mutations_are_loop_replacement_sets(
                             )
                         });
                     }
-                    if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
+                    if matches!(op.as_str(), "push!" | "pop!" | "pop-val!")
                         || op.ends_with('!')
                     {
                         return false;
@@ -11555,7 +11555,7 @@ fn collect_loop_replacement_set_vector_slots(
                             out.insert(target.clone(), *slot);
                         }
                     }
-                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!")
+                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!")
                     || op.ends_with('!')
                 {
                     if ctx
@@ -11642,7 +11642,7 @@ fn update_scalar_vec_min_lengths_after_expr(
             }
             return;
         }
-        "pop!" | "pop-val!" | "pull!" => {
+        "pop!" | "pop-val!" => {
             if let Some(slot) = items.get(1).and_then(argument_slot) {
                 minimums
                     .entry(slot)
@@ -11750,7 +11750,7 @@ fn collect_scalar_param_constant_set_requirements(
                                 }
                                 _ => {}
                             }
-                        } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!" | "pull!") {
+                        } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!") {
                             invalid_slots.insert(slot);
                         }
                     }
@@ -11806,7 +11806,6 @@ fn collect_typed_scalar_param_call_invalidations(
                 | "push!"
                 | "pop!"
                 | "pop-val!"
-                | "pull!"
         )
     });
     let may_mutate_argument = node.effect.contains(EffectFlags::MUTATE)
@@ -12727,82 +12726,6 @@ fn compile_fast_box_ctor(
     }
 }
 
-fn compile_fast_cell_set(
-    op: &str,
-    node: &TypedExpression,
-    ctx: &Ctx<'_>,
-    normalize_bool: bool,
-) -> Result<String, String> {
-    if node.children.len() != 3 {
-        return Err(format!("{} requires exactly 2 arguments", op));
-    }
-    let cell_node = node
-        .children
-        .get(1)
-        .ok_or_else(|| format!("{} missing cell", op))?;
-    let value_node = node
-        .children
-        .get(2)
-        .ok_or_else(|| format!("{} missing value", op))?;
-    let nested_ctx = Ctx {
-        fn_sigs: ctx.fn_sigs,
-        fn_ids: ctx.fn_ids,
-        extern_names: ctx.extern_names,
-        lambda_ids: ctx.lambda_ids,
-        closure_defs: ctx.closure_defs,
-        lambda_bindings: ctx.lambda_bindings,
-        current_function: ctx.current_function,
-        locals: ctx.locals.clone(),
-        local_types: ctx.local_types.clone(),
-        materialized_scalar_local_slots: ctx.materialized_scalar_local_slots.clone(),
-        hoisted_scalar_vec_data_slots: ctx.hoisted_scalar_vec_data_slots.clone(),
-        proven_scalar_vec_min_lengths: ctx.proven_scalar_vec_min_lengths.clone(),
-        definitely_materialized_top_level_scalar_names: ctx
-            .definitely_materialized_top_level_scalar_names,
-        proven_scalar_index_loads: ctx.proven_scalar_index_loads,
-        nonnegative_int_locals: ctx.nonnegative_int_locals,
-        tmp_i32: ctx.tmp_i32 + 2,
-    };
-    let cell = compile_expr(cell_node, &nested_ctx)?;
-    let value_raw = compile_expr(value_node, &nested_ctx)?;
-    let value = if normalize_bool {
-        format!("{value_raw}\ni32.const 0\ni32.ne")
-    } else {
-        value_raw
-    };
-    let release_rhs = should_release_set_rhs(value_node, ctx.lambda_bindings);
-    let managed_slots = managed_local_slots(ctx);
-    let cell_prefix = cell;
-    let set_op = vec_set_runtime_for_scalar(
-        cell_node
-            .typ
-            .as_ref()
-            .and_then(|t| match t {
-                Type::List(inner) => Some(!is_ref_type(inner)),
-                _ => None,
-            })
-            .unwrap_or(false),
-    );
-    if release_rhs {
-        let tmp_val = ctx.tmp_i32 + 1;
-        let keep_tmp = ctx.tmp_i32 + 2;
-        let release = emit_release_managed_temp_if_not_local_alias(
-            tmp_val,
-            keep_tmp,
-            &managed_slots,
-            value_node.typ.as_ref(),
-        );
-        Ok(format!(
-            "{cell_prefix}\ni32.const 0\n{value}\nlocal.tee {tmp_val}\ncall {set_op}\n{}",
-            release
-        ))
-    } else {
-        Ok(format!(
-            "{cell_prefix}\ni32.const 0\n{value}\ncall {set_op}"
-        ))
-    }
-}
-
 fn compile_fast_truthy(
     op: &str,
     node: &TypedExpression,
@@ -12853,7 +12776,6 @@ fn compile_fast_cell_helper(
 ) -> Option<Result<String, String>> {
     match op {
         "box" | "int" | "dec" | "bool" => Some(compile_fast_box_ctor(op, node, ctx)),
-        "set" | "=!" => Some(compile_fast_cell_set(op, node, ctx, false)),
         "true?" => Some(compile_fast_truthy(op, node, ctx, false)),
         "false?" => Some(compile_fast_truthy(op, node, ctx, true)),
         _ => None,
@@ -15518,7 +15440,7 @@ fn compile_program_to_wat_build_typed_with_opts(
         }
     }
     // Keep all top-level std/user defs available to avoid lookup misses for scoped aliases
-    // (e.g. `(let =! (lambda ...))`) under higher-order/transformed call shapes.
+    // under higher-order/transformed call shapes.
     for name in top_defs.keys() {
         needed.insert(name.clone());
     }

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::parser::Expression;
 #[cfg(feature = "io")]
 use crate::types::TypeVar;
@@ -17,12 +15,6 @@ pub struct BuiltinHostExternSpec {
 pub struct ExternDecl {
     pub module: String,
     pub import: String,
-    pub local_name: String,
-    pub typ: Type,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LetypeDecl {
     pub local_name: String,
     pub typ: Type,
 }
@@ -138,6 +130,7 @@ pub fn parse_decl_type_expr(expr: &Expression) -> Result<Type, String> {
     parse_type_expr(expr)
 }
 
+#[cfg(feature = "io")]
 fn type_to_expr(typ: &Type) -> Expression {
     match typ {
         Type::Int => Expression::Word("Int".to_string()),
@@ -169,30 +162,37 @@ fn type_to_expr(typ: &Type) -> Expression {
     }
 }
 
+#[cfg(feature = "io")]
 fn ty_char_list() -> Type {
     Type::List(Box::new(Type::Char))
 }
 
+#[cfg(feature = "io")]
 fn ty_unit() -> Type {
     Type::Unit
 }
 
+#[cfg(feature = "io")]
 fn ty_int() -> Type {
     Type::Int
 }
 
+#[cfg(feature = "io")]
 fn ty_bool() -> Type {
     Type::Bool
 }
 
+#[cfg(feature = "io")]
 fn fn1(a: Type, r: Type) -> Type {
     Type::Function(Box::new(a), Box::new(r))
 }
 
+#[cfg(feature = "io")]
 fn fn2(a: Type, b: Type, r: Type) -> Type {
     Type::Function(Box::new(a), Box::new(fn1(b, r)))
 }
 
+#[cfg(feature = "io")]
 fn fn3(a: Type, b: Type, c: Type, r: Type) -> Type {
     Type::Function(Box::new(a), Box::new(fn2(b, c, r)))
 }
@@ -213,23 +213,6 @@ pub fn parse_extern_decl(expr: &Expression) -> Result<Option<ExternDecl>, String
     Ok(Some(ExternDecl {
         module: module.clone(),
         import: import.clone(),
-        local_name: local_name.clone(),
-        typ,
-    }))
-}
-
-pub fn parse_letype_decl(expr: &Expression) -> Result<Option<LetypeDecl>, String> {
-    let Expression::Apply(items) = expr else {
-        return Ok(None);
-    };
-    let [Expression::Word(kw), Expression::Word(local_name), typ_expr] = &items[..] else {
-        return Ok(None);
-    };
-    if kw != "letype" {
-        return Ok(None);
-    }
-    let typ = parse_type_expr(typ_expr)?;
-    Ok(Some(LetypeDecl {
         local_name: local_name.clone(),
         typ,
     }))

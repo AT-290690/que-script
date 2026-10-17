@@ -141,17 +141,11 @@ fn is_bang_contract_op(op: &str, known_requires_bang: &HashMap<String, bool>) ->
     if is_mutating_op(op) {
         return true;
     }
-    if known_requires_bang.get(op).copied().unwrap_or(false) {
-        return true;
-    }
-    if is_impure_bang_exception_name(op) {
-        return true;
-    }
-    false
+    known_requires_bang.get(op).copied().unwrap_or(false)
 }
 
 fn is_mutation_contract_call_op(op: &str, known_mutates_first_arg: &HashSet<String>) -> bool {
-    is_mutating_op(op) || op == "push!" || known_mutates_first_arg.contains(op)
+    is_mutating_op(op) || known_mutates_first_arg.contains(op)
 }
 
 fn is_intrinsic_pure_op(op: &str) -> bool {
@@ -1431,28 +1425,6 @@ fn top_level_function_arities(root: &TypedExpression) -> HashMap<String, usize> 
     arities
 }
 
-fn is_impure_bang_exception_name(name: &str) -> bool {
-    matches!(
-        name,
-        "set"
-            | "Id"
-            | "+="
-            | "-="
-            | "*="
-            | "/="
-            | "++"
-            | "--"
-            | "**"
-            | "+=."
-            | "-=."
-            | "*=."
-            | "/=."
-            | "++."
-            | "--."
-            | "**."
-    )
-}
-
 fn eval_function_binding_requires_bang(
     item_expr: &Expression,
     let_node: &TypedExpression,
@@ -1479,7 +1451,7 @@ fn eval_function_binding_requires_bang(
     let requires_bang = rhs_node.effect.contains(EffectFlags::IO)
         || match rhs {
             Expression::Word(alias_target) => {
-                if alias_target.ends_with('!') && !is_impure_bang_exception_name(alias_target) {
+                if alias_target.ends_with('!') {
                     true
                 } else if alias_target.contains('/') {
                     false

@@ -952,6 +952,18 @@ xs)"#,
     }
 
     #[test]
+    fn test_legacy_cell_setter_names_are_ordinary_user_functions() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let set (lambda a b (+ a b)))
+                (let =! (lambda a b (- a b)))
+                [(set 20 22) (=! 20 22)])"#,
+            true,
+        );
+        assert_eq!(output, "[42 -2]");
+    }
+
+    #[test]
     fn test_parser_malformed_desugar_forms_return_errors_instead_of_panicking() {
         let std_ast = crate::baked::load_ast();
         let defs = crate::baked::ast_to_definitions(std_ast, "active library")
@@ -1480,13 +1492,6 @@ xs)"#,
         run_program_error_unlocked(src)
     }
 
-    #[cfg(any())]
-    #[test]
-    fn test_serialize_preserves_nested_que_data_as_source_text() {
-        let output = run_program_output(r#"(serialize { [1 2 3] { "hello\nworld" true } })"#);
-        assert_eq!(output, r#"{ [1 2 3] { "hello\nworld" true } }"#);
-    }
-
     #[test]
     fn test_serialize_inside_recursive_closure_is_a_direct_host_call_not_a_capture() {
         let wat = compile_std_program_to_wat(
@@ -1509,54 +1514,6 @@ xs)"#,
 
         assert!(wat.contains("call $__que_serialize"));
         assert!(!wat.contains("Unsupported closure capture 'serialize'"));
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn test_deserialize_parses_literal_data_in_typed_context() {
-        let output = run_program_output(
-            r#"(do
-                (let xs (deserialize "[4 5 6]"))
-                (+ (get xs 0) (+ (get xs 1) (get xs 2))))"#,
-        );
-        assert_eq!(output, "15");
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn test_deserialize_infers_unconstrained_stored_fields_from_literal_data() {
-        let output = run_program_output(
-            r#"(do
-                (let saved (deserialize "{ [4 5] [6 7] }"))
-                (let {used unused} saved)
-                (+ (get used 0) (get used 1)))"#,
-        );
-        assert_eq!(output, "9");
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn test_sig_propagates_concrete_type_into_deserialize() {
-        let output = run_program_output(
-            r#"(do
-                (let xs [ { true false 1 2 3 [false] } ])
-                (let encoded (serialize xs))
-                (sig decoded [{Bool {Bool {Int {Int {Int [Bool]}}}}}])
-                (let decoded (deserialize encoded))
-                decoded)"#,
-        );
-        assert_eq!(output, "[{ true { false { 1 { 2 { 3 [false] } } } } }]");
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn test_deserialize_rejects_non_literal_code() {
-        let error = run_program_error(
-            r#"(do
-                (let xs (deserialize "(map (lambda x (+ x 1)) [1 2])"))
-                (+ (get xs 0) 0))"#,
-        );
-        assert!(error.contains("expected vector literal"), "{error}");
     }
 
     fn compile_std_program_to_wat(src: &str, enable_optimizer: bool) -> String {
@@ -1806,25 +1763,6 @@ xs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         run_program_output_with_std_and_opts_unlocked(src, enable_optimizer)
-    }
-
-    #[cfg(any())]
-    fn run_program_error_with_std_io_root(src: &str, root: std::path::PathBuf) -> String {
-        let _lock = runtime_exec_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let wat = compile_std_program_to_wat(src, false);
-        let argv: Vec<String> = Vec::new();
-        let store_data = crate::io::ShellStoreData::new_with_security(
-            Some(root),
-            crate::io::ShellPolicy::allow_all(),
-        )
-        .map_err(|e| e.to_string())
-        .expect("io store should initialize");
-        let run_result = crate::runtime::run_wat_text(&wat, store_data, &argv, |linker| {
-            crate::io::add_shell_to_linker(linker).map_err(|e| e.to_string())
-        });
-        run_result.expect_err("program should fail at runtime")
     }
 
     fn assert_std_program_output_matches_with_and_without_optimizer(src: &str) {
@@ -2737,52 +2675,6 @@ xs
     fn test_runtime_cond_macro_runs_through_baked_library() {
         let output = run_program_output_with_std_and_opts(r#"(cond false 1 true 2 3)"#, true);
         assert_eq!(output, "2");
-    }
-
-    #[test]
-    #[cfg(any())]
-    fn test_runtime_io_rejects_parent_directory_escape_even_with_read_permission() {
-        let base = std::env::temp_dir().join(format!(
-            "que-io-sandbox-parent-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock should be after epoch")
-                .as_nanos()
-        ));
-        let sandbox = base.join("sandbox");
-        std::fs::create_dir_all(&sandbox).expect("sandbox should be created");
-        std::fs::write(base.join("secret.txt"), "secret").expect("secret should be written");
-
-        let err = run_program_error_with_std_io_root(r#"(read! "../secret.txt")"#, sandbox);
-        assert!(
-            err.contains("escapes io sandbox root"),
-            "expected sandbox escape error, got: {}",
-            err
-        );
-    }
-
-    #[test]
-    #[cfg(any())]
-    fn test_runtime_io_rejects_absolute_path_outside_sandbox_even_with_read_permission() {
-        let base = std::env::temp_dir().join(format!(
-            "que-io-sandbox-absolute-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock should be after epoch")
-                .as_nanos()
-        ));
-        let sandbox = base.join("sandbox");
-        std::fs::create_dir_all(&sandbox).expect("sandbox should be created");
-        let secret = base.join("secret.txt");
-        std::fs::write(&secret, "secret").expect("secret should be written");
-
-        let src = format!(r#"(read! "{}")"#, secret.display());
-        let err = run_program_error_with_std_io_root(&src, sandbox);
-        assert!(
-            err.contains("escapes io sandbox root"),
-            "expected sandbox escape error, got: {}",
-            err
-        );
     }
 
     #[test]
@@ -4476,6 +4368,7 @@ out"#,
   (let +=. (lambda a b (+. a b)))
   (let *=. (lambda a b (*. a b)))
   (let ++. (lambda x (+. x 1.0)))
+  (let pull! (lambda xs (length xs)))
   (and
     (= (++ 1) 2)
     (= (-- 5) 4)
@@ -4483,7 +4376,8 @@ out"#,
     (= (-= 7 4) 3)
     (= (Dec->Int (+=. 2.5 0.5)) 3)
     (= (Dec->Int (*=. 1.5 2.0)) 3)
-    (= (Dec->Int (++. 3.0)) 4)))"#;
+    (= (Dec->Int (++. 3.0)) 4)
+    (= (pull! [1 2 3]) 3)))"#;
         let output = run_program_output(program);
         assert_eq!(output.trim(), "true");
     }
@@ -7254,26 +7148,6 @@ parse-value"#;
             release_pos > print_pos,
             "expected the temporary result of serialize to be released after print!, got wat:\n{}",
             wat
-        );
-    }
-
-    #[test]
-    #[cfg(any())]
-    fn test_wat_host_print_releases_temporary_string_from_std_function_alias() {
-        let wat = compile_std_program_to_wat(r#"(print! (Integer->String 42))"#, true);
-        let main_start = wat
-            .find("(func (export \"main\")")
-            .expect("main export should exist");
-        let main_wat = &wat[main_start..];
-        let print_pos = main_wat
-            .find("call $v_print_bang")
-            .expect("expected print host call");
-        let after_print = &main_wat[print_pos..];
-
-        assert!(
-            after_print.contains("call $rc_release_vec"),
-            "expected an owned string returned through the Integer->String alias chain to be released after print!, got:\n{}",
-            main_wat
         );
     }
 

@@ -3384,7 +3384,7 @@ fn expression_contains_fusion_unsafe_effect(expr: &Expression) -> bool {
             if let Some(Expression::Word(head)) = items.first() {
                 if matches!(
                     head.as_str(),
-                    "set!" | "push!" | "pop!" | "pop-val!" | "pull!"
+                    "set!" | "push!" | "pop!" | "pop-val!"
                 ) || head.ends_with('!')
                 {
                     return true;
@@ -4228,34 +4228,6 @@ fn rewrite_local_cell_uses_in_typed_expr(
                     {
                         let value = rewrite_local_cell_uses_in_typed_expr(
                             node.children.get(3)?,
-                            name,
-                            kind,
-                            payload_type,
-                            cell_get_aliases,
-                            cell_set_aliases,
-                            shadowed,
-                        )?;
-                        return Some(TypedExpression {
-                            expr: Expression::Apply(vec![
-                                Expression::Word("alter!".to_string()),
-                                Expression::Word(name.to_string()),
-                                value.expr.clone(),
-                            ]),
-                            typ: node.typ.clone(),
-                            effect: node.effect,
-                            children: vec![
-                                pure_word("alter!"),
-                                make_typed_word(name, payload_type.clone()),
-                                value,
-                            ],
-                        });
-                    }
-                    "set" | "=!"
-                        if items.len() == 3
-                            && matches!(items.get(1), Some(Expression::Word(w)) if w == name) =>
-                    {
-                        let value = rewrite_local_cell_uses_in_typed_expr(
-                            node.children.get(2)?,
                             name,
                             kind,
                             payload_type,
@@ -5566,7 +5538,7 @@ fn mutates_or_binds_any_word(expr: &Expression, names: &HashSet<String>) -> bool
         Expression::Apply(items) => {
             if let Some(Expression::Word(kw)) = items.first() {
                 match kw.as_str() {
-                    "let" | "letrec" | "mut" | "alter!" | "set" | "=!" => {
+                    "let" | "letrec" | "mut" | "alter!" => {
                         if matches!(items.get(1), Some(Expression::Word(target)) if names.contains(target))
                         {
                             return true;
@@ -7147,7 +7119,7 @@ fn local_mutate_expr_safe(
                     .iter()
                     .skip(1)
                     .all(|item| local_mutate_expr_safe(item, &mut locals.clone(), params)),
-                "set!" | "push!" | "pop!" | "set" | "=!" => false,
+                "set!" | "push!" | "pop!" => false,
                 _ if head.ends_with('!') => false,
                 _ => items
                     .iter()
