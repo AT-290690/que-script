@@ -97,22 +97,41 @@ fn help() -> &'static str {
     "que — Que compiler, tooling, and runner
 
 Usage:
-  que <program.que> [arguments ...] [--opt] [--runtime <runtime>]
+  que <program.que> [program arguments...] [--opt|--debug] [--runtime <runtime>]
+  que run-wasi <program.que> [program arguments...] [--opt|--debug] [--runtime <runtime>]
   que compile <program.que> [--opt] [--out <program.wasm>]
-  que run-wasi <program.que> [arguments ...] [--opt] [--runtime <runtime>]
   que wat <program.que>
   que wat --eval <source>
-  que --eval <source> [arguments ...] [--opt|--debug]
-  que --lib <names|types|source> [pattern|name]
-  que --env
+  que --eval <source> [program arguments...] [--opt|--debug]
   que <program.que> --emit <source|opt-source|wat|wasm|types> [--out <file>]
   que explain <program.que> [--json] [--opt] [--out <file>]
   que fmt <program.que> [--check|--stdout]
   que fmt --stdin
+  que --lib <names|types|source> [pattern|name]
+  que --env
 
-`run-wasi` uses a user-installed runtime: wasmtime (default), wasmer, or
-iwasm/WAMR. Select it with --runtime or QUE_WASM_RUNTIME. Native-C tooling is
-kept separately in the repository's scripts directory."
+Commands:
+  <program.que>       Compile then run a Que program through the selected WASI runtime.
+  run-wasi            Explicit spelling of the default run command.
+  compile             Emit a .wasm file without running it.
+  wat                 Print readable WebAssembly text.
+  --eval              Compile and run a source expression without creating a source file.
+  --emit              Print or write a compiler artifact; use `que <file> --emit types` for types.
+  explain             Show inferred types, static proofs, effects, and optimization information.
+  fmt                 Format a source file, or stdin with `que fmt --stdin`.
+  --lib               Browse bundled library names, types, or source.
+  --env               List compiler and runtime environment settings.
+
+Running programs:
+  `que hello.que` is the usual command. `run-wasi` exists when you want the
+  runtime step to be explicit, such as `que run-wasi hello.que --opt`.
+  Que compiles to WASI WebAssembly and then invokes a runtime installed on your
+  PATH: Wasmtime (default), Wasmer, or iwasm/WAMR. Choose one with
+  `--runtime <name-or-path>` or `QUE_WASM_RUNTIME`. Pass filesystem permissions
+  to Que with `--allow read`, `--allow write`, or `--allow all`.
+
+Native-C compilation is intentionally a separate repository tool:
+  ./scripts/compile-native-c.sh hello.que"
 }
 
 pub fn run() -> Result<(), String> {
@@ -587,11 +606,7 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
     let opt = take_flag(&mut args, "--opt");
     let debug = take_flag(&mut args, "--debug");
     let no_result = take_flag(&mut args, "--no-result");
-    let runtime = take_value(&mut args, "--runtime")?
-        .or_else(|| env::var("QUE_WASM_RUNTIME").ok())
-        .unwrap_or_else(|| "wasmtime".to_string());
-    let (runtime_adapter, runtime_executable) = WasmRuntime::parse(&runtime)?;
-    env::set_var("QUE_WASI_NO_RESULT", if no_result { "1" } else { "0" });
+    let runtime = take_value(&mut args, "--runtime")?;
     let permissions = if let Some(index) = args.iter().position(|arg| arg == "--allow") {
         let tail = args.drain(index..).skip(1).collect::<Vec<_>>();
         if let Some(separator) = tail.iter().position(|arg| arg == "in") {
@@ -608,8 +623,16 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
     let path = args
         .first()
         .cloned()
-        .ok_or_else(|| "run-wasi requires a program path".to_string())?;
+        .ok_or_else(|| {
+            "run-wasi needs a Que source file.\n\nUsage: que run-wasi <program.que> [program arguments...] [--opt|--debug] [--runtime <runtime>]\n\nNormally you can omit `run-wasi`: `que <program.que>` compiles and runs it with Wasmtime (or the runtime selected by --runtime / QUE_WASM_RUNTIME). Run `que --help` for all commands."
+                .to_string()
+        })?;
     args.remove(0);
+    let runtime = runtime
+        .or_else(|| env::var("QUE_WASM_RUNTIME").ok())
+        .unwrap_or_else(|| "wasmtime".to_string());
+    let (runtime_adapter, runtime_executable) = WasmRuntime::parse(&runtime)?;
+    env::set_var("QUE_WASI_NO_RESULT", if no_result { "1" } else { "0" });
     let wasm = env::temp_dir().join(format!("que-wasi-{}.wasm", std::process::id()));
     let mut compile = vec![
         path.clone(),
@@ -876,6 +899,14 @@ mod runtime_adapter_tests {
     #[test]
     fn unknown_runtime_is_rejected() {
         assert!(WasmRuntime::parse("mystery-vm").is_err());
+    }
+
+    #[test]
+    fn run_wasi_without_a_program_explains_the_default_command() {
+        let error = run_wasi(Vec::new()).unwrap_err();
+        assert!(error.contains("needs a Que source file"), "{error}");
+        assert!(error.contains("que <program.que>"), "{error}");
+        assert!(error.contains("que --help"), "{error}");
     }
 
     #[test]

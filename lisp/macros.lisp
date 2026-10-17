@@ -32,6 +32,10 @@
   (lambda con . body
     (qq (unless (uq con) (do (uqs body))))))
 
+(letmacro sig
+  (lambda name typ
+    (qq (letype (uq name) (uq typ)))))
+
 (letmacro test
   (lambda name expr
     (qq { (uq name) (uq expr) })))

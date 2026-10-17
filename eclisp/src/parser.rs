@@ -748,7 +748,7 @@ fn split_macro_definitions(
                     (items.first(), items.get(1))
                 {
                     if kw == "letmacro" {
-                        if name == "letype" || name == "sig" {
+                        if name == "letype" {
                             return Err(format!(
                                 "Macro name '{}' is reserved by the language",
                                 name
@@ -762,7 +762,7 @@ fn split_macro_definitions(
             }
             if let [Expression::Word(kw), Expression::Word(name), _rhs] = &items[..] {
                 if kw == "letmacro" {
-                    if name == "letype" || name == "sig" {
+                    if name == "letype" {
                         return Err(format!("Macro name '{}' is reserved by the language", name));
                     }
                     let macro_def = parse_macro_definition(&items[2..], name)?;
@@ -1656,7 +1656,6 @@ fn desugar_with_counter(
                     "comp" => Ok(combinator_transform_rev(exprs)?),
                     "do" => Ok(transform_do(exprs, binding_counter)?),
                     "block" => Ok(transform_block(exprs, binding_counter)?),
-                    "sig" => Ok(sig_transform(exprs)?),
                     _ => Ok(Expression::Apply(exprs)),
                 }
             } else {
@@ -2704,21 +2703,6 @@ fn transform_block(
             .collect(),
         binding_counter,
     )
-}
-
-fn sig_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    exprs.remove(0);
-    if exprs.len() != 2 {
-        return Err("sig expects exactly 2 arguments: name and Type".to_string());
-    }
-    let Expression::Word(_) = &exprs[0] else {
-        return Err("sig first argument must be a name".to_string());
-    };
-    Ok(Expression::Apply(vec![
-        Expression::Word("letype".to_string()),
-        exprs[0].clone(),
-        exprs[1].clone(),
-    ]))
 }
 
 fn combinator_transform_rev(mut exprs: Vec<Expression>) -> Result<Expression, String> {

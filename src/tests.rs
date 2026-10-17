@@ -7386,12 +7386,16 @@ fn"#;
     }
 
     #[test]
-    fn test_sig_desugars_to_letype_and_matches_inferred_lambda_type() {
-        let expr = crate::parser::build(
+    fn test_baked_sig_macro_expands_to_letype_and_matches_inferred_lambda_type() {
+        let std_ast = crate::baked::load_ast();
+        let defs = crate::baked::ast_to_definitions(std_ast, "active library")
+            .expect("active library definitions should load");
+        let expr = crate::parser::merge_std_and_program(
             r#"(do
                     (sig add (Int -> Int -> Int))
                     (let add (lambda (a b) (+ a b)))
                     (add 1 2))"#,
+            defs,
         )
         .expect("program should build");
 
@@ -7437,13 +7441,18 @@ fn"#;
     }
 
     #[test]
-    fn test_sig_macro_name_is_reserved() {
-        let err = crate::parser::build("(letmacro sig (lambda () 1))")
-            .expect_err("sig macro name should be reserved");
+    fn test_sig_is_an_ordinary_user_overridable_macro_name() {
+        let expr = crate::parser::build(
+            r#"(do
+                (letmacro sig (lambda name ignored-type (qq (let (uq name) 42))))
+                (sig answer Int)
+                answer)"#,
+        )
+        .expect("a user sig macro should be accepted");
+        let rendered = expr.to_lisp();
         assert!(
-            err.contains("Macro name 'sig' is reserved"),
-            "expected reserved sig error, got: {}",
-            err
+            !rendered.contains("(sig ") && rendered.contains("(let answer 42)"),
+            "sig should expand as an ordinary macro, got: {rendered}"
         );
     }
 
@@ -7579,7 +7588,7 @@ fn"#;
     fn test_letype_wildcard_underscore_still_enforces_constrained_slots() {
         let expr = crate::parser::build(
             r#"(do
-                    (sig xs (Int -> _ -> Bool))
+                    (letype xs (Int -> _ -> Bool))
                     (let xs (lambda (x y) 20))
                     (xs 1 true))"#,
         )
@@ -7611,7 +7620,7 @@ fn"#;
     fn test_letype_reuses_named_generic_type_variables_within_one_signature() {
         let expr = crate::parser::build(
             r#"(do
-                    (sig pair-same (T -> T -> { T T }))
+                    (letype pair-same (T -> T -> { T T }))
                     (let pair-same (lambda (a b) { a b }))
                     (pair-same 1 true))"#,
         )
@@ -7634,7 +7643,7 @@ fn"#;
     fn test_letype_reuses_named_generic_inside_vector_type() {
         let ok_expr = crate::parser::build(
             r#"(do
-                    (sig head ([T] -> T))
+                    (letype head ([T] -> T))
                     (let head (lambda (xs) (car xs)))
                     (head [1 2 3]))"#,
         )
@@ -7648,7 +7657,7 @@ fn"#;
 
         let bad_expr = crate::parser::build(
             r#"(do
-                    (sig bad-head ([T] -> T))
+                    (letype bad-head ([T] -> T))
                     (let bad-head (lambda (xs) true))
                     (bad-head [1 2 3]))"#,
         )
@@ -7671,7 +7680,7 @@ fn"#;
     fn test_letype_rejects_value_when_named_generic_requires_vector() {
         let expr = crate::parser::build(
             r#"(do
-                    (sig add (Int -> T -> Int -> { Int [T] }))
+                    (letype add (Int -> T -> Int -> { Int [T] }))
                     (let add (lambda (x f y) { (+ x y) f }))
                     add)"#,
         )
@@ -7695,7 +7704,7 @@ fn"#;
     fn test_letype_rejects_identity_when_return_must_be_vector_of_same_generic() {
         let expr = crate::parser::build(
             r#"(do
-                    (sig fn (T -> [T]))
+                    (letype fn (T -> [T]))
                     (let fn (lambda (x) x))
                     fn)"#,
         )
@@ -7786,6 +7795,10 @@ fn"#;
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        // This fixture deliberately exercises every supported filesystem host
+        // operation, so grant the same capabilities the CLI would pass through
+        // from `--allow all`.
+        let _permissions = ScopedEnvVar::set("QUE_WASI_ALLOW", "all");
         let expr = crate::parser::build(
             r#"(do
                 (print! "hi")
@@ -7911,7 +7924,7 @@ fn"#;
         let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
         let expr = crate::parser::build(
             r#"(do
-                (sig value {Int {Dec {Bool {Char {[Int] [Char]}}}}})
+                (letype value {Int {Dec {Bool {Char {[Int] [Char]}}}}})
                 (let value (deserialize "{ 42 { -3.25 { true { (char 120) { [1 2 3] \"ok\" } } } } }"))
                 (serialize value))"#,
         )

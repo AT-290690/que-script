@@ -231,24 +231,28 @@ fn main() {
         _ => {}
     }
     let mut args = env::args().skip(1).collect::<Vec<_>>();
-    let compiler_command = args.first().is_some_and(|arg| {
-        matches!(
-            arg.as_str(),
-            "--help"
-                | "-h"
-                | "--version"
-                | "-V"
-                | "compile"
-                | "run-wasi"
-                | "wat"
-                | "explain"
-                | "fmt"
-                | "--eval"
-                | "-e"
-                | "--lib"
-                | "--env"
-        )
-    }) || args.iter().any(|arg| arg == "--emit");
+    // An empty invocation is a request for the compiler's command overview,
+    // not an attempt to run a missing program through WASI.
+    let compiler_command = args.is_empty()
+        || args.first().is_some_and(|arg| {
+            matches!(
+                arg.as_str(),
+                "--help"
+                    | "-h"
+                    | "--version"
+                    | "-V"
+                    | "compile"
+                    | "run-wasi"
+                    | "wat"
+                    | "explain"
+                    | "fmt"
+                    | "--eval"
+                    | "-e"
+                    | "--lib"
+                    | "--env"
+            )
+        })
+        || args.iter().any(|arg| arg == "--emit");
     if !compiler_command {
         args.insert(0, "run-wasi".into());
     }
