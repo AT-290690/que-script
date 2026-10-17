@@ -53,6 +53,53 @@
       (qq (lambda (uq arg)
             (|> (uq arg) (uq fn) (uqs rest)))))))
 
+; Syntax-list helpers used by the two pipeline macros below. They are macros,
+; rather than parser rewrites, so their stage handling remains ordinary Que
+; code. The `syntax/*` forms exist only while expanding a `letmacro` body.
+(letmacro pipe/last
+  (lambda value stages
+    (if (syntax/empty? stages)
+        (qq (uq value))
+        (do
+          (let stage (syntax/head stages))
+          (let rest (syntax/tail stages))
+          (let append-value?
+            (and
+              (syntax/list? stage)
+              (not (syntax/empty? stage))
+              (syntax/word? (syntax/head stage))
+              (not (syntax/word=? (syntax/head stage) lambda))))
+          (let next
+            (if append-value?
+                (syntax/append stage value)
+                (qq ((uq stage) (uq value)))))
+          (qq (pipe/last (uq next) (uq rest)))))))
+
+(letmacro pipe/first
+  (lambda value stages
+    (if (syntax/empty? stages)
+        (qq (uq value))
+        (do
+          (let stage (syntax/head stages))
+          (let rest (syntax/tail stages))
+          (let next
+            (if (and (syntax/list? stage) (not (syntax/empty? stage)))
+                (syntax/prepend
+                  (syntax/head stage)
+                  (syntax/prepend value (syntax/tail stage)))
+                (qq ((uq stage) (uq value)))))
+          (qq (pipe/first (uq next) (uq rest)))))))
+
+(letmacro |>
+  (() (error "|> requires a value and at least one function stage"))
+  ((value . stages)
+    (qq (pipe/last (uq value) (uq stages)))))
+
+(letmacro <|
+  (() (error "<| requires a value and at least one function stage"))
+  ((value . stages)
+    (qq (pipe/first (uq value) (uq stages)))))
+
 (letmacro test
   (lambda name expr
     (qq { (uq name) (uq expr) })))

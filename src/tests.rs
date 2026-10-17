@@ -411,6 +411,22 @@ xs)"#,
     }
 
     #[test]
+    fn test_baked_pipeline_macros_preserve_data_position_and_lambda_stage_rules() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let inc (lambda n (+ n 1)))
+                [
+                  (|> 10 (+ 1))
+                  (|> 3 (lambda n (+ n 4)))
+                  (<| 10 (- 20))
+                  (<| 3 inc)
+                ])"#,
+            true,
+        );
+        assert_eq!(output, "[11 7 -10 4]");
+    }
+
+    #[test]
     fn test_parser_expands_top_level_letmacro_before_desugar() {
         let expr = crate::parser::build(
             "(do
@@ -920,6 +936,9 @@ xs)"#,
 
     #[test]
     fn test_parser_malformed_desugar_forms_return_errors_instead_of_panicking() {
+        let std_ast = crate::baked::load_ast();
+        let defs = crate::baked::ast_to_definitions(std_ast, "active library")
+            .expect("active library definitions should load");
         for (source, expected) in [
             ("(set!)", "set! requires at least 3 arguments"),
             ("(integer x)", "integer requires exactly 2 arguments"),
@@ -937,7 +956,7 @@ xs)"#,
                 "<| requires a value and at least one function stage",
             ),
         ] {
-            let error = crate::parser::build(source)
+            let error = crate::parser::merge_std_and_program(source, defs.clone())
                 .expect_err("malformed desugar form should be rejected");
             assert!(
                 error.contains(expected),
@@ -10539,10 +10558,9 @@ consume!
         let _lock = runtime_exec_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let expr = crate::parser::build(
-            "(do (let xs [1 2 3]) (let clear empty!) (clear xs) (length xs))",
-        )
-        .expect("program should build");
+        let expr =
+            crate::parser::build("(do (let xs [1 2 3]) (let clear empty!) (clear xs) (length xs))")
+                .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
         wat::parse_str(&wat).expect("empty! function value should generate valid WAT");
@@ -10604,10 +10622,8 @@ consume!
         let _lock = runtime_exec_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let expr = crate::parser::build(
-            "(do (let xs [1 2 3]) (capacity! xs 1) (push! xs 4) xs)",
-        )
-        .expect("program should build");
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (capacity! xs 1) (push! xs 4) xs)")
+            .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
         wat::parse_str(&wat).expect("capacity! program should generate valid WAT");

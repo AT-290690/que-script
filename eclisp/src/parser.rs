@@ -908,6 +908,9 @@ fn eval_macro_expr_in_env(
                 Some(Expression::Word(head)) if is_compile_time_bool_op(head) => {
                     eval_compile_time_bool_op(head, &items[1..], bindings, macros, gensym_counter)
                 }
+                Some(Expression::Word(head)) if is_compile_time_syntax_op(head) => {
+                    eval_compile_time_syntax_op(head, &items[1..], bindings, macros, gensym_counter)
+                }
                 Some(Expression::Word(head)) if macros.contains_key(head) => {
                     let Some(macro_def) = macros.get(head) else {
                         return Err(format!(
@@ -975,6 +978,20 @@ fn is_compile_time_int_op(op: &str) -> bool {
 
 fn is_compile_time_bool_op(op: &str) -> bool {
     matches!(op, "and" | "or" | "not")
+}
+
+fn is_compile_time_syntax_op(op: &str) -> bool {
+    matches!(
+        op,
+        "syntax/list?"
+            | "syntax/empty?"
+            | "syntax/head"
+            | "syntax/tail"
+            | "syntax/prepend"
+            | "syntax/append"
+            | "syntax/word?"
+            | "syntax/word=?"
+    )
 }
 
 fn eval_macro_arg(
@@ -1164,6 +1181,95 @@ fn eval_compile_time_bool_op(
     Ok(Expression::Word(result.to_string()))
 }
 
+fn eval_compile_time_syntax_op(
+    op: &str,
+    args: &[Expression],
+    bindings: &mut HashMap<String, Expression>,
+    macros: &HashMap<String, MacroDef>,
+    gensym_counter: &mut usize,
+) -> Result<Expression, String> {
+    let values = args
+        .iter()
+        .map(|arg| eval_macro_arg(arg, bindings, macros, gensym_counter))
+        .collect::<Result<Vec<_>, _>>()?;
+    let expect_arity = |expected: usize| {
+        if values.len() == expected {
+            Ok(())
+        } else {
+            Err(format!(
+                "compile-time '{}' expects exactly {} argument{}, got {}",
+                op,
+                expected,
+                if expected == 1 { "" } else { "s" },
+                values.len()
+            ))
+        }
+    };
+    let expect_list = |value: Expression| match value {
+        Expression::Apply(items) => Ok(items),
+        other => Err(format!(
+            "compile-time '{}' expected a syntax list, got {}",
+            op,
+            other.to_lisp()
+        )),
+    };
+
+    match op {
+        "syntax/list?" => {
+            expect_arity(1)?;
+            Ok(Expression::Word(matches!(values[0], Expression::Apply(_)).to_string()))
+        }
+        "syntax/empty?" => {
+            expect_arity(1)?;
+            Ok(Expression::Word(expect_list(values[0].clone())?.is_empty().to_string()))
+        }
+        "syntax/head" => {
+            expect_arity(1)?;
+            let items = expect_list(values[0].clone())?;
+            items
+                .into_iter()
+                .next()
+                .ok_or_else(|| "compile-time 'syntax/head' expected a non-empty syntax list".to_string())
+        }
+        "syntax/tail" => {
+            expect_arity(1)?;
+            let mut items = expect_list(values[0].clone())?;
+            if items.is_empty() {
+                return Err(
+                    "compile-time 'syntax/tail' expected a non-empty syntax list".to_string(),
+                );
+            }
+            items.remove(0);
+            Ok(Expression::Apply(items))
+        }
+        "syntax/prepend" => {
+            expect_arity(2)?;
+            let mut items = expect_list(values[1].clone())?;
+            items.insert(0, values[0].clone());
+            Ok(Expression::Apply(items))
+        }
+        "syntax/append" => {
+            expect_arity(2)?;
+            let mut items = expect_list(values[0].clone())?;
+            items.push(values[1].clone());
+            Ok(Expression::Apply(items))
+        }
+        "syntax/word?" => {
+            expect_arity(1)?;
+            Ok(Expression::Word(matches!(values[0], Expression::Word(_)).to_string()))
+        }
+        "syntax/word=?" => {
+            expect_arity(2)?;
+            let equal = matches!(
+                (&values[0], &values[1]),
+                (Expression::Word(left), Expression::Word(right)) if left == right
+            );
+            Ok(Expression::Word(equal.to_string()))
+        }
+        _ => unreachable!("syntax operation was checked by is_compile_time_syntax_op"),
+    }
+}
+
 fn quasiquote_macro_expr(
     expr: &Expression,
     bindings: &HashMap<String, Expression>,
@@ -1315,7 +1421,9 @@ fn expand_macros_expr(
         Expression::Apply(items) if !items.is_empty() => {
             if let Some(Expression::Word(head)) = items.first() {
                 match head.as_str() {
-                    "quote" | "qq" | "uq" | "uqs" | "gensym" => {
+                    "quote" | "qq" | "uq" | "uqs" | "gensym"
+                    | "syntax/list?" | "syntax/empty?" | "syntax/head" | "syntax/tail"
+                    | "syntax/prepend" | "syntax/append" | "syntax/word?" | "syntax/word=?" => {
                         return Err(format!(
                             "Compile-time form '{}' can only appear inside letmacro bodies",
                             head
@@ -1627,8 +1735,6 @@ fn desugar_with_counter(
             let exprs = desugared_exprs;
             if let Expression::Word(ref name) = exprs[0] {
                 match name.as_str() {
-                    "<|" => Ok(pipe_data_first_curry_transform(exprs)?),
-                    "|>" => Ok(pipe_curry_transform(exprs)?),
                     "if" => Ok(if_transform(exprs)?),
                     "-" => Ok(minus_transform(exprs)),
                     "-." => Ok(minusf_transform(exprs)),
@@ -2794,81 +2900,6 @@ fn if_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
         },
     ]))
 }
-fn pipe_data_first_curry_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    if exprs.len() < 2 {
-        return Err("<| requires a value and at least one function stage".to_string());
-    }
-    let mut inp = exprs.remove(1); // piped value
-
-    for stage in exprs.into_iter().skip(1) {
-        match stage {
-            // normal |>, data-first
-            Expression::Apply(mut inner) if !inner.is_empty() => {
-                let func = inner.remove(0);
-                let mut new_stage = vec![func, inp];
-                new_stage.extend(inner);
-                inp = Expression::Apply(new_stage);
-            }
-
-            // simple function
-            stage => {
-                inp = Expression::Apply(vec![stage, inp]);
-            }
-        }
-    }
-
-    Ok(inp)
-}
-
-fn pipe_curry_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    if exprs.len() < 2 {
-        return Err("|> requires a value and at least one function stage".to_string());
-    }
-    let mut inp = exprs.remove(1);
-
-    for stage in exprs.into_iter().skip(1) {
-        match stage {
-            Expression::Apply(items)
-                if !items.is_empty()
-                    && matches!(&items[0], Expression::Word(head) if head != "lambda") =>
-            {
-                let func = items[0].clone();
-                let mut args: Vec<Expression> = items[1..].to_vec();
-                args.push(inp);
-                let mut new_list = vec![func];
-                new_list.extend(args);
-                inp = Expression::Apply(new_list);
-            }
-
-            stage => {
-                inp = Expression::Apply(vec![stage, inp]);
-            }
-        }
-    }
-
-    Ok(inp)
-}
-
-// fn pipe_transform(mut exprs: Vec<Expression>) -> Expression {
-//     let mut inp = exprs.remove(1);
-
-//     for stage in exprs.into_iter().skip(1) {
-//         if let Expression::Apply(mut inner) = stage {
-//             if inner.is_empty() {
-//                 continue;
-//             }
-//             let func = inner.remove(0);
-//             let mut new_stage = vec![func, inp];
-//             new_stage.extend(inner);
-//             inp = Expression::Apply(new_stage);
-//         } else {
-//             inp = Expression::Apply(vec![stage, inp]);
-//         }
-//     }
-
-//     inp
-// }
-
 fn is_decimal(s: &str) -> bool {
     if s == "-" || s == "+" {
         return false;
