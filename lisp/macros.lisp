@@ -36,6 +36,23 @@
   (lambda name typ
     (qq (letype (uq name) (uq typ)))))
 
+; `apply` is source-level application splicing, not runtime vector unpacking.
+; Keep the one-argument form as the function expression itself.
+(letmacro apply
+  ((fn)
+    (qq (uq fn)))
+  ((fn . args)
+    (qq ((uq fn) (uqs args)))))
+
+; Composition is lowered through the data-last pipeline.  `gensym` keeps the
+; generated parameter hygienic instead of relying on a conventional `_x` name.
+(letmacro comp
+  (lambda fn . rest
+    (do
+      (let arg (gensym))
+      (qq (lambda (uq arg)
+            (|> (uq arg) (uq fn) (uqs rest)))))))
+
 (letmacro test
   (lambda name expr
     (qq { (uq name) (uq expr) })))

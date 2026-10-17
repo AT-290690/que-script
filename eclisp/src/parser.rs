@@ -1652,8 +1652,6 @@ fn desugar_with_counter(
                     "while" => Ok(loop_while_transform(exprs, binding_counter)?),
                     "lambda" => lambda_destructure_transform(exprs, binding_counter),
                     "cons" => Ok(cons_transform(exprs)),
-                    "apply" => Ok(apply_transform(exprs)?),
-                    "comp" => Ok(combinator_transform_rev(exprs)?),
                     "do" => Ok(transform_do(exprs, binding_counter)?),
                     "block" => Ok(transform_block(exprs, binding_counter)?),
                     _ => Ok(Expression::Apply(exprs)),
@@ -2464,28 +2462,6 @@ fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
 //     ))
 // }
 
-fn normalize_apply(expr: Expression) -> Expression {
-    match expr {
-        Expression::Apply(items) if items.len() == 2 => {
-            let f = normalize_apply(items[0].clone());
-            let arg = normalize_apply(items[1].clone());
-
-            match f {
-                Expression::Apply(mut inner) => {
-                    inner.push(arg);
-                    Expression::Apply(inner)
-                }
-                other => Expression::Apply(vec![other, arg]),
-            }
-        }
-
-        Expression::Apply(items) => {
-            Expression::Apply(items.into_iter().map(normalize_apply).collect())
-        }
-
-        other => other,
-    }
-}
 enum DestructuringKind {
     Tuple,
     Vector,
@@ -2703,39 +2679,6 @@ fn transform_block(
             .collect(),
         binding_counter,
     )
-}
-
-fn combinator_transform_rev(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    exprs.remove(0);
-    if exprs.is_empty() {
-        return Err("(comp) requires at least one function".into());
-    }
-    // generate fresh parameter
-    let arg = Expression::Word("_x".to_string());
-    // Build nested application: fns applied right-to-left
-    let body = exprs
-        .into_iter()
-        .fold(arg.clone(), |acc, func| Expression::Apply(vec![func, acc]));
-
-    Ok(normalize_apply(Expression::Apply(vec![
-        Expression::Word("lambda".to_string()),
-        arg,
-        body,
-    ])))
-}
-
-fn apply_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
-    // Remove the "apply"
-    exprs.remove(0);
-
-    if exprs.is_empty() {
-        return Err("(apply) requires at least one function".into());
-    }
-
-    let func: Expression = exprs.remove(0);
-    Ok(exprs
-        .into_iter()
-        .fold(func, |acc, arg| Expression::Apply(vec![acc, arg])))
 }
 
 fn right_partial_transform(op: &str, first: Expression) -> Expression {

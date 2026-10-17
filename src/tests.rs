@@ -389,10 +389,25 @@ xs)"#,
     }
 
     #[test]
-    fn test_parser_apply_alias_matches_direct_application() {
-        let expr =
-            crate::parser::build("(apply (make-adder 2) 3)").expect("apply alias should parse");
+    fn test_baked_apply_macro_matches_direct_application() {
+        let std_ast = crate::baked::load_ast();
+        let defs = crate::baked::ast_to_definitions(std_ast, "active library")
+            .expect("active library definitions should load");
+        let expr = crate::parser::merge_std_and_program("(apply (make-adder 2) 3)", defs)
+            .expect("apply macro should expand");
         assert_eq!(expr.to_lisp(), "(do ((make-adder 2) 3))");
+    }
+
+    #[test]
+    fn test_baked_comp_macro_is_hygienic_and_preserves_stage_order() {
+        let output = run_program_output_with_std_and_opts(
+            r#"(do
+                (let __macro_0 1000)
+                (let transform (comp (+ 1) (* 2)))
+                (transform 20))"#,
+            true,
+        );
+        assert_eq!(output, "42");
     }
 
     #[test]
@@ -4106,7 +4121,11 @@ out"#,
               (letrec bs! (lambda i
                 (if (= i 0) 0 (do (log/int! i) (bs! (- i 1))))))
               (bs! n)))))"#;
-        let expr = crate::parser::build(source).expect("input should build");
+        let std_ast = crate::baked::load_ast();
+        let defs = crate::baked::ast_to_definitions(std_ast, "active library")
+            .expect("active library definitions should load");
+        let expr = crate::parser::merge_std_and_program(source, defs)
+            .expect("input should build with bundled macros");
         let inferred = crate::infer::infer_with_builtins_typed(
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
@@ -4123,7 +4142,11 @@ out"#,
               (letrec bs (lambda i
                 (if (= i 0) 0 (do (log/int! i) (bs (- i 1))))))
               (bs n)))))"#;
-        let expr = crate::parser::build(source).expect("input should build");
+        let std_ast = crate::baked::load_ast();
+        let defs = crate::baked::ast_to_definitions(std_ast, "active library")
+            .expect("active library definitions should load");
+        let expr = crate::parser::merge_std_and_program(source, defs)
+            .expect("input should build with bundled macros");
         let inferred = crate::infer::infer_with_builtins_typed(
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
