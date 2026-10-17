@@ -3914,62 +3914,6 @@ fn analyze_recursive_progress(
     }
 }
 
-fn analyze_termination_expr(
-    expr: &Expression,
-    structural_summaries: &HashMap<String, StructuralSummary>,
-    facts: &AbstractState,
-    diagnostics: &mut AnalysisSink,
-) {
-    let Expression::Apply(items) = expr else {
-        return;
-    };
-    let op = items.first().and_then(word).unwrap_or("");
-    if op == "while" {
-        analyze_while_termination(expr, items, structural_summaries, facts, diagnostics);
-    }
-    if op == "letrec" && items.len() == 3 {
-        if let (Expression::Word(name), Expression::Apply(lambda)) = (&items[1], &items[2]) {
-            if matches!(lambda.first(), Some(Expression::Word(head)) if head == "lambda")
-                && lambda.len() >= 2
-            {
-                let params = lambda[1..lambda.len() - 1]
-                    .iter()
-                    .filter_map(|param| word(param).map(str::to_string))
-                    .collect::<Vec<_>>();
-                if params.len() == lambda.len() - 2
-                    && contains_unchanged_recursive_call(
-                        lambda.last().expect("lambda body exists"),
-                        name,
-                        &params,
-                    )
-                {
-                    record_diagnostic(
-                        diagnostics,
-                        format!(
-                            "termination: recursive call to '{}' repeats all arguments unchanged: `{}`",
-                            name,
-                            expr.to_lisp()
-                        ),
-                    );
-                }
-                if params.len() == lambda.len() - 2 {
-                    analyze_recursive_progress(
-                        lambda.last().expect("lambda body exists"),
-                        name,
-                        &params,
-                        structural_summaries,
-                        facts,
-                        diagnostics,
-                    );
-                }
-            }
-        }
-    }
-    for child in items.iter().skip(1) {
-        analyze_termination_expr(child, structural_summaries, facts, diagnostics);
-    }
-}
-
 #[derive(Clone)]
 struct RecursiveDefinition {
     params: Vec<String>,
@@ -5323,12 +5267,9 @@ pub fn analyze_user_program_report(
         };
         let entry_facts = facts.clone();
         validate_static_bounds_expr(expression, &mut facts, &mut diagnostics);
-        analyze_termination_expr(
-            expression,
-            &structural_summaries,
-            &entry_facts,
-            &mut diagnostics,
-        );
+        // `collect_termination_findings` is the single termination decision
+        // point.  Diagnostics, proof facts, and --explain are projections of
+        // these same findings, so they cannot disagree about a proof.
         let mut termination = Vec::new();
         collect_termination_findings(
             expression,
@@ -5337,6 +5278,9 @@ pub fn analyze_user_program_report(
             &mut termination,
         );
         for finding in termination {
+            if finding.status == "warning" {
+                record_diagnostic(&mut diagnostics, format!("termination: {}", finding.reason));
+            }
             let status = match finding.status.as_str() {
                 "proven" => ProofStatus::ProvenSafe,
                 "warning"
@@ -5532,18 +5476,19 @@ fn collect_termination_findings(
         let subject = format!("while {}", condition.to_lisp());
         let mut diagnostics = AnalysisSink::default();
         analyze_while_termination(expr, items, structural_summaries, facts, &mut diagnostics);
-        if let Some(reason) = diagnostics
+        let warnings = diagnostics
             .diagnostics
             .into_iter()
-            .find(|message| message.starts_with("termination:"))
-        {
-            findings.push(TerminationFinding {
-                subject,
+            .filter_map(|message| message.strip_prefix("termination: ").map(str::to_string))
+            .collect::<Vec<_>>();
+        if !warnings.is_empty() {
+            findings.extend(warnings.into_iter().map(|reason| TerminationFinding {
+                subject: subject.clone(),
                 status: "warning".to_string(),
                 measure: None,
-                reason: reason.trim_start_matches("termination: ").to_string(),
+                reason,
                 proof: Vec::new(),
-            });
+            }));
         } else {
             let mut updates = HashMap::new();
             for body in items.iter().skip(2) {
@@ -5683,8 +5628,9 @@ fn collect_termination_findings(
                 if params.len() == lambda.len() - 2 {
                     if contains_unchanged_recursive_call(body, name, &params) {
                         diagnostics.diagnostics.push(format!(
-                            "recursive call to '{}' repeats all arguments unchanged",
-                            name
+                            "termination: recursive call to '{}' repeats all arguments unchanged: `{}`",
+                            name,
+                            expr.to_lisp()
                         ));
                     }
                     analyze_recursive_progress(
@@ -5696,14 +5642,19 @@ fn collect_termination_findings(
                         &mut diagnostics,
                     );
                 }
-                if let Some(reason) = diagnostics.diagnostics.into_iter().next() {
-                    findings.push(TerminationFinding {
+                let warnings = diagnostics
+                    .diagnostics
+                    .into_iter()
+                    .filter_map(|message| message.strip_prefix("termination: ").map(str::to_string))
+                    .collect::<Vec<_>>();
+                if !warnings.is_empty() {
+                    findings.extend(warnings.into_iter().map(|reason| TerminationFinding {
                         subject: name.clone(),
                         status: "warning".to_string(),
                         measure: None,
-                        reason: reason.trim_start_matches("termination: ").to_string(),
+                        reason,
                         proof: Vec::new(),
-                    });
+                    }));
                 } else if let Expression::Apply(branch) = body {
                     if matches!(branch.first(), Some(Expression::Word(head)) if head == "if")
                         && branch.len() >= 3
@@ -7137,17 +7088,50 @@ mod tests {
             }),
             "{explained:?}"
         );
+        let static_report = report(source, 1);
+        assert!(static_report.proofs.iter().any(|proof| {
+            proof.kind == ProofKind::Termination
+                && proof.status == ProofStatus::ProvenSafe
+                && proof
+                    .details
+                    .iter()
+                    .any(|detail| detail.contains("strict interval right - left shrinks"))
+        }));
 
-        let unchanged_interval = diagnostics(
-            "(letrec stuck (lambda (left right) (if (> left right) false (stuck left right))))",
-            1,
-        );
+        let stuck_source =
+            "(letrec stuck (lambda (left right) (if (> left right) false (stuck left right))))";
+        let unchanged_interval = diagnostics(stuck_source, 1);
         assert!(
             unchanged_interval
                 .iter()
                 .any(|message| message.contains("not every recursive call")),
             "{unchanged_interval:?}"
         );
+        let expression = crate::parser::build(stuck_source).expect("source should build");
+        let (_typ, typed) = crate::infer::infer_with_builtins_typed(
+            &expression,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("source should infer");
+        let explained_warnings = explain_termination(&typed, 1)
+            .into_iter()
+            .filter(|finding| finding.status == "warning")
+            .collect::<Vec<_>>();
+        assert!(
+            !explained_warnings.is_empty(),
+            "recursive warning should be explained"
+        );
+        let static_report = report(stuck_source, 1);
+        for warning in explained_warnings {
+            assert!(static_report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message == format!("termination: {}", warning.reason)
+            }));
+            assert!(static_report.proofs.iter().any(|proof| {
+                proof.kind == ProofKind::Termination
+                    && proof.status == ProofStatus::Unknown
+                    && proof.details.first() == Some(&warning.reason)
+            }));
+        }
     }
 
     #[test]
