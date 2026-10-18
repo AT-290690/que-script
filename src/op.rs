@@ -3643,7 +3643,7 @@ fn fold_constants(node: TypedExpression) -> TypedExpression {
         "/" | "/#" => fold_int_checked_bin(node, &items, i32::checked_div),
         "%" => fold_int_checked_bin(node, &items, i32::checked_rem),
 
-        "=" | "=?" | "=#" => fold_int_cmp(node, &items, |a, b| a == b),
+        "=" | "=?" | "=#" | "=~" => fold_int_cmp(node, &items, |a, b| a == b),
         "<" | "<#" => fold_int_cmp(node, &items, |a, b| a < b),
         ">" | ">#" => fold_int_cmp(node, &items, |a, b| a > b),
         "<=" | "<=#" => fold_int_cmp(node, &items, |a, b| a <= b),
@@ -5146,7 +5146,7 @@ fn is_safe_pure_call_expr(expr: &Expression) -> bool {
     };
     if !matches!(
         op.as_str(),
-        "=" | "=?"
+        "=" | "=?" | "=~"
             | "=#"
             | "=."
             | "<"

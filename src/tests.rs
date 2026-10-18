@@ -157,6 +157,55 @@ xs)"#,
     }
 
     #[test]
+    fn test_enum_equality_requires_the_same_enum_and_compiles_to_scalar_equality() {
+        let source = r#"(do
+            (enum Shape Rock Paper Scissors)
+            [ (=~ Rock Rock) (=~ Rock Paper) ])"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "[true false]");
+
+        let inferred_operands = r#"(do
+            (enum Shape Rock Paper Scissors)
+            (enum Outcome Lose Draw Win)
+            (let outcome (lambda ({ left right })
+              (cond
+                (=~ left right) Draw
+                (and (=~ left Rock) (=~ right Paper)) Win
+                Lose)))
+            (match (outcome { Rock Paper })
+              Lose "lose"
+              Draw "draw"
+              Win "win"))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(inferred_operands);
+        assert_eq!(run_program_output_with_std_and_opts(inferred_operands, true), "win");
+
+        let cross_enum = crate::parser::build(
+            r#"(do
+                (enum Shape Rock Paper)
+                (enum Outcome Lose Win)
+                (=~ Rock Lose))"#,
+        )
+        .expect("program should build");
+        let err = crate::infer::infer_with_builtins_typed(
+            &cross_enum,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("different enum types must not compare");
+        assert!(err.contains("Cannot unify Shape with Outcome"), "{err}");
+
+        let int_operand = crate::parser::build(
+            r#"(do (enum Shape Rock Paper) (=~ Rock 1))"#,
+        )
+        .expect("program should build");
+        let err = crate::infer::infer_with_builtins_typed(
+            &int_operand,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("enum and Int must not compare");
+        assert!(err.contains("Cannot unify Shape with Int"), "{err}");
+    }
+
+    #[test]
     fn test_table_accepts_enum_keys_without_string_conversion() {
         let source = r#"(do
             (enum Letter A B C)

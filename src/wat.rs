@@ -460,7 +460,7 @@ fn builtin_fn_tag(name: &str) -> Option<i32> {
         "*" | "*#" => Some(3),
         "/" | "/#" => Some(4),
         "%" => Some(5),
-        "=" | "=?" | "=#" => Some(6),
+        "=" | "=?" | "=#" | "=~" => Some(6),
         "<" | "<#" => Some(7),
         ">" | ">#" => Some(8),
         "<=" | "<=#" => Some(9),
@@ -1064,6 +1064,7 @@ fn is_special_word(w: &str) -> bool {
             | "="
             | "=?"
             | "=#"
+            | "=~"
             | "=."
             | "<"
             | "<#"
@@ -7445,7 +7446,7 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             }
             "i32.rem_s"
         }
-        "=" | "=?" | "=#" => "i32.eq",
+        "=" | "=?" | "=#" | "=~" => "i32.eq",
         "<" | "<#" => "i32.lt_s",
         ">" | ">#" => "i32.gt_s",
         "<=" | "<=#" => "i32.le_s",

@@ -227,6 +227,13 @@ its final branch is `_`:
     C 4)))
 ```
 
+Use `=~` to compare two values from the same enum. Comparing values from
+different enums, or an enum and an `Int`, is a type error:
+
+```lisp
+(=~ A B) ; false
+```
+
 These first-class enums are deliberately compact: each value lowers to an
 `i32` tag. Payload variants can be added later without changing this syntax.
 The former string-dispatch macro is available explicitly as `match/string`.

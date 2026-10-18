@@ -168,6 +168,7 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             | "="
             | "=?"
             | "=#"
+            | "=~"
             | "=."
             | "<"
             | "<#"
@@ -2003,6 +2004,9 @@ pub struct InferenceContext {
     pub enum_scopes: Vec<HashMap<String, Arc<EnumType>>>,
     pub lambda_scope_bases: Vec<usize>,
     pub constraints: Vec<(Type, Type, TypeError)>,
+    /// `=~` first unifies its operands, then this records the requirement
+    /// that their resolved shared type is an enum.
+    pub enum_equality_constraints: Vec<(Type, Type, TypeError)>,
     pub fresh_var_counter: u64,
     pub expr_types: HashMap<usize, Type>,
     pub collect_expr_types: bool,
@@ -2017,6 +2021,12 @@ pub struct InferenceContext {
 impl InferenceContext {
     pub fn add_constraint(&mut self, t1: Type, t2: Type, src: TypeError) {
         self.constraints.push((t1, t2, src));
+    }
+
+    pub fn add_enum_equality_constraint(&mut self, left: Type, right: Type, src: TypeError) {
+        self.constraints
+            .push((left.clone(), right.clone(), src.clone()));
+        self.enum_equality_constraints.push((left, right, src));
     }
 
     pub fn fresh_var(&mut self) -> Type {
@@ -3430,7 +3440,19 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
 
     // Special handling for vector before anything else
     if let Expression::Word(name) = &exprs[0] {
-        if name == "vector" {
+        if name == "=~" {
+            if exprs.len() != 3 {
+                return Err("=~ expects exactly two enum operands".to_string());
+            }
+            let left = infer_expr(&exprs[1], ctx)?;
+            let right = infer_expr(&exprs[2], ctx)?;
+            ctx.add_enum_equality_constraint(
+                left,
+                right,
+                ctx.type_error(TypeErrorVariant::Source, exprs.to_vec()),
+            );
+            return Ok(Type::Bool);
+        } else if name == "vector" {
             let args = &exprs[1..];
             if args.is_empty() {
                 return Ok(Type::List(Box::new(ctx.fresh_var())));
@@ -3764,6 +3786,7 @@ fn infer_with_builtins_typed_internal(
         enum_scopes: vec![HashMap::new()],
         lambda_scope_bases: Vec::new(),
         constraints: Vec::new(),
+        enum_equality_constraints: Vec::new(),
         fresh_var_counter: init_id,
         expr_types: HashMap::new(),
         collect_expr_types: true,
@@ -3812,6 +3835,25 @@ fn infer_with_builtins_typed_internal(
     };
     let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
     ctx.env.apply_substitution_map(&subst_map);
+
+    for (left, right, src) in &ctx.enum_equality_constraints {
+        let left = apply_subst_map_to_type(&subst_map, left);
+        let right = apply_subst_map_to_type(&subst_map, right);
+        if !matches!((&left, &right), (Type::Enum(a), Type::Enum(b)) if a == b) {
+            let message = format!(
+                "=~ requires two values of the same enum type, but got {} and {}",
+                left, right
+            );
+            let mut partial_typed = build_typed_expression(expr, &ctx.expr_types);
+            annotate_effects(&mut partial_typed);
+            return Err(InferErrorInfo {
+                message: with_src(message, src),
+                scope: src.scope.clone(),
+                snippet: src_snippet(src),
+                partial_typed_ast: Some(partial_typed),
+            });
+        }
+    }
 
     let solved_expr_types: HashMap<usize, Type> = ctx
         .expr_types

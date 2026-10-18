@@ -14,6 +14,7 @@ Mutation: (push! xs x), (set! xs i x), (pop! xs), (empty! xs), (capacity! xs n),
 Pipelines pass data last: (|> xs (map f) (select pred)).
 Enums: (enum Letter A B C); values are compact typed tags, not Ints.
 Match enums exhaustively: (match letter A value-a B value-b C value-c), or use _ as the final default.
+Compare values from the same enum with (=~ a b); cross-enum comparisons are rejected.
 Enums can be Table keys directly: (Table/set! points A 1), (Table/get A points); no string conversion occurs.
 Use (block ...) for lexical branch/loop scopes so repeated local names do not collide.
 Comments begin with ; and continue to the end of the line.
