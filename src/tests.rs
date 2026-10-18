@@ -232,6 +232,32 @@ xs)"#,
     }
 
     #[test]
+    fn test_wasi_deserializes_enum_table_keys_by_variant_name() {
+        let source = r#"(do
+            (enum Shape Rock Paper Scissors)
+            (sig table [[{ Shape Int }]])
+            (let table (Table/new))
+            (Table/set! table Rock 1)
+            (Table/set! table Scissors 2)
+            (let encoded (serialize table))
+            (sig restored [[{ Shape Int }]])
+            (let restored (deserialize encoded))
+            (snd (get (Table/get Rock restored) 0)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
+
+        // Shared prefixes exercise the generated enum-name trie rather than
+        // only the easy one-letter-distinct case.
+        let shared_prefixes = r#"(do
+            (enum HttpCode NotFound NotAllowed Success)
+            (sig code HttpCode)
+            (let code (deserialize "NotAllowed"))
+            (match code NotFound 1 NotAllowed 2 Success 3))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(shared_prefixes);
+        assert_eq!(run_program_output_with_std_and_opts(shared_prefixes, true), "2");
+    }
+
+    #[test]
     fn test_table_enum_key_rejects_a_string_key() {
         let source = r#"(do
             (enum Letter A B C)

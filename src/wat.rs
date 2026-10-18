@@ -13297,6 +13297,74 @@ fn wasi_expect_literal(text: &str) -> String {
     out
 }
 
+/// Emit a small trie that reads one of an enum's serialized variant names.
+/// Enum values are written as bare Que words, so we cannot try candidates one
+/// after another: a failed attempt would already have consumed input.  Looking
+/// ahead one character at each trie node lets all variants, including shared
+/// prefixes such as `NotFound` and `NotAllowed`, deserialize correctly.
+fn emit_wasi_enum_deserializer(variants: &[String]) -> String {
+    fn delimiter_test() -> String {
+        let delimiters = [-1, 32, 9, 10, 13, 93, 125]; // EOF, whitespace, ], }
+        let mut out = String::new();
+        for (index, delimiter) in delimiters.iter().enumerate() {
+            out.push_str(&format!(
+                "local.get $c\ni32.const {delimiter}\ni32.eq\n"
+            ));
+            if index > 0 {
+                out.push_str("i32.or\n");
+            }
+        }
+        out
+    }
+
+    fn node(entries: &[(Vec<char>, usize)], depth: usize) -> String {
+        let terminal = entries
+            .iter()
+            .find_map(|(chars, tag)| (chars.len() == depth).then_some(*tag));
+        let mut groups: Vec<(char, Vec<(Vec<char>, usize)>)> = Vec::new();
+        for (chars, tag) in entries {
+            if chars.len() == depth {
+                continue;
+            }
+            let ch = chars[depth];
+            if let Some((_, grouped)) = groups.iter_mut().find(|(existing, _)| *existing == ch) {
+                grouped.push((chars.clone(), *tag));
+            } else {
+                groups.push((ch, vec![(chars.clone(), *tag)]));
+            }
+        }
+
+        let mut alternatives = "unreachable".to_string();
+        for (ch, grouped) in groups.into_iter().rev() {
+            let child = node(&grouped, depth + 1);
+            alternatives = format!(
+                "local.get $c\ni32.const {}\ni32.eq\nif (result i32)\n  call $__deser_get\n  drop\n{}\nelse\n{}\nend",
+                u32::from(ch),
+                child.replace('\n', "\n  "),
+                alternatives.replace('\n', "\n  "),
+            );
+        }
+
+        let result = if let Some(tag) = terminal {
+            format!(
+                "{}if (result i32)\n  i32.const {tag}\nelse\n{}\nend",
+                delimiter_test(),
+                alternatives.replace('\n', "\n  "),
+            )
+        } else {
+            alternatives
+        };
+        format!("call $__deser_peek\nlocal.set $c\n{result}")
+    }
+
+    let entries = variants
+        .iter()
+        .enumerate()
+        .map(|(tag, variant)| (variant.chars().collect::<Vec<_>>(), tag))
+        .collect::<Vec<_>>();
+    format!("call $__deser_ws\n{}", node(&entries, 0))
+}
+
 fn emit_wasi_deserializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<String, String> {
     let name = wasi_serde_name(typ);
     if !emitted.insert(name.clone()) {
@@ -13326,7 +13394,11 @@ fn emit_wasi_deserializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<S
             }
             format!("{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $item i32)\n    i32.const 123 call $__deser_expect\n    i32.const 0 i32.const 1 call $vec_new_i32 local.set $out\n{fields}    i32.const 125 call $__deser_expect\n    local.get $out)\n")
         }
-        Type::Var(_) | Type::Enum(_) | Type::Function(_, _) => return Err("unsupported WASI deserialization type".into()),
+        Type::Enum(enum_type) => {
+            let body = emit_wasi_enum_deserializer(&enum_type.variants);
+            format!("  (func $__wasi_deserialize_{name} (result i32)\n    (local $c i32)\n{}\n  )\n", body.replace('\n', "\n    "))
+        }
+        Type::Var(_) | Type::Function(_, _) => return Err("unsupported WASI deserialization type".into()),
     };
     Ok(function)
 }
@@ -13383,6 +13455,10 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
         if op == "serialize" {
             return Err("serialize requires a concrete value type".to_string());
         }
+        return Err(
+            "deserialize requires a concrete expected type; add `(sig name Type)` before its binding"
+                .to_string(),
+        );
     }
 
     let arg_slot = ctx.tmp_i32;

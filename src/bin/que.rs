@@ -16,6 +16,7 @@ Enums: (enum Letter A B C); values are compact typed tags, not Ints.
 Match enums exhaustively: (match letter A value-a B value-b C value-c), or use _ as the final default.
 Compare values from the same enum with (=~ a b); cross-enum comparisons are rejected.
 Enums can be Table keys directly: (Table/set! points A 1), (Table/get A points); no string conversion occurs.
+See `que --examples` for a complete enum, match, Table, and serialize/deserialize example.
 Use (block ...) for lexical branch/loop scopes so repeated local names do not collide.
 Comments begin with ; and continue to the end of the line.
 Run `que --examples`, `que --style`, or `que --pitfalls` for more."#;
@@ -36,7 +37,30 @@ const EXAMPLES: &str = r#"Que examples
 ; Scoped branch locals
 (if true
     (block (let value 1) value)
-    (block (let value 2) value))"#;
+    (block (let value 2) value))
+
+; Closed enum, exhaustive match, compact Table keys, and typed decoding
+(enum Shape Rock Paper Scissors)
+
+(let beats? (lambda (left right)
+  (or (and (=~ left Rock) (=~ right Scissors))
+      (and (=~ left Paper) (=~ right Rock))
+      (and (=~ left Scissors) (=~ right Paper)))))
+
+(sig points [[{ Shape Int }]])
+(let points (Table/new))
+(Table/set! points Rock 1)
+(Table/set! points Paper 2)
+
+(let saved (serialize points))
+; deserialize needs its result type to choose a decoder.
+(sig restored [[{ Shape Int }]])
+(let restored (deserialize saved))
+
+(match Rock
+  Rock (if (beats? Rock Scissors) (snd (get (Table/get Rock restored) 0)) 0)
+  Paper 0
+  Scissors 0) ; 1"#;
 
 const STYLE: &str = r#"Que style
 

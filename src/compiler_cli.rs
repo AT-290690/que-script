@@ -130,6 +130,12 @@ Running programs:
   `--runtime <name-or-path>` or `QUE_WASM_RUNTIME`. Pass filesystem permissions
   to Que with `--allow read`, `--allow write`, or `--allow all`.
 
+Learning:
+  que --learn          Quick language reference, including enums and Tables.
+  que --examples       Small copyable programs, including enum serialization.
+  que --style          Recommended code style and performance guidance.
+  que --pitfalls       Common correctness traps and their fixes.
+
 Native-C compilation is intentionally a separate repository tool:
   ./scripts/compile-native-c.sh hello.que"
 }
