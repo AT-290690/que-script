@@ -1,7 +1,8 @@
 use crate::parser::Expression;
-use crate::types::{generalize, Type, TypeEnv, TypeScheme, TypeVar};
+use crate::types::{generalize, EnumType, Type, TypeEnv, TypeScheme, TypeVar};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::{BitOr, BitOrAssign};
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub enum TypeErrorVariant {
@@ -197,6 +198,8 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             | "pop-val!"
             | "empty!"
             | "capacity!"
+            | "__table-key-hash"
+            | "__table-key-equal?"
             | "get"
             | "car"
             | "cdr"
@@ -220,6 +223,8 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             | "letrec"
             | "mut"
             | "do"
+            | "enum"
+            | "match"
     )
 }
 
@@ -444,7 +449,7 @@ fn annotate_effects_mut(
                             body_effect
                         }
                     }
-                    Some(Expression::Word(op)) if op == "if" || op == "while" => {
+                    Some(Expression::Word(op)) if op == "if" || op == "while" || op == "match" => {
                         let mut combined = EffectFlags::PURE;
                         for ch in node.children.iter_mut().skip(1) {
                             combined |= annotate_effects_mut(
@@ -1995,6 +2000,7 @@ pub struct InferenceContext {
     pub env: TypeEnv,
     pub mut_scopes: Vec<HashSet<String>>,
     pub declared_type_scopes: Vec<HashMap<String, (Type, bool)>>,
+    pub enum_scopes: Vec<HashMap<String, Arc<EnumType>>>,
     pub lambda_scope_bases: Vec<usize>,
     pub constraints: Vec<(Type, Type, TypeError)>,
     pub fresh_var_counter: u64,
@@ -2086,6 +2092,7 @@ impl InferenceContext {
         self.env.enter_scope();
         self.mut_scopes.push(HashSet::new());
         self.declared_type_scopes.push(HashMap::new());
+        self.enum_scopes.push(HashMap::new());
     }
 
     pub fn exit_lexical_scope(&mut self) {
@@ -2095,6 +2102,9 @@ impl InferenceContext {
         }
         if self.declared_type_scopes.len() > 1 {
             self.declared_type_scopes.pop();
+        }
+        if self.enum_scopes.len() > 1 {
+            self.enum_scopes.pop();
         }
     }
 
@@ -2182,6 +2192,57 @@ impl InferenceContext {
             }
         }
     }
+
+    pub fn enum_type(&self, name: &str) -> Option<Arc<EnumType>> {
+        self.enum_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).cloned())
+    }
+
+    pub fn enum_for_variant(&self, variant: &str) -> Option<Arc<EnumType>> {
+        self.enum_scopes.iter().rev().find_map(|scope| {
+            scope
+                .values()
+                .find(|enum_type| enum_type.variants.iter().any(|name| name == variant))
+                .cloned()
+        })
+    }
+
+    pub fn declare_enum(
+        &mut self,
+        name: String,
+        variants: Vec<String>,
+    ) -> Result<Arc<EnumType>, String> {
+        if variants.is_empty() {
+            return Err(format!("enum '{}' needs at least one variant", name));
+        }
+        let Some(scope) = self.enum_scopes.last_mut() else {
+            return Err("internal error: missing enum scope".to_string());
+        };
+        if scope.contains_key(&name) {
+            return Err(format!("enum '{}' already declared in this scope", name));
+        }
+        let current_bindings = self
+            .env
+            .scopes
+            .last()
+            .ok_or_else(|| "internal error: missing type scope".to_string())?;
+        for variant in &variants {
+            if current_bindings.contains_key(variant) {
+                return Err(format!("enum variant '{}' is already defined in this scope", variant));
+            }
+        }
+        let enum_type = Arc::new(EnumType { name: name.clone(), variants });
+        scope.insert(name, enum_type.clone());
+        for variant in &enum_type.variants {
+            self.env.insert(
+                variant.clone(),
+                TypeScheme::monotype(Type::Enum(enum_type.clone())),
+            )?;
+        }
+        Ok(enum_type)
+    }
 }
 
 fn mut_capture_error(name: &str) -> String {
@@ -2220,6 +2281,8 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "letrec" => infer_rec(&exprs, ctx),
                     "extern" => infer_extern(&exprs, ctx),
                     "letype" => infer_letype(&exprs, ctx),
+                    "enum" => infer_enum(&exprs, ctx),
+                    "match" => infer_match(&exprs, ctx),
                     "alter!" => infer_alter(&exprs, ctx),
                     "do" => infer_do(expr, &exprs, ctx),
                     _ => infer_function_call(exprs, ctx),
@@ -2260,10 +2323,15 @@ fn parse_type_hint_with_named_vars(
             "Bool" => Ok(Type::Bool),
             "Char" => Ok(Type::Char),
             "_" => Ok(ctx.fresh_var()),
-            _ => Ok(named_vars
-                .entry(name.clone())
-                .or_insert_with(|| ctx.fresh_var())
-                .clone()),
+            _ => Ok(ctx
+                .enum_type(name)
+                .map(Type::Enum)
+                .unwrap_or_else(|| {
+                    named_vars
+                        .entry(name.clone())
+                        .or_insert_with(|| ctx.fresh_var())
+                        .clone()
+                })),
         },
 
         Expression::Apply(items) if items.is_empty() => Ok(Type::Unit),
@@ -2410,6 +2478,110 @@ fn infer_letype(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
         );
     }
     Ok(Type::Unit)
+}
+
+fn infer_enum(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let [Expression::Word(_kw), Expression::Word(name), variants @ ..] = exprs else {
+        return Err("enum expects: (enum Name Variant ...)".to_string());
+    };
+    let mut names = Vec::with_capacity(variants.len());
+    let mut seen = HashSet::new();
+    for variant in variants {
+        let Expression::Word(variant) = variant else {
+            return Err(format!("enum '{}' variants must be names", name));
+        };
+        if variant == "_" {
+            return Err(format!("enum '{}' cannot use '_' as a variant", name));
+        }
+        if !seen.insert(variant.clone()) {
+            return Err(format!("enum '{}' declares '{}' more than once", name, variant));
+        }
+        names.push(variant.clone());
+    }
+    ctx.declare_enum(name.clone(), names)?;
+    Ok(Type::Unit)
+}
+
+fn infer_match(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let args = &exprs[1..];
+    if args.len() < 3 || args.len() % 2 == 0 {
+        return Err("match expects: (match value Variant body ...)".to_string());
+    }
+
+    let value = &args[0];
+    let clauses = &args[1..];
+    let mut enum_type: Option<Arc<EnumType>> = None;
+    let mut covered = HashSet::new();
+    let mut has_default = false;
+    let mut branch_type: Option<Type> = None;
+
+    for (clause_index, pair) in clauses.chunks_exact(2).enumerate() {
+        let Expression::Word(pattern) = &pair[0] else {
+            return Err("match patterns must be enum variants or '_'".to_string());
+        };
+        if pattern == "_" {
+            if has_default {
+                return Err("match has more than one '_' branch".to_string());
+            }
+            if clause_index + 1 != clauses.len() / 2 {
+                return Err("match '_' branch must be last".to_string());
+            }
+            has_default = true;
+        } else {
+            let Some(found_enum) = ctx.enum_for_variant(pattern) else {
+                return Err(format!("'{}' is not an enum variant", pattern));
+            };
+            if let Some(expected_enum) = &enum_type {
+                if expected_enum != &found_enum {
+                    return Err(format!(
+                        "match mixes variants from '{}' and '{}'",
+                        expected_enum.name, found_enum.name
+                    ));
+                }
+            } else {
+                enum_type = Some(found_enum);
+            }
+            if !covered.insert(pattern.clone()) {
+                return Err(format!("duplicate match branch '{}'", pattern));
+            }
+        }
+
+        let current_branch_type = infer_expr(&pair[1], ctx)?;
+        if let Some(expected_type) = &branch_type {
+            ctx.add_constraint(
+                expected_type.clone(),
+                current_branch_type,
+                ctx.type_error(TypeErrorVariant::IfBody, vec![pair[1].clone()]),
+            );
+        } else {
+            branch_type = Some(current_branch_type);
+        }
+    }
+
+    let enum_type = enum_type.ok_or_else(|| "match needs at least one enum variant branch".to_string())?;
+    if !has_default {
+        let missing = enum_type
+            .variants
+            .iter()
+            .filter(|variant| !covered.contains(*variant))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(format!(
+                "non-exhaustive match on {}: missing {}",
+                enum_type.name,
+                missing.join(", ")
+            ));
+        }
+    }
+
+    let value_type = infer_expr(value, ctx)?;
+    ctx.add_constraint(
+        value_type,
+        Type::Enum(enum_type),
+        ctx.type_error(TypeErrorVariant::Source, vec![value.clone()]),
+    );
+    Ok(branch_type.expect("match has at least one clause"))
 }
 // arity depth (number of list nestings)
 fn type_arity(t: &Type) -> usize {
@@ -3401,6 +3573,24 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
                 ctx.type_error(TypeErrorVariant::GetIndex, exprs.to_vec()),
             );
             return Ok(elem_type);
+        } else if name == "__table-key-hash" && exprs.len() == 3 {
+            let _key_type = infer_expr(&exprs[1], ctx)?;
+            let capacity_type = infer_expr(&exprs[2], ctx)?;
+            ctx.add_constraint(
+                Type::Int,
+                capacity_type,
+                ctx.type_error(TypeErrorVariant::Source, exprs.to_vec()),
+            );
+            return Ok(Type::Int);
+        } else if name == "__table-key-equal?" && exprs.len() == 3 {
+            let left_type = infer_expr(&exprs[1], ctx)?;
+            let right_type = infer_expr(&exprs[2], ctx)?;
+            ctx.add_constraint(
+                left_type,
+                right_type,
+                ctx.type_error(TypeErrorVariant::Source, exprs.to_vec()),
+            );
+            return Ok(Type::Bool);
         } else if name == "set!" && exprs.len() == 4 {
             let target_type = infer_expr(&exprs[1], ctx)?;
             let index_type = infer_expr(&exprs[2], ctx)?;
@@ -3571,6 +3761,7 @@ fn infer_with_builtins_typed_internal(
         env,
         mut_scopes: vec![HashSet::new()],
         declared_type_scopes: vec![HashMap::new()],
+        enum_scopes: vec![HashMap::new()],
         lambda_scope_bases: Vec::new(),
         constraints: Vec::new(),
         fresh_var_counter: init_id,

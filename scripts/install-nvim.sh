@@ -6,6 +6,9 @@ REPO_BASE="${QUE_REPO_RAW:-https://raw.githubusercontent.com/AT-290690/que-scrip
 INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/que/start/que-nvim"
 NVIM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
 NVIM_INIT="$NVIM_CONFIG_DIR/init.lua"
+# Pre-data runtime packs win resolution order. Remove only this obsolete Que
+# location so it cannot shadow the managed copy in INSTALL_ROOT.
+LEGACY_PLUGIN_ROOT="$NVIM_CONFIG_DIR/pack/que/start/que-nvim"
 
 clean_old_neovim() {
   [[ "${QUE_CLEAN_NVIM:-0}" == "1" ]] || return 0
@@ -49,6 +52,11 @@ command -v nvim >/dev/null 2>&1 || {
 }
 
 clean_old_neovim
+
+if [[ -d "$LEGACY_PLUGIN_ROOT" ]]; then
+  echo "Removing legacy Que plugin that would shadow the current install: $LEGACY_PLUGIN_ROOT"
+  rm -rf "$LEGACY_PLUGIN_ROOT"
+fi
 
 download_file \
   "$REPO_BASE/miscs/neovim/README.md" \

@@ -159,6 +159,7 @@ fn type_to_expr(typ: &Type) -> Expression {
             Expression::Apply(parts)
         }
         Type::Var(v) => Expression::Word(format!("T{}", v.id)),
+        Type::Enum(enum_type) => Expression::Word(enum_type.name.clone()),
     }
 }
 

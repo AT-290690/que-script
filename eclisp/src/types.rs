@@ -1,10 +1,20 @@
 use crate::infer::apply_subst_map_to_type;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeVar {
     pub id: u64,
+}
+
+/// A closed, zero-payload sum type.  Its runtime representation is the
+/// zero-based i32 index of a variant, while the full definition stays here so
+/// inference can prove constructor membership and match coverage.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnumType {
+    pub name: String,
+    pub variants: Vec<String>,
 }
 
 impl TypeVar {
@@ -26,6 +36,7 @@ pub enum Type {
     Dec,
     Bool,
     Char,
+    Enum(Arc<EnumType>),
     Function(Box<Type>, Box<Type>),
     List(Box<Type>),
     Unit,
@@ -41,6 +52,7 @@ impl fmt::Display for Type {
             Type::Dec => write!(f, "Dec"),
             Type::Bool => write!(f, "Bool"),
             Type::Char => write!(f, "Char"),
+            Type::Enum(enum_type) => write!(f, "{}", enum_type.name),
             Type::Function(from, to) => match **from {
                 Type::Function(_, _) => write!(f, "({}) -> {}", from, to),
                 _ => write!(f, "{} -> {}", from, to),
@@ -159,7 +171,9 @@ impl Type {
     }
     pub fn substitute(&self, subst: &HashMap<u64, Type>) -> Type {
         match self {
-            Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => self.clone(),
+            Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => {
+                self.clone()
+            }
             Type::Var(v) => {
                 if let Some(ty) = subst.get(&v.id) {
                     ty.clone()
@@ -189,7 +203,7 @@ impl Type {
 
     fn collect_free_vars(&self, vars: &mut std::collections::HashSet<u64>) {
         match self {
-            Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => {}
+            Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => {}
             Type::Var(v) => {
                 vars.insert(v.id);
             }

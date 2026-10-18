@@ -210,6 +210,38 @@ type:
 (let parse/int! (lambda (text) (deserialize text)))
 ```
 
+### Closed enums and exhaustive matching
+
+For a small fixed domain, declare zero-payload tags with `enum`. Variants have
+their declared enum type, not `Int`, and `match` requires every variant unless
+its final branch is `_`:
+
+```lisp
+(enum Letter A B C)
+
+(sig score (Letter -> Int))
+(let score (lambda letter
+  (match letter
+    A 1
+    B 3
+    C 4)))
+```
+
+These first-class enums are deliberately compact: each value lowers to an
+`i32` tag. Payload variants can be added later without changing this syntax.
+The former string-dispatch macro is available explicitly as `match/string`.
+
+Enums are also valid `Table` keys. The table keeps its normal structural
+`[Char]` key support, while enum keys use their compact tag for hashing and
+equality—no string conversion or allocation is involved:
+
+```lisp
+(sig points [[{ Letter Int }]])
+(let points (Table/new))
+(Table/set! points A 1)
+(Table/set! points B 3)
+```
+
 ## IO and permissions
 
 IO is exposed through typed host imports and denied unless the matching

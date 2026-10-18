@@ -57,6 +57,17 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                                 continue;
                             }
                         }
+                        if let Expression::Apply(enum_items) = it {
+                            if matches!(enum_items.first(), Some(Expression::Word(w)) if w == "enum")
+                            {
+                                for variant in enum_items.iter().skip(2) {
+                                    if let Expression::Word(name) = variant {
+                                        bound.insert(name.clone());
+                                    }
+                                }
+                                continue;
+                            }
+                        }
                         if let Expression::Apply(let_items) = it {
                             if let [Expression::Word(kw), Expression::Word(name), rhs] =
                                 &let_items[..]
@@ -73,6 +84,18 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                     return;
                 }
                 if op == "letype" {
+                    return;
+                }
+                if op == "enum" {
+                    return;
+                }
+                if op == "match" {
+                    if let Some(value) = exprs.get(1) {
+                        collect_free_idents(value, bound, acc);
+                    }
+                    for branch in exprs.iter().skip(3).step_by(2) {
+                        collect_free_idents(branch, bound, acc);
+                    }
                     return;
                 }
                 if op == "let" || op == "letrec" {
@@ -748,7 +771,7 @@ fn split_macro_definitions(
                     (items.first(), items.get(1))
                 {
                     if kw == "letmacro" {
-                        if name == "letype" {
+                        if matches!(name.as_str(), "letype" | "enum" | "match") {
                             return Err(format!(
                                 "Macro name '{}' is reserved by the language",
                                 name
@@ -762,7 +785,7 @@ fn split_macro_definitions(
             }
             if let [Expression::Word(kw), Expression::Word(name), _rhs] = &items[..] {
                 if kw == "letmacro" {
-                    if name == "letype" {
+                    if matches!(name.as_str(), "letype" | "enum" | "match") {
                         return Err(format!("Macro name '{}' is reserved by the language", name));
                     }
                     let macro_def = parse_macro_definition(&items[2..], name)?;
@@ -3134,7 +3157,8 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                 || kw == "letrec"
                                 || kw == "mut"
                                 || kw == "extern"
-                                || kw == "letype")
+                                || kw == "letype"
+                                || kw == "enum")
                                 && matches!(name, Some(Expression::Word(_)))
                             {
                                 let Expression::Word(name) = name.unwrap() else {

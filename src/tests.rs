@@ -96,6 +96,115 @@ xs)"#,
     }
 
     #[test]
+    fn test_enum_variants_have_the_declared_type() {
+        let exprs = crate::parser::parse(
+            "(do (enum Letter A B C) (let pick (lambda x (match x A 1 B 3 C 4))) (pick B))",
+        )
+        .unwrap();
+        let expr = exprs.first().expect("enum program should parse");
+        let (typ, _) = crate::infer::infer_with_builtins_typed(
+            expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect("enum program should infer");
+        assert_eq!(typ.to_string(), "Int");
+    }
+
+    #[test]
+    fn test_enum_match_requires_exhaustive_variants() {
+        let exprs = crate::parser::parse("(do (enum Letter A B C) (match A A 1 B 2))").unwrap();
+        let err = crate::infer::infer_with_builtins_typed(
+            exprs.first().expect("enum program should parse"),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("incomplete enum match must fail");
+        assert!(err.contains("non-exhaustive match on Letter: missing C"), "{err}");
+    }
+
+    #[test]
+    fn test_enum_tags_do_not_unify_with_ints() {
+        let exprs = crate::parser::parse("(do (enum Letter A B C) (+ A 1))").unwrap();
+        let err = crate::infer::infer_with_builtins_typed(
+            exprs.first().expect("enum program should parse"),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("enum tag must not be accepted as an Int");
+        assert!(err.contains("expected Int but got Letter"), "{err}");
+    }
+
+    #[test]
+    fn test_enum_match_runtime_and_optimizer_agree() {
+        let source = r#"(do
+            (enum Letter A B C)
+            (sig score (Letter -> Int))
+            (let score (lambda letter (match letter A 1 B 3 C 4)))
+            [ (score A) (score B) (score C) ])"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "[1 3 4]");
+    }
+
+    #[test]
+    fn test_match_accepts_a_top_level_enum_typed_variable() {
+        let source = r#"(do
+            (enum Letter A B C)
+            (let letter B)
+            (match letter
+              A "first"
+              B "second"
+              C "third"))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "second");
+    }
+
+    #[test]
+    fn test_table_accepts_enum_keys_without_string_conversion() {
+        let source = r#"(do
+            (enum Letter A B C)
+            (sig points [[{ Letter Int }]])
+            (let points (Table/new))
+            (Table/set! points A 1)
+            (Table/set! points B 3)
+            (snd (get (Table/get A points) 0)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
+    }
+
+    #[test]
+    fn test_wasi_serializes_enum_table_entries_by_variant_name() {
+        let source = r#"(do
+            (enum Letter A B C)
+            (sig points [[{ Letter Int }]])
+            (let points (Table/new))
+            (Table/set! points A 1)
+            (Table/set! points B 3)
+            (Table/get A points))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "[{ A 1 }]");
+    }
+
+    #[test]
+    fn test_table_enum_key_rejects_a_string_key() {
+        let source = r#"(do
+            (enum Letter A B C)
+            (sig points [[{ Letter Int }]])
+            (let points (Table/new))
+            (Table/set! points A 1)
+            (Table/set! points "A" 2))"#;
+        let std_ast = crate::baked::load_ast();
+        let crate::parser::Expression::Apply(items) = std_ast else {
+            panic!("standard library should be a do expression");
+        };
+        let expr = crate::parser::merge_std_and_program(source, items[1..].to_vec())
+            .expect("enum table program should merge with the standard library");
+        let err = crate::infer::infer_with_builtins_typed(
+            &expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("string must not be accepted as a Letter table key");
+        assert!(err.contains("expected [Char] but got Letter"), "{err}");
+    }
+
+    #[test]
     fn test_type_inference_single_arg_variadic_desugar_produces_callable() {
         let exprs = crate::parser::parse("(or false)").unwrap();
         let expr = exprs.first().expect("expression should parse");
@@ -209,6 +318,16 @@ xs)"#,
             "unexpected error: {}",
             err
         );
+    }
+
+    #[test]
+    fn test_enum_match_default_and_renamed_string_match_macro() {
+        let source = r#"(do
+            (enum Letter A B C)
+            [ (match B A 1 _ 9)
+              (match/string "ok" "no" 1 "ok" 2 0) ])"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "[9 2]");
     }
 
     #[test]

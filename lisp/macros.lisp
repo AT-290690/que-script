@@ -423,7 +423,7 @@
           (uq h)
           (uqs rest))))))
 
-(letmacro match
+(letmacro match/string
   (lambda (value . cases)
       (let h (gensym))
       (qq

@@ -3,6 +3,10 @@ set -euo pipefail
 
 PLUGIN_SOURCE_DIR="./miscs/neovim"
 INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/que/start/que-nvim"
+# Older development installers placed this plugin under the config runtime.
+# Neovim loads config packs before data packs, so a stale copy there silently
+# shadows the freshly installed plugin below.
+LEGACY_INSTALL_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/pack/que/start/que-nvim"
 
 usage() {
   cat <<'EOF'
@@ -47,6 +51,11 @@ fi
 echo "Installing local que-nvim..."
 echo "Source: ${PLUGIN_SOURCE_DIR}"
 echo "Target: ${INSTALL_ROOT}"
+
+if [ -d "$LEGACY_INSTALL_ROOT" ]; then
+  echo "Removing legacy Que plugin that would shadow the current install: $LEGACY_INSTALL_ROOT"
+  rm -rf "$LEGACY_INSTALL_ROOT"
+fi
 
 mkdir -p "$INSTALL_ROOT"
 rm -rf "$INSTALL_ROOT"/*

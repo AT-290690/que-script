@@ -321,6 +321,87 @@ fn emit_wasi_guard_trap_runtime() -> String {
     out
 }
 
+fn emit_table_key_runtime() -> &'static str {
+    r#"
+
+  (func $table_key_hash_scalar (param $key i32) (param $cap i32) (result i32)
+    (local $mixed i32)
+    local.get $cap i32.eqz
+    if i32.const 0 return end
+    local.get $key local.set $mixed
+    local.get $mixed local.get $mixed i32.const 16 i32.shr_u i32.xor
+    i32.const -2048144789 i32.mul local.set $mixed
+    local.get $mixed local.get $mixed i32.const 13 i32.shr_u i32.xor
+    i32.const -1028477387 i32.mul local.set $mixed
+    local.get $mixed local.get $mixed i32.const 16 i32.shr_u i32.xor
+    local.get $cap i32.rem_u
+  )
+
+  (func $table_key_hash_vec (param $key i32) (param $cap i32) (result i32)
+    (local $len i32) (local $data i32) (local $i i32) (local $hash i32)
+    local.get $cap i32.eqz
+    if i32.const 0 return end
+    local.get $key i32.load local.set $len
+    local.get $key i32.const 16 i32.add i32.load local.set $data
+    block $done loop $items
+      local.get $i local.get $len i32.ge_u br_if $done
+      local.get $hash i32.const 131 i32.mul
+      local.get $data local.get $i i32.const 4 i32.mul i32.add i32.load
+      i32.add local.get $cap i32.rem_u local.set $hash
+      local.get $i i32.const 1 i32.add local.set $i
+      br $items
+    end end
+    local.get $hash
+  )
+
+  (func $table_key_equal_vec (param $left i32) (param $right i32) (result i32)
+    (local $len i32) (local $left_data i32) (local $right_data i32) (local $i i32)
+    local.get $left local.get $right i32.eq
+    if i32.const 1 return end
+    local.get $left i32.load local.tee $len
+    local.get $right i32.load i32.ne
+    if i32.const 0 return end
+    local.get $left i32.const 16 i32.add i32.load local.set $left_data
+    local.get $right i32.const 16 i32.add i32.load local.set $right_data
+    block $equal loop $items
+      local.get $i local.get $len i32.ge_u br_if $equal
+      local.get $left_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.get $right_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      i32.ne if i32.const 0 return end
+      local.get $i i32.const 1 i32.add local.set $i
+      br $items
+    end end
+    i32.const 1
+  )
+
+  ;; Unoptimized polymorphic Table helpers use this representation dispatch.
+  (func $table_key_hash_dynamic (param $key i32) (param $cap i32) (result i32)
+    local.get $key call $is_vec_ptr
+    if (result i32)
+      local.get $key local.get $cap call $table_key_hash_vec
+    else
+      local.get $key local.get $cap call $table_key_hash_scalar
+    end
+  )
+
+  (func $table_key_equal_dynamic (param $left i32) (param $right i32) (result i32)
+    local.get $left local.get $right i32.eq
+    if i32.const 1 return end
+    local.get $left call $is_vec_ptr
+    if (result i32)
+      local.get $right call $is_vec_ptr
+      if (result i32)
+        local.get $left local.get $right call $table_key_equal_vec
+      else
+        i32.const 0
+      end
+    else
+      i32.const 0
+    end
+  )
+"#
+}
+
 fn parse_env_bool_like(name: &str, default: bool) -> bool {
     std::env::var(name)
         .ok()
@@ -440,6 +521,7 @@ fn is_i32ish_type(t: &Type) -> bool {
             | Type::Dec
             | Type::Bool
             | Type::Char
+            | Type::Enum(_)
             | Type::Unit
             | Type::List(_)
             | Type::Tuple(_)
@@ -883,7 +965,9 @@ fn top_level_borrow_plan(
 
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
-        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit => Ok("i32"),
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => {
+            Ok("i32")
+        }
         Type::List(_) | Type::Tuple(_) => Ok("i32"),
         Type::Var(_) => Ok("i32"),
         Type::Function(_, _) => Ok("i32"),
@@ -903,6 +987,7 @@ fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
         | Type::Dec
         | Type::Bool
         | Type::Char
+        | Type::Enum(_)
         | Type::Unit
         | Type::List(_)
         | Type::Tuple(_) => Ok(VecElemKind::I32),
@@ -937,6 +1022,9 @@ fn is_special_word(w: &str) -> bool {
             | "letrec"
             | "lambda"
             | "if"
+            | "match"
+            | "enum"
+            | "letype"
             | "vector"
             | "string"
             | "integers"
@@ -947,6 +1035,8 @@ fn is_special_word(w: &str) -> bool {
             | "__vec_new_uninit_i32"
             | "tuple"
             | "length"
+            | "__table-key-hash"
+            | "__table-key-equal?"
             | "get"
             | "car"
             | "cdr"
@@ -1088,6 +1178,23 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     return;
                 }
                 if op == "letype" {
+                    return;
+                }
+                if op == "enum" {
+                    for variant in items.iter().skip(2) {
+                        if let Expression::Word(name) = variant {
+                            bound.insert(name.clone());
+                        }
+                    }
+                    return;
+                }
+                if op == "match" {
+                    if let Some(value) = items.get(1) {
+                        collect_refs(value, bound, out);
+                    }
+                    for branch in items.iter().skip(3).step_by(2) {
+                        collect_refs(branch, bound, out);
+                    }
                     return;
                 }
                 // Type/cast hints are compile-time-only in this backend.
@@ -4861,6 +4968,8 @@ fn emit_vector_runtime(
   ;; __DBG_RC_EXPORTS__
 "#,
     );
+    out.push_str(emit_table_key_runtime());
+
     if apply_arities.contains(&0) {
         out.push_str(&emit_high_arity_apply_i32(0, fn_ids, fn_sigs, closure_defs));
     }
@@ -7164,6 +7273,64 @@ fn emit_wasi_list_dir_runtime() -> &'static str {
     include_str!("wasi_list_dir.wat")
 }
 
+/// Table keys have two efficient physical representations today: scalar i32
+/// values (including enum tags) and vectors (the existing string keys).  The
+/// library remains polymorphic, so an unresolved key type uses the guarded
+/// runtime dispatch.  Concrete optimized specializations take the direct path.
+fn compile_table_key_hash(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let key = node
+        .children
+        .get(1)
+        .ok_or_else(|| "__table-key-hash missing key".to_string())?;
+    let capacity = node
+        .children
+        .get(2)
+        .ok_or_else(|| "__table-key-hash missing capacity".to_string())?;
+    let key_code = compile_expr(key, ctx)?;
+    let capacity_code = compile_expr(capacity, ctx)?;
+    let helper = match key.typ.as_ref() {
+        Some(Type::List(_)) => "$table_key_hash_vec",
+        Some(Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit) => {
+            "$table_key_hash_scalar"
+        }
+        Some(Type::Var(_)) | None => "$table_key_hash_dynamic",
+        Some(Type::Tuple(_)) | Some(Type::Function(_, _)) => {
+            return Err(
+                "Table keys must be scalar values, enum values, or vectors; tuple and function keys are not supported"
+                    .to_string(),
+            );
+        }
+    };
+    Ok(format!("{key_code}\n{capacity_code}\ncall {helper}"))
+}
+
+fn compile_table_key_equal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let left = node
+        .children
+        .get(1)
+        .ok_or_else(|| "__table-key-equal? missing left key".to_string())?;
+    let right = node
+        .children
+        .get(2)
+        .ok_or_else(|| "__table-key-equal? missing right key".to_string())?;
+    let left_code = compile_expr(left, ctx)?;
+    let right_code = compile_expr(right, ctx)?;
+    let helper = match left.typ.as_ref() {
+        Some(Type::List(_)) => "call $table_key_equal_vec",
+        Some(Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit) => {
+            "i32.eq"
+        }
+        Some(Type::Var(_)) | None => "call $table_key_equal_dynamic",
+        Some(Type::Tuple(_)) | Some(Type::Function(_, _)) => {
+            return Err(
+                "Table keys must be scalar values, enum values, or vectors; tuple and function keys are not supported"
+                    .to_string(),
+            );
+        }
+    };
+    Ok(format!("{left_code}\n{right_code}\n{helper}"))
+}
+
 fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     fn emit_int_div_zero_check(rhs_local: usize) -> String {
         format!(
@@ -7424,6 +7591,83 @@ fn compile_if(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     Ok(format!(
         "{cond}\n(if (result {result_ty})\n  (then\n    {t}\n  )\n  (else\n    {e}\n  )\n)"
     ))
+}
+
+fn compile_match(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let Expression::Apply(items) = &node.expr else {
+        return Err("match must be an application".to_string());
+    };
+    let value_node = node
+        .children
+        .get(1)
+        .ok_or_else(|| "match missing value".to_string())?;
+    let Type::Enum(enum_type) = value_node
+        .typ
+        .as_ref()
+        .ok_or_else(|| "match missing enum type".to_string())?
+    else {
+        return Err("match value must be an enum".to_string());
+    };
+    let result_type = node
+        .typ
+        .as_ref()
+        .ok_or_else(|| "match missing result type".to_string())
+        .and_then(wasm_val_type)?;
+    let value_code = compile_expr(value_node, ctx)?;
+
+    fn compile_branches(
+        items: &[Expression],
+        node: &TypedExpression,
+        enum_type: &crate::types::EnumType,
+        clause_index: usize,
+        result_type: &str,
+        value_slot: usize,
+        ctx: &Ctx<'_>,
+    ) -> Result<String, String> {
+        let pattern_index = 2 + clause_index * 2;
+        let pattern = items
+            .get(pattern_index)
+            .and_then(|expr| match expr {
+                Expression::Word(pattern) => Some(pattern.as_str()),
+                _ => None,
+            })
+            .ok_or_else(|| "match pattern must be a variant".to_string())?;
+        let body = node
+            .children
+            .get(pattern_index + 1)
+            .ok_or_else(|| "match branch missing body".to_string())?;
+        let body_code = compile_expr(body, ctx)?;
+        if pattern == "_" {
+            return Ok(body_code);
+        }
+        let tag = enum_type
+            .variants
+            .iter()
+            .position(|variant| variant == pattern)
+            .ok_or_else(|| format!("unknown enum variant '{}'", pattern))?;
+        let next_pattern_index = pattern_index + 2;
+        let otherwise = if next_pattern_index < items.len() {
+            compile_branches(
+                items,
+                node,
+                enum_type,
+                clause_index + 1,
+                result_type,
+                value_slot,
+                ctx,
+            )?
+        } else {
+            // Inference has proved exhaustive coverage. Keep a defensive trap
+            // for corrupted values crossing an unchecked host boundary.
+            "unreachable".to_string()
+        };
+        Ok(format!(
+            "local.get {value_slot}\ni32.const {tag}\ni32.eq\n(if (result {result_type})\n  (then\n    {body_code}\n  )\n  (else\n    {otherwise}\n  )\n)"
+        ))
+    }
+
+    let branches = compile_branches(items, node, enum_type, 0, result_type, ctx.tmp_i32, ctx)?;
+    Ok(format!("{value_code}\nlocal.set {}\n{branches}", ctx.tmp_i32))
 }
 
 fn compile_if_discarding_result(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -13003,6 +13247,23 @@ fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<Str
             }
             format!("{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $data i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    local.get $out i32.const 123 call $vec_push_i32 drop\n    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n{fields}    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $out i32.const 125 call $vec_push_i32 drop\n    local.get $out)\n")
         }
+        Type::Enum(enum_type) => {
+            // Enums are compact i32 tags at runtime, but values crossing the
+            // WASI boundary should remain readable Que data.  Print the
+            // declared variant name rather than leaking its implementation tag.
+            let mut branches = String::new();
+            for (tag, variant) in enum_type.variants.iter().enumerate() {
+                let literal = wasi_append_literal("$out", variant).replace('\n', "\n      ");
+                branches.push_str(&format!(
+                    "    local.get $value\n    i32.const {tag}\n    i32.eq\n    if\n      {literal}\n    else\n"
+                ));
+            }
+            branches.push_str("      unreachable\n");
+            for _ in &enum_type.variants {
+                branches.push_str("    end\n");
+            }
+            format!("  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32)\n    i32.const 0\n    i32.const 0\n    call $vec_new_i32\n    local.set $out\n{branches}    local.get $out)\n")
+        }
         Type::Var(_) => format!("  (func $__wasi_serialize_{name} (param i32) (result i32)\n    local.get 0\n    call $__serde_int)\n"),
         Type::Function(_, _) => return Err("unsupported WASI serialization type".into()),
     };
@@ -13064,7 +13325,7 @@ fn emit_wasi_deserializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<S
             }
             format!("{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $item i32)\n    i32.const 123 call $__deser_expect\n    i32.const 0 i32.const 1 call $vec_new_i32 local.set $out\n{fields}    i32.const 125 call $__deser_expect\n    local.get $out)\n")
         }
-        Type::Var(_) | Type::Function(_, _) => return Err("unsupported WASI deserialization type".into()),
+        Type::Var(_) | Type::Enum(_) | Type::Function(_, _) => return Err("unsupported WASI deserialization type".into()),
     };
     Ok(function)
 }
@@ -13746,6 +14007,17 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             w
                         ))
                     }
+                } else if let Some(Type::Enum(enum_type)) = node.typ.as_ref() {
+                    // A top-level binding may itself have an enum type.  It
+                    // is compiled as a zero-argument value function above;
+                    // only an otherwise-unbound enum-typed word is a variant
+                    // constructor.
+                    let tag = enum_type
+                        .variants
+                        .iter()
+                        .position(|variant| variant == w)
+                        .ok_or_else(|| format!("Unknown enum variant '{}'", w))?;
+                    Ok(format!("i32.const {}", tag))
                 } else if let Some(tag) = builtin_fn_tag(w) {
                     Ok(format!("i32.const {}", tag))
                 } else {
@@ -13801,6 +14073,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
+                        "match" => compile_match(node, ctx),
                         "tuple" => compile_tuple(node, ctx),
                         "vector" | "string" => compile_vector_literal(node, ctx),
                         "__vec_new_zeroed_i32" => {
@@ -13842,7 +14115,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(emit_direct_builder_scalar_store_i32(&xs, &idx, &value, ctx))
                         }
-                        "extern" | "letype" => Ok("i32.const 0".to_string()),
+                        "extern" | "letype" | "enum" => Ok("i32.const 0".to_string()),
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
                         }
@@ -13861,6 +14134,8 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             // logical length at offset zero, including views.
                             Ok(format!("{a}\ni32.load"))
                         }
+                        "__table-key-hash" => compile_table_key_hash(node, ctx),
+                        "__table-key-equal?" => compile_table_key_equal(node, ctx),
                         "get" => compile_get(node, ctx),
                         "fst" => compile_fst(node, ctx),
                         "snd" => compile_snd(node, ctx),

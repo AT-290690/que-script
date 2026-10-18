@@ -220,16 +220,7 @@ q)))
  (lambda table key
    (do
      (let cap (length table))
-     (if (= cap 0)
-         0
-         (do
-           (mut i 0)
-           (mut hash 0)
-           (let len (length key))
-           (while (< i len) (do
-             (alter! hash (Int/euclidean-mod (+ (* hash 131) (as (get key i) Int)) cap))
-             (alter! i (+ i 1))))
-           hash)))))
+     (__table-key-hash key cap))))
 
 (let Table/create (lambda capacity (buckets (max 4 capacity))))
 
@@ -240,7 +231,7 @@ q)))
   (mut found -1)
   (let len (length bucket))
   (while (and (= found -1) (< i len)) (do
-    (if (Set/key-equal? (fst (get bucket i)) key)
+    (if (__table-key-equal? (fst (get bucket i)) key)
         (alter! found i)
         nil)
     (alter! i (+ i 1))))
