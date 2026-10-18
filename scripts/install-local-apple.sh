@@ -15,7 +15,7 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/install-local-apple.sh [--no-build]
 
-Builds the unified Que compiler and runner.
+Builds the unified Calque compiler and runner.
 
 Installs:
   /usr/local/bin/que

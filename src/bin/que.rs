@@ -4,7 +4,7 @@ use std::io;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const LEARN: &str = r#"Que quick reference
+const LEARN: &str = r#"Calque quick reference
 
 Bindings: (let x value), (mut x value), (alter! x value), (letrec f (lambda ...))
 Functions: (lambda (a b) body...), called as (f a b); extra body forms are sequenced.
@@ -21,7 +21,7 @@ Use (block ...) for lexical branch/loop scopes so repeated local names do not co
 Comments begin with ; and continue to the end of the line.
 Run `que --examples`, `que --style`, or `que --pitfalls` for more."#;
 
-const EXAMPLES: &str = r#"Que examples
+const EXAMPLES: &str = r#"Calque examples
 
 ; Functional
 (|> [1 2 3 4] (map (lambda (x) (* x x))))
@@ -62,7 +62,7 @@ const EXAMPLES: &str = r#"Que examples
   Paper 0
   Scissors 0) ; 1"#;
 
-const STYLE: &str = r#"Que style
+const STYLE: &str = r#"Calque style
 
 - Prefer clear functional composition for transformations and loops/mutation for hot code.
 - Public collection helpers normally take data last so they compose with |>.
@@ -72,7 +72,7 @@ const STYLE: &str = r#"Que style
 - Use --debug while checking correctness and --opt for release execution.
 - Use ; use-strict-warnings! at the start of a file for LSP correctness warnings."#;
 
-const PITFALLS: &str = r#"Que pitfalls
+const PITFALLS: &str = r#"Calque pitfalls
 
 - do sequences expressions but does not create a lexical scope; block does.
 - get is unchecked under --opt unless the compiler proves or you guard the index.
@@ -125,7 +125,7 @@ local function open_library_source(name)
   vim.api.nvim_buf_set_name(buf,'que-lib://'..name)
 end
 local function browse_library()
-  vim.ui.input({prompt='Que library pattern: ',default='*'},function(pattern)
+  vim.ui.input({prompt='Calque library pattern: ',default='*'},function(pattern)
     if not pattern or pattern=='' then return end
     local lines=vim.fn.systemlist({vim.env.QUE_NVIM_EXE,'--lib','types',pattern})
     if vim.v.shell_error ~= 0 then vim.notify(table.concat(lines,'\n'),vim.log.levels.ERROR); return end
@@ -133,13 +133,13 @@ local function browse_library()
     for _,line in ipairs(lines) do
       if line~='' then table.insert(entries,{name=line:match('^([^%s]+)%s+:') or line,text=line}) end
     end
-    if #entries==0 then vim.notify('No Que library symbols match '..pattern,vim.log.levels.INFO); return end
+    if #entries==0 then vim.notify('No Calque library symbols match '..pattern,vim.log.levels.INFO); return end
     local ok,pickers=pcall(require,'telescope.pickers')
     local fok,finders=pcall(require,'telescope.finders')
     local sok,sorters=pcall(require,'telescope.sorters')
     if ok and fok and sok then
       pickers.new({}, {
-        prompt_title='Que library types: '..pattern,
+        prompt_title='Calque library types: '..pattern,
         finder=finders.new_table({results=entries,entry_maker=function(entry) return {value=entry,display=entry.text,ordinal=entry.text} end}),
         sorter=sorters.get_generic_fuzzy_sorter(),
         attach_mappings=function(prompt,map)
@@ -153,7 +153,7 @@ local function browse_library()
       }):find()
       return
     end
-    vim.ui.select(entries,{prompt='Que library types: '..pattern,format_item=function(entry) return entry.text end},function(entry)
+    vim.ui.select(entries,{prompt='Calque library types: '..pattern,format_item=function(entry) return entry.text end},function(entry)
       if entry then open_library_source(entry.name) end
     end)
   end)
@@ -167,8 +167,8 @@ for name,mode in pairs(modes) do
   vim.api.nvim_create_user_command(name,function() run(mode[1],mode[2],mode[3]) end,{})
   vim.keymap.set('n','<leader>'..keys[name],'<cmd>'..name..'<CR>',{silent=true,buffer=true})
 end
-vim.api.nvim_create_user_command('QueLib',browse_library,{desc='Browse Que library types'})
-vim.keymap.set('n','<leader>g','<cmd>QueLib<CR>',{silent=true,buffer=true,desc='Browse Que library types'})
+vim.api.nvim_create_user_command('QueLib',browse_library,{desc='Browse Calque library types'})
+vim.keymap.set('n','<leader>g','<cmd>QueLib<CR>',{silent=true,buffer=true,desc='Browse Calque library types'})
 end"#
 }
 
@@ -179,7 +179,7 @@ fn run_nvim(mut args: Vec<String>) -> Result<(), String> {
     }
     let initial = if let Some(index) = args.iter().position(|arg| arg == "--code") {
         if index + 1 >= args.len() {
-            return Err("que nvim --code requires Que source".into());
+            return Err("que nvim --code requires Calque source".into());
         }
         let source = args.remove(index + 1);
         args.remove(index);
@@ -222,7 +222,7 @@ fn run_nvim(mut args: Vec<String>) -> Result<(), String> {
                 if status.success() {
                     Ok(())
                 } else {
-                    Err("scratch program failed; see the Que diagnostic above".into())
+                    Err("scratch program failed; see the Calque diagnostic above".into())
                 }
             }),
     };

@@ -14,7 +14,7 @@ const INDENT: usize = 2;
 
 pub fn format_source(source: &str) -> Result<String, String> {
     let before = crate::parser::build(source)
-        .map_err(|error| format!("cannot format invalid Que source: {error}"))?;
+        .map_err(|error| format!("cannot format invalid Calque source: {error}"))?;
     let forms = parse_forms(source)?;
     let mut rendered = Vec::new();
     for form in &forms {
@@ -22,9 +22,9 @@ pub fn format_source(source: &str) -> Result<String, String> {
     }
     let formatted = rendered.join("\n") + "\n";
     let after = crate::parser::build(&formatted)
-        .map_err(|error| format!("formatter produced invalid Que source: {error}"))?;
+        .map_err(|error| format!("formatter produced invalid Calque source: {error}"))?;
     if before.to_lisp() != after.to_lisp() {
-        return Err("formatter changed the parsed Que program".to_string());
+        return Err("formatter changed the parsed Calque program".to_string());
     }
     Ok(formatted)
 }

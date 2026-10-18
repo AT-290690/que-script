@@ -1,4 +1,4 @@
--- Que workstation configuration installed by scripts/install-all-linux.sh.
+-- Calque workstation configuration installed by scripts/install-all-linux.sh.
 -- Self-contained: no files from the Kickstart repository are required.
 vim.loader.enable()
 vim.g.mapleader = " "
@@ -242,7 +242,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
   end,
 })
 
--- Que is copied by install-all-linux.sh. Load it after Blink so Que can apply
+-- Calque is copied by install-all-linux.sh. Load it after Blink so Calque can apply
 -- the same completion labels used by the local workstation.
 local que_root = vim.fn.stdpath("data") .. "/site/pack/que/start/que-nvim"
 local que_lua = que_root .. "/lua"

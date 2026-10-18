@@ -50,7 +50,7 @@ static void require_permission(struct w2c_host* host, uint32_t permission,
 static uint32_t load_u32(struct w2c_host* host, uint32_t address) {
     wasm_rt_memory_t* memory = &host->instance->w2c_memory;
     if ((uint64_t)address + 4u > memory->size) {
-        que_host_fail("memory", "invalid Que vector address");
+        que_host_fail("memory", "invalid Calque vector address");
     }
     const uint8_t* p = memory->data + address;
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
@@ -61,7 +61,7 @@ static char* read_que_string(struct w2c_host* host, uint32_t vector) {
     uint32_t length = load_u32(host, vector);
     uint32_t data = load_u32(host, vector + 16u);
     if ((uint64_t)data + (uint64_t)length * 4u > host->instance->w2c_memory.size) {
-        que_host_fail("string", "invalid Que string data");
+        que_host_fail("string", "invalid Calque string data");
     }
 
     size_t capacity = (size_t)length * 4u + 1u;
@@ -120,7 +120,7 @@ static int write_que_string_to_stream(struct w2c_host* host, uint32_t vector,
     uint32_t length = load_u32(host, vector);
     uint32_t data = load_u32(host, vector + 16u);
     if ((uint64_t)data + (uint64_t)length * 4u > host->instance->w2c_memory.size) {
-        que_host_fail("string", "invalid Que string data");
+        que_host_fail("string", "invalid Calque string data");
     }
     for (uint32_t i = 0; i < length; ++i) {
         if (write_codepoint(stream, load_u32(host, data + i * 4u)) != 0) return -1;

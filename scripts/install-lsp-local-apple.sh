@@ -10,7 +10,7 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/install-lsp-local-apple.sh [--no-build]
 
-Builds the local macOS Que LSP executable and installs it on this machine.
+Builds the local macOS Calque LSP executable and installs it on this machine.
 
 Installs:
   /usr/local/bin/quelsp

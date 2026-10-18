@@ -1,8 +1,8 @@
-# Que native C host
+# Calque native C host
 
 This directory contains the optional host-import implementation used when a
-Que Wasm module is translated to C with `wasm2c`. It is not part of the Que
-compiler and does not add a C dependency to ordinary Que builds.
+Calque Wasm module is translated to C with `wasm2c`. It is not part of the Calque
+compiler and does not add a C dependency to ordinary Calque builds.
 
 Build a program with:
 
@@ -30,12 +30,12 @@ Implemented imports:
 - `read/chunks!`, `stdin/chunks!`, `read/lines!`
 - `serialize`, `deserialize`
 
-Non-option executable arguments populate Que's `ARGV`. Use `--` when a program
+Non-option executable arguments populate Calque's `ARGV`. Use `--` when a program
 argument itself begins with an option-like prefix.
 
 File paths are relative to the executable's working directory. Absolute paths,
 paths containing a `..` component, and symbolic-link traversal are rejected.
-Directory results are sorted consistently with the standard Que host.
+Directory results are sorted consistently with the standard Calque host.
 
 Run the native host integration checks with:
 

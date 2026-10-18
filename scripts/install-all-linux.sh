@@ -7,7 +7,7 @@ set -euo pipefail
 #   - que and quelsp
 #   - wasmtime (the default external WASI runtime)
 #   - Neovim, git, ripgrep and the tools needed by Telescope
-#   - the Que Neovim plugin and a self-contained Telescope/LSP config
+#   - the Calque Neovim plugin and a self-contained Telescope/LSP config
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This installer is for Linux. Use the platform installer for $(uname -s)." >&2
@@ -122,7 +122,7 @@ install_wasmtime() {
   fi
   local wasmtime_bin="$HOME/.wasmtime/bin"
   if [[ ! -x "$wasmtime_bin/wasmtime" ]]; then
-    echo "Installing wasmtime (Que's default external WASI runtime)..."
+    echo "Installing wasmtime (Calque's default external WASI runtime)..."
     # The upstream installer only considers .bashrc for a detected Bash shell,
     # even when .profile exists. Explicitly select the profile so fresh cloud
     # images do not fail after the binary has already been extracted.
@@ -137,7 +137,7 @@ install_wasmtime() {
     touch "$HOME/.profile"
     if ! grep -Fq 'WASMTIME_HOME' "$HOME/.profile" \
       && ! grep -Fq '.wasmtime/bin' "$HOME/.profile"; then
-      printf '\n# Wasmtime installed for Que\nexport PATH="$HOME/.wasmtime/bin:$PATH"\n' >> "$HOME/.profile"
+      printf '\n# Wasmtime installed for Calque\nexport PATH="$HOME/.wasmtime/bin:$PATH"\n' >> "$HOME/.profile"
     fi
   fi
   command -v wasmtime >/dev/null 2>&1 || {
@@ -160,7 +160,7 @@ install_packages
 ensure_modern_neovim
 install_wasmtime
 
-echo "Installing Que and the language server..."
+echo "Installing Calque and the language server..."
 download_and_run install.sh
 download_and_run lsp.sh
 download_and_run install-nvim.sh
@@ -170,7 +170,7 @@ test -x /usr/local/bin/quelsp
 test -f "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/que/start/que-nvim/lua/que/init.lua"
 
 echo
-echo "Installation complete. Everything needed by the Que Neovim environment is installed."
+echo "Installation complete. Everything needed by the Calque Neovim environment is installed."
 echo "  que --version"
 echo "  nvim --version"
 echo "  que nvim --allow all"

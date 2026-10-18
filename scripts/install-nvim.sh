@@ -6,7 +6,7 @@ REPO_BASE="${QUE_REPO_RAW:-https://raw.githubusercontent.com/AT-290690/que-scrip
 INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/que/start/que-nvim"
 NVIM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim"
 NVIM_INIT="$NVIM_CONFIG_DIR/init.lua"
-# Pre-data runtime packs win resolution order. Remove only this obsolete Que
+# Pre-data runtime packs win resolution order. Remove only this obsolete Calque
 # location so it cannot shadow the managed copy in INSTALL_ROOT.
 LEGACY_PLUGIN_ROOT="$NVIM_CONFIG_DIR/pack/que/start/que-nvim"
 
@@ -54,7 +54,7 @@ command -v nvim >/dev/null 2>&1 || {
 clean_old_neovim
 
 if [[ -d "$LEGACY_PLUGIN_ROOT" ]]; then
-  echo "Removing legacy Que plugin that would shadow the current install: $LEGACY_PLUGIN_ROOT"
+  echo "Removing legacy Calque plugin that would shadow the current install: $LEGACY_PLUGIN_ROOT"
   rm -rf "$LEGACY_PLUGIN_ROOT"
 fi
 
@@ -77,16 +77,16 @@ download_file \
 mkdir -p "$NVIM_CONFIG_DIR"
 managed_config=0
 installed_managed_config=0
-if [[ -f "$NVIM_INIT" ]] && grep -Fq 'Que workstation configuration installed by scripts/install-all-linux.sh' "$NVIM_INIT"; then
+if [[ -f "$NVIM_INIT" ]] && grep -Fq 'Calque workstation configuration installed by scripts/install-all-linux.sh' "$NVIM_INIT"; then
   managed_config=1
 fi
 
 if [[ ! -e "$NVIM_INIT" || "${QUE_OVERWRITE_NVIM:-0}" == "1" || "$managed_config" -eq 1 ]]; then
   download_file "$REPO_BASE/scripts/que-init.lua" "$NVIM_INIT"
   installed_managed_config=1
-  echo "Installed Que workstation config: $NVIM_INIT"
+  echo "Installed Calque workstation config: $NVIM_INIT"
 else
-  echo "Kept existing Neovim config. Set QUE_OVERWRITE_NVIM=1 to replace it with the Que workstation config."
+  echo "Kept existing Neovim config. Set QUE_OVERWRITE_NVIM=1 to replace it with the Calque workstation config."
 fi
 
 if [[ "$installed_managed_config" -eq 1 ]]; then
@@ -98,11 +98,11 @@ if [[ "$installed_managed_config" -eq 1 ]]; then
     "+enew" \
     "+file que-install-check.que" \
     "+setfiletype que" \
-    "+lua assert(vim.g.que_workstation_config == true, 'managed Que init.lua is not active')" \
+    "+lua assert(vim.g.que_workstation_config == true, 'managed Calque init.lua is not active')" \
     "+lua assert(vim.g.colors_name == 'catppuccin', 'Catppuccin is not active')" \
-    "+lua assert(vim.o.tabstop == 2 and vim.o.shiftwidth == 2 and vim.o.softtabstop == 2 and vim.o.expandtab, 'Que tab settings are not active')" \
-    "+lua local c=require('blink.cmp.config'); assert(c.appearance.kind_icons.Function == 'λ' and c.appearance.kind_icons.Keyword == 'β', 'Que completion label style is not active')" \
-    "+lua assert(vim.fn.exists(':QueFormat') == 2, 'Que Neovim plugin commands are not active')" \
+    "+lua assert(vim.o.tabstop == 2 and vim.o.shiftwidth == 2 and vim.o.softtabstop == 2 and vim.o.expandtab, 'Calque tab settings are not active')" \
+    "+lua local c=require('blink.cmp.config'); assert(c.appearance.kind_icons.Function == 'λ' and c.appearance.kind_icons.Keyword == 'β', 'Calque completion label style is not active')" \
+    "+lua assert(vim.fn.exists(':QueFormat') == 2, 'Calque Neovim plugin commands are not active')" \
     "+qa"
 fi
 
@@ -110,6 +110,6 @@ cat <<EOF
 Installed que-nvim to:
   $INSTALL_ROOT
 
-The managed config includes Catppuccin, Telescope, Que completion labels,
+The managed config includes Catppuccin, Telescope, Calque completion labels,
 and the two-space indentation settings. Make sure 'quelsp' is on PATH.
 EOF

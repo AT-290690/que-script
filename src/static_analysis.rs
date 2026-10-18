@@ -42,7 +42,7 @@ pub enum ProofKind {
     BoundsRead,
     BoundsWrite,
     /// The write is proven to replace an existing element, rather than using
-    /// Que's additional append-at-length `set!` case.
+    /// Calque's additional append-at-length `set!` case.
     BoundsWriteReplacement,
     NonEmpty,
     IntegerArithmetic,
@@ -4411,7 +4411,7 @@ fn access_index_is_proven(
         return true;
     }
 
-    // `set! xs (length xs) value` is Que's append-at-end operation.
+    // `set! xs (length xs) value` is Calque's append-at-end operation.
     if allow_append {
         if let Expression::Apply(length) = index {
             if matches!(length.first(), Some(Expression::Word(op)) if op == "length")

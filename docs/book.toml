@@ -1,0 +1,20 @@
+[book]
+title = "Calque — a typed Lisp for WebAssembly"
+authors = ["Anthony Tonev"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+additional-css = ["theme/custom.css"]
+additional-js = ["theme/calque-highlight.js"]
+git-repository-url = "https://github.com/AT-290690/que-script"
+edit-url-template = "https://github.com/AT-290690/que-script/edit/main/docs/{path}"
+
+[output.html.search]
+enable = true

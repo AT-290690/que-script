@@ -23,6 +23,7 @@ target
 #.idea/
 
 dist
+docs/book/
 
 releases/
 

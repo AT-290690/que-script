@@ -16,7 +16,7 @@ for bin in "${BINARIES[@]}"; do
 done
 
 if [ "$removed" -eq 0 ]; then
-  echo "No Que binaries found in $BIN_DIR"
+  echo "No Calque binaries found in $BIN_DIR"
 fi
 
 if [ -e "$LIB_PATH" ]; then

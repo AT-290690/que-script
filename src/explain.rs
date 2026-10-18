@@ -315,7 +315,7 @@ pub fn explain_program_with_effects_and_source(
 
 pub fn render_text(report: &ExplainReport) -> String {
     let mut lines = Vec::new();
-    lines.push("Que Explain".to_string());
+    lines.push("Calque Explain".to_string());
     lines.push(format!("Result type: {}", report.result_type));
 
     lines.push(String::new());
@@ -1222,7 +1222,7 @@ mod tests {
         let report = explain_source("(+ 1 2)");
         assert_eq!(report.result_type, "Int");
         let text = render_text(&report);
-        assert!(text.contains("Que Explain"));
+        assert!(text.contains("Calque Explain"));
         assert!(text.contains("Result type: Int"));
         assert!(text.contains("WAT shape:"));
     }

@@ -251,7 +251,7 @@ function mapBlockDiagnosticsToDocument(blockDiagnostics, blockStartLine, blockLi
 
     const out = new vscode.Diagnostic(
       new vscode.Range(start, end),
-      typeof diag.message === "string" ? diag.message : "Que diagnostic",
+      typeof diag.message === "string" ? diag.message : "Calque diagnostic",
       lspSeverityToVscode(diag.severity)
     );
     out.source = diag.source || "que";
@@ -914,7 +914,7 @@ function createClient(context) {
 
   return new LanguageClient(
     "queLanguageServer",
-    "Eclisp language support for Que",
+    "Eclisp language support for Calque",
     serverOptions,
     clientOptions
   );
@@ -962,7 +962,7 @@ async function activate(context) {
     "que.showLanguageServer",
     () => {
       const server = activeServer || resolveServerCommand(context);
-      vscode.window.showInformationMessage(`Que language server: ${server.command}`);
+      vscode.window.showInformationMessage(`Calque language server: ${server.command}`);
     }
   );
 

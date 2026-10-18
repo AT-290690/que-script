@@ -1,0 +1,34 @@
+:root {
+  --que-accent: #9ecbff;
+  --que-code: #161d2b;
+}
+
+.nav-chapters,
+.sidebar .chapter-item.expanded > a.toggle + a {
+  color: var(--que-accent);
+}
+
+.content h1,
+.content h2,
+.content h3 {
+  letter-spacing: -0.02em;
+}
+
+.content h1::before {
+  content: "λ ";
+  color: var(--que-accent);
+}
+
+code {
+  border-radius: 4px;
+}
+
+pre {
+  border: 1px solid rgba(158, 203, 255, 0.16);
+  border-radius: 8px;
+}
+
+.warning {
+  border-left: 4px solid #e2a76f;
+  padding-left: 1rem;
+}

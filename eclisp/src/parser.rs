@@ -2950,7 +2950,7 @@ macro_rules! s {
     };
 }
 
-/// An exact base-10 literal as written in Que source.
+/// An exact base-10 literal as written in Calque source.
 ///
 /// Runtime `Dec` values are scaled i32 integers, but keeping the source value
 /// in decimal form until lowering avoids routing literals through binary

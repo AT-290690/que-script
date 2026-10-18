@@ -68,7 +68,7 @@
             (|> (uq arg) (uq fn) (uqs rest)))))))
 
 ; Syntax-list helpers used by the two pipeline macros below. They are macros,
-; rather than parser rewrites, so their stage handling remains ordinary Que
+; rather than parser rewrites, so their stage handling remains ordinary Calque
 ; code. The `syntax/*` forms exist only while expanding a `letmacro` body.
 (letmacro pipe/last
   (lambda value stages

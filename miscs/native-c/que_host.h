@@ -24,7 +24,7 @@ struct w2c_host {
 uint32_t que_host_parse_permissions(const char* value);
 void que_host_init(struct w2c_host* host, struct w2c_main* instance,
                    uint32_t permissions);
-/* Consume --allow options, populate Que's ARGV, and return 0 on success. */
+/* Consume --allow options, populate Calque's ARGV, and return 0 on success. */
 int que_host_configure_argv(struct w2c_host* host, int argc, char** argv);
 void que_host_print_result(struct w2c_host* host, uint32_t value,
                            const char* type_text);

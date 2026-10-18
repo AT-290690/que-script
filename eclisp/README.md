@@ -1,6 +1,6 @@
 # Eclisp
 
-Eclisp is the language core used by Que.
+Eclisp is the language core used by Calque.
 
 This folder is intentionally small and standalone. It contains:
 
@@ -13,7 +13,7 @@ This folder is intentionally small and standalone. It contains:
 
 It does not contain:
 
-- Que standard library source
+- Calque standard library source
 - optimizer
 - WebAssembly/WAT compiler
 - runtime

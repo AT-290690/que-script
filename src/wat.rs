@@ -6137,7 +6137,7 @@ fn emit_vector_runtime(
 
 fn emit_wasi_print_runtime() -> &'static str {
     r#"
-  ;; Que [Char] -> UTF-8 stdout. Scratch bytes live below the heap base.
+  ;; Calque [Char] -> UTF-8 stdout. Scratch bytes live below the heap base.
   (func $__wasi_write_text (param $fd i32) (param $text i32) (result i32)
     (local $len i32) (local $data i32) (local $i i32)
     (local $c i32) (local $n i32)
@@ -6387,7 +6387,7 @@ fn emit_wasi_clear_runtime() -> &'static str {
 
 fn emit_wasi_stdin_runtime() -> &'static str {
     r#"
-  ;; Read stdin and decode UTF-8 into Que's [Char] representation.
+  ;; Read stdin and decode UTF-8 into Calque's [Char] representation.
   (func $__wasi_read_fd (param $fd i32) (result i32)
     (local $out i32) (local $n i32) (local $i i32)
     (local $b i32) (local $c i32) (local $needed i32)
@@ -6668,7 +6668,7 @@ fn emit_wasi_argv_runtime() -> &'static str {
 fn emit_wasi_file_runtime(has_read: bool, has_write: bool) -> String {
     let mut out = String::from(
         r#"
-  ;; Encode a Que [Char] path as UTF-8 at scratch address 1024.
+  ;; Encode a Calque [Char] path as UTF-8 at scratch address 1024.
   (func $__wasi_encode_path (param $path i32) (result i32)
     (local $len i32) (local $data i32) (local $i i32)
     (local $p i32) (local $c i32)
@@ -12551,7 +12551,7 @@ fn compile_vec_capacity(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
     let xs = compile_expr(vector, ctx)?;
     let n = compile_expr(requested, ctx)?;
     // The runtime helper returns the vector pointer for its own control-flow
-    // convenience. `capacity!` is a mutation operation, however, so its Que
+    // convenience. `capacity!` is a mutation operation, however, so its Calque
     // value is `nil`, just like `push!`, `set!`, and `empty!`.
     Ok(format!(
         "{xs}\n{n}\ncall $vec_capacity_i32\ndrop\ni32.const 0"
@@ -13250,7 +13250,7 @@ fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<Str
         }
         Type::Enum(enum_type) => {
             // Enums are compact i32 tags at runtime, but values crossing the
-            // WASI boundary should remain readable Que data.  Print the
+            // WASI boundary should remain readable Calque data.  Print the
             // declared variant name rather than leaking its implementation tag.
             let mut branches = String::new();
             for (tag, variant) in enum_type.variants.iter().enumerate() {
@@ -13298,7 +13298,7 @@ fn wasi_expect_literal(text: &str) -> String {
 }
 
 /// Emit a small trie that reads one of an enum's serialized variant names.
-/// Enum values are written as bare Que words, so we cannot try candidates one
+/// Enum values are written as bare Calque words, so we cannot try candidates one
 /// after another: a failed attempt would already have consumed input.  Looking
 /// ahead one character at each trie node lets all variants, including shared
 /// prefixes such as `NotFound` and `NotAllowed`, deserialize correctly.
@@ -14207,7 +14207,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             // Keeping this load inline matters in append-heavy code:
                             // `push!` is lowered through `(length xs)`, so a
                             // million appends otherwise become a million tiny
-                            // Wasm-to-Wasm calls.  Every Que vector stores its
+                            // Wasm-to-Wasm calls.  Every Calque vector stores its
                             // logical length at offset zero, including views.
                             Ok(format!("{a}\ni32.load"))
                         }
@@ -16657,7 +16657,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     monolithic_wat.push_str(")\n");
 
     let mut runtime_wat = String::new();
-    runtime_wat.push_str(";; Que runtime module\n");
+    runtime_wat.push_str(";; Calque runtime module\n");
     runtime_wat.push_str("(module\n");
     runtime_wat.push_str(generic_runtime_body);
     runtime_wat.push_str(&emit_runtime_func_exports(generic_runtime_body));
@@ -16670,7 +16670,7 @@ fn compile_program_to_wat_build_typed_with_opts(
 
     let mut user_wat = String::new();
     user_wat.push_str(&format!(";; Type: {}\n", abi_type_descriptor(main_ret_ty)));
-    user_wat.push_str(";; Que user module; imports runtime helpers from module \"que_runtime\".\n");
+    user_wat.push_str(";; Calque user module; imports runtime helpers from module \"que_runtime\".\n");
     user_wat.push_str("(module\n");
     user_wat.push_str(&extern_imports);
     user_wat.push_str(&emit_runtime_imports(generic_runtime_body, &user_body));

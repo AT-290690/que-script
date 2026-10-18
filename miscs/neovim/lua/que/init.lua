@@ -179,7 +179,7 @@ local function setup_hover(client, bufnr, hover_handler, opts)
         vim.wo[hover_win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder"
       end
     end, bufnr)
-  end, { buffer = bufnr, desc = "Que hover" })
+  end, { buffer = bufnr, desc = "Calque hover" })
 end
 
 local function setup_format(bufnr, opts)
@@ -188,7 +188,7 @@ local function setup_format(bufnr, opts)
     local source = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n") .. "\n"
     local formatted = vim.fn.system(command, source)
     if vim.v.shell_error ~= 0 then
-      vim.notify(formatted ~= "" and formatted or "Que formatter failed", vim.log.levels.ERROR)
+      vim.notify(formatted ~= "" and formatted or "Calque formatter failed", vim.log.levels.ERROR)
       return
     end
     local cursor = vim.api.nvim_win_get_cursor(0)
@@ -201,13 +201,13 @@ local function setup_format(bufnr, opts)
   end
   pcall(vim.api.nvim_buf_del_user_command, bufnr, "QueFormat")
   vim.api.nvim_buf_create_user_command(bufnr, "QueFormat", format_buffer, {
-    desc = "Format the current Que buffer",
+    desc = "Format the current Calque buffer",
   })
   if opts.format_key ~= false then
     vim.keymap.set("n", opts.format_key or "<leader>f", format_buffer, {
       buffer = bufnr,
       silent = true,
-      desc = "Format Que buffer",
+      desc = "Format Calque buffer",
     })
   end
 end
@@ -229,7 +229,7 @@ local function open_library_source(executable, name)
 end
 
 local function library_picker(executable)
-  vim.ui.input({ prompt = "Que library pattern: ", default = "*" }, function(pattern)
+  vim.ui.input({ prompt = "Calque library pattern: ", default = "*" }, function(pattern)
     if not pattern or pattern == "" then
       return
     end
@@ -246,7 +246,7 @@ local function library_picker(executable)
       end
     end
     if #entries == 0 then
-      vim.notify("No Que library symbols match " .. pattern, vim.log.levels.INFO)
+      vim.notify("No Calque library symbols match " .. pattern, vim.log.levels.INFO)
       return
     end
 
@@ -255,7 +255,7 @@ local function library_picker(executable)
     local sorter_ok, sorters = pcall(require, "telescope.sorters")
     if ok and finder_ok and sorter_ok then
       pickers.new({}, {
-        prompt_title = "Que library types: " .. pattern,
+        prompt_title = "Calque library types: " .. pattern,
         finder = finders.new_table({
           results = entries,
           entry_maker = function(entry)
@@ -282,7 +282,7 @@ local function library_picker(executable)
     end
 
     vim.ui.select(entries, {
-      prompt = "Que library types: " .. pattern,
+      prompt = "Calque library types: " .. pattern,
       format_item = function(entry)
         return entry.text
       end,
@@ -298,7 +298,7 @@ function M.setup(opts)
   opts = opts or {}
 
   -- Completion presentation is editor configuration, not an LSP capability.
-  -- Apply Blink's Que labels immediately so they do not depend on whether the
+  -- Apply Blink's Calque labels immediately so they do not depend on whether the
   -- language server has attached yet. on_attach repeats this harmlessly for
   -- configurations that load Blink after que.nvim.
   if opts.completion_icons ~= false then
@@ -348,10 +348,10 @@ function M.setup(opts)
     setup_hover(client, bufnr, hover_handler, opts)
     vim.api.nvim_buf_create_user_command(bufnr, "QueLib", function()
       library_picker(opts.que_executable or "que")
-    end, { desc = "Browse Que library types" })
+    end, { desc = "Browse Calque library types" })
     vim.keymap.set("n", opts.library_key or "<leader>g", function()
       library_picker(opts.que_executable or "que")
-    end, { buffer = bufnr, silent = true, desc = "Browse Que library types" })
+    end, { buffer = bufnr, silent = true, desc = "Browse Calque library types" })
     if user_on_attach then
       user_on_attach(client, bufnr)
     end

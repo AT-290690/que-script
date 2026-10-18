@@ -1,10 +1,14 @@
-# Que
+# Calque
 
 **A statically typed Lisp toolchain targeting WebAssembly.**
 
-Que is the reference toolchain for **Eclisp**, a small expression-oriented Lisp
-with Hindley–Milner type inference, macros, first-class functions, explicit
-mutation, and WebAssembly as its compilation target.
+Calque is a small expression-oriented Lisp with Hindley–Milner type inference,
+macros, first-class functions, and explicit mutation. Its compiler optimizes
+and lowers typed programs to WebAssembly, and the project provides runtime
+integration, the `que` CLI, formatter, language servers, and editor tooling.
+
+Calque is the language and toolchain name. `que` is the compact technical
+spelling used for the command, `.que` source files, `que.toml`, and `quelsp`.
 
 The language is designed to let functional and imperative code live together.
 Use pipelines, recursion, partial application, and immutable values where they
@@ -45,14 +49,25 @@ control over performance matters.
 
 ## Project status
 
-Que is pre-1.0 and under active development. The compiler and runtime have a
+Calque is pre-1.0 and under active development. The compiler and runtime have a
 large automated test suite and are already useful for experimentation,
 algorithmic programs, data processing, language research, and portable Wasm
 tools. Language and library compatibility may still change between releases,
-so pin a known release before using Que in long-lived or critical systems.
+so pin a known release before using Calque in long-lived or critical systems.
 
 Bug reports and reduced failing programs are especially valuable while the
 language approaches a stable compatibility contract.
+
+## Documentation
+
+The repository contains a full mdBook source under [`docs/`](docs/README.md),
+covering the language, static analysis, toolchain, standard library, and
+worked examples. Preview it locally with:
+
+```bash
+cargo install mdbook
+mdbook serve docs
+```
 
 ## Install
 
@@ -331,7 +346,7 @@ que fmt program.que --check
 que fmt --stdin
 ```
 
-Open the configured Que Neovim scratch environment with:
+Open the configured Calque Neovim scratch environment with:
 
 ```bash
 que nvim
@@ -346,7 +361,7 @@ directly to `que --lib` without shell escaping.
 
 ## Native C output
 
-Que programs compile to standard Wasm and can be run by any compatible host.
+Calque programs compile to standard Wasm and can be run by any compatible host.
 For native experiments, the repository also contains a wasm2c host adapter:
 
 ```bash
@@ -375,7 +390,7 @@ que explain program.que
 que fmt program.que
 ```
 
-Normal `que program.que` execution uses a runtime installed by the user. Que
+Normal `que program.que` execution uses a runtime installed by the user. Calque
 neither embeds nor installs a runtime. The optional native-C experiment remains
 available as `./scripts/compile-native-c.sh`; it is not part of the installed
 CLI.
@@ -388,7 +403,7 @@ que run-wasi program.que --opt --runtime wasmer
 que run-wasi program.que --opt --runtime iwasm
 ```
 
-It lowers Que IO, arguments, filesystem operations, chunked input, and concrete
+It lowers Calque IO, arguments, filesystem operations, chunked input, and concrete
 serialization/deserialization to WASI. Use `--allow` to grant the corresponding
 capabilities. Install one of Wasmtime, Wasmer, or WAMR separately and make its
 CLI available on `PATH`. Wasmtime is the default; choose another with
@@ -400,7 +415,7 @@ is accepted too.
 Requirements:
 
 - A current stable Rust toolchain
-- A WASI runtime for executing Que programs (Wasmtime, Wasmer, or WAMR)
+- A WASI runtime for executing Calque programs (Wasmtime, Wasmer, or WAMR)
 - Wasmtime CLI specifically for running the repository's runtime tests
 - Node.js and npm for building the VS Code extension
 - Optional: WABT for WAT and native-C workflows
@@ -426,7 +441,7 @@ Run the cross-target differential corpus:
 ./scripts/test-differential.sh
 ```
 
-This generates a deterministic set of Que programs and checks that `--debug`,
+This generates a deterministic set of Calque programs and checks that `--debug`,
 `--opt`, and the `wasm2c`/native-C path have the same observable result. It
 also checks that a program which fails at runtime fails on every target. The
 runner needs Wasmtime, WABT's `wasm2c`, and `clang` or `cc`, so it remains
@@ -454,10 +469,10 @@ src/                optimizer, Wasm compiler, runtime, IO host, LSP, analysis
 miscs/neovim/       Neovim integration
 miscs/extension/    VS Code extension
 miscs/native-c/     optional wasm2c host
-examples/           example Que programs
+examples/           example Calque programs
 scripts/            build, install, and release helpers
 ```
 
 ## License
 
-Que is available under the [MIT License](LICENSE).
+Calque is available under the [MIT License](LICENSE).

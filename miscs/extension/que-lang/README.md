@@ -1,17 +1,17 @@
-### Eclisp language support for Que
+### Eclisp language support for Calque
 
-Eclisp is the Lisp-like language. Que is the toolchain that runs it, compiles it, explains it, and provides the language server.
+Eclisp is the Lisp-like language. Calque is the toolchain that runs it, compiles it, explains it, and provides the language server.
 
 This extension keeps the existing `.que` file extension and uses the `quelsp` binary for editor features.
 
-Requires the Que LSP binary (`quelsp`) to be installed or configured with:
+Requires the Calque LSP binary (`quelsp`) to be installed or configured with:
 
 ```json
 "que.languageServer.path": "/absolute/path/to/quelsp"
 ```
 
 By default the extension runs `quelsp` from `PATH`, matching other editors.
-Use **Que: Show Language Server** from the command palette to see the selected
+Use **Calque: Show Language Server** from the command palette to see the selected
 command. Set the path above (or `QUE_LSP_PATH`) for a checkout-specific binary.
 
 Works in:

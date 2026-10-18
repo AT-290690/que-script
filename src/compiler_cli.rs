@@ -94,7 +94,7 @@ enum EmitKind {
 }
 
 fn help() -> &'static str {
-    "que — Que compiler, tooling, and runner
+    "que — Calque compiler, tooling, and runner
 
 Usage:
   que <program.que> [program arguments...] [--opt|--debug] [--runtime <runtime>]
@@ -111,7 +111,7 @@ Usage:
   que --env
 
 Commands:
-  <program.que>       Compile then run a Que program through the selected WASI runtime.
+  <program.que>       Compile then run a Calque program through the selected WASI runtime.
   run-wasi            Explicit spelling of the default run command.
   compile             Emit a .wasm file without running it.
   wat                 Print readable WebAssembly text.
@@ -125,10 +125,10 @@ Commands:
 Running programs:
   `que hello.que` is the usual command. `run-wasi` exists when you want the
   runtime step to be explicit, such as `que run-wasi hello.que --opt`.
-  Que compiles to WASI WebAssembly and then invokes a runtime installed on your
+  Calque compiles to WASI WebAssembly and then invokes a runtime installed on your
   PATH: Wasmtime (default), Wasmer, or iwasm/WAMR. Choose one with
   `--runtime <name-or-path>` or `QUE_WASM_RUNTIME`. Pass filesystem permissions
-  to Que with `--allow read`, `--allow write`, or `--allow all`.
+  to Calque with `--allow read`, `--allow write`, or `--allow all`.
 
 Learning:
   que --learn          Quick language reference, including enums and Tables.
@@ -630,7 +630,7 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
         .first()
         .cloned()
         .ok_or_else(|| {
-            "run-wasi needs a Que source file.\n\nUsage: que run-wasi <program.que> [program arguments...] [--opt|--debug] [--runtime <runtime>]\n\nNormally you can omit `run-wasi`: `que <program.que>` compiles and runs it with Wasmtime (or the runtime selected by --runtime / QUE_WASM_RUNTIME). Run `que --help` for all commands."
+            "run-wasi needs a Calque source file.\n\nUsage: que run-wasi <program.que> [program arguments...] [--opt|--debug] [--runtime <runtime>]\n\nNormally you can omit `run-wasi`: `que <program.que>` compiles and runs it with Wasmtime (or the runtime selected by --runtime / QUE_WASM_RUNTIME). Run `que --help` for all commands."
                 .to_string()
         })?;
     args.remove(0);
@@ -754,7 +754,7 @@ fn runtime_failure_reason(stderr: &str, debug: bool) -> String {
         "a debug safety check trapped (check vector bounds, division by zero, and Int overflow)"
             .to_string()
     } else {
-        "the WebAssembly program trapped; rerun with --debug for Que safety checks".to_string()
+        "the WebAssembly program trapped; rerun with --debug for Calque safety checks".to_string()
     }
 }
 
@@ -910,7 +910,7 @@ mod runtime_adapter_tests {
     #[test]
     fn run_wasi_without_a_program_explains_the_default_command() {
         let error = run_wasi(Vec::new()).unwrap_err();
-        assert!(error.contains("needs a Que source file"), "{error}");
+        assert!(error.contains("needs a Calque source file"), "{error}");
         assert!(error.contains("que <program.que>"), "{error}");
         assert!(error.contains("que --help"), "{error}");
     }

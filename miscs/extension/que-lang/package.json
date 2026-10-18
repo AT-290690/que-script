@@ -1,8 +1,8 @@
 {
   "name": "que-lang",
-  "displayName": "Eclisp language support for Que",
+  "displayName": "Eclisp language support for Calque",
   "publisher": "anthony",
-  "description": "Eclisp syntax highlighting and IntelliSense for .que files powered by the Que toolchain.",
+  "description": "Eclisp syntax highlighting and IntelliSense for .que files powered by the Calque toolchain.",
   "version": "0.0.4",
   "main": "./extension.js",
   "icon": "logo.png",
@@ -26,7 +26,7 @@
         "id": "que",
         "aliases": [
           "Eclisp",
-          "Que",
+          "Calque",
           "que"
         ],
         "extensions": [
@@ -55,11 +55,11 @@
     "commands": [
       {
         "command": "que.restartLanguageServer",
-        "title": "Que: Restart Eclisp Language Server"
+        "title": "Calque: Restart Eclisp Language Server"
       },
       {
         "command": "que.showLanguageServer",
-        "title": "Que: Show Language Server"
+        "title": "Calque: Show Language Server"
       },
       {
         "command": "que.toggleLineComment",
@@ -75,7 +75,7 @@
       }
     ],
     "configuration": {
-      "title": "Eclisp Language Support for Que",
+      "title": "Eclisp Language Support for Calque",
       "properties": {
         "que.languageServer.path": {
           "type": "string",

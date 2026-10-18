@@ -59,7 +59,7 @@ mkdir -p "$output_dir"
 
 result_type="$("$que_bin" "$input_file" --emit types | sed -n 's/^result : //p' | tail -n 1)"
 if [ -z "$result_type" ]; then
-  echo "error: could not determine Que result type" >&2
+  echo "error: could not determine Calque result type" >&2
   exit 1
 fi
 

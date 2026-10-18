@@ -21,7 +21,7 @@ else
   exit 1
 fi
 
-echo "Building Que test compiler..."
+echo "Building Calque test compiler..."
 cargo build --bin que
 
 echo "Running deterministic debug/opt/wasm2c differential corpus..."

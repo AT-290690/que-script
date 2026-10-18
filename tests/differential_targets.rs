@@ -82,7 +82,7 @@ fn run_wasm(compiler: &Path, source: &Path, mode: &str) -> Outcome {
             .arg(mode)
             .env("QUE_WASM_RUNTIME", "wasmtime")
             .output()
-            .expect("Que should start Wasmtime"),
+            .expect("Calque should start Wasmtime"),
     )
 }
 
@@ -178,7 +178,7 @@ fn generated_programs_match_across_debug_opt_and_native_c() {
         "requires wasmtime, wasm2c, and clang or cc"
     );
     let compiler = compiler();
-    assert!(compiler.is_file(), "missing Que compiler: {}", compiler.display());
+    assert!(compiler.is_file(), "missing Calque compiler: {}", compiler.display());
     let temp = TempDir::new("targets");
 
     for (name, source) in generated_sources() {

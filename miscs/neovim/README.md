@@ -1,6 +1,6 @@
 # Neovim Support
 
-This folder contains a minimal Neovim integration for Que / Eclisp.
+This folder contains a minimal Neovim integration for Calque / Eclisp.
 
 It provides:
 
@@ -43,7 +43,7 @@ Quick install script:
 curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/main/scripts/install-nvim.sh | bash
 ```
 
-For a fresh Linux/SSH machine, the all-in-one bootstrap also installs Que,
+For a fresh Linux/SSH machine, the all-in-one bootstrap also installs Calque,
 `quelsp`, Wasmtime, Neovim, Telescope, and a portable starter config:
 
 ```bash
@@ -55,7 +55,7 @@ It preserves an existing `~/.config/nvim/init.lua`; set
 `QUE_NVIM_INIT_URL` to a URL before running the installer.
 
 To deliberately replace an old Neovim setup, deleting its config, plugin data,
-state, and cache before installing the managed Que workstation, use:
+state, and cache before installing the managed Calque workstation, use:
 
 ```bash
 curl -fsSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/AT-290690/que-script/main/scripts/install-all-linux.sh | env QUE_CLEAN_NVIM=1 QUE_OVERWRITE_NVIM=1 bash
@@ -112,7 +112,7 @@ require("que").setup({ completion_icons = false })
 ```
 
 The default glyphs use ordinary Unicode symbols and do not require a Nerd Font.
-Existing `on_attach` callbacks and `nvim-cmp` formatting are preserved and then decorated for Que buffers.
+Existing `on_attach` callbacks and `nvim-cmp` formatting are preserved and then decorated for Calque buffers.
 Inferred completion types are displayed alongside candidates by default; use
 `completion_type_hints = false` to hide that column.
 
@@ -128,9 +128,9 @@ Inside `que nvim`, these buffer-local commands and shortcuts save the scratch fi
 - `:QueSource` / `<leader>z`: optimized expanded source
 - `:QueLib` / `<leader>g`: enter a library glob (for example `map*` or `push!`), fuzzy-filter the matching type signatures, and press Enter to open the selected source
 
-The shortcuts use Space as the leader in the preconfigured Que scratch editor.
+The shortcuts use Space as the leader in the preconfigured Calque scratch editor.
 Normal and debug runs retain their original interactive terminal splits. Source and inferred
-types use Que highlighting, WAT uses WAT highlighting, and explanations use Markdown.
+types use Calque highlighting, WAT uses WAT highlighting, and explanations use Markdown.
 
 Default root markers:
 

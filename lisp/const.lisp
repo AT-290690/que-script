@@ -153,7 +153,7 @@
 
 (let &box (lambda value [ value ]))
 
-; Mulberry32 implemented in Que with explicit 32-bit unsigned arithmetic.
+; Mulberry32 implemented in Calque with explicit 32-bit unsigned arithmetic.
 ; Run:
 ;   que scripts/mulberry32.que
 ;   que scripts/mulberry32.que 1 5

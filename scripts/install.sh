@@ -51,5 +51,5 @@ sudo mv "/tmp/que-lib.lisp" "$LIB_PATH"
 echo "Installed library: $LIB_PATH"
 
 echo "Done (que and que-lib.lisp)."
-echo "To run Que, install a WASI runtime: wasmtime (default), wasmer, or iwasm/WAMR."
+echo "To run Calque, install a WASI runtime: wasmtime (default), wasmer, or iwasm/WAMR."
 echo "Select it with: que program.que --runtime <runtime>"

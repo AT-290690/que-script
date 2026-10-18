@@ -10,7 +10,7 @@ use std::path::Path;
 
 fn usage() -> String {
     "Usage: que-trs (--ml | --js | --clj) --s <source.que> [--d <output>]\n\
-     Transpiles a Que program after std merge, macro expansion, tree-shaking, and desugaring.\n\
+     Transpiles a Calque program after std merge, macro expansion, tree-shaking, and desugaring.\n\
      Examples:\n\
        que-trs --ml --s ./example/main.que --d ./example/dist/main.ml\n\
        que-trs --js --s ./example/main.que --d ./example/dist/main.js\n\

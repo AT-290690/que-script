@@ -12,7 +12,7 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/install-nvim-local-apple.sh
 
-Installs the local Que / Eclisp Neovim plugin from this checkout onto this macOS machine.
+Installs the local Calque / Eclisp Neovim plugin from this checkout onto this macOS machine.
 
 Installs:
   ~/.local/share/nvim/site/pack/que/start/que-nvim
@@ -53,7 +53,7 @@ echo "Source: ${PLUGIN_SOURCE_DIR}"
 echo "Target: ${INSTALL_ROOT}"
 
 if [ -d "$LEGACY_INSTALL_ROOT" ]; then
-  echo "Removing legacy Que plugin that would shadow the current install: $LEGACY_INSTALL_ROOT"
+  echo "Removing legacy Calque plugin that would shadow the current install: $LEGACY_INSTALL_ROOT"
   rm -rf "$LEGACY_INSTALL_ROOT"
 fi
 
