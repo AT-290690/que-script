@@ -12,6 +12,9 @@ Data: vectors [1 2 3], tuples {a b}, strings "text", characters 'x'.
 Control: (if test yes no), (cond test value ... default), (while test body...), (loop i test body...).
 Mutation: (push! xs x), (set! xs i x), (pop! xs), (empty! xs), (capacity! xs n), (&mut cell), (&alter! cell value).
 Pipelines pass data last: (|> xs (map f) (select pred)).
+Enums: (enum Letter A B C); values are compact typed tags, not Ints.
+Match enums exhaustively: (match letter A value-a B value-b C value-c), or use _ as the final default.
+Enums can be Table keys directly: (Table/set! points A 1), (Table/get A points); no string conversion occurs.
 Use (block ...) for lexical branch/loop scopes so repeated local names do not collide.
 Comments begin with ; and continue to the end of the line.
 Run `que --examples`, `que --style`, or `que --pitfalls` for more."#;

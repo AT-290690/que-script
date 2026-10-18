@@ -32,10 +32,6 @@
   (lambda con . body
     (qq (unless (uq con) (do (uqs body))))))
 
-(letmacro sig
-  (lambda name typ
-    (qq (letype (uq name) (uq typ)))))
-
 ; Mutable cells are ordinary one-element vectors. Keeping this sugar here
 ; makes the representation explicit without reserving parser forms.
 (letmacro &mut

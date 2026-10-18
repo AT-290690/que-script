@@ -2161,7 +2161,7 @@ impl InferenceContext {
             .is_some()
         {
             return Err(format!(
-                "letype for '{}' must appear before its binding in the same scope",
+                "sig for '{}' must appear before its binding in the same scope",
                 name
             ));
         }
@@ -2170,7 +2170,7 @@ impl InferenceContext {
         };
         if scope.contains_key(&name) {
             return Err(format!(
-                "letype for '{}' already declared in this scope",
+                "sig for '{}' already declared in this scope",
                 name
             ));
         }
@@ -2280,7 +2280,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "mut" => infer_mut(&exprs, ctx),
                     "letrec" => infer_rec(&exprs, ctx),
                     "extern" => infer_extern(&exprs, ctx),
-                    "letype" => infer_letype(&exprs, ctx),
+                    "sig" => infer_sig(&exprs, ctx),
                     "enum" => infer_enum(&exprs, ctx),
                     "match" => infer_match(&exprs, ctx),
                     "alter!" => infer_alter(&exprs, ctx),
@@ -2462,9 +2462,9 @@ fn infer_extern(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
     Ok(Type::Unit)
 }
 
-fn infer_letype(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+fn infer_sig(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let [Expression::Word(_kw), Expression::Word(local_name), type_expr] = exprs else {
-        return Err("letype expects: (letype name Type)".to_string());
+        return Err("sig expects: (sig name Type)".to_string());
     };
     let typ = parse_type_hint(type_expr, ctx)?;
     ctx.declare_type(local_name.clone(), typ)?;
@@ -3409,7 +3409,7 @@ fn infer_do(
             .find(|(name, (_typ, used))| !declared_before.contains(*name) && !*used)
         {
             return Err(format!(
-                "letype for '{}' has no matching binding in this scope",
+                "sig for '{}' has no matching binding in this scope",
                 name
             ));
         }

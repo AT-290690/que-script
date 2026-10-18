@@ -1024,7 +1024,7 @@ fn is_special_word(w: &str) -> bool {
             | "if"
             | "match"
             | "enum"
-            | "letype"
+            | "sig"
             | "vector"
             | "string"
             | "integers"
@@ -1177,7 +1177,7 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     }
                     return;
                 }
-                if op == "letype" {
+                if op == "sig" {
                     return;
                 }
                 if op == "enum" {
@@ -14115,7 +14115,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(emit_direct_builder_scalar_store_i32(&xs, &idx, &value, ctx))
                         }
-                        "extern" | "letype" | "enum" => Ok("i32.const 0".to_string()),
+                        "extern" | "sig" | "enum" => Ok("i32.const 0".to_string()),
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
                         }

@@ -9,7 +9,7 @@ This folder is intentionally small and standalone. It contains:
 - core types
 - Hindley-Milner type inference
 - effect inference and validation that is part of type checking
-- extern and `letype` declaration parsing
+- extern declarations and native `sig` signatures
 
 It does not contain:
 

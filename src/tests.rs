@@ -7324,10 +7324,10 @@ add-one!"#;
     }
 
     #[test]
-    fn test_wasm_lsp_hover_letype_declaration_name_shows_signature() {
-        let program = r#"(letype add (Int -> Int -> Int))
+    fn test_wasm_lsp_hover_sig_declaration_name_shows_signature() {
+        let program = r#"(sig add (Int -> Int -> Int))
 (let add (lambda (a b) (+ a b)))"#;
-        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 0, 10);
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 0, 6);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
 
@@ -7338,7 +7338,7 @@ add-one!"#;
 
         assert!(
             contents.contains("add : Int -> Int -> Int"),
-            "expected letype declaration hover type info, got: {}",
+            "expected sig declaration hover type info, got: {}",
             contents
         );
     }
@@ -7413,10 +7413,10 @@ fn"#;
     }
 
     #[test]
-    fn test_letype_function_signature_matches_inferred_lambda_type() {
+    fn test_sig_function_signature_matches_inferred_lambda_type() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype add (Int -> Int -> Int))
+                    (sig add (Int -> Int -> Int))
                     (let add (lambda (a b) (+ a b)))
                     (add 1 2))"#,
         )
@@ -7426,19 +7426,19 @@ fn"#;
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
-        .expect("matching letype should infer successfully");
+        .expect("matching sig should infer successfully");
 
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
         assert!(
             !wat.contains("Unsupported free word"),
-            "letype should not survive as a runtime dependency, got:\n{}",
+            "sig should not survive as a runtime dependency, got:\n{}",
             wat
         );
     }
 
     #[test]
-    fn test_baked_sig_macro_expands_to_letype_and_matches_inferred_lambda_type() {
+    fn test_baked_native_sig_matches_inferred_lambda_type() {
         let std_ast = crate::baked::load_ast();
         let defs = crate::baked::ast_to_definitions(std_ast, "active library")
             .expect("active library definitions should load");
@@ -7460,8 +7460,8 @@ fn"#;
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
         assert!(
-            !wat.contains("sig") && !wat.contains("letype"),
-            "sig should desugar away before runtime codegen, got:\n{}",
+            !wat.contains("sig"),
+            "sig should not survive runtime codegen, got:\n{}",
             wat
         );
     }
@@ -7493,26 +7493,21 @@ fn"#;
     }
 
     #[test]
-    fn test_sig_is_an_ordinary_user_overridable_macro_name() {
-        let expr = crate::parser::build(
+    fn test_sig_is_a_reserved_language_form() {
+        let _err = crate::parser::build(
             r#"(do
                 (letmacro sig (lambda name ignored-type (qq (let (uq name) 42))))
                 (sig answer Int)
                 answer)"#,
         )
-        .expect("a user sig macro should be accepted");
-        let rendered = expr.to_lisp();
-        assert!(
-            !rendered.contains("(sig ") && rendered.contains("(let answer 42)"),
-            "sig should expand as an ordinary macro, got: {rendered}"
-        );
+        .expect_err("a user sig macro must be rejected");
     }
 
     #[test]
-    fn test_letype_function_signature_mismatch_errors_naturally() {
+    fn test_sig_function_signature_mismatch_errors_naturally() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype add (Int -> Int -> Int))
+                    (sig add (Int -> Int -> Int))
                     (let add (lambda (a b) (and a b)))
                     (add 1 2))"#,
         )
@@ -7522,7 +7517,7 @@ fn"#;
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
-        .expect_err("mismatched letype should fail");
+        .expect_err("mismatched sig should fail");
         assert!(
             err.contains("Signature mismatch for 'add'"),
             "expected signature mismatch header, got: {}",
@@ -7547,27 +7542,27 @@ fn"#;
     }
 
     #[test]
-    fn test_letype_without_matching_binding_errors() {
-        let expr = crate::parser::build(r#"(do (letype add (Int -> Int -> Int)) 0)"#)
+    fn test_sig_without_matching_binding_errors() {
+        let expr = crate::parser::build(r#"(do (sig add (Int -> Int -> Int)) 0)"#)
             .expect("program should build");
 
         let err = crate::infer::infer_with_builtins_typed(
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
-        .expect_err("unmatched letype should fail");
+        .expect_err("unmatched sig should fail");
         assert!(
             err.contains("no matching binding"),
-            "expected unmatched letype error, got: {}",
+            "expected unmatched sig error, got: {}",
             err
         );
     }
 
     #[test]
-    fn test_letype_non_function_value_mismatch_uses_declared_vs_inferred_message() {
+    fn test_sig_non_function_value_mismatch_uses_declared_vs_inferred_message() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype xs [Int])
+                    (sig xs [Int])
                     (let xs ["a" "b"])
                     xs)"#,
         )
@@ -7577,7 +7572,7 @@ fn"#;
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
-        .expect_err("mismatched letype should fail");
+        .expect_err("mismatched sig should fail");
         assert!(
             err.contains("Signature mismatch for 'xs'"),
             "expected signature mismatch header, got: {}",
@@ -7603,10 +7598,10 @@ fn"#;
     }
 
     #[test]
-    fn test_letype_non_function_value_match_still_infers() {
+    fn test_sig_non_function_value_match_still_infers() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype xs [Int])
+                    (sig xs [Int])
                     (let xs [1 2 3])
                     xs)"#,
         )
@@ -7616,14 +7611,14 @@ fn"#;
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
-        .expect("matching non-function letype should infer successfully");
+        .expect("matching non-function sig should infer successfully");
     }
 
     #[test]
-    fn test_letype_allows_wildcard_underscore_in_function_signature() {
+    fn test_sig_allows_wildcard_underscore_in_function_signature() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype xs (Int -> _ -> Int))
+                    (sig xs (Int -> _ -> Int))
                     (let xs (lambda (x y) 20))
                     (xs 1 true))"#,
         )
@@ -7637,10 +7632,10 @@ fn"#;
     }
 
     #[test]
-    fn test_letype_wildcard_underscore_still_enforces_constrained_slots() {
+    fn test_sig_wildcard_underscore_still_enforces_constrained_slots() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype xs (Int -> _ -> Bool))
+                    (sig xs (Int -> _ -> Bool))
                     (let xs (lambda (x y) 20))
                     (xs 1 true))"#,
         )
@@ -7669,10 +7664,10 @@ fn"#;
     }
 
     #[test]
-    fn test_letype_reuses_named_generic_type_variables_within_one_signature() {
+    fn test_sig_reuses_named_generic_type_variables_within_one_signature() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype pair-same (T -> T -> { T T }))
+                    (sig pair-same (T -> T -> { T T }))
                     (let pair-same (lambda (a b) { a b }))
                     (pair-same 1 true))"#,
         )
@@ -7692,10 +7687,10 @@ fn"#;
     }
 
     #[test]
-    fn test_letype_reuses_named_generic_inside_vector_type() {
+    fn test_sig_reuses_named_generic_inside_vector_type() {
         let ok_expr = crate::parser::build(
             r#"(do
-                    (letype head ([T] -> T))
+                    (sig head ([T] -> T))
                     (let head (lambda (xs) (car xs)))
                     (head [1 2 3]))"#,
         )
@@ -7709,7 +7704,7 @@ fn"#;
 
         let bad_expr = crate::parser::build(
             r#"(do
-                    (letype bad-head ([T] -> T))
+                    (sig bad-head ([T] -> T))
                     (let bad-head (lambda (xs) true))
                     (bad-head [1 2 3]))"#,
         )
@@ -7729,10 +7724,10 @@ fn"#;
     }
 
     #[test]
-    fn test_letype_rejects_value_when_named_generic_requires_vector() {
+    fn test_sig_rejects_value_when_named_generic_requires_vector() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype add (Int -> T -> Int -> { Int [T] }))
+                    (sig add (Int -> T -> Int -> { Int [T] }))
                     (let add (lambda (x f y) { (+ x y) f }))
                     add)"#,
         )
@@ -7753,10 +7748,10 @@ fn"#;
     }
 
     #[test]
-    fn test_letype_rejects_identity_when_return_must_be_vector_of_same_generic() {
+    fn test_sig_rejects_identity_when_return_must_be_vector_of_same_generic() {
         let expr = crate::parser::build(
             r#"(do
-                    (letype fn (T -> [T]))
+                    (sig fn (T -> [T]))
                     (let fn (lambda (x) x))
                     fn)"#,
         )
@@ -7976,7 +7971,7 @@ fn"#;
         let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
         let expr = crate::parser::build(
             r#"(do
-                (letype value {Int {Dec {Bool {Char {[Int] [Char]}}}}})
+                (sig value {Int {Dec {Bool {Char {[Int] [Char]}}}}})
                 (let value (deserialize "{ 42 { -3.25 { true { (char 120) { [1 2 3] \"ok\" } } } } }"))
                 (serialize value))"#,
         )

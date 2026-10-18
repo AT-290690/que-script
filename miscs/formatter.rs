@@ -141,7 +141,7 @@ fn prefix_count(open: char, items: &[Form]) -> usize {
         return 0;
     }
     match head(items) {
-        "let" | "letrec" | "mut" | "sig" | "letype" => 3,
+        "let" | "letrec" | "mut" | "sig" => 3,
         "lambda" => 2,
         "if" => 3,
         "while" => 2,

@@ -42,8 +42,8 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                 }
                 if op == "do" {
                     for it in &exprs[1..] {
-                        if let Expression::Apply(letype_items) = it {
-                            if matches!(letype_items.first(), Some(Expression::Word(w)) if w == "letype")
+                        if let Expression::Apply(sig_items) = it {
+                            if matches!(sig_items.first(), Some(Expression::Word(w)) if w == "sig")
                             {
                                 continue;
                             }
@@ -83,7 +83,7 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                     }
                     return;
                 }
-                if op == "letype" {
+                if op == "sig" {
                     return;
                 }
                 if op == "enum" {
@@ -157,7 +157,7 @@ fn tree_shake(
         if let Some(def) = index.get(name) {
             if let Expression::Apply(list) = def {
                 if list.len() >= 3 {
-                    if !matches!(list.first(), Some(Expression::Word(kw)) if kw == "letype") {
+                    if !matches!(list.first(), Some(Expression::Word(kw)) if kw == "sig") {
                         let mut deps = HashSet::new();
                         let mut scoped = HashSet::new();
                         collect_free_idents(&list[2], &mut scoped, &mut deps);
@@ -771,7 +771,7 @@ fn split_macro_definitions(
                     (items.first(), items.get(1))
                 {
                     if kw == "letmacro" {
-                        if matches!(name.as_str(), "letype" | "enum" | "match") {
+                        if matches!(name.as_str(), "sig" | "enum" | "match") {
                             return Err(format!(
                                 "Macro name '{}' is reserved by the language",
                                 name
@@ -785,7 +785,7 @@ fn split_macro_definitions(
             }
             if let [Expression::Word(kw), Expression::Word(name), _rhs] = &items[..] {
                 if kw == "letmacro" {
-                    if matches!(name.as_str(), "letype" | "enum" | "match") {
+                    if matches!(name.as_str(), "sig" | "enum" | "match") {
                         return Err(format!("Macro name '{}' is reserved by the language", name));
                     }
                     let macro_def = parse_macro_definition(&items[2..], name)?;
@@ -2679,7 +2679,7 @@ fn rename_block_sequence_item(
                 renamed_rhs,
             ]);
         }
-        if kw == "letype" {
+        if kw == "sig" {
             let fresh = names
                 .entry(name.clone())
                 .or_insert_with(|| fresh_block_binding(name, binding_counter))
@@ -3157,7 +3157,7 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                 || kw == "letrec"
                                 || kw == "mut"
                                 || kw == "extern"
-                                || kw == "letype"
+                                || kw == "sig"
                                 || kw == "enum")
                                 && matches!(name, Some(Expression::Word(_)))
                             {

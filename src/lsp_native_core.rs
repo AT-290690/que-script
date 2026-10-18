@@ -437,7 +437,7 @@ fn estimate_syntax_effect(
                         effect |= estimate_syntax_effect(body, known_effects);
                     }
                 }
-                Some(Expression::Word(op)) if op == "letype" || op == "extern" || op == "enum" => {}
+                Some(Expression::Word(op)) if op == "sig" || op == "extern" || op == "enum" => {}
                 Some(Expression::Word(op)) => {
                     for item in items.iter().skip(1) {
                         effect |= estimate_syntax_effect(item, known_effects);

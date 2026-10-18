@@ -171,7 +171,12 @@ impl Type {
     }
     pub fn substitute(&self, subst: &HashMap<u64, Type>) -> Type {
         match self {
-            Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => {
+            Type::Int
+            | Type::Dec
+            | Type::Bool
+            | Type::Char
+            | Type::Enum(_)
+            | Type::Unit => {
                 self.clone()
             }
             Type::Var(v) => {
@@ -203,7 +208,12 @@ impl Type {
 
     fn collect_free_vars(&self, vars: &mut std::collections::HashSet<u64>) {
         match self {
-            Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => {}
+            Type::Int
+            | Type::Dec
+            | Type::Bool
+            | Type::Char
+            | Type::Enum(_)
+            | Type::Unit => {}
             Type::Var(v) => {
                 vars.insert(v.id);
             }
