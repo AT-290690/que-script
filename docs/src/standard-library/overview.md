@@ -16,9 +16,10 @@ que --lib types 'map*'
 que --lib source Table/update!
 ```
 
-This is the authoritative API reference between releases. The pages in this
-chapter explain the families and conventions rather than duplicating hundreds
-of signatures that could drift.
+This is the authoritative API reference between releases. Start with
+[Functions by example](by-example.md) for copyable everyday use, then use the
+[complete library index](index.md) and the live query when you need a
+specialist or implementation-level name.
 
 ## Naming and argument order
 
@@ -51,4 +52,5 @@ of signatures that could drift.
 | Numbers | decimal helpers, bit operations, random, BigInt and SignedBigInt |
 | Meta and utility | dates, parsing helpers, test helpers, constants |
 
-The following pages cover the most important usage patterns.
+The following pages cover the most important usage patterns and the complete
+public library families.

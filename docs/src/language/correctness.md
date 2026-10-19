@@ -41,12 +41,21 @@ be empty. A warning is not necessarily a bug: it says a proof was unavailable.
 ## Arithmetic
 
 `Int` is signed `i32`. The analyser tracks ranges where it can and warns about
-possible overflow, underflow, division by zero, and unsafe squares. Guard a
-calculation with the matching predicate:
+possible overflow, underflow, division by zero, and unsafe squares. Use the
+matching predicate in a value-producing `if`:
 
 ```que
-(when (+/safe? left right)
-  (+ left right))
+(if (+/safe? left right)
+    (+ left right)
+    fallback)
+```
+
+`when` is for effect-only bodies: its false branch is `nil`, so its body must
+also produce `nil`. It is appropriate when the guarded operation is a mutation:
+
+```que
+(when (+/safe? total amount)
+  (alter! total (+ total amount)))
 ```
 
 Debug execution additionally inserts runtime guards for configured checks;

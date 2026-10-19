@@ -1,0 +1,24 @@
+; use-strict-warnings!
+; How many routes go from the top-left to the bottom-right of a 10 x 10 grid
+; when each step goes only right or down?
+;
+; This is dynamic programming in one vector. `capacity!` reserves its backing
+; storage once; the inner loop then updates it in place.
+
+(let SIZE 10)
+
+(let paths (capacity (+ SIZE 1) []))
+
+(loop i (<= i SIZE)
+  (push! paths 1))
+
+(loop row (< row SIZE)
+  (loop/for col 1 (<= col SIZE) (++ col)
+    (let left (get paths (- col 1)))
+    (let current (get paths col))
+    ; The guard proves the addition cannot wrap in an Int.
+    (when (+/safe? current left)
+      (set! paths col (+ current left)))))
+
+; 184756
+(get paths (- (length paths) 1))

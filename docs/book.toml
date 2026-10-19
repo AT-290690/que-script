@@ -1,5 +1,5 @@
 [book]
-title = "Calque — a typed Lisp for WebAssembly"
+title = "The Calque Scripting Language"
 authors = ["Anthony Tonev"]
 language = "en"
 src = "src"

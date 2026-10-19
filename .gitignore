@@ -31,4 +31,13 @@ node_modules
 
 scripts/deprecated/
 miscs/extension/que-lang/*.vsix
-examples
+# Most of `examples/` is local scratch material or generated benchmark output.
+# Keep the curated demo programs and the mdBook example pages versioned.
+examples/*
+!examples/demo/
+examples/demo/*
+!examples/demo/03-grid-paths.que
+!examples/demo/04-enum-table-round-trip.que
+!docs/src/examples/
+!docs/src/examples/grid-paths.md
+!docs/src/examples/enum-table-serialization.md

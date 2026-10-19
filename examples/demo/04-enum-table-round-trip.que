@@ -1,0 +1,22 @@
+; A closed enum can be used as a typed hash-table key and survives
+; serialize/deserialize when the destination type is declared.
+
+(enum Shape Rock Paper Scissors)
+
+(sig points [[{ Shape Int }]])
+(let points (Table/new))
+(Table/set! points Rock 1)
+(Table/set! points Scissors 2)
+
+(let text (serialize points))
+
+; `deserialize` needs a concrete expected type.
+(sig restored [[{ Shape Int }]])
+(let restored (deserialize text))
+
+(let score (Table/get-unsafe Rock restored))
+
+(match Rock
+  Rock score
+  Paper 0
+  Scissors 0)

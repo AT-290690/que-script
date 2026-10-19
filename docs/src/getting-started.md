@@ -1,23 +1,8 @@
 # Getting started
 
-## Install the compiler and a runtime
-
-Calque emits WASI WebAssembly. The `que` command needs a compatible runtime on
-`PATH` to execute a program: `wasmtime` is the default; `wasmer` and
-`iwasm`/WAMR are also supported.
-
-Install the CLI and bundled library on Linux or macOS:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/refs/heads/main/scripts/install.sh | bash
-```
-
-Then install your chosen WASI runtime. Select a non-default runtime per run:
-
-```sh
-que hello.que --runtime wasmer
-que hello.que --runtime /path/to/iwasm
-```
+Install Calque, a WASI runtime, the language server, and optional editor
+integration by following [Installation](installation.md). Once `que` is on
+your `PATH`, continue here.
 
 ## First program
 

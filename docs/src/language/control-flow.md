@@ -20,7 +20,9 @@ All control forms are expressions.
 ```
 
 `cond` tests each condition in order. Its last unpaired expression is the
-default branch. `when`, `when-not`, and `unless` are bundled macros.
+default branch. `when`, `when-not`, and `unless` are bundled macros. `when`
+and `when-not` are for effects: their implicit false branch is `nil`, so use
+`if` or `cond` when both branches must produce a useful value.
 
 ## `while` and `loop`
 
