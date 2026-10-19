@@ -29,10 +29,9 @@ que program.que --allow read print
 runtime exposes the current working directory to the Wasm program when a file
 permission is granted.
 
-## Streaming input
+## Callback input
 
-For large input, avoid allocating the full file when a callback can process it
-incrementally:
+The callback forms process chunks or lines without building an output vector:
 
 ```que
 (read/lines! "input.txt"
@@ -41,9 +40,15 @@ incrementally:
     false))
 ```
 
-The callback returns a `Bool`; use it to control the streaming operation as
-documented by the function’s live signature. Query the installed library when
-using chunked or line APIs:
+The callback returns a `Bool`: `false` continues and `true` stops early. The
+operation returns whether it stopped early. `read/chunks!` and
+`stdin/chunks!` require a positive chunk size.
+
+The current external WASI adapter reads the source input before splitting it
+for these callbacks, while a native-C or embedding host can stream directly.
+The callback API is still useful for early exit and for avoiding a separate
+vector of every line or chunk. Query the installed library when using these
+APIs:
 
 ```sh
 que --lib types 'read/*'

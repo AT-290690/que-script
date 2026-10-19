@@ -34,6 +34,8 @@ many safety and optimization facts it proves.
 - Lexical closures, recursion, partial application, macro expansion, and
   data-last functional APIs.
 - Mutable locals and mutable vectors with direct loop constructs.
+- Deterministic reference-counted memory for vectors, tuples, and closures;
+  source-level reference cycles are rejected.
 - Fixed-size `Int` arithmetic, fixed-point `Dec`, and compact closed enums.
 - Static warnings for likely out-of-bounds access, empty-vector operations,
   unsafe arithmetic, and termination facts that could not be proven.

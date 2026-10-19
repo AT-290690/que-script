@@ -43,6 +43,43 @@ specific function type for the accepted key kind:
 que --lib types 'Set/*'
 ```
 
+### Set algebra
+
+`Set/intersection`, `Set/union`, `Set/difference`, and `Set/xor` each create a
+new set; neither input set is changed. Let `A = {"red", "blue", "green"}`
+and `B = {"green", "gold"}`:
+
+<img class="set-algebra-diagram" src="../images/set-algebra.svg" alt="Venn diagrams for intersection, union, difference, and xor">
+
+| Operation | Mathematical meaning | With `A` and `B` |
+|---|---|---|
+| `(Set/intersection A B)` | values in both sets, `A ∩ B` | `{"green"}` |
+| `(Set/union A B)` | values in either set, `A ∪ B` | `{"red", "blue", "green", "gold"}` |
+| `(Set/difference A B)` | values in the first but not the second, `A \ B` | `{"red", "blue"}` |
+| `(Set/xor A B)` | values in exactly one input, `(A \ B) ∪ (B \ A)` | `{"red", "blue", "gold"}` |
+
+```que
+(let A (Vector->Set ["red" "blue" "green"]))
+(let B (Vector->Set ["green" "gold"]))
+
+(let common (Set/intersection A B))
+(let all (Set/union A B))
+(let only-A (Set/difference A B))
+(let exclusive (Set/xor A B))
+
+{ (Set/has? "green" common)    ; true
+  (Set/has? "red" common)      ; false
+  (Set/has? "gold" all)        ; true
+  (Set/has? "blue" only-A)     ; true
+  (Set/has? "green" exclusive)} ; false
+```
+
+`Set/difference` is directional: swapping its arguments changes the result.
+`Set/xor` is symmetric, so `(Set/xor A B)` and `(Set/xor B A)` contain the
+same members. A set's bucket layout does not promise a presentation order; if
+you need a deterministic displayed vector, convert with `Set->Vector` and sort
+the result.
+
 ## Heap and deque
 
 `Heap/*` implements a mutable binary heap using a caller-supplied comparison

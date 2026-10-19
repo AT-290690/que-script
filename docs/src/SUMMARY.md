@@ -14,6 +14,7 @@
 - [Vectors, tuples, strings, and characters](language/collections.md)
 - [Enums and matching](language/enums.md)
 - [Mutation and capacity](language/mutation.md)
+- [Memory management and ownership](language/memory.md)
 - [Pipelines and composition](language/pipelines.md)
 - [Macros](language/macros.md)
 - [Inference and signatures](language/type-inference.md)

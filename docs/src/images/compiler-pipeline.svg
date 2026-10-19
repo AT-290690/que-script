@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 330" role="img" aria-labelledby="title desc">
+  <title id="title">Calque compiler and execution pipeline</title>
+  <desc id="desc">Calque source moves through parsing and macros, type inference, static analysis and optimization, WAT, and Wasm. The Wasm output can run through a WASI runtime or through wasm2c and a C compiler.</desc>
+  <defs>
+    <style>
+      .stage { fill: #313244; stroke: #89b4fa; stroke-width: 2; rx: 10; }
+      .output { fill: #313244; stroke: #a6e3a1; stroke-width: 2; rx: 10; }
+      .title { font: 600 18px system-ui, sans-serif; fill: #cdd6f4; }
+      .label { font: 600 14px system-ui, sans-serif; fill: #cdd6f4; }
+      .detail { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #bac2de; }
+      .arrow { fill: none; stroke: #89b4fa; stroke-width: 2.5; marker-end: url(#arrow); }
+      .branch { fill: none; stroke: #a6e3a1; stroke-width: 2.5; marker-end: url(#arrow-good); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#89b4fa" /></marker>
+    <marker id="arrow-good" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#a6e3a1" /></marker>
+  </defs>
+
+  <text class="title" x="540" y="32" text-anchor="middle">Calque compilation and execution</text>
+
+  <rect class="stage" x="24" y="78" width="140" height="76" />
+  <text class="label" x="94" y="109" text-anchor="middle">Calque source</text>
+  <text class="detail" x="94" y="130" text-anchor="middle">.que</text>
+
+  <rect class="stage" x="206" y="78" width="166" height="76" />
+  <text class="label" x="289" y="106" text-anchor="middle">Parser + macros</text>
+  <text class="detail" x="289" y="128" text-anchor="middle">expanded source</text>
+
+  <rect class="stage" x="414" y="78" width="166" height="76" />
+  <text class="label" x="497" y="106" text-anchor="middle">Type inference</text>
+  <text class="detail" x="497" y="128" text-anchor="middle">typed AST</text>
+
+  <rect class="stage" x="622" y="78" width="184" height="76" />
+  <text class="label" x="714" y="101" text-anchor="middle">Proofs + optimizer</text>
+  <text class="detail" x="714" y="124" text-anchor="middle">bounds · effects</text>
+  <text class="detail" x="714" y="141" text-anchor="middle">fusion</text>
+
+  <rect class="stage" x="848" y="78" width="104" height="76" />
+  <text class="label" x="900" y="106" text-anchor="middle">WAT</text>
+  <text class="detail" x="900" y="128" text-anchor="middle">Wasm text</text>
+
+  <rect class="stage" x="976" y="78" width="80" height="76" />
+  <text class="label" x="1016" y="106" text-anchor="middle">Wasm</text>
+  <text class="detail" x="1016" y="128" text-anchor="middle">.wasm</text>
+
+  <path class="arrow" d="M164 116 H205" />
+  <path class="arrow" d="M372 116 H413" />
+  <path class="arrow" d="M580 116 H621" />
+  <path class="arrow" d="M806 116 H847" />
+  <path class="arrow" d="M952 116 H975" />
+
+  <rect class="output" x="660" y="228" width="230" height="70" />
+  <text class="label" x="775" y="255" text-anchor="middle">WASI runtime</text>
+  <text class="detail" x="775" y="276" text-anchor="middle">Wasmtime · Wasmer · WAMR</text>
+
+  <rect class="output" x="906" y="228" width="150" height="70" />
+  <text class="label" x="981" y="255" text-anchor="middle">wasm2c + C</text>
+  <text class="detail" x="981" y="276" text-anchor="middle">native executable</text>
+
+  <path class="branch" d="M1016 155 V184 H775 V227" />
+  <path class="branch" d="M1016 155 V227" />
+  <text class="detail" x="480" y="202" text-anchor="middle">one Calque front end; two execution back ends</text>
+</svg>

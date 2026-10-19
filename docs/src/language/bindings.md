@@ -33,13 +33,23 @@ Tuple and vector patterns can bind components directly:
 ```
 
 Vector destructuring has the usual shape constraint: a fixed pattern such as
-`[first second]` requires the vector to contain those elements. The analyser
-may warn when it cannot prove that fact. Rest patterns are available in lambda
-parameter patterns:
+`[a b]` requires the vector to contain those elements. The analyser
+may warn when it cannot prove that fact. A final `. rest` binding works in
+both `let` and lambda vector patterns:
 
 ```que
-(let head (lambda ([x . xs]) x))
+(let [a b . rest] [10 20 30 40])
+a    ; 10
+b    ; 20
+rest ; [30 40]
+
+(let get-head (lambda ([x . xs]) x))
 ```
+
+The names before `.` bind fixed positions. `rest` is the same tail window as
+`(cdr vector fixed-position-count)`: it begins after those positions without
+initially copying the remaining values. It materializes independently if you
+mutate it. The rest pattern must be final and can bind one name only.
 
 ## Scope
 

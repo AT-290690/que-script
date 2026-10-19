@@ -497,13 +497,21 @@
 
 (let unique/int (lambda xs
     (if (= (length xs) 0)
-        [(+ (get xs 0) 0)]
-        (<| xs (map (lambda x [(as x Char)])) (Vector->Set) (Set->Vector) (map (lambda x (as (get x 0) Int)))))))
+        xs
+        (|> xs
+            (map (lambda (x) [(as x Char)]))
+            Vector->Set
+            Set->Vector
+            (map (lambda (x) (as (get x 0) Int)))))))
 
 (let unique/char (lambda xs
     (if (= (length xs) 0)
         xs
-        (<| xs (map (lambda x [x])) (Vector->Set) (Set->Vector) (map (lambda x (get x 0)))))))
+        (|> xs
+            (map (lambda (x) [x]))
+            Vector->Set
+            Set->Vector
+            (map (lambda (x) (get x 0)))))))
 
 (let neighborhood/diagonal [ [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
 

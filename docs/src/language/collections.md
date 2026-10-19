@@ -23,7 +23,8 @@ The basic operations are:
 | `(pop! xs)` | remove the final element |
 | `(pop-val! xs)` | remove and return the final element |
 | `(empty! xs)` | set length to zero while retaining allocated capacity |
-| `(car xs)`, `(cdr xs)` | first element and tail-style view/copy API |
+| `(car xs)` | first element; equivalent to `(get xs 0)` |
+| `(cdr xs)`, `(cdr xs n)` | tail window from offset `1` or explicit offset `n` |
 
 `get` is guarded in debug mode when the compiler cannot prove the access safe.
 Optimized code relies on the established invariant, so write an explicit guard
@@ -33,6 +34,12 @@ or structure the loop so that the proof is obvious:
 (loop i (< i (length xs))
   (println! (get xs i)))
 ```
+
+`cdr` initially shares the source vector's backing storage and shifts the
+logical start index; it does not copy every tail. Mutating that result
+materializes an independent vector, so it cannot change the original. See
+[Functions by example](../standard-library/by-example.md#car-cdr-and-tail-windows)
+for a complete example and the retention trade-off.
 
 ## Tuples
 

@@ -32,19 +32,23 @@ introduces and updates its named counter for you:
 ```que
 (mut i 0)
 (while (< i 3)
-  (println! i)
+  (println! (Integer->String i))
   (++ i))
 
 (loop i (< i 3)
-  (println! i))
+  (println! (Integer->String i)))
 ```
+
+`println!` has type `[Char] -> ()`: convert an `Int` with
+`Integer->String`, or build text with functions such as `join`.
 
 There are library macros for common forms:
 
 ```que
-(loop/for i 1 (<= i 10) (++ i) (println! i))
-(loop/in value [10 20 30] (println! value))
-(loop/in/i (value index) [10 20] (println! {index value}))
+(loop/for i 1 (<= i 10) (++ i) (println! (Integer->String i)))
+(loop/in value [10 20 30] (println! (Integer->String value)))
+(loop/in/i index value [10 20]
+  (println! (join ":" [(Integer->String index) (Integer->String value)])))
 (times 3 (println! "tick"))
 ```
 

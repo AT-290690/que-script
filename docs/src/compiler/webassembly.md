@@ -5,6 +5,8 @@ Calque lowers its typed AST into WebAssembly. Core scalar values fit the Wasm
 scalar lowering. Managed collections and closures use the runtime’s reference
 counted representation.
 
+<img class="explanatory-diagram" src="../images/compiler-pipeline.svg" alt="Calque source through parsing, macros, inference, analysis, optimization, WAT, Wasm, and two execution paths">
+
 ## Wasm32 today
 
 The default target is Wasm32: linear-memory addresses and array indexes in the

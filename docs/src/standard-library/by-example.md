@@ -35,6 +35,32 @@ same basic read operations work on both.
 (cons [0] xs)           ; [0 10 20 30] — concatenate two vectors
 ```
 
+### `car`, `cdr`, and tail windows
+
+`car` reads the first element: it is the head-oriented spelling of
+`(get xs 0)`. `cdr` creates a **tail window**. `(cdr xs)` starts at offset
+`1`; `(cdr xs n)` starts at offset `n`. The window has its own logical index
+zero, so it is useful for head-and-tail recursion without copying every tail.
+
+```que
+(let xs [10 20 30 40])
+(let tail (cdr xs 2))
+
+(get tail 0)            ; 30
+(length tail)           ; 2
+
+(set! tail 0 99)
+{xs tail}
+; { [10 20 30 40] [99 40] }
+```
+
+Initially, a `cdr` result shares the source vector's backing storage. The
+first mutation of the tail materializes an independent vector, so changing
+`tail` does not change `xs`. Conversely, retaining a small tail also retains
+the original allocation until the tail is released or materialized. Use
+`slice` when a fresh copied subvector is the clearer or more appropriate
+representation.
+
 `get`, `car`, `first`, `last`, and `pop-val!` require a valid, non-empty
 input. For a dynamic index, use `in-bounds?`, `Vector/get*`, or structure the
 loop so the analyser can prove the access.

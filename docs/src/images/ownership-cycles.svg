@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" role="img" aria-labelledby="title desc">
+  <title id="title">Calque ownership cycles versus graphs represented with IDs</title>
+  <desc id="desc">The left panel shows a rejected cycle where a vector stores a closure that captures the same vector. The right panel shows a valid graph table whose logical edges are integer IDs.</desc>
+  <defs>
+    <style>
+      .panel { fill: #1e1e2e; stroke: #45475a; stroke-width: 1.5; }
+      .heading { font: 600 17px system-ui, sans-serif; fill: #cdd6f4; }
+      .label { font: 14px system-ui, sans-serif; fill: #cdd6f4; }
+      .small { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #bac2de; }
+      .bad { fill: #f38ba8; }
+      .good { fill: #a6e3a1; }
+      .box { fill: #313244; stroke: #89b4fa; stroke-width: 2; rx: 10; }
+      .arrow { fill: none; stroke: #89b4fa; stroke-width: 2.4; marker-end: url(#arrow); }
+      .logical { fill: none; stroke: #a6e3a1; stroke-width: 2.2; stroke-dasharray: 6 5; marker-end: url(#arrow-good); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#89b4fa" /></marker>
+    <marker id="arrow-good" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a6e3a1" /></marker>
+  </defs>
+
+  <rect class="panel" x="12" y="12" width="420" height="276" rx="14" />
+  <text class="heading" x="222" y="45" text-anchor="middle">Rejected: managed ownership cycle</text>
+  <rect class="box" x="48" y="105" width="142" height="70" />
+  <text class="label" x="119" y="134" text-anchor="middle">callbacks</text>
+  <text class="small" x="119" y="154" text-anchor="middle">vector</text>
+  <rect class="box" x="250" y="105" width="142" height="70" />
+  <text class="label" x="321" y="134" text-anchor="middle">report-size</text>
+  <text class="small" x="321" y="154" text-anchor="middle">closure</text>
+  <path class="arrow" d="M191 122 H249" />
+  <text class="small" x="220" y="99" text-anchor="middle">stores</text>
+  <path class="arrow" d="M249 160 H191" />
+  <text class="small" x="220" y="195" text-anchor="middle">captures</text>
+  <circle cx="385" cy="75" r="15" fill="#f38ba8" />
+  <path d="M378 68 L392 82 M392 68 L378 82" stroke="#1e1e2e" stroke-width="3" stroke-linecap="round" />
+  <text class="label bad" x="222" y="256" text-anchor="middle">both references can remain live forever</text>
+
+  <rect class="panel" x="468" y="12" width="420" height="276" rx="14" />
+  <text class="heading" x="678" y="45" text-anchor="middle">Valid: logical graph represented by IDs</text>
+  <rect class="box" x="497" y="73" width="238" height="117" />
+  <text class="label" x="616" y="101" text-anchor="middle">edges : Table</text>
+  <text class="small" x="525" y="126">0 → [1 2]</text>
+  <text class="small" x="525" y="148">1 → [2]</text>
+  <text class="small" x="525" y="170">2 → [0]</text>
+  <circle cx="782" cy="118" r="22" fill="#313244" stroke="#a6e3a1" stroke-width="2" />
+  <circle cx="838" cy="177" r="22" fill="#313244" stroke="#a6e3a1" stroke-width="2" />
+  <circle cx="756" cy="204" r="22" fill="#313244" stroke="#a6e3a1" stroke-width="2" />
+  <text class="label" x="782" y="124" text-anchor="middle">0</text>
+  <text class="label" x="838" y="183" text-anchor="middle">1</text>
+  <text class="label" x="756" y="210" text-anchor="middle">2</text>
+  <path class="logical" d="M799 134 L820 160" />
+  <path class="logical" d="M816 188 L782 200" />
+  <path class="logical" d="M758 181 C741 161 750 136 762 128" />
+  <text class="label good" x="678" y="256" text-anchor="middle">cycles are values, not managed back-edges</text>
+</svg>

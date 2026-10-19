@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 270" role="img" aria-labelledby="title desc">
+  <title id="title">Venn diagrams for Calque set algebra</title>
+  <desc id="desc">Four diagrams show intersection, union, directional difference, and symmetric difference of sets A and B.</desc>
+  <defs>
+    <style>
+      .title { font: 600 17px system-ui, sans-serif; fill: #cdd6f4; }
+      .formula { font: 15px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #a6adc8; }
+      .letter { font: 600 16px system-ui, sans-serif; fill: #cdd6f4; }
+      .outline { fill: none; stroke: #89b4fa; stroke-width: 2.5; }
+      .fill { fill: #cba6f7; fill-opacity: .72; }
+    </style>
+    <clipPath id="right-intersection" clipPathUnits="userSpaceOnUse"><circle cx="130" cy="122" r="48" /></clipPath>
+    <mask id="left-minus-right" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-10" y="0" width="220" height="270">
+      <rect x="-10" y="0" width="220" height="270" fill="white" />
+      <circle cx="130" cy="122" r="48" fill="black" />
+    </mask>
+  </defs>
+
+  <!-- Intersection -->
+  <g transform="translate(0 0)">
+    <text class="title" x="100" y="30" text-anchor="middle">intersection</text>
+    <text class="formula" x="100" y="52" text-anchor="middle">A ∩ B</text>
+    <circle class="fill" cx="70" cy="122" r="48" clip-path="url(#right-intersection)" />
+    <circle class="outline" cx="70" cy="122" r="48" />
+    <circle class="outline" cx="130" cy="122" r="48" />
+    <text class="letter" x="70" y="122" text-anchor="middle" dominant-baseline="middle">A</text>
+    <text class="letter" x="130" y="122" text-anchor="middle" dominant-baseline="middle">B</text>
+    <text class="formula" x="100" y="224" text-anchor="middle">shared members</text>
+  </g>
+
+  <!-- Union -->
+  <g transform="translate(200 0)">
+    <text class="title" x="100" y="30" text-anchor="middle">union</text>
+    <text class="formula" x="100" y="52" text-anchor="middle">A ∪ B</text>
+    <circle class="fill" cx="70" cy="122" r="48" />
+    <circle class="fill" cx="130" cy="122" r="48" />
+    <circle class="outline" cx="70" cy="122" r="48" />
+    <circle class="outline" cx="130" cy="122" r="48" />
+    <text class="letter" x="70" y="122" text-anchor="middle" dominant-baseline="middle">A</text>
+    <text class="letter" x="130" y="122" text-anchor="middle" dominant-baseline="middle">B</text>
+    <text class="formula" x="100" y="224" text-anchor="middle">members in either set</text>
+  </g>
+
+  <!-- Difference -->
+  <g transform="translate(400 0)">
+    <text class="title" x="100" y="30" text-anchor="middle">difference</text>
+    <text class="formula" x="100" y="52" text-anchor="middle">A \ B</text>
+    <circle class="fill" cx="70" cy="122" r="48" mask="url(#left-minus-right)" />
+    <circle class="outline" cx="70" cy="122" r="48" />
+    <circle class="outline" cx="130" cy="122" r="48" />
+    <text class="letter" x="70" y="122" text-anchor="middle" dominant-baseline="middle">A</text>
+    <text class="letter" x="130" y="122" text-anchor="middle" dominant-baseline="middle">B</text>
+    <text class="formula" x="100" y="224" text-anchor="middle">in A, not B</text>
+  </g>
+
+  <!-- Symmetric difference -->
+  <g transform="translate(600 0)">
+    <text class="title" x="100" y="30" text-anchor="middle">xor</text>
+    <text class="formula" x="100" y="52" text-anchor="middle">A △ B</text>
+    <path class="fill" fill-rule="evenodd" d="M70 74a48 48 0 1 0 0 96a48 48 0 1 0 0-96M130 74a48 48 0 1 0 0 96a48 48 0 1 0 0-96" />
+    <circle class="outline" cx="70" cy="122" r="48" />
+    <circle class="outline" cx="130" cy="122" r="48" />
+    <text class="letter" x="70" y="122" text-anchor="middle" dominant-baseline="middle">A</text>
+    <text class="letter" x="130" y="122" text-anchor="middle" dominant-baseline="middle">B</text>
+    <text class="formula" x="100" y="224" text-anchor="middle">in exactly one set</text>
+  </g>
+</svg>

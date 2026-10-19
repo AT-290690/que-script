@@ -19,6 +19,146 @@ que explain program.que --opt --json
 The report groups warnings before termination, effects and permissions,
 performance observations, and generated-code details.
 
+## Reading `que explain`
+
+`que explain` is the programmer-facing view of the typed program, static
+proofs, and generated WAT shape. It does not run the program or benchmark it.
+Use `--opt` when you want its generated-code and performance observations to
+describe the optimized build you intend to run:
+
+```sh
+que explain program.que --opt
+que explain program.que --opt --json --out explain.json
+```
+
+The text report has these sections:
+
+| Section | What it tells you |
+|---|---|
+| **Result type** | The inferred type of the final user expression. |
+| **Correctness** | Static arithmetic/bounds warnings, source locations, suggestions, and successful bounds proofs. |
+| **Termination** | A proven or unknown result for analysed loops and recursive functions, including the inferred measure when available. |
+| **Effects and permissions** | The combined effect (`pure`, mutation, host I/O, or unknown call) and required host imports. |
+| **Performance** | A static count of allocations, dynamic applies, checked/unchecked reads, direct calls, and WAT bytes. |
+| **Generated code** | Per-function allocation and call details, plus inferred source-form types and effects. |
+
+For a safe counted access, the useful part looks conceptually like this:
+
+```text
+Correctness:
+  Proven bounds:
+    (get xs i) proven safe
+      0 <= i <= 9
+
+Termination:
+  proven terminating: while (< i (length xs))
+    i increases toward the exit bound
+```
+
+The report's performance section is deliberately **static WAT shape, not a
+runtime profile**. It can identify a remaining allocation or bounds check and
+point toward a useful rewrite, but timing, CPU effects, and allocator behavior
+still require a real benchmark.
+
+`--json` contains the same information in stable fields such as
+`result_type`, `warnings`, `bounds_proofs`, `termination`, `effect`,
+`host_imports`, `metrics`, `compiled_functions`, and `optimization_targets`.
+That form is intended for editor integrations, CI, and custom reporting.
+
+## The analysis model
+
+Type inference answers questions such as “is this value an `Int` or a
+`[Char]`?” It cannot answer “can this `Int` overflow?” or “is this index below
+this particular vector's length?” Calque runs a second, flow-sensitive static
+analysis after type inference for those questions.
+
+It is an **abstract interpreter**: it executes a finite mathematical summary
+of the program rather than executing its concrete values. A useful simplified
+view of the state at a program point is:
+
+```text
+S = (R, L, A, P)
+
+R(x) = [lower, upper]       possible Int range for x
+L(xs) = n or >= n           known exact or minimum vector length
+A                         symbolic affine relations, such as i < length(xs)
+P                         path facts, aliases, and recognised guard summaries
+```
+
+For example, on the true path of this condition the analyser refines the
+abstract state to include both facts needed by `get`:
+
+```que
+(if (and (>= i 0) (< i (length xs)))
+    (get xs i)
+    fallback)
+```
+
+```text
+true path:  0 <= i < length(xs)
+therefore:  (get xs i) is proven safe
+```
+
+It keeps bounded alternatives when useful—for example, a value known to be
+negative *or* positive rather than merely “some `Int`”—and tracks simple
+affine relations such as `a + b <= 2147483647`. Arithmetic ranges are
+calculated in a wider analysis domain, then checked against the signed `i32`
+range used by `Int`.
+
+### Control flow and loops
+
+The analyser refines facts independently along each branch. Where paths meet,
+it retains only facts that remain valid on every incoming path. Informally:
+
+```text
+after (if condition left right) = join(state(left), state(right))
+```
+
+Loops require a fixed point: the body is analysed repeatedly until its summary
+stops gaining useful facts. Widening deliberately broadens a changing range
+when necessary so this process always finishes. That is why Calque can prove
+common counted loops without attempting to solve the halting problem.
+
+```que
+(loop i (< i (length xs))
+  (get xs i))
+```
+
+The loop supplies an initial value, condition, and update. The analysis derives
+`0 <= i < length(xs)` for the body, proves the read safe, and can record the
+counter as moving toward its exit bound.
+
+### Proof outcomes
+
+Each checked operation has one of three outcomes:
+
+| Result | Meaning |
+|---|---|
+| **proven safe** | Every abstract execution reaching the operation satisfies the required fact. |
+| **definitely invalid** | Every possible execution violates it, such as a known negative index. |
+| **unknown** | The analysis cannot establish either conclusion with its conservative model. |
+
+Only a proven-safe fact is eligible for an optimization such as omitting a
+runtime bounds check. `unknown` is intentionally not a claim that the program
+fails; write a guard, simplify the shape, or keep the check if the invariant
+lives outside the visible source.
+
+The same model supports several analyses:
+
+- **bounds and non-empty vectors** — `get`, `set!`, `car`, and `pop-val!`;
+- **arithmetic** — `+`, `-`, `*`, `/`, and `%`, including a non-zero divisor
+  and the special `minimum Int / -1` overflow case;
+- **termination evidence** — counted loops and recursive calls whose argument
+  is shown to move toward a base-case guard;
+- **effects** — mutation, host I/O, and calls whose effect cannot yet be
+  resolved.
+
+Recognised helper predicates can carry proof information too. A conventional
+definition such as `in-bounds?` can establish a later `get` when its true
+branch is taken, and `+/safe?` can establish the corresponding guarded
+addition. The analyser is conservative about aliases and mutation: once a
+fact may have been invalidated, it stops relying on it.
+
 ## Bounds and empty vectors
 
 The analyser recognizes common loop shapes:

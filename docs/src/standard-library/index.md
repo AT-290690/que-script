@@ -14,6 +14,38 @@ que --lib types 'Table/*'
 que --lib source Table/update-or!
 ```
 
+## Common functions
+
+Most Calque programs use a fairly small part of the library. Start with these
+names; the sections below remain the complete family index, and [Functions by
+example](by-example.md) shows each of these patterns in runnable code.
+
+| Need | Start with |
+|---|---|
+| Build integer data | `range`, `range/exclusive`, `fill`, `replicate` |
+| Transform or retain vector values | `map`, `map/i`, `filter` (or `select`), `exclude`, `flat-map` |
+| Visit for effects | `for`, `each`, `for/i`, `each/i` |
+| Combine or inspect values | `reduce`, `sum`, `product`, `count`, `find`, `some?`, `every?`, `minimum`, `maximum` |
+| Reshape a vector | `reverse`, `flat`, `zip`, `unzip`, `slice`, `take/first`, `drop/first`, `partition` |
+| Order or classify values | `sort`, `group`, `unique/int`, `unique/char` |
+| Parse or assemble text | `split`, `split/lines`, `split/words`, `trim`, `join`, `String->Integer`, `Integer->String` |
+| Use key-value data | `Table/new`, `Table/set!`, `Table/get`, `Table/has?`, `Table/entries`, `Table/update-or!`, `Table/count` |
+| Work directly with a vector | `length`, `get`, `set!`, `push!`, `pop!`, `pop-val!`, `empty!`, `capacity!`, `in-bounds?` |
+
+The usual collection convention is **data last**, so calls compose through
+`|>`:
+
+```que
+(|> [1 2 3 4]
+    (map (lambda (x) (* x x)))
+    (filter (lambda (x) (> x 4)))
+    sum)
+; 25
+```
+
+`get`, `pop-val!`, `first`, and `last` require a valid value. When an index or
+input length is dynamic, check it with `in-bounds?` or use `Vector/get*`.
+
 ## Core language operations
 
 The compiler provides vector and tuple primitives: `length`, `get`, `set!`,

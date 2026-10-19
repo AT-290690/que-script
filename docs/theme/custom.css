@@ -32,3 +32,13 @@ pre {
   border-left: 4px solid #e2a76f;
   padding-left: 1rem;
 }
+
+/* This is an explanatory diagram, not a photograph: keep it in the page
+   instead of mdBook's click-to-zoom overlay. */
+.set-algebra-diagram,
+.explanatory-diagram {
+  display: block;
+  width: min(800px, 100%);
+  margin: 1.25rem auto;
+  cursor: default;
+}
