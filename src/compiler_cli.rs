@@ -220,6 +220,7 @@ fn environment_help() -> &'static str {
   QUE_WASM_OPT           Optimization level: none, speed, or speed_and_size.
   QUE_DEVIRTUALIZE       Call devirtualization: off, known-heads, or aggressive.
   QUE_TCO                Tail-call optimization: off, conservative, or aggressive.
+  QUE_SELF_TCO           Direct self tail calls: loop (default) or return-call (comparison).
   QUE_SMALL_SCALAR_INLINE_COST  Scalar helper inline budget.
   QUE_LOOP_UNROLL_MAX    Maximum constant loop trip count to unroll.
   QUE_LOOP_UNROLL_COST   Maximum loop unroll cost.

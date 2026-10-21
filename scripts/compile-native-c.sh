@@ -65,7 +65,9 @@ fi
 
 export QUE_WASM_OPT="${QUE_WASM_OPT:-speed}"
 export QUE_DEVIRTUALIZE="${QUE_DEVIRTUALIZE:-aggressive}"
-export QUE_TCO="${QUE_TCO:-off}"
+# Direct self tail calls lower to Wasm MVP loops, so this is now safe for
+# wasm2c as well as Wasmtime. Callers can still set QUE_TCO=off explicitly.
+export QUE_TCO="${QUE_TCO:-conservative}"
 export QUE_SMALL_SCALAR_INLINE_COST="${QUE_SMALL_SCALAR_INLINE_COST:-512}"
 export QUE_LOOP_UNROLL_MAX="${QUE_LOOP_UNROLL_MAX:-16}"
 export QUE_LOOP_UNROLL_COST="${QUE_LOOP_UNROLL_COST:-2000}"

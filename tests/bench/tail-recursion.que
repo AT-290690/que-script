@@ -1,0 +1,23 @@
+; Direct self-tail recursion benchmark.
+;
+; This intentionally measures only the tail-call mechanism: two scalar
+; parameters, no allocation, no table/vector work, and enough iterations that
+; process startup is insignificant. The result is a checksum of the iteration
+; count, so the loop cannot be removed as dead code.
+;
+; Compare implementations with:
+;   QUE_TCO=aggressive QUE_SELF_TCO=return-call que tests/bench/tail-recursion.que --opt
+;   QUE_TCO=aggressive QUE_SELF_TCO=loop        que tests/bench/tail-recursion.que --opt
+;
+; The loop mode is Calque's default. `return-call` retains the old Wasm
+; tail-call lowering solely as a regression baseline.
+
+(let STEPS 50000000)
+
+(letrec count-up
+  (lambda (remaining checksum)
+    (if (= remaining 0)
+        checksum
+        (count-up (- remaining 1) (+ checksum 1)))))
+
+(count-up STEPS 0)

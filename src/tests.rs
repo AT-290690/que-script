@@ -9350,9 +9350,12 @@ n"#;
     }
 
     #[test]
-    fn test_wat_tail_call_recognizes_do_wrapped_self_recursion() {
-        let prev_tco = std::env::var("QUE_TCO").ok();
-        std::env::set_var("QUE_TCO", "aggressive");
+    fn test_wat_tail_call_lowers_do_wrapped_self_recursion_to_loop() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let _self_tco = ScopedEnvVar::set("QUE_SELF_TCO", "loop");
         let expr = crate::parser::build(
             r#"(do
                     (letrec rev (lambda ([head . tail] ys)
@@ -9365,19 +9368,63 @@ n"#;
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
             .expect("program should compile");
-        if let Some(prev) = prev_tco {
-            std::env::set_var("QUE_TCO", prev);
-        } else {
-            std::env::remove_var("QUE_TCO");
-        }
         let rev_start = wat.find("(func $v_rev").expect("rev should exist");
         let rev_wat = &wat[rev_start..];
 
         assert!(
-            rev_wat.contains("return_call $v_rev"),
-            "do-wrapped tail recursion should compile to return_call, got:\n{}",
+            rev_wat.contains("(loop $que_tail_recur")
+                && rev_wat.contains("br $que_tail_recur"),
+            "do-wrapped direct self recursion should compile to a local loop, got:\n{}",
             rev_wat
         );
+        assert!(
+            !rev_wat.contains("return_call $v_rev"),
+            "direct self recursion should not need return_call once lowered to a loop, got:\n{}",
+            rev_wat
+        );
+    }
+
+    #[test]
+    fn test_wat_self_tail_return_call_mode_remains_available_for_comparison() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let _self_tco = ScopedEnvVar::set("QUE_SELF_TCO", "return-call");
+        let expr = crate::parser::build(
+            r#"(do
+                    (letrec countdown (lambda n
+                      (if (= n 0) 0 (countdown (- n 1)))))
+                    (countdown 10))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        let countdown_start = wat
+            .find("(func $v_countdown")
+            .expect("countdown should exist");
+        let countdown_wat = &wat[countdown_start..];
+        assert!(countdown_wat.contains("return_call $v_countdown"));
+        assert!(!countdown_wat.contains("(loop $que_tail_recur"));
+    }
+
+    #[test]
+    fn test_runtime_tail_loop_preserves_managed_arguments_and_locals() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
+        let _self_tco = ScopedEnvVar::set("QUE_SELF_TCO", "loop");
+        let output = run_program_output_unlocked(
+            r#"(do
+                (letrec rev (lambda ([head . tail] ys)
+                  (let next (cons [head] ys))
+                  (if (= (length tail) 0)
+                      next
+                      (rev tail next))))
+                (rev [1 2 3 4 5 6 7 8 9 10] []))"#,
+        );
+        assert_eq!(output, "[10 9 8 7 6 5 4 3 2 1]");
     }
 
     #[test]

@@ -180,6 +180,33 @@ enum TailCallMode {
     Aggressive,
 }
 
+/// How an eligible direct self tail call is represented in the generated Wasm.
+///
+/// `return_call` is the general Wasm tail-call instruction.  A direct call back
+/// to the same function can do better: its parameters are ordinary mutable
+/// Wasm locals, so the call can instead update them and branch to the top of a
+/// local loop.  The latter is part of Wasm MVP and therefore also survives the
+/// wasm2c path, which does not lower the tail-call proposal.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DirectSelfTailMode {
+    ReturnCall,
+    Loop,
+}
+
+fn direct_self_tail_mode_from_env() -> Result<DirectSelfTailMode, String> {
+    let raw = std::env::var("QUE_SELF_TCO").unwrap_or_else(|_| "loop".to_string());
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "loop" | "local-loop" | "local_loop" => Ok(DirectSelfTailMode::Loop),
+        "return-call" | "return_call" | "returncall" | "wasm" => {
+            Ok(DirectSelfTailMode::ReturnCall)
+        }
+        other => Err(format!(
+            "invalid QUE_SELF_TCO='{}'. expected one of: loop, return-call",
+            other
+        )),
+    }
+}
+
 fn max_local_index_in_code(code: &str) -> Option<usize> {
     let tokens: Vec<&str> = code.split_whitespace().collect();
     let mut max_idx = None;
@@ -9083,6 +9110,7 @@ fn compile_tail_do(
     self_name: &str,
     arity: usize,
     releasable_ref_slots: &[ManagedRefSlot],
+    direct_self_tail_mode: DirectSelfTailMode,
 ) -> Result<Option<String>, String> {
     if items.len() <= 1 {
         return Ok(None);
@@ -9546,6 +9574,7 @@ fn compile_tail_do(
         self_name,
         arity,
         releasable_ref_slots,
+        direct_self_tail_mode,
     )?
     else {
         return Ok(None);
@@ -12347,7 +12376,16 @@ fn compile_guarded_scalar_param_replacement_tail_body(
         ctx,
         self_name,
         param_count,
-        |body_ctx| compile_tail_expr(body, body_ctx, self_name, param_count, releasable_ref_slots),
+        |body_ctx| {
+            compile_tail_expr(
+                body,
+                body_ctx,
+                self_name,
+                param_count,
+                releasable_ref_slots,
+                DirectSelfTailMode::ReturnCall,
+            )
+        },
     )
 }
 
@@ -14627,6 +14665,7 @@ fn compile_tail_expr(
     self_name: &str,
     arity: usize,
     releasable_ref_slots: &[ManagedRefSlot],
+    direct_self_tail_mode: DirectSelfTailMode,
 ) -> Result<Option<String>, String> {
     match &node.expr {
         Expression::Apply(items) if !items.is_empty() => match &items[0] {
@@ -14683,14 +14722,36 @@ fn compile_tail_expr(
                         release_scratch_slot,
                     ));
                 }
-                for i in 0..args.len() {
-                    out.push(format!("local.get {}", arg_base_tmp + i));
+                match direct_self_tail_mode {
+                    DirectSelfTailMode::ReturnCall => {
+                        for i in 0..args.len() {
+                            out.push(format!("local.get {}", arg_base_tmp + i));
+                        }
+                        out.push(format!("return_call ${}", ident(self_name)));
+                    }
+                    DirectSelfTailMode::Loop => {
+                        // All arguments were evaluated into temporary locals before
+                        // changing a parameter. This preserves ordinary call
+                        // semantics when a later argument reads an earlier one.
+                        for i in 0..args.len() {
+                            out.push(format!("local.get {}", arg_base_tmp + i));
+                            out.push(format!("local.set {i}"));
+                        }
+                        out.push("br $que_tail_recur".to_string());
+                    }
                 }
-                out.push(format!("return_call ${}", ident(self_name)));
                 Ok(Some(out.join("\n")))
             }
             Expression::Word(op) if op == "do" => {
-                compile_tail_do(items, node, ctx, self_name, arity, releasable_ref_slots)
+                compile_tail_do(
+                    items,
+                    node,
+                    ctx,
+                    self_name,
+                    arity,
+                    releasable_ref_slots,
+                    direct_self_tail_mode,
+                )
             }
             Expression::Word(op) if op == "if" => {
                 let cond_node = node
@@ -14712,14 +14773,28 @@ fn compile_tail_expr(
                     .ok_or_else(|| "if missing type".to_string())
                     .and_then(wasm_val_type)?;
                 let then_code = if let Some(tc) =
-                    compile_tail_expr(then_node, ctx, self_name, arity, releasable_ref_slots)?
+                    compile_tail_expr(
+                        then_node,
+                        ctx,
+                        self_name,
+                        arity,
+                        releasable_ref_slots,
+                        direct_self_tail_mode,
+                    )?
                 {
                     tc
                 } else {
                     compile_expr(then_node, ctx)?
                 };
                 let else_code = if let Some(tc) =
-                    compile_tail_expr(else_node, ctx, self_name, arity, releasable_ref_slots)?
+                    compile_tail_expr(
+                        else_node,
+                        ctx,
+                        self_name,
+                        arity,
+                        releasable_ref_slots,
+                        direct_self_tail_mode,
+                    )?
                 {
                     tc
                 } else {
@@ -14907,10 +14982,25 @@ fn compile_lambda_func(
     } else {
         None
     };
+    // A direct self call can reuse this function's parameter locals.  Keep the
+    // guarded worker path on `return_call`: it emits helper functions whose
+    // recursive target is not the enclosing function's loop.
+    let direct_self_tail_mode = if tco_safe && guarded_tail_body.is_none() {
+        direct_self_tail_mode_from_env()?
+    } else {
+        DirectSelfTailMode::ReturnCall
+    };
     let tail_body_code = if let Some(guarded) = guarded_tail_body.as_ref() {
         Some(guarded.inline_code())
     } else if tco_safe {
-        compile_tail_expr(body_node, &ctx, name, params.len(), &ref_slots)?
+        compile_tail_expr(
+            body_node,
+            &ctx,
+            name,
+            params.len(),
+            &ref_slots,
+            direct_self_tail_mode,
+        )?
     } else {
         None
     };
@@ -15073,13 +15163,28 @@ fn compile_lambda_func(
         return Ok(out);
     }
     if let Some(tail_code) = tail_body_code {
-        if !borrowed_top_level_prelude.is_empty() {
+        if direct_self_tail_mode == DirectSelfTailMode::Loop {
+            out.push_str("    (block $que_tail_done\n      (loop $que_tail_recur\n");
+            if !borrowed_top_level_prelude.is_empty() {
+                out.push_str(&format!(
+                    "        {}\n",
+                    borrowed_top_level_prelude.replace('\n', "\n        ")
+                ));
+            }
             out.push_str(&format!(
-                "    {}\n",
-                borrowed_top_level_prelude.replace('\n', "\n    ")
+                "        {}\n",
+                tail_code.replace('\n', "\n        ")
             ));
+            out.push_str("      )\n    )\n");
+        } else {
+            if !borrowed_top_level_prelude.is_empty() {
+                out.push_str(&format!(
+                    "    {}\n",
+                    borrowed_top_level_prelude.replace('\n', "\n    ")
+                ));
+            }
+            out.push_str(&format!("    {}\n", tail_code.replace('\n', "\n    ")));
         }
-        out.push_str(&format!("    {}\n", tail_code.replace('\n', "\n    ")));
         out.push_str("    unreachable\n");
         out.push_str("  )\n");
         return Ok(out);
