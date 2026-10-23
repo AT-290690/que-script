@@ -5532,10 +5532,18 @@ out"#,
             "closure runtime should use the closure header magic, got:\n{}",
             wat
         );
+        let classifier_start = wat
+            .find("(func $is_closure_ptr")
+            .expect("closure classifier should be emitted");
+        let classifier_end = wat[classifier_start..]
+            .find("(func $is_vec_ptr")
+            .map(|offset| classifier_start + offset)
+            .expect("vector classifier should follow closure classifier");
+        let classifier = &wat[classifier_start..classifier_end];
         assert!(
-            !wat.contains("i32.const -2147483648") && !wat.contains("i32.const 2147483647"),
-            "closure runtime should not depend on sign-bit tagging anymore, got:\n{}",
-            wat
+            !classifier.contains("i32.const -2147483648")
+                && !classifier.contains("i32.const 2147483647"),
+            "closure classification should not depend on sign-bit tagging, got:\n{classifier}"
         );
     }
 
@@ -10780,6 +10788,38 @@ consume!
             run_program_output_with_std_and_opts_unlocked("(capacity 32 [1 2 3])", true),
             "[1 2 3]",
             "the immutable capacity wrapper must return its fresh copy"
+        );
+    }
+
+    #[test]
+    fn test_wat_runtime_rejects_invalid_refcounts_and_oversized_vectors() {
+        let expr = crate::parser::build("(do (let xs [1 2]) (capacity! xs 32) xs)")
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        wat::parse_str(&wat).expect("hardened runtime should generate valid WAT");
+
+        for function in ["$rc_retain_vec", "$rc_release_vec", "$closure_retain", "$closure_release"] {
+            let start = wat
+                .find(&format!("(func {function}"))
+                .unwrap_or_else(|| panic!("missing runtime function {function}"));
+            let body = &wat[start..];
+            assert!(
+                body.contains("i32.const 0\n    i32.le_s\n    if\n      unreachable"),
+                "{function} must trap before retaining/releasing a dead object:\n{body}"
+            );
+        }
+        assert!(
+            wat.contains("i32.const 2147483647\n    i32.eq\n    if\n      unreachable"),
+            "retains must trap instead of wrapping the reference count"
+        );
+        assert!(
+            wat.contains("(func $vec_validate_len") && wat.contains("i32.const 536870911"),
+            "vector constructors and growth must cap word capacity before byte-size arithmetic"
+        );
+        assert!(
+            wat.contains("(local $needed_end64 i64)"),
+            "allocator end-address arithmetic must be performed without i32 wraparound"
         );
     }
 

@@ -2084,6 +2084,9 @@ fn emit_vector_runtime(
     let vec_min_cap = parse_env_i32("QUE_VEC_MIN_CAP", 2, 1, 4096);
     let vec_growth_num = parse_env_i32("QUE_VEC_GROWTH_NUM", 2, 1, 64);
     let vec_growth_den = parse_env_i32("QUE_VEC_GROWTH_DEN", 1, 1, 64);
+    // Vector elements are i32 words. Keep `capacity * 4` within i32
+    // arithmetic before handing the byte count to the allocator.
+    const VEC_MAX_CAP: i32 = i32::MAX / 4;
     let vec_bounds_check_enabled = parse_env_bool_like("QUE_BOUNDS_CHECK", true);
 
     let mut apply_arities = apply_arities.clone();
@@ -2117,11 +2120,20 @@ fn emit_vector_runtime(
     (local $rem_base i32)
     (local $base i32)
     (local $needed_end i32)
-    (local $cur_bytes i32)
-    (local $delta i32)
+    (local $needed_end64 i64)
+    (local $cur_bytes i64)
+    (local $delta i64)
     (local $grow_pages i32)
     (local $grow_res i32)
     ;; __DBG_RC_ALLOC_INC__
+    ;; Allocations are byte counts. Reject invalid sizes before the small-block
+    ;; classes can reinterpret a negative request as a small positive one.
+    local.get $n
+    i32.const 0
+    i32.lt_s
+    if
+      unreachable
+    end
     ;; Small-block fast path (segregated free lists).
     ;; Rounds small requests to class size and pops in O(1) when available.
     local.get $n
@@ -2346,28 +2358,40 @@ fn emit_vector_runtime(
     global.get $heap
     local.set $base
     local.get $base
+    i64.extend_i32_u
     local.get $n
-    i32.const 8
-    i32.add
-    i32.add
+    i64.extend_i32_s
+    i64.add
+    i64.const 8
+    i64.add
+    local.tee $needed_end64
+    i64.const 4294967296
+    i64.ge_u
+    if
+      unreachable
+    end
+    local.get $needed_end64
+    i32.wrap_i64
     local.set $needed_end
     memory.size
-    i32.const 16
-    i32.shl
+    i64.extend_i32_u
+    i64.const 16
+    i64.shl
     local.set $cur_bytes
-    local.get $needed_end
+    local.get $needed_end64
     local.get $cur_bytes
-    i32.gt_u
+    i64.gt_u
     if
-      local.get $needed_end
+      local.get $needed_end64
       local.get $cur_bytes
-      i32.sub
+      i64.sub
       local.set $delta
       local.get $delta
-      i32.const 65535
-      i32.add
-      i32.const 16
-      i32.shr_u
+      i64.const 65535
+      i64.add
+      i64.const 16
+      i64.shr_u
+      i32.wrap_i64
       local.set $grow_pages
       local.get $grow_pages
       memory.grow
@@ -2601,6 +2625,7 @@ fn emit_vector_runtime(
   )
 
   (func $rc_retain_vec (param $ptr i32) (result i32)
+    (local $rc i32)
     local.get $ptr
     i32.eqz
     if
@@ -2610,10 +2635,26 @@ fn emit_vector_runtime(
     local.get $ptr
     i32.const 8
     i32.add
+    i32.load
+    local.set $rc
+    ;; A retain of an already released object is a use-after-free. Refcount
+    ;; overflow is likewise never a valid program state.
+    local.get $rc
+    i32.const 0
+    i32.le_s
+    if
+      unreachable
+    end
+    local.get $rc
+    i32.const 2147483647
+    i32.eq
+    if
+      unreachable
+    end
     local.get $ptr
     i32.const 8
     i32.add
-    i32.load
+    local.get $rc
     i32.const 1
     i32.add
     i32.store
@@ -2640,6 +2681,14 @@ fn emit_vector_runtime(
     i32.add
     i32.load
     local.set $rc
+    ;; Releasing a dead object would otherwise free its backing storage a
+    ;; second time. Stop before touching any destructor or free-list state.
+    local.get $rc
+    i32.const 0
+    i32.le_s
+    if
+      unreachable
+    end
     ;; __DBG_RC_RELEASE_VEC_RC_HIST__
     local.get $rc
     i32.const 1
@@ -3069,8 +3118,18 @@ fn emit_vector_runtime(
 
   (func $closure_retain (param $ptr i32) (result i32)
     (local $base i32)
+    (local $rc i32)
     local.get $ptr
     i32.eqz
+    if
+      i32.const 0
+      return
+    end
+    ;; Direct function ids share function type positions with heap closures.
+    ;; They are immediate values, not reference-counted allocations.
+    local.get $ptr
+    i32.const 65536
+    i32.lt_u
     if
       i32.const 0
       return
@@ -3079,10 +3138,24 @@ fn emit_vector_runtime(
     local.tee $base
     i32.const 12
     i32.add
+    i32.load
+    local.set $rc
+    local.get $rc
+    i32.const 0
+    i32.le_s
+    if
+      unreachable
+    end
+    local.get $rc
+    i32.const 2147483647
+    i32.eq
+    if
+      unreachable
+    end
     local.get $base
     i32.const 12
     i32.add
-    i32.load
+    local.get $rc
     i32.const 1
     i32.add
     i32.store
@@ -3103,12 +3176,25 @@ fn emit_vector_runtime(
       return
     end
     local.get $ptr
+    i32.const 65536
+    i32.lt_u
+    if
+      i32.const 0
+      return
+    end
+    local.get $ptr
     local.set $base
     local.get $base
     i32.const 12
     i32.add
     i32.load
     local.set $rc
+    local.get $rc
+    i32.const 0
+    i32.le_s
+    if
+      unreachable
+    end
     local.get $rc
     i32.const 1
     i32.sub
@@ -3182,7 +3268,7 @@ fn emit_vector_runtime(
   )
 
   (func $is_closure_ptr (param $ptr i32) (result i32)
-    (local $mem_end i32)
+    (local $mem_end i64)
     (local $n i32)
     (local $rc i32)
     local.get $ptr
@@ -3193,21 +3279,16 @@ fn emit_vector_runtime(
       return
     end
     memory.size
-    i32.const 16
-    i32.shl
+    i64.extend_i32_u
+    i64.const 16
+    i64.shl
     local.set $mem_end
     local.get $ptr
+    i64.extend_i32_u
+    i64.const 16
+    i64.add
     local.get $mem_end
-    i32.ge_u
-    if
-      i32.const 0
-      return
-    end
-    local.get $ptr
-    local.get $mem_end
-    i32.const 16
-    i32.sub
-    i32.gt_u
+    i64.gt_u
     if
       i32.const 0
       return
@@ -3245,14 +3326,16 @@ fn emit_vector_runtime(
       return
     end
     local.get $ptr
-    i32.const 16
-    i32.add
+    i64.extend_i32_u
+    i64.const 16
+    i64.add
     local.get $n
-    i32.const 8
-    i32.mul
-    i32.add
+    i64.extend_i32_s
+    i64.const 8
+    i64.mul
+    i64.add
     local.get $mem_end
-    i32.gt_u
+    i64.gt_u
     if
       i32.const 0
       return
@@ -3261,7 +3344,7 @@ fn emit_vector_runtime(
   )
 
   (func $is_vec_ptr (param $ptr i32) (result i32)
-    (local $mem_end i32)
+    (local $mem_end i64)
     (local $len i32)
     (local $cap i32)
     (local $rc i32)
@@ -3269,7 +3352,6 @@ fn emit_vector_runtime(
     (local $data i32)
     (local $magic i32)
     (local $backing i32)
-    (local $avail i32)
     (local $data_base i32)
     (local $data_block_size i32)
     local.get $ptr
@@ -3280,21 +3362,16 @@ fn emit_vector_runtime(
       return
     end
     memory.size
-    i32.const 16
-    i32.shl
+    i64.extend_i32_u
+    i64.const 16
+    i64.shl
     local.set $mem_end
     local.get $ptr
+    i64.extend_i32_u
+    i64.const 28
+    i64.add
     local.get $mem_end
-    i32.ge_u
-    if
-      i32.const 0
-      return
-    end
-    local.get $ptr
-    local.get $mem_end
-    i32.const 28
-    i32.sub
-    i32.gt_u
+    i64.gt_u
     if
       i32.const 0
       return
@@ -3365,8 +3442,9 @@ fn emit_vector_runtime(
         return
       end
       local.get $data
+      i64.extend_i32_u
       local.get $mem_end
-      i32.ge_u
+      i64.ge_u
       if
         i32.const 0
         return
@@ -3414,6 +3492,13 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    local.get $cap
+    i32.const __VEC_MAX_CAP__
+    i32.gt_s
+    if
+      i32.const 0
+      return
+    end
     local.get $len
     local.get $cap
     i32.gt_s
@@ -3434,21 +3519,22 @@ fn emit_vector_runtime(
       end
     end
     local.get $data
-    i32.const 8
-    i32.sub
-    local.set $data_base
-    local.get $data_base
-    i32.const 65536
+    i32.const 65544
     i32.lt_u
     if
       i32.const 0
       return
     end
-    local.get $data_base
+    local.get $data
     i32.const 8
-    i32.add
+    i32.sub
+    local.set $data_base
+    local.get $data_base
+    i64.extend_i32_u
+    i64.const 8
+    i64.add
     local.get $mem_end
-    i32.gt_u
+    i64.gt_u
     if
       i32.const 0
       return
@@ -3473,21 +3559,14 @@ fn emit_vector_runtime(
       return
     end
     local.get $data
-    local.get $mem_end
-    i32.ge_u
-    if
-      i32.const 0
-      return
-    end
-    local.get $mem_end
-    local.get $data
-    i32.sub
-    local.set $avail
+    i64.extend_i32_u
     local.get $cap
-    local.get $avail
-    i32.const 2
-    i32.shr_u
-    i32.gt_u
+    i64.extend_i32_u
+    i64.const 4
+    i64.mul
+    i64.add
+    local.get $mem_end
+    i64.gt_u
     if
       i32.const 0
       return
@@ -3565,12 +3644,31 @@ fn emit_vector_runtime(
     call $rc_release_vec
   )
 
+  ;; Vector elements occupy four bytes, so this keeps byte-size calculations
+  ;; before they reach $alloc.
+  (func $vec_validate_len (param $len i32)
+    local.get $len
+    i32.const 0
+    i32.lt_s
+    if
+      unreachable
+    end
+    local.get $len
+    i32.const __VEC_MAX_CAP__
+    i32.gt_s
+    if
+      unreachable
+    end
+  )
+
   (func $vec_new_i32 (param $len i32) (param $elem_ref i32) (result i32)
     (local $cap i32)
     (local $ptr i32)
     (local $data i32)
     (local $i i32)
     ;; __DBG_RC_VEC_NEW_INC__
+    local.get $len
+    call $vec_validate_len
     local.get $len
     i32.const __VEC_MIN_CAP__
     i32.lt_s
@@ -3648,6 +3746,8 @@ fn emit_vector_runtime(
     (local $ptr i32)
     (local $data i32)
     local.get $len
+    call $vec_validate_len
+    local.get $len
     i32.const 1
     i32.lt_s
     if (result i32)
@@ -3713,6 +3813,8 @@ fn emit_vector_runtime(
     (local $i i32)
     (local $remaining i32)
     (local $copy i32)
+    local.get $len
+    call $vec_validate_len
     local.get $len
     i32.const 1
     i32.lt_s
@@ -3823,6 +3925,8 @@ fn emit_vector_runtime(
     (local $ptr i32)
     (local $data i32)
     local.get $len
+    call $vec_validate_len
+    local.get $len
     i32.const 1
     i32.lt_s
     if (result i32)
@@ -3909,6 +4013,8 @@ fn emit_vector_runtime(
     local.get $ptr
     i32.load
     local.set $len
+    local.get $len
+    call $vec_validate_len
     local.get $len
     i32.const __VEC_MIN_CAP__
     i32.lt_s
@@ -4026,6 +4132,7 @@ fn emit_vector_runtime(
   (func $vec_grow_i32 (param $ptr i32) (result i32)
     (local $cap i32)
     (local $new_cap i32)
+    (local $grown i64)
     (local $len i32)
     (local $old_data i32)
     (local $new_data i32)
@@ -4040,11 +4147,31 @@ fn emit_vector_runtime(
     i32.load
     local.set $cap
     local.get $cap
-    i32.const __VEC_GROWTH_NUM__
-    i32.mul
-    i32.const __VEC_GROWTH_DEN__
-    i32.div_s
-    local.set $new_cap
+    call $vec_validate_len
+    local.get $cap
+    i32.const __VEC_MAX_CAP__
+    i32.ge_s
+    if
+      unreachable
+    end
+    local.get $cap
+    i64.extend_i32_s
+    i64.const __VEC_GROWTH_NUM__
+    i64.mul
+    i64.const __VEC_GROWTH_DEN__
+    i64.div_s
+    local.set $grown
+    local.get $grown
+    i64.const __VEC_MAX_CAP__
+    i64.gt_s
+    if
+      i32.const __VEC_MAX_CAP__
+      local.set $new_cap
+    else
+      local.get $grown
+      i32.wrap_i64
+      local.set $new_cap
+    end
     local.get $new_cap
     local.get $cap
     i32.le_s
@@ -4151,11 +4278,7 @@ fn emit_vector_runtime(
     end
     local.set $target
     local.get $target
-    i32.const 536870911
-    i32.gt_s
-    if
-      unreachable
-    end
+    call $vec_validate_len
     local.get $ptr
     i32.const 4
     i32.add
@@ -5709,6 +5832,7 @@ fn emit_vector_runtime(
     out = out.replace("__VEC_MIN_CAP__", &vec_min_cap.to_string());
     out = out.replace("__VEC_GROWTH_NUM__", &vec_growth_num.to_string());
     out = out.replace("__VEC_GROWTH_DEN__", &vec_growth_den.to_string());
+    out = out.replace("__VEC_MAX_CAP__", &VEC_MAX_CAP.to_string());
     out = out.replace("__DECIMAL_SCALE__", &decimal_scale_i64().to_string());
     let dec_overflow_check = if arithmetic_check_config().dec_overflow_check {
         format!(

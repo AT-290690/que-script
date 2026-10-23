@@ -153,10 +153,58 @@ fn generated_sources() -> Vec<(String, String)> {
         ));
         calls.push(format!("(calc-{case})"));
     }
-    vec![(
-        "generated-mixed-corpus".to_string(),
-        format!("{}\n[{}]", definitions.join("\n"), calls.join(" ")),
-    )]
+    vec![
+        (
+            "generated-mixed-corpus".to_string(),
+            format!("{}\n[{}]", definitions.join("\n"), calls.join(" ")),
+        ),
+        // Exercises the ownership transitions which are easy to get wrong in
+        // an optimizing RC compiler: storing nested managed values, borrowing
+        // one back through `get`, mutating it, and releasing part of the
+        // enclosing vector.
+        (
+            "managed-vector-aliasing".to_string(),
+            r#"
+              (let outer [])
+              (mut i 0)
+              (while (< i 100)
+                (let row [i (+ i 1)])
+                (push! outer row)
+                (++ i))
+              (mut total 0)
+              (mut j 0)
+              (while (< j 100)
+                (let row (get outer j))
+                (set! row 0 (+ (get row 0) 10))
+                (alter! total (+ total (get row 0)))
+                (++ j))
+              (mut k 0)
+              (while (< k 50)
+                (pop! outer)
+                (++ k))
+              [total (length outer) (get (get outer 0) 0)]
+            "#
+            .to_string(),
+        ),
+        // A closure owns its captured vector. Repeated calls return scalar
+        // values while the captured managed value remains live across calls.
+        (
+            "managed-closure-capture".to_string(),
+            r#"
+              (let make-counter
+                (lambda seed
+                  (block
+                    (let xs [seed])
+                    (lambda value
+                      (do
+                        (push! xs value)
+                        (sum xs))))))
+              (let counter (make-counter 10))
+              [(counter 1) (counter 2) (counter 3)]
+            "#
+            .to_string(),
+        ),
+    ]
 }
 
 fn assert_same(name: &str, source: &str, debug: &Outcome, optimized: &Outcome, native: &Outcome) {
