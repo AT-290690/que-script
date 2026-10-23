@@ -15,6 +15,7 @@
 - [Enums and matching](language/enums.md)
 - [Mutation and capacity](language/mutation.md)
 - [Memory management and ownership](language/memory.md)
+- [Performance guide](language/performance.md)
 - [Pipelines and composition](language/pipelines.md)
 - [Macros](language/macros.md)
 - [Inference and signatures](language/type-inference.md)
@@ -25,6 +26,7 @@
 
 - [WebAssembly target](compiler/webassembly.md)
 - [CLI](compiler/cli.md)
+- [Debugging cookbook](compiler/debugging.md)
 - [Projects, tests, and editors](compiler/projects-and-editors.md)
 - [FFI and host imports](compiler/ffi.md)
 
@@ -39,6 +41,7 @@
 
 # Examples
 
+- [Recipes](examples/recipes.md)
 - [Grid paths: mutable dynamic programming](examples/grid-paths.md)
 - [Enum-keyed table round trip](examples/enum-table-serialization.md)
 
