@@ -6693,7 +6693,96 @@ fn emit_wasi_argv_runtime() -> &'static str {
 }
 
 fn emit_wasi_file_runtime(has_read: bool, has_write: bool) -> String {
-    let mut out = String::from(
+    let mut out = String::new();
+    if has_read {
+        out.push_str(
+            r#"
+  ;; Report filesystem failures before leaving the guest.  A raw `unreachable`
+  ;; loses the WASI errno and makes an ordinary missing file look like a Calque
+  ;; safety-check failure to the command-line driver.
+  (data (i32.const 61000) "debug.host_error: read!: ")
+  (data (i32.const 61032) ": file not found\0a")
+  (data (i32.const 61064) ": permission denied\0a")
+  (data (i32.const 61096) ": is a directory\0a")
+  (data (i32.const 61128) ": a path component is not a directory\0a")
+  (data (i32.const 61176) ": could not open file\0a")
+  (func $__wasi_write_error_text (param $ptr i32) (param $len i32)
+    i32.const 0
+    local.get $ptr
+    i32.store
+    i32.const 4
+    local.get $len
+    i32.store
+    i32.const 2
+    i32.const 0
+    i32.const 1
+    i32.const 16
+    call $__wasi_fd_write
+    drop)
+  (func $__wasi_read_error (param $path i32) (param $errno i32)
+    (local $suffix_ptr i32) (local $suffix_len i32)
+    i32.const 61000
+    i32.const 25
+    call $__wasi_write_error_text
+    i32.const 2
+    local.get $path
+    call $__wasi_write_text
+    drop
+    i32.const 61176
+    local.set $suffix_ptr
+    i32.const 22
+    local.set $suffix_len
+    ;; WASI preview1 errno values: ACCES=2, ISDIR=31, NOENT=44, NOTDIR=54.
+    local.get $errno
+    i32.const 44
+    i32.eq
+    if
+      i32.const 61032
+      local.set $suffix_ptr
+      i32.const 17
+      local.set $suffix_len
+    else
+      local.get $errno
+      i32.const 2
+      i32.eq
+      if
+        i32.const 61064
+        local.set $suffix_ptr
+        i32.const 20
+        local.set $suffix_len
+      else
+        local.get $errno
+        i32.const 31
+        i32.eq
+        if
+          i32.const 61096
+          local.set $suffix_ptr
+          i32.const 17
+          local.set $suffix_len
+        else
+          local.get $errno
+          i32.const 54
+          i32.eq
+          if
+            i32.const 61128
+            local.set $suffix_ptr
+            i32.const 38
+            local.set $suffix_len
+          end
+        end
+      end
+    end
+    local.get $suffix_ptr
+    local.get $suffix_len
+    call $__wasi_write_error_text
+    i32.const 70
+    call $__wasi_proc_exit
+    unreachable)
+"#,
+        );
+    }
+
+    out.push_str(
         r#"
   ;; Encode a Calque [Char] path as UTF-8 at scratch address 1024.
   (func $__wasi_encode_path (param $path i32) (result i32)
@@ -6856,7 +6945,7 @@ fn emit_wasi_file_runtime(has_read: bool, has_write: bool) -> String {
         out.push_str(
             r#"
   (func $v_read_bang_ (param $path i32) (result i32)
-    (local $len i32) (local $fd i32) (local $result i32)
+    (local $len i32) (local $fd i32) (local $result i32) (local $errno i32)
     local.get $path
     call $__wasi_encode_path
     local.set $len
@@ -6870,7 +6959,14 @@ fn emit_wasi_file_runtime(has_read: bool, has_write: bool) -> String {
     i32.const 0
     i32.const 16
     call $__wasi_path_open
-    if unreachable end
+    local.tee $errno
+    i32.eqz
+    if
+    else
+      local.get $path
+      local.get $errno
+      call $__wasi_read_error
+    end
     i32.const 16
     i32.load
     local.tee $fd
@@ -16457,6 +16553,12 @@ fn compile_program_to_wat_build_typed_with_opts(
     let mut extern_imports = String::new();
     let wasi_host = wasi_bool("QUE_WASI_HOST");
     let wasi_prints_result = wasi_host && !wasi_no_result;
+    let wasi_needs_file_read = used_extern_defs.contains_key("read!")
+        || used_extern_defs.contains_key("read/chunks!")
+        || used_extern_defs.contains_key("read/lines!");
+    // Filesystem errors are reported by the guest so a failed `read!` retains
+    // the operation, path, and WASI error instead of becoming an opaque trap.
+    let wasi_file_error_diagnostics = wasi_host && wasi_needs_file_read;
     let wasi_guard_diagnostics = wasi_host
         && (parse_env_bool_like("QUE_INT_OVERFLOW_CHECK", false)
             || parse_env_bool_like("QUE_DEC_OVERFLOW_CHECK", false)
@@ -16540,13 +16642,14 @@ fn compile_program_to_wat_build_typed_with_opts(
             || used_extern_defs.contains_key("print!")
             || used_extern_defs.contains_key("clear!")
             || used_extern_defs.contains_key("write!")
-            || wasi_guard_diagnostics)
+            || wasi_guard_diagnostics
+            || wasi_file_error_diagnostics)
     {
         extern_imports.push_str(
             "  (import \"wasi_snapshot_preview1\" \"fd_write\" (func $__wasi_fd_write (param i32 i32 i32 i32) (result i32)))\n",
         );
     }
-    if wasi_guard_diagnostics {
+    if wasi_guard_diagnostics || wasi_file_error_diagnostics {
         extern_imports.push_str(
             "  (import \"wasi_snapshot_preview1\" \"proc_exit\" (func $__wasi_proc_exit (param i32)))\n",
         );
@@ -16566,9 +16669,6 @@ fn compile_program_to_wat_build_typed_with_opts(
             "  (import \"wasi_snapshot_preview1\" \"random_get\" (func $__wasi_random_get (param i32 i32) (result i32)))\n",
         );
     }
-    let wasi_needs_file_read = used_extern_defs.contains_key("read!")
-        || used_extern_defs.contains_key("read/chunks!")
-        || used_extern_defs.contains_key("read/lines!");
     let wasi_needs_stdin_read =
         used_extern_defs.contains_key("stdin!") || used_extern_defs.contains_key("stdin/chunks!");
     if wasi_host && (wasi_needs_stdin_read || wasi_needs_file_read) {
@@ -16637,7 +16737,8 @@ fn compile_program_to_wat_build_typed_with_opts(
     if wasi_host
         && (wasi_prints_result
             || used_extern_defs.contains_key("print!")
-            || used_extern_defs.contains_key("write!"))
+            || used_extern_defs.contains_key("write!")
+            || wasi_file_error_diagnostics)
     {
         extern_imports.push_str(emit_wasi_print_runtime());
     }

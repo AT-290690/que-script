@@ -8021,6 +8021,25 @@ fn"#;
     }
 
     #[test]
+    fn test_wasi_read_reports_missing_file_without_a_raw_trap() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
+        let _permissions = ScopedEnvVar::set("QUE_WASI_ALLOW", "read");
+        let expr = crate::parser::build(r#"(read! "missing.txt")"#)
+            .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+
+        assert!(wat.contains("debug.host_error: read!:"), "{wat}");
+        assert!(wat.contains("(func $__wasi_read_error"), "{wat}");
+        assert!(wat.contains("call $__wasi_proc_exit"), "{wat}");
+        assert!(wat.contains("\"fd_write\""), "{wat}");
+        wat::parse_str(&wat).expect("WASI read error reporter should encode");
+    }
+
+    #[test]
     fn test_wasi_serialize_is_specialized_inside_guest() {
         let _lock = runtime_exec_lock()
             .lock()

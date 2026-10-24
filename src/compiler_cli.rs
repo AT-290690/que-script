@@ -725,6 +725,9 @@ fn runtime_failure_message(
     debug: bool,
 ) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
+    if let Some(host_error) = host_failure_reason(&stderr) {
+        return format!("in '{source_path}': {host_error}");
+    }
     let reason = runtime_failure_reason(&stderr, debug);
     let status = output
         .status
@@ -732,6 +735,13 @@ fn runtime_failure_message(
         .map(|code| format!("exit code {code}"))
         .unwrap_or_else(|| "terminated by signal".to_string());
     format!("in '{source_path}': runtime error using {runtime}: {reason} ({status})")
+}
+
+fn host_failure_reason(stderr: &str) -> Option<&str> {
+    stderr
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("debug.host_error: "))
 }
 
 fn runtime_failure_reason(stderr: &str, debug: bool) -> String {
@@ -937,5 +947,14 @@ mod runtime_adapter_tests {
     fn runtime_failure_reason_classifies_memory_traps() {
         let reason = runtime_failure_reason("invalid write address: -2147483632", false);
         assert_eq!(reason, "vector access was outside its valid range");
+    }
+
+    #[test]
+    fn host_failure_reason_preserves_wasi_file_context() {
+        let stderr = "Error: failed to run\ndebug.host_error: read!: missing.txt: file not found\n";
+        assert_eq!(
+            host_failure_reason(stderr),
+            Some("read!: missing.txt: file not found")
+        );
     }
 }
