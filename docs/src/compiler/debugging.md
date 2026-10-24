@@ -62,6 +62,12 @@ the contract and makes an accidental specialization easier to find:
 Check destructuring too: `[head . tail]` needs a non-empty vector, while
 `{left right}` expects a two-field tuple.
 
+The compiler and both language servers collect independent top-level type
+errors together. During diagnostic recovery only, a failed declaration gets an
+internal unknown placeholder so later forms can still be checked; it never
+makes the program valid or compilable. This avoids distracting “undefined
+variable” cascades while still finding other errors in those later forms.
+
 ## A bounds, empty-vector, or arithmetic warning
 
 Warnings mean the analyser could not prove the required fact. They are not all

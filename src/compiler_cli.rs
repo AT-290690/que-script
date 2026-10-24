@@ -2,7 +2,7 @@
 //!
 //! This module deliberately has no dependency on the embedded Wasmtime host.
 
-use crate::infer::{infer_with_builtins_typed_lsp, InferErrorInfo, TypedExpression};
+use crate::infer::{infer_with_builtins_typed_lsp_all, TypedExpression};
 use crate::parser::Expression;
 use std::collections::BTreeMap;
 use std::env;
@@ -482,10 +482,25 @@ fn user_form_count(source: &str) -> usize {
 
 fn infer_program(source: &str, merged: &Expression) -> Result<TypedExpression, String> {
     let (env, next_id) = crate::types::create_builtin_environment(crate::types::TypeEnv::new());
-    infer_with_builtins_typed_lsp(merged, (env, next_id), user_form_count(source))
+    infer_with_builtins_typed_lsp_all(merged, (env, next_id), user_form_count(source))
         .map(|(_, typed)| typed)
-        .map_err(|InferErrorInfo { message, .. }| {
-            crate::lsp_native_core::normalize_diagnostic_message(&message)
+        .map_err(|errors| {
+            let messages = errors
+                .into_iter()
+                .map(|error| crate::lsp_native_core::normalize_diagnostic_message(&error.message))
+                .collect::<Vec<_>>();
+            if messages.len() == 1 {
+                messages.into_iter().next().unwrap_or_default()
+            } else {
+                format!(
+                    "type errors:\n{}",
+                    messages
+                        .into_iter()
+                        .map(|message| format!("  - {message}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
         })
 }
 
@@ -924,6 +939,48 @@ mod runtime_adapter_tests {
         assert!(error.contains("needs a Calque source file"), "{error}");
         assert!(error.contains("que <program.que>"), "{error}");
         assert!(error.contains("que --help"), "{error}");
+    }
+
+    #[test]
+    fn cli_inference_reports_independent_type_errors_together() {
+        let source = r#"
+            (let first (+ true 1))
+            (let uses-first (+ first 1))
+            (let second (missing-name 2))
+        "#;
+        let merged = merged_program(source).expect("program should merge with the library");
+        let error = infer_program(source, &merged).expect_err("program should fail inference");
+
+        assert!(error.contains("type errors:"), "{error}");
+        assert!(error.contains("expected Int but got Bool"), "{error}");
+        assert!(
+            error.contains("Undefined variable: missing-name"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("Undefined variable: first"),
+            "dependent error should be suppressed: {error}"
+        );
+    }
+
+    #[test]
+    fn cli_inference_checks_past_a_failed_top_level_binding() {
+        let source = r#"
+            (let decode (lambda ch (upper 1)))
+            (let score
+              (|> ["A"]
+                  (filter (lambda word (> (length word) false)))
+                  (map decode)))
+        "#;
+        let merged = merged_program(source).expect("program should merge with the library");
+        let error = infer_program(source, &merged).expect_err("program should fail inference");
+
+        assert!(error.contains("Argument 1 of upper expected Char but got Int"), "{error}");
+        assert!(error.contains("Argument 2 of > expected Int but got Bool"), "{error}");
+        assert!(
+            !error.contains("Undefined variable: decode"),
+            "failed bindings should remain usable for recovery only: {error}"
+        );
     }
 
     #[test]

@@ -1,7 +1,9 @@
 use crate::infer::{
-    infer_with_builtins_typed, infer_with_builtins_typed_lsp, EffectFlags, InferErrorScope,
+    infer_with_builtins_typed, infer_with_builtins_typed_lsp_all, EffectFlags, InferErrorScope,
     TypedExpression,
 };
+#[cfg(feature = "compiler")]
+use crate::infer::infer_with_builtins_typed_lsp;
 use crate::lsp_native_core as native_core;
 use crate::parser::{self, Expression};
 use crate::types::{Type, TypeEnv};
@@ -200,7 +202,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
         }
     };
 
-    match infer_with_builtins_typed_lsp(
+    match infer_with_builtins_typed_lsp_all(
         &program,
         (core.base_env.clone(), core.base_next_id),
         user_form_count,
@@ -255,23 +257,25 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                 });
             }
         }
-        Err(err) => {
+        Err(errors) => {
             let mut candidate_symbols = user_bound_symbols.clone();
             candidate_symbols.extend(core.global_signatures.keys().cloned());
             candidate_symbols.extend(core.std_fallback_names.iter().cloned());
             candidate_symbols.extend(symbol_types_raw.keys().cloned());
             candidate_symbols.extend(let_binding_types_raw.keys().cloned());
-            let message_with_suggestions = native_core::append_undefined_variable_suggestions(
-                &err.message,
-                candidate_symbols.iter().map(|s| s.as_str()),
-                3,
-            );
-            diagnostics.extend(make_error_diagnostic(
-                text,
-                message_with_suggestions,
-                err.scope.as_ref(),
-                err.snippet.as_deref(),
-            ));
+            for err in errors {
+                let message_with_suggestions = native_core::append_undefined_variable_suggestions(
+                    &err.message,
+                    candidate_symbols.iter().map(|s| s.as_str()),
+                    3,
+                );
+                diagnostics.extend(make_error_diagnostic(
+                    text,
+                    message_with_suggestions,
+                    err.scope.as_ref(),
+                    err.snippet.as_deref(),
+                ));
+            }
         }
     }
 

@@ -41,6 +41,34 @@ pub struct InferErrorInfo {
     pub partial_typed_ast: Option<TypedExpression>,
 }
 
+/// All recoverable inference failures found while checking a program.
+///
+/// The normal compiler path remains fail-fast. Editor and diagnostic callers
+/// can opt into collecting independent failures from separate top-level forms.
+#[derive(Clone, Debug)]
+pub struct InferErrors {
+    pub errors: Vec<InferErrorInfo>,
+}
+
+impl From<InferErrorInfo> for InferErrors {
+    fn from(error: InferErrorInfo) -> Self {
+        Self {
+            errors: vec![error],
+        }
+    }
+}
+
+impl InferErrors {
+    fn primary(self) -> InferErrorInfo {
+        self.errors.into_iter().next().unwrap_or(InferErrorInfo {
+            message: "type inference failed without a diagnostic".to_string(),
+            scope: None,
+            snippet: None,
+            partial_typed_ast: None,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TypedExpression {
     pub expr: Expression,
@@ -1997,6 +2025,7 @@ pub struct SolveError {
     pub snippet: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct InferenceContext {
     pub env: TypeEnv,
     pub mut_scopes: Vec<HashSet<String>>,
@@ -2016,6 +2045,8 @@ pub struct InferenceContext {
     pub scope_lambda_path: Vec<usize>,
     pub scope_lambda_counters: Vec<usize>,
     pub last_error_scope: Option<InferErrorScope>,
+    pub collect_top_level_errors: bool,
+    pub collected_errors: Vec<InferErrorInfo>,
 }
 
 impl InferenceContext {
@@ -3376,6 +3407,38 @@ fn infer_alter(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     Ok(Type::Unit)
 }
 
+fn top_level_binding_name(expr: &Expression) -> Option<&str> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    match &items[..] {
+        [Expression::Word(keyword), Expression::Word(name), ..]
+            if matches!(keyword.as_str(), "let" | "letrec" | "mut") =>
+        {
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
+fn install_recovery_binding(expr: &Expression, ctx: &mut InferenceContext) {
+    let Some(name) = top_level_binding_name(expr) else {
+        return;
+    };
+    // This binding exists only while collecting diagnostics. It lets later
+    // forms be checked past an earlier bad declaration, but the accumulated
+    // error still prevents the program from compiling.
+    if ctx.env.get(name).is_none() {
+        let placeholder = ctx.fresh_var();
+        let _ = ctx
+            .env
+            .insert(name.to_string(), TypeScheme::monotype(placeholder));
+    }
+    // A failed binding following `sig` already supplied the real diagnostic;
+    // do not add a misleading second "no matching binding" error at the end.
+    ctx.mark_declared_type_used(name);
+}
+
 // Type inference for do expressions
 fn infer_do(
     expr: &Expression,
@@ -3410,14 +3473,75 @@ fn infer_do(
             }
         }
 
-        last_type = infer_expr(item, ctx)?;
+        let is_recoverable_user_form =
+            is_root_do && idx >= user_start && ctx.collect_top_level_errors;
+        if !is_recoverable_user_form {
+            last_type = infer_expr(item, ctx)?;
+            continue;
+        }
+
+        // A failed top-level form must not leak its half-created binding,
+        // constraints, or fresh variables into later forms. This lets an
+        // editor report independent errors together without cascades.
+        let checkpoint = ctx.clone();
+        match infer_expr(item, ctx) {
+            Ok(typ) => {
+                let constraints = ctx.constraints.clone();
+                match solve_constraints_list(&constraints) {
+                    Ok(subst) => {
+                        ctx.env.apply_substitution_map(&subst);
+                        last_type = typ;
+                    }
+                    Err(error) => {
+                        let diagnostic = InferErrorInfo {
+                            message: error.message,
+                            scope: error.scope.or_else(|| ctx.current_error_scope()),
+                            snippet: error.snippet,
+                            // Building a complete partial tree per error is
+                            // needlessly expensive; callers use `scope` to
+                            // locate this top-level form.
+                            partial_typed_ast: None,
+                        };
+                        *ctx = checkpoint;
+                        install_recovery_binding(item, ctx);
+                        ctx.collected_errors.push(diagnostic);
+                    }
+                }
+            }
+            Err(message) => {
+                let diagnostic = InferErrorInfo {
+                    message,
+                    scope: ctx
+                        .last_error_scope
+                        .clone()
+                        .or_else(|| ctx.current_error_scope()),
+                    snippet: None,
+                    partial_typed_ast: None,
+                };
+                *ctx = checkpoint;
+                install_recovery_binding(item, ctx);
+                ctx.collected_errors.push(diagnostic);
+            }
+        }
     }
 
     if let Some(scope) = ctx.declared_type_scopes.last() {
-        if let Some((name, _)) = scope
+        let unused = scope
             .iter()
-            .find(|(name, (_typ, used))| !declared_before.contains(*name) && !*used)
-        {
+            .filter_map(|(name, (_typ, used))| {
+                (!declared_before.contains(name) && !*used).then_some(name.clone())
+            })
+            .collect::<Vec<_>>();
+        if ctx.collect_top_level_errors {
+            for name in unused {
+                ctx.collected_errors.push(InferErrorInfo {
+                    message: format!("sig for '{}' has no matching binding in this scope", name),
+                    scope: None,
+                    snippet: None,
+                    partial_typed_ast: None,
+                });
+            }
+        } else if let Some(name) = unused.first() {
             return Err(format!(
                 "sig for '{}' has no matching binding in this scope",
                 name
@@ -3778,7 +3902,8 @@ fn infer_with_builtins_typed_internal(
     expr: &Expression,
     (env, init_id): (TypeEnv, u64),
     user_form_count_for_scope: Option<usize>,
-) -> Result<(Type, TypedExpression), InferErrorInfo> {
+    collect_top_level_errors: bool,
+) -> Result<(Type, TypedExpression), InferErrors> {
     let mut ctx = InferenceContext {
         env,
         mut_scopes: vec![HashSet::new()],
@@ -3796,6 +3921,8 @@ fn infer_with_builtins_typed_internal(
         scope_lambda_path: Vec::new(),
         scope_lambda_counters: vec![0],
         last_error_scope: None,
+        collect_top_level_errors,
+        collected_errors: Vec::new(),
     };
 
     let inferred = match infer_expr(expr, &mut ctx) {
@@ -3809,9 +3936,16 @@ fn infer_with_builtins_typed_internal(
                 scope: ctx.last_error_scope.clone(),
                 snippet: None,
                 partial_typed_ast,
-            });
+            }
+            .into());
         }
     };
+
+    if !ctx.collected_errors.is_empty() {
+        return Err(InferErrors {
+            errors: ctx.collected_errors.clone(),
+        });
+    }
 
     let constraints_vec: Vec<(Type, Type, TypeError)> = ctx
         .constraints
@@ -3830,7 +3964,8 @@ fn infer_with_builtins_typed_internal(
                 scope: e.scope,
                 snippet: e.snippet,
                 partial_typed_ast,
-            });
+            }
+            .into());
         }
     };
     let solved_type = apply_subst_map_to_type(&subst_map, &inferred);
@@ -3851,7 +3986,8 @@ fn infer_with_builtins_typed_internal(
                 scope: src.scope.clone(),
                 snippet: src_snippet(src),
                 partial_typed_ast: Some(partial_typed),
-            });
+            }
+            .into());
         }
     }
 
@@ -3869,7 +4005,8 @@ fn infer_with_builtins_typed_internal(
             scope: None,
             snippet: None,
             partial_typed_ast: Some(typed_expr),
-        });
+        }
+        .into());
     }
     Ok((solved_type, typed_expr))
 }
@@ -3878,7 +4015,8 @@ pub fn infer_with_builtins_typed(
     expr: &Expression,
     (env, init_id): (TypeEnv, u64),
 ) -> Result<(Type, TypedExpression), String> {
-    infer_with_builtins_typed_internal(expr, (env, init_id), None).map_err(|e| e.message)
+    infer_with_builtins_typed_internal(expr, (env, init_id), None, false)
+        .map_err(|errors| errors.primary().message)
 }
 
 pub fn infer_with_builtins_typed_lsp(
@@ -3886,5 +4024,18 @@ pub fn infer_with_builtins_typed_lsp(
     (env, init_id): (TypeEnv, u64),
     user_form_count: usize,
 ) -> Result<(Type, TypedExpression), InferErrorInfo> {
-    infer_with_builtins_typed_internal(expr, (env, init_id), Some(user_form_count))
+    infer_with_builtins_typed_internal(expr, (env, init_id), Some(user_form_count), false)
+        .map_err(InferErrors::primary)
+}
+
+/// Infer a program while collecting independent failures from its user
+/// top-level forms. A failed form is rolled back and introduces no binding for
+/// later forms, preventing misleading dependent diagnostics.
+pub fn infer_with_builtins_typed_lsp_all(
+    expr: &Expression,
+    (env, init_id): (TypeEnv, u64),
+    user_form_count: usize,
+) -> Result<(Type, TypedExpression), Vec<InferErrorInfo>> {
+    infer_with_builtins_typed_internal(expr, (env, init_id), Some(user_form_count), true)
+        .map_err(|errors| errors.errors)
 }

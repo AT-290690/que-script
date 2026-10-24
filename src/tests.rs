@@ -6791,6 +6791,41 @@ parse-value"#;
     }
 
     #[test]
+    fn test_wasm_lsp_diagnostics_collects_independent_top_level_type_errors() {
+        let source = r#"
+            (let first (+ true 1))
+            (let uses-first (+ first 1))
+            (let second (missing-name 2))
+            (let good (+ 20 22))
+        "#;
+        let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
+        let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
+            .expect("diagnostics response should be valid JSON");
+        let messages = diagnostics
+            .as_array()
+            .expect("diagnostics should be an array")
+            .iter()
+            .filter_map(|item| item.get("message").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(messages.len(), 2, "unexpected diagnostics: {diagnostics_json}");
+        assert!(
+            messages.iter().any(|message| message.contains("expected Int but got Bool")),
+            "missing first type error: {diagnostics_json}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("Undefined variable: missing-name")),
+            "missing second type error: {diagnostics_json}"
+        );
+        assert!(
+            !messages.iter().any(|message| message.contains("Undefined variable: first")),
+            "dependent diagnostic should be suppressed: {diagnostics_json}"
+        );
+    }
+
+    #[test]
     fn test_type_inference_occurs_check_message_order() {
         let program = "(let v [])\n(push! v v)";
         let std_ast = crate::baked::load_ast();

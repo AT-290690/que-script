@@ -14,7 +14,9 @@ use lsp_types::{
     ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
     SignatureInformation, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
 };
-use que::infer::{infer_with_builtins_typed_lsp, EffectFlags, InferErrorScope, TypedExpression};
+use que::infer::{
+    infer_with_builtins_typed_lsp_all, EffectFlags, InferErrorScope, TypedExpression,
+};
 use que::lsp_native_core as native_core;
 use que::parser::Expression;
 use que::types::{Type, TypeEnv};
@@ -1337,8 +1339,11 @@ fn analyze_document_text(
         }
     };
 
-    match infer_with_builtins_typed_lsp(&program, (base_env.clone(), base_next_id), user_form_count)
-    {
+    match infer_with_builtins_typed_lsp_all(
+        &program,
+        (base_env.clone(), base_next_id),
+        user_form_count,
+    ) {
         Ok((_typ, typed)) => {
             if que::lsp_native_core::lsp_static_analysis_enabled(text) {
                 let analysis_form_count =
@@ -1360,23 +1365,25 @@ fn analyze_document_text(
             form_scoped_symbols =
                 build_form_scoped_analyses(text, user_form_count, &typed, global_effects);
         }
-        Err(err) => {
+        Err(errors) => {
             let mut candidate_symbols = user_bound_symbols.clone();
             candidate_symbols.extend(global_signatures.keys().cloned());
             candidate_symbols.extend(std_fallback_names.iter().cloned());
             candidate_symbols.extend(symbol_types_raw.keys().cloned());
             candidate_symbols.extend(let_binding_types_raw.keys().cloned());
-            let message_with_suggestions = native_core::append_undefined_variable_suggestions(
-                &err.message,
-                candidate_symbols.iter().map(|s| s.as_str()),
-                3,
-            );
-            diagnostics.extend(make_error_diagnostic(
-                text,
-                message_with_suggestions,
-                err.scope.as_ref(),
-                err.snippet.as_deref(),
-            ));
+            for err in errors {
+                let message_with_suggestions = native_core::append_undefined_variable_suggestions(
+                    &err.message,
+                    candidate_symbols.iter().map(|s| s.as_str()),
+                    3,
+                );
+                diagnostics.extend(make_error_diagnostic(
+                    text,
+                    message_with_suggestions,
+                    err.scope.as_ref(),
+                    err.snippet.as_deref(),
+                ));
+            }
         }
     }
 
@@ -2358,6 +2365,41 @@ mod tests {
         assert!(diagnostic.message.contains("Macro 'one' expected"));
         assert_eq!(diagnostic.range.start, Position::new(1, 0));
         assert_eq!(diagnostic.range.end, Position::new(1, 9));
+    }
+
+    #[test]
+    fn native_lsp_collects_independent_type_errors_without_cascades() {
+        let source = r#"
+            (let first (+ true 1))
+            (let uses-first (+ first 1))
+            (let second (missing-name 2))
+        "#;
+        let analysis = analyze_lsp_test_source(source);
+        let messages = analysis
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(messages.len(), 2, "unexpected diagnostics: {messages:#?}");
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("expected Int but got Bool")),
+            "missing first type error: {messages:#?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("Undefined variable: missing-name")),
+            "missing second type error: {messages:#?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message.contains("Undefined variable: first")),
+            "dependent error should be suppressed: {messages:#?}"
+        );
     }
 
     #[test]

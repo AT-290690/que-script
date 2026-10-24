@@ -59,6 +59,33 @@ mod tests {
     }
 
     #[test]
+    fn collects_independent_top_level_type_errors_without_cascades() {
+        let source = r#"
+            (let bad (+ true 1))
+            (let uses-bad (+ bad 1))
+            (let also-bad (missing-name 2))
+            (let good (+ 20 22))
+        "#;
+        let expr = build(source).expect("program should parse");
+        let errors = infer::infer_with_builtins_typed_lsp_all(&expr, core_environment(), 4)
+            .expect_err("program should have recoverable type errors");
+
+        assert_eq!(errors.len(), 2, "unexpected diagnostics: {errors:#?}");
+        assert!(
+            errors[0].message.contains("expected Int but got Bool"),
+            "unexpected first diagnostic: {:?}",
+            errors[0]
+        );
+        assert!(
+            errors[1].message.contains("Undefined variable: missing-name"),
+            "unexpected second diagnostic: {:?}",
+            errors[1]
+        );
+        assert_eq!(errors[0].scope.as_ref().map(|scope| scope.user_top_form), Some(0));
+        assert_eq!(errors[1].scope.as_ref().map(|scope| scope.user_top_form), Some(2));
+    }
+
+    #[test]
     fn decimal_literals_remain_exact_until_runtime_quantization() {
         let values =
             parse("1000000.001 1000000.002 3.1425 -3.1435").expect("decimal literals should parse");
