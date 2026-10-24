@@ -9,6 +9,9 @@ Enable strict warnings in a source file:
 ; use-strict-warnings!
 ```
 
+For a compact message-to-fix table, see [Warnings and proof
+recipes](../reference/warnings.md).
+
 Or inspect a full report:
 
 ```sh

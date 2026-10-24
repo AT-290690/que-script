@@ -4,6 +4,7 @@
 - [Installation](installation.md)
 - [Getting started](getting-started.md)
 - [Language tour](language/tour.md)
+- [Build a file-report program](examples/file-report.md)
 
 # Language
 
@@ -20,11 +21,13 @@
 - [Macros](language/macros.md)
 - [Inference and signatures](language/type-inference.md)
 - [Correctness analysis](language/correctness.md)
+- [Warnings and proof recipes](reference/warnings.md)
 - [Effects and permissions](language/effects.md)
 
 # Toolchain
 
 - [WebAssembly target](compiler/webassembly.md)
+- [Debug, optimized, and native execution](compiler/release-safety.md)
 - [CLI](compiler/cli.md)
 - [Debugging cookbook](compiler/debugging.md)
 - [Projects, tests, and editors](compiler/projects-and-editors.md)

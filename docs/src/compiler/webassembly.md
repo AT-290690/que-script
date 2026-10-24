@@ -47,3 +47,6 @@ compiler. It is deliberately separate from the main `que` command:
 This is useful for completed compute-heavy programs and native benchmarking.
 It is not a different source language: static typing, macro expansion, and
 Wasm generation occur first in the same compiler.
+
+For the debug/optimized safety boundary and a release checklist, see [Debug,
+optimized, and native execution](release-safety.md).

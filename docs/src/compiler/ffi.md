@@ -163,6 +163,27 @@ Enums serialize by their declared variant name and are checked against the
 expected enum on decode. See [Enum-keyed table round trip](../examples/enum-table-serialization.md)
 for a table example.
 
+### Compatibility and persistence
+
+`serialize` is designed for Calque-to-Calque data within a compatible compiler
+release. It is **not yet a versioned, stable public storage or network format**.
+Do not make a database schema, long-lived cache, or external API depend on its
+exact textual spelling without pinning the Calque compiler version and testing
+the decoder during upgrades.
+
+For persistent application data today, store an explicit version field next to
+the serialized value and own the migration in source:
+
+```que
+(let saved {1 (serialize value)})
+; On read, inspect the version before choosing the expected decoder and migration.
+```
+
+Serialization needs a concrete, fully known value type. It cannot serialize an
+unresolved generic or a function/closure, and `deserialize` needs an expected
+type through its binding, `sig`, or surrounding context. Malformed input or a
+type mismatch is a decoding failure, not an implicit conversion.
+
 Run a program using an operation only after granting the matching capability:
 
 ```sh

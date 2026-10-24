@@ -30,6 +30,8 @@ que hello.que --opt --allow print
 zero, and vector access where appropriate, and reports static-analysis
 findings. `--opt` enables optimization and removes those optional runtime
 guards; it is not a substitute for establishing correctness.
+See [Debug, optimized, and native execution](compiler/release-safety.md) for
+the precise safety and deployment contract.
 
 ## Learn from the installed compiler
 
