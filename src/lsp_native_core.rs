@@ -3,7 +3,7 @@ use crate::parser::{self, Expression};
 use crate::types::{create_builtin_environment, Type, TypeEnv};
 use std::collections::{HashMap, HashSet};
 
-pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 19] = [
+pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 20] = [
     ("alter!", "T -> T -> ()"),
     ("&alter!", "[T] -> T -> ()"),
     ("vector", "T... -> [T]"),
@@ -23,6 +23,7 @@ pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 19] = [
     ("macroexpand-1", "compile-time single-step macro expansion"),
     ("enum", "Name -> Variant... -> ()"),
     ("match", "Enum -> Variant -> T ... -> T"),
+    ("=~", "Enum -> Enum -> Bool"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -480,6 +481,7 @@ fn is_known_pure_syntax_call(op: &str) -> bool {
             | "="
             | "=?"
             | "=#"
+            | "=~"
             | "=."
             | "<"
             | "<#"

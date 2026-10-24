@@ -2179,6 +2179,22 @@ mod tests {
     }
 
     #[test]
+    fn native_hover_reports_enum_equality_signature() {
+        let state = test_server_state();
+        let hover = state
+            .hover_for_text("(enum Letter A B C)\n(=~ B C)", Position::new(1, 1))
+            .expect("enum equality operator should have a hover");
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected Markdown hover contents");
+        };
+        assert!(
+            markup.value.contains("=~ : Enum -> Enum -> Bool"),
+            "unexpected hover: {}",
+            markup.value
+        );
+    }
+
+    #[test]
     fn completion_keeps_library_functions_when_document_has_local_bindings() {
         let state = test_server_state();
         let items = state.completion_items_for_text("(let xs [1 2 3])\nma", Position::new(1, 2));

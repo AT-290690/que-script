@@ -5725,6 +5725,20 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_enum_equality_operator_has_a_signature() {
+        let program = "(enum Letter A B C)\n(=~ B C)";
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 1, 1);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+        let contents = hover
+            .get("contents")
+            .and_then(|value| value.as_str())
+            .expect("enum equality operator should have hover contents");
+
+        assert_eq!(contents, "=~ : Enum -> Enum -> Bool");
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_distinguishes_repeated_pipeline_stages() {
         let source = "(|> (range 1 10) (map square) (map Integer->String))";
         let first: serde_json::Value =
