@@ -27,7 +27,7 @@ syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(&alter!\|&mut\|alter!
 syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(enum\|match\|match\/string\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
 
 " Arithmetic operators share one highlight group, including Dec variants.
-syn match queOperator /\%([[:alnum:]_\/.!?&<>=+#*%-]\)\@<!\%(=~\|[+*\/%-]\.\|[+*\/%-]\)\%([[:alnum:]_\/.!?&<>=+#*%-]\)\@!/
+syn match queOperator /\%([[:alnum:]_\/.!?&<>=+#*%-]\)\@<!\%(=\~\|[+*\/%-]\.\|[+*\/%-]\)\%([[:alnum:]_\/.!?&<>=+#*%-]\)\@!/
 
 " --- Builtins (Functions, Core Operations & Mutations) ---
 syn keyword queBuiltin
