@@ -260,12 +260,19 @@ Strings have type `[Char]`. `split` takes the separator first and text last;
 
 ```que
 (split "," "red,green,blue")             ; ["red" "green" "blue"]
-(split/lines "one\ntwo")                  ; ["one" "two"]
-(split/words "one two")                   ; ["one" "two"]
+(split/lines "one\n\ntwo")                ; ["one" "" "two"]
+(split/spaces "one  two")                 ; ["one" "" "two"]
+(split/words "  one\ttwo\nthree  ")       ; ["one" "two" "three"]
 (join "/" ["usr" "local" "bin"])        ; "usr/local/bin"
 (trim "  Calque  ")                       ; "Calque"
 (slice 1 4 "Calque")                      ; "alq"
 ```
+
+`split` and `split/spaces` are raw delimiter splits: repeated, leading, and
+trailing delimiters produce empty fields. `split/lines` follows that rule so
+blank lines remain available as structure in an input. `split/words` is the
+tokenizing variant: it splits on spaces, tabs, carriage returns, and newlines,
+and drops empty fields.
 
 Use `lower`, `upper`, `digit?`, `space?`, and the `String/*` predicates for
 text logic:

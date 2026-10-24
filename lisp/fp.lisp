@@ -521,9 +521,40 @@
 
 (let neighborhood/von-neumann [ [ 1 0 ] [ 0 -1 ] [ 0 1 ] [ -1 0 ] ])
 
+(let space? (lambda c
+    (or (=# c ' ')
+        (=# c '\n')
+        (=# c '\r')
+        (=# c '\t'))))
+
+; Raw line splitting deliberately preserves blank lines: they often carry
+; structure in text formats. `split/words` below is the tokenizing variant.
 (let split/lines (lambda xs (String/to-vector/raw xs '\n')))
 
-(let split/words (lambda xs (String/to-vector/raw xs ' ')))
+; `split/spaces` is the raw literal-space splitter. Unlike `split/words`, it
+; keeps empty fields so callers can distinguish repeated, leading, and trailing
+; spaces.
+(let split/spaces (lambda xs (String/to-vector/raw xs ' ')))
+
+; A word is a maximal run of non-whitespace characters. Unlike the raw split
+; helpers, this deliberately discards empty fields and accepts tabs and lines.
+(let split/words (lambda xs (do
+    (let out [])
+    (&mut word [])
+    (let len (length xs))
+    (mut i 0)
+    (while (< i len) (do
+      (let current (get xs i))
+      (if (space? current)
+          (if (not-empty? (&get word))
+              (do
+                (push! out (&get word))
+                (&alter! word []))
+              nil)
+          (push! (&get word) current))
+      (++ i)))
+    (if (not-empty? (&get word)) (push! out (&get word)))
+    out)))
 
 (let split/commas (lambda xs (String/to-vector/raw xs ',')))
 
@@ -679,12 +710,6 @@
 (let true/option (lambda x { true x }))
 
 (let false/option (lambda x { false x }))
-
-(let space? (lambda c
-    (or (=# c ' ')
-        (=# c '\n')
-        (=# c '\r')
-        (=# c '\t'))))
 
 (let trim/left (lambda xs (do
       (let len (length xs))

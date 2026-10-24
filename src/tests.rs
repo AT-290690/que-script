@@ -908,6 +908,20 @@ xs)"#,
     }
 
     #[test]
+    fn test_runtime_std_split_words_tokenizes_whitespace_while_split_spaces_preserves_fields() {
+        let src = r#"[
+            (split/spaces "one  two ")
+            (split/words "  one\ttwo\nthree\rfour  ")
+            (split/lines "one\n\ntwo")
+          ]"#;
+        assert_std_program_output_matches_with_and_without_optimizer(src);
+        assert_eq!(
+            run_program_output_with_std_and_opts(src, true).trim(),
+            "[[\"one\" \"\" \"two\" \"\"] [\"one\" \"two\" \"three\" \"four\"] [\"one\" \"\" \"two\"]]"
+        );
+    }
+
+    #[test]
     fn test_runtime_string_find_helpers_work() {
         let output = run_program_output_with_std_and_opts(
             r#"[

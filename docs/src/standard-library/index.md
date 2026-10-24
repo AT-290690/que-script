@@ -28,7 +28,7 @@ example](by-example.md) shows each of these patterns in runnable code.
 | Combine or inspect values | `reduce`, `sum`, `product`, `count`, `find`, `some?`, `every?`, `minimum`, `maximum` |
 | Reshape a vector | `reverse`, `flat`, `zip`, `unzip`, `slice`, `take/first`, `drop/first`, `partition` |
 | Order or classify values | `sort`, `group`, `unique/int`, `unique/char` |
-| Parse or assemble text | `split`, `split/lines`, `split/words`, `trim`, `join`, `String->Integer`, `Integer->String` |
+| Parse or assemble text | `split`, `split/lines`, `split/spaces`, `split/words`, `trim`, `join`, `String->Integer`, `Integer->String` |
 | Use key-value data | `Table/new`, `Table/set!`, `Table/get`, `Table/has?`, `Table/entries`, `Table/update-or!`, `Table/count` |
 | Work directly with a vector | `length`, `get`, `set!`, `push!`, `pop!`, `pop-val!`, `empty!`, `capacity!`, `in-bounds?` |
 
@@ -93,7 +93,7 @@ prefer the non-raw name unless you are extending the library itself.
 
 ## Text, numbers, and conversion
 
-- Text: `split`, `split/lines`, `split/words`, `split/commas`, `join`,
+- Text: `split`, `split/lines`, `split/spaces`, `split/words`, `split/commas`, `join`,
   `trim`, `trim/left`, `trim/right`, `lower`, `upper`, `digit?`, `space?`,
   `String/starts?`, `String/ends?`, `String/contains?`, `String/equal?`,
   `String/lt?`, `String/lte?`, `String/gt?`, `String/gte?`, `String/find`,
