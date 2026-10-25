@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn formatting_is_idempotent() {
         let once =
-            format_source("(let xs [78 9 20 10 30 2])\n(loop i (< i (length xs)) (get xs i))")
+            format_source("(let xs [78 9 20 10 30 2])\n(loop i (< i (length xs)) (get i xs))")
                 .expect("first format");
         let twice = format_source(&once).expect("second format");
         assert_eq!(once, twice);

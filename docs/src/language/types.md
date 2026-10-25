@@ -170,8 +170,8 @@ still inferred; it is simply shared by every later mutation.
 
 ```que
 (let xs [])
-(push! xs 1)       ; fixes xs as [Int]
-; (push! xs true)  ; type error
+(push! 1 xs)       ; fixes xs as [Int]
+; (push! true xs)  ; type error
 ```
 
 `mut` bindings are monomorphic by design and retain one type throughout their

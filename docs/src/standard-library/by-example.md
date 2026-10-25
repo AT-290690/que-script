@@ -4,8 +4,8 @@ This is the practical first stop for the bundled library: short examples of
 the functions you will use in normal programs. The [complete library
 index](index.md) covers every exported family, including low-level helpers.
 
-Functions that transform a collection usually take that collection last, so
-they compose naturally with `|>`. Operations ending in `!` mutate the first
+Functions that transform a collection take that collection last, so they
+compose naturally with `|>`. Operations ending in `!` mutate their final
 collection argument and normally return `nil`.
 
 ```que
@@ -25,31 +25,31 @@ same basic read operations work on both.
 (let xs [10 20 30])
 
 (length xs)             ; 3
-(get xs 1)              ; 20
+(get 1 xs)              ; 20
 (car xs)                ; 10 — first element
 (cdr xs)                ; [20 30] — tail from offset 1
-(cdr xs 2)              ; [30] — tail from an explicit offset
+(cdr 2 xs)              ; [30] — tail from an explicit offset
 (first xs)              ; 10
 (last xs)               ; 30
-(at xs -1)              ; 30 — negative indexing helper
+(at -1 xs)              ; 30 — negative indexing helper
 (cons [0] xs)           ; [0 10 20 30] — concatenate two vectors
 ```
 
 ### `car`, `cdr`, and tail windows
 
 `car` reads the first element: it is the head-oriented spelling of
-`(get xs 0)`. `cdr` creates a **tail window**. `(cdr xs)` starts at offset
-`1`; `(cdr xs n)` starts at offset `n`. The window has its own logical index
+`(get 0 xs)`. `cdr` creates a **tail window**. `(cdr xs)` starts at offset
+`1`; `(cdr n xs)` starts at offset `n`. The window has its own logical index
 zero, so it is useful for head-and-tail recursion without copying every tail.
 
 ```que
 (let xs [10 20 30 40])
-(let tail (cdr xs 2))
+(let tail (cdr 2 xs))
 
-(get tail 0)            ; 30
+(get 0 tail)            ; 30
 (length tail)           ; 2
 
-(set! tail 0 99)
+(set! 0 99 tail)
 {xs tail}
 ; { [10 20 30 40] [99 40] }
 ```
@@ -67,19 +67,19 @@ loop so the analyser can prove the access.
 
 ```que
 (if (in-bounds? xs index)
-    (get xs index)
+    (get index xs)
     fallback)
 
 (let {found? values} (Vector/get* index xs))
-(if found? (get values 0) fallback)
+(if found? (get 0 values) fallback)
 ```
 
 Mutation is direct and explicit:
 
 ```que
 (let xs [10 20])
-(set! xs 0 99)          ; [99 20]
-(push! xs 30)           ; append, xs is now [99 20 30]
+(set! 0 99 xs)          ; [99 20]
+(push! 30 xs)           ; append, xs is now [99 20 30]
 (let last-value (pop-val! xs))
 (pop! xs)               ; remove the last value and return nil
 (empty! xs)             ; length becomes zero; allocation remains available
@@ -91,8 +91,8 @@ the copy, and returns it. `compact!` discards unused vector capacity.
 
 ```que
 (let out [])
-(capacity! out 1000)
-(loop i (< i 1000) (push! out i))
+(capacity! 1000 out)
+(loop i (< i 1000) (push! i out))
 
 (let copy-with-room (capacity 1000 out))
 (compact! out)
@@ -179,7 +179,7 @@ also receive an index.
 
 ```que
 (let seen [])
-(for (lambda (x) (push! seen x)) [1 2 3])
+(for (lambda (x) (push! x seen)) [1 2 3])
 ; seen is [1 2 3]
 
 (|> [1 2 3]
@@ -241,7 +241,7 @@ second.
 ; [1 2 4 5]
 
 (let xs [5 1 4 2])
-(Vector/sort! xs (lambda (a b) (< a b)))
+(Vector/sort! (lambda (a b) (< a b)) xs)
 ; xs is [1 2 4 5]
 ```
 
@@ -333,13 +333,13 @@ deterministic seed-to-value functions.
 
 ## Tables, sets, heaps, deques, and matrices
 
-Tables are mutable hash maps. Put the table first for mutation; use the key
-first for lookup and membership so those work in a pipeline.
+Tables are mutable hash maps. Their public operations put the table last, so
+they compose naturally with `|>`.
 
 ```que
 (let scores (Table/new))
-(Table/set! scores "Ada" 10)
-(Table/update-or! scores "Ada" (lambda () 0) (lambda (n) (+ n 1)))
+(Table/set! "Ada" 10 scores)
+(Table/update-or! "Ada" (lambda () 0) (lambda (n) (+ n 1)) scores)
 
 (Table/has? "Ada" scores)                ; true
 (Table/get-unsafe "Ada" scores)          ; 11
@@ -356,10 +356,10 @@ new tables. `Table/count` and `Table/frequency` build counting tables.
 
 ```que
 (let tags (Set/new))
-(Set/add! tags "fast")
-(Set/add! tags "typed")
+(Set/add! "fast" tags)
+(Set/add! "typed" tags)
 (Set/has? "fast" tags)                   ; true
-(Set/remove! tags "fast")
+(Set/remove! "fast" tags)
 (Set/values tags)                         ; ["typed"]
 ```
 
@@ -369,10 +369,10 @@ Sets provide `intersection`, `union`, `difference`, and `xor`, as well as
 ```que
 (let heap [])
 (let before? (lambda (a b) (< a b)))
-(Heap/push! heap 4 before?)
-(Heap/push! heap 1 before?)
+(Heap/push! 4 before? heap)
+(Heap/push! 1 before? heap)
 (Heap/peek! heap)                         ; 1
-(Heap/pop! heap before?)
+(Heap/pop! before? heap)
 ```
 
 `Que/new` creates a deque with a default value. Use `Que/append!`/`Que/push!`

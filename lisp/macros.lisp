@@ -48,7 +48,7 @@
 
 (letmacro &alter!
   (lambda cell value
-    (qq (set! (uq cell) 0 (uq value)))))
+    (qq (set! 0 (uq value) (uq cell)))))
 
 ; `apply` is source-level application splicing, not runtime vector unpacking.
 ; Keep the one-argument form as the function expression itself.
@@ -229,7 +229,7 @@
             (mut (uq i) 0)
             (while (< (uq i) (uq len))
               (do
-                (let (uq item) (get (uq xs) (uq i)))
+                (let (uq item) (get (uq i) (uq xs)))
                 (uqs body)
                 (++ (uq i))
                 nil)))))))
@@ -254,12 +254,12 @@
             (mut (uq y) 0)
             (while (< (uq y) (uq height))
               (do
-                (let (uq row) (get (uq rows) (uq y)))
+                (let (uq row) (get (uq y) (uq rows)))
                 (let (uq width) (length (uq row)))
                 (mut (uq x) 0)
                 (while (< (uq x) (uq width))
                   (do
-                    (let (uq item) (get (uq row) (uq x)))
+                    (let (uq item) (get (uq x) (uq row)))
                     (uqs body)
                     (++ (uq x))
                     nil))
@@ -402,7 +402,7 @@
 
           (while (< (uq index) (uq len))
             (let (uq item)
-              (get (uq xs) (uq index)))
+              (get (uq index) (uq xs)))
 
             (uqs body)
             (++ (uq index))))))))

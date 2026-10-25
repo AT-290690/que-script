@@ -30,7 +30,8 @@ specialist or implementation-level name.
 - Namespace-like names use `/`: `Vector/sort!`, `String/contains?`,
   `Table/update!`.
 - Transform-style functions usually take data last so they work with `|>`.
-- Mutating collection operations normally take the collection first.
+- Collection operations, including mutating ones, normally take their
+  collection last.
 
 ```que
 (|> xs
@@ -38,7 +39,7 @@ specialist or implementation-level name.
     (select valid?)
     sum)
 
-(Table/set! table key value)
+(Table/set! key value table)
 ```
 
 ## Main families

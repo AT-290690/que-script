@@ -50,7 +50,7 @@ For a safe counted access, the useful part looks conceptually like this:
 ```text
 Correctness:
   Proven bounds:
-    (get xs i) proven safe
+    (get i xs) proven safe
       0 <= i <= 9
 
 Termination:
@@ -93,13 +93,13 @@ abstract state to include both facts needed by `get`:
 
 ```que
 (if (and (>= i 0) (< i (length xs)))
-    (get xs i)
+    (get i xs)
     fallback)
 ```
 
 ```text
 true path:  0 <= i < length(xs)
-therefore:  (get xs i) is proven safe
+therefore:  (get i xs) is proven safe
 ```
 
 It keeps bounded alternatives when useful—for example, a value known to be
@@ -124,7 +124,7 @@ common counted loops without attempting to solve the halting problem.
 
 ```que
 (loop i (< i (length xs))
-  (get xs i))
+  (get i xs))
 ```
 
 The loop supplies an initial value, condition, and update. The analysis derives
@@ -168,7 +168,7 @@ The analyser recognizes common loop shapes:
 
 ```que
 (loop i (< i (length xs))
-  (get xs i))
+  (get i xs))
 ```
 
 Here it can establish `0 <= i < length(xs)`. If it cannot prove an access, it

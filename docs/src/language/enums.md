@@ -73,8 +73,8 @@ compared directly—there is no conversion to a string:
 ```que
 (sig points [[{ Shape Int }]])
 (let points (Table/new))
-(Table/set! points Rock 1)
-(Table/set! points Paper 2)
+(Table/set! Rock 1 points)
+(Table/set! Paper 2 points)
 ```
 
 Current enums have no payload variants. `match/string` remains available for

@@ -256,10 +256,13 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
                 Type::Function(
-                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::Int),
                     Box::new(Type::Function(
-                        Box::new(Type::Int),
-                        Box::new(Type::Function(Box::new(a), Box::new(Type::Unit))),
+                        Box::new(a.clone()),
+                        Box::new(Type::Function(
+                            Box::new(Type::List(Box::new(a))),
+                            Box::new(Type::Unit),
+                        )),
                     )),
                 ),
             ),
@@ -272,8 +275,11 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
                 Type::Function(
-                    Box::new(Type::List(Box::new(a.clone()))),
-                    Box::new(Type::Function(Box::new(a), Box::new(Type::Unit))),
+                    Box::new(a.clone()),
+                    Box::new(Type::Function(
+                        Box::new(Type::List(Box::new(a))),
+                        Box::new(Type::Unit),
+                    )),
                 ),
             ),
         );
@@ -325,8 +331,8 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
                 Type::Function(
-                    Box::new(Type::List(Box::new(a.clone()))),
-                    Box::new(Type::Function(Box::new(Type::Int), Box::new(a))),
+                    Box::new(Type::Int),
+                    Box::new(Type::Function(Box::new(Type::List(Box::new(a.clone()))), Box::new(a))),
                 ),
             ),
         );
@@ -363,9 +369,9 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
                 Type::Function(
-                    Box::new(Type::List(Box::new(a.clone()))),
+                    Box::new(Type::Int),
                     Box::new(Type::Function(
-                        Box::new(Type::Int),
+                        Box::new(Type::List(Box::new(a.clone()))),
                         Box::new(Type::List(Box::new(a.clone()))),
                     )),
                 ),
@@ -754,8 +760,11 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
             TypeScheme::new(
                 vec![a.var_id().unwrap()],
                 Type::Function(
-                    Box::new(Type::List(Box::new(a.clone()))),
-                    Box::new(Type::Function(Box::new(Type::Int), Box::new(Type::Unit))),
+                    Box::new(Type::Int),
+                    Box::new(Type::Function(
+                        Box::new(Type::List(Box::new(a))),
+                        Box::new(Type::Unit),
+                    )),
                 ),
             ),
         );

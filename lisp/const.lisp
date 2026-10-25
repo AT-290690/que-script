@@ -273,7 +273,7 @@
             (alter! n (+ n 1))))
         (+. (*. 2.0 sm) (*. (Int->Dec shifts) const/dec/ln2))))))
 
-  (let Payload/get (lambda (i) (if (> (length ARGV) i) (get ARGV i) "")))
+  (let Payload/get (lambda (i) (if (> (length ARGV) i) (get i ARGV) "")))
 
   (let Meta/token->Pair
     (lambda (token)
@@ -282,12 +282,12 @@
         (mut seen? false)
         (mut i 0)
         (while (< i (length token))
-            (let ch (get token i))
+            (let ch (get i token))
             (if (and (not seen?) (=# ch '='))
                 (alter! seen? true)
                 (if seen?
-                    (push! value ch)
-                    (push! key ch)))
+                    (push! ch value)
+                    (push! ch key)))
             (++ i))
         { key value }))
 
@@ -297,7 +297,7 @@
         (for
           (lambda (token)
             (if (not-empty? token)
-                (push! out (Meta/token->Pair token))))
+                (push! (Meta/token->Pair token) out)))
           (split " " text))
         out))
 
@@ -305,7 +305,7 @@
     (lambda (text)
       (reduce
         (lambda (acc pair)
-            (Table/set! acc (fst pair) (snd pair))
+            (Table/set! (fst pair) (snd pair) acc)
             acc)
         (Table/new)
         (Meta/parse text))))
@@ -352,15 +352,15 @@
   (let len (length xs))
   (mut i 0)
   (while (< i len)
-    (let x (get xs i))
+    (let x (get i xs))
     (if (=# x prev)
       (++ counter)
       (do
-        (push! temp { counter prev })
+        (push! { counter prev } temp)
         (alter! prev x)
         (alter! counter 1)))
     (alter! i (+ i 1)))
-  (push! temp { counter prev })
+  (push! { counter prev } temp)
   temp))
 
 (let decode/rl (lambda (xs)
@@ -368,10 +368,10 @@
   (let len (length xs))
   (mut i 0)
   (while (< i len)
-    (let { counter x } (get xs i))
+    (let { counter x } (get i xs))
     (mut n 0)
     (while (< n counter)
-      (push! out x)
+      (push! x out)
       (alter! n (+ n 1)))
     (alter! i (+ i 1)))
   out))
@@ -381,7 +381,7 @@
 (let UTF8/start-3? (lambda (b) (= (& b 240) 224)))
 (let UTF8/start-4? (lambda (b) (= (& b 248) 240)))
 
-(let get* (lambda xs i some none (if (in-bounds? xs i) (do (some (get xs i)) nil) (do (none) nil))))
+(let get* (lambda i some none xs (if (in-bounds? i xs) (do (some (get i xs)) nil) (do (none) nil))))
 
 (let println! (lambda text (do
   (print! text)
@@ -401,6 +401,6 @@
     (loop i (< i (length s))
       (alter! h
         (% (+ (* h 31)
-              (Char->Int (get s i)))
+              (Char->Int (get i s)))
            65521)))
     h))

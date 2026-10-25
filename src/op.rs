@@ -107,18 +107,124 @@ impl FuseNameState {
     }
 }
 
+// The optimiser has a mature internal representation in which collection
+// receivers come first.  Keep that representation private, but convert at
+// the public boundary: inference, macros, LSP, and generated source all see
+// the language's data-last API.
+fn lower_data_last_core_expression(expr: &Expression) -> Expression {
+    let Expression::Apply(items) = expr else {
+        return expr.clone();
+    };
+    let mut items: Vec<_> = items.iter().map(lower_data_last_core_expression).collect();
+    match items.first() {
+        Some(Expression::Word(op))
+            if matches!(op.as_str(), "get" | "push!" | "capacity!" | "cdr") && items.len() == 3 =>
+        {
+            items.swap(1, 2)
+        }
+        Some(Expression::Word(op)) if op == "set!" && items.len() == 4 => {
+            items[1..].rotate_right(1)
+        }
+        _ => {}
+    }
+    Expression::Apply(items)
+}
+
+fn restore_data_last_core_expression(expr: &Expression) -> Expression {
+    let Expression::Apply(items) = expr else {
+        return expr.clone();
+    };
+    let mut items: Vec<_> = items
+        .iter()
+        .map(restore_data_last_core_expression)
+        .collect();
+    match items.first() {
+        Some(Expression::Word(op))
+            if matches!(op.as_str(), "get" | "push!" | "capacity!" | "cdr") && items.len() == 3 =>
+        {
+            items.swap(1, 2);
+        }
+        Some(Expression::Word(op)) if op == "set!" && items.len() == 4 => {
+            // Lowering rotates source `(index value vector)` right into the
+            // private `(vector index value)` ABI, so restoration must rotate
+            // the operands back left.
+            items[1..].rotate_left(1);
+        }
+        _ => {}
+    }
+    Expression::Apply(items)
+}
+
+fn lower_data_last_core_forms(node: &TypedExpression) -> TypedExpression {
+    let mut lowered = node.clone();
+    lowered.expr = lower_data_last_core_expression(&node.expr);
+    lowered.children = node
+        .children
+        .iter()
+        .map(lower_data_last_core_forms)
+        .collect();
+    match &node.expr {
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if matches!(op.as_str(), "get" | "push!" | "capacity!" | "cdr"))
+                && lowered.children.len() == 3 =>
+        {
+            lowered.children.swap(1, 2)
+        }
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "set!")
+                && lowered.children.len() == 4 =>
+        {
+            lowered.children[1..].rotate_right(1)
+        }
+        _ => {}
+    }
+    lowered
+}
+
+fn restore_data_last_core_forms(node: &TypedExpression) -> TypedExpression {
+    let mut restored = node.clone();
+    restored.expr = restore_data_last_core_expression(&node.expr);
+    restored.children = node
+        .children
+        .iter()
+        .map(restore_data_last_core_forms)
+        .collect();
+    match &node.expr {
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if matches!(op.as_str(), "get" | "push!" | "capacity!" | "cdr"))
+                && restored.children.len() == 3 =>
+        {
+            restored.children.swap(1, 2);
+        }
+        Expression::Apply(items)
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "set!")
+                && restored.children.len() == 4 =>
+        {
+            restored.children[1..].rotate_left(1);
+        }
+        _ => {}
+    }
+    restored
+}
+
 pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     if std::env::var("QUE_DEBUG_DISABLE_OPTS").ok().as_deref() == Some("1") {
         return node.clone();
     }
+    let legacy = lower_data_last_core_forms(node);
+    restore_data_last_core_forms(&optimize_typed_ast_legacy(&legacy))
+}
+
+fn optimize_typed_ast_legacy(node: &TypedExpression) -> TypedExpression {
     let mut seed = node.clone();
     let fused_expr = fuse_entry_expression_for_program(&node.expr);
     if fused_expr.to_lisp() != node.expr.to_lisp() {
+        let source_fused_expr = restore_data_last_core_expression(&fused_expr);
         if let Ok((_typ, fused_typed)) = crate::infer::infer_with_builtins_typed(
-            &fused_expr,
+            &source_fused_expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         ) {
-            seed = fused_typed;
+            seed = lower_data_last_core_forms(&fused_typed);
         }
     }
 
@@ -3382,10 +3488,8 @@ fn expression_contains_fusion_unsafe_effect(expr: &Expression) -> bool {
     match expr {
         Expression::Apply(items) => {
             if let Some(Expression::Word(head)) = items.first() {
-                if matches!(
-                    head.as_str(),
-                    "set!" | "push!" | "pop!" | "pop-val!"
-                ) || head.ends_with('!')
+                if matches!(head.as_str(), "set!" | "push!" | "pop!" | "pop-val!")
+                    || head.ends_with('!')
                 {
                     return true;
                 }
@@ -3540,7 +3644,10 @@ fn hoist_fusion_callables(
 #[cfg(all(test, feature = "compiler"))]
 pub(crate) fn fuse_map_filter_reduce_for_test(expr: &Expression) -> Expression {
     let mut name_state = FuseNameState::default();
-    fuse_map_filter_reduce_chains_expr(expr, &mut name_state)
+    // Fusion builders intentionally use the optimiser's private
+    // receiver-first representation.  Tests exercise this helper at the
+    // language boundary, so return valid source-order Calque.
+    restore_data_last_core_expression(&fuse_map_filter_reduce_chains_expr(expr, &mut name_state))
 }
 
 fn optimize_typed_ast_once(node: &TypedExpression) -> TypedExpression {
@@ -3613,7 +3720,11 @@ fn canonicalize_push_to_set_append(node: TypedExpression) -> TypedExpression {
 }
 
 fn is_vector_push_name(name: &str) -> bool {
-    matches!(name, "push!" | "std/vector/push!" | "Vector/push!")
+    // Only the core primitive reaches this private, receiver-first optimizer
+    // representation.  Public library aliases keep their data-last spelling
+    // until ordinary inlining; treating them as primitives would swap their
+    // value and target arguments.
+    name == "push!"
 }
 
 fn fold_constants(node: TypedExpression) -> TypedExpression {
@@ -5146,7 +5257,8 @@ fn is_safe_pure_call_expr(expr: &Expression) -> bool {
     };
     if !matches!(
         op.as_str(),
-        "=" | "=?" | "=~"
+        "=" | "=?"
+            | "=~"
             | "=#"
             | "=."
             | "<"
@@ -5544,7 +5656,19 @@ fn mutates_or_binds_any_word(expr: &Expression, names: &HashSet<String>) -> bool
                             return true;
                         }
                     }
-                    "set!" | "push!" | "pop!" => {
+                    "set!" => {
+                        if matches!(items.get(3), Some(Expression::Word(target)) if names.contains(target))
+                        {
+                            return true;
+                        }
+                    }
+                    "push!" => {
+                        if matches!(items.get(2), Some(Expression::Word(target)) if names.contains(target))
+                        {
+                            return true;
+                        }
+                    }
+                    "pop!" => {
                         if matches!(items.get(1), Some(Expression::Word(target)) if names.contains(target))
                         {
                             return true;

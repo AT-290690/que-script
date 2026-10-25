@@ -20,7 +20,7 @@ control over performance matters.
   (lambda (xs)
     (mut total 0)
     (loop i (< i (length xs))
-      (alter! total (+ total (get xs i))))
+      (alter! total (+ total (get i xs))))
     total))
 
 (|> [1 2 3 4 5]
@@ -181,7 +181,7 @@ Mutation is explicit:
 (let increment-all!
   (lambda (xs)
     (loop i (< i (length xs))
-      (set! xs i (+ (get xs i) 1)))
+      (set! i (+ (get i xs) 1) xs))
     xs))
 
 (increment-all! [10 20 30])
@@ -260,8 +260,8 @@ equality—no string conversion or allocation is involved:
 ```lisp
 (sig points [[{ Letter Int }]])
 (let points (Table/new))
-(Table/set! points A 1)
-(Table/set! points B 3)
+(Table/set! A 1 points)
+(Table/set! B 3 points)
 ```
 
 ## IO and permissions

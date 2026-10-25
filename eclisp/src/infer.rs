@@ -173,8 +173,25 @@ fn is_bang_contract_op(op: &str, known_requires_bang: &HashMap<String, bool>) ->
     known_requires_bang.get(op).copied().unwrap_or(false)
 }
 
-fn is_mutation_contract_call_op(op: &str, known_mutates_first_arg: &HashSet<String>) -> bool {
-    is_mutating_op(op) || known_mutates_first_arg.contains(op)
+fn is_mutation_contract_call_op(op: &str, known_mutates_final_arg: &HashSet<String>) -> bool {
+    is_mutating_op(op) || known_mutates_final_arg.contains(op)
+}
+
+fn mutation_contract_target<'a>(
+    op: &str,
+    items: &'a [Expression],
+    known_mutates_final_arg: &HashSet<String>,
+) -> Option<&'a Expression> {
+    // `alter!` is assignment syntax over a mutable cell, not a collection
+    // operation: its binding stays first. Every collection receiver and every
+    // user-defined mutator follows the data-last convention.
+    if op == "alter!" {
+        items.get(1)
+    } else if is_mutation_contract_call_op(op, known_mutates_final_arg) {
+        items.last()
+    } else {
+        None
+    }
 }
 
 fn is_intrinsic_pure_op(op: &str) -> bool {
@@ -667,7 +684,7 @@ fn annotate_effects(root: &mut TypedExpression) {
 fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), String> {
     let mut extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
-    let mut known_mutates_first_arg: HashSet<String> = HashSet::new();
+    let mut known_mutates_final_arg: HashSet<String> = HashSet::new();
     let known_function_arities = top_level_function_arities(root);
     if let Expression::Apply(items) = &root.expr {
         if matches!(items.first(), Some(Expression::Word(w)) if w == "do") {
@@ -686,7 +703,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                     let_node,
                     &extern_names,
                     &mut known_requires_bang,
-                    &mut known_mutates_first_arg,
+                    &mut known_mutates_final_arg,
                     &known_function_arities,
                 ) {
                     return Err(message);
@@ -696,13 +713,13 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                     if let [Expression::Word(kw), _, rhs] = &binding[..] {
                         if (kw == "let" || kw == "letrec") && let_node.children.get(2).is_some() {
                             let mut nested_requires_bang = known_requires_bang.clone();
-                            let mut nested_mutates_first_arg = known_mutates_first_arg.clone();
+                            let mut nested_mutates_final_arg = known_mutates_final_arg.clone();
                             if let Some(message) = validate_nested_function_names(
                                 rhs,
                                 &let_node.children[2],
                                 &extern_names,
                                 &mut nested_requires_bang,
-                                &mut nested_mutates_first_arg,
+                                &mut nested_mutates_final_arg,
                                 &known_function_arities,
                             ) {
                                 return Err(message);
@@ -718,7 +735,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
             root,
             &extern_names,
             &mut known_requires_bang,
-            &mut known_mutates_first_arg,
+            &mut known_mutates_final_arg,
             &known_function_arities,
         ) {
             return Err(message);
@@ -730,7 +747,7 @@ fn validate_impure_function_name_suffix(root: &TypedExpression) -> Result<(), St
                     &root.children[2],
                     &extern_names,
                     &mut known_requires_bang,
-                    &mut known_mutates_first_arg,
+                    &mut known_mutates_final_arg,
                     &known_function_arities,
                 ) {
                     return Err(message);
@@ -769,7 +786,7 @@ fn validate_nested_function_names(
     node: &TypedExpression,
     extern_names: &HashSet<String>,
     known_requires_bang: &mut HashMap<String, bool>,
-    known_mutates_first_arg: &mut HashSet<String>,
+    known_mutates_final_arg: &mut HashSet<String>,
     known_function_arities: &HashMap<String, usize>,
 ) -> Option<String> {
     let Expression::Apply(items) = expr else {
@@ -786,13 +803,13 @@ fn validate_nested_function_names(
             .get(body_idx)
             .or_else(|| node.children.last())?;
         let mut scoped_requires_bang = known_requires_bang.clone();
-        let mut scoped_mutates_first_arg = known_mutates_first_arg.clone();
+        let mut scoped_mutates_final_arg = known_mutates_final_arg.clone();
         return validate_nested_function_names(
             &items[body_idx],
             body_node,
             extern_names,
             &mut scoped_requires_bang,
-            &mut scoped_mutates_first_arg,
+            &mut scoped_mutates_final_arg,
             known_function_arities,
         );
     }
@@ -804,7 +821,7 @@ fn validate_nested_function_names(
                 node,
                 extern_names,
                 known_requires_bang,
-                known_mutates_first_arg,
+                known_mutates_final_arg,
                 known_function_arities,
             ) {
                 return Some(message);
@@ -815,7 +832,7 @@ fn validate_nested_function_names(
                     rhs_node,
                     extern_names,
                     known_requires_bang,
-                    known_mutates_first_arg,
+                    known_mutates_final_arg,
                     known_function_arities,
                 );
             }
@@ -827,7 +844,7 @@ fn validate_nested_function_names(
         && items.len() == node.children.len()
     {
         let mut scoped_requires_bang = known_requires_bang.clone();
-        let mut scoped_mutates_first_arg = known_mutates_first_arg.clone();
+        let mut scoped_mutates_final_arg = known_mutates_final_arg.clone();
         for idx in 1..items.len() {
             let child = &node.children[idx];
             if let Ok(Some(_extern_decl)) = crate::externals::parse_extern_decl(&items[idx]) {
@@ -844,7 +861,7 @@ fn validate_nested_function_names(
                     child,
                     extern_names,
                     &mut scoped_requires_bang,
-                    &mut scoped_mutates_first_arg,
+                    &mut scoped_mutates_final_arg,
                     known_function_arities,
                 ) {
                     return Some(message);
@@ -858,7 +875,7 @@ fn validate_nested_function_names(
                             &child.children[2],
                             extern_names,
                             &mut scoped_requires_bang,
-                            &mut scoped_mutates_first_arg,
+                            &mut scoped_mutates_final_arg,
                             known_function_arities,
                         ) {
                             return Some(message);
@@ -872,7 +889,7 @@ fn validate_nested_function_names(
                 child,
                 extern_names,
                 &mut scoped_requires_bang,
-                &mut scoped_mutates_first_arg,
+                &mut scoped_mutates_final_arg,
                 known_function_arities,
             ) {
                 return Some(message);
@@ -887,7 +904,7 @@ fn validate_nested_function_names(
             child,
             extern_names,
             known_requires_bang,
-            known_mutates_first_arg,
+            known_mutates_final_arg,
             known_function_arities,
         ) {
             return Some(message);
@@ -901,7 +918,7 @@ fn check_impure_binding_name(
     let_node: &TypedExpression,
     extern_names: &HashSet<String>,
     known_requires_bang: &mut HashMap<String, bool>,
-    known_mutates_first_arg: &mut HashSet<String>,
+    known_mutates_final_arg: &mut HashSet<String>,
     known_function_arities: &HashMap<String, usize>,
 ) -> Option<String> {
     let (name, _requires_bang) = eval_function_binding_requires_bang(
@@ -911,29 +928,40 @@ fn check_impure_binding_name(
         known_requires_bang,
         known_function_arities,
     )?;
-    if let Some(offending_idx) = eval_function_binding_non_first_mutation_target(
+    if let Some(offending_idx) = eval_function_binding_non_receiver_mutation_target(
         item_expr,
         known_requires_bang,
-        known_mutates_first_arg,
+        known_mutates_final_arg,
     ) {
         return Some(
             format!(
-                "Impure function '{}' must mutate its first parameter (argument 1); found mutation target using argument {}\n{}",
+                "Impure function '{}' must mutate its final parameter (argument {}); found mutation target using argument {}\n{}",
                 name,
+                function_arity(item_expr),
                 offending_idx + 1,
                 item_expr.to_lisp()
             )
         );
     }
-    if eval_function_binding_mutates_first_arg(
+    if eval_function_binding_mutates_receiver_arg(
         item_expr,
         known_requires_bang,
-        known_mutates_first_arg,
+        known_mutates_final_arg,
     ) {
-        known_mutates_first_arg.insert(name.clone());
+        known_mutates_final_arg.insert(name.clone());
     }
 
     None
+}
+
+fn function_arity(binding: &Expression) -> usize {
+    let Expression::Apply(items) = binding else {
+        return 0;
+    };
+    let Some(Expression::Apply(lambda_items)) = items.get(2) else {
+        return 0;
+    };
+    lambda_items.len().saturating_sub(2)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -957,17 +985,18 @@ fn resolve_mutation_binding(
 fn collect_target_param_usage(
     expr: &Expression,
     scopes: &[HashMap<String, MutationBinding>],
+    allowed_param_index: usize,
     uses_allowed_param: &mut bool,
-    first_non_first_param: &mut Option<usize>,
+    first_non_receiver_param: &mut Option<usize>,
 ) {
     match expr {
         Expression::Int(_) | Expression::Dec(_) => {}
         Expression::Word(name) => {
             if let Some(MutationBinding::Param(idx)) = resolve_mutation_binding(scopes, name) {
-                if idx == 0 {
+                if idx == allowed_param_index {
                     *uses_allowed_param = true;
-                } else if first_non_first_param.is_none() {
-                    *first_non_first_param = Some(idx);
+                } else if first_non_receiver_param.is_none() {
+                    *first_non_receiver_param = Some(idx);
                 }
             }
         }
@@ -980,8 +1009,9 @@ fn collect_target_param_usage(
                     collect_target_param_usage(
                         item,
                         scopes,
+                        allowed_param_index,
                         uses_allowed_param,
-                        first_non_first_param,
+                        first_non_receiver_param,
                     );
                 }
             } else {
@@ -989,8 +1019,9 @@ fn collect_target_param_usage(
                     collect_target_param_usage(
                         item,
                         scopes,
+                        allowed_param_index,
                         uses_allowed_param,
-                        first_non_first_param,
+                        first_non_receiver_param,
                     );
                 }
             }
@@ -998,54 +1029,59 @@ fn collect_target_param_usage(
     }
 }
 
-fn target_non_first_param_index(
+fn target_non_receiver_param_index(
     expr: &Expression,
     scopes: &[HashMap<String, MutationBinding>],
+    allowed_param_index: usize,
 ) -> Option<usize> {
     let mut uses_allowed_param = false;
-    let mut first_non_first_param = None;
+    let mut first_non_receiver_param = None;
     collect_target_param_usage(
         expr,
         scopes,
+        allowed_param_index,
         &mut uses_allowed_param,
-        &mut first_non_first_param,
+        &mut first_non_receiver_param,
     );
     if uses_allowed_param {
         None
     } else {
-        first_non_first_param
+        first_non_receiver_param
     }
 }
 
 fn target_param_binding(
     expr: &Expression,
     scopes: &[HashMap<String, MutationBinding>],
+    allowed_param_index: usize,
 ) -> Option<MutationBinding> {
     match expr {
         Expression::Word(name) => resolve_mutation_binding(scopes, name),
         _ => {
             let mut uses_allowed_param = false;
-            let mut first_non_first_param = None;
+            let mut first_non_receiver_param = None;
             collect_target_param_usage(
                 expr,
                 scopes,
+                allowed_param_index,
                 &mut uses_allowed_param,
-                &mut first_non_first_param,
+                &mut first_non_receiver_param,
             );
             if uses_allowed_param {
-                Some(MutationBinding::Param(0))
+                Some(MutationBinding::Param(allowed_param_index))
             } else {
-                first_non_first_param.map(MutationBinding::Param)
+                first_non_receiver_param.map(MutationBinding::Param)
             }
         }
     }
 }
 
-fn expr_mutates_non_first_param(
+fn expr_mutates_non_receiver_param(
     expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
-    known_mutates_first_arg: &HashSet<String>,
+    known_mutates_final_arg: &HashSet<String>,
     scopes: &mut Vec<HashMap<String, MutationBinding>>,
+    allowed_param_index: usize,
 ) -> Option<usize> {
     match expr {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => None,
@@ -1061,11 +1097,12 @@ fn expr_mutates_non_first_param(
                 Expression::Word(op) if op == "do" => {
                     scopes.push(HashMap::new());
                     for item in items.iter().skip(1) {
-                        if let Some(idx) = expr_mutates_non_first_param(
+                        if let Some(idx) = expr_mutates_non_receiver_param(
                             item,
                             known_requires_bang,
-                            known_mutates_first_arg,
+                            known_mutates_final_arg,
                             scopes,
+                            allowed_param_index,
                         ) {
                             scopes.pop();
                             return Some(idx);
@@ -1087,28 +1124,30 @@ fn expr_mutates_non_first_param(
                 }
                 Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => {
                     items.get(2).and_then(|rhs| {
-                        expr_mutates_non_first_param(
+                        expr_mutates_non_receiver_param(
                             rhs,
                             known_requires_bang,
-                            known_mutates_first_arg,
+                            known_mutates_final_arg,
                             scopes,
+                            allowed_param_index,
                         )
                     })
                 }
                 Expression::Word(op)
-                    if is_mutation_contract_call_op(op, known_mutates_first_arg) =>
+                    if is_mutation_contract_call_op(op, known_mutates_final_arg) =>
                 {
-                    if let Some(target) = items.get(1) {
-                        if let Some(idx) = target_non_first_param_index(target, scopes) {
+                    if let Some(target) = mutation_contract_target(op, items, known_mutates_final_arg) {
+                        if let Some(idx) = target_non_receiver_param_index(target, scopes, allowed_param_index) {
                             return Some(idx);
                         }
                     }
                     for item in items.iter().skip(1) {
-                        if let Some(idx) = expr_mutates_non_first_param(
+                        if let Some(idx) = expr_mutates_non_receiver_param(
                             item,
                             known_requires_bang,
-                            known_mutates_first_arg,
+                            known_mutates_final_arg,
                             scopes,
+                            allowed_param_index,
                         ) {
                             return Some(idx);
                         }
@@ -1120,11 +1159,12 @@ fn expr_mutates_non_first_param(
                         if matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
                         {
                             for item in items.iter().skip(1) {
-                                if let Some(idx) = expr_mutates_non_first_param(
+                                if let Some(idx) = expr_mutates_non_receiver_param(
                                     item,
                                     known_requires_bang,
-                                    known_mutates_first_arg,
+                                    known_mutates_final_arg,
                                     scopes,
+                                    allowed_param_index,
                                 ) {
                                     return Some(idx);
                                 }
@@ -1141,7 +1181,7 @@ fn expr_mutates_non_first_param(
                                     };
                                     let binding = items
                                         .get(idx + 1)
-                                        .and_then(|arg| target_param_binding(arg, scopes))
+                                        .and_then(|arg| target_param_binding(arg, scopes, allowed_param_index))
                                         .unwrap_or(MutationBinding::Local);
                                     Some((name.clone(), binding))
                                 })
@@ -1154,11 +1194,12 @@ fn expr_mutates_non_first_param(
                                 }
                             }
                             let result = lambda_items.last().and_then(|body| {
-                                expr_mutates_non_first_param(
+                                expr_mutates_non_receiver_param(
                                     body,
                                     known_requires_bang,
-                                    known_mutates_first_arg,
+                                    known_mutates_final_arg,
                                     scopes,
+                                    allowed_param_index,
                                 )
                             });
                             scopes.pop();
@@ -1167,11 +1208,12 @@ fn expr_mutates_non_first_param(
                     }
 
                     for item in items.iter().skip(1) {
-                        if let Some(idx) = expr_mutates_non_first_param(
+                        if let Some(idx) = expr_mutates_non_receiver_param(
                             item,
                             known_requires_bang,
-                            known_mutates_first_arg,
+                            known_mutates_final_arg,
                             scopes,
+                            allowed_param_index,
                         ) {
                             return Some(idx);
                         }
@@ -1183,10 +1225,10 @@ fn expr_mutates_non_first_param(
     }
 }
 
-fn eval_function_binding_non_first_mutation_target(
+fn eval_function_binding_non_receiver_mutation_target(
     item_expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
-    known_mutates_first_arg: &HashSet<String>,
+    known_mutates_final_arg: &HashSet<String>,
 ) -> Option<usize> {
     let Expression::Apply(let_items) = item_expr else {
         return None;
@@ -1222,19 +1264,22 @@ fn eval_function_binding_non_first_mutation_target(
             }
         }
     }
-    expr_mutates_non_first_param(
+    let receiver_param_index = lambda_items.len().saturating_sub(3);
+    expr_mutates_non_receiver_param(
         body,
         known_requires_bang,
-        known_mutates_first_arg,
+        known_mutates_final_arg,
         &mut scopes,
+        receiver_param_index,
     )
 }
 
-fn expr_mutates_first_param(
+fn expr_mutates_receiver_param(
     expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
-    known_mutates_first_arg: &HashSet<String>,
+    known_mutates_final_arg: &HashSet<String>,
     scopes: &mut Vec<HashMap<String, MutationBinding>>,
+    receiver_param_index: usize,
 ) -> bool {
     match expr {
         Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => false,
@@ -1250,11 +1295,12 @@ fn expr_mutates_first_param(
                 Expression::Word(op) if op == "do" => {
                     scopes.push(HashMap::new());
                     for item in items.iter().skip(1) {
-                        if expr_mutates_first_param(
+                        if expr_mutates_receiver_param(
                             item,
                             known_requires_bang,
-                            known_mutates_first_arg,
+                            known_mutates_final_arg,
                             scopes,
+                            receiver_param_index,
                         ) {
                             scopes.pop();
                             return true;
@@ -1277,31 +1323,33 @@ fn expr_mutates_first_param(
                 Expression::Word(op) if op == "let" || op == "letrec" || op == "mut" => items
                     .get(2)
                     .map(|rhs| {
-                        expr_mutates_first_param(
+                        expr_mutates_receiver_param(
                             rhs,
                             known_requires_bang,
-                            known_mutates_first_arg,
+                            known_mutates_final_arg,
                             scopes,
+                            receiver_param_index,
                         )
                     })
                     .unwrap_or(false),
                 Expression::Word(op)
-                    if is_mutation_contract_call_op(op, known_mutates_first_arg) =>
+                    if is_mutation_contract_call_op(op, known_mutates_final_arg) =>
                 {
-                    if let Some(target) = items.get(1) {
+                    if let Some(target) = mutation_contract_target(op, items, known_mutates_final_arg) {
                         if matches!(
-                            target_param_binding(target, scopes),
-                            Some(MutationBinding::Param(0))
+                            target_param_binding(target, scopes, receiver_param_index),
+                            Some(MutationBinding::Param(idx)) if idx == receiver_param_index
                         ) {
                             return true;
                         }
                     }
                     items.iter().skip(1).any(|item| {
-                        expr_mutates_first_param(
+                        expr_mutates_receiver_param(
                             item,
                             known_requires_bang,
-                            known_mutates_first_arg,
+                            known_mutates_final_arg,
                             scopes,
+                            receiver_param_index,
                         )
                     })
                 }
@@ -1310,11 +1358,12 @@ fn expr_mutates_first_param(
                         if matches!(lambda_items.first(), Some(Expression::Word(w)) if w == "lambda")
                         {
                             for item in items.iter().skip(1) {
-                                if expr_mutates_first_param(
+                                if expr_mutates_receiver_param(
                                     item,
                                     known_requires_bang,
-                                    known_mutates_first_arg,
+                                    known_mutates_final_arg,
                                     scopes,
+                                    receiver_param_index,
                                 ) {
                                     return true;
                                 }
@@ -1331,7 +1380,7 @@ fn expr_mutates_first_param(
                                     };
                                     let binding = items
                                         .get(idx + 1)
-                                        .and_then(|arg| target_param_binding(arg, scopes))
+                                        .and_then(|arg| target_param_binding(arg, scopes, receiver_param_index))
                                         .unwrap_or(MutationBinding::Local);
                                     Some((name.clone(), binding))
                                 })
@@ -1344,11 +1393,12 @@ fn expr_mutates_first_param(
                                 }
                             }
                             let result = lambda_items.last().is_some_and(|body| {
-                                expr_mutates_first_param(
+                                expr_mutates_receiver_param(
                                     body,
                                     known_requires_bang,
-                                    known_mutates_first_arg,
+                                    known_mutates_final_arg,
                                     scopes,
+                                    receiver_param_index,
                                 )
                             });
                             scopes.pop();
@@ -1357,11 +1407,12 @@ fn expr_mutates_first_param(
                     }
 
                     items.iter().skip(1).any(|item| {
-                        expr_mutates_first_param(
+                        expr_mutates_receiver_param(
                             item,
                             known_requires_bang,
-                            known_mutates_first_arg,
+                            known_mutates_final_arg,
                             scopes,
+                            receiver_param_index,
                         )
                     })
                 }
@@ -1370,10 +1421,10 @@ fn expr_mutates_first_param(
     }
 }
 
-fn eval_function_binding_mutates_first_arg(
+fn eval_function_binding_mutates_receiver_arg(
     item_expr: &Expression,
     known_requires_bang: &HashMap<String, bool>,
-    known_mutates_first_arg: &HashSet<String>,
+    known_mutates_final_arg: &HashSet<String>,
 ) -> bool {
     let Expression::Apply(let_items) = item_expr else {
         return false;
@@ -1409,11 +1460,13 @@ fn eval_function_binding_mutates_first_arg(
             }
         }
     }
-    expr_mutates_first_param(
+    let receiver_param_index = lambda_items.len().saturating_sub(3);
+    expr_mutates_receiver_param(
         body,
         known_requires_bang,
-        known_mutates_first_arg,
+        known_mutates_final_arg,
         &mut scopes,
+        receiver_param_index,
     )
 }
 
@@ -1520,7 +1573,7 @@ pub fn collect_top_level_function_external_impurity(
 ) {
     let extern_names = collect_top_level_extern_names(root);
     let mut known_requires_bang: HashMap<String, bool> = HashMap::new();
-    let mut known_mutates_first_arg: HashSet<String> = HashSet::new();
+    let mut known_mutates_final_arg: HashSet<String> = HashSet::new();
     let known_function_arities = top_level_function_arities(root);
     let mut record = |item_expr: &Expression, let_node: &TypedExpression| {
         let binding_name = match item_expr {
@@ -1543,17 +1596,17 @@ pub fn collect_top_level_function_external_impurity(
         );
         let mutates = match item_expr {
             Expression::Apply(items) => match items.get(2) {
-                Some(Expression::Word(alias)) => known_mutates_first_arg.contains(alias),
-                _ => eval_function_binding_mutates_first_arg(
+                Some(Expression::Word(alias)) => known_mutates_final_arg.contains(alias),
+                _ => eval_function_binding_mutates_receiver_arg(
                     item_expr,
                     &known_requires_bang,
-                    &known_mutates_first_arg,
+                    &known_mutates_final_arg,
                 ),
             },
             _ => false,
         };
         if mutates {
-            known_mutates_first_arg.insert(binding_name.clone());
+            known_mutates_final_arg.insert(binding_name.clone());
         }
         out.insert(binding_name, mutates);
         Some(())
@@ -1984,12 +2037,12 @@ fn format_type_mismatch(expected: &Type, actual: &Type, src: &TypeError) -> Stri
             }
         }
         TypeErrorVariant::GetTarget => mismatch_shape_phrase(expected, actual)
-            .unwrap_or_else(|| format!("get expected vector as first argument, got {}", actual)),
+            .unwrap_or_else(|| format!("get expected vector as final argument, got {}", actual)),
         TypeErrorVariant::GetIndex => {
             format!("get index expected Int but got {}", actual)
         }
         TypeErrorVariant::SetTarget => mismatch_shape_phrase(expected, actual)
-            .unwrap_or_else(|| format!("set! expected vector as first argument, got {}", actual)),
+            .unwrap_or_else(|| format!("set! expected vector as final argument, got {}", actual)),
         TypeErrorVariant::SetIndex => {
             format!("set! index expected Int but got {}", actual)
         }
@@ -3690,8 +3743,8 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             }
             return Ok(Type::Tuple(elem_types));
         } else if name == "get" && exprs.len() == 3 {
-            let target_type = infer_expr(&exprs[1], ctx)?;
-            let index_type = infer_expr(&exprs[2], ctx)?;
+            let index_type = infer_expr(&exprs[1], ctx)?;
+            let target_type = infer_expr(&exprs[2], ctx)?;
             let elem_type = match target_type {
                 Type::List(inner) => *inner,
                 Type::Var(tv) => {
@@ -3738,9 +3791,9 @@ fn infer_function_call(exprs: &[Expression], ctx: &mut InferenceContext) -> Resu
             );
             return Ok(Type::Bool);
         } else if name == "set!" && exprs.len() == 4 {
-            let target_type = infer_expr(&exprs[1], ctx)?;
-            let index_type = infer_expr(&exprs[2], ctx)?;
-            let value_type = infer_expr(&exprs[3], ctx)?;
+            let index_type = infer_expr(&exprs[1], ctx)?;
+            let value_type = infer_expr(&exprs[2], ctx)?;
+            let target_type = infer_expr(&exprs[3], ctx)?;
             let elem_type = match target_type {
                 Type::List(inner) => *inner,
                 Type::Var(tv) => {

@@ -10,12 +10,12 @@ Bindings: (let x value), (mut x value), (alter! x value), (letrec f (lambda ...)
 Functions: (lambda (a b) body...), called as (f a b); extra body forms are sequenced.
 Data: vectors [1 2 3], tuples {a b}, strings "text", characters 'x'.
 Control: (if test yes no), (cond test value ... default), (while test body...), (loop i test body...).
-Mutation: (push! xs x), (set! xs i x), (pop! xs), (empty! xs), (capacity! xs n), (&mut cell), (&alter! cell value).
+Mutation: (get i xs), (push! x xs), (set! i x xs), (pop! xs), (empty! xs), (capacity! n xs), (&mut cell), (&alter! cell value).
 Pipelines pass data last: (|> xs (map f) (select pred)).
 Enums: (enum Letter A B C); values are compact typed tags, not Ints.
 Match enums exhaustively: (match letter A value-a B value-b C value-c), or use _ as the final default.
 Compare values from the same enum with (=~ a b); cross-enum comparisons are rejected.
-Enums can be Table keys directly: (Table/set! points A 1), (Table/get A points); no string conversion occurs.
+Enums can be Table keys directly: (Table/set! A 1 points), (Table/get A points); no string conversion occurs.
 See `que --examples` for a complete enum, match, Table, and serialize/deserialize example.
 Use (block ...) for lexical branch/loop scopes so repeated local names do not collide.
 Comments begin with ; and continue to the end of the line.
@@ -30,7 +30,7 @@ const EXAMPLES: &str = r#"Calque examples
 (let sum (lambda (xs)
   (mut total 0)
   (loop i (< i (length xs))
-    (alter! total (+ total (get xs i))))
+    (alter! total (+ total (get i xs))))
   total))
 (sum [10 20 30])
 
@@ -49,8 +49,8 @@ const EXAMPLES: &str = r#"Calque examples
 
 (sig points [[{ Shape Int }]])
 (let points (Table/new))
-(Table/set! points Rock 1)
-(Table/set! points Paper 2)
+(Table/set! Rock 1 points)
+(Table/set! Paper 2 points)
 
 (let saved (serialize points))
 ; deserialize needs its result type to choose a decoder.
@@ -58,15 +58,15 @@ const EXAMPLES: &str = r#"Calque examples
 (let restored (deserialize saved))
 
 (match Rock
-  Rock (if (beats? Rock Scissors) (snd (get (Table/get Rock restored) 0)) 0)
+  Rock (if (beats? Rock Scissors) (snd (get 0 (Table/get Rock restored))) 0)
   Paper 0
   Scissors 0) ; 1"#;
 
 const STYLE: &str = r#"Calque style
 
 - Prefer clear functional composition for transformations and loops/mutation for hot code.
-- Public collection helpers normally take data last so they compose with |>.
-- Put caller-visible mutated values first.
+- Public collection helpers take data last so they compose with |>.
+- Put caller-visible mutated collections last: (push! value xs), (set! index value xs).
 - Use block around branch-local and loop-local bindings.
 - Cache lengths and repeated computations in hot loops.
 - Use --debug while checking correctness and --opt for release execution.
@@ -77,7 +77,7 @@ const PITFALLS: &str = r#"Calque pitfalls
 - do sequences expressions but does not create a lexical scope; block does.
 - get is unchecked under --opt unless the compiler proves or you guard the index.
 - Int is signed i32; guard arithmetic in strict/debug code when overflow is possible.
-- Mutation visible to a caller must be rooted in the function's first parameter.
+- If a function mutates a caller-passed collection, that collection must be its final parameter.
 - deserialize needs a concrete expected type.
 - A partial application is a function value, so a missing argument can look like closure capture.
 - Use grouped lambda parameters: (lambda (a b) body...)."#;

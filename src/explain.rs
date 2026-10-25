@@ -1337,7 +1337,7 @@ mod tests {
     #[test]
     fn explain_text_groups_sections_and_shows_analysis_evidence() {
         let report = explain_source(
-            "(let n 10) (let xs []) (mut build 0) (while (<= build n) (push! xs true) (alter! build (+ build 1))) (mut i 0) (while (<= i n) (get xs i) (* i i) (alter! i (+ i 1)))",
+            "(let n 10) (let xs []) (mut build 0) (while (<= build n) (push! true xs) (alter! build (+ build 1))) (mut i 0) (while (<= i n) (get i xs) (* i i) (alter! i (+ i 1)))",
         );
         let text = render_text(&report);
         let correctness = text.find("Correctness:").expect("correctness section");
@@ -1379,7 +1379,7 @@ mod tests {
     #[test]
     fn explain_reports_compiled_function_details_for_allocations_and_calls() {
         let report = explain_source(
-            r#"(let make (lambda a (block (let out []) (push! out a) out)))
+            r#"(let make (lambda a (block (let out []) (push! a out) out)))
 (make [40])"#,
         );
         let text = render_text(&report);
@@ -1409,7 +1409,7 @@ mod tests {
     #[test]
     fn explain_reports_ranked_optimization_targets() {
         let report = explain_source(
-            r#"(let make (lambda a (block (let out []) (push! out a) out)))
+            r#"(let make (lambda a (block (let out []) (push! a out) out)))
 (make [40])"#,
         );
         let text = render_text(&report);

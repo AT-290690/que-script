@@ -1,96 +1,96 @@
-(let Vector/swap! (lambda xs i j (do (let temp (get xs i)) (set! xs i (get xs j)) (set! xs j temp))))
+(let Vector/swap! (lambda i j xs (do (let temp (get i xs)) (set! i (get j xs) xs) (set! j temp xs))))
 
-(let Vector/sort-partition! (lambda arr start end fn (do
-     (let pivot (get arr end))
+(let Vector/sort-partition! (lambda start end fn arr (do
+     (let pivot (get end arr))
      (mut i (- start 1))
      (mut j start)
 
      (while (< j end) (do
-           (if (fn (get arr j) pivot) (do
+           (if (fn (get j arr) pivot) (do
           (alter! i (+ i 1))
-          (Vector/swap! arr i j)
+          (Vector/swap! i j arr)
           nil))
           (alter! j (+ j 1))))
 
-     (Vector/swap! arr (+ i 1) end)
+     (Vector/swap! (+ i 1) end arr)
      (+ i 1))))
 
-(let Vector/sort! (lambda arr fn (do
+(let Vector/sort! (lambda fn arr (do
      (let stack [])
-     (push! stack 0)
-     (push! stack (- (length arr) 1))
+     (push! 0 stack)
+     (push! (- (length arr) 1) stack)
      (while (> (length stack) 0) (do
-           (let end (get stack (- (length stack) 1)))
+           (let end (get (- (length stack) 1) stack))
            (pop! stack)
-           (let start (get stack (- (length stack) 1)))
+           (let start (get (- (length stack) 1) stack))
            (pop! stack)
            (if (< start end) (do
-                 (let pivot-index (Vector/sort-partition! arr start end fn))
-                 (push! stack start)
-                 (push! stack (- pivot-index 1))
-                 (push! stack (+ pivot-index 1))
-                 (push! stack end)
+                 (let pivot-index (Vector/sort-partition! start end fn arr))
+                 (push! start stack)
+                 (push! (- pivot-index 1) stack)
+                 (push! (+ pivot-index 1) stack)
+                 (push! end stack)
                  nil))))
      arr)))
 
-(let Matrix/for/i (lambda matrix fn (do
+(let Matrix/for/i (lambda fn matrix (do
   (let width (length (first matrix)))
   (let height (length matrix))
   (mut y 0)
   (while (< y height) (do
     (mut x 0)
     (while (< x width) (do
-      (fn (get matrix y x) y x)
+      (fn (get y x matrix) y x)
       (alter! x (+ x 1))))
     (alter! y (+ y 1))))
    matrix)))
 
 (let Int/min/three (lambda a b c (min (min a b) c)))
 
-(let String/damerau-levenshtein (lambda a b (do
+(let String/damerau-levenshtein (lambda b a (do
   (let n (length a))
   (let m (length b))
   (let matrix (Matrix/new (lambda _ _ 0) (+ n 1) (+ m 1) ))
 
   (mut i0 0)
   (while (<= i0 n) (do
-    (let row (get matrix i0))
-    (set! row 0 i0)
+    (let row (get i0 matrix))
+    (set! 0 i0 row)
     (alter! i0 (+ i0 1))))
 
-  (let first-row (get matrix 0))
+  (let first-row (get 0 matrix))
   (mut j0 0)
   (while (<= j0 m) (do
-    (set! first-row j0 j0)
+    (set! j0 j0 first-row)
     (alter! j0 (+ j0 1))))
 
   (mut i 1)
   (while (<= i n) (do
-    (let current-row (get matrix i))
-    (let prev-row (get matrix (- i 1)))
+    (let current-row (get i matrix))
+    (let prev-row (get (- i 1) matrix))
     (mut j 1)
     (while (<= j m) (do
-      (let a-char (get a (- i 1)))
-      (let b-char (get b (- j 1)))
+      (let a-char (get (- i 1) a))
+      (let b-char (get (- j 1) b))
       (let replace-cost (if (=# a-char b-char) 0 1))
 
-      (let delete-cost (+ (get prev-row j) 1))
-      (let insert-cost (+ (get current-row (- j 1)) 1))
-      (let subst-cost (+ (get prev-row (- j 1)) replace-cost))
+      (let delete-cost (+ (get j prev-row) 1))
+      (let insert-cost (+ (get (- j 1) current-row) 1))
+      (let subst-cost (+ (get (- j 1) prev-row) replace-cost))
       (let best (Int/min/three delete-cost insert-cost subst-cost))
 
       (let with-transpose
         (if (and (> i 1)
                  (> j 1)
-                 (=# a-char (get b (- j 2)))
-                 (=# (get a (- i 2)) b-char))
-            (min best (+ (get (get matrix (- i 2)) (- j 2)) 1))
+                 (=# a-char (get (- j 2) b))
+                 (=# (get (- i 2) a) b-char))
+            (min best (+ (get (- j 2) (get (- i 2) matrix)) 1))
             best))
-      (set! current-row j with-transpose)
+      (set! j with-transpose current-row)
       (alter! j (+ j 1))))
     (alter! i (+ i 1))))
 
-  (get (get matrix n) m))))
+  (get m (get n matrix)))))
 
 (let floor (lambda n (-. n (%. n 1.0))))
 (let ceil (lambda n (do
@@ -100,11 +100,11 @@
     (let intpart (-. absn frac))
     (cond (=. n 0.0) n (if (= sign 1) (+. intpart 1.0) (-. intpart))))))
 
-(let at (lambda xs i (if (< i 0) (get xs (+ (length xs) i)) (get xs i))))
+(let at (lambda i xs (if (< i 0) (get (+ (length xs) i) xs) (get i xs))))
 
-(let first (lambda xs (get xs 0)))
+(let first (lambda xs (get 0 xs)))
 
-(let last (lambda xs (get xs (- (length xs) 1))))
+(let last (lambda xs (get (- (length xs) 1) xs)))
 
 (let digit? (lambda ch (and (>=# ch '0') (<=# ch '9'))))
 
@@ -118,13 +118,13 @@
 
 (let not-empty? (lambda xs (not (= (length xs) 0))))
 
-(let in-bounds? (lambda xs index (and (< index (length xs)) (>= index 0))))
+(let in-bounds? (lambda index xs (and (< index (length xs)) (>= index 0))))
 
 (let range (lambda start end (do
      (let out [ start ])
      (mut i (+ start 1))
      (while (<= i end) (do
-        (set! out (length out) i)
+        (set! (length out) i out)
         (alter! i (+ i 1))))
      out)))
 
@@ -136,7 +136,7 @@
      (let out [ (Int->Dec start) ])
      (mut i (+ start 1))
      (while (<= i end) (do
-        (set! out (length out) (Int->Dec i))
+        (set! (length out) (Int->Dec i) out)
         (alter! i (+ i 1))))
      out)))
 
@@ -144,7 +144,7 @@
      (let out [])
      (mut i 0)
      (while (< i n) (do
-        (set! out (length out) 1.0)
+        (set! (length out) 1.0 out)
         (alter! i (+ i 1))))
      out)))
 
@@ -152,7 +152,7 @@
      (let out [])
      (mut i 0)
      (while (< i n) (do
-        (set! out (length out) 0.0)
+        (set! (length out) 0.0 out)
         (alter! i (+ i 1))))
      out)))
 
@@ -160,7 +160,7 @@
      (let out [])
      (mut i 0)
      (while (< i n) (do
-        (set! out (length out) 1)
+        (set! (length out) 1 out)
         (alter! i (+ i 1))))
      out)))
 
@@ -168,7 +168,7 @@
      (let out [])
      (mut i 0)
      (while (< i n) (do
-        (set! out (length out) 0)
+        (set! (length out) 0 out)
         (alter! i (+ i 1))))
      out)))
 
@@ -176,7 +176,7 @@
      (let out [])
      (mut i 0)
      (while (< i n) (do
-        (set! out (length out) true)
+        (set! (length out) true out)
         (alter! i (+ i 1))))
      out)))
 
@@ -184,20 +184,20 @@
      (let out [])
      (mut i 0)
      (while (< i n) (do
-        (set! out (length out) false)
+        (set! (length out) false out)
         (alter! i (+ i 1))))
      out)))
 
-(let cartesian-product (lambda a b (do
+(let cartesian-product (lambda b a (do
     (let out [])
     (let len-a (length a))
     (let len-b (length b))
     (mut i 0)
     (while (< i len-a) (do
-      (let x (get a i))
+      (let x (get i a))
       (mut j 0)
       (while (< j len-b) (do
-        (set! out (length out) { x (get b j) })
+        (set! (length out) { x (get j b) } out)
         (alter! j (+ j 1))))
       (alter! i (+ i 1))))
     out)))
@@ -257,7 +257,7 @@
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (alter! total (+ total (get xs i)))
+      (alter! total (+ total (get i xs)))
       (alter! i (+ i 1))))
     total)))
 
@@ -266,7 +266,7 @@
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (alter! total (+. total (get xs i)))
+      (alter! total (+. total (get i xs)))
       (alter! i (+ i 1))))
     total)))
 
@@ -275,7 +275,7 @@
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (if (get xs i) (alter! total (+ total 1)))
+      (if (get i xs) (alter! total (+ total 1)))
       (alter! i (+ i 1))))
     total)))
 
@@ -284,7 +284,7 @@
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (alter! total (* total (get xs i)))
+      (alter! total (* total (get i xs)))
       (alter! i (+ i 1))))
     total)))
 
@@ -293,7 +293,7 @@
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (alter! total (*. total (get xs i)))
+      (alter! total (*. total (get i xs)))
       (alter! i (+ i 1))))
     total)))
 
@@ -307,52 +307,52 @@
 
 (let maximum (lambda xs (cond
     (empty? xs) Int
-    (= (length xs) 1) (get xs 0)
+    (= (length xs) 1) (get 0 xs)
     (do
-      (mut best (get xs 0))
+      (mut best (get 0 xs))
       (let len (length xs))
       (mut i 1)
       (while (< i len) (do
-        (let value (get xs i))
+        (let value (get i xs))
         (if (> value best) (alter! best value))
         (alter! i (+ i 1))))
       best))))
 
 (let minimum (lambda xs (cond
     (empty? xs) Int
-    (= (length xs) 1) (get xs 0)
+    (= (length xs) 1) (get 0 xs)
     (do
-      (mut best (get xs 0))
+      (mut best (get 0 xs))
       (let len (length xs))
       (mut i 1)
       (while (< i len) (do
-        (let value (get xs i))
+        (let value (get i xs))
         (if (< value best) (alter! best value))
         (alter! i (+ i 1))))
       best))))
 
 (let maximum/dec (lambda xs (cond
     (empty? xs) Dec
-    (= (length xs) 1) (get xs 0)
+    (= (length xs) 1) (get 0 xs)
     (do
-      (mut best (get xs 0))
+      (mut best (get 0 xs))
       (let len (length xs))
       (mut i 1)
       (while (< i len) (do
-        (let value (get xs i))
+        (let value (get i xs))
         (if (>. value best) (alter! best value))
         (alter! i (+ i 1))))
       best))))
 
 (let minimum/dec (lambda xs (cond
     (empty? xs) Dec
-    (= (length xs) 1) (get xs 0)
+    (= (length xs) 1) (get 0 xs)
     (do
-      (mut best (get xs 0))
+      (mut best (get 0 xs))
       (let len (length xs))
       (mut i 1)
       (while (< i len) (do
-        (let value (get xs i))
+        (let value (get i xs))
         (if (<. value best) (alter! best value))
         (alter! i (+ i 1))))
       best))))
@@ -369,16 +369,16 @@
     (let len (length xs))
     (let half (/ len 2))
     (if (odd? len)
-        (get xs half)
-        (/ (+ (get xs (- half 1)) (get xs half)) 2)))))
+        (get half xs)
+        (/ (+ (get (- half 1) xs) (get half xs)) 2)))))
 
 (let median/dec (lambda xs (do
   (let len (Int->Dec (length xs)))
   (let half (/. len 2.))
   (let mid (Dec->Int half))
   (if (odd/dec? len)
-      (get xs mid)
-      (/. (+. (get xs (Dec->Int (-. half 1.))) (get xs mid)) 2.)))))
+      (get mid xs)
+      (/. (+. (get (Dec->Int (-. half 1.)) xs) (get mid xs)) 2.)))))
 
 (let sqrt (lambda n
   (do
@@ -426,7 +426,7 @@
   (mut i 0)
   (let out [])
   (while (< i (length a)) (do
-    (push! out { (get a i) (get b i) })
+    (push! { (get i a) (get i b) } out)
     (alter! i (+ i 1))))
   out)))
 
@@ -436,9 +436,9 @@
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (let pair (get xs i))
-      (set! left (length left) (fst pair))
-      (set! right (length right) (snd pair))
+      (let pair (get i xs))
+      (set! (length left) (fst pair) left)
+      (set! (length right) (snd pair) right)
       (alter! i (+ i 1))))
     { left right })))
 
@@ -446,13 +446,13 @@
      (let out [])
      (let len (length xs))
      (mut i 0)
-     (while (< i len) (do (set! out (length out) (get xs (- len i 1))) (alter! i (+ i 1))))
+     (while (< i len) (do (set! (length out) (get (- len i 1) xs) out) (alter! i (+ i 1))))
      out))))
 
 (let buckets (lambda size (do
      (let out [[]])
      (mut i 1)
-     (while (< i size) (do (set! out (length out) []) (alter! i (+ i 1))))
+     (while (< i size) (do (set! (length out) [] out) (alter! i (+ i 1))))
      out)))
 
 (let match? (lambda a b (do
@@ -462,7 +462,7 @@
         (mut i 0)
         (mut same true)
         (while (and same (< i len-a)) (do
-            (if (not (=# (get a i) (get b i))) (alter! same false) nil)
+            (if (not (=# (get i a) (get i b))) (alter! same false) nil)
             (alter! i (+ i 1))))
         same)))))
 
@@ -474,11 +474,11 @@
        (let len-xs (length xs))
        (mut i 0)
        (while (< i len-xs) (do
-         (let current (get xs i))
+         (let current (get i xs))
          (let len-current (length current))
          (mut j 0)
          (while (< j len-current) (do
-           (set! out (length out) (get current j))
+           (set! (length out) (get j current) out)
            (alter! j (+ j 1))))
          (alter! i (+ i 1))))
        out))))
@@ -490,7 +490,7 @@
     (while (< i len) (do
         (mut j (+ i 1))
         (while (< j len) (do
-            (push! pairs { (get xs i) (get xs j) })
+            (push! { (get i xs) (get j xs) } pairs)
             (alter! j (+ j 1))))
         (alter! i (+ i 1))))
     pairs)))
@@ -502,7 +502,7 @@
             (map (lambda (x) [(as x Char)]))
             Vector->Set
             Set->Vector
-            (map (lambda (x) (as (get x 0) Int)))))))
+            (map (lambda (x) (as (get 0 x) Int)))))))
 
 (let unique/char (lambda xs
     (if (= (length xs) 0)
@@ -511,7 +511,7 @@
             (map (lambda (x) [x]))
             Vector->Set
             Set->Vector
-            (map (lambda (x) (get x 0)))))))
+            (map (lambda (x) (get 0 x)))))))
 
 (let neighborhood/diagonal [ [ 1 -1 ] [ -1 -1 ] [ 1 1 ] [ -1 1 ] ])
 
@@ -529,12 +529,12 @@
 
 ; Raw line splitting deliberately preserves blank lines: they often carry
 ; structure in text formats. `split/words` below is the tokenizing variant.
-(let split/lines (lambda xs (String/to-vector/raw xs '\n')))
+(let split/lines (lambda xs (String/to-vector/raw '\n' xs)))
 
 ; `split/spaces` is the raw literal-space splitter. Unlike `split/words`, it
 ; keeps empty fields so callers can distinguish repeated, leading, and trailing
 ; spaces.
-(let split/spaces (lambda xs (String/to-vector/raw xs ' ')))
+(let split/spaces (lambda xs (String/to-vector/raw ' ' xs)))
 
 ; A word is a maximal run of non-whitespace characters. Unlike the raw split
 ; helpers, this deliberately discards empty fields and accepts tabs and lines.
@@ -544,19 +544,19 @@
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (let current (get xs i))
+      (let current (get i xs))
       (if (space? current)
           (if (not-empty? (&get word))
               (do
-                (push! out (&get word))
+                (push! (&get word) out)
                 (&alter! word []))
               nil)
-          (push! (&get word) current))
+          (push! current (&get word)))
       (++ i)))
-    (if (not-empty? (&get word)) (push! out (&get word)))
+    (if (not-empty? (&get word)) (push! (&get word) out))
     out)))
 
-(let split/commas (lambda xs (String/to-vector/raw xs ',')))
+(let split/commas (lambda xs (String/to-vector/raw ',' xs)))
 
 (let subset (lambda xs (if (empty? xs) [ xs ] (do
     (let n (length xs))
@@ -570,10 +570,10 @@
         (let bits-len (length bits))
         (mut j 0)
         (while (< j bits-len) (do
-          (if (= (get bits j) 1)
-              (Vector/append/raw! subset (get xs j)))
+          (if (= (get j bits) 1)
+              (Vector/append/raw! (get j xs) subset))
           (alter! j (+ j 1))))
-        (Vector/push! out subset)
+        (Vector/push! subset out)
         (alter! i (+ i 1))))
     out))))
 
@@ -582,7 +582,7 @@
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (set! out (length out) (get xs i))
+      (set! (length out) (get i xs) out)
       (alter! i (+ i 1))))
     out)))
 
@@ -590,40 +590,40 @@
 ; `compact!` releases unused backing slots in place.
 (let capacity (lambda n xs (do
   (let out (copy xs))
-  (capacity! out n)
+  (capacity! n out)
   out)))
 
-(let compact! (lambda xs (capacity! xs (length xs))))
+(let compact! (lambda xs (capacity! (length xs) xs)))
 
 (let fill (lambda n fn (do
   (let out [])
   (mut i n)
   (while (> i 0) (do
-    (Vector/append/raw! out (fn i))
+    (Vector/append/raw! (fn i) out)
     (alter! i (- i 1))))
   out)))
 
 (let transpose (lambda matrix (if (empty? matrix) matrix (do
     (let H (length matrix))
-    (let W (length (get matrix 0)))
+    (let W (length (get 0 matrix)))
     (let out [])
     (mut i 0)
     (while (< i W) (do
         (mut j 0)
-        (Vector/push! out [])
+        (Vector/push! [] out)
         (while (< j H) (do
-          (Vector/push! (at out -1) (get matrix j i))
+          (Vector/push! (get j i matrix) (at -1 out))
           (alter! j (+ j 1))))
         (alter! i (+ i 1))))
     out))))
 
-(let interleave (lambda xs ys (do
+(let interleave (lambda ys xs (do
   (let out [])
   (let len (min (length xs) (length ys)))
   (mut i 0)
   (while (< i len) (do
-    (Vector/push! out (get xs i))
-    (Vector/push! out (get ys i))
+    (Vector/push! (get i xs) out)
+    (Vector/push! (get i ys) out)
     (alter! i (+ i 1))))
   out)))
 
@@ -635,12 +635,12 @@
     (mut b 0)
     (mut i 0)
     (while (< i len) (do
-      (let left (get px i))
-      (let right (get px (% (+ i 1) len)))
-      (let y1 (get left 0))
-      (let x1 (get left 1))
-      (let y2 (get right 0))
-      (let x2 (get right 1))
+      (let left (get i px))
+      (let right (get (% (+ i 1) len) px))
+      (let y1 (get 0 left))
+      (let x1 (get 1 left))
+      (let y2 (get 0 right))
+      (let x2 (get 1 right))
       (alter! a (+ a (* y1 x2)))
       (alter! b (+ b (* y2 x1)))
       (alter! i (+ i 1))))
@@ -653,7 +653,7 @@
   (let len (length xs))
   (mut i 0)
   (while (< i n) (do
-    (Vector/push! out (get xs (% i len)))
+    (Vector/push! (get (% i len) xs) out)
     (alter! i (+ i 1))))
   out)))
 
@@ -661,7 +661,7 @@
   (let out [])
   (mut i 0)
   (while (< i n) (do
-    (Vector/push! out x)
+    (Vector/push! x out)
     (alter! i (+ i 1))))
   out)))
 
@@ -678,10 +678,10 @@
           (while (< (&get i) (length arr)) (do
               (let rest (filter/i (lambda y j (not (= j (&get i)))) arr))
               (let perms (permute rest))
-              (let x (get arr (&get i)))
+              (let x (get (&get i) arr))
               (&mut j 0)
               (while (< (&get j) (length perms)) (do
-                  (set! out (length out) (Vector/cons/raw! [x] (get perms (&get j))))
+                  (set! (length out) (Vector/cons/raw! [x] (get (&get j) perms)) out)
                   (&alter! j (+ (&get j) 1))))
               (&alter! i (+ (&get i) 1))))
           out))))
@@ -691,12 +691,12 @@
     (let out [])
     (letrec combinations (lambda temp arr size start
         (if (= (length temp) size)
-            (set! out (length out) (copy temp))
+            (set! (length out) (copy temp) out)
             (do
               (mut i start)
               (let len (length arr))
               (while (< i len) (do
-                    (set! temp (length temp) (get arr i))
+                    (set! (length temp) (get i arr) temp)
                     (combinations temp arr size (+ i 1))
                     (pop! temp)
                     (alter! i (+ i 1))))))))
@@ -714,14 +714,14 @@
 (let trim/left (lambda xs (do
       (let len (length xs))
       (mut start 0)
-      (while (and (< start len) (space? (get xs start))) (do
+      (while (and (< start len) (space? (get start xs))) (do
         (++ start)))
       (slice start len xs))))
 
 (let trim/right (lambda xs (do
       (let len (length xs))
       (mut end (- len 1))
-      (while (and (>= end 0) (space? (get xs end))) (do
+      (while (and (>= end 0) (space? (get end xs))) (do
         (-- end)))
       (slice 0 (+ end 1) xs))))
 
@@ -731,44 +731,44 @@
 (let for (lambda fn xs (do
   (mut i 0)
   (let len (length xs))
-  (while (< i len) (do (fn (get xs i)) (alter! i (+ i 1)))))))
+  (while (< i len) (do (fn (get i xs)) (alter! i (+ i 1)))))))
 
 (let for/i (lambda fn xs (do
   (mut i 0)
   (let len (length xs))
-  (while (< i len) (do (fn (get xs i) i) (alter! i (+ i 1)))))))
+  (while (< i len) (do (fn (get i xs) i) (alter! i (+ i 1)))))))
 
 (let filter/i (lambda fn? xs (if (empty? xs) xs (do
      (let out [])
      (mut i 0)
      (while (< i (length xs)) (do
-            (let x (get xs i))
-            (if (fn? x i) (set! out (length out) x))
+            (let x (get i xs))
+            (if (fn? x i) (set! (length out) x out))
             (alter! i (+ i 1))))
      out))))
 
 (let reduce (lambda fn initial xs (do
      (mut out initial)
      (mut i 0)
-     (while (< i (length xs)) (do (alter! out (fn out (get xs i))) (alter! i (+ i 1))))
+     (while (< i (length xs)) (do (alter! out (fn out (get i xs))) (alter! i (+ i 1))))
      out)))
 
 (let reduce/i (lambda fn initial xs (do
      (mut out initial)
      (mut i 0)
-     (while (< i (length xs)) (do (alter! out (fn out (get xs i) i)) (alter! i (+ i 1))))
+     (while (< i (length xs)) (do (alter! out (fn out (get i xs) i)) (alter! i (+ i 1))))
      out)))
 
 (let map (lambda fn xs (if (empty? xs) [] (do
      (let out [])
      (mut i 0)
-     (while (< i (length xs)) (do (set! out (length out) (fn (get xs i))) (alter! i (+ i 1))))
+     (while (< i (length xs)) (do (set! (length out) (fn (get i xs)) out) (alter! i (+ i 1))))
      out))))
 
 (let map/i (lambda fn xs (if (empty? xs) [] (do
      (let out [])
      (mut i 0)
-     (while (< i (length xs)) (do (set! out (length out) (fn (get xs i) i)) (alter! i (+ i 1))))
+     (while (< i (length xs)) (do (set! (length out) (fn (get i xs) i) out) (alter! i (+ i 1))))
      out))))
 
 (let reduce/until (lambda fn fn? initial xs (do
@@ -777,7 +777,7 @@
   (mut i 0)
   (let len (length xs))
   (while (and (not placed) (< i len)) (do
-    (let x (get xs i))
+    (let x (get i xs))
     (let a out)
     (unless (fn? a x) (alter! out (fn a x)) (alter! placed true))
     (alter! i (+ i 1))))
@@ -790,7 +790,7 @@ out)))
   (let len (length xs))
   (while (and (not placed) (< i len)) (do
     (let idx i)
-    (let x (get xs idx))
+    (let x (get idx xs))
     (let a out)
     (unless (fn? a x idx) (alter! out (fn a x idx)) (alter! placed true))
     (alter! i (+ i 1))))
@@ -801,7 +801,7 @@ out)))
   (mut i 0)
   (let len (length xs))
   (while (and (not placed) (< i len)) (do
-    (let x (get xs i))
+    (let x (get i xs))
     (unless (fn? x) (do (fn x) nil) (alter! placed true))
     (alter! i (+ i 1)))))))
 
@@ -811,7 +811,7 @@ out)))
   (let len (length xs))
   (while (and (not placed) (< i len)) (do
     (let idx i)
-    (let x (get xs idx))
+    (let x (get idx xs))
     (unless (fn? x idx) (do (fn x idx) nil) (alter! placed true))
     (alter! i (+ i 1)))))))
 
@@ -821,8 +821,8 @@ out)))
   (mut i 0)
   (let len (length xs))
   (while (and (not placed) (< i len)) (do
-    (let x (get xs i))
-    (unless (fn? x) (do (push! out (fn x)) nil) (alter! placed true))
+    (let x (get i xs))
+    (unless (fn? x) (do (push! (fn x) out) nil) (alter! placed true))
     (alter! i (+ i 1))))
   out)))
 
@@ -833,8 +833,8 @@ out)))
   (let len (length xs))
   (while (and (not placed) (< i len)) (do
     (let idx i)
-    (let x (get xs idx))
-    (unless (fn? x idx) (do (push! out (fn x idx)) nil) (alter! placed true))
+    (let x (get idx xs))
+    (unless (fn? x idx) (do (push! (fn x idx) out) nil) (alter! placed true))
     (alter! i (+ i 1))))
   out)))
 
@@ -851,25 +851,25 @@ out)))
 (let every? (lambda predicate? xs (do
            (mut i 0)
            (let len (length xs))
-           (while (and (< i len) (predicate? (get xs i))) (alter! i (+ i 1)))
+           (while (and (< i len) (predicate? (get i xs))) (alter! i (+ i 1)))
            (not (> len i)))))
 
 (let some? (lambda predicate? xs (do
            (mut i 0)
            (let len (length xs))
-           (while (and (< i len) (not (predicate? (get xs i)))) (alter! i (+ i 1)))
+           (while (and (< i len) (not (predicate? (get i xs)))) (alter! i (+ i 1)))
            (or (= len 0) (> len i)))))
 
 (let every/i? (lambda predicate? xs (do
            (mut i 0)
            (let len (length xs))
-           (while (and (< i len) (predicate? (get xs i) i)) (alter! i (+ i 1)))
+           (while (and (< i len) (predicate? (get i xs) i)) (alter! i (+ i 1)))
            (not (> len i)))))
 
 (let some/i? (lambda predicate? xs (do
            (mut i 0)
            (let len (length xs))
-           (while (and (< i len) (not (predicate? (get xs i) i))) (alter! i (+ i 1)))
+           (while (and (< i len) (not (predicate? (get i xs) i))) (alter! i (+ i 1)))
            (or (= len 0) (> len i)))))
 
 (let divisible? (lambda b a (= (% a b) 0)))
@@ -935,7 +935,7 @@ out)))
   (mut i 1)
   (let len (length xs))
   (while (< i len) (do
-    (Vector/push! out (fn (get xs (- i 1)) (get xs i)))
+    (Vector/push! (fn (get (- i 1) xs) (get i xs)) out)
     (alter! i (+ i 1))))
   out))))
 
@@ -943,14 +943,14 @@ out)))
     (let out [])
     (mut i 0)
     (let len (length a))
-    (while (< i len) (do (set! out (length out) (f (get a i) (get b i))) (alter! i (+ i 1))))
+    (while (< i len) (do (set! (length out) (f (get i a) (get i b)) out) (alter! i (+ i 1))))
     out)))
 
 (let slice (lambda start end xs (if (empty? xs) xs (do
      (let bounds (- end start))
      (let out [])
      (mut i 0)
-     (while (< i bounds) (do (set! out (length out) (get xs (+ start i))) (alter! i (+ i 1))))
+     (while (< i bounds) (do (set! (length out) (get (+ start i) xs) out) (alter! i (+ i 1))))
      out))))
 
 (let drop/first (lambda start xs (if (empty? xs) xs (do
@@ -958,27 +958,27 @@ out)))
      (let bounds (- end start))
      (let out [])
      (mut i 0)
-     (while (< i bounds) (do (set! out (length out) (get xs (+ start i))) (alter! i (+ i 1))))
+     (while (< i bounds) (do (set! (length out) (get (+ start i) xs) out) (alter! i (+ i 1))))
      out))))
 
 (let drop/last (lambda end xs (if (empty? xs) xs (do
      (let bounds (- (length xs) end))
      (let out [])
      (mut i 0)
-     (while (< i bounds) (do (set! out (length out) (get xs i)) (alter! i (+ i 1))))
+     (while (< i bounds) (do (set! (length out) (get i xs) out) (alter! i (+ i 1))))
      out))))
 
 (let take/first (lambda end xs (if (empty? xs) xs (do
      (let out [])
      (mut i 0)
-     (while (< i end) (do (set! out (length out) (get xs i)) (alter! i (+ i 1))))
+     (while (< i end) (do (set! (length out) (get i xs) out) (alter! i (+ i 1))))
      out))))
 
 (let take/last (lambda start xs (if (empty? xs) xs (do
      (let out [])
      (let len (length xs))
      (mut i (- len start))
-     (while (< i len) (do (set! out (length out) (get xs i)) (alter! i (+ i 1))))
+     (while (< i len) (do (set! (length out) (get i xs) out) (alter! i (+ i 1))))
      out))))
 
 (let take/while
@@ -986,8 +986,8 @@ out)))
     (do
       (let out [])
       (mut i 0)
-      (while (and (< i (length xs)) (fn? (get xs i))) (do
-        (push! out (get xs i))
+      (while (and (< i (length xs)) (fn? (get i xs))) (do
+        (push! (get i xs) out)
         (++ i)))
       out)))
 
@@ -995,14 +995,14 @@ out)))
   (lambda fn? xs
     (do
       (mut i 0)
-      (while (and (< i (length xs)) (fn? (get xs i))) (++ i))
-      (cdr xs i))))
+      (while (and (< i (length xs)) (fn? (get i xs))) (++ i))
+      (cdr i xs))))
 
 (let find (lambda fn? xs (do
      (mut i 0)
      (mut index -1)
      (let len (length xs))
-     (while (and (< i len) (= index -1)) (if (fn? (get xs i))
+     (while (and (< i len) (= index -1)) (if (fn? (get i xs))
               (alter! index i)
               (alter! i (+ i 1))))
      index)))
@@ -1012,8 +1012,8 @@ out)))
     (mut i 0)
     (let len (length xs))
     (while (< i len) (do (if (= (% i n) 0)
-        (set! a (length a) [(get xs i)])
-        (set! (at a -1) (length (at a -1)) (get xs i)))
+        (set! (length a) [(get i xs)] a)
+        (set! (length (at -1 a)) (get i xs) (at -1 a)))
         (alter! i (+ i 1))))
      a))))
 
@@ -1026,7 +1026,7 @@ out)))
        (mut i 0)
        (while (< i len) (do
          (if (<= (+ i size) len)
-             (set! out (length out) (slice i (+ i size) xs)))
+             (set! (length out) (slice i (+ i size) xs) out))
          (alter! i (+ i 1))))
        out))))
 
@@ -1034,17 +1034,17 @@ out)))
     (let len (length directions))
     (mut i 0)
     (while (< i len) (do
-      (let dir (get directions i))
+      (let dir (get i directions))
       (let dy (+ (first dir) y))
-      (let dx (+ (get dir 1) x))
-      (if (Matrix/in-bounds/raw? xs dy dx)
-          (fn (get xs dy dx) dir dy dx))
+      (let dx (+ (get 1 dir) x))
+      (if (Matrix/in-bounds/raw? dy dx xs)
+          (fn (get dy dx xs) dir dy dx))
       (alter! i (+ i 1))))
     nil)))
 
 (let points (lambda fn? matrix (do
    (let coords [])
-   (Matrix/for/i matrix (lambda cell y x (if (fn? cell) (do (Vector/push! coords [ y x ]) nil))))
+   (Matrix/for/i (lambda cell y x (if (fn? cell) (do (Vector/push! [ y x ] coords) nil))) matrix)
     coords)))
 
 (let flat-map (lambda fn xs (flat (map fn xs))))
@@ -1054,10 +1054,10 @@ out)))
   (let len (- (length xs) 1))
   (mut i 0)
   (while (< i len) (do
-    (Vector/push! out (get xs i))
-    (Vector/push! out x)
+    (Vector/push! (get i xs) out)
+    (Vector/push! x out)
     (alter! i (+ i 1))))
-   (Vector/push! out (get xs (- (length xs) 1)))
+   (Vector/push! (get (- (length xs) 1) xs) out)
   out))))
 
 (let scan (lambda fn xsi (do
@@ -1065,7 +1065,7 @@ out)))
   (let xs (copy xsi))
   (mut i 1)
   (while (< i len) (do
-    (set! xs i (fn (get xs (- i 1)) (get xs i)))
+    (set! i (fn (get (- i 1) xs) (get i xs)) xs)
     (alter! i (+ i 1))))
   xs)))
 
@@ -1079,12 +1079,12 @@ out)))
     (let out [])
     (letrec combinations (lambda temp arr size start
         (if (= (length temp) size)
-            (set! out (length out) (copy temp))
+            (set! (length out) (copy temp) out)
             (do
               (mut i start)
               (let len (length arr))
               (while (< i len) (do
-                    (set! temp (length temp) (get arr i))
+                    (set! (length temp) (get i arr) temp)
                     (combinations temp arr size (+ i 1))
                     (pop! temp)
                     (alter! i (+ i 1))))))))
@@ -1097,10 +1097,10 @@ out)))
   (let len (length xs))
   (mut i 0)
   (while (and ok (< i len)) (do
-    (let option (get xs i))
+    (let option (get i xs))
     (if (fst option)
         (do
-          (Vector/push! values (snd option))
+          (Vector/push! (snd option) values)
           nil)
         (alter! ok false))
     (alter! i (+ i 1))))
@@ -1113,23 +1113,23 @@ out)))
   (mut i 0)
   (let len (length xs))
   (while (< i len) (do
-    (let item (get xs i))
+    (let item (get i xs))
     (let key (fn item))
-    (let hit (Table/get/raw out key))
+    (let hit (Table/get/raw key out))
     (if (= (length hit) 0)
-        (do (Table/set/raw! out key [item]) nil)
-        (do (push! (snd (get hit 0)) item) nil))
+        (do (Table/set/raw! key [item] out) nil)
+        (do (push! item (snd (get 0 hit))) nil))
     (alter! i (+ i 1))))
   out)))
 
 (let autocorrect (lambda dictionary word (do
-  (let f (get dictionary 0))
+  (let f (get 0 dictionary))
   (&mut best-word f)
-  (mut best-dist (String/damerau-levenshtein word f))
+  (mut best-dist (String/damerau-levenshtein f word))
   (mut i 1)
   (while (< i (length dictionary)) (do
-    (let candidate (get dictionary i))
-    (let dist (String/damerau-levenshtein word candidate))
+    (let candidate (get i dictionary))
+    (let dist (String/damerau-levenshtein candidate word))
     (if (< dist best-dist)
         (do
           (&alter! best-word candidate)
@@ -1143,8 +1143,8 @@ out)))
      (let out [])
      (mut i 0)
      (while (< i (length xs)) (do
-            (let x (get xs i))
-            (if (fn? x) (set! out (length out) x))
+            (let x (get i xs))
+            (if (fn? x) (set! (length out) x out))
             (alter! i (+ i 1))))
      out))))
 
@@ -1262,7 +1262,7 @@ out)))
 
 (let sort (lambda fn xs (do
   (let out (copy xs))
-  (Vector/sort! out fn)
+  (Vector/sort! fn out)
   out)))
 
 (let sort/bool/desc
@@ -1272,10 +1272,10 @@ out)))
       (let trues (count (lambda x x) xs))
       (mut i 0)
       (while (< i trues)
-        (push! out true)
+        (push! true out)
         (++ i))
       (while (< i (length xs))
-        (push! out false)
+        (push! false out)
         (++ i))
       out)))
 
@@ -1286,10 +1286,10 @@ out)))
       (let falses (count (lambda x (not x)) xs))
       (mut i 0)
       (while (< i falses)
-        (push! out false)
+        (push! false out)
         (++ i))
       (while (< i (length xs))
-        (push! out true)
+        (push! true out)
         (++ i))
       out)))
 
@@ -1318,20 +1318,20 @@ out)))
         (let len-ys (length ys))
         (while (< i len-str) (do
           (mut matched? false)
-          (if (and (<= (+ i len-ys) len-str) (=# (get str i) (get ys 0)))
+          (if (and (<= (+ i len-ys) len-str) (=# (get i str) (get 0 ys)))
               (do
                 (alter! matched? true)
                 (mut j 1)
                 (while (and matched? (< j len-ys)) (do
-                  (if (not (=# (get str (+ i j)) (get ys j))) (alter! matched? false))
+                  (if (not (=# (get (+ i j) str) (get j ys))) (alter! matched? false))
                   (alter! j (+ j 1))))))
           (if matched?
               (do
-                (push! out (slice start i str))
+                (push! (slice start i str) out)
                 (alter! start (+ i len-ys))
                 (alter! i (+ i len-ys)))
               (alter! i (+ i 1)))))
-        (push! out (slice start len-str str))
+        (push! (slice start len-str str) out)
         out)))))
 
 (let join (lambda str xs (do
@@ -1339,16 +1339,16 @@ out)))
     (mut i 0)
     (let len-xs (length xs))
     (while (< i len-xs) (do
-      (let current (get xs i))
+      (let current (get i xs))
       (mut j 0)
       (while (< j (length current)) (do
-        (push! out (get current j))
+        (push! (get j current) out)
         (alter! j (+ j 1))))
       (if (< (+ i 1) len-xs)
           (do
             (mut k 0)
             (while (< k (length str)) (do
-              (push! out (get str k))
+              (push! (get k str) out)
               (alter! k (+ k 1))))))
       (alter! i (+ i 1))))
    out)))
@@ -1359,15 +1359,15 @@ out)))
 
 (let graph/project-path
   (lambda col path
-    (map (lambda i (get col i)) path)))
+    (map (lambda i (get i col)) path)))
 
 (let graph/path->nodes
   (lambda from-col to-col path
     (if (empty? path)
         []
         (do
-          (let out [(get from-col (get path 0))])
-          (for (lambda i (push! out (get to-col i))) path)
+          (let out [(get (get 0 path) from-col)])
+          (for (lambda i (push! (get i to-col) out)) path)
           out))))
 
 (let graph/rotate
@@ -1377,7 +1377,7 @@ out)))
       (mut i 0)
       (let len (length xs))
       (while (< i len) (do
-        (push! out (get xs (% (+ start i) len)))
+        (push! (get (% (+ start i) len) xs) out)
         (alter! i (+ i 1))))
       out)))
 
@@ -1390,7 +1390,7 @@ out)))
           (mut best 0)
           (mut i 1)
           (while (< i cycle-len) (do
-            (if (String/lt? (get nodes i) (get nodes best))
+            (if (String/lt? (get i nodes) (get best nodes))
                 (alter! best i)
                 nil)
             (alter! i (+ i 1))))
@@ -1403,7 +1403,7 @@ out)))
         (do
           (let start (graph/cycle/min-rotation nodes))
           (let core (graph/rotate start (slice 0 (- (length nodes) 1) nodes)))
-          (cons core [(get core 0)])))))
+          (cons core [(get 0 core)])))))
 
 (let graph/normalize-path
   (lambda from-col to-col path
@@ -1425,10 +1425,10 @@ out)))
     (reduce
       (lambda (a i)
         (do
-          (let from (get from-col i))
+          (let from (get i from-col))
           (if (Table/has? from a)
-              (push! (Table/get-unsafe from a) i)
-              (Table/set! a from [i]))
+              (push! i (Table/get-unsafe from a))
+              (Table/set! from [i] a))
           a))
       (Table/new)
       rows)))
@@ -1438,7 +1438,7 @@ out)))
     (do
       (let nodes (graph/path->nodes from-col to-col path))
       (if (or (< (length nodes) 3)
-              (not (match? (get nodes 0) (last nodes))))
+              (not (match? (get 0 nodes) (last nodes))))
           false
           (do
             (let seen (Set/new))
@@ -1446,10 +1446,10 @@ out)))
             (mut ok true)
             (let stop (- (length nodes) 1))
             (while (and ok (< i stop)) (do
-              (let node (get nodes i))
+              (let node (get i nodes))
               (if (Set/has? node seen)
                   (alter! ok false)
-                  (Set/add! seen node))
+                  (Set/add! node seen))
               (alter! i (+ i 1))))
             ok)))))
 
@@ -1468,7 +1468,7 @@ out)))
               (for
                 (lambda next-i
                   (do
-                    (let next-to (get to-col next-i))
+                    (let next-to (get next-i to-col))
                     (if (next-ok? path next-i)
                         (if (match? next-to origin)
                             (do
@@ -1479,8 +1479,8 @@ out)))
                                     (let key (graph/cycle-key from-col to-col full-path))
                                     (if (not (Set/has? key seen))
                                         (do
-                                          (Set/add! seen key)
-                                          (push! out full-path))
+                                          (Set/add! key seen)
+                                          (push! full-path out))
                                         nil))
                                   nil))
                             (if (not (contains-node? next-to visited))
@@ -1494,9 +1494,9 @@ out)))
               nil)))
       (for
         (lambda start-i
-          (dfs (get from-col start-i)
-               (get to-col start-i)
-               [(get from-col start-i) (get to-col start-i)]
+          (dfs (get start-i from-col)
+               (get start-i to-col)
+               [(get start-i from-col) (get start-i to-col)]
                [start-i]))
         rows)
       out)))
@@ -1508,11 +1508,11 @@ out)))
       from-col
       to-col
       (lambda (path next-i)
-        (> (get time-col next-i) (get time-col (at path -1))))
+        (> (get next-i time-col) (get (at -1 path) time-col)))
       (lambda (path)
         (and (>= (length path) min-length)
-             (<= (- (get time-col (at path -1))
-                    (get time-col (get path 0)))
+             (<= (- (get (at -1 path) time-col)
+                    (get (get 0 path) time-col))
                  max-span-seconds))))))
 
 (let graph/has-cycle?
@@ -1634,12 +1634,12 @@ out)))
 (let loop/some-n? (lambda n predicate? (loop/some-range? 0 n predicate?)))
 
 (let swap! Vector/swap!)
-(let scan! (lambda xs fn (do
+(let scan! (lambda fn xs (do
   (let len (length xs))
   (if (> len 1) (do
     (mut i 1)
     (while (< i len) (do
-      (set! xs i (fn (get xs (- i 1)) (get xs i)))
+      (set! i (fn (get (- i 1) xs) (get i xs)) xs)
       (alter! i (+ i 1))))) nil)
   nil)))
 (let reverse! Vector/reverse!)

@@ -30,7 +30,7 @@ fn ident(name: &str, idx: usize) -> String {
         "fst" => "(a)=>a[0]".to_string(),
         "snd" => "(a)=>a[1]".to_string(),
         "car" => "(a)=>a[0]".to_string(),
-        "cdr" => "(a)=>a.slice(1)".to_string(),
+        "cdr" => "(n)=>(a)=>a.slice(n)".to_string(),
 
         "var" => "__var".to_string(),
         "const" => "__const".to_string(),
@@ -200,25 +200,32 @@ fn compile_expr_to_js_inner(expr: &Expression, in_lambda_body: bool) -> String {
                     "length" => format!("{}.length", compile_expr_to_js(&items[1])),
                     "get" => format!(
                         "({}[{}])",
-                        compile_expr_to_js(&items[1]),
-                        compile_expr_to_js(&items[2])
+                        compile_expr_to_js(&items[2]),
+                        compile_expr_to_js(&items[1])
                     ),
                     "car" => format!("({}[0])", compile_expr_to_js(&items[1])),
                     "cdr" => format!(
                         "({}.slice({}))",
-                        compile_expr_to_js(&items[1]),
-                        compile_expr_to_js(&items[2])
+                        compile_expr_to_js(&items[2]),
+                        compile_expr_to_js(&items[1])
                     ),
                     "fst" => format!("({}[0])", compile_expr_to_js(&items[1])),
                     "snd" => format!("({}[1])", compile_expr_to_js(&items[1])),
                     "set!" => format!(
                         "({}[{}]={},0)",
+                        compile_expr_to_js(&items[3]),
                         compile_expr_to_js(&items[1]),
-                        compile_expr_to_js(&items[2]),
-                        compile_expr_to_js(&items[3])
+                        compile_expr_to_js(&items[2])
                     ),
                     "push!" => format!(
                         "({}.push({}),0)",
+                        compile_expr_to_js(&items[2]),
+                        compile_expr_to_js(&items[1])
+                    ),
+                    // JavaScript arrays reserve capacity internally. Preserve
+                    // argument evaluation but make this semantic hint a no-op.
+                    "capacity!" => format!(
+                        "(void ({}), void ({}), 0)",
                         compile_expr_to_js(&items[1]),
                         compile_expr_to_js(&items[2])
                     ),

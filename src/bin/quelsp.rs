@@ -2347,11 +2347,11 @@ mod tests {
         let analysis = analyze_lsp_test_source(source);
         assert_eq!(analysis.diagnostics.len(), 1);
         let diagnostic = &analysis.diagnostics[0];
-        assert!(diagnostic
-            .message
-            .contains("Macro '&mut' expected"),
+        assert!(
+            diagnostic.message.contains("Macro '&mut' expected"),
             "unexpected diagnostic: {}",
-            diagnostic.message);
+            diagnostic.message
+        );
         assert_eq!(diagnostic.range.start, Position::new(0, 7));
         assert_eq!(diagnostic.range.end, Position::new(0, 16));
     }
@@ -2404,7 +2404,7 @@ mod tests {
 
     #[test]
     fn generated_names_are_hidden_in_end_to_end_static_diagnostics() {
-        let source = "; use-strict-warnings!\n(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get xs index))))";
+        let source = "; use-strict-warnings!\n(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get index xs))))";
         let analysis = analyze_lsp_test_source(source);
         let warning = analysis
             .diagnostics
@@ -2412,7 +2412,7 @@ mod tests {
             .find(|diagnostic| diagnostic.message.contains("index not proven safe"))
             .expect("expected static bounds warning");
         assert!(!warning.message.contains("__block_"));
-        assert!(warning.message.contains("(get xs index)"));
+        assert!(warning.message.contains("(get index xs)"));
         assert_eq!(warning.range.start.line, 4);
     }
 }

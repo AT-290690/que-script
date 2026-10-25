@@ -1,4 +1,4 @@
-(let Vector/append/raw! (lambda xs x (do (push! xs x) xs)))
+(let Vector/append/raw! (lambda x xs (do (push! x xs) xs)))
 
 (let Vector/cons/raw
   (lambda a b
@@ -9,88 +9,88 @@
 
       (mut i 0)
       (while (< i lena) (do
-        (set! out (length out) (get a i))
+        (set! (length out) (get i a) out)
         (alter! i (+ i 1))))
 
       (mut j 0)
       (while (< j lenb) (do
-        (set! out (length out) (get b j))
+        (set! (length out) (get j b) out)
         (alter! j (+ j 1))))
 
       out)))
 
-(let Vector/cons/raw! (lambda a b (if (and (empty? a) (empty? b)) a (do
+(let Vector/cons/raw! (lambda b a (if (and (empty? a) (empty? b)) a (do
   (mut i 0)
   (let lenb (length b))
   (while (< i lenb) (do
-    (set! a (length a) (get b i))
+    (set! (length a) (get i b) a)
     (alter! i (+ i 1))))
   a))))
 
 (let Int/euclidean-mod (lambda a b (% (+ (% a b) b) b)))
 
-(let Vector/to-string/raw (lambda xs delim (do
+(let Vector/to-string/raw (lambda delim xs (do
     (let out [])
     (let len-xs (length xs))
     (mut i 0)
     (while (< i len-xs) (do
       (if (> i 0)
-          (set! out (length out) delim))
-      (let current (get xs i))
+          (set! (length out) delim out))
+      (let current (get i xs))
       (let len-current (length current))
       (mut j 0)
       (while (< j len-current) (do
-        (set! out (length out) (get current j))
+        (set! (length out) (get j current) out)
         (alter! j (+ j 1))))
       (alter! i (+ i 1))))
     out)))
 
-(let String/to-vector/raw (lambda str ch (do
+(let String/to-vector/raw (lambda ch str (do
     (let out [[]])
     (let len (length str))
     (mut i 0)
     (while (< i len) (do
-      (let current (get str i))
+      (let current (get i str))
       (if (=# current ch)
-          (set! out (length out) [])
+          (set! (length out) [] out)
           (do
-            (let prev (get out (- (length out) 1)))
-            (set! prev (length prev) current)))
+            (let prev (get (- (length out) 1) out))
+            (set! (length prev) current prev)))
       (alter! i (+ i 1))))
     out)))
 
 (let String/chars->unsigned-dec (lambda xs (do
   (let parts (Chars->Digits/dec xs))
-  (let pow (expt (length (get parts 1)) 10))
+  (let pow (expt (length (get 1 parts)) 10))
   (/. (Int->Dec (+
-    (* (Digits->Integer (get parts 0)) pow)
-    (Digits->Integer (get parts 1)))) (Int->Dec pow)))))
+    (* (Digits->Integer (get 0 parts)) pow)
+    (Digits->Integer (get 1 parts)))) (Int->Dec pow)))))
 
-(let Matrix/in-bounds/raw? (lambda matrix y x (and (in-bounds? matrix y) (in-bounds? (get matrix y) x))))
+(let Matrix/in-bounds/raw? (lambda y x matrix (and (in-bounds? y matrix) (in-bounds? x (get y matrix)))))
 
-(let Matrix/set/raw! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))
+(let Matrix/set/raw! (lambda y x value matrix (do (set! x value (get y matrix)) 0)))
 
 (let Dec/scaling 1000000.0)
 
-(let Que/offset-left (lambda q (* (- (length (get q 0)) 1) -1)))
+(let Que/offset-left (lambda q (* (- (length (get 0 q)) 1) -1)))
 
-(let Que/offset-right (lambda q (length (get q 1))))
+(let Que/offset-right (lambda q (length (get 1 q))))
 
 (let Que/empty/raw! (lambda q (do
-    (set! q 0 [(get q 0 0)])
-    (set! q 1 [])
+    (set! 0 [(get 0 0 q)] q)
+    (set! 1 [] q)
     q)))
 
-(let Que/add-to-left! (lambda q item (do (let c (get q 0)) (set! c (length c) item))))
+(let Que/add-to-left! (lambda item q (do (let c (get 0 q)) (set! (length c) item c))))
 
-(let Que/add-to-right! (lambda q item (do (let c (get q 1)) (set! c (length c) item))))
+(let Que/add-to-right! (lambda item q (do (let c (get 1 q)) (set! (length c) item c))))
 
 (let Que/remove-from-left! (lambda q (do
   (let len (Que/length q))
   (if (> len 0)
      (cond
         (= len 1) (Que/empty/raw! q)
-        (> (length (get q 0)) 0) (do (pop! (get q 0)) q)
+        (> (length (get 0 q)) 0) (do (pop! (get 0 q)) q)
         q) q))))
 
 (let Que/remove-from-right! (lambda q (do
@@ -98,7 +98,7 @@
     (if (> len 0)
      (cond
         (= len 1) (Que/empty/raw! q)
-        (> (length (get q 1)) 0) (do (pop! (get q 1)) q)
+        (> (length (get 1 q)) 0) (do (pop! (get 1 q)) q)
         q) q))))
 
 (let Que/balance? (lambda q (= (+ (Que/offset-right q) (Que/offset-left q)) 0)))
@@ -111,17 +111,17 @@
       (mut right half)
       (let len (length initial))
       (while (< right len) (do
-        (Que/add-to-right! q (get initial right))
+        (Que/add-to-right! (get right initial) q)
         (alter! right (+ right 1))))
       (mut left (- half 1))
       (while (>= left 0) (do
-        (Que/add-to-left! q (get initial left))
+        (Que/add-to-left! (get left initial) q)
         (alter! left (- left 1))))
     q))))
 
-(let Que/append/raw! (lambda q item (do (Que/add-to-right! q item) q)))
+(let Que/append/raw! (lambda item q (do (Que/add-to-right! item q) q)))
 
-(let Que/prepend/raw! (lambda q item (do (Que/add-to-left! q item) q)))
+(let Que/prepend/raw! (lambda item q (do (Que/add-to-left! item q) q)))
 
 (let Que/head! (lambda q (do
     (if (= (Que/offset-right q) 0) (Que/balance! q) q)
@@ -133,7 +133,7 @@
     (Que/remove-from-left! q)
 q)))
 
-(let Que/enqueue/raw! (lambda queue item (Que/append/raw! queue item)))
+(let Que/enqueue/raw! (lambda item queue (Que/append/raw! item queue)))
 
 (let Vector/equal/raw? (lambda a b fn? (do
   (if (< (length a) (length b)) false
@@ -143,8 +143,8 @@ q)))
       (mut result true)
       (let len (length a))
       (while (< i len) (do
-        (let da (get a i))
-        (let db (get b i))
+        (let da (get i a))
+        (let db (get i b))
         (if (not (fn? da db)) (do
           (alter! result false)
           (alter! i len)))
@@ -158,7 +158,7 @@ q)))
     (let len-b (length b))
     (let len (if (< len-a len-b) len-a len-b))
     (while (and (< i len) (not (done? state))) (do
-      (alter! state (step state (get a i) (get b i) i))
+      (alter! state (step state (get i a) (get i b) i))
       (alter! i (+ i 1))))
     { state len-a len-b })))
 
@@ -169,10 +169,10 @@ q)))
       (let matrix [])
       (mut i 0)
       (while (< i W) (do
-          (push! matrix [])
+          (push! [] matrix)
           (mut j 0)
           (while (< j H) (do
-            (Matrix/set/raw! matrix i j (fn i j))
+            (Matrix/set/raw! i j (fn i j) matrix)
             (alter! j (+ j 1))))
           (alter! i (+ i 1))))
       matrix))))
@@ -182,7 +182,7 @@ q)))
     (do
       (mut i 0)
       (while (and (< i (length digits))
-                  (zero? (get digits i))) (do
+                  (zero? (get i digits))) (do
         (++ i)))
       (if (= i (length digits))
           [0]
@@ -214,10 +214,10 @@ q)))
       (StructBigDec/precision b)
       precision))))
 
-(let Vector/to-tuple/raw (lambda xs fn1 fn2 { (fn1 xs) (fn2 xs) }))
+(let Vector/to-tuple/raw (lambda fn1 fn2 xs { (fn1 xs) (fn2 xs) }))
 
 (let Table/hash
- (lambda table key
+ (lambda key table
    (do
      (let cap (length table))
      (__table-key-hash key cap))))
@@ -226,151 +226,151 @@ q)))
 
 (let Table/max-capacity (lambda a b (Table/create (max (length a) (length b)))))
 
-(let Table/find-index (lambda bucket key (do
+(let Table/find-index (lambda key bucket (do
   (mut i 0)
   (mut found -1)
   (let len (length bucket))
   (while (and (= found -1) (< i len)) (do
-    (if (__table-key-equal? (fst (get bucket i)) key)
+    (if (__table-key-equal? (fst (get i bucket)) key)
         (alter! found i)
         nil)
     (alter! i (+ i 1))))
   found)))
 
-(let Table/for-each (lambda table fn (do
+(let Table/for-each (lambda fn table (do
   (mut i 0)
   (let table-len (length table))
   (while (< i table-len) (do
-    (let bucket (get table i))
+    (let bucket (get i table))
     (mut j 0)
     (let bucket-len (length bucket))
     (while (< j bucket-len) (do
-      (fn (get bucket j))
+      (fn (get j bucket))
       (alter! j (+ j 1))))
     (alter! i (+ i 1)))))))
 
-(let Table/set/unchecked! (lambda table key value (do
-  (let idx (Table/hash table key))
-  (let bucket (get table idx))
-  (set! bucket (length bucket) { key value })
+(let Table/set/unchecked! (lambda key value table (do
+  (let idx (Table/hash key table))
+  (let bucket (get idx table))
+  (set! (length bucket) { key value } bucket)
   table)))
 
-(let Table/resize/raw! (lambda table new-capacity (do
+(let Table/resize/raw! (lambda new-capacity table (do
   (let target (max 4 new-capacity))
   (if (= target (length table))
       table
       (do
         (let entries [])
-        (Table/for-each table (lambda entry (set! entries (length entries) entry)))
+        (Table/for-each (lambda entry (set! (length entries) entry entries)) table)
         (Heap/empty! table)
         (mut i 0)
         (while (< i target) (do
-          (set! table (length table) [])
+          (set! (length table) [] table)
           (alter! i (+ i 1))))
         (mut j 0)
         (let entries-len (length entries))
         (while (< j entries-len) (do
-          (let entry (get entries j))
-          (Table/set/unchecked! table (fst entry) (snd entry))
+          (let entry (get j entries))
+          (Table/set/unchecked! (fst entry) (snd entry) table)
           (alter! j (+ j 1))))
         table)))))
 
 (let Table/compact/raw! (lambda table (do
   (let used (Table/count-entries table))
   (let target (max 32 (* used 2)))
-  (Table/resize/raw! table target))))
+  (Table/resize/raw! target table))))
 
-(let Table/has/raw? (lambda table key
+(let Table/has/raw? (lambda key table
   (if (= (length table) 0)
       false
       (do
-        (let idx (Table/hash table key))
-        (let bucket (get table idx))
-        (>= (Table/find-index bucket key) 0)))))
+        (let idx (Table/hash key table))
+        (let bucket (get idx table))
+        (>= (Table/find-index key bucket) 0)))))
 
-(let Table/set/raw! (lambda table key value (do
-  (if (= (length table) 0) (do (Table/resize/raw! table 32) nil) nil)
-  (let idx (Table/hash table key))
-  (let bucket (get table idx))
-  (let index (Table/find-index bucket key))
+(let Table/set/raw! (lambda key value table (do
+  (if (= (length table) 0) (do (Table/resize/raw! 32 table) nil) nil)
+  (let idx (Table/hash key table))
+  (let bucket (get idx table))
+  (let index (Table/find-index key bucket))
   (if (= index -1)
       (do
-        (set! bucket (length bucket) { key value })
+        (set! (length bucket) { key value } bucket)
         (if (> (length bucket) 8)
-            (do (Table/resize/raw! table (* (length table) 2)) nil)
+            (do (Table/resize/raw! (* (length table) 2) table) nil)
             nil))
-      (set! bucket index { key value }))
+      (set! index { key value } bucket))
   table)))
 
-(let Table/remove/raw! (lambda table key (do
+(let Table/remove/raw! (lambda key table (do
   (if (= (length table) 0)
       table
       (do
-        (let idx (Table/hash table key))
-        (let bucket (get table idx))
-        (let index (Table/find-index bucket key))
+        (let idx (Table/hash key table))
+        (let bucket (get idx table))
+        (let index (Table/find-index key bucket))
         (if (>= index 0)
             (do
-              (set! bucket index (get bucket (- (length bucket) 1)))
+              (set! index (get (- (length bucket) 1) bucket) bucket)
               (pop! bucket))
             nil)
         (if (and (> (length table) 32) (= (length bucket) 0))
             (do
               (let used (Table/count-entries table))
               (if (< (* used 4) (length table))
-                  (do (Table/resize/raw! table (max 32 (/ (length table) 2))) nil)
+                  (do (Table/resize/raw! (max 32 (/ (length table) 2)) table) nil)
                   nil))
             nil)
         table)))))
 
-(let Table/get/raw (lambda table key
+(let Table/get/raw (lambda key table
   (if (= (length table) 0)
       []
       (do
-        (let idx (Table/hash table key))
-        (let bucket (get table idx))
-        (let index (Table/find-index bucket key))
-        (if (>= index 0) [ (get bucket index) ] [])))))
+        (let idx (Table/hash key table))
+        (let bucket (get idx table))
+        (let index (Table/find-index key bucket))
+        (if (>= index 0) [ (get index bucket) ] [])))))
 
-(let Table/drop/raw! (lambda table keys (do
+(let Table/drop/raw! (lambda keys table (do
   (mut i 0)
   (let len (length keys))
   (while (< i len) (do
-    (Table/remove/raw! table (get keys i))
+    (Table/remove/raw! (get i keys) table)
     (alter! i (+ i 1)))))))
 
-(let Table/keep/raw (lambda table keys (do
+(let Table/keep/raw (lambda keys table (do
   (let out (Table/create (max 32 (length keys))))
   (mut i 0)
   (let len (length keys))
   (while (< i len) (do
-    (let key (get keys i))
-    (let hit (Table/get/raw table key))
+    (let key (get i keys))
+    (let hit (Table/get/raw key table))
     (if (> (length hit) 0)
-        (do (Table/set/raw! out key (fst (get hit 0))) nil)
+        (do (Table/set/raw! key (fst (get 0 hit)) out) nil)
         nil)
     (alter! i (+ i 1))))
   out)))
 
-(let Table/merge/raw! (lambda a b (do
+(let Table/merge/raw! (lambda b a (do
   (let entries (Table/entries b))
   (mut i 0)
   (let len (length entries))
   (while (< i len) (do
-    (let entry (get entries i))
-    (Table/set/raw! a (fst entry) (snd entry))
+    (let entry (get i entries))
+    (Table/set/raw! (fst entry) (snd entry) a)
     (alter! i (+ i 1))))
   a)))
 
-(let Table/merge/raw (lambda a b (do
+(let Table/merge/raw (lambda b a (do
   (let out (Table/max-capacity a b))
-  (Table/merge/raw! out a)
-  (Table/merge/raw! out b)
+  (Table/merge/raw! a out)
+  (Table/merge/raw! b out)
   out)))
 
-(let Table/omit/raw (lambda table keys (do
-  (let out (Table/merge/raw (Table/create 32) table))
-  (Table/drop/raw! out keys)
+(let Table/omit/raw (lambda keys table (do
+  (let out (Table/merge/raw table (Table/create 32)))
+  (Table/drop/raw! keys out)
   out)))
 
 (let String/prepend-zeroes (lambda (s target-len)
@@ -404,7 +404,7 @@ q)))
           (String/prepend-zeroes right-unpadded 6))
 
         (mut len (length right))
-        (while (=# (get right (- len 1)) '0')
+        (while (=# (get (- len 1) right) '0')
             (pop! right)
             (alter! len (- len 1)))
 
@@ -417,8 +417,8 @@ q)))
     (mut same true)
     (while (and same (< i target-len))
       (do
-        (if (not (=# (get data (+ offset i))
-                     (get target i)))
+        (if (not (=# (get (+ offset i) data)
+                     (get i target)))
             (alter! same false))
         (alter! i (+ i 1))))
     same))
@@ -472,11 +472,11 @@ q)))
 
 (let Digits->Integer (lambda digits-with-sign (do
     (let len (length digits-with-sign))
-    (let negative? (and (> len 0) (< (get digits-with-sign 0) 0)))
+    (let negative? (and (> len 0) (< (get 0 digits-with-sign) 0)))
     (mut num 0)
     (mut i 0)
     (while (< i len) (do
-      (let digit (get digits-with-sign i))
+      (let digit (get i digits-with-sign))
       (alter! num (+ (* num 10) (if negative? (abs digit) digit)))
       (alter! i (+ i 1))))
     (if negative? (- 0 num) num))))
@@ -485,13 +485,13 @@ q)))
     (let len (length chars))
     (mut sign 1)
     (mut i 0)
-    (if (and (> len 0) (=# (get chars 0) '-'))
+    (if (and (> len 0) (=# (get 0 chars) '-'))
         (do
           (alter! sign -1)
           (alter! i 1)))
     (mut num 0)
     (while (< i len) (do
-      (alter! num (+ (* num 10) (Char->Digit (get chars i))))
+      (alter! num (+ (* num 10) (Char->Digit (get i chars))))
       (alter! i (+ i 1))))
     (* num sign))))
 
@@ -503,8 +503,8 @@ q)))
       (mut result true)
       (let len (length a))
       (while (< i len) (do
-        (let da (get a i))
-        (let db (get b i))
+        (let da (get i a))
+        (let db (get i b))
         (if (not (= da db)) (do
           (alter! result false)
           (alter! i len)))
@@ -515,11 +515,11 @@ q)))
 
 (let Vector/pop! (lambda xs (pop! xs)))
 
-(let Vector/push! (lambda xs x (do (set! xs (length xs) x) xs)))
+(let Vector/push! (lambda x xs (do (set! (length xs) x xs) xs)))
 
 (let Heap/empty! (lambda xs (do (empty! xs) xs)))
 
-(let Vector/overwrite! (lambda (xs ys) (Heap/empty! xs) (loop i (< i (length ys)) (set! xs i (get ys i)))))
+(let Vector/overwrite! (lambda (ys xs) (Heap/empty! xs) (loop i (< i (length ys)) (set! i (get i ys) xs))))
 
 (let StructDec/scale 1000)
 
@@ -616,8 +616,8 @@ q)))
     (mut decided false)
     (mut out false)
     (while (and (not decided) (< i min-len)) (do
-        (let ca (get a i))
-        (let cb (get b i))
+        (let ca (get i a))
+        (let cb (get i b))
         (if (=# ca cb)
             (alter! i (+ i 1))
             (do
@@ -633,8 +633,8 @@ q)))
     (mut decided false)
     (mut out false)
     (while (and (not decided) (< i min-len)) (do
-        (let ca (get a i))
-        (let cb (get b i))
+        (let ca (get i a))
+        (let cb (get i b))
         (if (=# ca cb)
             (alter! i (+ i 1))
             (do
@@ -655,7 +655,7 @@ q)))
     (let len (length digits))
     (mut i 0)
     (while (< i len) (do
-      (set! out (length out) (Char->Digit (get digits i)))
+      (set! (length out) (Char->Digit (get i digits)) out)
       (alter! i (+ i 1))))
     out)))
 
@@ -664,10 +664,10 @@ q)))
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (let ch (get xs i))
+      (let ch (get i xs))
       (if (=# ch '.')
-          (push! out [])
-          (push! (at out -1) (Char->Digit ch)))
+          (push! [] out)
+          (push! (Char->Digit ch) (at -1 out)))
       (alter! i (+ i 1))))
     out)))
 
@@ -679,15 +679,15 @@ q)))
         (let str [])
         (while (> n 0) (do
             (let x (% n base))
-            (push! str (+# (Int->Char x) (char 48)))
+            (push! (+# (Int->Char x) (char 48)) str)
             (alter! n (/ n base))))
-        (if neg? (push! str '-'))
+        (if neg? (push! '-' str))
         (mut left 0)
         (mut right (- (length str) 1))
         (while (< left right) (do
-            (let ch (get str left))
-            (set! str left (get str right))
-            (set! str right ch)
+            (let ch (get left str))
+            (set! left (get right str) str)
+            (set! right ch str)
             (alter! left (+ left 1))
             (alter! right (- right 1))))
         str))))
@@ -699,19 +699,19 @@ q)))
     (let len (length digits))
     (mut i 0)
     (while (< i len) (do
-      (set! out (length out) (Digit->Char (get digits i)))
+      (set! (length out) (Digit->Char (get i digits)) out)
       (alter! i (+ i 1))))
     out)))
 
 
 
 (let String->Dec (lambda xs
-  (if (=# (get xs 0) '-') (*. (String/chars->unsigned-dec (slice 1 (length xs) xs)) -1.0) (String/chars->unsigned-dec xs))))
+  (if (=# (get 0 xs) '-') (*. (String/chars->unsigned-dec (slice 1 (length xs) xs)) -1.0) (String/chars->unsigned-dec xs))))
 
 (let Int->Alphabet
   (lambda x offset (Int->Char (+ x (Char->Int offset)))))
 
-(let Heap/peek! (lambda heap (get heap 0)))
+(let Heap/peek! (lambda heap (get 0 heap)))
 
 (let Set->Vector (lambda xs (filter not-empty? (flat xs))))
 
@@ -719,43 +719,43 @@ q)))
 
 (let Que/new (lambda def [[ def ] []]))
 
-(let Que/length (lambda q (+ (length (get q 0)) (length (get q 1)) -1)))
+(let Que/length (lambda q (+ (length (get 0 q)) (length (get 1 q)) -1)))
 
 (let Que/empty? (lambda q (= (Que/length q) 0)))
 
-(let Que/get (lambda q offset (do
+(let Que/get (lambda offset q (do
   (let offset-index (+ offset (Que/offset-left q)))
   (let index (if (< offset-index 0) (* offset-index -1) offset-index))
   (if (>= offset-index 0)
-       (get (get q 1) index)
-       (get (get q 0) index)))))
+       (get index (get 1 q))
+       (get index (get 0 q))))))
 
 (let Vector->Que (lambda init initial (do
  (let q (Que/new init))
  (let half (/ (length initial) 2))
  (mut left (- half 1))
  (while (>= left 0) (do
-    (Que/add-to-left! q (get initial left))
+    (Que/add-to-left! (get left initial) q)
     (alter! left (- left 1))))
  (mut right half)
  (let len (length initial))
  (while (< right len) (do
-   (Que/add-to-right! q (get initial right))
+   (Que/add-to-right! (get right initial) q)
    (alter! right (+ right 1))))
     q)))
 
-(let Que->Vector (lambda q (if (Que/empty? q) [(get q 0 0)] (do
+(let Que->Vector (lambda q (if (Que/empty? q) [(get 0 0 q)] (do
   (let out [])
   (mut index 0)
   (let len (Que/length q))
   (while (< index len) (do
-      (set! out (length out) (Que/get q index))
+      (set! (length out) (Que/get index q) out)
       (alter! index (+ index 1))))
     out))))
 
-(let Que/peek (lambda q (Que/get q 0)))
+(let Que/peek (lambda q (Que/get 0 q)))
 
-(let Que/last (lambda q (Que/get q (- (Que/length q) 1))))
+(let Que/last (lambda q (Que/get (- (Que/length q) 1) q)))
 
 (let Que/not-empty? (lambda q (not (Que/empty? q))))
 
@@ -764,7 +764,7 @@ q)))
         (mut n num)
         (let out [])
         (while (> n 0) (do
-            (push! out (% n 2))
+            (push! (% n 2) out)
             (alter! n (/ n 2))))
         (reverse out)))))
 
@@ -773,7 +773,7 @@ q)))
   (mut index 0)
   (mut out 0)
   (while (< index len) (do
-    (alter! out (+ out (* (at xs index) (expt (- len index 1) 2))))
+    (alter! out (+ out (* (at index xs) (expt (- len index 1) 2))))
     (alter! index (+ index 1))))
   out)))
 
@@ -781,7 +781,7 @@ q)))
      (let out [ (BigInt/new (Integer->Chars start)) ])
      (mut i (+ start 1))
      (while (<= i end) (do
-        (set! out (length out) (BigInt/new (Integer->Chars i)))
+        (set! (length out) (BigInt/new (Integer->Chars i)) out)
         (alter! i (+ i 1))))
    out)))
 
@@ -792,14 +792,14 @@ q)))
   (let result [])
   (mut carry 0)
   (loop/range/exclusive i 0 max-length
-    (let digit-A (if (< i (length a)) (get a i) 0))
-    (let digit-B (if (< i (length b)) (get b i) 0))
+    (let digit-A (if (< i (length a)) (get i a) 0))
+    (let digit-B (if (< i (length b)) (get i b) 0))
     (let sm (+ digit-A digit-B carry))
-    (push! result (% sm 10))
+    (push! (% sm 10) result)
     (alter! carry (/ sm 10)))
   ; Handle remaining carry
   (while (> carry 0) (do
-    (push! result (% carry 10))
+    (push! (% carry 10) result)
     (alter! carry (/ carry 10))))
   (reverse result))))
 
@@ -814,22 +814,22 @@ q)))
       (let max-length (max (length a) (length b)))
 
       (while (< j max-length) (do
-        (let digit-a (if (< j (length a)) (get a j) 0))
-        (let digit-b (if (< j (length b)) (get b j) 0))
+        (let digit-a (if (< j (length a)) (get j a) 0))
+        (let digit-b (if (< j (length b)) (get j b) 0))
         (let diff (- (- digit-a digit-b) borrow))
 
         (if (< diff 0)
             (do
-              (push! result (+ diff 10))
+              (push! (+ diff 10) result)
               (alter! borrow 1))
             (do
-              (push! result diff)
+              (push! diff result)
               (alter! borrow 0)))
 
         (alter! j (+ j 1))))
 
       (mut k (- (length result) 1))
-      (while (and (> k 0) (= (get result k) 0)) (do
+      (while (and (> k 0) (= (get k result) 0)) (do
         (pop! result)
         (alter! k (- k 1))))
 
@@ -840,27 +840,27 @@ q)))
   (let b (reverse b1))
   (let result [])
   ; Initialize result array with zeros
-  (loop/range/exclusive _ 0 (+ (length a) (length b)) (push! result 0))
+  (loop/range/exclusive _ 0 (+ (length a) (length b)) (push! 0 result))
   (loop/range/exclusive i 0 (length a)
     (mut carry 0)
-    (let digit-a (get a i))
+    (let digit-a (get i a))
     (loop/range/exclusive j 0 (length b)
-      (let digit-B (get b j))
+      (let digit-B (get j b))
       (let idx (+ i j))
-      (let prod (+ (* digit-a digit-B) (get result idx) carry))
-      (set! result idx (% prod 10))
+      (let prod (+ (* digit-a digit-B) (get idx result) carry))
+      (set! idx (% prod 10) result)
       (alter! carry (/ prod 10)))
     ; Handle carry for this digit-a
     (mut k (+ i (length b)))
     (while (> carry 0) (do
-      (if (not (< k (length result))) (push! result 0))
-      (let sm (+ (get result k) carry))
-      (set! result k (% sm 10))
+      (if (not (< k (length result))) (push! 0 result))
+      (let sm (+ (get k result) carry))
+      (set! k (% sm 10) result)
       (alter! carry (/ sm 10))
       (alter! k (+ k 1)))))
   ; Remove trailing zeros (from the most significant end), but keep at least one digit
   (mut ii (- (length result) 1))
-  (while (and (> ii 0) (= (get result ii) 0) (> (length result) 1)) (do
+  (while (and (> ii 0) (= (get ii result) 0) (> (length result) 1)) (do
     (pop! result)
     (alter! ii (- ii 1))))
   (reverse result))))
@@ -873,8 +873,8 @@ q)))
       (mut i 0)
       (mut result true) ; assume a <= b
       (while (< i (length a)) (do
-        (let da (get a i))
-        (let db (get b i))
+        (let da (get i a))
+        (let db (get i b))
         (if (< da db) (do
           (alter! result true)
           (alter! i (length a))))
@@ -892,8 +892,8 @@ q)))
       (mut i 0)
       (mut result true) ; assume a >= b
       (while (< i (length a)) (do
-        (let da (get a i))
-        (let db (get b i))
+        (let da (get i a))
+        (let db (get i b))
         (if (> da db) (do
           (alter! result true)
           (alter! i (length a))))
@@ -911,8 +911,8 @@ q)))
       (mut i 0)
       (mut found-less false) ; true if a < b at some digit
       (while (< i (length a)) (do
-        (let da (get a i))
-        (let db (get b i))
+        (let da (get i a))
+        (let db (get i b))
         (if (< da db) (do
           (alter! found-less true)
           (alter! i (length a))))
@@ -929,8 +929,8 @@ q)))
       (mut i 0)
       (mut found-greater false) ; true if a > b at some digit
       (while (< i (length a)) (do
-        (let da (get a i))
-        (let db (get b i))
+        (let da (get i a))
+        (let db (get i b))
         (if (> da db) (do
           (alter! found-greater true)
           (alter! i (length a))))
@@ -949,7 +949,7 @@ q)))
       (mut i 0)
 
       (while (< i len) (do
-        (let digit (get dividend i))
+        (let digit (get i dividend))
 
         ;; current = trim(cons(current, [digit]))
         (let cur0 (&get current))
@@ -973,7 +973,7 @@ q)))
                 (alter! low (+ mid 1)))
               (alter! high (- mid 1)))))
 
-        (push! result q)
+        (push! q result)
 
         ;; current = current - divisor*q
         (let prod2 (BigInt/mul divisor [q]))
@@ -1006,7 +1006,7 @@ q)))
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (&alter! total (BigInt/add (&get total) (get xs i)))
+      (&alter! total (BigInt/add (&get total) (get i xs)))
       (alter! i (+ i 1))))
     (&get total))))
 
@@ -1015,7 +1015,7 @@ q)))
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (&alter! total (BigInt/mul (&get total) (get xs i)))
+      (&alter! total (BigInt/mul (&get total) (get i xs)))
       (alter! i (+ i 1))))
     (&get total))))
 
@@ -1027,10 +1027,10 @@ q)))
     (while (< i (- b 1)) (do (&alter! out (BigInt/mul (&get out) a)) (alter! i (+ i 1))))
     (&get out)))))
 
-(let BigInt/expt (lambda a b (if (and (= (length b) 1) (= (get b 0) 0)) [ 1 ] (do
+(let BigInt/expt (lambda a b (if (and (= (length b) 1) (= (get 0 b) 0)) [ 1 ] (do
     (&mut out a)
     (&mut exp (BigInt/sub b [ 1 ]))
-    (while (not (and (= (length (&get exp)) 1) (= (get (&get exp) 0) 0))) (do
+    (while (not (and (= (length (&get exp)) 1) (= (get 0 (&get exp)) 0))) (do
       (&alter! out (BigInt/mul (&get out) a))
       (&alter! exp (BigInt/sub (&get exp) [ 1 ]))))
     (&get out)))))
@@ -1054,7 +1054,7 @@ q)))
       { neg mag }))))
 
 (let SignedBigInt/new (lambda str
-  (if (and (> (length str) 0) (=# (get str 0) '-'))
+  (if (and (> (length str) 0) (=# (get 0 str) '-'))
       (SignedBigInt/normalize { true (BigInt/new (slice 1 (length str) str)) })
       (SignedBigInt/normalize { false (BigInt/new str) }))))
 
@@ -1151,7 +1151,7 @@ q)))
         (&mut current start)
         (while (SignedBigInt/lt? (&get current) end) (do
           (&alter! current (SignedBigInt/add (&get current) SignedBigInt/one))
-          (set! out (length out) (&get current))))
+          (set! (length out) (&get current) out)))
         out))))
 
 (let SignedBigInt/sum (lambda xs (do
@@ -1159,7 +1159,7 @@ q)))
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (&alter! total (SignedBigInt/add (&get total) (get xs i)))
+      (&alter! total (SignedBigInt/add (&get total) (get i xs)))
       (alter! i (+ i 1))))
     (&get total))))
 
@@ -1168,7 +1168,7 @@ q)))
     (let len (length xs))
     (mut i 0)
     (while (< i len) (do
-      (&alter! total (SignedBigInt/mul (&get total) (get xs i)))
+      (&alter! total (SignedBigInt/mul (&get total) (get i xs)))
       (alter! i (+ i 1))))
     (&get total))))
 
@@ -1320,7 +1320,7 @@ q)))
 
 (let Tuple/int/div (lambda { a b } (* a b)))
 
-(let Set/hash (lambda table key (do
+(let Set/hash (lambda key table (do
   (let cap (length table))
   (if (= cap 0) 0 (do
     (mut i 0)
@@ -1328,7 +1328,7 @@ q)))
     (let len (length key))
     (while (< i len) (do
       (alter! hash (Int/euclidean-mod
-        (+ (* hash 131) (as (get key i) Int))
+        (+ (* hash 131) (as (get i key) Int))
         cap))
       (alter! i (+ i 1))))
     hash)))))
@@ -1339,16 +1339,16 @@ q)))
     (mut i 0)
     (mut matches true)
     (while (and matches (< i len)) (do
-      (if (not (=# (get a i) (get b i))) (alter! matches false) nil)
+      (if (not (=# (get i a) (get i b))) (alter! matches false) nil)
       (alter! i (+ i 1))))
     matches)))))
 
-(let Set/find-index (lambda bucket key (do
+(let Set/find-index (lambda key bucket (do
   (mut i 0)
   (mut found -1)
   (let len (length bucket))
   (while (and (= found -1) (< i len)) (do
-    (if (Set/key-equal? (get bucket i) key) (alter! found i) nil)
+    (if (Set/key-equal? (get i bucket) key) (alter! found i) nil)
     (alter! i (+ i 1))))
   found)))
 
@@ -1356,75 +1356,75 @@ q)))
   (mut total 0)
   (mut i 0)
   (while (< i (length table)) (do
-    (alter! total (+ total (length (get table i))))
+    (alter! total (+ total (length (get i table))))
     (alter! i (+ i 1))))
   total)))
 
-(let Set/for-each (lambda table fn (do
+(let Set/for-each (lambda fn table (do
   (mut i 0)
   (let table-len (length table))
   (while (< i table-len) (do
-    (let bucket (get table i))
+    (let bucket (get i table))
     (mut j 0)
     (let bucket-len (length bucket))
     (while (< j bucket-len) (do
-      (fn (get bucket j))
+      (fn (get j bucket))
       (alter! j (+ j 1))))
     (alter! i (+ i 1)))))))
 
-(let Set/add/raw! (lambda table key (do
-  (let idx (Set/hash table key))
-  (let bucket (get table idx))
-  (set! bucket (length bucket) key)
+(let Set/add/raw! (lambda key table (do
+  (let idx (Set/hash key table))
+  (let bucket (get idx table))
+  (set! (length bucket) key bucket)
   table)))
 
 (let Set/new (lambda (buckets 32)))
 (let Set/new/capacity (lambda n (buckets (max 4 n))))
 (let Set/max-capacity (lambda a b (Set/new/capacity (max (length a) (length b)))))
 
-(let Set/resize! (lambda table new-capacity (do
+(let Set/resize! (lambda new-capacity table (do
   (let target (max 4 new-capacity))
   (if (not (= target (length table))) (do
     (let entries [])
-    (Set/for-each table (lambda key (set! entries (length entries) key)))
+    (Set/for-each (lambda key (set! (length entries) key entries)) table)
     (Heap/empty! table)
     (mut i 0)
-    (while (< i target) (do (set! table (length table) []) (alter! i (+ i 1))))
+    (while (< i target) (do (set! (length table) [] table) (alter! i (+ i 1))))
     (mut j 0)
     (while (< j (length entries)) (do
-      (Set/add/raw! table (get entries j))
+      (Set/add/raw! (get j entries) table)
       (alter! j (+ j 1))))) nil)
   nil)))
 
 (let Set/compact! (lambda table (do
-  (Set/resize! table (max 32 (* (Set/count table) 2)))
+  (Set/resize! (max 32 (* (Set/count table) 2)) table)
   nil)))
 
 (let Set/has? (lambda item table
   (if (= (length table) 0) false (do
-    (let idx (Set/hash table item))
-    (>= (Set/find-index (get table idx) item) 0)))))
+    (let idx (Set/hash item table))
+    (>= (Set/find-index item (get idx table)) 0)))))
 
-(let Set/add! (lambda table item (do
-  (if (= (length table) 0) (Set/resize! table 32) nil)
-  (let idx (Set/hash table item))
-  (let bucket (get table idx))
-  (if (= (Set/find-index bucket item) -1) (do
-    (set! bucket (length bucket) item)
-    (if (> (length bucket) 8) (Set/resize! table (* (length table) 2)) nil)) nil)
+(let Set/add! (lambda item table (do
+  (if (= (length table) 0) (Set/resize! 32 table) nil)
+  (let idx (Set/hash item table))
+  (let bucket (get idx table))
+  (if (= (Set/find-index item bucket) -1) (do
+    (set! (length bucket) item bucket)
+    (if (> (length bucket) 8) (Set/resize! (* (length table) 2) table) nil)) nil)
   nil)))
 
-(let Set/remove! (lambda table item (do
+(let Set/remove! (lambda item table (do
   (if (not (= (length table) 0)) (do
-    (let idx (Set/hash table item))
-    (let bucket (get table idx))
-    (let index (Set/find-index bucket item))
+    (let idx (Set/hash item table))
+    (let bucket (get idx table))
+    (let index (Set/find-index item bucket))
     (if (>= index 0) (do
-      (set! bucket index (get bucket (- (length bucket) 1)))
+      (set! index (get (- (length bucket) 1) bucket) bucket)
       (pop! bucket)) nil)
     (if (and (> (length table) 32) (= (length bucket) 0)
              (< (* (Set/count table) 4) (length table)))
-        (Set/resize! table (max 32 (/ (length table) 2))) nil)) nil)
+        (Set/resize! (max 32 (/ (length table) 2)) table) nil)) nil)
   nil)))
 
 (let Vector->Set (lambda xs (do
@@ -1432,99 +1432,97 @@ q)))
   (mut i 0)
   (let len (length xs))
   (while (< i len) (do
-    (Set/add! out (get xs i))
+    (Set/add! (get i xs) out)
     (alter! i (+ i 1))))
   out)))
 
-(let Set/intersection (lambda a b (do
+(let Set/intersection (lambda b a (do
   (let out (Set/max-capacity a b))
   (let a-count (Set/count a))
   (let b-count (Set/count b))
   (let src (if (< a-count b-count) a b))
   (let trg (if (< a-count b-count) b a))
-  (Set/for-each src (lambda key
+  (Set/for-each (lambda key
     (if (and (not-empty? key) (Set/has? key trg))
-        (do (Set/add! out key) nil)
-        nil)))
+        (do (Set/add! key out) nil)
+        nil)) src)
   out)))
 
-(let Set/difference (lambda a b (do
+(let Set/difference (lambda b a (do
   (let out (Set/max-capacity a b))
-  (Set/for-each a (lambda key
+  (Set/for-each (lambda key
     (if (and (not-empty? key) (not (Set/has? key b)))
-        (do (Set/add! out key) nil)
-        nil)))
+        (do (Set/add! key out) nil)
+        nil)) a)
   out)))
 
-(let Set/xor (lambda a b (do
+(let Set/xor (lambda b a (do
   (let out (Set/max-capacity a b))
-  (Set/for-each a (lambda key
+  (Set/for-each (lambda key
     (if (and (not-empty? key) (not (Set/has? key b)))
-        (do (Set/add! out key) nil)
-        nil)))
-  (Set/for-each b (lambda key
+        (do (Set/add! key out) nil)
+        nil)) a)
+  (Set/for-each (lambda key
     (if (and (not-empty? key) (not (Set/has? key a)))
-        (do (Set/add! out key) nil)
-        nil)))
+        (do (Set/add! key out) nil)
+        nil)) b)
   out)))
 
-(let Set/union (lambda a b (do
+(let Set/union (lambda b a (do
   (let out (Set/max-capacity a b))
-  (Set/for-each a (lambda key
-    (if (not-empty? key) (do (Set/add! out key) nil) nil)))
-  (Set/for-each b (lambda key
-    (if (not-empty? key) (do (Set/add! out key) nil) nil)))
+  (Set/for-each (lambda key
+    (if (not-empty? key) (do (Set/add! key out) nil) nil)) a)
+  (Set/for-each (lambda key
+    (if (not-empty? key) (do (Set/add! key out) nil) nil)) b)
   out)))
 
-(let Table/update! (lambda table key init f (do
-  (if (= (length table) 0) (do (Table/resize/raw! table 32) nil) nil)
-  (let idx (Table/hash table key))
-  (let bucket (get table idx))
-  (let index (Table/find-index bucket key))
+(let Table/update! (lambda key init f table (do
+  (if (= (length table) 0) (do (Table/resize/raw! 32 table) nil) nil)
+  (let idx (Table/hash key table))
+  (let bucket (get idx table))
+  (let index (Table/find-index key bucket))
   (if (>= index 0)
-      (set! bucket index
-        { (fst (get bucket index))
-          (f (snd (get bucket index))) })
+      (set! index { (fst (get index bucket))
+          (f (snd (get index bucket))) } bucket)
       (do
-        (set! bucket (length bucket) { key init })
+        (set! (length bucket) { key init } bucket)
         (if (> (length bucket) 8)
-            (do (Table/resize/raw! table (* (length table) 2)) nil)
+            (do (Table/resize/raw! (* (length table) 2) table) nil)
             nil)))
   nil)))
 
-(let Table/update-or! (lambda table key missing present (do
-  (if (= (length table) 0) (do (Table/resize/raw! table 32) nil) nil)
-  (let idx (Table/hash table key))
-  (let bucket (get table idx))
-  (let index (Table/find-index bucket key))
+(let Table/update-or! (lambda key missing present table (do
+  (if (= (length table) 0) (do (Table/resize/raw! 32 table) nil) nil)
+  (let idx (Table/hash key table))
+  (let bucket (get idx table))
+  (let index (Table/find-index key bucket))
   (if (>= index 0)
-      (set! bucket index
-        { (fst (get bucket index))
-          (present (snd (get bucket index))) })
+      (set! index { (fst (get index bucket))
+          (present (snd (get index bucket))) } bucket)
       (do
-        (set! bucket (length bucket) { key (missing) })
+        (set! (length bucket) { key (missing) } bucket)
         (if (> (length bucket) 8)
-            (do (Table/resize/raw! table (* (length table) 2)) nil)
+            (do (Table/resize/raw! (* (length table) 2) table) nil)
             nil)))
   nil)))
 
-(let Table/push-or! (lambda table key value (do
-  (if (= (length table) 0) (do (Table/resize/raw! table 32) nil) nil)
-  (let idx (Table/hash table key))
-  (let bucket (get table idx))
-  (let index (Table/find-index bucket key))
+(let Table/push-or! (lambda key value table (do
+  (if (= (length table) 0) (do (Table/resize/raw! 32 table) nil) nil)
+  (let idx (Table/hash key table))
+  (let bucket (get idx table))
+  (let index (Table/find-index key bucket))
   (if (>= index 0)
-      (push! (snd (get bucket index)) value)
+      (push! value (snd (get index bucket)))
       (do
-        (set! bucket (length bucket) { key [value] })
+        (set! (length bucket) { key [value] } bucket)
         (if (> (length bucket) 8)
-            (do (Table/resize/raw! table (* (length table) 2)) nil)
+            (do (Table/resize/raw! (* (length table) 2) table) nil)
             nil)))
   nil)))
 
 (let Table/entries (lambda table (do
   (let out [])
-  (Table/for-each table (lambda entry (set! out (length out) entry)))
+  (Table/for-each (lambda entry (set! (length out) entry out)) table)
   out)))
 
 (let Table/keys (lambda table (do
@@ -1533,7 +1531,7 @@ q)))
   (mut i 0)
   (let len (length entries))
   (while (< i len) (do
-    (set! out (length out) (fst (get entries i)))
+    (set! (length out) (fst (get i entries)) out)
     (alter! i (+ i 1))))
   out)))
 
@@ -1543,7 +1541,7 @@ q)))
   (mut i 0)
   (let len (length entries))
   (while (< i len) (do
-    (set! out (length out) (snd (get entries i)))
+    (set! (length out) (snd (get i entries)) out)
     (alter! i (+ i 1))))
   out)))
 
@@ -1552,18 +1550,17 @@ q)))
   (mut i 0)
   (let len (length arr))
   (while (< i len) (do
-    (let key (get arr i))
-    (let idx (Table/hash table key))
-    (let bucket (get table idx))
-    (let index (Table/find-index bucket key))
+    (let key (get i arr))
+    (let idx (Table/hash key table))
+    (let bucket (get idx table))
+    (let index (Table/find-index key bucket))
     (if (>= index 0)
-        (set! bucket index
-          { (fst (get bucket index))
-            (+ (snd (get bucket index)) 1) })
+        (set! index { (fst (get index bucket))
+            (+ (snd (get index bucket)) 1) } bucket)
         (do
-          (set! bucket (length bucket) { key 1 })
+          (set! (length bucket) { key 1 } bucket)
           (if (> (length bucket) 8)
-              (do (Table/resize/raw! table (* (length table) 2)) nil)
+              (do (Table/resize/raw! (* (length table) 2) table) nil)
               nil)))
     (alter! i (+ i 1))))
   table)))
@@ -1573,18 +1570,17 @@ q)))
   (mut i 0)
   (let len (length xs))
   (while (< i len) (do
-    (let key [(get xs i)])
-    (let idx (Table/hash table key))
-    (let bucket (get table idx))
-    (let index (Table/find-index bucket key))
+    (let key [(get i xs)])
+    (let idx (Table/hash key table))
+    (let bucket (get idx table))
+    (let index (Table/find-index key bucket))
     (if (>= index 0)
-        (set! bucket index
-          { (fst (get bucket index))
-            (+ (snd (get bucket index)) 1) })
+        (set! index { (fst (get index bucket))
+            (+ (snd (get index bucket)) 1) } bucket)
         (do
-          (set! bucket (length bucket) { key 1 })
+          (set! (length bucket) { key 1 } bucket)
           (if (> (length bucket) 8)
-              (do (Table/resize/raw! table (* (length table) 2)) nil)
+              (do (Table/resize/raw! (* (length table) 2) table) nil)
               nil)))
     (alter! i (+ i 1))))
   table)))
@@ -1595,8 +1591,8 @@ q)))
   (mut i 0)
   (let len (length entries))
   (while (< i len) (do
-    (let entry (get entries i))
-    (Table/set/raw! out (fst entry) (snd entry))
+    (let entry (get i entries))
+    (Table/set/raw! (fst entry) (snd entry) out)
     (alter! i (+ i 1))))
   out)))
 
@@ -1605,7 +1601,7 @@ q)))
   (mut i 0)
   (mut result -1)
   (while (and (= result -1) (< i len)) (do
-    (if (match? (get xs i) target)
+    (if (match? (get i xs) target)
         (alter! result i))
     (alter! i (+ i 1))))
   result)))
@@ -1615,7 +1611,7 @@ q)))
   (mut i 0)
   (mut result -1)
   (while (< i len) (do
-    (if (match? (get xs i) target)
+    (if (match? (get i xs) target)
         (alter! result i))
     (alter! i (+ i 1))))
   result)))
@@ -1644,7 +1640,7 @@ q)))
 (let Tuple/map/fst map/fst)
 (let Tuple/map/snd map/snd)
 
-(let Vector->Tuple (lambda fn1 fn2 xs (Vector/to-tuple/raw xs fn1 fn2)))
+(let Vector->Tuple (lambda fn1 fn2 xs (Vector/to-tuple/raw fn1 fn2 xs)))
 
 (let Tuple/bool/eq? (lambda { a b } (=? a b)))
 (let Tuple/int/eq? (lambda { a b } (= a b)))
@@ -1660,46 +1656,46 @@ q)))
 (let Integer->String Integer->Chars)
 (let Dec->String Dec->Chars)
 
-(let String->Vector (lambda ch xs (String/to-vector/raw xs ch)))
-(let Vector->String (lambda ch xs (Vector/to-string/raw xs ch)))
+(let String->Vector (lambda ch xs (String/to-vector/raw ch xs)))
+(let Vector->String (lambda ch xs (Vector/to-string/raw ch xs)))
 (let String->Integer Chars->Integer)
 (let Chars->Dec String->Dec)
 
 (let Vector/equal? (lambda fn? xs ys (Vector/equal/raw? xs ys fn?)))
 
 (let Que/empty! (lambda q (do (Que/empty/raw! q) nil)))
-(let Que/enque! (lambda xs v(do (Que/enqueue/raw! xs v) nil)))
+(let Que/enque! (lambda v xs (do (Que/enqueue/raw! v xs) nil)))
 (let Que/deque! (lambda queue (do (Que/tail/raw! queue) nil)))
-(let Que/push! (lambda xs v (do (Que/append/raw! xs v) nil)))
+(let Que/push! (lambda v xs (do (Que/append/raw! v xs) nil)))
 (let Que/pop! (lambda queue (do (Que/head! queue) nil)))
-(let Que/prepend! (lambda xs v (do (Que/prepend/raw! xs v) nil))) 
+(let Que/prepend! (lambda v xs (do (Que/prepend/raw! v xs) nil)))
 (let Que/first Que/peek)
 (let Que/tail! (lambda queue (do (Que/tail/raw! queue) nil)))
-(let Que/append! (lambda xs v (do (Que/append/raw! xs v) nil)))
+(let Que/append! (lambda v xs (do (Que/append/raw! v xs) nil)))
 
-(let Que/at (lambda i xs (if (< i 0) (Que/get xs (+ (length xs) i)) (Que/get xs i))))
+(let Que/at (lambda i xs (if (< i 0) (Que/get (+ (length xs) i) xs) (Que/get i xs))))
 
 (let Vector/pop-val! pop-val!)
 (let Vector/last last)
 (let Vector/first first)
 (let Vector/pull! pop-val!)
-(let Vector/get-unsafe (lambda idx xs (get xs idx)))
-(let Vector/get* (lambda idx xs (if (and (>= idx 0) (< idx (length xs))) { true [(get xs idx)] } { false [] })))
-(let Vector/at-unsafe (lambda idx xs (at xs idx)))
-(let Vector/at* (lambda idx xs (if (< idx (length xs)) { true [(at xs idx)] } { false [] })))
-(let Vector/set! (lambda xs i v (set! xs i v)))
-(let Vector/append! (lambda xs x (Vector/append/raw! xs x)))
-(let Vector/cons! (lambda xs x (Vector/cons/raw! xs x)))
+(let Vector/get-unsafe (lambda idx xs (get idx xs)))
+(let Vector/get* (lambda idx xs (if (and (>= idx 0) (< idx (length xs))) { true [(get idx xs)] } { false [] })))
+(let Vector/at-unsafe (lambda idx xs (at idx xs)))
+(let Vector/at* (lambda idx xs (if (< idx (length xs)) { true [(at idx xs)] } { false [] })))
+(let Vector/set! (lambda i v xs (set! i v xs)))
+(let Vector/append! (lambda x xs (Vector/append/raw! x xs)))
+(let Vector/cons! (lambda x xs (Vector/cons/raw! x xs)))
 (let Vector/cons (lambda x xs (Vector/cons/raw xs x)))
 (let Vector/compare (lambda step done? initial b a (Vector/compare/raw a b step done? initial)))
 (let Vector/new (lambda fn n (fill n fn)))
 (let Vector/of (lambda (n x)
   (let out [])
-  (loop i (< i n) (push! out x))
+  (loop i (< i n) (push! x out))
   out))
 (let Matrix/new (lambda fn w h (Matrix/fill/raw w h fn)))
-(let Vector/in-bounds? (lambda (index xs) (in-bounds? xs index)))
-(let Matrix/in-bounds? (lambda (y x xs) (Matrix/in-bounds/raw? xs y x)))
+(let Vector/in-bounds? (lambda (index xs) (in-bounds? index xs)))
+(let Matrix/in-bounds? (lambda (y x xs) (Matrix/in-bounds/raw? y x xs)))
 (let String/equal? match?)
 (let String/quote (lambda str (cons "'" str "'")))
 (let String/dquote (lambda str (cons ['"'] str ['"'])))
@@ -1721,25 +1717,25 @@ q)))
 (let Table/new/capacity (lambda n (buckets (max 4 n))))
 
 
-(let Table/get (lambda key table (Table/get/raw table key)))
+(let Table/get (lambda key table (Table/get/raw key table)))
 (let Table/get* (lambda key table
-  (if (Table/has/raw? table key)
-      { true [ (snd (get (Table/get/raw table key) 0)) ] }
+  (if (Table/has/raw? key table)
+      { true [ (snd (get 0 (Table/get/raw key table))) ] }
       { false [] })))
-(let Table/get-unsafe (lambda key table (snd (get (Table/get/raw table key) 0))))
+(let Table/get-unsafe (lambda key table (snd (get 0 (Table/get/raw key table)))))
 
-(let Table/has? (lambda key table (Table/has/raw? table key)))
-(let Table/set! (lambda table key value (do (Table/set/raw! table key value) nil)))
-(let Table/remove! (lambda table key (do (Table/remove/raw! table key) nil)))
+(let Table/has? (lambda key table (Table/has/raw? key table)))
+(let Table/set! (lambda key value table (do (Table/set/raw! key value table) nil)))
+(let Table/remove! (lambda key table (do (Table/remove/raw! key table) nil)))
 
-(let Table/drop! (lambda table keys (Table/drop/raw! table keys)))
-(let Table/keep (lambda keys table (Table/keep/raw table keys)))
-(let Table/omit (lambda keys table (Table/omit/raw table keys)))
+(let Table/drop! (lambda keys table (Table/drop/raw! keys table)))
+(let Table/keep (lambda keys table (Table/keep/raw keys table)))
+(let Table/omit (lambda keys table (Table/omit/raw keys table)))
 
-(let Table/merge! (lambda table other (do (Table/merge/raw! table other) nil)))
-(let Table/merge (lambda other table (Table/merge/raw table other)))
+(let Table/merge! (lambda other table (do (Table/merge/raw! other table) nil)))
+(let Table/merge (lambda other table (Table/merge/raw other table)))
 
-(let Table/resize! (lambda table n (do (Table/resize/raw! table n) nil)))
+(let Table/resize! (lambda n table (do (Table/resize/raw! n table) nil)))
 (let Table/compact! (lambda table (do (Table/compact/raw! table) nil)))
 
 (let Table/create/new Table/create)
@@ -1748,11 +1744,11 @@ q)))
   (mut i 0)
   (let len (length table))
   (while (< i len) (do
-    (alter! total (+ total (length (get table i))))
+    (alter! total (+ total (length (get i table))))
     (alter! i (+ i 1))))
   total)))
 
-(let Table/get/raw* (lambda xs i some none (if (Table/has/raw? xs i) (do (some (Table/get/raw xs i)) nil) (do (none) nil))))
+(let Table/get/raw* (lambda i some none xs (if (Table/has/raw? i xs) (do (some (Table/get/raw i xs)) nil) (do (none) nil))))
 
 (let Set/size Table/size)
 (let Set/values flat)
@@ -1760,20 +1756,20 @@ q)))
 (let Heap/parent (lambda i (- (>> (+ i 1) 1) 1)))
 (let Heap/left (lambda i (+ (<< i 1) 1)))
 (let Heap/right (lambda i (<< (+ i 1) 1)))
-(let Heap/compare? (lambda i j fn? heap (=? (fn? (get heap i) (get heap j)) true)))
+(let Heap/compare? (lambda i j fn? heap (=? (fn? (get i heap) (get j heap)) true)))
 
-(let Heap/swap! (lambda heap i j (do
-  (let value (get heap i))
-  (set! heap i (get heap j))
-  (set! heap j value))))
+(let Heap/swap! (lambda i j heap (do
+  (let value (get i heap))
+  (set! i (get j heap) heap)
+  (set! j value heap))))
 
-(let Heap/sift-up! (lambda heap fn (do
+(let Heap/sift-up! (lambda fn heap (do
   (mut node (- (length heap) 1))
   (while (and (> node 0) (Heap/compare? node (Heap/parent node) fn heap)) (do
-    (Heap/swap! heap node (Heap/parent node))
+    (Heap/swap! node (Heap/parent node) heap)
     (alter! node (Heap/parent node)))))))
 
-(let Heap/sift-down! (lambda heap fn (do
+(let Heap/sift-down! (lambda fn heap (do
   (mut node 0)
   (mut active true)
   (while active (do
@@ -1784,25 +1780,25 @@ q)))
           (and (< right (length heap)) (Heap/compare? right node fn heap)))
         (block
           (let child (if (and (< right (length heap)) (Heap/compare? right left fn heap)) right left))
-          (Heap/swap! heap node child)
+          (Heap/swap! node child heap)
           (alter! node child))
         (alter! active false)))))))
 
-(let Heap/push! (lambda heap value fn (do
-  (set! heap (length heap) value)
-  (Heap/sift-up! heap fn)
+(let Heap/push! (lambda value fn heap (do
+  (set! (length heap) value heap)
+  (Heap/sift-up! fn heap)
   nil)))
 
-(let Heap/pop! (lambda heap fn (do
+(let Heap/pop! (lambda fn heap (do
   (let bottom (- (length heap) 1))
-  (if (> bottom 0) (Heap/swap! heap 0 bottom) nil)
+  (if (> bottom 0) (Heap/swap! 0 bottom heap) nil)
   (pop! heap)
-  (if (not (empty? heap)) (Heap/sift-down! heap fn) nil)
+  (if (not (empty? heap)) (Heap/sift-down! fn heap) nil)
   nil)))
 
-(let Heap/replace! (lambda heap value fn (do
-  (set! heap 0 value)
-  (Heap/sift-down! heap fn)
+(let Heap/replace! (lambda value fn heap (do
+  (set! 0 value heap)
+  (Heap/sift-down! fn heap)
   heap)))
 (let Heap/empty? empty?)
 (let Heap/not-empty? not-empty?)
@@ -1810,7 +1806,7 @@ q)))
   (let heap [])
   (mut i 0)
   (while (< i (length xs)) (do
-    (Heap/push! heap (get xs i) fn)
+    (Heap/push! (get i xs) fn heap)
     (alter! i (+ i 1))))
   heap)))
 
@@ -1853,10 +1849,10 @@ q)))
           (String->Integer (slice 17 19 ts))
         ])))
 
-(let Date/year (lambda dt (get dt 0)))
-(let Date/month (lambda dt (get dt 1)))
-(let Date/day (lambda dt (get dt 2)))
-(let Date/hour (lambda dt (get dt 3)))
+(let Date/year (lambda dt (get 0 dt)))
+(let Date/month (lambda dt (get 1 dt)))
+(let Date/day (lambda dt (get 2 dt)))
+(let Date/hour (lambda dt (get 3 dt)))
 
 (let Date/ymd (lambda [a b c] [a b c]))
 (let Date/ymdh (lambda [a b c d] [a b c d]))
@@ -1874,7 +1870,7 @@ q)))
         (mut n num)
         (let digits [])
         (while (> n 0) (do
-            (Vector/push! digits (% n base))
+            (Vector/push! (% n base) digits)
             (alter! n (/ n base))))
         (reverse digits)))))
 
@@ -1884,7 +1880,7 @@ q)))
   (let half (/ len 2))
   (mut i 0)
   (while (< i half) (do
-    (Vector/swap! xs i (- len i 1))
+    (Vector/swap! i (- len i 1) xs)
     (alter! i (+ i 1))))
   xs)))
 
@@ -1893,23 +1889,23 @@ q)))
     (let len-xs (length xs))
     (mut i 0)
     (while (< i len-xs) (do
-      (let current (get xs i))
+      (let current (get i xs))
       (let len-current (length current))
       (mut j 0)
       (while (< j len-current) (do
-        (set! out (length out) (get current j))
+        (set! (length out) (get j current) out)
         (alter! j (+ j 1))))
       (alter! i (+ i 1))))
     out)))
-(let Vector/concat! (lambda xs os (do
+(let Vector/concat! (lambda os xs (do
     (let len-os (length os))
     (mut i 0)
     (while (< i len-os) (do
-      (let current (get os i))
+      (let current (get i os))
       (let len-current (length current))
       (mut j 0)
       (while (< j len-current) (do
-        (set! xs (length xs) (get current j))
+        (set! (length xs) (get j current) xs)
         (alter! j (+ j 1))))
       (alter! i (+ i 1))))
     xs)))

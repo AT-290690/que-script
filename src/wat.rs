@@ -39,11 +39,92 @@ impl Drop for StaticProofFactsGuard {
 }
 
 fn static_proof_is_safe(kind: crate::static_analysis::ProofKind, expr: &Expression) -> bool {
+    let source_expr = restore_data_last_core_expression(expr);
     STATIC_PROOF_FACTS.with(|cell| {
         cell.borrow()
             .as_ref()
-            .is_some_and(|facts| facts.is_proven_safe(kind, expr))
+            .is_some_and(|facts| facts.is_proven_safe(kind, &source_expr))
     })
+}
+
+/// The public collection API is data-last.  The Wasm backend predates that
+/// convention and deliberately retains its target-first internal ABI: it keeps
+/// the lowering compact and avoids duplicating the heavily tested RC paths.
+///
+/// This conversion happens after inference and optimization.  It is not a
+/// compatibility path: source programs are checked only in data-last order.
+fn lower_data_last_core_expression(expr: &Expression) -> Expression {
+    let Expression::Apply(items) = expr else {
+        return expr.clone();
+    };
+    let mut items: Vec<Expression> = items.iter().map(lower_data_last_core_expression).collect();
+    match items.first().and_then(|item| match item {
+        Expression::Word(name) => Some(name.as_str()),
+        _ => None,
+    }) {
+        Some("get") | Some("capacity!") if items.len() == 3 => items.swap(1, 2),
+        Some("push!") if items.len() == 3 => items.swap(1, 2),
+        Some("cdr") if items.len() == 3 => items.swap(1, 2),
+        Some("set!") if items.len() == 4 => {
+            // Source: (set! index value vector); backend: (set! vector index value).
+            items[1..].rotate_right(1);
+        }
+        _ => {}
+    }
+    Expression::Apply(items)
+}
+
+fn restore_data_last_core_expression(expr: &Expression) -> Expression {
+    let Expression::Apply(items) = expr else {
+        return expr.clone();
+    };
+    let mut items: Vec<Expression> = items
+        .iter()
+        .map(restore_data_last_core_expression)
+        .collect();
+    match items.first().and_then(|item| match item {
+        Expression::Word(name) => Some(name.as_str()),
+        _ => None,
+    }) {
+        Some("get") | Some("capacity!") if items.len() == 3 => items.swap(1, 2),
+        Some("push!") if items.len() == 3 => items.swap(1, 2),
+        Some("cdr") if items.len() == 3 => items.swap(1, 2),
+        Some("set!") if items.len() == 4 => {
+            // Backend: (set! vector index value); source: (set! index value vector).
+            items[1..].rotate_left(1);
+        }
+        _ => {}
+    }
+    Expression::Apply(items)
+}
+
+fn lower_data_last_core_forms(node: &TypedExpression) -> TypedExpression {
+    let mut lowered = node.clone();
+    lowered.expr = lower_data_last_core_expression(&node.expr);
+    lowered.children = node
+        .children
+        .iter()
+        .map(lower_data_last_core_forms)
+        .collect();
+    let op = match &node.expr {
+        Expression::Apply(items) => items.first().and_then(|item| match item {
+            Expression::Word(name) => Some(name.as_str()),
+            _ => None,
+        }),
+        _ => None,
+    };
+    match op {
+        Some("get") | Some("capacity!") | Some("push!") | Some("cdr")
+            if lowered.children.len() == 3 =>
+        {
+            lowered.children.swap(1, 2);
+        }
+        Some("set!") if lowered.children.len() == 4 => {
+            lowered.children[1..].rotate_right(1);
+        }
+        _ => {}
+    }
+    lowered
 }
 
 pub struct WasiOverrideGuard(WasiOverrides);
@@ -197,9 +278,7 @@ fn direct_self_tail_mode_from_env() -> Result<DirectSelfTailMode, String> {
     let raw = std::env::var("QUE_SELF_TCO").unwrap_or_else(|_| "loop".to_string());
     match raw.trim().to_ascii_lowercase().as_str() {
         "loop" | "local-loop" | "local_loop" => Ok(DirectSelfTailMode::Loop),
-        "return-call" | "return_call" | "returncall" | "wasm" => {
-            Ok(DirectSelfTailMode::ReturnCall)
-        }
+        "return-call" | "return_call" | "returncall" | "wasm" => Ok(DirectSelfTailMode::ReturnCall),
         other => Err(format!(
             "invalid QUE_SELF_TCO='{}'. expected one of: loop, return-call",
             other
@@ -992,9 +1071,7 @@ fn top_level_borrow_plan(
 
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
-        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => {
-            Ok("i32")
-        }
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => Ok("i32"),
         Type::List(_) | Type::Tuple(_) => Ok("i32"),
         Type::Var(_) => Ok("i32"),
         Type::Function(_, _) => Ok("i32"),
@@ -1310,14 +1387,21 @@ fn collect_main_mutated_top_level_let_names_in_expr(
     let Expression::Apply(items) = expr else {
         return;
     };
-    if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
-        if top_level_let_names.contains(target)
-            && (matches!(
-                op.as_str(),
-                "set!" | "push!" | "pop!" | "pop-val!" | "alter!"
-            ) || op.ends_with('!'))
-        {
-            out.insert(target.clone());
+    if let Some(Expression::Word(op)) = items.first() {
+        // Core collection forms have already been lowered to the private
+        // receiver-first ABI at this point.  Public/library mutators, on the
+        // other hand, deliberately put their mutated data last.  Treating all
+        // bang names as receiver-first used to let `(Table/set! key value t)`
+        // be lifted past its earlier top-level effects.
+        let target = match op.as_str() {
+            "set!" | "push!" | "pop!" | "pop-val!" | "alter!" | "&alter!" => items.get(1),
+            _ if op.ends_with('!') => items.last(),
+            _ => None,
+        };
+        if let Some(Expression::Word(target)) = target {
+            if top_level_let_names.contains(target) {
+                out.insert(target.clone());
+            }
         }
     }
     for item in items {
@@ -1434,7 +1518,9 @@ fn expr_uses_name_as_noncall(name: &str, expr: &Expression) -> bool {
     }
 }
 
-fn collect_direct_main_lambda_bindings(main_node: &TypedExpression) -> HashMap<String, TypedExpression> {
+fn collect_direct_main_lambda_bindings(
+    main_node: &TypedExpression,
+) -> HashMap<String, TypedExpression> {
     let Expression::Apply(items) = &main_node.expr else {
         return HashMap::new();
     };
@@ -1459,7 +1545,8 @@ fn collect_direct_main_lambda_bindings(main_node: &TypedExpression) -> HashMap<S
         let Some(rhs) = node.children.get(2) else {
             continue;
         };
-        if !matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda")) {
+        if !matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(w)) if w == "lambda"))
+        {
             continue;
         }
         if expr_uses_name_as_noncall(name, &rhs.expr)
@@ -1497,13 +1584,7 @@ fn lifted_main_lambda_capture_names(
             return;
         }
         for capture in lambda_capture_names(lambda, top_defs) {
-            expand(
-                &capture,
-                top_defs,
-                direct_main_lambdas,
-                expanding,
-                out,
-            );
+            expand(&capture, top_defs, direct_main_lambdas, expanding, out);
         }
         expanding.remove(name);
     }
@@ -1579,8 +1660,15 @@ fn lambda_capture_names(
 
 fn builtin_storage_summary(name: &str) -> Option<StorageSummary> {
     match name {
-        "push!"
-        | "std/vector/push!"
+        // This check receives the backend's private, receiver-first core
+        // representation (see `lower_data_last_core_forms`).
+        "push!" => Some(StorageSummary {
+            target_param: 0,
+            value_param: 1,
+        }),
+        // Public aliases are not lowered as core primitives, so they retain
+        // their source-level data-last parameter positions.
+        "std/vector/push!"
         | "std/vector/append!"
         | "std/vector/push-and-get!"
         | "Vector/push!"
@@ -1589,18 +1677,25 @@ fn builtin_storage_summary(name: &str) -> Option<StorageSummary> {
         | "Que/enque!"
         | "Que/append!"
         | "Que/prepend!"
-        | "Set/add!"
-        | "Heap/push!" => Some(StorageSummary {
+        | "Set/add!" => Some(StorageSummary {
+            target_param: 1,
+            value_param: 0,
+        }),
+        "Heap/push!" => Some(StorageSummary {
+            target_param: 2,
+            value_param: 0,
+        }),
+        "set!" => Some(StorageSummary {
             target_param: 0,
+            value_param: 2,
+        }),
+        "std/vector/set!" | "std/vector/update!" | "Vector/set!" => Some(StorageSummary {
+            target_param: 2,
             value_param: 1,
         }),
-        "set!" | "std/vector/set!" | "std/vector/update!" | "Vector/set!" => Some(StorageSummary {
-            target_param: 0,
-            value_param: 2,
-        }),
         "Table/set!" | "Table/push-or!" => Some(StorageSummary {
-            target_param: 0,
-            value_param: 2,
+            target_param: 2,
+            value_param: 1,
         }),
         _ => None,
     }
@@ -7791,7 +7886,10 @@ fn compile_match(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
     }
 
     let branches = compile_branches(items, node, enum_type, 0, result_type, ctx.tmp_i32, ctx)?;
-    Ok(format!("{value_code}\nlocal.set {}\n{branches}", ctx.tmp_i32))
+    Ok(format!(
+        "{value_code}\nlocal.set {}\n{branches}",
+        ctx.tmp_i32
+    ))
 }
 
 fn compile_if_discarding_result(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -10969,7 +11067,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             }
             return Ok(emit_unchecked_scalar_get_from_slots(xs_slot, idx_slot));
         }
-        if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
+        if let Some(Expression::Int(index)) = node.children.get(1).map(|n| &n.expr) {
             if let Some(data_slot) = hoisted_scalar_vec_data_slot(xs_node, ctx) {
                 return Ok(emit_constant_scalar_get_from_data_slot(data_slot, *index));
             }
@@ -11061,7 +11159,7 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     }
     if !runtime_bounds_check && !release_xs_after {
         if let Some(data_slot) = hoisted_scalar_vec_data_slot(xs_node, ctx) {
-            if let Some(Expression::Int(index)) = node.children.get(2).map(|n| &n.expr) {
+            if let Some(Expression::Int(index)) = node.children.get(1).map(|n| &n.expr) {
                 return Ok(emit_constant_scalar_get_from_data_slot(data_slot, *index));
             }
             return Ok(emit_dynamic_scalar_get_from_data_slot(
@@ -11758,8 +11856,7 @@ fn collect_loop_append_by_length_set_vector_slots(
                             out.insert(target.clone(), *slot);
                         }
                     }
-                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!")
-                    || op.ends_with('!')
+                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!") || op.ends_with('!')
                 {
                     if ctx
                         .local_types
@@ -11819,11 +11916,7 @@ fn expr_mutates_vector_name_except_self(
     match expr {
         Expression::Apply(items) => {
             if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
-                if matches!(
-                    op.as_str(),
-                    "set!" | "push!" | "pop!" | "pop-val!"
-                ) && target == name
-                {
+                if matches!(op.as_str(), "set!" | "push!" | "pop!" | "pop-val!") && target == name {
                     return true;
                 }
                 if current_function.is_some_and(|self_name| op == self_name) && target == name {
@@ -11878,9 +11971,7 @@ fn vector_mutations_are_loop_replacement_sets(
                             )
                         });
                     }
-                    if matches!(op.as_str(), "push!" | "pop!" | "pop-val!")
-                        || op.ends_with('!')
-                    {
+                    if matches!(op.as_str(), "push!" | "pop!" | "pop-val!") || op.ends_with('!') {
                         return false;
                     }
                 }
@@ -11925,8 +12016,7 @@ fn collect_loop_replacement_set_vector_slots(
                             out.insert(target.clone(), *slot);
                         }
                     }
-                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!")
-                    || op.ends_with('!')
+                } else if matches!(op.as_str(), "push!" | "pop!" | "pop-val!") || op.ends_with('!')
                 {
                     if ctx
                         .current_function
@@ -13441,9 +13531,7 @@ fn emit_wasi_enum_deserializer(variants: &[String]) -> String {
         let delimiters = [-1, 32, 9, 10, 13, 93, 125]; // EOF, whitespace, ], }
         let mut out = String::new();
         for (index, delimiter) in delimiters.iter().enumerate() {
-            out.push_str(&format!(
-                "local.get $c\ni32.const {delimiter}\ni32.eq\n"
-            ));
+            out.push_str(&format!("local.get $c\ni32.const {delimiter}\ni32.eq\n"));
             if index > 0 {
                 out.push_str("i32.or\n");
             }
@@ -14838,17 +14926,15 @@ fn compile_tail_expr(
                 }
                 Ok(Some(out.join("\n")))
             }
-            Expression::Word(op) if op == "do" => {
-                compile_tail_do(
-                    items,
-                    node,
-                    ctx,
-                    self_name,
-                    arity,
-                    releasable_ref_slots,
-                    direct_self_tail_mode,
-                )
-            }
+            Expression::Word(op) if op == "do" => compile_tail_do(
+                items,
+                node,
+                ctx,
+                self_name,
+                arity,
+                releasable_ref_slots,
+                direct_self_tail_mode,
+            ),
             Expression::Word(op) if op == "if" => {
                 let cond_node = node
                     .children
@@ -14868,30 +14954,26 @@ fn compile_tail_expr(
                     .as_ref()
                     .ok_or_else(|| "if missing type".to_string())
                     .and_then(wasm_val_type)?;
-                let then_code = if let Some(tc) =
-                    compile_tail_expr(
-                        then_node,
-                        ctx,
-                        self_name,
-                        arity,
-                        releasable_ref_slots,
-                        direct_self_tail_mode,
-                    )?
-                {
+                let then_code = if let Some(tc) = compile_tail_expr(
+                    then_node,
+                    ctx,
+                    self_name,
+                    arity,
+                    releasable_ref_slots,
+                    direct_self_tail_mode,
+                )? {
                     tc
                 } else {
                     compile_expr(then_node, ctx)?
                 };
-                let else_code = if let Some(tc) =
-                    compile_tail_expr(
-                        else_node,
-                        ctx,
-                        self_name,
-                        arity,
-                        releasable_ref_slots,
-                        direct_self_tail_mode,
-                    )?
-                {
+                let else_code = if let Some(tc) = compile_tail_expr(
+                    else_node,
+                    ctx,
+                    self_name,
+                    arity,
+                    releasable_ref_slots,
+                    direct_self_tail_mode,
+                )? {
                     tc
                 } else {
                     compile_expr(else_node, ctx)?
@@ -15843,13 +15925,15 @@ fn compile_program_to_wat_build_typed_with_opts(
     } else {
         None
     };
-    let typed_ast = optimized_typed_ast.as_ref().unwrap_or(typed_ast);
+    let source_typed_ast = optimized_typed_ast.as_ref().unwrap_or(typed_ast);
     // The analyzer and lowerer inspect the exact same optimized tree. Proven
     // facts may remove debug checks; unknown or conflicting occurrences keep
     // the conservative runtime guard.
     let _static_proof_guard = (parse_env_bool_like("QUE_OPT_PROOF_CODEGEN", false)
         || parse_env_bool_like("QUEC_DEBUG_ANALYSIS", false))
-    .then(|| StaticProofFactsGuard::install(typed_ast));
+    .then(|| StaticProofFactsGuard::install(source_typed_ast));
+    let lowered_typed_ast = lower_data_last_core_forms(source_typed_ast);
+    let typed_ast = &lowered_typed_ast;
     validate_no_rc_cycles(typed_ast)?;
 
     let (top_defs, extern_defs, main_expr, main_node) = match &typed_ast.expr {
@@ -16876,7 +16960,8 @@ fn compile_program_to_wat_build_typed_with_opts(
 
     let mut user_wat = String::new();
     user_wat.push_str(&format!(";; Type: {}\n", abi_type_descriptor(main_ret_ty)));
-    user_wat.push_str(";; Calque user module; imports runtime helpers from module \"que_runtime\".\n");
+    user_wat
+        .push_str(";; Calque user module; imports runtime helpers from module \"que_runtime\".\n");
     user_wat.push_str("(module\n");
     user_wat.push_str(&extern_imports);
     user_wat.push_str(&emit_runtime_imports(generic_runtime_body, &user_body));

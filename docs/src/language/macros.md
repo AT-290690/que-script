@@ -100,7 +100,7 @@ evaluates its input once, then reads its final element:
       (qq
         (block
           (let (uq values) (uq xs))
-          (get (uq values) (- (length (uq values)) 1)))))))
+          (get (- (length (uq values)) 1) (uq values)))))))
 
 (last-item [10 20 30])
 ; 30

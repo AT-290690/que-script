@@ -137,7 +137,7 @@ fn generated_sources() -> Vec<(String, String)> {
               (mut i 0)\n\
               (mut total 0)\n\
               (while (< i (length xs))\n\
-                (let x (get xs i))\n\
+                (let x (get i xs))\n\
                 (if (= (% (+ x i) 2) 0) (alter! total (+ total x)) (alter! total (- total x)))\n\
                 (++ i))\n\
               (let make-adder (lambda n (lambda x (+ n x))))\n\
@@ -178,7 +178,11 @@ fn generated_programs_match_across_debug_opt_and_native_c() {
         "requires wasmtime, wasm2c, and clang or cc"
     );
     let compiler = compiler();
-    assert!(compiler.is_file(), "missing Calque compiler: {}", compiler.display());
+    assert!(
+        compiler.is_file(),
+        "missing Calque compiler: {}",
+        compiler.display()
+    );
     let temp = TempDir::new("targets");
 
     for (name, source) in generated_sources() {
@@ -186,7 +190,11 @@ fn generated_programs_match_across_debug_opt_and_native_c() {
         fs::write(&source_path, &source).expect("generated source should write");
         let debug = run_wasm(&compiler, &source_path, "--debug");
         let optimized = run_wasm(&compiler, &source_path, "--opt");
-        let native = run_native(&compiler, &source_path, &temp.0.join(format!("native-{name}")));
+        let native = run_native(
+            &compiler,
+            &source_path,
+            &temp.0.join(format!("native-{name}")),
+        );
         assert_same(&name, &source, &debug, &optimized, &native);
     }
 
@@ -195,7 +203,11 @@ fn generated_programs_match_across_debug_opt_and_native_c() {
     fs::write(&source_path, source).expect("failure source should write");
     let debug = run_wasm(&compiler, &source_path, "--debug");
     let optimized = run_wasm(&compiler, &source_path, "--opt");
-    let native = run_native(&compiler, &source_path, &temp.0.join("native-division-by-zero"));
+    let native = run_native(
+        &compiler,
+        &source_path,
+        &temp.0.join("native-division-by-zero"),
+    );
     assert_same("division-by-zero", source, &debug, &optimized, &native);
     assert_eq!(debug, Outcome::Failure(FailureKind::RuntimeTrap));
 }

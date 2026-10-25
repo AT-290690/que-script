@@ -81,7 +81,7 @@ Make the condition visible at the use site:
 
 ```que
 (if (and (>= index 0) (< index (length xs)))
-    (get xs index)
+    (get index xs)
     fallback)
 ```
 

@@ -7,14 +7,14 @@ mod tests {
             ("(and (> 2 1) (= 1 1))", "Bool"),
             ("(do (let id (lambda x x)) (let a (id 10)) (let b (id (= 1 1))) b)", "Bool"),
             ("(do (let id (lambda x x)) (let a (id 10)) (let b (id (= 1 1))) b)", "Bool"),
-            ("(do (let xs (vector (vector 1))) (let x (get xs 0)) (let y (get x 0)) y)", "Int"),
-            ("(do (let xs (vector (vector 1))) (let x (get (get xs 0) 0)) x)", "Int"),
+            ("(do (let xs (vector (vector 1))) (let x (get 0 xs)) (let y (get 0 x)) y)", "Int"),
+            ("(do (let xs (vector (vector 1))) (let x (get 0 (get 0 xs))) x)", "Int"),
             ("(lambda x (+ x 1))", "Int -> Int"),
             ("(lambda x (and x (or x x)))", "Bool -> Bool"),
             ("(do (let fn? (lambda a b (and a b))) (fn? (= 1 1) (= 1 2)))", "Bool"),
-            ("(do (let process (lambda xs (get xs 0))) (process (vector 1 2 3 )))", "Int"),
+            ("(do (let process (lambda xs (get 0 xs))) (process (vector 1 2 3 )))", "Int"),
             (
-                "(do (let process (lambda xs (do (let x (get xs 0)) x))) (process (vector (= 1 1))))",
+                "(do (let process (lambda xs (do (let x (get 0 xs)) x))) (process (vector (= 1 1))))",
                 "Bool",
             ),
             ("(vector 1 2 3)", "[Int]"),
@@ -22,8 +22,8 @@ mod tests {
             ("nil", "()"),
             ("(do (let x 10) (let fn (lambda (do (let x 2) (* x x)))) (fn))", "Int"),
             (
-                "(do (let fn! (lambda a b c d (do (set! a (length a) (if d (lambda x (> (+ c b) x)) (lambda _ false))) nil))) fn!)",
-                "[Int -> Bool] -> Int -> Int -> Bool -> ()",
+                "(do (let fn! (lambda b c d a (do (set! (length a) (if d (lambda x (> (+ c b) x)) (lambda _ false)) a) nil))) fn!)",
+                "Int -> Int -> Bool -> [Int -> Bool] -> ()",
             ),
             (
                 "(do (let Int 0) (let as (lambda _ t t)) (let xs (as (vector) (vector Int))) xs)",
@@ -36,8 +36,8 @@ mod tests {
             (
                 r#"(do
 (let xs (vector (vector (vector))))
-(set! xs (length xs) (vector (vector true)))
-(set! xs (length xs) (vector (vector false)))
+(set! (length xs) (vector (vector true)) xs)
+(set! (length xs) (vector (vector false)) xs)
 xs)"#,
                 "[[[Bool]]]",
             ),
@@ -118,7 +118,10 @@ xs)"#,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
         .expect_err("incomplete enum match must fail");
-        assert!(err.contains("non-exhaustive match on Letter: missing C"), "{err}");
+        assert!(
+            err.contains("non-exhaustive match on Letter: missing C"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -140,7 +143,10 @@ xs)"#,
             (let score (lambda letter (match letter A 1 B 3 C 4)))
             [ (score A) (score B) (score C) ])"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
-        assert_eq!(run_program_output_with_std_and_opts(source, true), "[1 3 4]");
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "[1 3 4]"
+        );
     }
 
     #[test]
@@ -162,7 +168,10 @@ xs)"#,
             (enum Shape Rock Paper Scissors)
             [ (=~ Rock Rock) (=~ Rock Paper) ])"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
-        assert_eq!(run_program_output_with_std_and_opts(source, true), "[true false]");
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "[true false]"
+        );
 
         let inferred_operands = r#"(do
             (enum Shape Rock Paper Scissors)
@@ -177,7 +186,10 @@ xs)"#,
               Draw "draw"
               Win "win"))"#;
         assert_std_program_output_matches_with_and_without_optimizer(inferred_operands);
-        assert_eq!(run_program_output_with_std_and_opts(inferred_operands, true), "win");
+        assert_eq!(
+            run_program_output_with_std_and_opts(inferred_operands, true),
+            "win"
+        );
 
         let cross_enum = crate::parser::build(
             r#"(do
@@ -193,10 +205,8 @@ xs)"#,
         .expect_err("different enum types must not compare");
         assert!(err.contains("Cannot unify Shape with Outcome"), "{err}");
 
-        let int_operand = crate::parser::build(
-            r#"(do (enum Shape Rock Paper) (=~ Rock 1))"#,
-        )
-        .expect("program should build");
+        let int_operand = crate::parser::build(r#"(do (enum Shape Rock Paper) (=~ Rock 1))"#)
+            .expect("program should build");
         let err = crate::infer::infer_with_builtins_typed(
             &int_operand,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
@@ -211,9 +221,9 @@ xs)"#,
             (enum Letter A B C)
             (sig points [[{ Letter Int }]])
             (let points (Table/new))
-            (Table/set! points A 1)
-            (Table/set! points B 3)
-            (snd (get (Table/get A points) 0)))"#;
+            (Table/set! A 1 points)
+            (Table/set! B 3 points)
+            (snd (get 0 (Table/get A points))))"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
         assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
     }
@@ -224,11 +234,14 @@ xs)"#,
             (enum Letter A B C)
             (sig points [[{ Letter Int }]])
             (let points (Table/new))
-            (Table/set! points A 1)
-            (Table/set! points B 3)
+            (Table/set! A 1 points)
+            (Table/set! B 3 points)
             (Table/get A points))"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
-        assert_eq!(run_program_output_with_std_and_opts(source, true), "[{ A 1 }]");
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "[{ A 1 }]"
+        );
     }
 
     #[test]
@@ -237,12 +250,12 @@ xs)"#,
             (enum Shape Rock Paper Scissors)
             (sig table [[{ Shape Int }]])
             (let table (Table/new))
-            (Table/set! table Rock 1)
-            (Table/set! table Scissors 2)
+            (Table/set! Rock 1 table)
+            (Table/set! Scissors 2 table)
             (let encoded (serialize table))
             (sig restored [[{ Shape Int }]])
             (let restored (deserialize encoded))
-            (snd (get (Table/get Rock restored) 0)))"#;
+            (snd (get 0 (Table/get Rock restored))))"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
         assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
 
@@ -254,7 +267,10 @@ xs)"#,
             (let code (deserialize "NotAllowed"))
             (match code NotFound 1 NotAllowed 2 Success 3))"#;
         assert_std_program_output_matches_with_and_without_optimizer(shared_prefixes);
-        assert_eq!(run_program_output_with_std_and_opts(shared_prefixes, true), "2");
+        assert_eq!(
+            run_program_output_with_std_and_opts(shared_prefixes, true),
+            "2"
+        );
     }
 
     #[test]
@@ -263,8 +279,8 @@ xs)"#,
             (enum Letter A B C)
             (sig points [[{ Letter Int }]])
             (let points (Table/new))
-            (Table/set! points A 1)
-            (Table/set! points "A" 2))"#;
+            (Table/set! A 1 points)
+            (Table/set! "A" 2 points))"#;
         let std_ast = crate::baked::load_ast();
         let crate::parser::Expression::Apply(items) = std_ast else {
             panic!("standard library should be a do expression");
@@ -323,16 +339,16 @@ xs)"#,
             ("(+ 1.23 2)", "Arithmetic operator '+' expected Int but got Dec\n(+ 1.23 2)"),
             (
                 r#"(do (let xs (vector (vector (vector))))
-(set! xs (length xs) (vector (vector true)))
-(set! xs (length xs) (vector (vector 1))))"#,
-                "set! value expected Bool but got Int\n(set! xs (length xs) (vector (vector 1)))",
+(set! (length xs) (vector (vector true)) xs)
+(set! (length xs) (vector (vector 1)) xs))"#,
+                "set! value expected Bool but got Int\n(set! (length xs) (vector (vector 1)) xs)",
             ),
             (
                 r#"(do
 (let xs (vector))
-(set! xs (length xs) false)
-(set! xs (length xs) 1))"#,
-                "set! value expected Bool but got Int\n(set! xs (length xs) 1)",
+(set! (length xs) false xs)
+(set! (length xs) 1 xs))"#,
+                "set! value expected Bool but got Int\n(set! (length xs) 1 xs)",
             ),
             (
                 "(do (mut x 1) (let f (lambda y x)) (f 0))",
@@ -407,7 +423,7 @@ xs)"#,
 
     #[test]
     fn test_type_inference_tuple_vector_mismatch_uses_shape_wording() {
-        let exprs = crate::parser::parse("(get (tuple 1 2) 0)").unwrap();
+        let exprs = crate::parser::parse("(get 0 (tuple 1 2))").unwrap();
         let expr = exprs.first().expect("expression should parse");
         let err = crate::infer::infer_with_builtins_typed(
             expr,
@@ -425,7 +441,7 @@ xs)"#,
 
     #[test]
     fn test_type_inference_get_index_mismatch_reports_index_message() {
-        let exprs = crate::parser::parse("(get (vector 1 2) false)").unwrap();
+        let exprs = crate::parser::parse("(get false (vector 1 2))").unwrap();
         let expr = exprs.first().expect("expression should parse");
         let err = crate::infer::infer_with_builtins_typed(
             expr,
@@ -442,7 +458,7 @@ xs)"#,
 
     #[test]
     fn test_type_inference_set_value_mismatch_reports_value_message() {
-        let exprs = crate::parser::parse("(do (let xs (vector false)) (set! xs 0 1))").unwrap();
+        let exprs = crate::parser::parse("(do (let xs (vector false)) (set! 0 1 xs))").unwrap();
         let expr = exprs.first().expect("expression should parse");
         let err = crate::infer::infer_with_builtins_typed(
             expr,
@@ -772,17 +788,17 @@ xs)"#,
             r#"(do
                 (let out [])
                 (repeat/static 3
-                  (push! out 7))
+                  (push! 7 out))
                 (let unrolled [])
                 (unroll/static 4 i
-                  (push! unrolled i))
+                  (push! i unrolled))
                 [
                   (= (length (zeros/static 3)) 3)
                   (= (sum (zeros/static 3)) 0)
                   (= (sum (ones/static 2)) 2)
                   (every? identity (truths/static 2))
                   (every? not (falses/static 2))
-                  (=# (get (chars/static 3 'x') 1) 'x')
+                  (=# (get 1 (chars/static 3 'x')) 'x')
                   (= (sum (range/static 2 5)) 14)
                   (= (sum out) 21)
                   (= (sum unrolled) 6)
@@ -1078,7 +1094,7 @@ xs)"#,
           (if (> left right) -1
             (do
               (let idx (/ (+ left right) 2))
-              (let cur (get xs idx))
+              (let cur (get idx xs))
               (cond (= cur target) 1
                     (> target cur) (bs (+ idx 1) right)
                     (bs left (- idx 1)))))))
@@ -1131,7 +1147,7 @@ xs)"#,
             lisp
         );
         assert!(
-            lisp.contains("(set! code 0 (string 87 111 114 108 100))"),
+            lisp.contains("(set! 0 (string 87 111 114 108 100) code)"),
             "expected &alter! to desugar to set! index 0, got: {}",
             lisp
         );
@@ -1211,7 +1227,7 @@ xs)"#,
                   (let board [])
                   (mut i 0)
                   (while (< i (* size size)) (do
-                    (set! board (length board) 0)
+                    (set! (length board) 0 board)
                     (alter! i (+ i 1))))
                   board)))
                 (let step-and-hash (lambda board size weight (do
@@ -1240,7 +1256,7 @@ xs)"#,
             r#"(do
                 (&mut xs [1 2 3])
                 (&alter! xs [4 5 6])
-                (+ (get (&get xs) 0) (length (&get xs))))"#,
+                (+ (get 0 (&get xs)) (length (&get xs))))"#,
             true,
         );
         assert_eq!(output.trim(), "7");
@@ -1252,8 +1268,8 @@ xs)"#,
             r#"(do
                 (&mut xs [1 2 3])
                 (&alter! xs (&get xs))
-                (set! (&get xs) 0 9)
-                (+ (get (&get xs) 0) (length (&get xs))))"#,
+                (set! 0 9 (&get xs))
+                (+ (get 0 (&get xs)) (length (&get xs))))"#,
             true,
         );
         assert_eq!(output.trim(), "12");
@@ -1265,7 +1281,7 @@ xs)"#,
             r#"(do
                 (&mut xs [1 2 3])
                 (&alter! xs [4 5 6])
-                (get (&get xs) 0))"#,
+                (get 0 (&get xs)))"#,
             true,
         );
         let main = wat
@@ -1287,7 +1303,7 @@ xs)"#,
                   (let out [])
                   (mut i 0)
                   (while (< i n)
-                    (set! out (length out) 0)
+                    (set! (length out) 0 out)
                     (alter! i (+ i 1)))
                   out)))
                 (let run (lambda () (do
@@ -1709,7 +1725,7 @@ xs)"#,
     (if (> left right) -1
       (do
         (let idx (/ (+ left right) 2))
-        (let cur (get xs idx))
+        (let cur (get idx xs))
         (println! (serialize cur))
         (cond (= cur target) 1
               (< target cur) (bs! left (- idx 1))
@@ -1781,7 +1797,7 @@ xs)"#,
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
         let _analysis = ScopedEnvVar::set("QUEC_DEBUG_ANALYSIS", "1");
-        let source = "(let safeget (lambda xs i (if (and (>= i 0) (< i (length xs))) (get xs i) 0))) (let unknownget (lambda ys j (get ys j))) {(safeget [1] 0) (unknownget [1] 0)}";
+        let source = "(let safeget (lambda xs i (if (and (>= i 0) (< i (length xs))) (get i xs) 0))) (let unknownget (lambda ys j (get j ys))) {(safeget [1] 0) (unknownget [1] 0)}";
         let wat = compile_std_program_to_wat(source, false);
         let safe = named_wat_function(&wat, "v_safeget");
         let unknown = named_wat_function(&wat, "v_unknownget");
@@ -1805,12 +1821,12 @@ xs)"#,
         let _proofs = ScopedEnvVar::set("QUE_OPT_PROOF_CODEGEN", "1");
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let source = r#"
-(let replace! (lambda (xs i)
+(let replace! (lambda (i xs)
   (if (and (>= i 0) (< i (length xs)))
-      (set! xs i 7)
+      (set! i 7 xs)
       nil)))
-(let unknown! (lambda (ys j) (set! ys j 8)))
-{(replace! [1 2] 1) (unknown! [3 4] 1)}
+(let unknown! (lambda (j ys) (set! j 8 ys)))
+{(replace! 1 [1 2]) (unknown! 1 [3 4])}
 "#;
         let wat = compile_std_program_to_wat(source, true);
         let proven = named_wat_function(&wat, "v_replace_bang_");
@@ -1845,7 +1861,7 @@ xs)"#,
   (if (= i 4)
       nil
       (do
-        (set! xs i 1)
+        (set! i 1 xs)
         (fill! (+ i 1))))))
 (fill! 0)
 xs
@@ -1870,7 +1886,7 @@ xs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _proofs = ScopedEnvVar::set("QUE_OPT_PROOF_CODEGEN", "1");
-        let source = "(let xs []) (set! xs (length xs) 7) {xs (length xs)}";
+        let source = "(let xs []) (set! (length xs) 7 xs) {xs (length xs)}";
         let wat = compile_std_program_to_wat(source, true);
         let main = wat
             .split("(func (export \"main\")")
@@ -1915,7 +1931,7 @@ xs
     #[test]
     fn test_wat_monomorphizes_uniquely_used_polymorphic_vector_builder() {
         let src = r#"(let wrap (lambda x [x]))
-(get (wrap 7) 0)"#;
+(get 0 (wrap 7))"#;
         let wat = compile_std_program_to_wat(src, true);
         let wrap_wat = named_wat_function(&wat, "v_wrap");
         assert!(
@@ -1941,7 +1957,7 @@ xs
         let src = r#"(let wrap (lambda x [x]))
 (let ints (wrap 7))
 (let nested (wrap [8]))
-(+ (get ints 0) (get (get nested 0) 0))"#;
+(+ (get 0 ints) (get 0 (get 0 nested)))"#;
         let wat = compile_std_program_to_wat(src, true);
         let wrap_wat = named_wat_function(&wat, "v_wrap");
         assert!(
@@ -1979,6 +1995,21 @@ xs
         assert_eq!(
             output_with_opts, output_no_opts,
             "optimizer output must match non-optimized output"
+        );
+    }
+
+    #[test]
+    fn test_data_last_core_vector_operations_match_optimized_execution() {
+        let source = r#"(do
+            (let xs [])
+            (capacity! 4 xs)
+            (push! 10 xs)
+            (set! 0 20 xs)
+            { (get 0 xs) (cdr 0 xs) })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 20 [20] }"
         );
     }
 
@@ -2125,7 +2156,7 @@ xs
         let src = r#"(do
           (let pick-small (lambda a b (if (BigInt/lt? a b) a b)))
           (let best [(BigInt/new "99")])
-          (set! best 0 (pick-small (BigInt/new "35") (car best)))
+          (set! 0 (pick-small (BigInt/new "35") (car best)) best)
           (Digits->Chars (car best)))"#;
 
         assert_eq!(run_program_output_with_std_and_opts(src, false), "35");
@@ -2156,7 +2187,7 @@ xs
         let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let xs [])
-                (loop/range/exclusive i 0 10 (push! xs i))
+                (loop/range/exclusive i 0 10 (push! i xs))
                 xs)"#,
             true,
         );
@@ -2246,7 +2277,7 @@ xs
             (let teams (map (lambda x (if (= (% x 3) 0) "Blue" (if (= (% x 3) 1) "Red" "Green"))) ids))
             (Table/entries
               (reduce/i (lambda (a team i)
-                          (let id (Integer->String (get ids i)))
+                          (let id (Integer->String (get i ids)))
                             (if (Table/has? team a)
                                 (push! (Table/get-unsafe team a) id)
                                 (Table/set! a team [id]))
@@ -2277,8 +2308,8 @@ xs
         let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let counts (Table/new))
-                (Table/update! counts "US" 1 (lambda n (+ n 1)))
-                (Table/update! counts "US" 1 (lambda n (+ n 1)))
+                (Table/update! "US" 1 (lambda n (+ n 1)) counts)
+                (Table/update! "US" 1 (lambda n (+ n 1)) counts)
                 (Table/get-unsafe "US" counts))"#,
             true,
         );
@@ -2290,8 +2321,8 @@ xs
         let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let counts (Table/new))
-                (Table/update-or! counts "US" (lambda 10) (lambda n (+ n 1)))
-                (Table/update-or! counts "US" (lambda 10) (lambda n (+ n 1)))
+                (Table/update-or! "US" (lambda 10) (lambda n (+ n 1)) counts)
+                (Table/update-or! "US" (lambda 10) (lambda n (+ n 1)) counts)
                 (Table/get-unsafe "US" counts))"#,
             true,
         );
@@ -2303,9 +2334,9 @@ xs
         let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let groups (Table/new))
-                (Table/push-or! groups "blue" "A")
-                (Table/push-or! groups "blue" "B")
-                (Table/push-or! groups "red" "C")
+                (Table/push-or! "blue" "A" groups)
+                (Table/push-or! "blue" "B" groups)
+                (Table/push-or! "red" "C" groups)
                 { (Table/get-unsafe "blue" groups) (Table/get-unsafe "red" groups) })"#,
             true,
         );
@@ -2494,7 +2525,7 @@ xs
                           (if (not-empty? line)
                             (block
                               (let [dst src len] (map parse-number (split/words line)))
-                              (push! out { dst src len })))
+                              (push! { dst src len } out)))
                           (++ i)))
                       out)))
                 (let rows (parse-map input))
@@ -2511,7 +2542,7 @@ xs
                             (if (BigInt/lte? src value)
                               (if (BigInt/lt? value (BigInt/add src len))
                                 (do
-                                  (Vector/set! result 0 (BigInt/add dst (BigInt/sub value src)))
+                                  (Vector/set! 0 (BigInt/add dst (BigInt/sub value src)) result)
                                   (alter! found true)))))
                           (++ i)))
                       (Vector/get-unsafe 0 result))))
@@ -2610,15 +2641,15 @@ xs
                                 (lambda x
                                     (do
                                         (letrec tail-call:retry!
-                                            (lambda out x
+                                            (lambda x out
                                                 (do
                                                     (let result (- (/ x 3) 2))
                                                     (if (<= result 0)
                                                         out
                                                         (tail-call:retry!
-                                                            (do (push! out result) out)
-                                                            result)))))
-                                        (tail-call:retry! [] x))))
+                                                            result
+                                                            (do (push! result out) out))))))
+                                        (tail-call:retry! x []))))
                             (|> input (map retry) (map sum) (sum)))))
                 [(part1 PARSED) (part2 PARSED)])"#,
             true,
@@ -2666,7 +2697,7 @@ xs
         crate::externals::extend_with_builtin_host_externs(&mut lib_defs)
             .expect("builtin host externs should load");
         let expr = crate::parser::merge_std_and_program(
-            "(do (let out []) (when true (set! out 0 0)) out)",
+            "(do (let out []) (when true (set! 0 0 out)) out)",
             lib_defs,
         )
         .expect("user program should be able to use baked library macros");
@@ -2741,15 +2772,15 @@ xs
                     from
                     to
                     (lambda (path next-i)
-                      (> (get ts next-i) (get ts (at path -1))))
+                      (> (get next-i ts) (get (at -1 path) ts)))
                     (lambda (path)
                       (>= (length path) 3))))
                 (cons
                   (Integer->String (length cycles))
                   "|"
-                  (join ">" (graph/path->nodes from to (get cycles 0)))
+                  (join ">" (graph/path->nodes from to (get 0 cycles)))
                   "|"
-                  (join "," (graph/project-path txs (get cycles 0)))
+                  (join "," (graph/project-path txs (get 0 cycles)))
                   "|"
                   (join ">" (graph/normalize-cycle ["U002" "U003" "U001" "U002"]))))"#,
             true,
@@ -2779,9 +2810,9 @@ xs
                 (cons
                   (Integer->String (length cycles))
                   "|"
-                  (join ">" (graph/path->nodes from to (get cycles 0)))
+                  (join ">" (graph/path->nodes from to (get 0 cycles)))
                   "|"
-                  (join "," (graph/project-path txs (get cycles 0)))))"#,
+                  (join "," (graph/project-path txs (get 0 cycles)))))"#,
             true,
         );
         assert_eq!(output.trim(), "1|U006>U005>U006|T0006,T0007");
@@ -2812,9 +2843,9 @@ xs
                 (let refs [2 3 4 2])
                 (let joined (zip { ids refs }))
                 (floyd/cycle?
-                  (lambda pair (get joined (- (snd pair) 1)))
+                  (lambda pair (get (- (snd pair) 1) joined))
                   (lambda (a b) (= (fst a) (fst b)))
-                  (get joined 0)
+                  (get 0 joined)
                   (length joined)))"#,
             true,
         );
@@ -2826,8 +2857,8 @@ xs
         let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let xs [1 2 3 4 5])
-                (let ys (cdr xs 2))
-                (set! ys 0 99)
+                (let ys (cdr 2 xs))
+                (set! 0 99 ys)
                 { xs ys })"#,
             true,
         );
@@ -2897,7 +2928,7 @@ xs
         let err = run_program_error(
             r#"(do
                 (let xs [ 1 2 3 4 ])
-                [(get xs -1) (get xs 4) (get xs 10)])"#,
+                [(get -1 xs) (get 4 xs) (get 10 xs)])"#,
         );
         assert!(
             err.contains("failed to run main module"),
@@ -2976,14 +3007,14 @@ xs
                 (mut base-inline 10)
                 (mut i-inline 0)
                 (while (< i-inline 2) (do
-                  (alter! num-inline (+ num-inline (* base-inline (get digits i-inline))))
+                  (alter! num-inline (+ num-inline (* base-inline (get i-inline digits))))
                   (alter! base-inline (/ base-inline 10))
                   (alter! i-inline (+ i-inline 1))))
                 (mut num-pre 0)
                 (mut base-pre 10)
                 (mut i-pre 0)
                 (while (< i-pre 2) (do
-                  (let term (* base-pre (get digits i-pre)))
+                  (let term (* base-pre (get i-pre digits)))
                   (alter! num-pre (+ num-pre term))
                   (alter! base-pre (/ base-pre 10))
                   (alter! i-pre (+ i-pre 1))))
@@ -3114,7 +3145,7 @@ xs
             r#"(do
                 (let xs [])
                 (let i [0])
-                (while (< (get i 0) 10) (do (push! xs (get i 0)) (set! i 0 (+ (get i 0) 1))))
+                (while (< (get 0 i) 10) (do (push! (get 0 i) xs) (set! 0 (+ (get 0 i) 1) i)))
                 xs)"#,
         );
         assert_eq!(output, "[0 1 2 3 4 5 6 7 8 9]");
@@ -3126,10 +3157,10 @@ xs
             r#"(let build-graph (lambda n edges source destination (do
   (let graph (map  (lambda _ []) (zeroes n)))
   (loop/in edge edges (do
-    (let u (get edge 0))
-    (let v (get edge 1))
-    (push! (get graph u) v)
-    (push! (get graph v) u)))
+    (let u (get 0 edge))
+    (let v (get 1 edge))
+    (push! v (get u graph))
+    (push! u (get v graph))))
   graph)))
 
 [(build-graph 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2)
@@ -3246,7 +3277,7 @@ xs
     (let out [])
     (mut i 0)
     (while (< i (length xs)) (do
-      (set! out (length out) (fn (get xs i)))
+      (set! (length out) (fn (get i xs)) out)
       (alter! i (+ i 1))))
     out))))
   (let mapcar (lambda fn (comp (mymap (mymap fn)))))
@@ -3271,9 +3302,9 @@ xs
             (map identity) (reduce/until/i (lambda { a out } b i (do
         (let check (Integer->String (- target b)))
         (if (Table/has? check a) (do
-            (push! out i)  (push! out (snd (get (Table/get check a))))))
+            (push! i out)  (push! (snd (get (Table/get check a))) out)))
         (let key (Integer->String b))
-        (Table/set! a key i)
+        (Table/set! key i a)
         { a out }))
         (lambda { _ out } _ _ (not-empty? out))
         { (Table/new) [] } )))))
@@ -3320,8 +3351,8 @@ xs
                   (let odd [])
                   (let even [])
                   (let out [])
-                  (loop/range/exclusive i 0 (length nums) (push! (if (= (% i 2) 0) even odd) (get nums i)))
-                  (loop/range/exclusive j 0 (length even) (do (push! out (get even j)) (push! out (get odd j))))
+                  (loop/range/exclusive i 0 (length nums) (push! (get i nums) (if (= (% i 2) 0) even odd)))
+                  (loop/range/exclusive j 0 (length even) (do (push! (get j even) out) (push! (get j odd) out)))
                   out)))
                 [(sort-array-by-parity2 [4 2 5 7])
                  (sort-array-by-parity2 [2 3])
@@ -3335,7 +3366,7 @@ xs
     fn test_regression_std_vector_for_isolated_behavior() {
         let output = run_program_output_with_std_and_opts(
             r#"(let out [])
-(loop/in x [1 2 3 4] (set! out (length out) (* x 2)))
+(loop/in x [1 2 3 4] (set! (length out) (* x 2) out))
 out"#,
             true,
         );
@@ -3566,7 +3597,7 @@ out"#,
     #[test]
     fn test_typed_optimization_inline_avoids_duplicate_vector_eval() {
         let typed =
-            infer_typed("(do (let f (lambda x (+ (get x 0) (get x 0)))) (f (vector 1 2 3)))");
+            infer_typed("(do (let f (lambda x (+ (get 0 x) (get 0 x)))) (f (vector 1 2 3)))");
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
 
@@ -3582,7 +3613,7 @@ out"#,
             optimized_lisp
         );
         assert!(
-            optimized_lisp.matches("get __inline_arg_").count() >= 2,
+            optimized_lisp.matches("(get 0 __inline_arg_").count() >= 2,
             "inlined body should reuse temp arg binding, got: {}",
             optimized_lisp
         );
@@ -3673,7 +3704,7 @@ out"#,
     #[test]
     fn test_typed_optimization_small_scalar_helper_skips_managed_allocating_body() {
         let typed = infer_typed(
-            "(do (let f (lambda x (do (let xs (vector x x)) (get xs 0)))) (let g (lambda n (f n))) (g 7))",
+            "(do (let f (lambda x (do (let xs (vector x x)) (get 0 xs)))) (let g (lambda n (f n))) (g 7))",
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -3690,7 +3721,7 @@ out"#,
         let typed = infer_typed_built(
             r#"(do
                 (let idx (lambda size x y (+ x (* y size))))
-                (let read-at (lambda board size x y (get board (idx size x y))))
+                (let read-at (lambda board size x y (get (idx size x y) board)))
                 (read-at [1 2 3 4] 2 1 1))"#,
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
@@ -3702,7 +3733,7 @@ out"#,
             optimized_lisp
         );
         assert!(
-            optimized_lisp.contains("(get board (+ x (* y size)))"),
+            optimized_lisp.contains("(get (+ x (* y size)) board)"),
             "small scalar helper should inline as scalar expression, got: {}",
             optimized_lisp
         );
@@ -3719,10 +3750,10 @@ out"#,
                 (let line-score
                   (lambda board a b c
                     (do
-                      (let v (get board a))
+                      (let v (get a board))
                       (if (= v 0)
                         0
-                        (if (and (= v (get board b)) (= v (get board c)))
+                        (if (and (= v (get b board)) (= v (get c board)))
                           v
                           0)))))
                 (let winner
@@ -3756,16 +3787,16 @@ out"#,
 
     #[test]
     fn test_typed_optimization_canonicalizes_push_to_set_append() {
-        let typed = infer_typed_built("(do (let xs []) (push! xs 1) xs)");
+        let typed = infer_typed_built("(do (let xs []) (push! 1 xs) xs)");
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
         assert!(
-            optimized_lisp.contains("(set! xs (length xs) 1)"),
+            optimized_lisp.contains("(set! (length xs) 1 xs)"),
             "push! should canonicalize to append-at-length set!, got: {}",
             optimized_lisp
         );
         assert!(
-            !optimized_lisp.contains("(push! xs 1)"),
+            !optimized_lisp.contains("(push! 1 xs)"),
             "optimized lisp should not keep direct push!, got: {}",
             optimized_lisp
         );
@@ -3993,7 +4024,7 @@ out"#,
                     (mut i 0)
                     (while (< i (* size size))
                       (do
-                        (set! board (length board) 0)
+                        (set! (length board) 0 board)
                         (alter! i (+ i 1))))
                     board))
                 5)"#,
@@ -4011,7 +4042,7 @@ out"#,
                     (mut i 0)
                     (while (< i n)
                       (do
-                        (set! xs (length xs) (+ i 1))
+                        (set! (length xs) (+ i 1) xs)
                         (alter! i (+ i 1))))
                     xs))
                 5)"#,
@@ -4039,7 +4070,7 @@ out"#,
     #[test]
     fn test_typed_optimization_lowers_non_escaping_local_variable_cell_to_mut_local() {
         let typed = infer_typed_built(
-            "(do (let box (lambda value [value])) (let x (box 0)) (set! x 0 1) (get x 0))",
+            "(do (let box (lambda value [value])) (let x (box 0)) (set! 0 1 x) (get 0 x))",
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let lisp = optimized.expr.to_lisp();
@@ -4063,7 +4094,7 @@ out"#,
     #[test]
     fn test_typed_optimization_keeps_local_variable_cell_when_lambda_would_capture_it() {
         let typed = infer_typed_built(
-            "(do (let box (lambda value [value])) (let x (box 0)) (let f (lambda () (get x 0))) f)",
+            "(do (let box (lambda value [value])) (let x (box 0)) (let f (lambda () (get 0 x))) f)",
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let lisp = optimized.expr.to_lisp();
@@ -4084,7 +4115,7 @@ out"#,
     #[test]
     fn test_infer_impure_function_does_not_require_bang_suffix() {
         let exprs =
-            crate::parser::parse("(let fn (lambda xs (set! xs 0 1)))").expect("input should parse");
+            crate::parser::parse("(let fn (lambda xs (set! 0 1 xs)))").expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
@@ -4134,7 +4165,7 @@ out"#,
         let exprs = crate::parser::parse(
             "(do
                 (let even? (lambda x (= (% x 2) 0)))
-                (let put! (lambda xs x (set! xs 0 x)))
+                (let put! (lambda x xs (set! 0 x xs)))
                 (even? 2))",
         )
         .expect("input should parse");
@@ -4155,8 +4186,8 @@ out"#,
         let exprs = crate::parser::parse(
             "(let search?! (lambda x (do
                 (let cell (vector 0))
-                (letrec bs (lambda cell n (if (= n 0) true (do (set! cell 0 n) (bs cell (- n 1))))))
-                (bs cell x))))",
+                (letrec bs (lambda n cell (if (= n 0) true (do (set! 0 n cell) (bs (- n 1) cell)))))
+                (bs x cell))))",
         )
         .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -4172,8 +4203,8 @@ out"#,
         let exprs = crate::parser::parse(
             "(let search?! (lambda x (do
                 (let cell (vector 0))
-                (letrec bs! (lambda cell n (if (= n 0) true (do (set! cell 0 n) (bs! cell (- n 1))))))
-                (bs! cell x))))",
+                (letrec bs! (lambda n cell (if (= n 0) true (do (set! 0 n cell) (bs! (- n 1) cell)))))
+                (bs! x cell))))",
         )
         .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -4189,7 +4220,7 @@ out"#,
         let expr = crate::parser::build(
             "(let search (lambda (target xs)
                 (letrec bs (lambda (left right)
-                    (if (> left right) false (= target (get xs left)))))))",
+                    (if (> left right) false (= target (get left xs)))))))",
         )
         .expect("input should build");
         let inferred = crate::infer::infer_with_builtins_typed(
@@ -4232,8 +4263,8 @@ out"#,
         let exprs = crate::parser::parse(
             "(let search?! (lambda x (do
                 (let cell (vector 0))
-                (letrec bs?! (lambda cell n (if (= n 0) true (do (set! cell 0 n) (bs?! cell (- n 1))))))
-                (bs?! cell x))))",
+                (letrec bs?! (lambda n cell (if (= n 0) true (do (set! 0 n cell) (bs?! (- n 1) cell)))))
+                (bs?! x cell))))",
         )
         .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -4293,7 +4324,7 @@ out"#,
     #[test]
     fn test_infer_impure_function_alias_does_not_require_bang_suffix() {
         let exprs = crate::parser::parse(
-            "(do (let reverse! (lambda xs (set! xs 0 1))) (let reverse reverse!) reverse)",
+            "(do (let reverse! (lambda xs (set! 0 1 xs))) (let reverse reverse!) reverse)",
         )
         .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -4308,7 +4339,7 @@ out"#,
     fn test_infer_impure_wrapper_call_does_not_require_bang_suffix() {
         let exprs = crate::parser
             ::parse(
-                "(do (let reverse! (lambda xs (set! xs 0 1))) (let wrap (lambda xs (reverse! xs))) wrap)"
+                "(do (let reverse! (lambda xs (set! 0 1 xs))) (let wrap (lambda xs (reverse! xs))) wrap)"
             )
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -4341,7 +4372,7 @@ out"#,
     fn test_infer_partial_application_alias_of_impure_function_stays_equivalent() {
         let exprs = crate::parser
             ::parse(
-                "(do (let fn! (lambda a b (do (set! a 0 b) a))) (let f2 (lambda xs (do (let c xs) (fn! c)))) f2)"
+                "(do (let fn! (lambda a b (do (set! 0 a b) a))) (let f2 (lambda xs (do (let c xs) (fn! c)))) f2)"
             )
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -4360,7 +4391,7 @@ out"#,
     fn test_infer_saturated_alias_call_does_not_require_bang_suffix() {
         let exprs = crate::parser
             ::parse(
-                "(do (let fn! (lambda a b (do (set! a 0 b) a))) (let f2 (lambda xs (do (let c xs) (fn! c 2)))) f2)"
+                "(do (let fn! (lambda a b (do (set! 0 a b) a))) (let f2 (lambda xs (do (let c xs) (fn! 2 c)))) f2)"
             )
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -4373,7 +4404,7 @@ out"#,
 
     #[test]
     fn test_infer_impure_function_non_unit_return_allowed_by_default() {
-        let exprs = crate::parser::parse("(let append-ten! (lambda xs (do (set! xs 0 1) xs)))")
+        let exprs = crate::parser::parse("(let append-ten! (lambda xs (do (set! 0 1 xs) xs)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
@@ -4389,7 +4420,7 @@ out"#,
 
     #[test]
     fn test_infer_impure_hyphenated_function_does_not_require_bang_suffix() {
-        let exprs = crate::parser::parse("(let append-ten (lambda xs (set! xs (length xs) 10)))")
+        let exprs = crate::parser::parse("(let append-ten (lambda xs (set! (length xs) 10 xs)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
@@ -4400,8 +4431,8 @@ out"#,
     }
 
     #[test]
-    fn test_infer_impure_function_mutation_target_must_be_first_param() {
-        let exprs = crate::parser::parse("(let set-middle! (lambda a b c (set! b 0 1)))")
+    fn test_infer_impure_function_mutation_target_must_be_final_param() {
+        let exprs = crate::parser::parse("(let set-middle! (lambda a b c (set! 0 1 b)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
@@ -4410,7 +4441,7 @@ out"#,
         );
         let err = inferred.expect_err("impure function mutating middle param should fail");
         assert!(
-            err.contains("must mutate its first parameter"),
+            err.contains("must mutate its final parameter"),
             "unexpected error: {}",
             err
         );
@@ -4418,11 +4449,11 @@ out"#,
 
     #[test]
     fn test_loop_in_pop_val_rejects_mutating_second_parameter_without_bang_suffix() {
-        let source = r#"(let rev (lambda (u xs)
+        let source = r#"(let rev (lambda (xs u)
   (let out [])
-  (loop/in x xs (push! out (pop-val! xs)))
+  (loop/in x xs (push! (pop-val! xs) out))
   out))
-(rev [] [1 2 3])"#;
+(rev [1 2 3] [])"#;
         let std_ast = crate::baked::load_ast();
         let crate::parser::Expression::Apply(items) = std_ast else {
             panic!("std ast should be (do ...)");
@@ -4433,18 +4464,18 @@ out"#,
             .expect_err("mutation of argument 2 must be rejected");
 
         assert!(
-            err.contains("must mutate its first parameter (argument 1)")
-                && err.contains("argument 2"),
+            err.contains("must mutate its final parameter (argument 2)")
+                && err.contains("argument 1"),
             "unexpected error: {err}"
         );
     }
 
     #[test]
-    fn test_infer_impure_function_mutation_target_inside_block_must_be_first_param() {
+    fn test_infer_impure_function_mutation_target_inside_block_must_be_final_param() {
         let expr = crate::parser::build(
             "(do
                 (let extend-env! (lambda env pair
-                  (do (set! env (length env) pair) env)))
+                  (do (set! (length env) pair env) env)))
                 (letrec prove-tautology? (lambda expr vars env
                   (if (= (length vars) 0)
                       true
@@ -4458,17 +4489,17 @@ out"#,
             &expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("block should not hide mutation of a non-first parameter");
+        let err = inferred.expect_err("block should not hide mutation of a non-final parameter");
         assert!(
-            err.contains("must mutate its first parameter"),
+            err.contains("must mutate its final parameter"),
             "unexpected error: {}",
             err
         );
     }
 
     #[test]
-    fn test_infer_impure_function_mutating_first_param_is_allowed() {
-        let exprs = crate::parser::parse("(let sort! (lambda xs fn (set! xs 0 1)))")
+    fn test_infer_impure_function_mutating_final_param_is_allowed() {
+        let exprs = crate::parser::parse("(let sort! (lambda fn xs (set! 0 1 xs)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
@@ -4477,30 +4508,30 @@ out"#,
         );
         assert!(
             inferred.is_ok(),
-            "impure function mutating arg1 should be allowed, got: {:?}",
+            "impure function mutating its final argument should be allowed, got: {:?}",
             inferred
         );
     }
 
     #[test]
-    fn test_infer_impure_function_mutating_last_param_is_rejected() {
-        let exprs = crate::parser::parse("(let sort! (lambda fn xs (set! xs 0 1)))")
+    fn test_infer_impure_function_mutating_non_final_param_is_rejected() {
+        let exprs = crate::parser::parse("(let sort! (lambda xs fn (set! 0 1 xs)))")
             .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
         let inferred = crate::infer::infer_with_builtins_typed(
             expr,
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         );
-        let err = inferred.expect_err("impure function mutating last param should fail");
+        let err = inferred.expect_err("impure function mutating a non-final parameter should fail");
         assert!(
-            err.contains("must mutate its first parameter"),
+            err.contains("must mutate its final parameter"),
             "unexpected error: {}",
             err
         );
     }
 
     #[test]
-    fn test_infer_io_only_bang_function_does_not_need_mutated_first_param() {
+    fn test_infer_io_only_bang_function_does_not_need_mutated_final_param() {
         let exprs = crate::parser::parse(
             r#"(do
                 (extern env log log! (Int -> ()))
@@ -4528,9 +4559,9 @@ out"#,
     }
 
     #[test]
-    fn test_infer_impure_nested_mutation_target_rooted_in_first_param_is_allowed() {
+    fn test_infer_impure_nested_mutation_target_rooted_in_final_param_is_allowed() {
         let exprs = crate::parser::parse(
-            "(let vector/three-d/set! (lambda matrix y x value (do (set! (get matrix y) x value) 0)))",
+            "(let vector/three-d/set! (lambda y x value matrix (do (set! x value (get y matrix)) 0)))",
         )
         .expect("input should parse");
         let expr = exprs.first().expect("input should contain one expression");
@@ -4540,7 +4571,7 @@ out"#,
         );
         assert!(
             inferred.is_ok(),
-            "nested target rooted in first param should be allowed, got: {:?}",
+            "nested target rooted in final param should be allowed, got: {:?}",
             inferred
         );
     }
@@ -4549,8 +4580,8 @@ out"#,
     fn test_infer_impure_operator_aliases_and_set_are_exempt_from_bang_suffix() {
         let exprs = crate::parser::parse(
             "(do
-                    (let update-set! (lambda vrbl x (set! vrbl 0 x)))
-                    (let boolean-set! (lambda vrbl x (set! vrbl 0 x)))
+                    (let update-set! (lambda x vrbl (set! 0 x vrbl)))
+                    (let boolean-set! (lambda x vrbl (set! 0 x vrbl)))
                     1)",
         )
         .expect("input should parse");
@@ -4594,10 +4625,10 @@ out"#,
     fn test_infer_local_nested_set_target_does_not_require_bang() {
         let exprs = crate::parser::parse(
             "(do
-                    (let at (lambda xs i (get xs i)))
+                    (let at (lambda i xs (get i xs)))
                     (let partition (lambda xs n (do
                         (let a (vector (vector 0)))
-                        (set! (at a 0) 0 1)
+                        (set! 0 1 (at 0 a))
                         a)))
                     partition)",
         )
@@ -4623,11 +4654,11 @@ out"#,
 
     #[test]
     fn test_typed_optimization_apply_alias_beta_reduce_skips_managed_args() {
-        let typed = infer_typed("(do ((lambda x (+ (get x 0) (get x 1))) (vector 10 20)))");
+        let typed = infer_typed("(do ((lambda x (+ (get 0 x) (get 1 x))) (vector 10 20)))");
         let optimized = crate::op::optimize_typed_ast(&typed);
         assert_eq!(
             optimized.expr.to_lisp(),
-            "((lambda x (+ (get x 0) (get x 1))) (vector 10 20))"
+            "((lambda x (+ (get 0 x) (get 1 x))) (vector 10 20))"
         );
     }
 
@@ -4676,7 +4707,7 @@ out"#,
     #[test]
     fn test_typed_optimization_map_short_name_fuses_to_direct_loop() {
         let typed = infer_typed(
-            "(do (let vector-map (lambda xs fn (fn (get xs 0)))) (let map (lambda fn xs (vector-map xs fn))) (map (lambda x (+ x 1)) (vector 41)))"
+            "(do (let vector-map (lambda xs fn (fn (get 0 xs)))) (let map (lambda fn xs (vector-map xs fn))) (map (lambda x (+ x 1)) (vector 41)))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -4696,7 +4727,7 @@ out"#,
     #[test]
     fn test_typed_optimization_filter_short_name_fuses_to_direct_loop() {
         let typed = infer_typed(
-            "(do (let vector-filter (lambda xs fn (fn (get xs 0)))) (let filter (lambda fn xs (vector-filter xs fn))) (filter (lambda x (> x 0)) (vector 41)))"
+            "(do (let vector-filter (lambda xs fn (fn (get 0 xs)))) (let filter (lambda fn xs (vector-filter xs fn))) (filter (lambda x (> x 0)) (vector 41)))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -4707,7 +4738,7 @@ out"#,
             optimized_lisp
         );
         assert!(
-            optimized_lisp.contains("(> (get __fuse_xs __fuse_i) 0)"),
+            optimized_lisp.contains("(> (get __fuse_i __fuse_xs) 0)"),
             "filter predicate should be preserved in optimized expression, got: {}",
             optimized_lisp
         );
@@ -4716,7 +4747,7 @@ out"#,
     #[test]
     fn test_typed_optimization_reduce_short_name_fuses_to_direct_loop() {
         let typed = infer_typed(
-            "(do (let vector-reduce (lambda xs fn init (fn init (get xs 0)))) (let reduce (lambda fn init xs (vector-reduce xs fn init))) (reduce (lambda a x (+ a x)) 10 (vector 32)))"
+            "(do (let vector-reduce (lambda xs fn init (fn init (get 0 xs)))) (let reduce (lambda fn init xs (vector-reduce xs fn init))) (reduce (lambda a x (+ a x)) 10 (vector 32)))"
         );
         let optimized = crate::op::optimize_typed_ast(&typed);
         let optimized_lisp = optimized.expr.to_lisp();
@@ -4904,7 +4935,7 @@ out"#,
             int_fused
         );
         assert!(
-            float_fused.contains("(/. (get __fuse_sum 0) (Int->Dec (get __fuse_count 0)))"),
+            float_fused.contains("(/. (get 0 __fuse_sum) (Int->Dec (get 0 __fuse_count)))"),
             "mean/dec should emit dec division by Int->Dec(count), got: {}",
             float_fused
         );
@@ -5252,7 +5283,7 @@ out"#,
             fused_lisp
         );
         assert!(
-            fused_lisp.contains("(set! __fuse_out 0"),
+            fused_lisp.contains("(set! 0") && fused_lisp.contains("__fuse_out)"),
             "find fusion should update output index inside fused loop, got: {}",
             fused_lisp
         );
@@ -5485,7 +5516,7 @@ out"#,
     fn test_wat_direct_main_helper_group_lifts_sibling_captures() {
         let program = r#"
             (let xs [])
-            (let add! (lambda x (push! xs x)))
+            (let add! (lambda x (push! x xs)))
             (letrec fill! (lambda n
               (if (= n 0)
                   0
@@ -6079,23 +6110,23 @@ out"#,
 
     #[test]
     fn test_lsp_static_analysis_summary_hides_destructuring_temporary() {
-        let message = "static bounds: index not proven safe: `(get _let_temp_vec_10000_42 0)`";
+        let message = "static bounds: index not proven safe: `(get 0 _let_temp_vec_10000_42)`";
         assert_eq!(
             crate::lsp_native_core::static_analysis_diagnostic_summary(message),
-            "index not proven safe: `(get destructured-vector 0)`"
+            "index not proven safe: `(get 0 destructured-vector)`"
         );
         assert_eq!(
             crate::lsp_native_core::static_analysis_diagnostic_snippet(message).as_deref(),
-            Some("(get destructured-vector 0)")
+            Some("(get 0 destructured-vector)")
         );
     }
 
     #[test]
     fn test_lsp_static_analysis_snippet_restores_multi_index_get_sugar() {
-        let message = "static bounds: index not proven safe: `(get (get m x) y)`";
+        let message = "static bounds: index not proven safe: `(get y (get x m))`";
         assert_eq!(
             crate::lsp_native_core::static_analysis_diagnostic_snippet(message).as_deref(),
-            Some("(get m x y)")
+            Some("(get x y m)")
         );
     }
 
@@ -6128,8 +6159,8 @@ out"#,
 
     #[test]
     fn test_lsp_static_analysis_range_is_scoped_to_originating_top_level_form() {
-        let source = "(let xs [])\n(get xs 0)\n(get xs 0)";
-        let message = "static bounds: index not proven safe: `(get xs 0)`";
+        let source = "(let xs [])\n(get 0 xs)\n(get 0 xs)";
+        let message = "static bounds: index not proven safe: `(get 0 xs)`";
         let first = crate::lsp_native_core::static_analysis_diagnostic_ranges(source, message, 1);
         let second = crate::lsp_native_core::static_analysis_diagnostic_ranges(source, message, 2);
         assert_eq!(first.len(), 1);
@@ -6226,8 +6257,8 @@ out"#,
 (let [a b] (split "," inp))
 {a b}
 (let inp2 (split "," inp))
-(get inp2 0)
-(get inp2 1)"#;
+(get 0 inp2)
+(get 1 inp2)"#;
         let raw_count = crate::lsp_native_core::parse_user_exprs_for_symbol_collection(source)
             .expect("source should parse")
             .len();
@@ -6253,7 +6284,7 @@ out"#,
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(
             r#"(let J
   (lambda (xs)
-    (push! xs 1)
+    (push! 1 xs)
     xs))"#
                 .to_string(),
         );
@@ -6299,7 +6330,7 @@ out"#,
     #[test]
     fn test_wasm_lsp_hover_user_fn_includes_effects_for_mutation() {
         let hover_json = crate::wasm_api::lsp_hover(
-            "(let touch! (lambda xs (do (set! xs 0 1) nil)))\ntouch!".to_string(),
+            "(let touch! (lambda xs (do (set! 0 1 xs) nil)))\ntouch!".to_string(),
             1,
             2,
         );
@@ -6363,7 +6394,7 @@ search?!"#;
     (if (> left right) false
       (do
         (let idx (/ (+ left right) 2))
-        (let current (get xs idx))
+        (let current (get idx xs))
         (log! current)
         (if (= target current) true
           (if (> target current)
@@ -6411,7 +6442,7 @@ reverse-list-loop"#;
     #[test]
     fn test_wasm_lsp_hover_alias_preserves_mutation_effect() {
         let program =
-            "(let reverse-core! (lambda xs (do (set! xs 0 1) nil)))\n(let reverse! reverse-core!)\nreverse!";
+            "(let reverse-core! (lambda xs (do (set! 0 1 xs) nil)))\n(let reverse! reverse-core!)\nreverse!";
         let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 2, 3);
         let hover: serde_json::Value =
             serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
@@ -6517,7 +6548,7 @@ reverse-list-loop"#;
     #[test]
     fn test_wasm_lsp_hover_local_mutation_is_not_an_observable_effect() {
         let hover_json = crate::wasm_api::lsp_hover(
-            "(let fn (lambda xs (do (let out []) (push! out 0) out)))\nfn".to_string(),
+            "(let fn (lambda xs (do (let out []) (push! 0 out) out)))\nfn".to_string(),
             1,
             1,
         );
@@ -6539,7 +6570,7 @@ reverse-list-loop"#;
     #[test]
     fn test_wasm_lsp_hover_param_mutation_with_bang_is_mutate() {
         let hover_json = crate::wasm_api::lsp_hover(
-            "(let append-ten! (lambda xs (push! xs 10)))\nappend-ten!".to_string(),
+            "(let append-ten! (lambda xs (push! 10 xs)))\nappend-ten!".to_string(),
             1,
             3,
         );
@@ -6808,9 +6839,15 @@ parse-value"#;
             .filter_map(|item| item.get("message").and_then(|value| value.as_str()))
             .collect::<Vec<_>>();
 
-        assert_eq!(messages.len(), 2, "unexpected diagnostics: {diagnostics_json}");
+        assert_eq!(
+            messages.len(),
+            2,
+            "unexpected diagnostics: {diagnostics_json}"
+        );
         assert!(
-            messages.iter().any(|message| message.contains("expected Int but got Bool")),
+            messages
+                .iter()
+                .any(|message| message.contains("expected Int but got Bool")),
             "missing first type error: {diagnostics_json}"
         );
         assert!(
@@ -6820,7 +6857,9 @@ parse-value"#;
             "missing second type error: {diagnostics_json}"
         );
         assert!(
-            !messages.iter().any(|message| message.contains("Undefined variable: first")),
+            !messages
+                .iter()
+                .any(|message| message.contains("Undefined variable: first")),
             "dependent diagnostic should be suppressed: {diagnostics_json}"
         );
     }
@@ -6903,7 +6942,7 @@ parse-value"#;
 
     #[test]
     fn test_wasm_lsp_warns_for_unproven_vector_access() {
-        let source = "; use-strict-warnings!\n(let xs [1 2 3])\n(let i 10)\n(get xs i)";
+        let source = "; use-strict-warnings!\n(let xs [1 2 3])\n(let i 10)\n(get i xs)";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -6923,7 +6962,7 @@ parse-value"#;
 
     #[test]
     fn test_wasm_lsp_static_analysis_is_off_without_directive() {
-        let source = "(let xs [1 2 3])\n(let i 10)\n(get xs i)";
+        let source = "(let xs [1 2 3])\n(let i 10)\n(get i xs)";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -6939,7 +6978,7 @@ parse-value"#;
 
     #[test]
     fn test_wasm_lsp_reports_all_unproven_vector_accesses() {
-        let source = "; use-strict-warnings!\n(let xs [1])\n(let ys [2])\n(let i 0)\n(let j 0)\n(get xs i)\n(get ys j)";
+        let source = "; use-strict-warnings!\n(let xs [1])\n(let ys [2])\n(let i 0)\n(let j 0)\n(get i xs)\n(get j ys)";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -6961,7 +7000,7 @@ parse-value"#;
 
     #[test]
     fn test_wasm_lsp_static_warning_maps_block_renamed_binding_to_source() {
-        let source = "; use-strict-warnings!\n(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get xs index))))\n(let xs2 [])\n(let index2 0)\n(if (> (length xs2) index2) (get xs2 0) -1)";
+        let source = "; use-strict-warnings!\n(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get index xs))))\n(let xs2 [])\n(let index2 0)\n(if (> (length xs2) index2) (get 0 xs2) -1)";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -6978,7 +7017,7 @@ parse-value"#;
         assert_eq!(warnings.len(), 1, "{diagnostics_json}");
         assert_eq!(
             warnings[0]["message"],
-            serde_json::json!("index not proven safe: `(get xs index)`")
+            serde_json::json!("index not proven safe: `(get index xs)`")
         );
         assert!(!diagnostics_json.contains("__block_"), "{diagnostics_json}");
         assert_eq!(warnings[0]["range"]["start"]["line"], serde_json::json!(4));
@@ -7054,7 +7093,7 @@ parse-value"#;
     #[test]
     fn test_wasm_lsp_accepts_negated_bounds_guard_in_else_branch() {
         let source =
-            "; use-strict-warnings!\n(let xs [1 2 3])\n(let i 1)\n(if (or false (not (in-bounds? xs i))) 0 (get xs i))";
+            "; use-strict-warnings!\n(let xs [1 2 3])\n(let i 1)\n(if (or false (not (in-bounds? i xs))) 0 (get i xs))";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(source.to_string());
         let diagnostics: serde_json::Value =
             serde_json::from_str(&diagnostics_json).expect("diagnostics should be valid JSON");
@@ -7166,7 +7205,7 @@ parse-value"#;
     #[test]
     fn test_wasm_lsp_diagnostics_scope_path_keeps_get_error_in_fn_only() {
         let program =
-            "(let fn (lambda x (get x 's')))\n\n(integer x 1)\n(while (< (get x) 10) (do\n    (match? (Integer->String (get x)) \"10\")\n(&alter! x (+ (&get x) 1))))";
+            "(let fn (lambda x (get 's' x)))\n\n(integer x 1)\n(while (< (get x) 10) (do\n    (match? (Integer->String (get x)) \"10\")\n(&alter! x (+ (&get x) 1))))";
         let diagnostics_json = crate::wasm_api::lsp_diagnostics(program.to_string());
         let diagnostics: serde_json::Value = serde_json::from_str(&diagnostics_json)
             .expect("diagnostics response should be valid JSON");
@@ -8059,7 +8098,7 @@ fn"#;
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
-        let expr = crate::parser::build("(get ARGV 0)").expect("program should build");
+        let expr = crate::parser::build("(get 0 ARGV)").expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
 
@@ -8090,8 +8129,7 @@ fn"#;
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _wasi = ScopedEnvVar::set("QUE_WASI_HOST", "1");
         let _permissions = ScopedEnvVar::set("QUE_WASI_ALLOW", "read");
-        let expr = crate::parser::build(r#"(read! "missing.txt")"#)
-            .expect("program should build");
+        let expr = crate::parser::build(r#"(read! "missing.txt")"#).expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
 
@@ -8281,11 +8319,11 @@ fn"#;
 (let f (lambda x (+ x 1)))
 (let outer [inner inner [3 4]])
 (let fs [f f (lambda x (* x 2))])
-(+ (get (get outer 0) 1)
-   (get (get outer 1) 0)
-   (get (get outer 2) 1)
-   ((get fs 0) 4)
-   ((get fs 2) 4))"#;
+(+ (get 1 (get 0 outer))
+   (get 0 (get 1 outer))
+   (get 1 (get 2 outer))
+   ((get 0 fs) 4)
+   ((get 2 fs) 4))"#;
         assert_eq!(run_program_output_with_std_and_opts(source, false), "20");
         assert_eq!(run_program_output_with_std_and_opts(source, true), "20");
     }
@@ -8323,7 +8361,7 @@ fn"#;
     fn test_wat_scalar_vector_clone_literal_uses_direct_store_construction() {
         let expr = crate::parser::build(
             "(do
-               (let clone3 (lambda xs [(+ (get xs 0) 0) (+ (get xs 1) 0) (+ (get xs 2) 0)]))
+               (let clone3 (lambda xs [(+ (get 0 xs) 0) (+ (get 1 xs) 0) (+ (get 2 xs) 0)]))
                (clone3 [4 5 6]))",
         )
         .expect("program should build");
@@ -8362,7 +8400,7 @@ fn"#;
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let expr = crate::parser::build(
             "(do
-               (let clone3 (lambda xs [(get xs 0) (get xs 1) (get xs 2)]))
+               (let clone3 (lambda xs [(get 0 xs) (get 1 xs) (get 2 xs)]))
                (clone3 [4 5 6]))",
         )
         .expect("program should build");
@@ -8382,7 +8420,7 @@ fn"#;
 
     #[test]
     fn test_wat_direct_scalar_push_uses_set_append_fast_path() {
-        let wat = compile_std_program_to_wat("(do (let xs []) (push! xs 1) (push! xs 2) xs)", true);
+        let wat = compile_std_program_to_wat("(do (let xs []) (push! 1 xs) (push! 2 xs) xs)", true);
         let main_start = wat
             .find("(func (export \"main\")")
             .expect("main export should exist");
@@ -8406,9 +8444,9 @@ fn"#;
             r#"(do
                 (let scalar [])
                 (let managed [])
-                (let unit (push! scalar 1))
-                (push! managed "hi")
-                {unit scalar (get managed 0)})"#,
+                (let unit (push! 1 scalar))
+                (push! "hi" managed)
+                {unit scalar (get 0 managed)})"#,
             true,
         );
         assert_eq!(result, "{ nil { [1] \"hi\" } }");
@@ -8416,7 +8454,7 @@ fn"#;
 
     #[test]
     fn test_wat_scalar_get_inlines_without_vec_get_runtime_call() {
-        let expr = crate::parser::build("(get [1 2 3] 1)").expect("program should build");
+        let expr = crate::parser::build("(get 1 [1 2 3])").expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
         let main_start = wat
@@ -8442,7 +8480,7 @@ fn"#;
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
-        let expr = crate::parser::build("(get [[]] 0)").expect("program should build");
+        let expr = crate::parser::build("(get 0 [[]])").expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
         let main_start = wat
@@ -8581,8 +8619,8 @@ fn"#;
 (let f (lambda x (+ x 1)))
 (let pair {xs [3 4]})
 (let fs {f (lambda x (* x 2))})
-(+ (get (fst pair) 1)
-   (get (snd pair) 0)
+(+ (get 1 (fst pair))
+   (get 0 (snd pair))
    ((fst fs) 4)
    ((snd fs) 4))"#;
         assert_eq!(run_program_output_with_std_and_opts(source, false), "18");
@@ -8591,7 +8629,7 @@ fn"#;
 
     #[test]
     fn test_wat_top_level_scalar_vector_get_uses_borrowed_global_cache_path() {
-        let expr = crate::parser::build("(do (let xs [1 2 3]) (let f (lambda () (get xs 1))) (f))")
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (let f (lambda () (get 1 xs))) (f))")
             .expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
         let main_start = wat
@@ -8619,7 +8657,7 @@ fn"#;
               (mut i 0)
               (mut total 0)
               (while (< i (length xs)) (do
-                (alter! total (+ total (length (get xs i))))
+                (alter! total (+ total (length (get i xs))))
                 (alter! i (+ i 1))))
               total)))
             (total-length))"#;
@@ -8819,11 +8857,11 @@ fn"#;
         let source = r#"(do
             (let update! (lambda model (do
               (let {xs ignored} model)
-              (set! xs 0 9)
+              (set! 0 9 xs)
               nil)))
             (let model {[1 2] [3]})
             (update! model)
-            (get (fst model) 0))"#;
+            (get 0 (fst model)))"#;
         assert_eq!(run_program_output(source), "9");
     }
 
@@ -8859,7 +8897,7 @@ fn"#;
     #[test]
     fn test_wat_top_level_scalar_vector_set_avoids_per_access_retain() {
         let expr = crate::parser::build(
-            "(do (let xs [1 2 3]) (let f! (lambda () (do (set! xs 1 9) (get xs 1)))) (f!))",
+            "(do (let xs [1 2 3]) (let f! (lambda () (do (set! 1 9 xs) (get 1 xs)))) (f!))",
         )
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat(&expr).expect("program should compile");
@@ -8883,12 +8921,12 @@ fn"#;
                   (let xs [])
                   (mut i 0)
                   (while (< i n) (do
-                    (set! xs (length xs) 0)
+                    (set! (length xs) 0 xs)
                     (alter! i (+ i 1))))
                   xs)))
                 (let xs (make-ints 3))
-                (set! xs 1 9)
-                (get xs 1))"#,
+                (set! 1 9 xs)
+                (get 1 xs))"#,
         )
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
@@ -8910,8 +8948,8 @@ fn"#;
         let expr = crate::parser::build(
             r#"(do
                 (let xs [1 2 3])
-                (set! xs 1 9)
-                (get xs 1))"#,
+                (set! 1 9 xs)
+                (get 1 xs))"#,
         )
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
@@ -8937,7 +8975,7 @@ fn"#;
     #[test]
     fn test_top_level_value_after_callback_capture_is_not_eagerly_cached() {
         let source = r#"(let xs [])
-((lambda () (push! xs 1)))
+((lambda () (push! 1 xs)))
 (let n (length xs))
 n"#;
         assert_eq!(run_program_output_with_std_and_opts(source, false), "1");
@@ -8965,10 +9003,10 @@ n"#;
                 (let xs [])
                 (mut i 0)
                 (while (<= i 10) (do
-                  (set! xs (length xs) 1)
+                  (set! (length xs) 1 xs)
                   (alter! i (+ i 1))))
-                (set! xs 3 0)
-                (get xs 3))"#,
+                (set! 3 0 xs)
+                (get 3 xs))"#,
         )
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
@@ -8997,16 +9035,16 @@ n"#;
 (mut i 0)
 (while (< i 130)
   (do
-    (set! filled (length filled) 7)
+    (set! (length filled) 7 filled)
     (alter! i (+ i 1))))
 (let zeroed [])
 (mut j 0)
 (while (< j 130)
   (do
-    (set! zeroed (length zeroed) 0)
+    (set! (length zeroed) 0 zeroed)
     (alter! j (+ j 1))))
-{(+ (get filled 0) (get filled 1) (get filled 64) (get filled 129))
- (+ (get zeroed 0) (get zeroed 1) (get zeroed 64) (get zeroed 129))}
+{(+ (get 0 filled) (get 1 filled) (get 64 filled) (get 129 filled))
+ (+ (get 0 zeroed) (get 1 zeroed) (get 64 zeroed) (get 129 zeroed))}
 "#;
         assert_eq!(run_program_output(source), "{ 28 0 }");
     }
@@ -9102,7 +9140,7 @@ n"#;
                     (mut acc 0)
                     (while (< i (length xs))
                       (do
-                        (alter! acc (+ acc (get xs i)))
+                        (alter! acc (+ acc (get i xs)))
                         (alter! i (+ i 1))))
                     acc)"#,
         )
@@ -9132,7 +9170,7 @@ n"#;
         let expr = crate::parser::build(
             r#"(do
                     (let idx (lambda size x y (+ x (* y size))))
-                    (let read-at (lambda board size x y (get board (idx size x y))))
+                    (let read-at (lambda board size x y (get (idx size x y) board)))
                     (read-at [1 2 3 4] 2 1 1))"#,
         )
         .expect("program should build");
@@ -9168,7 +9206,7 @@ n"#;
                         (do
                           (let out [])
                           (mut counter 1)
-                          (push! out (Counter->Char counter))
+                          (push! (Counter->Char counter) out)
                           out)))
                     (encode [1]))"#,
         )
@@ -9239,7 +9277,7 @@ n"#;
                     (mut acc 0)
                     (while (< i (length xs))
                       (do
-                        (alter! acc (+ acc (get xs i)))
+                        (alter! acc (+ acc (get i xs)))
                         (alter! i (+ i 1))))
                     acc)"#,
         )
@@ -9267,7 +9305,7 @@ n"#;
                 (mut acc 0)
                 (while (< i (length xs))
                   (do
-                    (alter! acc (+ acc (get xs i)))
+                    (alter! acc (+ acc (get i xs)))
                     (alter! i (+ i 1))))
                 acc)"#,
         );
@@ -9454,8 +9492,7 @@ n"#;
         let rev_wat = &wat[rev_start..];
 
         assert!(
-            rev_wat.contains("(loop $que_tail_recur")
-                && rev_wat.contains("br $que_tail_recur"),
+            rev_wat.contains("(loop $que_tail_recur") && rev_wat.contains("br $que_tail_recur"),
             "do-wrapped direct self recursion should compile to a local loop, got:\n{}",
             rev_wat
         );
@@ -9518,15 +9555,15 @@ n"#;
         let output = run_program_output_unlocked(
             r#"(do
                 (letrec expand-token!
-                  (lambda (out token merge-left merge-right)
+                  (lambda (token merge-left merge-right out)
                     (if (< token 256)
-                        (set! out (length out) token)
+                        (set! (length out) token out)
                         (do
                           (let i (- token 256))
-                          (expand-token! out (get merge-left i) merge-left merge-right)
-                          (expand-token! out (get merge-right i) merge-left merge-right)))))
+                          (expand-token! (get i merge-left) merge-left merge-right out)
+                          (expand-token! (get i merge-right) merge-left merge-right out)))))
                 (let out [0])
-                (expand-token! out 256 [65] [66])
+                (expand-token! 256 [65] [66] out)
                 out)"#,
         );
         assert_eq!(output, "[0 65 66]");
@@ -9553,18 +9590,18 @@ n"#;
     fn test_runtime_impure_branch_tuple_return_destructure_preserves_effects() {
         let result = run_program_output(
             r#"(do
-                (let choose! (lambda xs flag
+                (let choose! (lambda flag xs
                   (if flag
                       { 1 2 }
                       (do
-                        (set! xs 0 9)
-                        { 3 (get xs 0) }))))
+                        (set! 0 9 xs)
+                        { 3 (get 0 xs) }))))
                 (let use-choice! (lambda flag (do
                   (let xs [0])
-                  (let result (choose! xs flag))
+                  (let result (choose! flag xs))
                   (let a (fst result))
                   (let b (snd result))
-                  (+ a b (get xs 0)))))
+                  (+ a b (get 0 xs)))))
                 (+ (use-choice! true) (use-choice! false)))"#,
         );
         assert_eq!(result, "24");
@@ -9714,7 +9751,7 @@ n"#;
 
     #[test]
     fn test_wat_scalar_set_on_materialized_local_uses_materialized_scalar_set_runtime() {
-        let expr = crate::parser::build("((lambda (do (let xs [1]) (set! xs 0 2) xs)))")
+        let expr = crate::parser::build("((lambda (do (let xs [1]) (set! 0 2 xs) xs)))")
             .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
@@ -9733,7 +9770,7 @@ n"#;
 
     #[test]
     fn test_wat_dynamic_scalar_set_emits_direct_store_fast_branch() {
-        let expr = crate::parser::build("(do (let xs [1 2 3]) (mut i 1) (set! xs i 9) xs)")
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (mut i 1) (set! i 9 xs) xs)")
             .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
@@ -9771,7 +9808,7 @@ n"#;
                 (mut i 0)
                 (while (< i (length xs))
                   (do
-                    (set! xs i (+ (get xs i) 1))
+                    (set! i (+ (get i xs) 1) xs)
                     (alter! i (+ i 1))))
                 xs)))",
         )
@@ -9825,7 +9862,7 @@ n"#;
                 (mut total 0)
                 (while (< i (length xs))
                   (do
-                    (alter! total (+ total (length (get xs i))))
+                    (alter! total (+ total (length (get i xs))))
                     (alter! i (+ i 1))))
                 total)))"#;
         let expr = crate::parser::build(source).expect("program should build");
@@ -9874,8 +9911,8 @@ n"#;
                 (mut i 0)
                 (while (< i (length xs))
                   (do
-                    (length (get xs i))
-                    (set! alias i "changed")
+                    (length (get i xs))
+                    (set! i "changed" alias)
                     (alter! i (+ i 1))))
                 xs)))"#,
         )
@@ -9911,7 +9948,7 @@ n"#;
                 (mut i 0)
                 (while (< i n)
                   (do
-                    (set! xs i (+ (get xs i) 1))
+                    (set! i (+ (get i xs) 1) xs)
                     (alter! i (+ i 1))))
                 xs)))",
         )
@@ -9947,8 +9984,8 @@ n"#;
                 (let n (length xs))
                 (mut i 0)
                 (while (< i n) (do
-                  (set! xs i 2)
-                  (set! xs (length xs) 9)
+                  (set! i 2 xs)
+                  (set! (length xs) 9 xs)
                   (alter! i (+ i 1))))
                 xs)"#,
         );
@@ -9967,7 +10004,7 @@ n"#;
                   (mut i 0)
                   (while (< i 32)
                     (do
-                      (set! xs i (+ (get xs i) 1))
+                      (set! i (+ (get i xs) 1) xs)
                       (alter! i (+ i 1))))
                   xs)))
              (bump! [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16
@@ -10029,7 +10066,7 @@ n"#;
                   (mut i 0)
                   (while (<= i 32)
                     (do
-                      (set! xs i 1)
+                      (set! i 1 xs)
                       (alter! i (+ i 1))))
                   xs)))
               (fill))",
@@ -10074,8 +10111,8 @@ n"#;
         let expr = crate::parser::build(
             "(let fill! (lambda (xs)
                 (do
-                  (set! xs 0 1)
-                  (set! xs 1 2)
+                  (set! 0 1 xs)
+                  (set! 1 2 xs)
                   xs)))
              fill!",
         )
@@ -10114,8 +10151,8 @@ n"#;
         let expr = crate::parser::build(
             "(let fill! (lambda (xs)
                 (do
-                  (set! xs 0 1)
-                  (set! xs 1 2)
+                  (set! 0 1 xs)
+                  (set! 1 2 xs)
                   xs)))
              fill!",
         )
@@ -10166,12 +10203,12 @@ n"#;
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
         let expr = crate::parser::build(
-            "(let fill! (lambda (xs choose)
+            "(let fill! (lambda (choose xs)
                 (if choose
                     (do
-                      (set! xs 0 1)
-                      (set! xs 1 2)
-                      (+ (get xs 0) (get xs 1)))
+                      (set! 0 1 xs)
+                      (set! 1 2 xs)
+                      (+ (get 0 xs) (get 1 xs)))
                     0)))
              fill!",
         )
@@ -10227,13 +10264,13 @@ n"#;
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
         let source = r#"
-(letrec fill! (lambda (xs n)
+(letrec fill! (lambda (n xs)
   (if (= n 0)
-      (get xs 0)
+      (get 0 xs)
       (do
-        (set! xs 0 n)
-        (fill! xs (- n 1))))))
-(fill! [0] 3)
+        (set! 0 n xs)
+        (fill! (- n 1) xs)))))
+(fill! 3 [0])
 "#;
         let wat = compile_std_program_to_wat(source, true);
         let public = named_wat_function(&wat, "v_fill_bang_");
@@ -10264,13 +10301,13 @@ n"#;
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
         let source = r#"
-(letrec append-n! (lambda (xs n)
+(letrec append-n! (lambda (n xs)
   (if (= n 0)
       xs
       (do
-        (push! xs n)
-        (append-n! xs (- n 1))))))
-(append-n! [] 3)
+        (push! n xs)
+        (append-n! (- n 1) xs)))))
+(append-n! 3 [])
 "#;
         let wat = compile_std_program_to_wat(source, true);
         let public = named_wat_function(&wat, "v_append_dash_n_bang_");
@@ -10301,12 +10338,12 @@ n"#;
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let _tco = ScopedEnvVar::set("QUE_TCO", "aggressive");
         let source = r#"
-(letrec consume! (lambda (xs n)
+(letrec consume! (lambda (n xs)
   (if (= n 0)
       0
       (do
-        (set! xs 0 n)
-        (consume! (cdr xs) (- n 1))))))
+        (set! 0 n xs)
+        (consume! (- n 1) (cdr xs))))))
 consume!
 "#;
         let wat = compile_std_program_to_wat(source, true);
@@ -10327,7 +10364,7 @@ consume!
 (let replace-after-shrink! (lambda xs
   (do
     (shrink xs)
-    (set! xs 1 9)
+    (set! 1 9 xs)
     xs)))
 (replace-after-shrink! [1 2])
 "#;
@@ -10360,7 +10397,7 @@ consume!
         let result = run_program_output_unlocked(
             "(let fill! (lambda (xs)
                 (if true
-                    (do (set! xs 0 1) (set! xs 1 2) (length xs))
+                    (do (set! 0 1 xs) (set! 1 2 xs) (length xs))
                     0)))
              (fill! [])",
         );
@@ -10378,9 +10415,9 @@ consume!
             "(let fill! (lambda (xs)
                 (if true
                     (do
-                      (set! xs 0 1)
-                      (set! xs 1 2)
-                      (+ (get xs 0) (get xs 1)))
+                      (set! 0 1 xs)
+                      (set! 1 2 xs)
+                      (+ (get 0 xs) (get 1 xs)))
                     0)))
              (let base [9 0 0 9])
              (let view (slice 1 3 base))
@@ -10398,7 +10435,7 @@ consume!
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let result = run_program_output_unlocked(
-            "(let fill! (lambda (xs) (do (set! xs 0 1) (set! xs 1 2) xs)))
+            "(let fill! (lambda (xs) (do (set! 0 1 xs) (set! 1 2 xs) xs)))
              (fill! [])",
         );
 
@@ -10408,7 +10445,7 @@ consume!
     #[test]
     fn test_runtime_dynamic_scalar_set_keeps_append_at_length_semantics() {
         let result = run_program_output(
-            "((lambda (do (let xs [1 2]) (mut i (length xs)) (set! xs i 3) xs)))",
+            "((lambda (do (let xs [1 2]) (mut i (length xs)) (set! i 3 xs) xs)))",
         );
 
         assert_eq!(result, "[1 2 3]");
@@ -10421,10 +10458,10 @@ consume!
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
         let result = run_program_output_unlocked(
-            "(let append-at! (lambda (xs i value) (do (set! xs i value) xs)))
+            "(let append-at! (lambda (i value xs) (do (set! i value xs) xs)))
              (let xs [])
-             (append-at! xs (length xs) 1)
-             (append-at! xs (length xs) 2)
+             (append-at! (length xs) 1 xs)
+             (append-at! (length xs) 2 xs)
              xs",
         );
 
@@ -10441,11 +10478,11 @@ consume!
             r#"
 (let parse2 (lambda (raw)
   (let parts (split "\"value\":" raw))
-  (let value (get parts 1))
+  (let value (get 1 parts))
   (mut i 0)
   (mut result 0)
-  (while (and (< i (length value)) (digit? (get value i)))
-    (alter! result (+ (* result 10) (as (-# (get value i) '0') Int)))
+  (while (and (< i (length value)) (digit? (get i value)))
+    (alter! result (+ (* result 10) (as (-# (get i value) '0') Int)))
     (alter! i (+ i 1)))
   (+ result (* (length parts) 0))))
 (parse2 "{\"value\":21}")
@@ -10459,7 +10496,7 @@ consume!
     #[test]
     fn test_wat_scalar_set_on_slice_keeps_materializing_runtime() {
         let expr = crate::parser::build(
-            "((lambda (do (let xs [1 2]) (let ys (cdr xs 1)) (set! ys 0 3) ys)))",
+            "((lambda (do (let xs [1 2]) (let ys (cdr 1 xs)) (set! 0 3 ys) ys)))",
         )
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
@@ -10588,10 +10625,10 @@ consume!
                 (do
                   (let remaining [n])
                   (letrec fill! (lambda out
-                    (if (> (get remaining 0) 0)
+                    (if (> (get 0 remaining) 0)
                         (do
-                          (set! out (length out) (get remaining 0))
-                          (set! remaining 0 (- (get remaining 0) 1))
+                          (set! (length out) (get 0 remaining) out)
+                          (set! 0 (- (get 0 remaining) 1) remaining)
                           (fill! out))
                         out)))
                   (fill! []))))
@@ -10810,7 +10847,7 @@ consume!
         // take the ordinary growth path, without changing observable results.
         assert_eq!(
             run_program_output_unlocked(
-                "(do (let xs []) (capacity! xs 1) (push! xs 10) (push! xs 20) (push! xs 30) xs)",
+                "(do (let xs []) (capacity! 1 xs) (push! 10 xs) (push! 20 xs) (push! 30 xs) xs)",
             ),
             "[10 20 30]"
         );
@@ -10820,7 +10857,7 @@ consume!
         // on the general path rather than using the append specialization.
         assert_eq!(
             run_program_output_unlocked(
-                "(do (let xs []) (push! xs 1) (set! xs (length xs) (block (push! xs 2) 3)) xs)",
+                "(do (let xs []) (push! 1 xs) (set! (length xs) (block (push! 2 xs) 3) xs) xs)",
             ),
             "[1 3]"
         );
@@ -10831,7 +10868,7 @@ consume!
         let _lock = runtime_exec_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let expr = crate::parser::build("(do (let xs [1 2 3]) (capacity! xs 1) (push! xs 4) xs)")
+        let expr = crate::parser::build("(do (let xs [1 2 3]) (capacity! 1 xs) (push! 4 xs) xs)")
             .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
             .expect("program should compile");
@@ -10849,12 +10886,12 @@ consume!
             "capacity! runtime helper should be emitted, got:\n{wat}"
         );
         assert_eq!(
-            run_program_output_unlocked("(do (let xs []) (capacity! xs 32))"),
+            run_program_output_unlocked("(do (let xs []) (capacity! 32 xs))"),
             "0",
             "capacity! is a mutation operation and must return the unit value"
         );
         assert_eq!(
-            run_program_output_unlocked("(do (let xs [1 2 3]) (capacity! xs 1) (push! xs 4) xs)",),
+            run_program_output_unlocked("(do (let xs [1 2 3]) (capacity! 1 xs) (push! 4 xs) xs)",),
             "[1 2 3 4]",
             "capacity! must still resize the original vector"
         );
@@ -10868,7 +10905,7 @@ consume!
     #[test]
     fn test_wat_set_releases_fresh_managed_call_rhs_after_vector_retain() {
         let expr = crate::parser::build(
-            "(do (let make (lambda a (lambda x (+ x a)))) (let xs []) (set! xs 0 (make 1)) 0)",
+            "(do (let make (lambda a (lambda x (+ x a)))) (let xs []) (set! 0 (make 1) xs) 0)",
         )
         .expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
@@ -10966,7 +11003,7 @@ consume!
         let program = r#"(do
             (let xs [])
 (let f (lambda () (length xs)))
-(push! xs f)
+(push! f xs)
 0)"#;
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
@@ -10990,7 +11027,7 @@ consume!
         let expr = crate::parser::build(
             r#"(do
 (let xs [(lambda () 0)])
-(set! xs 0 (lambda () (length xs)))
+(set! 0 (lambda () (length xs)) xs)
 0)"#,
         )
         .expect("program should build");
@@ -11022,10 +11059,10 @@ consume!
     #[test]
     fn test_wat_rejects_wrapper_mutator_that_stores_closure_into_captured_vector() {
         let program = r#"(do
-(let save! (lambda xs f (push! xs f)))
+(let save! (lambda f xs (push! f xs)))
 (let xs [])
 (let f (lambda () (length xs)))
-(save! xs f)
+(save! f xs)
 0)"#;
         let std_ast = crate::baked::load_ast();
         let wrapped = match std_ast {
@@ -11051,34 +11088,34 @@ consume!
 (let int box)
 (let dec box)
 (let bool box)
-(let set-box! (lambda vrbl x (set! vrbl 0 x)))
-(let =! (lambda vrbl x (set! vrbl 0 x)))
-(let &alter! (lambda vrbl x (set! vrbl 0 x)))
+(let set-box! (lambda x vrbl (set! 0 x vrbl)))
+(let =! (lambda x vrbl (set! 0 x vrbl)))
+(let &alter! (lambda x vrbl (set! 0 x vrbl)))
 (let make-ref (lambda value [value]))
-(let &get (lambda vrbl (get vrbl 0)))
+(let &get (lambda vrbl (get 0 vrbl)))
 
-(let boole-set! (lambda vrbl x (set! vrbl 0 (if x true false))))
+(let boole-set! (lambda x vrbl (set! 0 (if x true false) vrbl)))
 (let boole-eqv? (lambda a b (=? (get a) (get b))))
 (let true? (lambda vrbl (if (get vrbl) true false)))
 (let false? (lambda vrbl (if (get vrbl) false true)))
-(let += (lambda vrbl n (&alter! vrbl (+ (get vrbl) n))))
-(let -= (lambda vrbl n (&alter! vrbl (- (get vrbl) n))))
-(let *= (lambda vrbl n (&alter! vrbl (* (get vrbl) n))))
-(let /= (lambda vrbl n (&alter! vrbl (/ (get vrbl) n))))
-(let ++ (lambda vrbl (&alter! vrbl (+ (get vrbl) 1))))
-(let -- (lambda vrbl (&alter! vrbl (- (get vrbl) 1))))
-(let ** (lambda vrbl (&alter! vrbl (* (get vrbl) (get vrbl)))))
+(let += (lambda n vrbl (&alter! (+ (get vrbl) n) vrbl)))
+(let -= (lambda n vrbl (&alter! (- (get vrbl) n) vrbl)))
+(let *= (lambda n vrbl (&alter! (* (get vrbl) n) vrbl)))
+(let /= (lambda n vrbl (&alter! (/ (get vrbl) n) vrbl)))
+(let ++ (lambda vrbl (&alter! (+ (get vrbl) 1) vrbl)))
+(let -- (lambda vrbl (&alter! (- (get vrbl) 1) vrbl)))
+(let ** (lambda vrbl (&alter! (* (get vrbl) (get vrbl)) vrbl)))
 
 
-(let +=. (lambda vrbl n (&alter! vrbl (+. (get vrbl) n))))
-(let -=. (lambda vrbl n (&alter! vrbl (-. (get vrbl) n))))
-(let *=. (lambda vrbl n (&alter! vrbl (*. (get vrbl) n))))
-(let /=. (lambda vrbl n (&alter! vrbl (/. (get vrbl) n))))
-(let ++. (lambda vrbl (&alter! vrbl (+. (get vrbl) 1.0))))
-(let --. (lambda vrbl (&alter! vrbl (-. (get vrbl) 1.0))))
-(let **. (lambda vrbl (&alter! vrbl (*. (get vrbl) (get vrbl)))))
+(let +=. (lambda n vrbl (&alter! (+. (get vrbl) n) vrbl)))
+(let -=. (lambda n vrbl (&alter! (-. (get vrbl) n) vrbl)))
+(let *=. (lambda n vrbl (&alter! (*. (get vrbl) n) vrbl)))
+(let /=. (lambda n vrbl (&alter! (/. (get vrbl) n) vrbl)))
+(let ++. (lambda vrbl (&alter! (+. (get vrbl) 1.0) vrbl)))
+(let --. (lambda vrbl (&alter! (-. (get vrbl) 1.0) vrbl)))
+(let **. (lambda vrbl (&alter! (*. (get vrbl) (get vrbl)) vrbl)))
 
-    (let fn (lambda a b (do (let y [a b]) (set! y (length y) 10) y)))
+    (let fn (lambda a b (do (let y [a b]) (set! (length y) 10 y) y)))
     (let outer (lambda z (do (let g (fn 1 2)) (length g))))
     (mut bi0 0)
     (while (< bi0 500000) (do
@@ -11090,7 +11127,7 @@ consume!
       (let v [])
       (mut i 0)
       (while (< i n) (do
-        (set! v (length v) [i (+ i 1)])
+        (set! (length v) [i (+ i 1)] v)
         (alter! i (+ i 1))))
       v)))
     (mut bi1 0)
@@ -11104,7 +11141,7 @@ consume!
       (let v [])
       (mut i 0)
       (while (< i n) (do
-        (set! v (length v) i)
+        (set! (length v) i v)
         (alter! i (+ i 1))))
       v)))
     (mut bi2 0)
@@ -11120,9 +11157,9 @@ consume!
       (let xs [])
       (mut i 0)
       (while (< i n) (do
-        (set! xs (length xs) i)
+        (set! (length xs) i xs)
         (alter! i (+ i 1))))
-      (lambda idx (get xs idx)))))
+      (lambda idx (get idx xs)))))
 
     (mut bi3 0)
     (while (< bi3 500000) (do
@@ -11133,8 +11170,8 @@ consume!
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline (lambda n (do
       (let xs [n (+ n 1)])
-      (let add-base (lambda x (+ x (get xs 0))))
-      (lambda y (add-base (+ y (get xs 1)))))))
+      (let add-base (lambda x (+ x (get 0 xs))))
+      (lambda y (add-base (+ y (get 1 xs)))))))
 
     (mut bi4 0)
     (while (< bi4 400000) (do
@@ -11146,8 +11183,8 @@ consume!
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline2 (lambda n (do
       (let xs [n (+ n 1)])
-      (let add-base (lambda x (+ x (get xs 0))))
-      (lambda y (add-base (+ y (get xs 1)))))))
+      (let add-base (lambda x (+ x (get 0 xs))))
+      (lambda y (add-base (+ y (get 1 xs)))))))
 
     (mut bi5 0)
     (while (< bi5 400000) (do
@@ -11158,8 +11195,8 @@ consume!
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline3 (lambda n (do
       (let xs [n (+ n 1)])
-      (let add-base (lambda x (+ x (get xs 0))))
-      (lambda y (add-base (+ y (get xs 1)))))))
+      (let add-base (lambda x (+ x (get 0 xs))))
+      (lambda y (add-base (+ y (get 1 xs)))))))
 
     (mut bi6 0)
     (while (< bi6 400000) (do
@@ -11171,8 +11208,8 @@ consume!
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline4 (lambda n (do
       (let xs [n (+ n 1)])
-      (let add-base (lambda x (+ x (get xs 0))))
-      (lambda y (add-base (+ y (get xs 1)))))))
+      (let add-base (lambda x (+ x (get 0 xs))))
+      (lambda y (add-base (+ y (get 1 xs)))))))
 
     (mut bi7 0)
     (while (< bi7 400000) (do
@@ -11184,8 +11221,8 @@ consume!
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline5 (lambda n (do
       (let xs [n (+ n 1)])
-      (let add-base (lambda x (+ x (get xs 0))))
-      (lambda y (add-base (+ y (get xs 1)))))))
+      (let add-base (lambda x (+ x (get 0 xs))))
+      (lambda y (add-base (+ y (get 1 xs)))))))
 
     (mut bi8 0)
     (while (< bi8 400000) (do
@@ -11197,8 +11234,8 @@ consume!
     ; closure captures another closure (which captures a vector)
     (let mk-pipeline6 (lambda n (do
       (let xs [n (+ n 1)])
-      (let add-base (lambda x (+ x (get xs 0))))
-      (lambda y (add-base (+ y (get xs 1)))))))
+      (let add-base (lambda x (+ x (get 0 xs))))
+      (lambda y (add-base (+ y (get 1 xs)))))))
 
     (mut bi9 0)
     (while (< bi9 400000) (do
@@ -11212,9 +11249,9 @@ consume!
       (let rows [])
       (mut i 0)
       (while (< i n) (do
-        (set! rows (length rows) [i (+ i 1) (+ i 2)])
+        (set! (length rows) [i (+ i 1) (+ i 2)] rows)
         (alter! i (+ i 1))))
-      (lambda j (+ (get (get rows 0) 0) (get (get rows 1) 1) j)))))
+      (lambda j (+ (get 0 (get 0 rows)) (get 1 (get 1 rows)) j)))))
 
     (mut bi10 0)
     (while (< bi10 250000) (do
@@ -11225,7 +11262,7 @@ consume!
     ; same idea as your outer/fn pattern but closure-returning inner
     (let make2 (lambda a b (do
       (let y [a b])
-      (set! y (length y) 10)
+      (set! (length y) 10 y)
       (lambda k (+ (length y) k)))))
 
     (let outer2 (lambda z (do
@@ -11244,7 +11281,7 @@ consume!
       (mut i 0)
       (while (< i n) (do
         (let idx i)
-        (set! fs (length fs) (lambda x (+ x idx)))
+        (set! (length fs) (lambda x (+ x idx)) fs)
         (alter! i (+ i 1))))
       fs)))
 
@@ -11252,8 +11289,8 @@ consume!
       (integer acc 0)
       (mut i 0)
       (while (< i n) (do
-        (let f (get fs i))
-        (&alter! acc (+ (&get acc) (f 1)))
+        (let f (get i fs))
+        (&alter! (+ (&get acc) (f 1)) acc)
         (alter! i (+ i 1))))
       (get acc))))
 
@@ -11279,7 +11316,7 @@ consume!
 (let x [[]])
 (mut i 0)
 (while (< i 300000) (do
-  (set! x 0 [])
+  (set! 0 [] x)
   (alter! i (+ i 1))))
 1)"#;
         assert_eq!(
@@ -11304,7 +11341,7 @@ consume!
             (
                 r#"(let A [false (and (= 1 2) (> 3 3))]) ; => [false false] Correct
 (let B [false (or (= 1 2) (> 3 3))]) ; => [true false] Wrong
-(and (=? (get A 0) (get B 0)) (=? (get A 1) (get B 1)))"#,
+(and (=? (get 0 A) (get 0 B)) (=? (get 1 A) (get 1 B)))"#,
                 "true",
             ),
             (
@@ -11331,11 +11368,11 @@ consume!
     (if (> (length heap) 1)
       (do
         (let y (Heap/peek! heap))
-        (Heap/pop! heap max-cmp)
+        (Heap/pop! max-cmp heap)
         (let x (Heap/peek! heap))
-        (Heap/pop! heap max-cmp)
+        (Heap/pop! max-cmp heap)
         (if (!= x y)
-          (Heap/push! heap (- y x) max-cmp))
+          (Heap/push! (- y x) max-cmp heap))
         (tail-call/smash?! t))
         false)))
   (tail-call/smash?! true)
@@ -11371,7 +11408,7 @@ consume!
     (lambda xs (map Integer->String xs))
     (Vector->Set)
     (lambda all
-      (Set/difference all (|> nums (map Integer->String) (Vector->Set))))
+      (Set/difference (|> nums (map Integer->String) (Vector->Set)) all))
     (flat)
     (lambda __std_arg0 (map Chars->Integer __std_arg0)))))
 
@@ -11405,8 +11442,8 @@ consume!
                 "[2 3]",
             ),
             (
-                r#"(let flood-fill! (lambda image sr sc color (do
-    (let old (get image sr sc))
+                r#"(let flood-fill! (lambda sr sc color image (do
+    (let old (get sr sc image))
     (unless (= old color)
         (do
             (let m (length image))
@@ -11416,48 +11453,48 @@ consume!
                 (let t (last stack))
                 (pop! stack)
                 (let i (first t))
-                (let j (get t 1))
-                (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get image i j) old)) (do
-                    (set! image i j color)
-                    (push! stack [(+ i 1) j])
-                    (push! stack [(- i 1) j])
-                    (push! stack [i (+ j 1)])
-                    (push! stack [i (- j 1)])
+                (let j (get 1 t))
+                (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get i j image) old)) (do
+                    (set! i j color image)
+                    (push! [(+ i 1) j] stack)
+                    (push! [(- i 1) j] stack)
+                    (push! [i (+ j 1)] stack)
+                    (push! [i (- j 1)] stack)
                     nil))))
         nil)))))
 
 
 (let image [[1 1 1] [1 1 0] [1 0 1]])
-(flood-fill! image 1 1 2)
+(flood-fill! 1 1 2 image)
 image
 ; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#,
                 "[[2 2 2] [2 2 0] [2 0 1]]",
             ),
             (
-                r#"(let flood-fill! (lambda image sr sc color (do
-    (let old (get image sr sc))
+                r#"(let flood-fill! (lambda sr sc color image (do
+    (let old (get sr sc image))
     (unless (= old color)
         (do
             (let m (length image))
-            (let n (length (get image 0)))
+            (let n (length (get 0 image)))
             (let stack [[sr sc]])
             (while (not-empty? stack) (do
                 (let t (last stack))
                 (pop! stack)
-                (let i (get t 0))
-                (let j (get t 1))
-                (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get image i j) old)) (do
-                    (set! image i j color)
-                    (push! stack [(+ i 1) j])
-                    (push! stack [(- i 1) j])
-                    (push! stack [i (+ j 1)])
-                    (push! stack [i (- j 1)])
+                (let i (get 0 t))
+                (let j (get 1 t))
+                (if (and (>= i 0) (< i m) (>= j 0) (< j n) (= (get i j image) old)) (do
+                    (set! i j color image)
+                    (push! [(+ i 1) j] stack)
+                    (push! [(- i 1) j] stack)
+                    (push! [i (+ j 1)] stack)
+                    (push! [i (- j 1)] stack)
                     nil))))
         nil)))))
 
 
 (let image [[1 1 1] [1 1 0] [1 0 1]])
-(flood-fill! image 1 1 2)
+(flood-fill! 1 1 2 image)
 image
 ; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#,
                 "[[2 2 2] [2 2 0] [2 0 1]]",
@@ -11468,13 +11505,13 @@ image
     (do
       (let graph (map (lambda _ []) (zeroes n)))
       (for (lambda edge (do
-        (let u (get edge 0))
-        (let v (get edge 1))
-        (push! (get graph u) v)
-        (push! (get graph v) u))) edges)
+        (let u (get 0 edge))
+        (let v (get 1 edge))
+        (push! v (get u graph))
+        (push! u (get v graph)))) edges)
       (let visited (zeroes n))
       (let queue [source])
-      (set! visited source 1)
+      (set! source 1 visited)
       (boolean found false)
       (while (and (not (true? found)) (> (length queue) 0)) (do
         (let current (last queue))
@@ -11482,11 +11519,11 @@ image
         (if (= current destination)
           (&alter! found true)
           (for (lambda neighbor (do
-            (if (= (get visited neighbor) 0)
+            (if (= (get neighbor visited) 0)
               (do
-                (set! visited neighbor 1)
-                (push! queue neighbor)
-                nil)))) (get graph current)))))
+                (set! neighbor 1 visited)
+                (push! neighbor queue)
+                nil)))) (get current graph)))))
       (true? found))))))
 
 [(valid-path? 3 [[ 0 1 ] [ 1 2 ] [ 2 0 ]] 0 2) ; Should return true
@@ -11510,23 +11547,23 @@ image
   (reduce (lambda a xs (do
         (integer score 0)
         (let y (first xs))
-        (let x (get xs 1))
+        (let x (get 1 xs))
         (let visited (buckets 8))
         (let queue (Que/new [Int]))
-        (let current (get matrix y x))
-        (Set/add! visited (yx->key y x))
-        (Que/enque! queue [ y x ])
+        (let current (get y x matrix))
+        (Set/add! (yx->key y x) visited)
+        (Que/enque! [ y x ] queue)
 
         (while (Que/not-empty? queue) (do
             (let element (Que/peek queue))
             (Que/deque! queue )
             (let y (first element))
-            (let x (get element 1))
+            (let x (get 1 element))
             (neighborhood neighborhood/von-neumann y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
-                 (if (and (= (- cell (get matrix y x)) 1) (not (Set/has? key visited))) (do
-                    (if (= cell 9) (do (&alter! score  (+ (&get score) 1)) nil) (do (Que/enque! queue [ dy dx ]) nil))
-                    (Set/add! visited key)
+                 (if (and (= (- cell (get y x matrix)) 1) (not (Set/has? key visited))) (do
+                    (if (= cell 9) (do (&alter! score  (+ (&get score) 1)) nil) (do (Que/enque! [ dy dx ] queue) nil))
+                    (Set/add! key visited)
                     nil)))) matrix)))
 
         (+ a (get score)))) 0 coords))))
@@ -11536,26 +11573,26 @@ image
   (reduce (lambda a xs (do
         (integer score 0)
         (let y (first xs))
-        (let x (get xs 1))
+        (let x (get 1 xs))
         (let visited (buckets 8))
         (let queue (Que/new [Int]))
-        (let current (get matrix y x))
+        (let current (get y x matrix))
         (let root-key (yx->key y x))
-        (Table/set! visited root-key 1)
-        (Que/enque! queue [ y x ])
+        (Table/set! root-key 1 visited)
+        (Que/enque! [ y x ] queue)
         (while (Que/not-empty? queue) (do
             (let element (Que/peek queue))
             (let y (first element))
-            (let x (get element 1))
-            (if (= (get matrix y x) 9) (&alter! score (+ (&get score) (snd (get (Table/get root-key visited))))))
+            (let x (get 1 element))
+            (if (= (get y x matrix) 9) (&alter! score (+ (&get score) (snd (get (Table/get root-key visited))))))
             (Que/deque! queue)
             (neighborhood neighborhood/von-neumann y x (lambda cell dir dy dx (do
                  (let key (yx->key dy dx))
-                 (if (= (- cell (get matrix y x)) 1) (do
-                    (Que/enque! queue [ dy dx ])
+                 (if (= (- cell (get y x matrix)) 1) (do
+                    (Que/enque! [ dy dx ] queue)
                     (if (Table/has? key visited)
-                        (Table/set! visited key (+ (snd (get (Table/get root-key visited))) (snd (get (Table/get key visited)))))
-                        (Table/set! visited key (as (snd (get (Table/get root-key visited))) Int)))
+                        (Table/set! key (+ (snd (get (Table/get root-key visited))) (snd (get (Table/get key visited)))) visited)
+                        (Table/set! key (as (snd (get (Table/get root-key visited))) Int) visited))
                       nil)))) matrix)))
         (+ a (get score)))) 0 coords))))
 
@@ -11585,7 +11622,7 @@ image
 
 (let part1 (lambda input (do
   (let left (map first input))
-  (let right (map (lambda pair (get pair 1)) input))
+  (let right (map (lambda pair (get 1 pair)) input))
   (|> (zip {(sort > left) (sort > right)})
       (map (lambda pair (- (fst pair) (snd pair))))
       (map abs)
@@ -11593,7 +11630,7 @@ image
 
 (let part2 (lambda input (do
   (let left (map first input))
-  (let right (map (lambda pair (get pair 1)) input))
+  (let right (map (lambda pair (get 1 pair)) input))
   (|>
     left
     (lambda __std_arg0 (map (lambda l (* l (count (lambda r (= l r)) right))) __std_arg0))
@@ -11646,10 +11683,10 @@ image
     (integer c 0)
     (let len (length xs))
     (for (lambda x (if (<> x 0) (do
-        (set! xs (get c) x)
+        (set! (get c) x xs)
         (&alter! c (+ (&get c) 1))))) xs)
     (while (< (get c) len) (do
-        (set! xs (get c) 0)
+        (set! (get c) 0 xs)
         (&alter! c (+ (&get c) 1))))
     nil)))
 
@@ -11664,14 +11701,14 @@ xs"#,
     (loop/range/exclusive i 0 n (do
         (integer temp 0)
         (loop/range/exclusive j i n (do
-            (&alter! temp (+ (&get temp) (get xs j)))
+            (&alter! temp (+ (&get temp) (get j xs)))
             (&alter! out (+ (&get out) (get temp)))))))
     (&get out))))
 
 (let expert-sub-array-sum (lambda xs (do
     (let n (length xs))
     (integer out 0)
-    (loop/range/exclusive i 0 n (&alter! out (+ (&get out) (* (get xs i) (+ i 1) (- n i)))))
+    (loop/range/exclusive i 0 n (&alter! out (+ (&get out) (* (get i xs) (+ i 1) (- n i)))))
     (&get out))))
 
 (let xs [1 4 5 3 2])
@@ -11700,7 +11737,7 @@ xs"#,
             (
                 r#"(let xs [ 1 2 3 ])
 (let copied (copy xs))
-(set! copied 0 1000)
+(set! 0 1000 copied)
 [ xs copied ]"#,
                 "[[1 2 3] [1000 2 3]]",
             ),
@@ -11709,8 +11746,8 @@ xs"#,
     (let odd [])
     (let even [])
     (let out [])
-    (loop/range/exclusive i 0 (length nums) (push! (if (even? i) even odd) (get nums i)))
-    (loop/range/exclusive j 0 (length even) (do (push! out (get even j)) (push! out (get odd j))))
+    (loop/range/exclusive i 0 (length nums) (push! (get i nums) (if (even? i) even odd)))
+    (loop/range/exclusive j 0 (length even) (do (push! (get j even) out) (push! (get j odd) out)))
     out))))
 
 [
@@ -11735,7 +11772,7 @@ D:=,=,=,+,=,=,=,+,=,=")
 (let parse (lambda input (do
 (|> input (split/lines) (lambda __std_arg0 (map (lambda x (do
     (let y (split/commas x))
-    (set! y 0 (get (String->Vector ':' (get y 0)) 1))
+    (set! 0 (get 1 (String->Vector ':' (get 0 y))) y)
     (flat y))) __std_arg0)))
 )))
 
@@ -11749,8 +11786,8 @@ D:=,=,=,+,=,=,=,+,=,=")
     (|> xs (lambda __std_arg0 (map (lambda x (|> x (lambda __std_arg0 (reduce app [0] __std_arg0)))) __std_arg0))
     (lambda __std_arg0 (map sum __std_arg0))
     (lambda __std_arg0 (map/i (lambda x i [i (+ x 100)]) __std_arg0))
-    (lambda rows (sort (lambda a b (> (get a 1) (get b 1))) rows))
-    (lambda __std_arg0 (map (lambda [i] (get letters i)) __std_arg0))))))
+    (lambda rows (sort (lambda a b (> (get 1 a) (get 1 b))) rows))
+    (lambda __std_arg0 (map (lambda [i] (get i letters)) __std_arg0))))))
 (|> input (parse) (part1!))"#,
                 "BDCA",
             ),
@@ -11760,8 +11797,8 @@ D:=,=,=,+,=,=,=,+,=,=")
     (let s [])
 
     (for (lambda x (do
-        (push! s x)
-        (Que/enque! q x))) str)
+        (push! x s)
+        (Que/enque! x q))) str)
 
     (let p? [true])
 
@@ -11782,7 +11819,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"(let palindrome? (lambda str (do
     (let p? [true])
-    (loop/range/exclusive i 0 (/ (length str) 2) (if (not (=# (get str i) (get str (- (length str) i 1)))) (&alter! p? false)))
+    (loop/range/exclusive i 0 (/ (length str) 2) (if (not (=# (get i str) (get (- (length str) i 1) str))) (&alter! p? false)))
     (true? p?))))
 [(palindrome? "racecar") (palindrome? "yes")]"#,
                 "[true false]",
@@ -11793,12 +11830,12 @@ D:=,=,=,+,=,=,=,+,=,=")
                 "[true false]",
             ),
             (
-                r#"(letrec rev! (lambda ys xs
+                r#"(letrec rev! (lambda xs ys
     (if (empty? xs)
          ys
-        (rev! (do (push! ys (at xs -1)) ys) (drop/last 1 xs)))))
+        (rev! (drop/last 1 xs) (do (push! (at -1 xs) ys) ys)))))
 ;
-(rev! [] [ 1 2 3 4 5 ])"#,
+(rev! [ 1 2 3 4 5 ] [])"#,
                 "[5 4 3 2 1]",
             ),
             (
@@ -11820,10 +11857,10 @@ D:=,=,=,+,=,=,=,+,=,=")
     (integer i 0)
     (integer j (- (length xs) 1))
     (while (<> (get i) (get j)) (do
-        (if (> (get xs (get i)) (get xs (get j))) (do
-            (&alter! best (max (* (- (get j) (get i)) (get xs (get j))) (get best)))
+        (if (> (get (get i) xs) (get (get j) xs)) (do
+            (&alter! best (max (* (- (get j) (get i)) (get (get j) xs)) (get best)))
             (&alter! j (- (&get j) 1))) (do
-            (&alter! best (max (* (- (get j) (get i)) (get xs (get i))) (get best)))
+            (&alter! best (max (* (- (get j) (get i)) (get (get i) xs)) (get best)))
             (&alter! i (+ (&get i) 1))))))
     (get best))))
 
@@ -11836,7 +11873,7 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"
 (letrec factorial (lambda n total
-    (if (= (get n 0) 0)
+    (if (= (get 0 n) 0)
         total
         (factorial (BigInt/sub n [ 1 ]) (BigInt/mul total n)))))
 
@@ -11918,15 +11955,15 @@ D:=,=,=,+,=,=,=,+,=,=")
   (loop/range/exclusive i 0 len (do
     (if (even? i)
       (do
-        (let color (get rings i))
-        (let rod-char (get rings (+ i 1)))
-        (let rod (get rods (- (Char->Digit rod-char) 0)))
+        (let color (get i rings))
+        (let rod-char (get (+ i 1) rings))
+        (let rod (get (- (Char->Digit rod-char) 0) rods))
         (cond
-          (=# color 'R') (set! rod 0 true)
-          (=# color 'G') (set! rod 1 true)
-          (=# color 'B') (set! rod 2 true)
+          (=# color 'R') (set! 0 true rod)
+          (=# color 'G') (set! 1 true rod)
+          (=# color 'B') (set! 2 true rod)
           nil)))))
-  (count (lambda rod (and (get rod 0) (get rod 1) (get rod 2))) rods))))
+  (count (lambda rod (and (get 0 rod) (get 1 rod) (get 2 rod))) rods))))
 
 ; Example usage
 [(count-points "B0B6G0R6R0R6G9") ; Should return 1
@@ -11938,7 +11975,7 @@ D:=,=,=,+,=,=,=,+,=,=")
                 r#"(let part1 (lambda input (|> input
     (lambda xs (cons xs [(first input)]))
     (lambda __std_arg0 (window 2 __std_arg0))
-    (lambda __std_arg0 (filter (lambda x (= (get x 0) (get x 1))) __std_arg0))
+    (lambda __std_arg0 (filter (lambda x (= (get 0 x) (get 1 x))) __std_arg0))
     (lambda __std_arg0 (map first __std_arg0))
     (sum))))
 (let part2 (lambda input (|> input
@@ -11969,9 +12006,9 @@ D:=,=,=,+,=,=,=,+,=,=")
     (integer index 0)
     (boolean escaped? false)
     (while (false? escaped?) (do
-        (set! input (get index) (+ (get pointer) 1))
+        (set! (get index) (+ (get pointer) 1) input)
         (&alter! index (+ (&get index) (get pointer)))
-        (if (in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
+        (if (in-bounds? (get index) input) (&alter! pointer (get (get index) input)) (&alter! escaped? true))
         (&alter! steps (+ (&get steps) 1))))
     (get steps))))
 
@@ -11982,9 +12019,9 @@ D:=,=,=,+,=,=,=,+,=,=")
     (integer index 0)
     (boolean escaped? false)
     (while (false? escaped?) (do
-        (set! input (get index) (+ (get pointer) (if (>= (get pointer) 3) -1 1)))
+        (set! (get index) (+ (get pointer) (if (>= (get pointer) 3) -1 1)) input)
         (&alter! index (+ (&get index) (get pointer)))
-        (if (in-bounds? input (get index)) (&alter! pointer (get input (get index))) (&alter! escaped? true))
+        (if (in-bounds? (get index) input) (&alter! pointer (get (get index) input)) (&alter! escaped? true))
         (&alter! steps (+ (&get steps) 1))))
     (get steps))))
 
@@ -11996,14 +12033,14 @@ D:=,=,=,+,=,=,=,+,=,=")
 ; Kadane's algorithm: returns maximum subarray sum for a vector of Ints
 (let max-subarray (lambda xs (do
   (let step (lambda acc x (do
-    (let current (max x (+ (get acc 0) x)))
-    (let best (max (get acc 1) current))
+    (let current (max x (+ (get 0 acc) x)))
+    (let best (max (get 1 acc) current))
     [ current best ])))
 
-  (let init [ (get xs 0) (get xs 0) ]) ; start with first element as current and best
+  (let init [ (get 0 xs) (get 0 xs) ]) ; start with first element as current and best
   (let rest (drop/first 1 xs))
   (let result (reduce step init rest))
-  (get result 1))))
+  (get 1 result))))
 
 ; Examples
 [
@@ -12017,8 +12054,8 @@ D:=,=,=,+,=,=,=,+,=,=")
                 r#"(let ints (lambda xs (map Integer->String xs)))
 ; examples
 [
- (interleave [ "a" "b" "c" ] (ints [ 1 2 3 ])) ; [ "a" 1 "b" 2 "c" 3 ]
- (interleave (ints [ 1 2 ]) [ "x" "y" "z" ])  ; [ 1 "x" 2 "y" "z" ]
+ (interleave (ints [ 1 2 3 ]) [ "a" "b" "c" ]) ; [ "a" 1 "b" 2 "c" 3 ]
+ (interleave [ "x" "y" "z" ] (ints [ 1 2 ]))  ; [ 1 "x" 2 "y" "z" ]
 ]"#,
                 "[[\"a\" \"1\" \"b\" \"2\" \"c\" \"3\"] [\"1\" \"x\" \"2\" \"y\"]]",
             ),
@@ -12032,19 +12069,19 @@ D:=,=,=,+,=,=,=,+,=,=")
                 r#"
 (let N 9)
 (let matrix (|> (zeroes N) (lambda __std_arg0 (map (lambda x (map (lambda _ 0) (zeroes N))) __std_arg0))))
-(let add-glider! (lambda matrix y x (do
-  (set! (get matrix (+ y 2)) (+ x 1) 1)
-  (set! (get matrix (+ y 2)) (+ x 2) 1)
-  (set! (get matrix (+ y 2)) (+ x 3) 1)
-  (set! (get matrix (+ y 1)) (+ x 3) 1)
-  (set! (get matrix (+ y 0)) (+ x 2) 1)
+(let add-glider! (lambda y x matrix (do
+  (set! (+ x 1) 1 (get (+ y 2) matrix))
+  (set! (+ x 2) 1 (get (+ y 2) matrix))
+  (set! (+ x 3) 1 (get (+ y 2) matrix))
+  (set! (+ x 3) 1 (get (+ y 1) matrix))
+  (set! (+ x 2) 1 (get (+ y 0) matrix))
   )))
-(add-glider! matrix 0 0)
+(add-glider! 0 0 matrix)
 
-; (set! (get matrix 6) 2 1)
-; (set! (get matrix 5) 4 1)
-; (set! (get matrix 5) 3 1)
-; (set! (get matrix 3) 3 1)
+; (set! 6 2 1 matrix)
+; (set! 5 4 1 matrix)
+; (set! 5 3 1 matrix)
+; (set! 3 3 1 matrix)
 
 (let gof (lambda matrix (do
   (map/i (lambda arr y (do
@@ -12053,9 +12090,10 @@ D:=,=,=,+,=,=,=,+,=,=")
         (reduce + 0
           (map
             (lambda dir
-              (get matrix
-                (emod (+ y (get dir 0)) N)
-                (emod (+ x (get dir 1)) N)))
+              (get
+                (emod (+ y (get 0 dir)) N)
+                (emod (+ x (get 1 dir)) N)
+                matrix))
             neighborhood/moore)))
       (cond
         (and (= cell 1) (or (< score 2) (> score 3))) 0
@@ -12078,21 +12116,21 @@ D:=,=,=,+,=,=,=,+,=,=")
 (integer generation 0)
 (&mut cells (zeroes *RES*))
 (let ruleset [ 0 1 0 1 1 0 1 0 ])
-(set! (&get cells) (/ (length (&get cells)) 2) 1)
+(set! (/ (length (&get cells)) 2) 1 (&get cells))
 (let out [])
 
 (let rules (lambda a b c (do
     (let index (Bits->Integer [ a b c ]))
-    (get ruleset (- 7 index)))))
+    (get (- 7 index) ruleset))))
 (let ++ (lambda vrbl (&alter! vrbl (+ (&get vrbl) 1))))
 (while (< (get generation) (/ *RES* 2)) (do
-    (push! out (&get cells))
+    (push! (&get cells) out)
     (let nextgen (copy (&get cells)))
     (loop/range/exclusive i 1 (- (length (&get cells)) 1) (do
-        (let left (get cells 0 (- i 1)))
-        (let me (get cells 0 i))
-        (let right (get cells 0 (+ i 1)))
-        (set! nextgen i (rules left me right))))
+        (let left (get 0 (- i 1) cells))
+        (let me (get 0 i cells))
+        (let right (get 0 (+ i 1) cells))
+        (set! i (rules left me right) nextgen)))
     (&alter! cells nextgen)
     (&alter! generation (+ (&get generation) 1))))
 
@@ -12160,7 +12198,7 @@ out
       (integer facing 0) ; North
 
       (let visited (buckets 128))
-      (Table/set! visited (point->key (get y) (get x)) true)
+      (Table/set! (point->key (get y) (get x)) true visited)
 
       (integer result 0)
 
@@ -12171,14 +12209,14 @@ out
                 (loop/range/exclusive _ 0 M (if (= (get result) 0)
                         (do
                           (let p (step (get y) (get x) (get facing)))
-                          (&alter! y (get p 0))
-                          (&alter! x (get p 1))
+                          (&alter! y (get 0 p))
+                          (&alter! x (get 1 p))
 
                           (let key (point->key (get y) (get x)))
                           (if (Table/has? key visited)
                               (&alter! result (+ (abs (get y))
                                              (abs (get x))))
-                              (Table/set! visited key true)))))))) input)
+                              (Table/set! key true visited)))))))) input)
 
       (get result))))
 
@@ -12254,29 +12292,29 @@ b
   { head tail })))
 
 (let part1 (lambda { _ nums } (do
-(let sword [[-1 (get nums 0) -1]])
+(let sword [[-1 (get 0 nums) -1]])
 (loop/range/exclusive i 1 (length nums) (do
-  (let num (get nums i))
+  (let num (get i nums))
   (boolean placed false)
   (loop/range/exclusive j 0 (length sword) (do
-    (let segment (get sword j))
+    (let segment (get j sword))
     (cond
-        (and (false? placed) (< num (get segment 1)) (= (get segment 0) -1)) (do (set! segment 0 num) (&alter! placed true))
-        (and (false? placed) (> num (get segment 1)) (= (get segment 2) -1)) (do (set! segment 2 num) (&alter! placed true))
+        (and (false? placed) (< num (get 1 segment)) (= (get 0 segment) -1)) (do (set! 0 num segment) (&alter! placed true))
+        (and (false? placed) (> num (get 1 segment)) (= (get 2 segment) -1)) (do (set! 2 num segment) (&alter! placed true))
         nil)))
-    (if (false? placed) (push! sword [-1 num -1]))))
+    (if (false? placed) (push! [-1 num -1] sword))))
 sword)))
 
 (part1 (parse INPUT))"#,
                 "[[3 5 7] [4 8 9] [5 10 -1] [-1 7 8] [-1 8 -1]]",
             ),
             (
-                r#"(let scan/sum! (lambda a b (push! a (+ (last a) b))))
+                r#"(let scan/sum! (lambda b a (push! (+ (last a) b) a)))
 
 (let left-right-sum-diff (lambda input
   (|> (zip {
-        (|> input (reduce (lambda a b (do (scan/sum! a b) a)) [0]) (drop/last 1))
-        (|> input (reverse) (reduce (lambda a b (do (scan/sum! a b) a)) [0]) (drop/last 1) (reverse))
+        (|> input (reduce (lambda a b (do (scan/sum! b a) a)) [0]) (drop/last 1))
+        (|> input (reverse) (reduce (lambda a b (do (scan/sum! b a) a)) [0]) (drop/last 1) (reverse))
     })
     (map (lambda { a b } (abs (- a b)))))))
 
@@ -12319,9 +12357,9 @@ sword)))
   (let out [])
   (let kind (fst T))
   (cond
-    (= kind 0) (push! out (* (fst (snd T)) 10))
-    (= kind 1) (if (fst (snd (snd T))) (push! out -1))
-    (= kind 2) (push! out (count/char 'a' (fst (snd (snd (snd T))))))
+    (= kind 0) (push! (* (fst (snd T)) 10) out)
+    (= kind 1) (if (fst (snd (snd T))) (push! -1 out))
+    (= kind 2) (push! (count/char 'a' (fst (snd (snd (snd T))))) out)
   nil)
   out)))
 
@@ -12355,7 +12393,7 @@ L82")
   (snd (reduce (lambda { dial counter } [d r] (do
       (let res (emod (+ dial (* d r)) 100))
       (let rng [dial])
-      (loop/range/exclusive i 1 r (push! rng (emod (+ (at rng -1) (* 1 d)) 100)))
+      (loop/range/exclusive i 1 r (push! (emod (+ (at -1 rng) (* 1 d)) 100) rng))
       { res (+ counter (count/int 0 rng)) })) { 50 0 } xs))))
 
 [ (part1 (parse INPUT)) (part2 (parse INPUT)) ]"#,
@@ -12374,7 +12412,7 @@ L82")
     (integer M -infinity)
     (loop/range/exclusive i 0 (length inp) (loop/range/exclusive j i (length inp)
         (if (<> i j)
-          (&alter! M (max (get M) (Chars->Integer [(get inp i) (get inp j)]))))))
+          (&alter! M (max (get M) (Chars->Integer [(get i inp) (get j inp)]))))))
     (&alter! S (+ (&get S) (get M)))))))
     (&get S))))
 
@@ -12384,8 +12422,8 @@ L82")
     (let N (length line))
     (let stack [])
     (loop/range/exclusive i 0 N (do
-      (while (and (not (empty? stack)) (<# (at stack -1) (get line i)) (> (+ (length stack) (- N i)) 12)) (pop! stack))
-      (push! stack (get line i))
+      (while (and (not (empty? stack)) (<# (at -1 stack) (get i line)) (> (+ (length stack) (- N i)) 12)) (pop! stack))
+      (push! (get i line) stack)
       (while (> (length stack) 12) (pop! stack))))
     (&alter! S (BigInt/add (&get S) (BigInt/new stack))))) parsed)
   (&get S))))
@@ -12411,7 +12449,7 @@ L82")
 (let part1 (lambda input (do
   (integer TOTAL 0)
   (loop/range/exclusive y 0 (length input) (do
-    (loop/range/exclusive x 0 (length (get input 0)) (if (= (get input y x) 1) (do
+    (loop/range/exclusive x 0 (length (get 0 input)) (if (= (get y x input) 1) (do
       (integer SUM 0)
       (neighborhood neighborhood/moore y x (lambda cell dir y x (&alter! SUM (+ (&get SUM) cell))) input)
       (if (< (get SUM) 4) (&alter! TOTAL (+ (&get TOTAL) 1))))))))
@@ -12421,12 +12459,12 @@ L82")
     (letrec rec (lambda total (do
         (let rem [])
         (loop/range/exclusive y 0 (length input) (do
-        (loop/range/exclusive x 0 (length (get input 0)) (if (= (get input y x) 1) (do
+        (loop/range/exclusive x 0 (length (get 0 input)) (if (= (get y x input) 1) (do
         (integer ACC 0)
         (neighborhood neighborhood/moore y x (lambda cell dir y x (&alter! ACC (+ (&get ACC) cell))) input)
-        (if (< (get ACC) 4) (push! rem [ y x ])))))))
+        (if (< (get ACC) 4) (push! [ y x ] rem)))))))
         (if (empty? rem) total (do
-        (for (lambda [y x] (set! (get input y) x 0)) rem)
+        (for (lambda [y x] (set! x 0 (get y input))) rem)
         (rec (+ total (length rem))))))))
     (rec 0))))
 
@@ -12456,17 +12494,17 @@ L82")
 
 (let part2 (lambda { rng _ } (do
   (let ranges (sort (lambda [ a ] [ b  ] (BigInt/lt? a b)) rng))
-  (&mut low (get ranges 0 0))
-  (&mut high (get ranges 0 1))
+  (&mut low (get 0 0 ranges))
+  (&mut high (get 0 1 ranges))
   (&mut out [ 0 ])
   (loop/range/exclusive i 1 (length ranges) (do
-    (let [ dlow dhigh ] (get ranges i))
+    (let [ dlow dhigh ] (get i ranges))
     (if (BigInt/gte? (&get high) dlow) (do
       (&alter! low (if (BigInt/lt? (&get low) dlow) (&get low) dlow))
       (&alter! high (if (BigInt/gt? (&get high) dhigh) (&get high) dhigh))) (do
       (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
-      (&alter! low (get ranges i 0))
-      (&alter! high (get ranges i 1))))))
+      (&alter! low (get i 0 ranges))
+      (&alter! high (get i 1 ranges))))))
   (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
   (&get out))))
 
@@ -12486,15 +12524,15 @@ L82")
   (let op (map first (last groups)))
   (pop! groups)
   (let ints (map (lambda x (map BigInt/new x)) groups))
-  (let numbers (reduce (lambda a i (do (push! a (map (lambda n (get n i)) ints)) a)) [] (range 0 (- (length (get ints 0)) 1))))
+  (let numbers (reduce (lambda a i (do (push! (map (lambda n (get i n)) ints) a) a)) [] (range 0 (- (length (get 0 ints)) 1))))
   {numbers op }
   )))
 
 (let part1 (lambda { numbers op } (reduce (lambda a { op i }
     (BigInt/add a
       (cond
-        (=# op '*') (reduce BigInt/mul [1] (get numbers i))
-        (=# op '+') (reduce BigInt/add [0] (get numbers i))
+        (=# op '*') (reduce BigInt/mul [1] (get i numbers))
+        (=# op '+') (reduce BigInt/add [0] (get i numbers))
         []
       ))) [0] (zip { op (range 0 (length op)) }))))
 (part1 (parse INPUT))"#,
@@ -12526,33 +12564,33 @@ L82")
   (let visited [[] [] [] [] [] [] [] [] []])
   (let queue (Que/new [Int]))
   (let start (points (lambda x (=# x 'S')) input))
-  (Que/enque! queue (get start 0))
+  (Que/enque! (get 0 start) queue)
   (while (Que/not-empty? queue) (do
     (let current (Que/peek queue))
     (Que/deque! queue)
     (let [ y x ] current)
     (let key (cons (Integer->String y) "-" (Integer->String x)))
     (if (and (Matrix/in-bounds? y x input) (not (Set/has? key visited))) (do
-        (Set/add! visited key)
-        (if (=# (get input y x) '^') (do
+        (Set/add! key visited)
+        (if (=# (get y x input) '^') (do
           (&alter! total (+ (&get total) 1))
-          (Que/enque! queue [ y (+ x 1) ])
-          (Que/enque! queue [ y (- x 1) ])) (Que/enque! queue [ (+ y 1) x ]))))))
+          (Que/enque! [ y (+ x 1) ] queue)
+          (Que/enque! [ y (- x 1) ] queue)) (Que/enque! [ (+ y 1) x ] queue))))))
   (get total))))
 (let part2 (lambda input (do
   (integer total 0)
   (let queue (Que/new [Int]))
   (let start (first (points (lambda x (=# x 'S')) input)))
-  (Que/enque! queue [(get start 0) (get start 1) 1])
+  (Que/enque! [(get 0 start) (get 1 start) 1] queue)
   (while (Que/not-empty? queue) (do
     (let current (Que/peek queue))
     (Que/deque! queue)
     (let [ y x c ] current)
     (if (Matrix/in-bounds? y x input) (do
-        (if (=# (get input y x) '^') (do
-            (Que/enque! queue [ y (+ x 1) c ])
-            (Que/enque! queue [ y (- x 1) c ]))
-            (Que/enque! queue [ (+ y 1) x c ])))
+        (if (=# (get y x input) '^') (do
+            (Que/enque! [ y (+ x 1) c ] queue)
+            (Que/enque! [ y (- x 1) c ] queue))
+            (Que/enque! [ (+ y 1) x c ] queue)))
         (&alter! total (+ (&get total) c)))))
   (get total))))
 (let PARSED (parse INPUT))
@@ -12581,25 +12619,25 @@ L82")
 (let solution (lambda input (do
   (let data (map (lambda x (map identity x)) input))
   (&mut beam [ 0 ])
-  (let timeline (map (lambda _ [ 0 ]) (zeroes (length (get data 0)))))
+  (let timeline (map (lambda _ [ 0 ]) (zeroes (length (get 0 data)))))
   (loop/range/exclusive y 0 (length data) (do
-    (let line (get data y))
+    (let line (get y data))
     (loop/range/exclusive x 0 (length line) (do
-      (let c (get line x))
+      (let c (get x line))
       (cond
         (=# c 'S') (do
-          (set! (get data (+ y 1)) x '|')
-          (set! timeline x [ 1 ]))
-        (=# c '^') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do
-          (set! (get data y) (- x 1) '|')
-          (set! (get data y) (+ x 1) '|')
+          (set! x '|' (get (+ y 1) data))
+          (set! x [ 1 ] timeline))
+        (=# c '^') (if (and (> (- y 1) 0) (=# (get (- y 1) x data) '|')) (do
+          (set! (- x 1) '|' (get y data))
+          (set! (+ x 1) '|' (get y data))
           (&alter! beam (BigInt/add (&get beam) [ 1 ]))
-          (set! timeline (- x 1) (BigInt/add (get timeline (- x 1)) (get timeline x)))
-          (set! timeline (+ x 1) (BigInt/add (get timeline (+ x 1)) (get timeline x)))
-          (set! timeline x [ 0 ])
+          (set! (- x 1) (BigInt/add (get (- x 1) timeline) (get x timeline)) timeline)
+          (set! (+ x 1) (BigInt/add (get (+ x 1) timeline) (get x timeline)) timeline)
+          (set! x [ 0 ] timeline)
         ))
-        (=# c '.') (if (and (> (- y 1) 0) (=# (get data (- y 1) x) '|')) (do
-          (set! (get data y) x '|'))))))))
+        (=# c '.') (if (and (> (- y 1) 0) (=# (get (- y 1) x data) '|')) (do
+          (set! x '|' (get y data)))))))))
   [(&get beam) (BigInt/sum timeline)])))
 
 (solution (parse INPUT))"#,
@@ -12634,18 +12672,18 @@ L82")
   (let dist [])
   (loop/range/exclusive i 0 len (do
     (loop/range/exclusive j i len (if (<> i j)
-      (push! dist { [ i j ] (abs (distance/three-d (get input i) (get input j))) })))))
-  (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2)))
+      (push! { [ i j ] (abs (distance/three-d (get i input) (get j input))) } dist)))))
+  (sort! (lambda { _ d1 } { _ d2 } (< d1 d2)) dist)
   (let edges (map fst dist))
   (let parent (range 0 (- (length input) 1)))
-  (letrec root (lambda i (if (= (get parent i) i) i (root (get parent i)))))
-  (let merge (lambda a b (set! parent (root a) (root b))))
+  (letrec root (lambda i (if (= (get i parent) i) i (root (get i parent)))))
+  (let merge (lambda a b (set! (root a) (root b) parent)))
   (for (lambda [ a b ] (merge a b)) (take/first 10 edges))
   (|>
     (range 0 (- (length input) 1))
     (reduce (lambda a b (do
       (let i (root b))
-      (set! a i (+ (get a i) 1))
+      (set! i (+ (get i a) 1) a)
       a))
     (zeroes (length input)))
     (sort >)
@@ -12659,10 +12697,10 @@ L82")
   ; compute all pairwise distances
   (loop/range/exclusive i 0 len
     (loop/range/exclusive j (+ i 1) len
-      (push! dist { [i j] (distance/three-d (get input i) (get input j)) })))
+      (push! { [i j] (distance/three-d (get i input) (get j input)) } dist)))
 
   ; sort edges by distance
-  (sort! dist (lambda { _ d1 } { _ d2 } (< d1 d2)))
+  (sort! (lambda { _ d1 } { _ d2 } (< d1 d2)) dist)
   (let edges (|> dist (map fst)))
 
   ; initialize union-find
@@ -12672,23 +12710,23 @@ L82")
 
   ; root with path compression
   (letrec root! (lambda i
-      (if (= (get parent i) i) i
+      (if (= (get i parent) i) i
           (do
-            (set! parent i (root! (get parent i)))
-            (get parent i)))))
+            (set! i (root! (get i parent)) parent)
+            (get i parent)))))
 
   ; merge with size tracking
   (let merge (lambda a b (do
         (let ra (root! a))
         (let rb (root! b))
         (if (<> ra rb) (do
-              (if (< (get size ra) (get size rb))
+              (if (< (get ra size) (get rb size))
                   (do
-                    (set! parent ra rb)
-                    (set! size rb (+ (get size rb) (get size ra))))
+                    (set! ra rb parent)
+                    (set! rb (+ (get rb size) (get ra size)) size))
                   (do
-                    (set! parent rb ra)
-                    (set! size ra (+ (get size ra) (get size rb)))))
+                    (set! rb ra parent)
+                    (set! ra (+ (get ra size) (get rb size)) size)))
               (&alter! components (- (&get components) 1))
               true)
             false))))
@@ -12697,7 +12735,7 @@ L82")
   (integer answer 0)
   (for (lambda [ a b ]
       (if (and (= (get answer) 0) (merge a b) (= (get components) 1))
-                (&alter! answer (* (get (get input a) 0) (get (get input b) 0))))) edges)
+                (&alter! answer (* (get 0 (get a input)) (get 0 (get b input)))))) edges)
   (get answer))))
 
 [(part1 (parse INPUT)) (part2 (parse INPUT))]"#,
@@ -12765,9 +12803,9 @@ UUUUD")
                   (=# y 'R') R
                           N)))
             (reduce (lambda a dir (do
-              (set! start 0 (clamp-range 0 len (+ (get dir 0) (get start 0))))
-              (set! start 1 (clamp-range 0 len (+ (get dir 1) (get start 1))))
-              (get pad (get start 0) (get start 1)))) '0'))))))))
+              (set! 0 (clamp-range 0 len (+ (get 0 dir) (get 0 start))) start)
+              (set! 1 (clamp-range 0 len (+ (get 1 dir) (get 1 start))) start)
+              (get (get 0 start) (get 1 start) pad))) '0'))))))))
 (let part2 (lambda input (do
   (let pad [['*' '*' '1' '*' '*'] ['*' '2' '3' '4' '*'] ['5' '6' '7' '8' '9'] ['*' 'A' 'B' 'C' '*'] ['*' '*' 'D' '*' '*']])
   (let len (- (length pad) 1))
@@ -12785,12 +12823,12 @@ UUUUD")
                   (=# y 'R') R
                           N)))
             (reduce (lambda a dir (do
-              (let y (+ (get dir 0) (get start 0)))
-              (let x (+ (get dir 1) (get start 1)))
-              (unless (and (Matrix/in-bounds? y x pad) (=# (get pad y x) '*')) (do
-                 (set! start 0 (clamp-range 0 len y))
-                 (set! start 1 (clamp-range 0 len x))))
-              (get pad (get start 0) (get start 1)))) '0'))))))))
+              (let y (+ (get 0 dir) (get 0 start)))
+              (let x (+ (get 1 dir) (get 1 start)))
+              (unless (and (Matrix/in-bounds? y x pad) (=# (get y x pad) '*')) (do
+                 (set! 0 (clamp-range 0 len y) start)
+                 (set! 1 (clamp-range 0 len x) start)))
+              (get (get 0 start) (get 1 start) pad))) '0'))))))))
 [(part1 (parse INPUT)) (part2 (parse INPUT))]"#,
                 "[\"1985\" \"5DB3\"]",
             ),
@@ -12799,13 +12837,13 @@ UUUUD")
 (let part1 (lambda input (|> input (count (lambda [a b c] (and (> (+ a b) c) (> (+ b c) a) (> (+ a c) b)))))))
 (let part2 (lambda input (|> input
   (reduce (lambda a [A B C] (do
-    (let [ pa pb pc ] (at a -1))
-    (push! pa A)
-    (push! pb B)
-    (push! pc C)
-    (if (= (length pa) 3) (push! a [[] [] []]))
+    (let [ pa pb pc ] (at -1 a))
+    (push! A pa)
+    (push! B pb)
+    (push! C pc)
+    (if (= (length pa) 3) (push! [[] [] []] a))
    a)) [[[] [] []]])
-  (filter (lambda x (not (empty? (get x 0)))))
+  (filter (lambda x (not (empty? (get 0 x)))))
   (flat)
   (part1))))
 
@@ -12842,24 +12880,24 @@ UUUUD")
                 "e",
             ),
             (
-                r#"(let flood-fill! (lambda image sr sc color (do
-    (let old (get image sr sc))
+                r#"(let flood-fill! (lambda sr sc color image (do
+    (let old (get sr sc image))
     (unless (= old color)
         (do
         (let m (length image))
         (let n (length (first image)))
-        (letrec adj! (lambda r c (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (get image r c) old)) (do
-                    (set! image r c color)
-                    (adj! (+ r 1) c)
-                    (adj! (- r 1) c)
-                    (adj! r (+ c 1))
-                    (adj! r (- c 1))
+        (letrec adj! (lambda r c image (if (and (>= r 0) (< r m) (>= c 0) (< c n) (= (get r c image) old)) (do
+                    (set! r c color image)
+                    (adj! (+ r 1) c image)
+                    (adj! (- r 1) c image)
+                    (adj! r (+ c 1) image)
+                    (adj! r (- c 1) image)
                 nil))))
-        (adj! sr sc)
+        (adj! sr sc image)
         nil)))))
 
 (let image [[1 1 1] [1 1 0] [1 0 1]])
-(flood-fill! image 1 1 2)
+(flood-fill! 1 1 2 image)
 image
 ; Output/ [[2 2 2] [2 2 0] [2 0 1]]"#,
                 "[[2 2 2] [2 2 0] [2 0 1]]",
@@ -12877,7 +12915,7 @@ image
     (let key (Integer->String n))
     (if (< n 2) n (if (Table/has? key memo) (snd (first (Table/get key memo))) (do
       (let res (+ (fibonacci! (- n 1)) (fibonacci! (- n 2))))
-      (Table/set! memo key res)
+      (Table/set! key res memo)
       res))))))
 (fibonacci! 10)"#,
                 "55",
@@ -12928,11 +12966,11 @@ image
   (lambda rows idx bit
     (count/int
       bit
-      (map (lambda r (get r idx)) rows))))
+      (map (lambda r (get idx r)) rows))))
 
 (let find-rating
   (lambda rows prefer-most? (do
-    (let width (length (get rows 0)))
+    (let width (length (get 0 rows)))
 
     (letrec step
       (lambda idx remaining
@@ -12951,7 +12989,7 @@ image
 
               (step
                 (+ idx 1)
-                (filter (lambda r (= (get r idx) keep-bit)) remaining)
+                (filter (lambda r (= (get idx r) keep-bit)) remaining)
                 )))))
 
     (get (step 0 rows)))))
@@ -12988,7 +13026,7 @@ bbrgwb")
     })))
 
 (let part1 (lambda { patterns-input towels } (do
-  (let patterns (reduce (lambda a b (do (Set/add! a b) a)) [[] [] [] [] [] [] [] [] []] patterns-input))
+  (let patterns (reduce (lambda a b (do (Set/add! b a) a)) [[] [] [] [] [] [] [] [] []] patterns-input))
   (letrec dp? (lambda str (loop/some-range? 1 (length str) (lambda i (do
     (let a (slice 0 i str))
     (let b (slice i (length str) str))
@@ -13065,14 +13103,14 @@ bbrgwb")
               (= i (length numbers)))
             result
             (do
-              (Set/add! drawn (Integer->String (get numbers i)))
+              (Set/add! (Integer->String (get i numbers)) drawn)
               (let winners
                 (filter (lambda b (board-wins? b drawn)) boards))
               (step!
                 (+ i 1)
                 (if (empty? winners)
                     result
-                    { i (get winners 0) }))))))
+                    { i (get 0 winners) }))))))
     (step! 0 { -1 [] }))))
 ; [[Int]] -> [[[Char]]] -> Int -> Int
 (let score
@@ -13090,7 +13128,7 @@ bbrgwb")
   (lambda { numbers boards } (do
     (let { i board } (first-winning-board numbers boards))
     (let drawn (Vector->Set (map Integer->String (slice 0 (+ i 1) numbers))))
-    (score board drawn (get numbers i)))))
+    (score board drawn (get i numbers)))))
 (part1 (parse INPUT))"#,
                 "4512",
             ),
@@ -13127,11 +13165,11 @@ bbrgwb")
         (map
           (lambda line (do
             (let parts (String->Vector ' ' line))
-            (let a (Point->Coords (get parts 0)))
-            (let b (Point->Coords (get parts 2)))
+            (let a (Point->Coords (get 0 parts)))
+            (let b (Point->Coords (get 2 parts)))
             (make-segment
-              (make-point (get a 0) (get a 1))
-              (make-point (get b 0) (get b 1)))))))))
+              (make-point (get 0 a) (get 1 a))
+              (make-point (get 0 b) (get 1 b)))))))))
 ; Int -> Int -> [Int]
 (let range*
   (lambda a b
@@ -13200,7 +13238,7 @@ bbrgwb")
 (let parse (lambda input (do
     (let timers (|> input (String->Vector ',') (map String->Integer)))
     (let counts (zeroes 9))
-      (for (lambda t (set! counts t (+ 1 (get counts t)))) timers)
+      (for (lambda t (set! t (+ 1 (get t counts)) counts)) timers)
       counts)))
 ; [Int] -> [Int] ; length 9
 (let step (lambda [ c0 c1 c2 c3 c4 c5 c6 c7 c8 ] [ c1 c2 c3 c4 c5 c6 (+ c7 c0) c8 c0 ]))
@@ -13239,16 +13277,16 @@ bbrgwb")
   (lambda line
     (do
       (let parts (String->Vector ' ' line))
-      (let id (parse-id (get parts 0)))
-      ; (let [ x y ] (parse-coords (get parts 2)))
-      ; (let [ w h ] (parse-size (get parts 3)))
-      (let coords (parse-coords (get parts 2)))
-      (let size (parse-size (get parts 3)))
+      (let id (parse-id (get 0 parts)))
+      ; (let [ x y ] (parse-coords (get 2 parts)))
+      ; (let [ w h ] (parse-size (get 3 parts)))
+      (let coords (parse-coords (get 2 parts)))
+      (let size (parse-size (get 3 parts)))
 
-      (let x (get coords 0))
-      (let y (get coords 1))
-      (let w (get size 0))
-      (let h (get size 1))
+      (let x (get 0 coords))
+      (let y (get 1 coords))
+      (let w (get 0 size))
+      (let h (get 1 size))
 
       { id { x { y { w h } } } })))
 ; {Int * {Int * Int * Int * Int}} -> [[Int]]
@@ -13323,8 +13361,8 @@ bbrgwb")
 (let solve? (lambda s (and (> (length s) 2) (do
   (let n (length s))
   (integer c 0)
-  (loop/range/exclusive i 0 (- n 1) (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1))))
-  (loop/range/exclusive j 0 (- n 2) (if (=# (get s j) (get s (+ j 2))) (&alter! c (+ (&get c) 1))))
+  (loop/range/exclusive i 0 (- n 1) (if (=# (get i s) (get (+ i 1) s)) (&alter! c (+ (&get c) 1))))
+  (loop/range/exclusive j 0 (- n 2) (if (=# (get j s) (get (+ j 2) s)) (&alter! c (+ (&get c) 1))))
   (> (get c) 0)))))
 
 [
@@ -13343,8 +13381,8 @@ bbrgwb")
     (if (< l r)
       (do
         (let width (- r l))
-        (let left (get input l))
-        (let right (get input r))
+        (let left (get l input))
+        (let right (get r input))
         (let min-height (min left right))
         (let area (* width min-height))
         (let condition (< left right))
@@ -13401,12 +13439,12 @@ bbrgwb")
     (let id (get file-id))
     (Vector/new (lambda _ id) ch))
     (Vector/new (lambda _ -1) ch)))) [])))
-  (let blanks (reduce/i (lambda a x i (do (if (= x -1) (push! a i)) a)) [] disk))
+  (let blanks (reduce/i (lambda a x i (do (if (= x -1) (push! i a)) a)) [] disk))
   (letrec fragment?! (lambda ind out (do
-    (let i (get blanks ind))
+    (let i (get ind blanks))
     (if (= (last disk) -1) (do (pop! disk) (fragment?! ind out))
       (if (not (<= (length disk) i)) (do
-        (set! disk i (last disk))
+        (set! i (last disk) disk)
         (pop! disk)
         (fragment?! (+ ind 1) out)
       ) false)))))
@@ -13485,9 +13523,9 @@ bbrgwb")
     (reduce/i (lambda a b i (do
       (let { bw bs } b)
       (let prev (last a))
-      (cond (empty? prev) (set! a 0 [b])
-            (not (match? (snd (last prev)) bs)) (push! a [b])
-            (push! prev b))
+      (cond (empty? prev) (set! 0 [b] a)
+            (not (match? (snd (last prev)) bs)) (push! [b] a)
+            (push! b prev))
       a)) [[]])
       (map (cond (map fst)))))
 
@@ -13502,15 +13540,15 @@ bbrgwb")
     (let R (box (- (length arr) 1)))
     (let result (box -1)) ; Store index here, -1 if not found
 
-    (while (and (<= (get L 0) (get R 0)) (= (get result 0) -1))
+    (while (and (<= (get 0 L) (get 0 R)) (= (get 0 result) -1))
         (do
-          (let mid (/ (+ (get L 0) (get R 0)) 2))
-          (let val (get arr mid))
+          (let mid (/ (+ (get 0 L) (get 0 R)) 2))
+          (let val (get mid arr))
           (cond
-            (= val target) (set! result 0 mid)
-            (< val target) (set! L 0 (+ mid 1))
-            (set! R 0 (- mid 1)))))
-    (get result 0))))
+            (= val target) (set! 0 mid result)
+            (< val target) (set! 0 (+ mid 1) L)
+            (set! 0 (- mid 1) R))))
+    (get 0 result))))
 
 ; Usage with your sorted result
 (let sorted-vec [1 2 5 5 6 9])
@@ -13526,7 +13564,7 @@ bbrgwb")
 (let generate-abc (lambda (do
   (let offset (Char->Int 'a'))
   (let out [])
-  (loop/range/exclusive i 0 26 (push! out (Int->Char (+ i offset))))
+  (loop/range/exclusive i 0 26 (push! (Int->Char (+ i offset)) out))
   out)))
 
 (let abc (generate-abc))
@@ -13546,32 +13584,32 @@ bbrgwb")
             (&alter! loop? false)))
 
         (if (> (get i) 0) (do
-          (let prev (get temp (- (get i) 1)))
-          (let next (get temp (get i)))
-          (set! temp (- (get i) 1) next)
-          (set! temp (get i) prev)
+          (let prev (get (- (get i) 1) temp))
+          (let next (get (get i) temp))
+          (set! (- (get i) 1) next temp)
+          (set! (get i) prev temp)
 
           (if (Set/has? temp correct) (do
             (&alter! out temp)
             (&alter! loop? false))
             (do
-              (set! temp (- (get i) 1) prev)
-              (set! temp (get i) next)))))
+              (set! (- (get i) 1) prev temp)
+              (set! (get i) next temp)))))
 
         (integer k 0)
         (while (and (true? loop?) (< (get k) (length abc))) (do
-          (let a (get abc (get k)))
-          (let t (get temp (get i)))
-          (set! temp (get i) a)
+          (let a (get (get k) abc))
+          (let t (get (get i) temp))
+          (set! (get i) a temp)
           (if (Set/has? temp correct) (do
               (&alter! out temp)
               (&alter! loop? false))
-              (set! temp (get i) t))
+              (set! (get i) t temp))
           (&alter! k (+ (&get k) 1))))
 
         (integer j 0)
         (while (and (true? loop?) (< (get j) (length abc))) (do
-          (let a (get abc (get j)))
+          (let a (get (get j) abc))
           (let added (cons (slice 0 (get i) word) [a] (slice (get i) (length word) word)))
           (if (Set/has? added correct) (do
               (&alter! out added)
@@ -13604,7 +13642,7 @@ SECRET = SANTA")
                 (exclude empty?)))))
 
 (let ENV (reduce
-  (lambda a [ k v ] (do (Table/set! a k v) a))
+  (lambda a [ k v ] (do (Table/set! k v a) a))
   (buckets 32)
   (parse/env .env)))
 
@@ -13621,8 +13659,8 @@ SECRET = SANTA")
   (and (> (length s) 2) (do
     (let n (length s))
     (integer c 0)
-    (loop/range/exclusive i 0 (- n 1) (if (=# (get s i) (get s (+ i 1))) (&alter! c (+ (&get c) 1))))
-    (loop/range/exclusive j 0 (- n 2) (if (=# (get s j) (get s (+ j 2))) (&alter! c (+ (&get c) 1))))
+    (loop/range/exclusive i 0 (- n 1) (if (=# (get i s) (get (+ i 1) s)) (&alter! c (+ (&get c) 1))))
+    (loop/range/exclusive j 0 (- n 2) (if (=# (get j s) (get (+ j 2) s)) (&alter! c (+ (&get c) 1))))
     (> (get c) 0)))))
 
 (map solve? ["BCAB" "BB" "A" "AABB" "BAB" "KEEP"])"#,
@@ -13739,9 +13777,9 @@ SECRET = SANTA")
 (add32 (add32 a b) (add32 c d))))
 
 (let block [0])
-(loop/range/exclusive i 1 64 (push! block 0))
+(loop/range/exclusive i 1 64 (push! 0 block))
 (let words [0])
-(loop/range/exclusive j 1 16 (push! words 0))
+(loop/range/exclusive j 1 16 (push! 0 words))
 
 (let shift-by (lambda i
 (do
@@ -13755,7 +13793,7 @@ SECRET = SANTA")
 (if (= r 0) 6 (if (= r 1) 10 (if (= r 2) 15 21)))))))))
 
 (let md5-a0! (lambda n (do
-(loop/range/exclusive bi 0 8 (set! block bi (get secret-bytes bi)))
+(loop/range/exclusive bi 0 8 (set! bi (get bi secret-bytes) block))
 
 (let div-init
 (if (>= n 1000000000) 1000000000
@@ -13773,34 +13811,33 @@ SECRET = SANTA")
 (integer msg-len 8)
 (loop/range/exclusive di 0 10 (if (> (get div) 0) (do
 (let digit (/ (get x) (get div)))
-(set! block (get msg-len) (+ 48 digit))
+(set! (get msg-len) (+ 48 digit) block)
 (&alter! x (% (get x) (get div)))
 (&alter! div (/ (get div) 10))
 (&alter! msg-len (+ (get msg-len) 1)))
 nil))
 
-(set! block (get msg-len) 128)
+(set! (get msg-len) 128 block)
 (loop/range/exclusive zi 0 56 (if (> zi (get msg-len))
-(set! block zi 0)
+(set! zi 0 block)
 nil))
 
 (let bit-len (* (get msg-len) 8))
-(set! block 56 (& bit-len 255))
-(set! block 57 (& (>> bit-len 8) 255))
-(set! block 58 (& (>> bit-len 16) 255))
-(set! block 59 (& (>> bit-len 24) 255))
-(set! block 60 0)
-(set! block 61 0)
-(set! block 62 0)
-(set! block 63 0)
+(set! 56 (& bit-len 255) block)
+(set! 57 (& (>> bit-len 8) 255) block)
+(set! 58 (& (>> bit-len 16) 255) block)
+(set! 59 (& (>> bit-len 24) 255) block)
+(set! 60 0 block)
+(set! 61 0 block)
+(set! 62 0 block)
+(set! 63 0 block)
 
 (loop/range/exclusive wi 0 16 (do
 (let j (* wi 4))
-(set! words wi
-(| (get block j)
-   (| (<< (get block (+ j 1)) 8)
-      (| (<< (get block (+ j 2)) 16)
-         (<< (get block (+ j 3)) 24)))))))
+(set! wi (| (get j block)
+   (| (<< (get (+ j 1) block) 8)
+      (| (<< (get (+ j 2) block) 16)
+         (<< (get (+ j 3) block) 24)))) words)))
 
 (let a0 1732584193)
 (let b0 -271733879)
@@ -13830,7 +13867,7 @@ nil))
 (do
   (&alter! f (^ (get C) (| (get B) (~ (get D)))))
   (&alter! g (% (* 7 ri) 16))))))
-(let x4 (add32-4 (get A) (get f) (get K ri) (get words (get g))))
+(let x4 (add32-4 (get A) (get f) (get ri K) (get (get g) words)))
 (let new-b (add32 (get B) (left-rotate x4 (shift-by ri))))
 (let old-d (get D))
 (&alter! D (get C))
@@ -13870,7 +13907,7 @@ d -> a")
 
 (let parse-operand
   (lambda (token)
-    (if (digit? (get token 0))
+    (if (digit? (get 0 token))
       {true {(String->Integer token) ""}}
       {false {0 token}})))
 
@@ -13880,25 +13917,25 @@ d -> a")
     (let empty (parse-operand "0"))
     (let expr
       (cond
-        (= (length words) 3) {"SET" {(parse-operand (get words 0)) {empty 0}}}
-        (= (length words) 4) {"NOT" {(parse-operand (get words 1)) {empty 0}}}
-        (match? (get words 1) "AND") {"AND" {(parse-operand (get words 0)) {(parse-operand (get words 2)) 0}}}
-        (match? (get words 1) "OR") {"OR" {(parse-operand (get words 0)) {(parse-operand (get words 2)) 0}}}
-        (match? (get words 1) "LSHIFT") {"LSHIFT" {(parse-operand (get words 0)) {empty (String->Integer (get words 2))}}}
-        {"RSHIFT" {(parse-operand (get words 0)) {empty (String->Integer (get words 2))}}}))
+        (= (length words) 3) {"SET" {(parse-operand (get 0 words)) {empty 0}}}
+        (= (length words) 4) {"NOT" {(parse-operand (get 1 words)) {empty 0}}}
+        (match? (get 1 words) "AND") {"AND" {(parse-operand (get 0 words)) {(parse-operand (get 2 words)) 0}}}
+        (match? (get 1 words) "OR") {"OR" {(parse-operand (get 0 words)) {(parse-operand (get 2 words)) 0}}}
+        (match? (get 1 words) "LSHIFT") {"LSHIFT" {(parse-operand (get 0 words)) {empty (String->Integer (get 2 words))}}}
+        {"RSHIFT" {(parse-operand (get 0 words)) {empty (String->Integer (get 2 words))}}}))
     {dest expr}))
 
 (let parse-input
   (lambda (text)
     (reduce
       (lambda (rules {left right})
-        (Table/set! rules left right)
+        (Table/set! left right rules)
         rules)
       (Table/new/capacity 512)
       (map parse-rule (map split/words (split/lines text))))))
 
 (letrec eval-wire!
-  (lambda (cache rules wire)
+  (lambda (rules wire cache)
     (if (Table/has? wire cache)
       (Table/get-unsafe wire cache)
       (block
@@ -13910,7 +13947,7 @@ d -> a")
           (lambda (operand)
             (if (fst operand)
               (fst (snd operand))
-              (eval-wire! cache rules (snd (snd operand))))))
+              (eval-wire! rules (snd (snd operand)) cache))))
         (let value
           (cond
             (match? op "SET") (eval-operand left)
@@ -13920,14 +13957,14 @@ d -> a")
             (match? op "LSHIFT") (<< (eval-operand left) shift)
             (>> (eval-operand left) shift)))
         (let signal (mask16 value))
-        (Table/set! cache wire signal)
+        (Table/set! wire signal cache)
         signal))))
 
 (let part1
   (lambda (text)
     (let rules (parse-input text))
     (let cache (Table/new/capacity 512))
-    (eval-wire! cache rules "a")))
+    (eval-wire! rules "a" cache)))
 
 
 (let part2
@@ -13935,7 +13972,7 @@ d -> a")
     (let modified (cons text ['\n'] "956 -> b"))
     (let rules (parse-input modified))
     (let cache (Table/new/capacity 512))
-    (eval-wire! cache rules "a")))
+    (eval-wire! rules "a" cache)))
 {(part1 input) (part2 input)}
 "#, "{ 72 72 }"),
 
@@ -13993,8 +14030,8 @@ Dublin to Belfast = 141")
 
 (letrec memory-length (lambda (line i total)
   (if (= i (- (length line) 1)) total
-        (if (=# (get line i) '\\')
-            (memory-length line (if (=# (get line (+ i 1)) 'x') (+ i 4) (+ i 2)) (+ total 1))
+        (if (=# (get i line) '\\')
+            (memory-length line (if (=# (get (+ i 1) line) 'x') (+ i 4) (+ i 2)) (+ total 1))
             (memory-length line (+ i 1) (+ total 1))))))
 
 (let line-difference
@@ -14029,9 +14066,9 @@ the sea shore
   (let temp [])
   (let len (length xs))
   (loop/range/exclusive i 0 len
-  (let x (get xs i))
-  (if (=# x prev) (++ counter) (do (push! temp { counter prev }) (alter! prev x) (alter! counter 1))))
-  (push! temp { counter prev })
+  (let x (get i xs))
+  (if (=# x prev) (++ counter) (do (push! { counter prev } temp) (alter! prev x) (alter! counter 1))))
+  (push! { counter prev } temp)
   temp)))
 (encode ['a' 'a' 'a' 'a' 'b' 'c' 'c' 'a' 'a' 'd' 'e' 'e' 'e' 'e'])"#, "[{ 4 (char 97) } { 1 (char 98) } { 2 (char 99) } { 2 (char 97) } { 1 (char 100) } { 4 (char 101) }]"),
 (r#"(let encode (lambda (xs) (do
@@ -14040,9 +14077,9 @@ the sea shore
   (let temp [])
   (let len (length xs))
   (loop/range/exclusive i 0 len
-    (let x (get xs i))
-    (if (=# x prev) (++ counter) (do (push! temp { counter prev }) (alter! prev x) (alter! counter 1))))
-  (push! temp { counter prev })
+    (let x (get i xs))
+    (if (=# x prev) (++ counter) (do (push! { counter prev } temp) (alter! prev x) (alter! counter 1))))
+  (push! { counter prev } temp)
   (|> temp (map (lambda ({ a b }) (cons (Integer->String a) [b]))) (flat)))))
 
 (&mut inp "1")
@@ -14058,21 +14095,21 @@ the sea shore
     (lambda (xs)
       (let out [])
       (let len (length xs))
-      (mut prev (get xs 0))
+      (mut prev (get 0 xs))
       (mut counter 1)
       (mut i 1)
       (while (< i len)
-        (let x (get xs i))
+        (let x (get i xs))
         (if (=# x prev)
           (++ counter)
           (do
-            (push! out (Counter->Char counter))
-            (push! out prev)
+            (push! (Counter->Char counter) out)
+            (push! prev out)
             (alter! prev x)
             (alter! counter 1)))
         (alter! i (+ i 1)))
-      (push! out (Counter->Char counter))
-      (push! out prev)
+      (push! (Counter->Char counter) out)
+      (push! prev out)
       out))
 
   (letrec repeat-encode
@@ -14135,7 +14172,7 @@ humidity-to-location map:
     (let words (split/words line))
     (let out [])
     (loop/range/exclusive i 1 (length words)
-      (push! out (parse-number (get words i))))
+      (push! (parse-number (get i words)) out))
     out))
 
 (let parse-map
@@ -14143,18 +14180,18 @@ humidity-to-location map:
     (let lines (split ['\n'] section))
     (let out [])
     (loop/range/exclusive i 1 (length lines)
-      (let line (get lines i))
+      (let line (get i lines))
       (if (not-empty? line)
         (block
           (let [dst src len] (map parse-number (split/words line)))
-          (push! out [dst src len]))))
+          (push! [dst src len] out))))
     out))
 
-(let seeds (parse-seeds (get blocks 0)))
+(let seeds (parse-seeds (get 0 blocks)))
 
 (let maps [])
 (loop/range/exclusive block-index 1 (length blocks)
-  (push! maps (parse-map (get blocks block-index))))
+  (push! (parse-map (get block-index blocks)) maps))
 
 (let apply-map-to-value
   (lambda (value rows)
@@ -14162,11 +14199,11 @@ humidity-to-location map:
     (mut found false)
     (let row-count (length rows))
     (loop i (and (< i row-count) (not found))
-      (let [dst src len] (get rows i))
+      (let [dst src len] (get i rows))
       (if (BigInt/lte? src value)
         (if (BigInt/lt? value (BigInt/add src len))
           (do
-            (set! result 0 (BigInt/add dst (BigInt/sub value src)))
+            (set! 0 (BigInt/add dst (BigInt/sub value src)) result)
             (alter! found true)))))
     (car result)))
 
@@ -14174,45 +14211,44 @@ humidity-to-location map:
   (lambda (seed)
     (let value [seed])
     (loop/range/exclusive i 0 (length maps)
-      (set! value 0 (apply-map-to-value (get value 0) (get maps i))))
+      (set! 0 (apply-map-to-value (get 0 value) (get i maps)) value))
     (car value)))
 
 (let part1
   (block
     (let best [(BigInt/new "99999999999999999999")])
     (loop/range/exclusive i 0 (length seeds)
-      (set! best 0 (big-min (car best) (seed-location (get seeds i)))))
+      (set! 0 (big-min (car best) (seed-location (get i seeds))) best))
     (car best)))
 
 (let seed-ranges
   (block
     (let out [])
     (loop/range/exclusive/by i 0 (length seeds) 2
-      (let start (get seeds i))
-      (let len (get seeds (+ i 1)))
-      (push! out [start (BigInt/add start len)]))
+      (let start (get i seeds))
+      (let len (get (+ i 1) seeds))
+      (push! [start (BigInt/add start len)] out))
     out))
 
 (let apply-row-to-ranges!
-  (lambda (mapped pending [ dst src len ])
+  (lambda (pending [ dst src len ] mapped)
     (let next [])
     (let src-end (BigInt/add src len))
     (loop/range/exclusive i 0 (length pending)
-      (let [start end] (get pending i))
+      (let [start end] (get i pending))
       (let overlap-start (big-max start src))
       (let overlap-end (big-min end src-end))
       (if (BigInt/lt? overlap-start overlap-end)
         (do
           (if (BigInt/lt? start overlap-start)
-            (push! next [start overlap-start]))
-          (push! mapped
-            [
+            (push! [start overlap-start] next))
+          (push! [
               (BigInt/add dst (BigInt/sub overlap-start src))
               (BigInt/add dst (BigInt/sub overlap-end src))
-            ])
+            ] mapped)
           (if (BigInt/lt? overlap-end end)
-            (push! next [overlap-end end])))
-        (push! next [start end])))
+            (push! [overlap-end end] next)))
+        (push! [start end] next)))
     next))
 
 (let apply-map-to-ranges
@@ -14220,25 +14256,24 @@ humidity-to-location map:
     (let mapped [])
     (let pending [ranges])
     (loop/range/exclusive row-index 0 (length rows)
-      (set! pending 0
-        (apply-row-to-ranges! mapped (car pending) (get rows row-index))))
+      (set! 0 (apply-row-to-ranges! (car pending) (get row-index rows) mapped) pending))
     (loop/range/exclusive i 0 (length (car pending))
-      (push! mapped (get pending 0 i)))
+      (push! (get 0 i pending) mapped))
     mapped))
 
 (let final-ranges
   (block
     (let ranges [seed-ranges])
     (loop/range/exclusive i 0 (length maps)
-      (set! ranges 0 (apply-map-to-ranges (car ranges) (get maps i))))
+      (set! 0 (apply-map-to-ranges (car ranges) (get i maps)) ranges))
     (car ranges)))
 
 (let part2
   (block
     (let best [(BigInt/new "99999999999999999999")])
     (loop/range/exclusive i 0 (length final-ranges)
-      (let start (get final-ranges i 0))
-      (set! best 0 (big-min (car best) start)))
+      (let start (get i 0 final-ranges))
+      (set! 0 (big-min (car best) start) best))
     (car best)))
 
 [
@@ -14258,33 +14293,33 @@ humidity-to-location map:
                     (|> c (drop/last 1) (split/commas) (map String->Integer)) ; pos
                     (|> d (split "x") (map String->Integer)) ; dim
                   }))))
-(let update! (lambda (m x y) (set! m x y (+ (get m x y) 1))))
+(let update! (lambda (x y m) (set! x y (+ (get x y m) 1) m)))
 (let part1 (comp
               (reduce (lambda (a { id [ x y ] [ w h ] })
                 (loop/range/exclusive iy y (+ y h)
                   (loop/range/exclusive ix x (+ w x)
-                    (update! a ix iy))) a)
+                    (update! ix iy a))) a)
                 (Matrix/new (lambda _ _ 0) N N))
               (flat)
             (count (gt/int? 1))))
 
 (let part2 (lambda (input)
-  (let out (Vector/new (lambda _ 0) (+ (fst (at input -1)) 1)))
+  (let out (Vector/new (lambda _ 0) (+ (fst (at -1 input)) 1)))
 
-  (let claim! (lambda (m x y id)
-      (let prev (get m x y))
+  (let claim! (lambda (x y id m)
+      (let prev (get x y m))
       (if (not (zero? prev)) (do
-        (set! out id id)
-        (set! out prev prev)))
-      (set! m x y id)))
+        (set! id id out)
+        (set! prev prev out)))
+      (set! x y id m)))
               (|> input (reduce (lambda (a { id [ x y ] [ w h ] })
                 (loop/range/exclusive iy y (+ y h)
                   (loop/range/exclusive ix x (+ w x)
-                    (claim! a ix iy id))) a)
+                    (claim! ix iy id a))) a)
                 (Matrix/new (lambda _ _ 0) N N)))
       (let ids (map (lambda ({ id }) id) input))
-      (let idx (find (lambda (id) (zero? (get out id))) ids))
-      (get ids idx)))
+      (let idx (find (lambda (id) (zero? (get id out))) ids))
+      (get idx ids)))
 (let PARSED (parse INPUT))
 [(part1 PARSED) (part2 PARSED)]"#, "[4 3]"),
 
@@ -14299,9 +14334,9 @@ humidity-to-location map:
     (if (>= i (- len 2))
         false
         (block
-          (let c1 (get chs i))
-          (let c2 (get chs (+ i 1)))
-          (let c3 (get chs (+ i 2)))
+          (let c1 (get i chs))
+          (let c2 (get (+ i 1) chs))
+          (let c3 (get (+ i 2) chs))
           ; Use character subtraction to find the relative character distance
           (let dist1 (-# c2 c1))
           (let dist2 (-# c3 c2))
@@ -14317,8 +14352,8 @@ humidity-to-location map:
     (if (>= i (- len 1))
         found-count
         (block
-          (let c1 (get chs i))
-          (let c2 (get chs (+ i 1)))
+          (let c1 (get i chs))
+          (let c2 (get (+ i 1) chs))
           (if (and (=# c1 c2) (not (=# c1 last-pair-char)))
               (count-pairs chs (+ i 2) len c1 (+ found-count 1))
               (count-pairs chs (+ i 1) len last-pair-char found-count))))))
@@ -14328,7 +14363,7 @@ humidity-to-location map:
   (lambda (chs i len)
     (if (>= i len)
         false
-        (if (forbidden? (get chs i))
+        (if (forbidden? (get i chs))
             true
             (has-forbidden? chs (+ i 1) len)))))
 
@@ -14345,22 +14380,22 @@ humidity-to-location map:
 
 ; Increments a mutable character vector at index tracking z-wrapping behavior
 (letrec increment-at!
-  (lambda (chs idx)
-    (let current (get chs idx))
+  (lambda (idx chs)
+    (let current (get idx chs))
     (if (=# current 'z')
         (do
-          (set! chs idx 'a')
-          (increment-at! chs (- idx 1)))
+          (set! idx 'a' chs)
+          (increment-at! (- idx 1) chs))
         ; Correct use of character operator: adding character unit distance 1
-        (set! chs idx (+# current (-# 'b' 'a'))))))
+        (set! idx (+# current (-# 'b' 'a')) chs))))
 
 ; Mutates a copy of the password using local mutators inside an optimization block
 (let next-password!
   (lambda (current-chs)
     (let last-idx (- (length current-chs) 1))
-    (increment-at! current-chs last-idx)
+    (increment-at! last-idx current-chs)
     (while (not (valid-password? current-chs))
-      (increment-at! current-chs last-idx))
+      (increment-at! last-idx current-chs))
     current-chs))
 
 (|> "vzbxkghb" (next-password!) (next-password!))"#, "vzcaabcc")

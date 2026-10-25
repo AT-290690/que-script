@@ -12,19 +12,19 @@ explicit arithmetic safety guard.
 (let SIZE 10)
 
 (let paths [])
-(capacity! paths (+ SIZE 1))
+(capacity! (+ SIZE 1) paths)
 (loop i (<= i SIZE)
-  (push! paths 1))
+  (push! 1 paths))
 
 (loop row (< row SIZE)
   (loop/for col 1 (<= col SIZE) (++ col)
-    (let left (get paths (- col 1)))
-    (let current (get paths col))
+    (let left (get (- col 1) paths))
+    (let current (get col paths))
     (when (+/safe? current left)
-      (set! paths col (+ current left)))))
+      (set! col (+ current left) paths))))
 
 ; 184756
-(get paths (- (length paths) 1))
+(get (- (length paths) 1) paths)
 ```
 
 The vector holds one dynamic-programming row. Initially every entry is one;

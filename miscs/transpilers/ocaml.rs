@@ -325,21 +325,21 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
                     "get" => {
                         let a = node
                             .children
-                            .get(1)
+                            .get(2)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                         let i = node
                             .children
-                            .get(2)
+                            .get(1)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "0".to_string());
                         if let Some(Type::Tuple(items)) =
-                            node.children.get(1).and_then(|n| n.typ.as_ref())
+                            node.children.get(2).and_then(|n| n.typ.as_ref())
                         {
                             if let Some(TypedExpression {
                                 expr: Expression::Int(idx),
                                 ..
-                            }) = node.children.get(2)
+                            }) = node.children.get(1)
                             {
                                 let idx = *idx as usize;
                                 if idx < items.len() {
@@ -384,12 +384,12 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
                     "cdr" => {
                         let a = node
                             .children
-                            .get(1)
+                            .get(2)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                         let i = node
                             .children
-                            .get(2)
+                            .get(1)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "1".to_string());
                         format!("(vec_rest {} {})", a, i)
@@ -397,17 +397,17 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
                     "set!" => {
                         let a = node
                             .children
-                            .get(1)
+                            .get(3)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                         let i = node
                             .children
-                            .get(2)
+                            .get(1)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "0".to_string());
                         let v = node
                             .children
-                            .get(3)
+                            .get(2)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "0".to_string());
                         format!("(vec_set {} {} {}; 0)", a, i, v)
@@ -415,15 +415,31 @@ fn compile_expr_inner(node: &TypedExpression, mut_vars: &HashSet<String>) -> Str
                     "push!" => {
                         let a = node
                             .children
-                            .get(1)
+                            .get(2)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "(vec_of_array [||])".to_string());
                         let v = node
                             .children
-                            .get(2)
+                            .get(1)
                             .map(|n| compile_expr_inner(n, mut_vars))
                             .unwrap_or_else(|| "0".to_string());
                         format!("(vec_push {} {}; 0)", a, v)
+                    }
+                    // OCaml's backing array is managed by vec_push. Keep the
+                    // user-visible evaluation order, but reservation itself is
+                    // not observable on this target.
+                    "capacity!" => {
+                        let n = node
+                            .children
+                            .get(1)
+                            .map(|n| compile_expr_inner(n, mut_vars))
+                            .unwrap_or_else(|| "0".to_string());
+                        let a = node
+                            .children
+                            .get(2)
+                            .map(|n| compile_expr_inner(n, mut_vars))
+                            .unwrap_or_else(|| "(vec_of_array [||])".to_string());
+                        format!("(let _ = {} in let _ = {} in 0)", n, a)
                     }
                     "pop!" => {
                         let a = node
@@ -734,6 +750,10 @@ fn show_expr_for_type(ty: &Type, var: &str) -> String {
         Type::Dec => format!("(string_of_float {})", var),
         Type::Bool => format!("(if {} then \"true\" else \"false\")", var),
         Type::Char => format!("(string_of_int {})", var),
+        // Calque enums are zero-payload i32 tags at runtime.  The standalone
+        // transpiler does not carry their variant-name metadata into OCaml,
+        // so render the tag just as the native representation does.
+        Type::Enum(_) => format!("(string_of_int {})", var),
         Type::Unit => "\"()\"".to_string(),
         Type::Function(_, _) => "\"<function>\"".to_string(),
         Type::Var(_) => format!("(show_any (Obj.repr {}))", var),

@@ -50,10 +50,10 @@ and copy backing storage. Reserve once when the eventual append count is known:
 
 ```que
 (let squares [])
-(capacity! squares 1000)
+(capacity! 1000 squares)
 
 (loop i (< i 1000)
-  (push! squares (* i i)))
+  (push! (* i i) squares))
 ```
 
 `capacity!` is only a reservation: it does not set the length or impose a
@@ -71,7 +71,7 @@ both the access invariant and the intended work clear:
 ```que
 (let total 0)
 (loop i (< i (length xs))
-  (alter! total (+ total (get xs i))))
+  (alter! total (+ total (get i xs))))
 ```
 
 Here the compiler can establish `0 <= i < length(xs)`. In optimized output it
@@ -81,7 +81,7 @@ as a guard rather than assuming `--opt` will discover it:
 
 ```que
 (if (and (>= index 0) (< index (length xs)))
-    (get xs index)
+    (get index xs)
     fallback)
 ```
 

@@ -268,8 +268,8 @@ fn compile_expr_inner(expr: &Expression, mut_vars: &HashSet<String>, in_fn_body:
                     }
                     "get" => format!(
                         "(q-get {} {})",
-                        compile_expr_inner(&items[1], mut_vars, false),
-                        compile_expr_inner(&items[2], mut_vars, false)
+                        compile_expr_inner(&items[2], mut_vars, false),
+                        compile_expr_inner(&items[1], mut_vars, false)
                     ),
                     "car" => format!(
                         "(q-get {} 0)",
@@ -277,8 +277,8 @@ fn compile_expr_inner(expr: &Expression, mut_vars: &HashSet<String>, in_fn_body:
                     ),
                     "cdr" => format!(
                         "(q-cdr {} {})",
-                        compile_expr_inner(&items[1], mut_vars, false),
-                        compile_expr_inner(&items[2], mut_vars, false)
+                        compile_expr_inner(&items[2], mut_vars, false),
+                        compile_expr_inner(&items[1], mut_vars, false)
                     ),
                     "fst" => format!(
                         "(q-get {} 0)",
@@ -290,12 +290,19 @@ fn compile_expr_inner(expr: &Expression, mut_vars: &HashSet<String>, in_fn_body:
                     ),
                     "set!" => format!(
                         "(do (q-set! {} {} {}) 0)",
+                        compile_expr_inner(&items[3], mut_vars, false),
                         compile_expr_inner(&items[1], mut_vars, false),
-                        compile_expr_inner(&items[2], mut_vars, false),
-                        compile_expr_inner(&items[3], mut_vars, false)
+                        compile_expr_inner(&items[2], mut_vars, false)
                     ),
                     "push!" => format!(
                         "(do (q-push! {} {}) 0)",
+                        compile_expr_inner(&items[2], mut_vars, false),
+                        compile_expr_inner(&items[1], mut_vars, false)
+                    ),
+                    // ArrayList grows automatically; retain source evaluation
+                    // order while treating capacity reservation as a no-op.
+                    "capacity!" => format!(
+                        "(do {} {} 0)",
                         compile_expr_inner(&items[1], mut_vars, false),
                         compile_expr_inner(&items[2], mut_vars, false)
                     ),

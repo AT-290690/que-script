@@ -11,18 +11,18 @@ local counters, in-place algorithms, and predictable allocation behavior.
   (+= total i))
 
 (let xs [])
-(push! xs total)
-(set! xs 0 42)
+(push! total xs)
+(set! 0 42 xs)
 ```
 
-The caller-visible mutable value of a function is normally rooted in its first
-parameter. This keeps mutation APIs regular:
+The caller-visible mutable value of a function is normally its final
+parameter. This keeps mutation APIs pipeline-friendly:
 
 ```que
 (let fill-zeroes!
   (lambda (xs)
     (loop i (< i (length xs))
-      (set! xs i 0))
+      (set! i 0 xs))
     xs))
 ```
 
@@ -32,10 +32,10 @@ parameter. This keeps mutation APIs regular:
 
 ```que
 (let paths [])
-(capacity! paths 1000)
+(capacity! 1000 paths)
 
 (loop i (< i 1000)
-  (push! paths i))
+  (push! i paths))
 ```
 
 It is useful before a known burst of appends. It returns unit, deliberately:

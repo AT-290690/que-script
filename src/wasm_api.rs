@@ -1,9 +1,9 @@
+#[cfg(feature = "compiler")]
+use crate::infer::infer_with_builtins_typed_lsp;
 use crate::infer::{
     infer_with_builtins_typed, infer_with_builtins_typed_lsp_all, EffectFlags, InferErrorScope,
     TypedExpression,
 };
-#[cfg(feature = "compiler")]
-use crate::infer::infer_with_builtins_typed_lsp;
 use crate::lsp_native_core as native_core;
 use crate::parser::{self, Expression};
 use crate::types::{Type, TypeEnv};

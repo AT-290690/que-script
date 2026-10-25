@@ -10,15 +10,15 @@
 (let paths (capacity (+ SIZE 1) []))
 
 (loop i (<= i SIZE)
-  (push! paths 1))
+  (push! 1 paths))
 
 (loop row (< row SIZE)
   (loop/for col 1 (<= col SIZE) (++ col)
-    (let left (get paths (- col 1)))
-    (let current (get paths col))
+    (let left (get (- col 1) paths))
+    (let current (get col paths))
     ; The guard proves the addition cannot wrap in an Int.
     (when (+/safe? current left)
-      (set! paths col (+ current left)))))
+      (set! col (+ current left) paths))))
 
 ; 184756
-(get paths (- (length paths) 1))
+(get (- (length paths) 1) paths)

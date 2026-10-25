@@ -30,12 +30,12 @@
 [a b c]
 {a b}
 (length xs)
-(get xs i)
-(set! xs i value)
-(push! xs value)
+(get i xs)
+(set! i value xs)
+(push! value xs)
 (pop! xs)
 (empty! xs)
-(capacity! xs n)
+(capacity! n xs)
 ```
 
 ## Functions and composition

@@ -2065,8 +2065,8 @@ fn destructure_vector_pattern(
                                         elem,
                                         Expression::Apply(vec![
                                             Expression::Word("get".to_string()),
-                                            Expression::Word(vector_var.clone()),
                                             Expression::Int(element_index as i32),
+                                            Expression::Word(vector_var.clone()),
                                         ]),
                                         arg_index,
                                         binding_counter,
@@ -2082,8 +2082,8 @@ fn destructure_vector_pattern(
                                     elem,
                                     Expression::Apply(vec![
                                         Expression::Word("get".to_string()),
-                                        Expression::Word(vector_var.clone()),
                                         Expression::Int(element_index as i32),
+                                        Expression::Word(vector_var.clone()),
                                     ]),
                                     arg_index,
                                     binding_counter,
@@ -2105,8 +2105,8 @@ fn destructure_vector_pattern(
                             Expression::Word(rest_name),
                             Expression::Apply(vec![
                                 Expression::Word("cdr".to_string()),
-                                Expression::Word(vector_var.clone()),
                                 Expression::Int(element_index as i32),
+                                Expression::Word(vector_var.clone()),
                             ]),
                         ]));
                     }
@@ -2311,44 +2311,42 @@ fn loop_while_transform(
 
 fn cdr_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
-    let len = exprs.len();
-    let mut iter = exprs.into_iter();
-    if len == 0 {
+    if exprs.is_empty() {
         return Err("cdr requires at least 1 argument".to_string());
     }
-    let first = iter.next().unwrap();
-    if len == 1 {
+    if exprs.len() == 1 {
         return Ok(Expression::Apply(vec![
             Expression::Word("cdr".to_string()),
-            first,
             Expression::Int(1),
+            exprs.remove(0),
         ]));
     }
-    Ok(Expression::Apply(vec![
-        Expression::Word("cdr".to_string()),
-        first,
-        iter.next().unwrap(),
-    ]))
+    if exprs.len() == 2 {
+        return Ok(Expression::Apply(vec![
+            Expression::Word("cdr".to_string()),
+            exprs.remove(0),
+            exprs.remove(0),
+        ]));
+    }
+    Err("cdr accepts a vector, or an offset followed by a vector".to_string())
 }
 
 fn accessor_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
     exprs.remove(0);
-    let len = exprs.len();
-    let mut iter = exprs.into_iter();
-    if len == 0 {
+    if exprs.is_empty() {
         return Err("get requires at least 1 argument".to_string());
     }
-    let first = iter.next().unwrap();
-    if len == 1 {
+    if exprs.len() == 1 {
         return Ok(Expression::Apply(vec![
             Expression::Word("get".to_string()),
-            first,
             Expression::Int(0),
+            exprs.remove(0),
         ]));
     }
-    let mut acc = first;
-    for e in iter {
-        acc = Expression::Apply(vec![Expression::Word("get".to_string()), acc, e]);
+    let target = exprs.pop().expect("checked non-empty");
+    let mut acc = target;
+    for index in exprs {
+        acc = Expression::Apply(vec![Expression::Word("get".to_string()), index, acc]);
     }
     Ok(acc)
 }
@@ -2361,19 +2359,18 @@ fn setter_transform(mut exprs: Vec<Expression>) -> Result<Expression, String> {
         return Ok(Expression::Apply(exprs));
     }
     exprs.remove(0);
-    let last = exprs.pop().unwrap();
+    let target = exprs.pop().unwrap();
+    let value = exprs.pop().unwrap();
     let set_idx = exprs.pop().unwrap();
-    let mut iter = exprs.into_iter();
-    let first = iter.next().unwrap();
-    let mut acc = first;
-    for e in iter {
-        acc = Expression::Apply(vec![Expression::Word("get".to_string()), acc, e]);
+    let mut acc = target;
+    for e in exprs {
+        acc = Expression::Apply(vec![Expression::Word("get".to_string()), e, acc]);
     }
     Ok(Expression::Apply(vec![
         Expression::Word("set!".to_string()),
-        acc,
         set_idx,
-        last,
+        value,
+        acc,
     ]))
 }
 

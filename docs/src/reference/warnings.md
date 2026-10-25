@@ -30,7 +30,7 @@ The canonical dynamic guard is:
 
 ```que
 (if (and (>= index 0) (< index (length xs)))
-    (get xs index)
+    (get index xs)
     fallback)
 ```
 
@@ -39,7 +39,7 @@ upper bound elsewhere:
 
 ```que
 (loop i (< i (length xs))
-  (get xs i))
+  (get i xs))
 ```
 
 ## Arithmetic

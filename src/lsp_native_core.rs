@@ -1549,8 +1549,8 @@ fn flatten_get_source(expr: &Expression) -> String {
             if matches!(items.first(), Some(Expression::Word(op)) if op == "get")
                 && items.len() == 3
             {
-                let base = collect(&items[1], indices);
-                indices.push(&items[2]);
+                let base = collect(&items[2], indices);
+                indices.push(&items[1]);
                 return base;
             }
         }
@@ -1564,12 +1564,12 @@ fn flatten_get_source(expr: &Expression) -> String {
     }
     format!(
         "(get {} {})",
-        base.to_lisp(),
         indices
             .iter()
             .map(|index| index.to_lisp())
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(" "),
+        base.to_lisp(),
     )
 }
 

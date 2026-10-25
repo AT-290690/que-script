@@ -57,7 +57,7 @@ reference cycle. This program is rejected at compile time:
     (length callbacks)))
 
 ; Error: report-size captures callbacks, then is stored in callbacks.
-(push! callbacks report-size)
+(push! report-size callbacks)
 ```
 
 <img class="explanatory-diagram" src="../images/ownership-cycles.svg" alt="Rejected managed ownership cycle beside a valid graph represented by IDs">
@@ -93,9 +93,9 @@ closures that refer back to their owner:
 ```que
 ; Node id -> ids of outgoing neighbours.
 (let edges (Table/new))
-(Table/set! edges 0 [1 2])
-(Table/set! edges 1 [2])
-(Table/set! edges 2 [0])
+(Table/set! 0 [1 2] edges)
+(Table/set! 1 [2] edges)
+(Table/set! 2 [0] edges)
 ```
 
 That graph has a logical cycle (`0 → 1 → 2 → 0`), but its values do not own one
@@ -115,7 +115,7 @@ with only the storage required by its current length:
 
 ```que
 (let work [])
-(capacity! work 1000)
+(capacity! 1000 work)
 ; fill and process work
 (empty! work)       ; elements are released; reserved storage stays reusable
 (compact! work)     ; discard unused backing capacity

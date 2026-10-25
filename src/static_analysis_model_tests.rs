@@ -108,7 +108,7 @@ fn model_check_literal_get_and_set_index_spaces() {
     for length in 0..=8usize {
         let vector = vector_literal(length);
         for index in -3..=11i32 {
-            let get_source = format!("(get {vector} {index})");
+            let get_source = format!("(get {index} {vector})");
             let get_diagnostics = diagnostics(&get_source, 1);
             let get_safe = index >= 0 && (index as usize) < length;
             assert_eq!(
@@ -117,7 +117,7 @@ fn model_check_literal_get_and_set_index_spaces() {
                 "get model mismatch\nsource: {get_source}\nlength: {length}\nindex: {index}\ndiagnostics: {get_diagnostics:#?}"
             );
 
-            let set_source = format!("(set! {vector} {index} 99)");
+            let set_source = format!("(set! {index} 99 {vector})");
             let set_diagnostics = diagnostics(&set_source, 1);
             let set_safe = index >= 0 && (index as usize) <= length;
             assert_eq!(
@@ -183,15 +183,15 @@ fn mutation_program(initial_length: usize, sequence: &[Mutation]) -> (String, us
     for mutation in sequence {
         match mutation {
             Mutation::Push => {
-                forms.push("(push! xs 7)".to_string());
+                forms.push("(push! 7 xs)".to_string());
                 length += 1;
             }
             Mutation::ReplaceFirst if length > 0 => {
-                forms.push("(set! xs 0 7)".to_string());
+                forms.push("(set! 0 7 xs)".to_string());
             }
             Mutation::ReplaceFirst => continue,
             Mutation::AppendWithSet => {
-                forms.push("(set! xs (length xs) 7)".to_string());
+                forms.push("(set! (length xs) 7 xs)".to_string());
                 length += 1;
             }
             Mutation::Pop => {
@@ -206,7 +206,7 @@ fn mutation_program(initial_length: usize, sequence: &[Mutation]) -> (String, us
         }
     }
     for final_index in FINAL_MUTATION_INDICES {
-        forms.push(format!("(get xs {final_index})"));
+        forms.push(format!("(get {final_index} xs)"));
     }
     let user_form_count = forms.len() - 1;
     (forms.join(" "), length, user_form_count)
@@ -225,7 +225,7 @@ fn model_check_all_vector_mutation_sequences_through_depth_five() {
                 let expected_safe = final_index >= 0 && (final_index as usize) < final_length;
                 let final_get_warning = found.iter().any(|message| {
                     message.contains("index not proven safe")
-                        && message.contains(&format!("(get xs {final_index})"))
+                        && message.contains(&format!("(get {final_index} xs)"))
                 });
                 assert_eq!(
                     !final_get_warning,
@@ -272,10 +272,10 @@ fn model_check_exact_length_guards_prove_all_smaller_literal_indices() {
             ] {
                 let source = if guard.starts_with("(let n") {
                     format!(
-                        "(let xs []) (let n {length}) (if (= (length xs) n) (get xs {index}) -1)"
+                        "(let xs []) (let n {length}) (if (= (length xs) n) (get {index} xs) -1)"
                     )
                 } else {
-                    format!("(let xs []) (if {guard} (get xs {index}) -1)")
+                    format!("(let xs []) (if {guard} (get {index} xs) -1)")
                 };
                 let found = diagnostics(&source, source.matches("(let ").count() + 1);
                 assert!(
@@ -326,7 +326,7 @@ fn model_check_alias_capture_and_comparison_direction_equivalence() {
 
 #[test]
 fn model_check_diagnostic_categories_are_stable_and_nonduplicated() {
-    let source = "(let xs []) (let i 4) (get xs i) (set! xs 5 0) (car xs) (pop-val! xs) (/ 1 0) (+ 2147483647 1) (- -2147483648 1)";
+    let source = "(let xs []) (let i 4) (get i xs) (set! 5 0 xs) (car xs) (pop-val! xs) (/ 1 0) (+ 2147483647 1) (- -2147483648 1)";
     let found = diagnostics(source, 9);
     let expected = [
         "index not proven safe",

@@ -1432,8 +1432,8 @@ fn canonical_access(expr: &Expression, state: &AbstractState) -> String {
         {
             format!(
                 "(get {} {})",
-                canonical_access(&items[1], state),
-                items[2].to_lisp()
+                items[1].to_lisp(),
+                canonical_access(&items[2], state)
             )
         }
         _ => expr.to_lisp(),
@@ -1509,7 +1509,7 @@ fn vector_length_info_at_depth(
                     minimum: length,
                 })
             }
-            [Expression::Word(op), value] if op == "cdr" => {
+            [Expression::Word(op), Expression::Int(1), value] if op == "cdr" => {
                 let inner = vector_length_info_at_depth(value, state, expansion_depth)?;
                 Some(VectorLengthInfo {
                     exact: inner.exact.map(|length| length.saturating_sub(1)),
@@ -1816,8 +1816,8 @@ fn collect_static_bound_guard_facts(
                             };
                             vector = Expression::Apply(vec![
                                 Expression::Word("get".to_string()),
-                                vector,
                                 projection_index.clone(),
+                                vector,
                             ]);
                         }
                         let index_key = canonical_scalar(index, facts);
@@ -2332,11 +2332,16 @@ fn apply_vector_mutation(items: &[Expression], facts: &mut AbstractState) {
     let Some(op) = items.first().and_then(word) else {
         return;
     };
-    let Some(xs_expr) = items.get(1) else {
+    let xs_index = match op {
+        "push!" => 2,
+        "set!" => 3,
+        _ => 1,
+    };
+    let Some(xs_expr) = items.get(xs_index) else {
         return;
     };
     let xs = canonical_access(xs_expr, facts);
-    let nested_prefix = format!("(get {xs} ");
+    let nested_prefix = "(get ".to_string();
 
     match op {
         "push!" => {
@@ -2366,14 +2371,14 @@ fn apply_vector_mutation(items: &[Expression], facts: &mut AbstractState) {
                 .length_sources
                 .retain(|_, source| !source.starts_with(&nested_prefix));
 
-            let direct_append = items.get(2).is_some_and(|index| {
+            let direct_append = items.get(1).is_some_and(|index| {
                 matches!(index, Expression::Apply(length)
                     if matches!(length.first(), Some(Expression::Word(name)) if name == "length")
                         && length.len() == 2
                         && canonical_access(&length[1], facts) == xs)
             });
             let known_append = items
-                .get(2)
+                .get(1)
                 .and_then(|index| integer_constant(index, facts))
                 .zip(
                     facts
@@ -2433,7 +2438,7 @@ fn apply_vector_mutation(items: &[Expression], facts: &mut AbstractState) {
             continue;
         }
         let vector = canonical_access(argument, facts);
-        let nested_prefix = format!("(get {vector} ");
+        let nested_prefix = "(get ".to_string();
         facts
             .fixed_lengths
             .retain(|name, _| name != &vector && !name.starts_with(&nested_prefix));
@@ -2754,7 +2759,7 @@ fn collect_size_mutations(
         {
             out.entry(name.clone()).or_default().push(SizeStep::Shrink);
         }
-        [Expression::Word(op), Expression::Word(name), _] if op == "push!" => {
+        [Expression::Word(op), _, Expression::Word(name)] if op == "push!" => {
             out.entry(name.clone()).or_default().push(SizeStep::Grow);
         }
         _ => {}
@@ -2985,7 +2990,7 @@ fn size_path_progress(
         {
             return PathProgress::update(SizeStep::Shrink);
         }
-        [Expression::Word(op), Expression::Word(target), _] if target == name && op == "push!" => {
+        [Expression::Word(op), _, Expression::Word(target)] if target == name && op == "push!" => {
             return PathProgress::update(SizeStep::Grow);
         }
         _ => {}
@@ -3555,7 +3560,7 @@ fn recursive_argument_size_step(
             [Expression::Word(op), Expression::Word(name)] if op == "cdr" && name == parameter => {
                 SizeStep::Shrink
             }
-            [Expression::Word(op), Expression::Word(name), _]
+            [Expression::Word(op), _, Expression::Word(name)]
                 if op == "cdr" && name == parameter =>
             {
                 SizeStep::Shrink
@@ -4778,12 +4783,12 @@ fn validate_static_bounds_expr(
     }
 
     if op == "get" && items.len() > 3 {
-        let mut accessed = items[1].clone();
-        for index in items.iter().skip(2) {
+        let mut accessed = items[2].clone();
+        for index in std::iter::once(&items[1]).chain(items.iter().skip(3)) {
             accessed = Expression::Apply(vec![
                 Expression::Word("get".to_string()),
-                accessed,
                 index.clone(),
+                accessed,
             ]);
             validate_static_bounds_expr(&accessed, facts, diagnostics);
         }
@@ -4791,12 +4796,12 @@ fn validate_static_bounds_expr(
     }
 
     if op == "get" && items.len() == 3 {
-        let status = access_index_status(&items[1], &items[2], facts, false);
+        let status = access_index_status(&items[2], &items[1], facts, false);
         diagnostics.record_proof(
             ProofKind::BoundsRead,
             status,
             expr,
-            access_proof_details(&items[1], &items[2], facts),
+            access_proof_details(&items[2], &items[1], facts),
         );
         if status != ProofStatus::ProvenSafe {
             let certainty = if status == ProofStatus::DefinitelyInvalid {
@@ -4812,20 +4817,20 @@ fn validate_static_bounds_expr(
                 ),
             );
         } else if diagnostics.capture_proofs {
-            let vector = canonical_access(&items[1], facts);
-            let index = canonical_scalar(&items[2], facts);
+            let vector = canonical_access(&items[2], facts);
+            let index = canonical_scalar(&items[1], facts);
             let mut details = Vec::new();
             if let Some(length) = facts
                 .fixed_lengths
                 .get(&vector)
                 .copied()
-                .or_else(|| literal_vector_length(&items[1]))
+                .or_else(|| literal_vector_length(&items[2]))
             {
                 details.push(format!("length({vector}) = {length}"));
             } else if let Some(minimum) = facts.minimum_lengths.get(&vector) {
                 details.push(format!("length({vector}) >= {minimum}"));
             }
-            if let Some(range) = integer_interval(&items[2], facts) {
+            if let Some(range) = integer_interval(&items[1], facts) {
                 details.push(format!("{} <= {} <= {}", range.min, index, range.max));
             } else if facts.safe_pairs.contains(&(vector.clone(), index.clone())) {
                 details.push(format!("0 <= {index} < length({vector})"));
@@ -4838,19 +4843,19 @@ fn validate_static_bounds_expr(
     }
 
     if op == "set!" && items.len() == 4 {
-        let status = access_index_status(&items[1], &items[2], facts, true);
-        let replacement_status = access_index_status(&items[1], &items[2], facts, false);
+        let status = access_index_status(&items[3], &items[1], facts, true);
+        let replacement_status = access_index_status(&items[3], &items[1], facts, false);
         diagnostics.record_proof(
             ProofKind::BoundsWrite,
             status,
             expr,
-            access_proof_details(&items[1], &items[2], facts),
+            access_proof_details(&items[3], &items[1], facts),
         );
         diagnostics.record_proof(
             ProofKind::BoundsWriteReplacement,
             replacement_status,
             expr,
-            access_proof_details(&items[1], &items[2], facts),
+            access_proof_details(&items[3], &items[1], facts),
         );
         if status != ProofStatus::ProvenSafe {
             let certainty = if status == ProofStatus::DefinitelyInvalid {
@@ -6117,7 +6122,7 @@ fn structural_parameter_effect(
         {
             return SizeStep::Shrink;
         }
-        [Expression::Word(op), Expression::Word(name), _] if name == parameter && op == "push!" => {
+        [Expression::Word(op), _, Expression::Word(name)] if name == parameter && op == "push!" => {
             return SizeStep::Grow;
         }
         _ => {}
@@ -6194,7 +6199,7 @@ fn structural_result_relation(
                 {
                     return SizeStep::Shrink;
                 }
-                [Expression::Word(op), Expression::Word(name), _]
+                [Expression::Word(op), _, Expression::Word(name)]
                     if op == "cdr" && name == parameter =>
                 {
                     return SizeStep::Shrink;
@@ -6412,8 +6417,8 @@ fn guard_path_from_params(expr: &Expression, params: &[&str]) -> Option<(usize, 
             if matches!(items.first(), Some(Expression::Word(op)) if op == "get")
                 && items.len() == 3 =>
         {
-            let (root, mut projections) = guard_path_from_params(&items[1], params)?;
-            let Expression::Word(index) = &items[2] else {
+            let (root, mut projections) = guard_path_from_params(&items[2], params)?;
+            let Expression::Word(index) = &items[1] else {
                 return None;
             };
             projections.push(params.iter().position(|param| *param == index)?);
@@ -6458,7 +6463,7 @@ mod tests {
 
     #[test]
     fn proof_facts_are_conservative_across_repeated_proof_keys() {
-        let expression = crate::parser::build("(get xs i)").expect("expression should build");
+        let expression = crate::parser::build("(get i xs)").expect("expression should build");
         let safe = StaticProof {
             id: AnalysisNodeId {
                 user_form_index: 0,
@@ -6483,18 +6488,18 @@ mod tests {
     #[test]
     fn structured_proofs_distinguish_safe_invalid_and_unknown_operations() {
         let findings = report(
-            "(let xs [1 2]) (get xs 1) (get xs 9) (let divide (lambda x (/ 10 x))) (+ 2147483647 1)",
+            "(let xs [1 2]) (get 1 xs) (get 9 xs) (let divide (lambda x (/ 10 x))) (+ 2147483647 1)",
             5,
         );
         assert!(findings.proofs.iter().any(|proof| {
             proof.kind == ProofKind::BoundsRead
                 && proof.status == ProofStatus::ProvenSafe
-                && proof.expression == "(get xs 1)"
+                && proof.expression == "(get 1 xs)"
         }));
         assert!(findings.proofs.iter().any(|proof| {
             proof.kind == ProofKind::BoundsRead
                 && proof.status == ProofStatus::DefinitelyInvalid
-                && proof.expression == "(get xs 9)"
+                && proof.expression == "(get 9 xs)"
         }));
         assert!(findings.proofs.iter().any(|proof| {
             proof.kind == ProofKind::NonZeroDivisor
@@ -6516,7 +6521,7 @@ mod tests {
 
     #[test]
     fn structured_proofs_have_stable_distinct_source_spans() {
-        let source = "(let xs [1])\n(do\n  (get xs 0)\n  (get xs 0))";
+        let source = "(let xs [1])\n(do\n  (get 0 xs)\n  (get 0 xs))";
         let expression = crate::parser::build(source).expect("source should build");
         let (_typ, typed) = crate::infer::infer_with_builtins_typed(
             &expression,
@@ -6549,7 +6554,7 @@ mod tests {
     #[test]
     fn function_postconditions_preserve_ranges_nonzero_and_vector_lengths() {
         let findings = diagnostics(
-            "(let clamp (lambda x (if (< x 0) 0 (if (> x 1) 1 x)))) (let pair (lambda x [x x])) (let i (clamp 99)) (let xs (pair 7)) {(get xs i) (/ 10 (if (= i 0) 1 i))}",
+            "(let clamp (lambda x (if (< x 0) 0 (if (> x 1) 1 x)))) (let pair (lambda x [x x])) (let i (clamp 99)) (let xs (pair 7)) {(get i xs) (/ 10 (if (= i 0) 1 i))}",
             5,
         );
         assert!(
@@ -6596,7 +6601,7 @@ mod tests {
 
     #[test]
     fn recursive_unit_step_range_is_inferred_from_entry_and_base_case() {
-        let source = "(let N 4) (let xs [0 0 0 0]) (letrec walk (lambda i (if (= i N) 0 (do (set! xs i 1) (walk (+ i 1)))))) (walk 0)";
+        let source = "(let N 4) (let xs [0 0 0 0]) (letrec walk (lambda i (if (= i N) 0 (do (set! i 1 xs) (walk (+ i 1)))))) (walk 0)";
         let expression = crate::parser::build(source).expect("source should build");
         let expressions = match &expression {
             Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(op)) if op == "do") => {
@@ -6619,30 +6624,30 @@ mod tests {
 
     #[test]
     fn recursive_range_proof_rejects_unknown_entries_and_non_unit_steps() {
-        let unknown_entry = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! xs i 1) (walk (+ i 1)))))) (let run (lambda i (walk i))) (run 0)";
+        let unknown_entry = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! i 1 xs) (walk (+ i 1)))))) (let run (lambda i (walk i))) (run 0)";
         let unknown_report = report(unknown_entry, 4);
         assert!(unknown_report.proofs.iter().any(|proof| {
             proof.kind == ProofKind::BoundsWriteReplacement
-                && proof.expression == "(set! xs i 1)"
+                && proof.expression == "(set! i 1 xs)"
                 && proof.status == ProofStatus::Unknown
         }));
 
-        let skipped_exit = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! xs i 1) (walk (+ i 2)))))) (walk 0)";
+        let skipped_exit = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! i 1 xs) (walk (+ i 2)))))) (walk 0)";
         let skipped_report = report(skipped_exit, 3);
         assert!(skipped_report.proofs.iter().any(|proof| {
             proof.kind == ProofKind::BoundsWriteReplacement
-                && proof.expression == "(set! xs i 1)"
+                && proof.expression == "(set! i 1 xs)"
                 && proof.status == ProofStatus::Unknown
         }));
     }
 
     #[test]
     fn captured_minimum_length_is_not_reused_when_vector_can_shrink() {
-        let source = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! xs i 1) (walk (+ i 1)))))) (pop! xs) (walk 0)";
+        let source = "(let xs [0 0 0 0]) (letrec walk (lambda i (if (= i 4) 0 (do (set! i 1 xs) (walk (+ i 1)))))) (pop! xs) (walk 0)";
         let findings = report(source, 4);
         assert!(findings.proofs.iter().any(|proof| {
             proof.kind == ProofKind::BoundsWriteReplacement
-                && proof.expression == "(set! xs i 1)"
+                && proof.expression == "(set! i 1 xs)"
                 && proof.status == ProofStatus::Unknown
         }));
     }
@@ -6650,7 +6655,7 @@ mod tests {
     #[test]
     fn disjunctive_ranges_preserve_holes_across_control_flow() {
         let findings = report(
-            "(let divide (lambda x (if (or (= x 0) (= x 2)) (/ 10 (- x 1)) 0))) (let bad (lambda x (if (or (= x -1) (= x 5)) (get [1 2 3] x) 0)))",
+            "(let divide (lambda x (if (or (= x 0) (= x 2)) (/ 10 (- x 1)) 0))) (let bad (lambda x (if (or (= x -1) (= x 5)) (get x [1 2 3]) 0)))",
             2,
         );
         assert!(
@@ -6670,7 +6675,7 @@ mod tests {
             findings.proofs.iter().any(|proof| {
                 proof.kind == ProofKind::BoundsRead
                     && proof.status == ProofStatus::DefinitelyInvalid
-                    && proof.expression == "(get (vector 1 2 3) x)"
+                    && proof.expression == "(get x (vector 1 2 3))"
             }),
             "{:#?}",
             findings.proofs
@@ -6857,7 +6862,7 @@ mod tests {
     #[test]
     fn termination_treats_vector_length_as_counter_bound_not_measure() {
         let findings = diagnostics(
-            "(let xs [5 8 2 1 5]) (mut i 0) (while (< i (length xs)) (do (get xs i) (alter! i (+ i 1))))",
+            "(let xs [5 8 2 1 5]) (mut i 0) (while (< i (length xs)) (do (get i xs) (alter! i (+ i 1))))",
             3,
         );
         assert!(
@@ -6918,7 +6923,7 @@ mod tests {
             ),
             (
                 "length moves away",
-                "(let xs [1]) (while (> (length xs) 0) (push! xs 1))",
+                "(let xs [1]) (while (> (length xs) 0) (push! 1 xs))",
                 true,
             ),
         ];
@@ -6932,7 +6937,7 @@ mod tests {
         }
 
         let competing =
-            "(let xs [1]) (mut i 0) (while (< i (length xs)) (do (alter! i (+ i 1)) (push! xs 1)))";
+            "(let xs [1]) (mut i 0) (while (< i (length xs)) (do (alter! i (+ i 1)) (push! 1 xs)))";
         let expression = crate::parser::build(competing).expect("source should build");
         let (_typ, typed) = crate::infer::infer_with_builtins_typed(
             &expression,
@@ -6990,7 +6995,7 @@ mod tests {
 
     #[test]
     fn counted_append_loop_proves_following_get_and_set_bounds() {
-        let source = "(let n 100) (let flags []) (mut i 0) (while (<= i n) (do (push! flags true) (alter! i (+ i 1)))) (mut k 0) (while (<= k n) (do (get flags k) (set! flags k false) (alter! k (+ k 1))))";
+        let source = "(let n 100) (let flags []) (mut i 0) (while (<= i n) (do (push! true flags) (alter! i (+ i 1)))) (mut k 0) (while (<= k n) (do (get k flags) (set! k false flags) (alter! k (+ k 1))))";
         let findings = diagnostics(source, 99);
         assert!(
             !findings
@@ -7231,7 +7236,7 @@ mod tests {
             .iter()
             .any(|message| message.contains("length of 'xs' does not move")));
 
-        let growing = diagnostics("(let xs [1]) (while (> (length xs) 0) (push! xs 1))", 2);
+        let growing = diagnostics("(let xs [1]) (while (> (length xs) 0) (push! 1 xs))", 2);
         assert!(growing
             .iter()
             .any(|message| message.contains("length of 'xs' does not move")));
@@ -7248,7 +7253,7 @@ mod tests {
             .any(|message| message.starts_with("termination:")));
 
         let growing_helper = diagnostics(
-            "(let add-one (lambda xs (push! xs 1))) (let xs [1]) (while (> (length xs) 0) (add-one xs))",
+            "(let add-one (lambda xs (push! 1 xs))) (let xs [1]) (while (> (length xs) 0) (add-one xs))",
             3,
         );
         assert!(growing_helper
@@ -7307,16 +7312,16 @@ mod tests {
 
     #[test]
     fn inferred_user_predicate_can_prove_a_later_access() {
-        let source = "(let valid? (lambda (xs i) (and (= 1 1) (>= i 0) (< i (length xs))))) (let xs [1 2]) (let i 1) (if (valid? xs i) (get xs i) 0)";
+        let source = "(let valid? (lambda (i xs) (and (= 1 1) (>= i 0) (< i (length xs))))) (let xs [1 2]) (let i 1) (if (valid? i xs) (get i xs) 0)";
         assert_eq!(analyze(source, 4), Ok(()));
     }
 
     #[test]
     fn nested_matrix_access_requires_both_path_proofs() {
-        let guarded = "(let xs [[1] [2]]) (let x 0) (let y 0) (if (and (>= x 0) (< x (length xs)) (>= y 0) (< y (length (get xs x)))) (get xs x y) -1)";
+        let guarded = "(let xs [[1] [2]]) (let x 0) (let y 0) (if (and (>= x 0) (< x (length xs)) (>= y 0) (< y (length (get x xs)))) (get y (get x xs)) -1)";
         assert!(analyze(guarded, 4).is_ok());
 
-        let unguarded = "(let xs [[1] [2]]) (let x 10) (let y 10) (get xs x y)";
+        let unguarded = "(let xs [[1] [2]]) (let x 10) (let y 10) (get y (get x xs))";
         assert!(analyze(unguarded, 4)
             .expect_err("unproven access should fail")
             .contains("index not proven safe"));
@@ -7324,19 +7329,19 @@ mod tests {
 
     #[test]
     fn cached_length_proves_loop_access_after_macro_expansion() {
-        let source = "(let xs [1 2 3 4]) (let len (length xs)) (mut i 0) (while (< i len) (do (let x (get xs i)) (alter! i (+ i 1))))";
+        let source = "(let xs [1 2 3 4]) (let len (length xs)) (mut i 0) (while (< i len) (do (let x (get i xs)) (alter! i (+ i 1))))";
         assert_eq!(analyze(source, 4), Ok(()));
     }
 
     #[test]
     fn cached_nested_lengths_prove_matrix_accesses() {
-        let source = "(let rows [[1] [2]]) (let height (length rows)) (mut y 0) (while (< y height) (do (let row (get rows y)) (let width (length row)) (mut x 0) (while (< x width) (do (let item (get row x)) (alter! x (+ x 1)))) (alter! y (+ y 1))))";
+        let source = "(let rows [[1] [2]]) (let height (length rows)) (mut y 0) (while (< y height) (do (let row (get y rows)) (let width (length row)) (mut x 0) (while (< x width) (do (let item (get x row)) (alter! x (+ x 1)))) (alter! y (+ y 1))))";
         assert_eq!(analyze(source, 4), Ok(()));
     }
 
     #[test]
     fn branch_refinement_does_not_escape_the_branch() {
-        let source = "(let xs [1 2]) (let i 1) (if (and (>= i 0) (< i (length xs))) (get xs i) 0) (get xs i)";
+        let source = "(let xs [1 2]) (let i 1) (if (and (>= i 0) (< i (length xs))) (get i xs) 0) (get i xs)";
         assert!(analyze(source, 4)
             .expect_err("a path-local proof must not escape its branch")
             .contains("index not proven safe"));
@@ -7344,7 +7349,7 @@ mod tests {
 
     #[test]
     fn assignment_kills_old_index_refinement() {
-        let source = "(let xs [1 2]) (mut i 1) (if (and (>= i 0) (< i (length xs))) (do (alter! i -1) (get xs i)) 0)";
+        let source = "(let xs [1 2]) (mut i 1) (if (and (>= i 0) (< i (length xs))) (do (alter! i -1) (get i xs)) 0)";
         assert!(analyze(source, 3)
             .expect_err("assigning the index must kill its prior proof")
             .contains("index not proven safe"));
@@ -7352,7 +7357,7 @@ mod tests {
 
     #[test]
     fn resize_kills_a_cached_length_relation() {
-        let source = "(let xs [1 2]) (let len (length xs)) (pop! xs) (mut i 0) (while (< i len) (do (let x (get xs i)) (alter! i (+ i 1))))";
+        let source = "(let xs [1 2]) (let len (length xs)) (pop! xs) (mut i 0) (while (< i len) (do (let x (get i xs)) (alter! i (+ i 1))))";
         assert!(analyze(source, 5)
             .expect_err("resizing a vector must invalidate its cached length")
             .contains("index not proven safe"));
@@ -7360,13 +7365,13 @@ mod tests {
 
     #[test]
     fn vector_aliases_share_a_symbolic_bounds_identity() {
-        let source = "(let xs [1 2]) (let ys xs) (let i 1) (if (and (>= i 0) (< i (length ys))) (get xs i) 0)";
+        let source = "(let xs [1 2]) (let ys xs) (let i 1) (if (and (>= i 0) (< i (length ys))) (get i xs) 0)";
         assert_eq!(analyze(source, 4), Ok(()));
     }
 
     #[test]
     fn resizing_through_an_alias_kills_original_vector_proofs() {
-        let source = "(let xs [1 2]) (let ys xs) (let len (length xs)) (pop! ys) (mut i 0) (while (< i len) (do (let x (get xs i)) (alter! i (+ i 1))))";
+        let source = "(let xs [1 2]) (let ys xs) (let len (length xs)) (pop! ys) (mut i 0) (while (< i len) (do (let x (get i xs)) (alter! i (+ i 1))))";
         assert!(analyze(source, 6)
             .expect_err("an alias resize must invalidate the shared vector identity")
             .contains("index not proven safe"));
@@ -7374,27 +7379,27 @@ mod tests {
 
     #[test]
     fn push_preserves_old_bounds_and_extends_known_length() {
-        let source = "(let xs [1 2 3]) (push! xs 10) {(get xs 2) (get xs 3)}";
+        let source = "(let xs [1 2 3]) (push! 10 xs) {(get 2 xs) (get 3 xs)}";
         assert_eq!(analyze(source, 2), Ok(()));
     }
 
     #[test]
     fn set_replacement_preserves_length_and_known_bounds() {
-        let source = "(let xs [1 2 3]) (set! xs 1 10) (get xs 2)";
+        let source = "(let xs [1 2 3]) (set! 1 10 xs) (get 2 xs)";
         assert_eq!(analyze(source, 3), Ok(()));
     }
 
     #[test]
     fn set_append_extends_known_length() {
-        let source = "(let xs [1 2 3]) (set! xs (length xs) 10) (get xs 3)";
+        let source = "(let xs [1 2 3]) (set! (length xs) 10 xs) (get 3 xs)";
         assert_eq!(analyze(source, 3), Ok(()));
     }
 
     #[test]
     fn set_replacement_invalidates_nested_element_facts() {
-        let source = "(let rows [[1]]) (let x 0) (let y 0) (if (and (in-bounds? rows x) (in-bounds? (get rows x) y)) (block (set! rows x []) (get rows x y)) -1)";
+        let source = "(let rows [[1]]) (let x 0) (let y 0) (if (and (in-bounds? x rows) (in-bounds? y (get x rows))) (block (set! x [] rows) (get y (get x rows))) -1)";
         let source =
-            format!("(let in-bounds? (lambda xs i (and (>= i 0) (< i (length xs))))) {source}");
+            format!("(let in-bounds? (lambda i xs (and (>= i 0) (< i (length xs))))) {source}");
         assert!(analyze(&source, 5)
             .expect_err("replacing a row must invalidate facts about its old contents")
             .contains("index not proven safe"));
@@ -7402,13 +7407,13 @@ mod tests {
 
     #[test]
     fn false_or_and_negation_refine_the_else_branch() {
-        let source = "(let in-bounds? (lambda (xs i) (and (>= i 0) (< i (length xs))))) (let xs [1 2]) (let i 1) (if (or (> i 10) (not (in-bounds? xs i))) 0 (get xs i))";
+        let source = "(let in-bounds? (lambda (i xs) (and (>= i 0) (< i (length xs))))) (let xs [1 2]) (let i 1) (if (or (> i 10) (not (in-bounds? i xs))) 0 (get i xs))";
         assert_eq!(analyze(source, 4), Ok(()));
     }
 
     #[test]
     fn diagnostic_mode_collects_all_unproven_accesses() {
-        let source = "(let xs [1]) (let ys [2]) (let i 0) (let j 0) (get xs i) (get ys j)";
+        let source = "(let xs [1]) (let ys [2]) (let i 0) (let j 0) (get i xs) (get j ys)";
         let expression = crate::parser::build(source).expect("source should parse");
         let (_typ, typed) = crate::infer::infer_with_builtins_typed(
             &expression,
@@ -7421,22 +7426,22 @@ mod tests {
 
     #[test]
     fn positive_dynamic_length_proves_literal_zero_access() {
-        let source = "(let xs []) (if (> (length xs) 0) (get xs 0) -1)";
+        let source = "(let xs []) (if (> (length xs) 0) (get 0 xs) -1)";
         assert_eq!(analyze(source, 2), Ok(()));
 
-        let equivalent = "(let xs []) (if (< 0 (length xs)) (get xs 0) -1)";
+        let equivalent = "(let xs []) (if (< 0 (length xs)) (get 0 xs) -1)";
         assert_eq!(analyze(equivalent, 2), Ok(()));
 
-        let stronger = "(let xs []) (if (> (length xs) 1) (get xs 0) -1)";
+        let stronger = "(let xs []) (if (> (length xs) 1) (get 0 xs) -1)";
         assert_eq!(analyze(stronger, 2), Ok(()));
 
-        let constant_alias = "(let xs []) (let index 0) (if (> (length xs) index) (get xs 0) -1)";
+        let constant_alias = "(let xs []) (let index 0) (if (> (length xs) index) (get 0 xs) -1)";
         assert_eq!(analyze(constant_alias, 3), Ok(()));
     }
 
     #[test]
     fn guarded_scalar_expression_proves_its_later_let_alias() {
-        let source = "(let xs [1 2 3]) (let left 0) (let right 2) (if (in-bounds? xs (/ (+ left right) 2)) (block (let index (/ (+ left right) 2)) (get xs index)) -1)";
+        let source = "(let xs [1 2 3]) (let left 0) (let right 2) (if (in-bounds? xs (/ (+ left right) 2)) (block (let index (/ (+ left right) 2)) (get index xs)) -1)";
         // Supply the predicate definition because this unit helper intentionally
         // infers without merging the baked standard library.
         let source =
@@ -7446,79 +7451,79 @@ mod tests {
 
     #[test]
     fn inferred_wrapper_contract_substitutes_reordered_arguments() {
-        let source = "(let base? (lambda (xs i) (and (>= i 0) (< i (length xs))))) (let flipped? (lambda (i xs) (base? xs i))) (let xs [1 2]) (let i 1) (if (flipped? i xs) (get xs i) -1)";
+        let source = "(let base? (lambda (xs i) (and (>= i 0) (< i (length xs))))) (let flipped? (lambda (i xs) (base? xs i))) (let xs [1 2]) (let i 1) (if (flipped? i xs) (get i xs) -1)";
         assert_eq!(analyze(source, 5), Ok(()));
     }
 
     #[test]
     fn inferred_contract_is_available_inside_nested_lambda() {
-        let source = "(let valid? (lambda (xs i) (and (>= i 0) (< i (length xs))))) (let search (lambda (xs) (let index 0) (if (valid? xs index) (get xs index) -1)))";
+        let source = "(let valid? (lambda (xs i) (and (>= i 0) (< i (length xs))))) (let search (lambda (xs) (let index 0) (if (valid? xs index) (get index xs) -1)))";
         assert_eq!(analyze(source, 2), Ok(()));
     }
 
     #[test]
     fn false_out_of_bounds_comparisons_refine_else_branch() {
-        let source = "(let xs [1 2]) (let index 1) (if (or false (< index 0) (>= index (length xs))) -1 (get xs index))";
+        let source = "(let xs [1 2]) (let index 1) (if (or false (< index 0) (>= index (length xs))) -1 (get index xs))";
         assert_eq!(analyze(source, 3), Ok(()));
     }
 
     #[test]
     fn predicate_body_substitution_preserves_false_comparison_implication() {
-        let source = "(let gte? (lambda a b (>= b a))) (let xs [1 2]) (let index 1) (if (gte? (length xs) index) -1 (get xs index))";
+        let source = "(let gte? (lambda a b (>= b a))) (let xs [1 2]) (let index 1) (if (gte? (length xs) index) -1 (get index xs))";
         assert_eq!(analyze(source, 4), Ok(()));
     }
 
     #[test]
     fn set_requires_a_proven_replacement_or_append_index() {
-        let unguarded = "(let xs [1 2]) (let i 10) (set! xs i 3)";
+        let unguarded = "(let xs [1 2]) (let i 10) (set! i 3 xs)";
         assert!(analyze(unguarded, 3)
             .expect_err("unproven set! should fail")
             .contains("set! index not proven safe"));
 
         let guarded =
-            "(let xs [1 2]) (let i 1) (if (and (>= i 0) (< i (length xs))) (set! xs i 3) nil)";
+            "(let xs [1 2]) (let i 1) (if (and (>= i 0) (< i (length xs))) (set! i 3 xs) nil)";
         assert_eq!(analyze(guarded, 3), Ok(()));
     }
 
     #[test]
     fn set_accepts_ques_append_at_length_semantics() {
-        assert_eq!(analyze("(let xs []) (set! xs (length xs) 1)", 2), Ok(()));
+        assert_eq!(analyze("(let xs []) (set! (length xs) 1 xs)", 2), Ok(()));
         assert_eq!(
-            analyze("(let xs [1]) (let end (length xs)) (set! xs end 2)", 3),
+            analyze("(let xs [1]) (let end (length xs)) (set! end 2 xs)", 3),
             Ok(())
         );
-        assert_eq!(analyze("(let xs [1]) (set! xs 1 2)", 2), Ok(()));
+        assert_eq!(analyze("(let xs [1]) (set! 1 2 xs)", 2), Ok(()));
     }
 
     #[test]
     fn set_proofs_distinguish_replacement_from_append_at_length() {
         let replacement = report(
-            "(let replace! (lambda (xs i) (if (and (>= i 0) (< i (length xs))) (set! xs i 7) nil)))",
+            "(let replace! (lambda (i xs) (if (and (>= i 0) (< i (length xs))) (set! i 7 xs) nil)))",
             1,
         );
         assert!(replacement.proofs.iter().any(|proof| {
             proof.kind == ProofKind::BoundsWriteReplacement
                 && proof.status == ProofStatus::ProvenSafe
-                && proof.expression == "(set! xs i 7)"
+                && proof.expression == "(set! i 7 xs)"
         }));
 
-        let append = report("(let xs []) (set! xs (length xs) 7)", 2);
+        let append = report("(let xs []) (set! (length xs) 7 xs)", 2);
         assert!(append.proofs.iter().any(|proof| {
             proof.kind == ProofKind::BoundsWrite
                 && proof.status == ProofStatus::ProvenSafe
-                && proof.expression == "(set! xs (length xs) 7)"
+                && proof.expression == "(set! (length xs) 7 xs)"
         }));
         assert!(append.proofs.iter().any(|proof| {
             proof.kind == ProofKind::BoundsWriteReplacement
                 && proof.status != ProofStatus::ProvenSafe
-                && proof.expression == "(set! xs (length xs) 7)"
+                && proof.expression == "(set! (length xs) 7 xs)"
         }));
     }
 
     #[test]
     fn set_rejects_negative_and_past_end_literal_indices() {
-        assert!(analyze("(let xs [1]) (set! xs -1 2)", 2).is_err());
-        assert!(analyze("(let xs [1]) (set! xs 2 2)", 2).is_err());
+        assert!(analyze("(let xs [1]) (set! -1 2 xs)", 2).is_err());
+        assert!(analyze("(let xs [1]) (set! 2 2 xs)", 2).is_err());
     }
 
     #[test]
@@ -7536,7 +7541,7 @@ mod tests {
 
     #[test]
     fn zero_argument_lambda_body_is_statically_analyzed() {
-        let source = "(let history []) (let alt []) (let undo! (lambda () (push! alt (pop-val! history)))) (let redo! (lambda () (push! history (pop-val! alt))))";
+        let source = "(let history []) (let alt []) (let undo! (lambda () (push! (pop-val! history) alt))) (let redo! (lambda () (push! (pop-val! alt) history)))";
         let expression = crate::parser::build(source).expect("source should parse");
         let (_typ, typed) = crate::infer::infer_with_builtins_typed(
             &expression,
@@ -7845,7 +7850,7 @@ mod tests {
 
     #[test]
     fn constant_division_narrows_unknown_ranges_before_offset_arithmetic() {
-        let source = "(let inspect (lambda xs left right (block (let index (/ (+ left right) 2)) (let current (get xs index)) {(+ index 1) (- index 1)})))";
+        let source = "(let inspect (lambda xs left right (block (let index (/ (+ left right) 2)) (let current (get index xs)) {(+ index 1) (- index 1)})))";
         let expression = crate::parser::build(source).expect("source should parse");
         let (_typ, typed) = crate::infer::infer_with_builtins_typed(
             &expression,
@@ -7897,7 +7902,7 @@ mod tests {
                     (let index (+ left (/ (- right left) 2)))
                     (if (not (in-bounds? xs index)) false
                       (block
-                        (let current (get xs index))
+                        (let current (get index xs))
                         (if (= target current) true
                           (if (>= index max-safe) false
                             (if (> target current)

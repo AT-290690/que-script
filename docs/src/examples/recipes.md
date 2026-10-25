@@ -49,10 +49,11 @@ the maximum `Int` value.
   (lambda (words)
     (let counts (Table/new))
     (loop/in word words
-      (Table/update-or! counts word
+      (Table/update-or! word
         (lambda () 1)
         (lambda (n)
-          (if (+/safe? n 1) (+ n 1) n))))
+          (if (+/safe? n 1) (+ n 1) n))
+        counts))
     counts))
 
 (let counts (frequency ["tea" "coffee" "tea" "tea"]))
@@ -105,12 +106,12 @@ batch size:
 
 ```que
 (let scratch [])
-(capacity! scratch 1000)
+(capacity! 1000 scratch)
 
 (loop pass (< pass 3)
   (empty! scratch)
   (loop i (< i 1000)
-    (push! scratch (+ pass i)))
+    (push! (+ pass i) scratch))
   (length scratch))
 
 (length scratch)

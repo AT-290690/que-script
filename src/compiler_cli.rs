@@ -975,8 +975,14 @@ mod runtime_adapter_tests {
         let merged = merged_program(source).expect("program should merge with the library");
         let error = infer_program(source, &merged).expect_err("program should fail inference");
 
-        assert!(error.contains("Argument 1 of upper expected Char but got Int"), "{error}");
-        assert!(error.contains("Argument 2 of > expected Int but got Bool"), "{error}");
+        assert!(
+            error.contains("Argument 1 of upper expected Char but got Int"),
+            "{error}"
+        );
+        assert!(
+            error.contains("Argument 2 of > expected Int but got Bool"),
+            "{error}"
+        );
         assert!(
             !error.contains("Undefined variable: decode"),
             "failed bindings should remain usable for recovery only: {error}"

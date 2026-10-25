@@ -64,7 +64,7 @@ For a hot update loop, use a mutable local and a mutable vector directly:
 (let increment-all!
   (lambda (xs)
     (loop i (< i (length xs))
-      (set! xs i (+ (get xs i) 1)))
+      (set! i (+ (get i xs) 1) xs))
     xs))
 
 (increment-all! [10 20 30])

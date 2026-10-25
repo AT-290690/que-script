@@ -47,7 +47,7 @@ rest ; [30 40]
 ```
 
 The names before `.` bind fixed positions. `rest` is the same tail window as
-`(cdr vector fixed-position-count)`: it begins after those positions without
+`(cdr fixed-position-count vector)`: it begins after those positions without
 initially copying the remaining values. It materializes independently if you
 mutate it. The rest pattern must be final and can bind one name only.
 

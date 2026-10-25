@@ -2,13 +2,13 @@
 
 ## Tables
 
-`Table/new` creates a mutable hash table. Its public operations use
-collection-first mutation and data-last lookup/predicate forms:
+`Table/new` creates a mutable hash table. Its public operations place the
+table last, including mutating operations:
 
 ```que
 (let scores (Table/new))
-(Table/set! scores "Ada" 10)
-(Table/set! scores "Lin" 20)
+(Table/set! "Ada" 10 scores)
+(Table/set! "Lin" 20 scores)
 
 (Table/has? "Ada" scores)
 (Table/get "Ada" scores)
@@ -19,7 +19,7 @@ checked result or `Table/get-unsafe` when presence is already established:
 
 ```que
 (let {found? values} (Table/get* "Ada" scores))
-(if found? (get values 0) 0)
+(if found? (get 0 values) 0)
 
 (if (Table/has? "Ada" scores)
     (Table/get-unsafe "Ada" scores)
