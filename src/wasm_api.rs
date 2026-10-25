@@ -504,6 +504,7 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             .cloned();
         let doc_sig = analysis.symbol_types.get(&symbol).cloned();
         let global_sig = core.global_signatures.get(&symbol).cloned();
+        let enum_variant_sig = native_core::enum_variant_type_in_source(&text, &symbol);
         let std_fallback_sig = if analysis.user_bound_symbols.contains(&symbol) {
             None
         } else if core.std_fallback_names.contains(&symbol) {
@@ -523,7 +524,8 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
                     .or(global_sig)
                     .or(std_fallback_sig)
             }
-        };
+        }
+        .or(enum_variant_sig);
 
         let Some(type_info) = type_info else {
             return "null".to_string();

@@ -1579,6 +1579,42 @@ pub fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut Has
     }
 }
 
+/// Return the declared enum type for a variant written in this source file.
+///
+/// Enum variants in an `(enum ...)` declaration and in a `match` arm are
+/// syntax, rather than ordinary evaluated expressions. Consequently they do
+/// not always have a `TypedExpression` occurrence for the normal hover index
+/// to collect. Keep this source-level declaration index as a fallback so every
+/// occurrence of a declared variant can still show its type.
+pub fn enum_variant_type_in_source(text: &str, symbol: &str) -> Option<String> {
+    let exprs = parse_user_exprs_for_symbol_collection(text)?;
+
+    fn find_variant_type(expr: &Expression, symbol: &str) -> Option<String> {
+        let Expression::Apply(items) = expr else {
+            return None;
+        };
+
+        if let [Expression::Word(keyword), Expression::Word(enum_name), variants @ ..] = &items[..]
+        {
+            if keyword == "enum"
+                && variants
+                    .iter()
+                    .any(|variant| matches!(variant, Expression::Word(name) if name == symbol))
+            {
+                return Some(enum_name.clone());
+            }
+        }
+
+        items
+            .iter()
+            .find_map(|item| find_variant_type(item, symbol))
+    }
+
+    exprs
+        .iter()
+        .find_map(|expr| find_variant_type(expr, symbol))
+}
+
 fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
     if let Expression::Apply(items) = expr {
         if let Some(Expression::Word(head)) = items.first() {

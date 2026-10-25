@@ -5784,6 +5784,20 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_reports_enum_variant_type_in_declaration_and_match_arm() {
+        let program = "(enum Direction Forward Down Up)\n(match Forward Forward 1 Down 2 Up 3)";
+        for (line, character) in [(0, 16), (1, 15)] {
+            let hover_json = crate::wasm_api::lsp_hover(program.to_string(), line, character);
+            let hover: serde_json::Value =
+                serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+            let contents = hover["contents"]
+                .as_str()
+                .expect("enum variant should have hover contents");
+            assert_eq!(contents, "Forward : Direction");
+        }
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_distinguishes_repeated_pipeline_stages() {
         let source = "(|> (range 1 10) (map square) (map Integer->String))";
         let first: serde_json::Value =
@@ -6306,6 +6320,19 @@ out"#,
             .expect("hover response should include string contents");
 
         assert_eq!(contents, "xs : [[Char]]");
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_enum_vector_let_binding_uses_rhs_type() {
+        let program = r#"(enum Direction Forward Down Up)
+(let commands
+  [{Forward 5}
+   {Down 5}])"#;
+        let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 1, 5);
+        let hover: serde_json::Value =
+            serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+
+        assert_eq!(hover["contents"], "commands : [{Direction Int}]");
     }
 
     #[test]

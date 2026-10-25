@@ -560,6 +560,7 @@ impl ServerState {
             .cloned();
         let doc_sig = doc.symbol_types.get(&symbol).cloned();
         let global_sig = self.global_signature(&symbol);
+        let enum_variant_sig = native_core::enum_variant_type_in_source(&doc.text, &symbol);
         let std_fallback_sig = if doc.user_bound_symbols.contains(&symbol) {
             None
         } else {
@@ -575,7 +576,8 @@ impl ServerState {
                 .or(doc_sig)
                 .or(global_sig)
                 .or(std_fallback_sig)
-        })?;
+        })
+        .or(enum_variant_sig)?;
         let type_info = normalize_signature(&type_info);
         let symbol_effect = self
             .form_let_effects_at(doc, position)
@@ -2196,6 +2198,43 @@ mod tests {
         };
         assert!(
             markup.value.contains("=~ : Enum -> Enum -> Bool"),
+            "unexpected hover: {}",
+            markup.value
+        );
+    }
+
+    #[test]
+    fn native_hover_reports_enum_variant_types_in_declarations_and_match_arms() {
+        let source = "(enum Direction Forward Down Up)\n(match Forward Forward 1 Down 2 Up 3)";
+        let state = test_server_state();
+
+        for position in [Position::new(0, 16), Position::new(1, 15)] {
+            let hover = state
+                .hover_for_text(source, position)
+                .expect("enum variant should have a hover");
+            let HoverContents::Markup(markup) = hover.contents else {
+                panic!("expected Markdown hover contents");
+            };
+            assert!(
+                markup.value.contains("Forward : Direction"),
+                "unexpected hover: {}",
+                markup.value
+            );
+        }
+    }
+
+    #[test]
+    fn native_hover_reports_enum_vector_let_binding_type() {
+        let source = "(enum Direction Forward Down Up)\n(let commands [{Forward 5} {Down 5}])";
+        let state = test_server_state();
+        let hover = state
+            .hover_for_text(source, Position::new(1, 5))
+            .expect("enum vector binding should have a hover");
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("expected Markdown hover contents");
+        };
+        assert!(
+            markup.value.contains("commands : [{Direction Int}]"),
             "unexpected hover: {}",
             markup.value
         );
