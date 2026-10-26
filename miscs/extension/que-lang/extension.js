@@ -960,9 +960,21 @@ async function activate(context) {
 
   const showServerCommand = vscode.commands.registerCommand(
     "que.showLanguageServer",
-    () => {
+    async () => {
       const server = activeServer || resolveServerCommand(context);
-      vscode.window.showInformationMessage(`Calque language server: ${server.command}`);
+      let build = "build identity unavailable (older server)";
+      if (client) {
+        try {
+          const info = await client.sendRequest("que/serverInfo");
+          if (info && typeof info.version === "string") {
+            const name = typeof info.name === "string" ? info.name : "Calque language server";
+            build = `${name} ${info.version}`;
+          }
+        } catch {
+          // An older server does not know this optional Calque request.
+        }
+      }
+      vscode.window.showInformationMessage(`Calque language server: ${server.command} (${build})`);
     }
   );
 

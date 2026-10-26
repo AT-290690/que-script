@@ -14,6 +14,12 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use wasm_bindgen::prelude::wasm_bindgen;
 
+const LSP_SERVER_NAME: &str = "Calque language server";
+
+fn lsp_build_version() -> String {
+    format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("CALQUE_BUILD_ID"))
+}
+
 #[derive(Clone, Copy)]
 struct Position {
     line: u32,
@@ -557,6 +563,14 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
         };
         serde_json::to_string(&Some(hover)).unwrap_or_else(|_| "null".to_string())
     })
+}
+
+/// Identifies the browser LSP artifact that supplied the current analysis.
+/// Browser hosts can expose this in their own diagnostics/status UI to make a
+/// stale Wasm bundle immediately visible.
+#[wasm_bindgen]
+pub fn lsp_build_info() -> String {
+    format!("{} {}", LSP_SERVER_NAME, lsp_build_version())
 }
 
 fn to_json_range(range: TextRange) -> JsonRange {

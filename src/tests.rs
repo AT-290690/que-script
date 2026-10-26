@@ -6336,6 +6336,28 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_reports_enum_program_binding_and_lambda_parameter_types() {
+        let program = "(enum Action North South East West Left Right Forward)\n(let rotate-right (lambda (degrees point) (let {x y} point) (cond (= (% degrees 360) 0) {x y} (= (% degrees 360) 90) {y (- 0 x)} (= (% degrees 360) 180) {(- 0 x) (- 0 y)} {(- 0 y) x})))";
+        for (character, expected) in [
+            (5, "rotate-right : Int -> {Int Int} -> {Int Int}"),
+            (28, "degrees : Int"),
+            (36, "point : {Int Int}"),
+        ] {
+            let hover_json = crate::wasm_api::lsp_hover(program.to_string(), 1, character);
+            let hover: serde_json::Value =
+                serde_json::from_str(&hover_json).expect("hover response should be valid JSON");
+            assert_eq!(hover["contents"], expected, "at character {character}");
+        }
+    }
+
+    #[test]
+    fn test_wasm_lsp_build_info_identifies_the_current_artifact() {
+        let info = crate::wasm_api::lsp_build_info();
+        assert!(info.starts_with("Calque language server 0.1.0+"));
+        assert_ne!(info, "Calque language server 0.1.0+");
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_distinguishes_same_named_locals_in_if_branches() {
         let program = r#"(if true
   (block

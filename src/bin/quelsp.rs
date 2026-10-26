@@ -29,6 +29,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 const ANALYSIS_DELAY_MS: u64 = 500;
+const SERVER_NAME: &str = "Calque language server";
+
+fn server_build_info() -> String {
+    format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("CALQUE_BUILD_ID"))
+}
 
 #[derive(Clone, Debug)]
 struct DocAnalysis {
@@ -126,7 +131,25 @@ struct CompletionsTextParams {
     position: Position,
 }
 
+#[derive(Debug, Serialize)]
+struct ServerInfoResult {
+    name: &'static str,
+    version: String,
+}
+
+#[derive(Serialize)]
+struct InitializeResult {
+    capabilities: ServerCapabilities,
+    #[serde(rename = "serverInfo")]
+    server_info: ServerInfoResult,
+}
+
 fn main() {
+    if std::env::args().skip(1).any(|arg| arg == "--version") {
+        println!("quelsp {}", server_build_info());
+        return;
+    }
+
     if let Err(err) = run() {
         eprintln!("quelsp error: {}", err);
         std::process::exit(1);
@@ -160,8 +183,14 @@ fn run() -> Result<(), String> {
         ..ServerCapabilities::default()
     };
 
-    let init_value = serde_json::to_value(server_capabilities)
-        .map_err(|e| format!("serialize server capabilities: {}", e))?;
+    let init_value = serde_json::to_value(InitializeResult {
+        capabilities: server_capabilities,
+        server_info: ServerInfoResult {
+            name: SERVER_NAME,
+            version: server_build_info(),
+        },
+    })
+    .map_err(|e| format!("serialize server capabilities: {}", e))?;
     let _init_params: InitializeParams = serde_json::from_value(
         connection
             .initialize(init_value)
@@ -378,6 +407,13 @@ impl ServerState {
                 let items = self.completion_items_for_text(&params.text, params.position);
                 self.reply_ok(req.id, Some(CompletionResponse::Array(items)))
             }
+            "que/serverInfo" => self.reply_ok(
+                req.id,
+                Some(ServerInfoResult {
+                    name: SERVER_NAME,
+                    version: server_build_info(),
+                }),
+            ),
             _ => self.reply_ok::<Value>(req.id, None),
         }
     }
@@ -2201,6 +2237,21 @@ mod tests {
             "unexpected hover: {}",
             markup.value
         );
+    }
+
+    #[test]
+    fn native_server_build_info_is_present_in_lsp_initialize_result() {
+        let result = serde_json::to_value(InitializeResult {
+            capabilities: ServerCapabilities::default(),
+            server_info: ServerInfoResult {
+                name: SERVER_NAME,
+                version: server_build_info(),
+            },
+        })
+        .expect("initialize result should serialize");
+
+        assert_eq!(result["serverInfo"]["name"], SERVER_NAME);
+        assert_eq!(result["serverInfo"]["version"], server_build_info());
     }
 
     #[test]
