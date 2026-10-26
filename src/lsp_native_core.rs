@@ -997,6 +997,17 @@ pub fn desugared_user_form_count(text: &str) -> Option<usize> {
     })
 }
 
+/// The cumulative number of runtime forms after each visible top-level source
+/// form. Surface forms such as `enum` and destructuring `let` can expand to
+/// several typed forms, so an editor must use these boundaries when it maps a
+/// source range back onto the inferred tree.
+pub fn desugared_top_level_form_counts(text: &str) -> Option<Vec<usize>> {
+    top_level_form_byte_ranges(text)
+        .into_iter()
+        .map(|(_, end)| desugared_user_form_count(text.get(..end)?))
+        .collect()
+}
+
 /// Static-analysis diagnostics are intentionally opt-in in editors.  Accept
 /// the directive anywhere in the leading blank/comment header, but not after
 /// program forms have begun.
@@ -2247,7 +2258,7 @@ fn top_level_form_byte_ranges(text: &str) -> Vec<(usize, usize)> {
 
         let start = i;
         match bytes[i] {
-            b'(' | b'[' => {
+            b'(' | b'[' | b'{' => {
                 let end = find_matching_list_end_byte(text, i)
                     .map(|idx| idx + 1)
                     .unwrap_or(text.len());
@@ -2278,11 +2289,14 @@ fn top_level_form_byte_ranges(text: &str) -> Vec<(usize, usize)> {
 fn find_matching_list_end_byte(text: &str, open_idx: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let open = *bytes.get(open_idx)?;
-    if open != b'(' && open != b'[' {
-        return None;
-    }
+    let first_close = match open {
+        b'(' => b')',
+        b'[' => b']',
+        b'{' => b'}',
+        _ => return None,
+    };
 
-    let mut stack = vec![if open == b'(' { b')' } else { b']' }];
+    let mut stack = vec![first_close];
     let mut in_string = false;
     let mut in_comment = false;
     let mut i = open_idx + 1;
@@ -2323,7 +2337,8 @@ fn find_matching_list_end_byte(text: &str, open_idx: usize) -> Option<usize> {
         match b {
             b'(' => stack.push(b')'),
             b'[' => stack.push(b']'),
-            b')' | b']' => {
+            b'{' => stack.push(b'}'),
+            b')' | b']' | b'}' => {
                 let Some(expected) = stack.pop() else {
                     return None;
                 };

@@ -6337,7 +6337,7 @@ out"#,
 
     #[test]
     fn test_wasm_lsp_hover_reports_enum_program_binding_and_lambda_parameter_types() {
-        let program = "(enum Action North South East West Left Right Forward)\n(let rotate-right (lambda (degrees point) (let {x y} point) (cond (= (% degrees 360) 0) {x y} (= (% degrees 360) 90) {y (- 0 x)} (= (% degrees 360) 180) {(- 0 x) (- 0 y)} {(- 0 y) x})))";
+        let program = "(enum Action North South East West Left Right Forward)\n(let rotate-right (lambda (degrees point) (let {x y} point) (cond (= (% degrees 360) 0) {x y} (= (% degrees 360) 90) {y (- 0 x)} (= (% degrees 360) 180) {(- 0 x) (- 0 y)} {(- 0 y) x})))\n(let {position heading} {{0 0} {1 0}})\n(let {x y} position)\n{x y}";
         for (character, expected) in [
             (5, "rotate-right : Int -> {Int Int} -> {Int Int}"),
             (28, "degrees : Int"),

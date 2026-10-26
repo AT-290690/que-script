@@ -1337,10 +1337,12 @@ fn analyze_document_text(
     if let Some(exprs) = &parsed_exprs {
         collect_user_bound_symbols_from_exprs(exprs, &mut user_bound_symbols);
     }
-    let user_form_count = parsed_exprs
+    let parsed_form_count = parsed_exprs
         .as_ref()
         .map(|exprs| exprs.len())
         .unwrap_or_else(|| top_level_form_ranges(text).len());
+    let user_form_count =
+        native_core::desugared_user_form_count(&analysis_source).unwrap_or(parsed_form_count);
 
     let mut lib_defs = std_defs.to_vec();
     lib_defs.extend(project_defs.iter().cloned());
@@ -1508,30 +1510,31 @@ fn build_form_scoped_analyses(
 
     let form_ranges = top_level_form_ranges(text);
     let typed_user_forms = extract_user_top_level_typed_forms(typed_program, user_form_count);
-    let count = form_ranges.len().min(typed_user_forms.len());
-    if count == 0 {
+    let expansion_counts = native_core::desugared_top_level_form_counts(text)
+        .unwrap_or_else(|| (1..=form_ranges.len()).collect());
+    if form_ranges.is_empty() || typed_user_forms.is_empty() {
         return Vec::new();
     }
 
-    let mut out = Vec::with_capacity(count);
-    for idx in 0..count {
+    let mut out = Vec::with_capacity(form_ranges.len());
+    let mut first_typed_form = 0usize;
+    for (range, cumulative_end) in form_ranges.into_iter().zip(expansion_counts) {
+        let end_typed_form = cumulative_end.min(typed_user_forms.len());
+        if end_typed_form <= first_typed_form {
+            continue;
+        }
         let mut raw_symbols: HashMap<String, Type> = HashMap::new();
         let mut raw_occurrences: HashMap<String, Vec<Type>> = HashMap::new();
         let mut raw_let_bindings: HashMap<String, Type> = HashMap::new();
         let mut let_binding_effects = HashMap::new();
         let mut let_binding_external_impure = HashMap::new();
-        collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
-        native_core::collect_symbol_type_occurrences(typed_user_forms[idx], &mut raw_occurrences);
-        collect_let_binding_types(typed_user_forms[idx], &mut raw_let_bindings);
-        collect_let_binding_effects(
-            typed_user_forms[idx],
-            &mut let_binding_effects,
-            global_effects,
-        );
-        collect_let_binding_external_impurity(
-            typed_user_forms[idx],
-            &mut let_binding_external_impure,
-        );
+        for typed_form in &typed_user_forms[first_typed_form..end_typed_form] {
+            collect_symbol_types(typed_form, &mut raw_symbols);
+            native_core::collect_symbol_type_occurrences(typed_form, &mut raw_occurrences);
+            collect_let_binding_types(typed_form, &mut raw_let_bindings);
+            collect_let_binding_effects(typed_form, &mut let_binding_effects, global_effects);
+            collect_let_binding_external_impurity(typed_form, &mut let_binding_external_impure);
+        }
         let symbol_types = raw_symbols
             .into_iter()
             .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
@@ -1541,7 +1544,7 @@ fn build_form_scoped_analyses(
             .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
             .collect();
         out.push(FormScopedAnalysis {
-            range: form_ranges[idx],
+            range,
             symbol_types,
             symbol_occurrence_types: raw_occurrences
                 .into_iter()
@@ -1559,6 +1562,7 @@ fn build_form_scoped_analyses(
             let_binding_effects,
             let_binding_external_impure,
         });
+        first_typed_form = end_typed_form;
     }
 
     out
@@ -1582,133 +1586,10 @@ fn extract_user_top_level_typed_forms<'a>(
 }
 
 fn top_level_form_ranges(text: &str) -> Vec<Range> {
-    let bytes = text.as_bytes();
-    let mut ranges = Vec::new();
-    let mut i = 0usize;
-
-    while i < bytes.len() {
-        while i < bytes.len() {
-            if bytes[i].is_ascii_whitespace() {
-                i += 1;
-                continue;
-            }
-            if bytes[i] == b';' {
-                while i < bytes.len() && bytes[i] != b'\n' {
-                    i += 1;
-                }
-                continue;
-            }
-            break;
-        }
-
-        if i >= bytes.len() {
-            break;
-        }
-
-        let start = i;
-        match bytes[i] {
-            b'(' | b'[' => {
-                let end = find_matching_list_end_byte(text, i)
-                    .map(|idx| idx + 1)
-                    .unwrap_or(text.len());
-                ranges.push(Range::new(
-                    byte_offset_to_position(text, start),
-                    byte_offset_to_position(text, end),
-                ));
-                i = end;
-            }
-            b'"' => {
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
-                        i += 1;
-                        break;
-                    }
-                    i += 1;
-                }
-                ranges.push(Range::new(
-                    byte_offset_to_position(text, start),
-                    byte_offset_to_position(text, i),
-                ));
-            }
-            _ => {
-                i += 1;
-                while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b';' {
-                    i += 1;
-                }
-                ranges.push(Range::new(
-                    byte_offset_to_position(text, start),
-                    byte_offset_to_position(text, i),
-                ));
-            }
-        }
-    }
-
-    ranges
-}
-
-fn find_matching_list_end_byte(text: &str, open_idx: usize) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let open = *bytes.get(open_idx)?;
-    if open != b'(' && open != b'[' {
-        return None;
-    }
-
-    let mut stack = vec![if open == b'(' { b')' } else { b']' }];
-    let mut in_string = false;
-    let mut in_comment = false;
-    let mut i = open_idx + 1;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if in_comment {
-            if b == b'\n' {
-                in_comment = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if !in_string && b == b';' {
-            in_comment = true;
-            i += 1;
-            continue;
-        }
-
-        if b == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
-            in_string = !in_string;
-            i += 1;
-            continue;
-        }
-
-        if in_string {
-            i += 1;
-            continue;
-        }
-
-        match b {
-            b'(' => stack.push(b')'),
-            b'[' => stack.push(b']'),
-            b')' | b']' => {
-                if let Some(expected) = stack.pop() {
-                    if b != expected {
-                        return None;
-                    }
-                    if stack.is_empty() {
-                        return Some(i);
-                    }
-                } else {
-                    return None;
-                }
-            }
-            _ => {}
-        }
-
-        i += 1;
-    }
-
-    None
+    native_core::top_level_form_ranges(text)
+        .into_iter()
+        .map(from_core_range)
+        .collect()
 }
 
 fn repair_source_for_analysis(text: &str) -> String {
@@ -1803,10 +1684,6 @@ fn infer_error_ranges(
 
 fn find_matching_paren_byte(text: &str, open_idx: usize) -> Option<usize> {
     native_core::find_matching_paren_byte(text, open_idx)
-}
-
-fn byte_offset_to_position(text: &str, target: usize) -> Position {
-    from_core_position(native_core::byte_offset_to_position(text, target))
 }
 
 fn full_range(text: &str) -> Range {
@@ -2276,6 +2153,98 @@ mod tests {
             "unexpected hover: {}",
             markup.value
         );
+    }
+
+    #[test]
+    fn native_hover_indexes_bindings_and_parameters_in_a_multi_form_enum_program() {
+        let source = r#"(enum Action North South East West Left Right Forward)
+
+(let commands
+  [{Forward 10}
+   {North 3}
+   {Forward 7}
+   {Right 90}
+   {Forward 11}])
+
+(let rotate-right
+  (lambda (degrees point)
+    (let {x y} point)
+    (cond
+      (= (% degrees 360) 0) {x y}
+      (= (% degrees 360) 90) {y (- 0 x)}
+      (= (% degrees 360) 180) {(- 0 x) (- 0 y)}
+      {(- 0 y) x})))
+
+(let move1
+  (lambda (state command)
+    (let {pos heading} state)
+    (let {x y} pos)
+    (let {dx dy} heading)
+    (let {action n} command)
+    (match action
+      North {{x (+ y n)} heading}
+      South {{x (- y n)} heading}
+      East {{(+ x n) y} heading}
+      West {{(- x n) y} heading}
+      Left {pos (rotate-right (- 360 n) heading)}
+      Right {pos (rotate-right n heading)}
+      Forward {{(+ x (* dx n)) (+ y (* dy n))} heading})))
+
+(let {p1 heading}
+  (reduce move1 {{0 0} {1 0}} commands))
+
+(let move2
+  (lambda (state command)
+    (let {pos waypoint} state)
+    (let {x y} pos)
+    (let {wx wy} waypoint)
+    (let {action n} command)
+    (match action
+      North {pos {wx (+ wy n)}}
+      South {pos {wx (- wy n)}}
+      East {pos {(+ wx n) wy}}
+      West {pos {(- wx n) wy}}
+      Left {pos (rotate-right (- 360 n) waypoint)}
+      Right {pos (rotate-right n waypoint)}
+      Forward {{(+ x (* wx n)) (+ y (* wy n))} waypoint})))
+
+(let {p2 waypoint}
+  (reduce move2 {{0 0} {10 1}} commands))
+
+(let {x1 y1} p1)
+(let {x2 y2} p2)
+{(+ (abs x1) (abs y1)) (+ (abs x2) (abs y2))}"#;
+        let state = test_server_state();
+        let position_of = |needle: &str| {
+            let offset = source.find(needle).expect("test symbol should exist");
+            let prefix = &source[..offset];
+            Position::new(
+                prefix.lines().count().saturating_sub(1) as u32,
+                prefix.lines().last().unwrap_or("").chars().count() as u32,
+            )
+        };
+
+        for (needle, expected) in [
+            ("commands", "commands : [{Action Int}]"),
+            (
+                "rotate-right",
+                "rotate-right : Int -> {Int Int} -> {Int Int}",
+            ),
+            ("degrees", "degrees : Int"),
+            ("point", "point : {Int Int}"),
+        ] {
+            let hover = state
+                .hover_for_text(source, position_of(needle))
+                .unwrap_or_else(|| panic!("{needle} should have a hover"));
+            let HoverContents::Markup(markup) = hover.contents else {
+                panic!("expected Markdown hover contents");
+            };
+            assert!(
+                markup.value.contains(expected),
+                "unexpected hover for {needle}: {}",
+                markup.value
+            );
+        }
     }
 
     #[test]

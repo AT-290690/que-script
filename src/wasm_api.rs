@@ -182,10 +182,12 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
     if let Some(exprs) = &parsed_exprs {
         collect_user_bound_symbols_from_exprs(&exprs, &mut user_bound_symbols);
     }
-    let user_form_count = parsed_exprs
+    let parsed_form_count = parsed_exprs
         .as_ref()
         .map(|exprs| exprs.len())
         .unwrap_or_else(|| top_level_form_ranges(text).len());
+    let user_form_count =
+        native_core::desugared_user_form_count(&analysis_source).unwrap_or(parsed_form_count);
 
     let program = match parser::merge_std_and_program(&analysis_source, core.std_defs.clone()) {
         Ok(expr) => expr,
@@ -232,18 +234,23 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                 collect_let_binding_effects(form, &mut let_binding_effects, &core.global_effects);
             }
             let form_ranges = top_level_form_ranges(text);
-            let count = form_ranges.len().min(typed_user_forms.len());
-            form_scoped_symbols = Vec::with_capacity(count);
-            for idx in 0..count {
+            let expansion_counts = native_core::desugared_top_level_form_counts(text)
+                .unwrap_or_else(|| (1..=form_ranges.len()).collect());
+            form_scoped_symbols = Vec::with_capacity(form_ranges.len());
+            let mut first_typed_form = 0usize;
+            for (range, cumulative_end) in form_ranges.into_iter().zip(expansion_counts) {
+                let end_typed_form = cumulative_end.min(typed_user_forms.len());
+                if end_typed_form <= first_typed_form {
+                    continue;
+                }
                 let mut raw_symbols: HashMap<String, Type> = HashMap::new();
                 let mut raw_occurrences: HashMap<String, Vec<Type>> = HashMap::new();
-                collect_symbol_types(typed_user_forms[idx], &mut raw_symbols);
-                native_core::collect_symbol_type_occurrences(
-                    typed_user_forms[idx],
-                    &mut raw_occurrences,
-                );
+                for typed_form in &typed_user_forms[first_typed_form..end_typed_form] {
+                    collect_symbol_types(typed_form, &mut raw_symbols);
+                    native_core::collect_symbol_type_occurrences(typed_form, &mut raw_occurrences);
+                }
                 form_scoped_symbols.push(FormScopedAnalysis {
-                    range: form_ranges[idx],
+                    range,
                     symbol_types: raw_symbols
                         .into_iter()
                         .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
@@ -261,6 +268,7 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                         })
                         .collect(),
                 });
+                first_typed_form = end_typed_form;
             }
         }
         Err(errors) => {
