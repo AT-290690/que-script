@@ -23,5 +23,23 @@ fn git_revision() -> Option<String> {
 
     let revision = String::from_utf8(output.stdout).ok()?;
     let revision = revision.trim();
-    (!revision.is_empty()).then(|| revision.to_string())
+    if revision.is_empty() {
+        return None;
+    }
+
+    let dirty = Command::new("git")
+        .args(["diff", "--quiet"])
+        .status()
+        .map(|status| !status.success())
+        .unwrap_or(false)
+        || Command::new("git")
+            .args(["diff", "--cached", "--quiet"])
+            .status()
+            .map(|status| !status.success())
+            .unwrap_or(false);
+    if dirty {
+        Some(format!("{revision}-dirty"))
+    } else {
+        Some(revision.to_string())
+    }
 }

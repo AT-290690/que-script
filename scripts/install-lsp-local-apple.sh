@@ -66,4 +66,4 @@ sudo mkdir -p "$(dirname "$BIN_PATH")"
 sudo mv "$tmp_bin" "$BIN_PATH"
 
 echo "Installed local macOS ${APP_NAME}."
-echo "Check with: ${APP_NAME} --help"
+echo "Check with: ${APP_NAME} --version"

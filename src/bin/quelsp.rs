@@ -137,13 +137,6 @@ struct ServerInfoResult {
     version: String,
 }
 
-#[derive(Serialize)]
-struct InitializeResult {
-    capabilities: ServerCapabilities,
-    #[serde(rename = "serverInfo")]
-    server_info: ServerInfoResult,
-}
-
 fn main() {
     if std::env::args().skip(1).any(|arg| arg == "--version") {
         println!("quelsp {}", server_build_info());
@@ -183,14 +176,11 @@ fn run() -> Result<(), String> {
         ..ServerCapabilities::default()
     };
 
-    let init_value = serde_json::to_value(InitializeResult {
-        capabilities: server_capabilities,
-        server_info: ServerInfoResult {
-            name: SERVER_NAME,
-            version: server_build_info(),
-        },
-    })
-    .map_err(|e| format!("serialize server capabilities: {}", e))?;
+    // `Connection::initialize` wraps this value as the LSP result's
+    // `capabilities` field. Passing an entire InitializeResult here would make
+    // capabilities nested, preventing clients from discovering hover support.
+    let init_value = serde_json::to_value(server_capabilities)
+        .map_err(|e| format!("serialize server capabilities: {}", e))?;
     let _init_params: InitializeParams = serde_json::from_value(
         connection
             .initialize(init_value)
@@ -2240,18 +2230,15 @@ mod tests {
     }
 
     #[test]
-    fn native_server_build_info_is_present_in_lsp_initialize_result() {
-        let result = serde_json::to_value(InitializeResult {
-            capabilities: ServerCapabilities::default(),
-            server_info: ServerInfoResult {
-                name: SERVER_NAME,
-                version: server_build_info(),
-            },
+    fn native_server_build_info_response_is_serializable() {
+        let result = serde_json::to_value(ServerInfoResult {
+            name: SERVER_NAME,
+            version: server_build_info(),
         })
-        .expect("initialize result should serialize");
+        .expect("server info response should serialize");
 
-        assert_eq!(result["serverInfo"]["name"], SERVER_NAME);
-        assert_eq!(result["serverInfo"]["version"], server_build_info());
+        assert_eq!(result["name"], SERVER_NAME);
+        assert_eq!(result["version"], server_build_info());
     }
 
     #[test]
