@@ -14,6 +14,8 @@ The central functional transforms are data-last.
 | Function | Role |
 |---|---|
 | `map` / `map/i` | build a new vector; `/i` receives the index |
+| `pairwise` | build overlapping adjacent `{left right}` tuples |
+| `map/adjacent` | transform each neighboring pair directly |
 | `filter`, `select`, `filter/i` | retain items satisfying a predicate |
 | `each` / `each/i` | visit items and return the original vector |
 | `for` / `for/i` | visit items for effects |
@@ -25,6 +27,16 @@ The central functional transforms are data-last.
 ; 60
 
 (map/i (lambda (x index) {index x}) ["a" "b"])
+```
+
+`pairwise` is data-last and returns one fewer tuple than its input. It is
+empty for inputs shorter than two elements.
+
+```que
+(|> [1 4 9 16]
+    pairwise
+    (map (lambda ({left right}) (- right left))))
+; [3 5 7]
 ```
 
 ## Construct and order

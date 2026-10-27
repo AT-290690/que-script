@@ -82,7 +82,12 @@
               (syntax/list? stage)
               (not (syntax/empty? stage))
               (syntax/word? (syntax/head stage))
-              (not (syntax/word=? (syntax/head stage) lambda))))
+              ; `comp` builds a function; it is not a partially-applied
+              ; data-last call.  Thus `(|> xs (comp f g))` must become
+              ; `((comp f g) xs)`, like a lambda stage, rather than
+              ; `(comp f g xs)`.
+              (not (syntax/word=? (syntax/head stage) lambda))
+              (not (syntax/word=? (syntax/head stage) comp))))
           (let next
             (if append-value?
                 (syntax/append stage value)

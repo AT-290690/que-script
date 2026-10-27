@@ -147,12 +147,31 @@ For a contiguous part of a vector, `slice` uses an exclusive end. The
 (drop/last 2 [0 1 2 3])                 ; [0 1]
 (partition 2 [1 2 3 4 5])               ; [[1 2] [3 4] [5]]
 (window 3 [1 2 3 4])                    ; [[1 2 3] [2 3 4]]
+(pairwise [1 2 3 4])                    ; [{1 2} {2 3} {3 4}]
 ```
 
 `take/while` retains the initial matching prefix; `drop/while` removes that
 prefix. `cycle`, `subset`, `permutation`, `combination`, and `combination/n`
 are combinatoric builders. `transpose` turns rows into columns; `Matrix/new`
 and `Matrix/for/i` are the more direct matrix tools.
+
+`pairwise` returns the overlapping adjacent pairs of a vector as tuples. An
+empty or one-element input has no pairs. Use it when the pairs themselves are
+useful data; use `map/adjacent` when you want to transform every neighboring
+pair immediately.
+
+```que
+(pairwise [10 13 18 20])
+; [{10 13} {13 18} {18 20}]
+
+(map/adjacent - [10 13 18 20])
+; [-3 -5 -2]
+
+(|> [10 13 18 20]
+    pairwise
+    (map (lambda ({left right}) (abs (- right left)))))
+; [3 5 2]
+```
 
 ## Map, filter, visit, and fold
 

@@ -1319,6 +1319,48 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
     }
 }
 
+/// Enum variants are source-level constants, not runtime bindings.  Capture
+/// collection works on source names, so it cannot otherwise distinguish a
+/// variant such as `Down` from a surrounding local with the same syntactic
+/// shape.  The inferred type keeps that distinction: only a word whose enum
+/// type declares that exact word as a variant may be omitted from a closure
+/// environment.
+fn collect_enum_variant_words(node: &TypedExpression, out: &mut HashSet<String>) {
+    if let (Expression::Word(word), Some(Type::Enum(enum_type))) = (&node.expr, &node.typ) {
+        if enum_type.variants.iter().any(|variant| variant == word) {
+            out.insert(word.clone());
+        }
+    }
+    for child in &node.children {
+        collect_enum_variant_words(child, out);
+    }
+}
+
+fn lambda_free_names(node: &TypedExpression) -> HashSet<String> {
+    let items = match &node.expr {
+        Expression::Apply(xs) => xs,
+        _ => return HashSet::new(),
+    };
+    if !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") || items.len() < 2 {
+        return HashSet::new();
+    }
+    let mut bound = HashSet::new();
+    for p in &items[1..items.len() - 1] {
+        collect_pattern_words(p, &mut bound);
+    }
+    let mut refs = HashSet::new();
+    if let Some(body) = items.last() {
+        collect_refs(body, &mut bound, &mut refs);
+        let mut direct_host_calls = HashSet::new();
+        collect_builtin_host_extern_call_heads(body, &mut direct_host_calls);
+        refs.retain(|name| !direct_host_calls.contains(name));
+    }
+    let mut enum_variants = HashSet::new();
+    collect_enum_variant_words(node, &mut enum_variants);
+    refs.retain(|name| !enum_variants.contains(name));
+    refs
+}
+
 fn top_level_binding_rhs_refs_main_only_names(
     kw: &str,
     name: &str,
@@ -1606,54 +1648,20 @@ fn lifted_main_lambda_capture_names(
 }
 
 fn lambda_is_hoistable(node: &TypedExpression, _top_defs: &HashMap<String, TopDef>) -> bool {
-    let items = match &node.expr {
-        Expression::Apply(xs) => xs,
-        _ => {
-            return false;
-        }
+    let Expression::Apply(items) = &node.expr else {
+        return false;
     };
     if !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") || items.len() < 2 {
         return false;
     }
-    let mut bound = HashSet::new();
-    for p in &items[1..items.len() - 1] {
-        collect_pattern_words(p, &mut bound);
-    }
-    let mut refs = HashSet::new();
-    if let Some(body) = items.last() {
-        collect_refs(body, &mut bound, &mut refs);
-        let mut direct_host_calls = HashSet::new();
-        collect_builtin_host_extern_call_heads(body, &mut direct_host_calls);
-        refs.retain(|name| !direct_host_calls.contains(name));
-    }
-    refs.is_empty()
+    lambda_free_names(node).is_empty()
 }
 
 fn lambda_capture_names(
     node: &TypedExpression,
     _top_defs: &HashMap<String, TopDef>,
 ) -> Vec<String> {
-    let items = match &node.expr {
-        Expression::Apply(xs) => xs,
-        _ => {
-            return Vec::new();
-        }
-    };
-    if !matches!(items.first(), Some(Expression::Word(w)) if w == "lambda") || items.len() < 2 {
-        return Vec::new();
-    }
-    let mut bound = HashSet::new();
-    for p in &items[1..items.len() - 1] {
-        collect_pattern_words(p, &mut bound);
-    }
-    let mut refs = HashSet::new();
-    if let Some(body) = items.last() {
-        collect_refs(body, &mut bound, &mut refs);
-        let mut direct_host_calls = HashSet::new();
-        collect_builtin_host_extern_call_heads(body, &mut direct_host_calls);
-        refs.retain(|name| !direct_host_calls.contains(name));
-    }
-    let mut caps = refs.into_iter().collect::<Vec<_>>();
+    let mut caps = lambda_free_names(node).into_iter().collect::<Vec<_>>();
     caps.sort();
     caps
 }

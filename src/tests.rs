@@ -150,6 +150,25 @@ xs)"#,
     }
 
     #[test]
+    fn test_wat_lambda_uses_enum_variants_as_constants_not_closure_captures() {
+        let source = r#"(do
+            (enum Direction Up Down)
+            (let input "()())")
+            (let directions
+              (map
+                (lambda (c)
+                  (if (=# c '(') Up Down))
+                input))
+            (map (lambda (direction)
+              (match direction Up 1 Down 0)) directions))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "[1 0 1 0 0]"
+        );
+    }
+
+    #[test]
     fn test_match_accepts_a_top_level_enum_typed_variable() {
         let source = r#"(do
             (enum Letter A B C)
@@ -628,12 +647,13 @@ xs)"#,
                 [
                   (|> 10 (+ 1))
                   (|> 3 (lambda n (+ n 4)))
+                  (|> "hello" (comp (map Char->Int) (map/adjacent -) (map abs) sum))
                   (<| 10 (- 20))
                   (<| 3 inc)
                 ])"#,
             true,
         );
-        assert_eq!(output, "[11 7 -10 4]");
+        assert_eq!(output, "[11 7 13 -10 4]");
     }
 
     #[test]
@@ -8964,6 +8984,9 @@ fn"#;
 
     #[test]
     fn test_wat_top_level_helper_built_scalar_vector_set_uses_materialized_fast_path() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let expr = crate::parser::build(
             r#"(do
                 (let make-ints (lambda n (do

@@ -1091,6 +1091,12 @@ out)))
     (combinations [] xs n 0)
     out)))
 
+(let pairwise (lambda (xs)
+  (let out [])
+  (loop/range/exclusive i 1 (length xs)
+    (push! {(get (- i 1) xs) (get i xs)} out))
+  out))
+
 (let resolve/option (lambda fn df xs (do
   (let values [])
   (mut ok true)

@@ -26,7 +26,7 @@ example](by-example.md) shows each of these patterns in runnable code.
 | Transform or retain vector values | `map`, `map/i`, `filter` (or `select`), `exclude`, `flat-map` |
 | Visit for effects | `for`, `each`, `for/i`, `each/i` |
 | Combine or inspect values | `reduce`, `sum`, `product`, `count`, `find`, `some?`, `every?`, `minimum`, `maximum` |
-| Reshape a vector | `reverse`, `flat`, `zip`, `unzip`, `slice`, `take/first`, `drop/first`, `partition` |
+| Reshape a vector | `reverse`, `flat`, `zip`, `unzip`, `slice`, `take/first`, `drop/first`, `partition`, `pairwise` |
 | Order or classify values | `sort`, `group`, `unique/int`, `unique/char` |
 | Parse or assemble text | `split`, `split/lines`, `split/spaces`, `split/words`, `trim`, `join`, `String->Integer`, `Integer->String` |
 | Use key-value data | `Table/new`, `Table/set!`, `Table/get`, `Table/has?`, `Table/entries`, `Table/update-or!`, `Table/count` |
@@ -66,7 +66,7 @@ The unnamespaced functional collection surface is in `lisp/fp.lisp`:
 - Construction and shape: `range`, `range/inclusive`, `range/exclusive`,
   `range/dec`, `fill`, `replicate`, `copy`, `reverse`, `flat`, `flat-map`,
   `zip`, `unzip`, `zip-with`, `transpose`, `interleave`, `intersperse`,
-  `partition`, `window`, `slice`, `take/first`, `take/last`, `drop/first`,
+  `partition`, `window`, `pairwise`, `slice`, `take/first`, `take/last`, `drop/first`,
   `drop/last`, `take/while`, `drop/while`, `cycle`, `subset`,
   `permutation`, `combination`, `combination/n`, and `scan`.
 - Traversal: `map`, `map/i`, `filter`, `filter/i`, `select`, `exclude`,
@@ -79,7 +79,7 @@ The unnamespaced functional collection surface is in `lisp/fp.lisp`:
   `product/dec`, `minimum`, `minimum/dec`, `maximum`, `maximum/dec`, `mean`,
   `mean/dec`, `median`, `median/dec`, `avg`, and `avg/dec`.
 - Ordering and specialized operations: `sort`, `group`, `unique/int`,
-  `unique/char`, `map/adjacent`, `map/tuple`, `map/fst`, `map/snd`,
+  `unique/char`, `pairwise`, `map/adjacent`, `map/tuple`, `map/fst`, `map/snd`,
   `resolve/option`, `autocorrect`, `match?`, `cartesian-product`, and
   `neighborhood`.
 
