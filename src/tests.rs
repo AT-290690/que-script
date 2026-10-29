@@ -6343,6 +6343,38 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_keeps_locally_inferred_types_in_a_bad_form() {
+        let program = r#"(let valid-position?
+  (lambda (entry)
+    (let {lo hi letter password} entry)
+    (let a (= (get (- lo 1) password) letter))
+    (let b (= (get (- hi 1) password) letter))
+    (not (= a b))))"#;
+
+        for (line, character, expected) in [(2, 10, "lo : Int"), (3, 9, "a : Bool")] {
+            let hover: serde_json::Value = serde_json::from_str(&crate::wasm_api::lsp_hover(
+                program.to_string(),
+                line,
+                character,
+            ))
+            .expect("hover response should be valid JSON");
+            assert_eq!(hover["contents"], expected, "at {line}:{character}");
+        }
+
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_diagnostics(program.to_string()))
+                .expect("diagnostics should be valid JSON");
+        assert!(
+            diagnostics
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| item["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("expected Int but got Bool")))),
+            "the type error must still be diagnosed: {diagnostics}"
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_enum_vector_let_binding_uses_rhs_type() {
         let program = r#"(enum Direction Forward Down Up)
 (let commands

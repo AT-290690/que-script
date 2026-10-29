@@ -1,4 +1,3 @@
-#[cfg(feature = "compiler")]
 use crate::infer::infer_with_builtins_typed_lsp;
 use crate::infer::{
     infer_with_builtins_typed, infer_with_builtins_typed_lsp_all, EffectFlags, InferErrorScope,
@@ -226,52 +225,41 @@ fn analyze_document_text(text: &str, core: &WasmLspCore) -> DocAnalysis {
                     diagnostics.extend(make_static_analysis_warning(text, finding));
                 }
             }
-            collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
-            let typed_user_forms = extract_user_top_level_typed_forms(&typed, user_form_count);
-            for form in &typed_user_forms {
-                collect_symbol_types(form, &mut symbol_types_raw);
-                collect_let_binding_types(form, &mut let_binding_types_raw);
-                collect_let_binding_effects(form, &mut let_binding_effects, &core.global_effects);
-            }
-            let form_ranges = top_level_form_ranges(text);
-            let expansion_counts = native_core::desugared_top_level_form_counts(text)
-                .unwrap_or_else(|| (1..=form_ranges.len()).collect());
-            form_scoped_symbols = Vec::with_capacity(form_ranges.len());
-            let mut first_typed_form = 0usize;
-            for (range, cumulative_end) in form_ranges.into_iter().zip(expansion_counts) {
-                let end_typed_form = cumulative_end.min(typed_user_forms.len());
-                if end_typed_form <= first_typed_form {
-                    continue;
-                }
-                let mut raw_symbols: HashMap<String, Type> = HashMap::new();
-                let mut raw_occurrences: HashMap<String, Vec<Type>> = HashMap::new();
-                for typed_form in &typed_user_forms[first_typed_form..end_typed_form] {
-                    collect_symbol_types(typed_form, &mut raw_symbols);
-                    native_core::collect_symbol_type_occurrences(typed_form, &mut raw_occurrences);
-                }
-                form_scoped_symbols.push(FormScopedAnalysis {
-                    range,
-                    symbol_types: raw_symbols
-                        .into_iter()
-                        .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
-                        .collect(),
-                    symbol_occurrence_types: raw_occurrences
-                        .into_iter()
-                        .map(|(name, types)| {
-                            (
-                                name,
-                                types
-                                    .into_iter()
-                                    .map(|typ| normalize_signature(&typ.to_string()))
-                                    .collect(),
-                            )
-                        })
-                        .collect(),
-                });
-                first_typed_form = end_typed_form;
-            }
+            collect_hover_type_data(
+                text,
+                user_form_count,
+                &typed,
+                core,
+                &mut symbol_types_raw,
+                &mut let_binding_types_raw,
+                &mut let_binding_effects,
+                &mut let_binding_external_impure,
+                &mut form_scoped_symbols,
+            );
         }
         Err(errors) => {
+            // Keep the inferred prefix and locally-known types inside the
+            // first bad form for hover. Diagnostics still come from the
+            // recovery pass below, so independent later errors are preserved.
+            if let Err(partial_error) = infer_with_builtins_typed_lsp(
+                &program,
+                (core.base_env.clone(), core.base_next_id),
+                user_form_count,
+            ) {
+                if let Some(typed) = partial_error.partial_typed_ast {
+                    collect_hover_type_data(
+                        text,
+                        user_form_count,
+                        &typed,
+                        core,
+                        &mut symbol_types_raw,
+                        &mut let_binding_types_raw,
+                        &mut let_binding_effects,
+                        &mut let_binding_external_impure,
+                        &mut form_scoped_symbols,
+                    );
+                }
+            }
             let mut candidate_symbols = user_bound_symbols.clone();
             candidate_symbols.extend(core.global_signatures.keys().cloned());
             candidate_symbols.extend(core.std_fallback_names.iter().cloned());
@@ -717,6 +705,65 @@ fn extract_user_top_level_typed_forms<'a>(
     }
 
     Vec::new()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_hover_type_data(
+    text: &str,
+    user_form_count: usize,
+    typed: &TypedExpression,
+    core: &WasmLspCore,
+    symbol_types: &mut HashMap<String, Type>,
+    let_binding_types: &mut HashMap<String, Type>,
+    let_binding_effects: &mut HashMap<String, EffectFlags>,
+    let_binding_external_impure: &mut HashMap<String, bool>,
+    form_scoped_symbols: &mut Vec<FormScopedAnalysis>,
+) {
+    collect_let_binding_external_impurity(typed, let_binding_external_impure);
+    let typed_user_forms = extract_user_top_level_typed_forms(typed, user_form_count);
+    for form in &typed_user_forms {
+        collect_symbol_types(form, symbol_types);
+        collect_let_binding_types(form, let_binding_types);
+        collect_let_binding_effects(form, let_binding_effects, &core.global_effects);
+    }
+
+    let form_ranges = top_level_form_ranges(text);
+    let expansion_counts = native_core::desugared_top_level_form_counts(text)
+        .unwrap_or_else(|| (1..=form_ranges.len()).collect());
+    *form_scoped_symbols = Vec::with_capacity(form_ranges.len());
+    let mut first_typed_form = 0usize;
+    for (range, cumulative_end) in form_ranges.into_iter().zip(expansion_counts) {
+        let end_typed_form = cumulative_end.min(typed_user_forms.len());
+        if end_typed_form <= first_typed_form {
+            continue;
+        }
+        let mut raw_symbols: HashMap<String, Type> = HashMap::new();
+        let mut raw_occurrences: HashMap<String, Vec<Type>> = HashMap::new();
+        for typed_form in &typed_user_forms[first_typed_form..end_typed_form] {
+            collect_symbol_types(typed_form, &mut raw_symbols);
+            native_core::collect_symbol_type_occurrences(typed_form, &mut raw_occurrences);
+        }
+        form_scoped_symbols.push(FormScopedAnalysis {
+            range,
+            symbol_types: raw_symbols
+                .into_iter()
+                .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
+                .collect(),
+            symbol_occurrence_types: raw_occurrences
+                .into_iter()
+                .map(|(name, types)| {
+                    (
+                        name,
+                        types
+                            .into_iter()
+                            .map(|typ| normalize_signature(&typ.to_string()))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        });
+        first_typed_form = end_typed_form;
+    }
 }
 
 fn type_specificity_score(typ: &Type) -> i32 {

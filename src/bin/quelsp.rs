@@ -15,7 +15,8 @@ use lsp_types::{
     SignatureInformation, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
 };
 use que::infer::{
-    infer_with_builtins_typed_lsp_all, EffectFlags, InferErrorScope, TypedExpression,
+    infer_with_builtins_typed_lsp, infer_with_builtins_typed_lsp_all, EffectFlags, InferErrorScope,
+    TypedExpression,
 };
 use que::lsp_native_core as native_core;
 use que::parser::Expression;
@@ -1386,16 +1387,42 @@ fn analyze_document_text(
                     diagnostics.extend(make_static_analysis_warning(text, finding));
                 }
             }
-            collect_let_binding_external_impurity(&typed, &mut let_binding_external_impure);
-            for form in extract_user_top_level_typed_forms(&typed, user_form_count) {
-                collect_symbol_types(form, &mut symbol_types_raw);
-                collect_let_binding_types(form, &mut let_binding_types_raw);
-                collect_let_binding_effects(form, &mut let_binding_effects, global_effects);
-            }
-            form_scoped_symbols =
-                build_form_scoped_analyses(text, user_form_count, &typed, global_effects);
+            collect_hover_type_data(
+                text,
+                user_form_count,
+                &typed,
+                global_effects,
+                &mut symbol_types_raw,
+                &mut let_binding_types_raw,
+                &mut let_binding_effects,
+                &mut let_binding_external_impure,
+                &mut form_scoped_symbols,
+            );
         }
         Err(errors) => {
+            // `lsp_all` deliberately rolls a bad top-level form back so later
+            // diagnostics do not cascade. For hover, also keep the fail-fast
+            // inference tree: it contains every type discovered before the
+            // failing constraint, including local names inside that form.
+            if let Err(partial_error) = infer_with_builtins_typed_lsp(
+                &program,
+                (base_env.clone(), base_next_id),
+                user_form_count,
+            ) {
+                if let Some(typed) = partial_error.partial_typed_ast {
+                    collect_hover_type_data(
+                        text,
+                        user_form_count,
+                        &typed,
+                        global_effects,
+                        &mut symbol_types_raw,
+                        &mut let_binding_types_raw,
+                        &mut let_binding_effects,
+                        &mut let_binding_external_impure,
+                        &mut form_scoped_symbols,
+                    );
+                }
+            }
             let mut candidate_symbols = user_bound_symbols.clone();
             candidate_symbols.extend(global_signatures.keys().cloned());
             candidate_symbols.extend(std_fallback_names.iter().cloned());
@@ -1436,6 +1463,27 @@ fn analyze_document_text(
         user_bound_symbols,
         form_scoped_symbols,
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_hover_type_data(
+    text: &str,
+    user_form_count: usize,
+    typed: &TypedExpression,
+    global_effects: &HashMap<String, EffectFlags>,
+    symbol_types: &mut HashMap<String, Type>,
+    let_binding_types: &mut HashMap<String, Type>,
+    let_binding_effects: &mut HashMap<String, EffectFlags>,
+    let_binding_external_impure: &mut HashMap<String, bool>,
+    form_scoped_symbols: &mut Vec<FormScopedAnalysis>,
+) {
+    collect_let_binding_external_impurity(typed, let_binding_external_impure);
+    for form in extract_user_top_level_typed_forms(typed, user_form_count) {
+        collect_symbol_types(form, symbol_types);
+        collect_let_binding_types(form, let_binding_types);
+        collect_let_binding_effects(form, let_binding_effects, global_effects);
+    }
+    *form_scoped_symbols = build_form_scoped_analyses(text, user_form_count, typed, global_effects);
 }
 
 fn parse_user_exprs_for_symbol_collection(text: &str) -> Option<Vec<Expression>> {
@@ -2446,6 +2494,52 @@ mod tests {
                 .any(|message| message.contains("Undefined variable: first")),
             "dependent error should be suppressed: {messages:#?}"
         );
+    }
+
+    #[test]
+    fn native_hover_keeps_locally_inferred_types_in_a_bad_form() {
+        let source = r#"(let valid-position?
+  (lambda (entry)
+    (let {lo hi letter password} entry)
+    (let a (= (get (- lo 1) password) letter))
+    (let b (= (get (- hi 1) password) letter))
+    (not (= a b))))"#;
+        let state = test_server_state();
+        let position_of = |needle: &str, symbol_offset: usize| {
+            let offset = source.find(needle).expect("test symbol should exist") + symbol_offset;
+            let prefix = &source[..offset];
+            Position::new(
+                prefix.lines().count().saturating_sub(1) as u32,
+                prefix.lines().last().unwrap_or("").chars().count() as u32,
+            )
+        };
+
+        let analysis = state.analyze_text_for_doc_path(source, None);
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("expected Int but got Bool")),
+            "expected the Bool equality error: {:#?}",
+            analysis.diagnostics
+        );
+
+        for (needle, symbol_offset, symbol, expected) in [
+            ("lo ", 0, "lo", "lo : Int"),
+            ("(let a ", 5, "a", "a : Bool"),
+        ] {
+            let hover = state
+                .hover_for_text(source, position_of(needle, symbol_offset))
+                .unwrap_or_else(|| panic!("{symbol} should have a hover"));
+            let HoverContents::Markup(markup) = hover.contents else {
+                panic!("expected Markdown hover contents");
+            };
+            assert!(
+                markup.value.contains(expected),
+                "unexpected hover for {symbol}: {}",
+                markup.value
+            );
+        }
     }
 
     #[test]

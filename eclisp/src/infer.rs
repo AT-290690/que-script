@@ -3150,6 +3150,52 @@ pub fn solve_constraints_list(
     Ok(unifier.into_substitution())
 }
 
+/// Produce the useful, non-conflicting portion of a substitution after type
+/// checking has failed.  This is deliberately not used to accept a program:
+/// diagnostics continue to come from `solve_constraints_list`.  It is only
+/// used to annotate the partial typed tree returned to editor clients, so a
+/// single bad expression does not turn every surrounding hover into an
+/// anonymous type variable.
+fn solve_constraints_best_effort(
+    constraints: &[(Type, Type, TypeError)],
+) -> HashMap<u64, Type> {
+    let mut unifier = Unifier::new();
+    let mut work: VecDeque<(Type, Type)> = constraints
+        .iter()
+        .map(|(left, right, _)| (left.clone(), right.clone()))
+        .collect();
+
+    while let Some((left, right)) = work.pop_front() {
+        let left = unifier.apply(&left);
+        let right = unifier.apply(&right);
+
+        match (left.clone(), right.clone()) {
+            (a, b) if a == b => {}
+            (Type::Var(var), ty) | (ty, Type::Var(var)) => {
+                // A rejected binding is precisely the local inconsistency
+                // which caused the diagnostic.  Keep solving independent
+                // constraints, rather than discarding all editor type data.
+                let _ = unifier.bind_var(var.id, ty);
+            }
+            (Type::List(left), Type::List(right)) => work.push_back((*left, *right)),
+            (Type::Function(left_arg, left_result), Type::Function(right_arg, right_result)) => {
+                work.push_back((*left_arg, *right_arg));
+                work.push_back((*left_result, *right_result));
+            }
+            (Type::Tuple(left_items), Type::Tuple(right_items))
+                if left_items.len() == right_items.len() =>
+            {
+                work.extend(left_items.into_iter().zip(right_items));
+            }
+            // This particular relation is invalid, but it must not erase
+            // substitutions established by the rest of the program.
+            _ => {}
+        }
+    }
+
+    unifier.into_substitution()
+}
+
 pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
     match ty {
         Type::Var(var) => match subst.get(&var.id) {
@@ -3981,7 +4027,18 @@ fn infer_with_builtins_typed_internal(
     let inferred = match infer_expr(expr, &mut ctx) {
         Ok(value) => value,
         Err(message) => {
-            let mut partial_typed = build_typed_expression(expr, &ctx.expr_types);
+            let constraints: Vec<(Type, Type, TypeError)> = ctx
+                .constraints
+                .iter()
+                .map(|(left, right, source)| (left.clone(), right.clone(), source.clone()))
+                .collect();
+            let subst = solve_constraints_best_effort(&constraints);
+            let partial_types = ctx
+                .expr_types
+                .iter()
+                .map(|(id, ty)| (*id, apply_subst_map_to_type(&subst, ty)))
+                .collect();
+            let mut partial_typed = build_typed_expression(expr, &partial_types);
             annotate_effects(&mut partial_typed);
             let partial_typed_ast = Some(partial_typed);
             return Err(InferErrorInfo {
@@ -4009,7 +4066,13 @@ fn infer_with_builtins_typed_internal(
     let subst_map = match solve_constraints_list(&constraints_vec) {
         Ok(subst) => subst,
         Err(e) => {
-            let mut partial_typed = build_typed_expression(expr, &ctx.expr_types);
+            let partial_subst = solve_constraints_best_effort(&constraints_vec);
+            let partial_types = ctx
+                .expr_types
+                .iter()
+                .map(|(id, ty)| (*id, apply_subst_map_to_type(&partial_subst, ty)))
+                .collect();
+            let mut partial_typed = build_typed_expression(expr, &partial_types);
             annotate_effects(&mut partial_typed);
             let partial_typed_ast = Some(partial_typed);
             return Err(InferErrorInfo {
