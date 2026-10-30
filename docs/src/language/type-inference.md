@@ -48,6 +48,35 @@ needs to be written at a serialization boundary.
 An arrow chain associates to the right. Parenthesize a function when it is an
 argument type.
 
+## Named generic roles are rigid
+
+Inside a `sig`, a named type variable is a role in the contract, not a
+placeholder that the implementation may silently specialize. Repeated names
+must remain the same type; different names must remain different roles.
+
+```que
+(sig wrap (T -> [T]))
+(let wrap (lambda (x) [x])) ; valid
+
+(sig broken (T -> [T]))
+(let broken (lambda (x) [3])) ; error: T was forced to Int
+```
+
+Likewise, the order of generic roles matters:
+
+```que
+(sig pair (T -> K -> [{ T K }]))
+(let pair (lambda (left right) [{right left}])) ; error
+```
+
+Use `_` for an intentionally unconstrained slot. Every `_` is a new flexible
+wildcard, unlike a repeated named role:
+
+```que
+(sig keep-left (T -> _ -> T))
+(let keep-left (lambda (x ignored) x))
+```
+
 ## Inspect inferred types
 
 ```sh

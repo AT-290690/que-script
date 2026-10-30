@@ -2543,6 +2543,26 @@ mod tests {
     }
 
     #[test]
+    fn native_lsp_diagnostics_reject_specialized_named_generics() {
+        let analysis = analyze_lsp_test_source(
+            r#"(sig fn (T -> [T]))
+(let fn (lambda (x) [3]))"#,
+        );
+        let messages = analysis
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            messages.iter().any(|message| {
+                message.contains("Signature mismatch for 'fn'")
+                    && message.contains("generic T was forced to Int")
+            }),
+            "expected rigid generic diagnostic, got: {messages:#?}"
+        );
+    }
+
+    #[test]
     fn generated_names_are_hidden_in_end_to_end_static_diagnostics() {
         let source = "; use-strict-warnings!\n(let f (lambda (xs)\n  (block\n    (let index 0)\n    (get index xs))))";
         let analysis = analyze_lsp_test_source(source);

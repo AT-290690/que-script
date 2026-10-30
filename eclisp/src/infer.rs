@@ -2078,11 +2078,20 @@ pub struct SolveError {
     pub snippet: Option<String>,
 }
 
+/// A type written in a `sig`. Named variables in this type are declaration
+/// roles, rather than ordinary inference variables: an implementation may
+/// conform to a role, but may not specialize or rename it.
+#[derive(Clone, Debug)]
+pub struct DeclaredType {
+    pub typ: Type,
+    rigid_vars: HashMap<u64, String>,
+}
+
 #[derive(Clone)]
 pub struct InferenceContext {
     pub env: TypeEnv,
     pub mut_scopes: Vec<HashSet<String>>,
-    pub declared_type_scopes: Vec<HashMap<String, (Type, bool)>>,
+    pub declared_type_scopes: Vec<HashMap<String, (DeclaredType, bool)>>,
     pub enum_scopes: Vec<HashMap<String, Arc<EnumType>>>,
     pub lambda_scope_bases: Vec<usize>,
     pub constraints: Vec<(Type, Type, TypeError)>,
@@ -2246,7 +2255,7 @@ impl InferenceContext {
             .unwrap_or(false)
     }
 
-    pub fn declare_type(&mut self, name: String, typ: Type) -> Result<(), String> {
+    pub fn declare_type(&mut self, name: String, typ: DeclaredType) -> Result<(), String> {
         if self
             .env
             .scopes
@@ -2272,7 +2281,7 @@ impl InferenceContext {
         Ok(())
     }
 
-    pub fn declared_type_in_current_scope(&self, name: &str) -> Option<Type> {
+    pub fn declared_type_in_current_scope(&self, name: &str) -> Option<DeclaredType> {
         self.declared_type_scopes
             .last()
             .and_then(|scope| scope.get(name))
@@ -2403,6 +2412,26 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
 fn parse_type_hint(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, String> {
     let mut named_vars = HashMap::new();
     parse_type_hint_with_named_vars(expr, ctx, &mut named_vars)
+}
+
+/// Parse a `sig` type while remembering which variables were explicitly named
+/// by the user. `_` deliberately does not enter this map: each underscore is
+/// an independent flexible wildcard.
+fn parse_declared_type_hint(
+    expr: &Expression,
+    ctx: &mut InferenceContext,
+) -> Result<DeclaredType, String> {
+    let mut named_vars = HashMap::new();
+    let typ = parse_type_hint_with_named_vars(expr, ctx, &mut named_vars)?;
+    let rigid_vars = named_vars
+        .into_iter()
+        .filter_map(|(name, typ)| match typ {
+            Type::Var(var) => Some((var.id, name)),
+            // Named enum types are not generic roles.
+            _ => None,
+        })
+        .collect();
+    Ok(DeclaredType { typ, rigid_vars })
 }
 
 fn parse_type_hint_with_named_vars(
@@ -2560,7 +2589,7 @@ fn infer_sig(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
     let [Expression::Word(_kw), Expression::Word(local_name), type_expr] = exprs else {
         return Err("sig expects: (sig name Type)".to_string());
     };
-    let typ = parse_type_hint(type_expr, ctx)?;
+    let typ = parse_declared_type_hint(type_expr, ctx)?;
     ctx.declare_type(local_name.clone(), typ)?;
     if ctx.collect_expr_types {
         ctx.expr_types.insert(
@@ -2568,6 +2597,7 @@ fn infer_sig(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
             exprs
                 .get(2)
                 .and_then(|_| ctx.declared_type_in_current_scope(local_name))
+                .map(|declared| declared.typ)
                 .unwrap_or(Type::Unit),
         );
     }
@@ -3217,32 +3247,235 @@ pub fn apply_subst_map_to_type(subst: &HashMap<u64, Type>, ty: &Type) -> Type {
     }
 }
 
-fn ensure_declared_type_matches(
-    name: &str,
-    declared_type: &Type,
-    inferred_type: &Type,
-    binding_expr: &Expression,
-    scope: Option<InferErrorScope>,
-) -> Result<Type, String> {
-    let constraints = vec![(
-        inferred_type.clone(),
-        declared_type.clone(),
-        TypeError {
-            variant: TypeErrorVariant::Source,
-            expr: vec![binding_expr.clone()],
-            scope,
-        },
-    )];
-    if let Ok(subst_map) = solve_constraints_list(&constraints) {
-        return Ok(apply_subst_map_to_type(&subst_map, declared_type));
+#[derive(Debug)]
+struct SignatureMatchError {
+    reason: String,
+}
+
+struct SignatureMatcher<'a> {
+    declared: &'a DeclaredType,
+    inferred_substitution: HashMap<u64, Type>,
+    /// Variables free in the surrounding environment are monomorphic at this
+    /// binding. They must not escape into a universally quantified declared
+    /// role (the usual skolem-escape check for signature subsumption).
+    fixed_inferred_vars: HashSet<u64>,
+}
+
+impl<'a> SignatureMatcher<'a> {
+    fn new(declared: &'a DeclaredType, fixed_inferred_vars: HashSet<u64>) -> Self {
+        Self {
+            declared,
+            inferred_substitution: HashMap::new(),
+            fixed_inferred_vars,
+        }
     }
 
-    Err(format!(
-        "Signature mismatch for '{}'\ndeclared: {}\ninferred: {}\nin:\n{}",
-        name,
-        declared_type,
-        inferred_type,
-        binding_expr.to_lisp()
+    fn is_rigid(&self, var_id: u64) -> bool {
+        self.declared.rigid_vars.contains_key(&var_id)
+    }
+
+    fn rigid_name(&self, var_id: u64) -> String {
+        self.declared
+            .rigid_vars
+            .get(&var_id)
+            .cloned()
+            .unwrap_or_else(|| format!("T{var_id}"))
+    }
+
+    fn apply_inferred(&self, typ: &Type) -> Type {
+        match typ {
+            Type::Var(var) => match self.inferred_substitution.get(&var.id) {
+                Some(replacement) => self.apply_inferred(replacement),
+                None => typ.clone(),
+            },
+            Type::Function(input, output) => Type::Function(
+                Box::new(self.apply_inferred(input)),
+                Box::new(self.apply_inferred(output)),
+            ),
+            Type::List(inner) => Type::List(Box::new(self.apply_inferred(inner))),
+            Type::Tuple(items) => Type::Tuple(
+                items
+                    .iter()
+                    .map(|item| self.apply_inferred(item))
+                    .collect(),
+            ),
+            _ => typ.clone(),
+        }
+    }
+
+    fn contains_inferred_var(&self, typ: &Type, var_id: u64) -> bool {
+        match self.apply_inferred(typ) {
+            Type::Var(var) => var.id == var_id,
+            Type::Function(input, output) => {
+                self.contains_inferred_var(&input, var_id)
+                    || self.contains_inferred_var(&output, var_id)
+            }
+            Type::List(inner) => self.contains_inferred_var(&inner, var_id),
+            Type::Tuple(items) => items
+                .iter()
+                .any(|item| self.contains_inferred_var(item, var_id)),
+            _ => false,
+        }
+    }
+
+    fn contains_rigid_role(&self, typ: &Type) -> bool {
+        match typ {
+            Type::Var(var) => self.is_rigid(var.id),
+            Type::Function(input, output) => {
+                self.contains_rigid_role(input) || self.contains_rigid_role(output)
+            }
+            Type::List(inner) => self.contains_rigid_role(inner),
+            Type::Tuple(items) => items.iter().any(|item| self.contains_rigid_role(item)),
+            _ => false,
+        }
+    }
+
+    fn bind_inferred(&mut self, var_id: u64, typ: &Type) -> Result<(), SignatureMatchError> {
+        if self.is_rigid(var_id) {
+            return Err(SignatureMatchError {
+                reason: format!(
+                    "generic {} was forced to {}",
+                    self.rigid_name(var_id),
+                    self.apply_inferred(typ)
+                ),
+            });
+        }
+        if self.fixed_inferred_vars.contains(&var_id) && self.contains_rigid_role(typ) {
+            return Err(SignatureMatchError {
+                reason: "implementation captures a surrounding monomorphic value where the signature requires a generic role".to_string(),
+            });
+        }
+        if self.contains_inferred_var(typ, var_id) {
+            return Err(SignatureMatchError {
+                reason: "implementation requires an infinite type".to_string(),
+            });
+        }
+        self.inferred_substitution.insert(var_id, typ.clone());
+        Ok(())
+    }
+
+    fn mismatch(&self, declared: &Type, inferred: &Type) -> SignatureMatchError {
+        let reason = match (declared, inferred) {
+            (Type::Var(expected), Type::Var(actual))
+                if self.is_rigid(expected.id) && self.is_rigid(actual.id) =>
+            {
+                format!(
+                    "generic {} was used where {} was declared",
+                    self.rigid_name(actual.id),
+                    self.rigid_name(expected.id)
+                )
+            }
+            (Type::Var(expected), actual) if self.is_rigid(expected.id) => format!(
+                "generic {} was forced to {}",
+                self.rigid_name(expected.id),
+                actual
+            ),
+            _ => format!("expected {} but inferred {}", declared, inferred),
+        };
+        SignatureMatchError { reason }
+    }
+
+    /// Directional matching is the important distinction from ordinary HM
+    /// unification. A `sig` role can be matched by an implementation variable,
+    /// but it is never itself bound to a concrete type or a different role.
+    fn match_type(&mut self, declared: &Type, inferred: &Type) -> Result<(), SignatureMatchError> {
+        let inferred = self.apply_inferred(inferred);
+
+        match declared {
+            Type::Var(var) if self.is_rigid(var.id) => match &inferred {
+                Type::Var(actual) if actual.id == var.id => Ok(()),
+                Type::Var(actual) if !self.is_rigid(actual.id) => {
+                    self.bind_inferred(actual.id, declared)
+                }
+                _ => Err(self.mismatch(declared, &inferred)),
+            },
+            // `_` is the only flexible declaration variable. It deliberately
+            // accepts any shape and is fresh for every occurrence.
+            Type::Var(_) => Ok(()),
+            _ => match &inferred {
+                Type::Var(var) if !self.is_rigid(var.id) => self.bind_inferred(var.id, declared),
+                Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit | Type::Enum(_) => {
+                    if declared == &inferred {
+                        Ok(())
+                    } else {
+                        Err(self.mismatch(declared, &inferred))
+                    }
+                }
+                Type::Function(inferred_input, inferred_output) => {
+                    let Type::Function(declared_input, declared_output) = declared else {
+                        return Err(self.mismatch(declared, &inferred));
+                    };
+                    self.match_type(declared_input, inferred_input)?;
+                    self.match_type(declared_output, inferred_output)
+                }
+                Type::List(inferred_inner) => {
+                    let Type::List(declared_inner) = declared else {
+                        return Err(self.mismatch(declared, &inferred));
+                    };
+                    self.match_type(declared_inner, inferred_inner)
+                }
+                Type::Tuple(inferred_items) => {
+                    let Type::Tuple(declared_items) = declared else {
+                        return Err(self.mismatch(declared, &inferred));
+                    };
+                    if declared_items.len() != inferred_items.len() {
+                        return Err(self.mismatch(declared, &inferred));
+                    }
+                    for (declared_item, inferred_item) in
+                        declared_items.iter().zip(inferred_items.iter())
+                    {
+                        self.match_type(declared_item, inferred_item)?;
+                    }
+                    Ok(())
+                }
+                // A rigid variable can occur in an inferred type after an
+                // earlier successful position bound an implementation variable
+                // to it. Any other shape mismatch is reported above.
+                Type::Var(_) => Err(self.mismatch(declared, &inferred)),
+            },
+        }
+    }
+
+    fn into_inferred_substitution(self) -> HashMap<u64, Type> {
+        self.inferred_substitution
+    }
+}
+
+fn apply_signature_substitution_to_expr_types(
+    expr_types: &mut HashMap<usize, Type>,
+    substitution: &HashMap<u64, Type>,
+) {
+    if substitution.is_empty() {
+        return;
+    }
+    for typ in expr_types.values_mut() {
+        *typ = apply_subst_map_to_type(substitution, typ);
+    }
+}
+
+fn ensure_declared_type_matches(
+    name: &str,
+    declared_type: &DeclaredType,
+    inferred_type: &Type,
+    binding_expr: &Expression,
+    fixed_inferred_vars: HashSet<u64>,
+) -> Result<(Type, HashMap<u64, Type>), String> {
+    let mut matcher = SignatureMatcher::new(declared_type, fixed_inferred_vars);
+    matcher
+        .match_type(&declared_type.typ, inferred_type)
+        .map_err(|error| {
+            format!(
+                "Signature mismatch for '{}'\ndeclared: {}\ninferred: {}\nreason: {}\nin:\n{}",
+                name,
+                declared_type.typ,
+                inferred_type,
+                error.reason,
+                binding_expr.to_lisp()
+            )
+        })?;
+    Ok((
+        declared_type.typ.clone(),
+        matcher.into_inferred_substitution(),
     ))
 }
 
@@ -3269,7 +3502,10 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         // assign a fresh monotype placeholder
         let tv = ctx.fresh_var();
 
-        let recursive_type = declared_type.clone().unwrap_or(tv);
+        // Recursive uses are checked against the implementation's temporary
+        // monotype.  Putting a rigid declared role here would feed it back
+        // into ordinary unification and allow the role to be specialized.
+        let recursive_type = tv;
         ctx.env
             .insert(name.clone(), TypeScheme::monotype(recursive_type.clone()))?;
 
@@ -3305,13 +3541,32 @@ fn infer_rec(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
         }
 
         if let Some(declared_type) = declared_type.as_ref() {
-            ensure_declared_type_matches(
+            let mut outer_env = ctx.env.clone();
+            outer_env
+                .scopes
+                .last_mut()
+                .expect("type environment has a current scope")
+                .remove(&name);
+            let (_declared_type, signature_substitution) = ensure_declared_type_matches(
                 &name,
                 declared_type,
                 &solved_type,
                 &Expression::Apply(exprs.to_vec()),
-                ctx.current_error_scope(),
+                outer_env.free_vars(),
             )?;
+            apply_signature_substitution_to_expr_types(
+                &mut ctx.expr_types,
+                &signature_substitution,
+            );
+            // Replace the temporary recursive monotype with the declared
+            // public scheme only after the directional signature check.
+            ctx.env
+                .scopes
+                .last_mut()
+                .expect("type environment has a current scope")
+                .remove(&name);
+            let declared_scheme = generalize(&ctx.env, declared_type.typ.clone());
+            ctx.env.insert(name.clone(), declared_scheme)?;
             ctx.mark_declared_type_used(&name);
         }
         Ok(Type::Unit)
@@ -3353,26 +3608,23 @@ fn infer_let(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
         let solved_type = apply_subst_map_to_type(&subst_map, &value_type);
         ctx.env.apply_substitution_map(&subst_map);
+        let fixed_inferred_vars = ctx.env.free_vars();
 
         let scheme = if let Some(declared_type) = declared_type.as_ref() {
-            let solved_declared_type = ensure_declared_type_matches(
+            let (solved_declared_type, signature_substitution) = ensure_declared_type_matches(
                 var_name,
                 declared_type,
                 &solved_type,
                 &Expression::Apply(exprs.to_vec()),
-                ctx.current_error_scope(),
+                fixed_inferred_vars,
             )?;
-            // Once the signature-specific check has produced its normal
-            // diagnostic, retain the successful match in the shared constraint
-            // set so nested nodes receive the concrete type during final solving.
-            ctx.add_constraint(
-                value_type.clone(),
-                declared_type.clone(),
-                ctx.type_error(
-                    TypeErrorVariant::Source,
-                    vec![Expression::Apply(exprs.to_vec())],
-                ),
+            apply_signature_substitution_to_expr_types(
+                &mut ctx.expr_types,
+                &signature_substitution,
             );
+            // Do not add an ordinary equality constraint here. It would
+            // re-enter the normal HM unifier later and specialize the rigid
+            // named roles we just verified directionally.
             ctx.mark_declared_type_used(var_name);
             if is_nonexpansive(value_expr) {
                 generalize(&ctx.env, solved_declared_type)
@@ -3425,6 +3677,7 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
         let solved_type = apply_subst_map_to_type(&subst_map, &value_type);
         ctx.env.apply_substitution_map(&subst_map);
+        let fixed_inferred_vars = ctx.env.free_vars();
 
         if matches!(solved_type, Type::Function(_, _)) {
             return Err("mut cannot bind function values".to_string());
@@ -3443,13 +3696,17 @@ fn infer_mut(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
             .insert(var_name.clone(), TypeScheme::monotype(solved_type.clone()))?;
         ctx.mark_mut_binding(var_name.clone());
         if let Some(declared_type) = declared_type.as_ref() {
-            ensure_declared_type_matches(
+            let (_declared_type, signature_substitution) = ensure_declared_type_matches(
                 var_name,
                 declared_type,
                 &solved_type,
                 &Expression::Apply(exprs.to_vec()),
-                ctx.current_error_scope(),
+                fixed_inferred_vars,
             )?;
+            apply_signature_substitution_to_expr_types(
+                &mut ctx.expr_types,
+                &signature_substitution,
+            );
             ctx.mark_declared_type_used(var_name);
         }
         Ok(Type::Unit)

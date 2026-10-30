@@ -7691,6 +7691,25 @@ fn"#;
     }
 
     #[test]
+    fn test_wasm_lsp_diagnostics_sig_rejects_specialized_named_generic() {
+        let program = r#"(sig fn (T -> [T]))
+(let fn (lambda (x) [3]))"#;
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_diagnostics(program.to_string()))
+                .expect("diagnostics should be valid JSON");
+        let message = diagnostics
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|item| item["message"].as_str())
+            .unwrap_or("");
+        assert!(
+            message.contains("Signature mismatch for 'fn'")
+                && message.contains("generic T was forced to Int"),
+            "expected rigid generic diagnostic, got: {diagnostics}"
+        );
+    }
+
+    #[test]
     fn test_sig_function_signature_matches_inferred_lambda_type() {
         let expr = crate::parser::build(
             r#"(do
@@ -7995,10 +8014,81 @@ fn"#;
         .expect_err("[T] -> T should reject returning a different type");
 
         assert!(
-            err.contains("Argument 1 of bad-head expected Bool but got Int"),
-            "expected vector generic mismatch, got: {}",
+            err.contains("Signature mismatch for 'bad-head'")
+                && err.contains("generic T was forced to Bool"),
+            "expected rigid vector generic mismatch, got: {}",
             err
         );
+    }
+
+    #[test]
+    fn test_sig_named_generics_are_rigid_and_underscores_remain_flexible() {
+        let environment = || crate::types::create_builtin_environment(crate::types::TypeEnv::new());
+
+        for program in [
+            r#"(do
+                (sig id (T -> T))
+                (let id (lambda (x) x))
+                {(id 1) (id true)})"#,
+            r#"(do
+                (sig fn (T -> [T]))
+                (let fn (lambda (x) [x]))
+                (fn true))"#,
+            r#"(do
+                (sig keep-left (T -> _ -> T))
+                (let keep-left (lambda (x ignored) x))
+                (keep-left 1 true))"#,
+        ] {
+            let expr = crate::parser::build(program).expect("program should parse");
+            crate::infer::infer_with_builtins_typed(&expr, environment())
+                .expect("implementation should preserve the declared generic roles");
+        }
+
+        for (program, binding_name, expected_reason) in [
+            (
+                r#"(do
+                    (sig fn (T -> [T]))
+                    (let fn (lambda (x) [3]))
+                    fn)"#,
+                "fn",
+                "generic T was forced to Int",
+            ),
+            (
+                r#"(do
+                    (sig fn (T -> [K]))
+                    (let fn (lambda (x) [x]))
+                    fn)"#,
+                "fn",
+                "generic T was used where K was declared",
+            ),
+            (
+                r#"(do
+                    (sig fn (T -> K -> [{ T K }]))
+                    (let fn (lambda (x y) [{ y x }]))
+                    fn)"#,
+                "fn",
+                "generic K was used where T was declared",
+            ),
+            (
+                r#"(do
+                    (let make (lambda (captured) (do
+                      (sig constant (T -> T))
+                      (let constant (lambda (ignored) captured))
+                      constant)))
+                    (make 1))"#,
+                "constant",
+                "implementation captures a surrounding monomorphic value",
+            ),
+        ] {
+            let expr = crate::parser::build(program).expect("program should parse");
+            let err = crate::infer::infer_with_builtins_typed(&expr, environment())
+                .expect_err("implementation must not specialize or reorder generic roles");
+            assert!(
+                err.contains(&format!("Signature mismatch for '{binding_name}'"))
+                    && err.contains(expected_reason),
+                "expected rigid generic diagnostic containing {expected_reason:?}, got: {err}"
+            );
+        }
     }
 
     #[test]
