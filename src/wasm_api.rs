@@ -1019,3 +1019,244 @@ pub fn wat(program: String) -> *const u8 {
     });
     write_to_output(&result)
 }
+
+/// Formats source for browser and Node hosts without requiring the native CLI.
+///
+/// The normal wasm-bindgen `String` return ABI is intentionally avoided here:
+/// small standalone hosts can use the same `get_output_ptr` / `get_output_len`
+/// pair as `wat` and do not need generated JavaScript glue.
+#[cfg(feature = "compiler")]
+#[wasm_bindgen]
+pub fn ai_format(program: String) -> *const u8 {
+    let result = match crate::formatter::format_source(&program) {
+        Ok(source) => serde_json::json!({ "ok": true, "source": source }).to_string(),
+        Err(error) => serde_json::json!({ "ok": false, "error": error }).to_string(),
+    };
+    write_to_output(&result)
+}
+
+/// Returns LSP diagnostics through the standalone-host output ABI.
+#[cfg(feature = "compiler")]
+#[wasm_bindgen]
+pub fn ai_diagnostics(text: String) -> *const u8 {
+    let result = lsp_diagnostics(text);
+    write_to_output(&result)
+}
+
+#[cfg(feature = "compiler")]
+fn library_definition_name(expr: &Expression) -> Option<&str> {
+    let Expression::Apply(items) = expr else {
+        return None;
+    };
+    if let [Expression::Word(keyword), Expression::Word(_module), Expression::Word(_import), Expression::Word(name), ..] =
+        &items[..]
+    {
+        if keyword == "extern" {
+            return Some(name);
+        }
+    }
+    if let [Expression::Word(keyword), Expression::Word(name), _, ..] = &items[..] {
+        if matches!(keyword.as_str(), "let" | "letrec" | "letmacro" | "mut") {
+            return Some(name);
+        }
+    }
+    None
+}
+
+#[cfg(feature = "compiler")]
+fn library_definition_kind(expr: &Expression) -> &'static str {
+    match expr {
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(keyword)) if keyword == "letmacro") => {
+            "macro"
+        }
+        Expression::Apply(items) if matches!(items.first(), Some(Expression::Word(keyword)) if keyword == "extern") => {
+            "host import"
+        }
+        _ => "library",
+    }
+}
+
+/// Lists the active standard-library API, including inferred types for regular
+/// functions and an explicit kind for macros and host imports.  This is the
+/// standalone equivalent of `que --lib types *`.
+#[cfg(feature = "compiler")]
+#[wasm_bindgen]
+pub fn ai_library_types() -> *const u8 {
+    let result = with_lsp_core(|core| {
+        let mut entries: HashMap<String, serde_json::Value> = HashMap::new();
+        for (name, signature) in &core.global_signatures {
+            if should_hide_completion_symbol(name) || name.starts_with("std/") {
+                continue;
+            }
+            entries.insert(
+                name.clone(),
+                serde_json::json!({
+                    "name": name,
+                    "type": signature,
+                    "kind": "built-in",
+                }),
+            );
+        }
+        // Definitions shadow primitives with the same name, just as they do
+        // in the normal `que --lib` explorer.
+        for definition in &core.std_defs {
+            let Some(name) = library_definition_name(definition) else {
+                continue;
+            };
+            if should_hide_completion_symbol(name) || name.starts_with("std/") {
+                continue;
+            }
+            let kind = library_definition_kind(definition);
+            let typ = if kind == "macro" {
+                "<macro>".to_string()
+            } else {
+                core.global_signatures
+                    .get(name)
+                    .cloned()
+                    .or_else(|| infer_standalone_std_symbol_signature(core, name))
+                    .unwrap_or_else(|| "<built-in>".to_string())
+            };
+            entries.insert(
+                name.to_string(),
+                serde_json::json!({ "name": name, "type": typ, "kind": kind }),
+            );
+        }
+        let mut values = entries.into_values().collect::<Vec<_>>();
+        values.sort_by(|left, right| {
+            left["name"]
+                .as_str()
+                .unwrap_or_default()
+                .cmp(right["name"].as_str().unwrap_or_default())
+        });
+        serde_json::json!({ "ok": true, "items": values }).to_string()
+    });
+    write_to_output(&result)
+}
+
+/// Returns the canonical source form for a library definition.  This mirrors
+/// `que --lib source NAME`, without requiring the caller to have a local
+/// `que-lib.lisp` file.
+#[cfg(feature = "compiler")]
+#[wasm_bindgen]
+pub fn ai_library_source(name: String) -> *const u8 {
+    let result = with_lsp_core(|core| {
+        if let Some(definition) = core
+            .std_defs
+            .iter()
+            .find(|definition| library_definition_name(definition) == Some(name.as_str()))
+        {
+            return serde_json::json!({
+                "ok": true,
+                "name": name,
+                "kind": library_definition_kind(definition),
+                "source": definition.to_lisp(),
+            })
+            .to_string();
+        }
+        if let Some(typ) = core.global_signatures.get(&name) {
+            return serde_json::json!({
+                "ok": true,
+                "name": name,
+                "kind": "built-in",
+                "type": typ,
+                "source": "<compiler/runtime built-in>",
+            })
+            .to_string();
+        }
+        serde_json::json!({
+            "ok": false,
+            "error": format!("library symbol '{}' not found", name),
+        })
+        .to_string()
+    });
+    write_to_output(&result)
+}
+
+/// Returns an LSP hover through the standalone-host output ABI.
+#[cfg(feature = "compiler")]
+#[wasm_bindgen]
+pub fn ai_hover(text: String, line: u32, character: u32) -> *const u8 {
+    let result = lsp_hover(text, line, character);
+    write_to_output(&result)
+}
+
+/// Produces the same static-analysis report used by `que explain`.
+#[cfg(feature = "compiler")]
+#[wasm_bindgen]
+pub fn ai_explain(program: String) -> *const u8 {
+    let result = STD.with(|std| {
+        let std_ast = std.borrow();
+        let parser::Expression::Apply(items) = &*std_ast else {
+            return serde_json::json!({
+                "ok": false,
+                "error": "embedded Calque standard library is malformed"
+            })
+            .to_string();
+        };
+
+        let wrapped_ast = match parser::merge_std_and_program(&program, items[1..].to_vec()) {
+            Ok(ast) => ast,
+            Err(error) => return serde_json::json!({
+                "ok": false,
+                "error": format_basic_debug_error_report("parse+desugar", &program, &error, None)
+            })
+            .to_string(),
+        };
+        let analysis_source = strip_comment_bodies_preserve_newlines(&program);
+        let user_form_count = parse_user_exprs_for_symbol_collection(&analysis_source)
+            .as_ref()
+            .map(|exprs| exprs.len())
+            .unwrap_or_else(|| top_level_form_ranges(&program).len());
+        let (_typ, typed_ast) = match infer_with_builtins_typed_lsp(
+            &wrapped_ast,
+            crate::types::create_builtin_environment(TypeEnv::new()),
+            user_form_count,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                return serde_json::json!({
+                    "ok": false,
+                    "error": format_basic_debug_error_report(
+                        "type-inference",
+                        &program,
+                        &error.message,
+                        error.scope.as_ref(),
+                    )
+                })
+                .to_string()
+            }
+        };
+        let wat =
+            match wat::compile_program_to_split_wat_typed(&typed_ast) {
+                Ok(wat) => wat,
+                Err(error) => return serde_json::json!({
+                    "ok": false,
+                    "error": format_basic_debug_error_report("wat-lowering", &program, &error, None)
+                })
+                .to_string(),
+            };
+        let report = crate::explain::explain_program_with_effects_and_source(
+            &typed_ast,
+            &wat.user_wat,
+            user_form_count,
+            &Default::default(),
+            Some(&program),
+        );
+        serde_json::json!({ "ok": true, "report": report }).to_string()
+    });
+    write_to_output(&result)
+}
+
+/// Compiles a program with the external WASI host ABI enabled.
+///
+/// This is intentionally separate from `wat`: browser hosts remain pure by
+/// default, while Node hosts can choose to provide a directory-scoped WASI
+/// implementation for `read!`, `write!`, stdin, terminal output, clock, and
+/// random operations.
+#[cfg(feature = "compiler")]
+#[wasm_bindgen]
+pub fn ai_wasi_wat(program: String, allow: String) -> *const u8 {
+    let _host = wat::scoped_wasi_override("QUE_WASI_HOST", "1");
+    let _allow = wat::scoped_wasi_override("QUE_ALLOW", &allow);
+    wat(program)
+}

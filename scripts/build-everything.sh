@@ -18,16 +18,16 @@ copy_release_artifacts() {
   cp "${source_dir}/que-lib.lisp" "releases/que-lib-${target_suffix}.lisp"
 }
 
-echo "[1/7] Baking language library"
+echo "[1/9] Baking language library"
 ./scripts/bake.sh
 
-echo "[2/7] Building native artifacts"
+echo "[2/9] Building native artifacts"
 ./scripts/build-all.sh
 
-echo "[3/7] Building Linux artifacts"
+echo "[3/9] Building Linux artifacts"
 ./scripts/build-all-linux.sh "${LINUX_TARGET}"
 
-echo "[4/7] Building Windows artifacts"
+echo "[4/9] Building Windows artifacts"
 if [[ -n "${WINDOWS_TARGET}" ]]; then
   ./scripts/build-all-windows.sh "${WINDOWS_TARGET}"
 else
@@ -43,10 +43,13 @@ if [[ -z "${WINDOWS_TARGET}" ]]; then
   fi
 fi
 
-echo "[5/7] Building wasm artifacts"
+echo "[5/9] Building wasm artifacts"
 ./scripts/build-wasm-c.sh
 
-echo "[6/8] Collecting release artifacts"
+echo "[6/9] Building AI execution bundles"
+./scripts/build-ai-native-linux.sh
+
+echo "[7/9] Collecting release artifacts"
 rm -rf releases
 mkdir -p releases
 
@@ -54,11 +57,13 @@ copy_release_artifacts "./target/release" "${HOST_TARGET}" ""
 copy_release_artifacts "./target/${LINUX_TARGET}/release" "${LINUX_TARGET}" ""
 copy_release_artifacts "./target/${WINDOWS_TARGET}/release" "${WINDOWS_TARGET}" ".exe"
 cp -R "miscs/neovim" "releases/que-nvim"
+cp "dist/calque-ai-runner.zip" "releases/"
+cp "dist/calque-ai-native-linux-x86_64.zip" "releases/"
 
-echo "[7/8] Building VS Code extension"
+echo "[8/9] Building VS Code extension"
 ./scripts/build-extension.sh
 
-echo "[8/8] Neovim plugin staged"
+echo "[9/9] Neovim plugin staged"
 
 echo "All builds completed successfully."
 echo "Release artifacts copied to ./releases"

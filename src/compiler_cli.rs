@@ -9,7 +9,7 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WasmRuntime {
@@ -671,14 +671,31 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
     let grants_filesystem = permissions
         .split(',')
         .any(|permission| matches!(permission.trim(), "all" | "*" | "read" | "write" | "delete"));
-    let output = runtime_adapter
-        .command(runtime_executable.clone(), &wasm, &args, grants_filesystem)
-        .output()
+    // Do not use `Command::output()` here. It replaces stdout with a pipe and
+    // accumulates it until the child exits, which makes long-running programs
+    // (terminal animations, servers, REPLs) appear completely silent. stdout
+    // stays attached to the terminal; stderr is retained for the structured
+    // Calque error messages produced after a terminating runtime failure.
+    let mut runtime_command = runtime_adapter.command(
+        runtime_executable.clone(),
+        &wasm,
+        &args,
+        grants_filesystem,
+    );
+    runtime_command
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::piped());
+    let child = runtime_command
+        .spawn()
         .map_err(|error| {
             format!(
                 "failed to start WebAssembly runtime '{runtime_executable}': {error}. Install it or choose another with --runtime"
             )
         })?;
+    let output = child.wait_with_output().map_err(|error| {
+        format!("failed while waiting for WebAssembly runtime '{runtime_executable}': {error}")
+    })?;
     let _ = fs::remove_file(&wasm);
     write_runtime_output(&output)?;
     if output.status.success() {
@@ -719,18 +736,6 @@ fn emit_debug_analysis_warnings(path: &str, source: &str, typed: &TypedExpressio
             eprintln!("Warning: {path}: {message}");
         }
     }
-}
-
-fn write_runtime_output(output: &Output) -> Result<(), String> {
-    std::io::stdout()
-        .write_all(&output.stdout)
-        .map_err(|error| format!("failed to write program output: {error}"))?;
-    if output.status.success() {
-        std::io::stderr()
-            .write_all(&output.stderr)
-            .map_err(|error| format!("failed to write program diagnostics: {error}"))?;
-    }
-    Ok(())
 }
 
 fn runtime_failure_message(
@@ -782,6 +787,17 @@ fn runtime_failure_reason(stderr: &str, debug: bool) -> String {
     } else {
         "the WebAssembly program trapped; rerun with --debug for Calque safety checks".to_string()
     }
+}
+
+fn write_runtime_output(output: &Output) -> Result<(), String> {
+    // stdout has already streamed directly to the terminal. On success, retain
+    // the established behavior of forwarding incidental runtime diagnostics.
+    if output.status.success() {
+        std::io::stderr()
+            .write_all(&output.stderr)
+            .map_err(|error| format!("failed to write program diagnostics: {error}"))?;
+    }
+    Ok(())
 }
 
 fn run_explain(raw: &[String]) -> Result<(), String> {
