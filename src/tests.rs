@@ -6375,6 +6375,36 @@ out"#,
     }
 
     #[test]
+    fn test_wasm_lsp_hover_reports_nested_current_after_unless() {
+        let program = r#"; use-strict-warnings!
+(let search? (lambda (target xs)
+  (letrec bs? (lambda (left right)
+    (if (or (< left 0) (> left right)) false
+      (block
+        (let index (+ left (/ (- right left) 2)))
+        (unless (in-bounds? index xs) false
+          (block
+            (let current (get index xs))
+            (cond (= target current) true
+                  (= index infinity) false
+                  (> target current) (bs? (+ index 1) right)
+                  (bs? left (- index 1)))))))))
+  (bs? 0 (- (length xs) 1))))
+
+(search? 42 (range 1 100))"#;
+        let hover: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_hover(program.to_string(), 8, 18))
+                .expect("hover response should be valid JSON");
+        let diagnostics: serde_json::Value =
+            serde_json::from_str(&crate::wasm_api::lsp_diagnostics(program.to_string()))
+                .expect("diagnostics should be valid JSON");
+        assert_eq!(
+            hover["contents"], "current : Int",
+            "hover: {hover}; diagnostics: {diagnostics}"
+        );
+    }
+
+    #[test]
     fn test_wasm_lsp_hover_enum_vector_let_binding_uses_rhs_type() {
         let program = r#"(enum Direction Forward Down Up)
 (let commands

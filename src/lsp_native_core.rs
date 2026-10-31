@@ -776,16 +776,21 @@ pub fn collect_symbol_type_occurrences(
 }
 
 fn block_source_name(name: &str) -> &str {
-    let Some(rest) = name.strip_prefix("__block_") else {
-        return name;
-    };
-    let Some((id, source_name)) = rest.split_once('_') else {
-        return name;
-    };
-    if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) || source_name.is_empty() {
-        name
-    } else {
-        source_name
+    let mut source_name = name;
+    loop {
+        let Some(rest) = source_name.strip_prefix("__block_") else {
+            return source_name;
+        };
+        let Some((id, next_source_name)) = rest.split_once('_') else {
+            return source_name;
+        };
+        if id.is_empty()
+            || !id.bytes().all(|byte| byte.is_ascii_digit())
+            || next_source_name.is_empty()
+        {
+            return source_name;
+        }
+        source_name = next_source_name;
     }
 }
 
