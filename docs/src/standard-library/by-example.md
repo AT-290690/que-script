@@ -117,9 +117,15 @@ excluded; `range/dec` creates decimal values.
 
 (replicate 3 "go")     ; ["go" "go" "go"]
 (fill 4 (lambda (i) (* i i)))
+; [0 1 4 9]
+(Vector/new (lambda (i) i) 5)
+; [0 1 2 3 4]
 (zeroes 4)              ; [0 0 0 0]
 (ones 4)                ; [1 1 1 1]
 ```
+
+`fill` and `Vector/new` call their callback once per output index, from `0`
+through `n - 1`, and place each result at that same index.
 
 The common shape operations return fresh vectors:
 

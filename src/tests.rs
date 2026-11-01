@@ -2099,6 +2099,21 @@ xs
         );
     }
 
+    #[test]
+    fn test_library_fill_and_vector_new_visit_indices_from_zero_in_order() {
+        let source = r#"
+{
+  (fill 5 (lambda i i))
+  (Vector/new (lambda i i) 5)
+}
+"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ [0 1 2 3 4] [0 1 2 3 4] }"
+        );
+    }
+
     /// Small, source-file-backed programs which must preserve their observable
     /// result across the optimizer boundary. Keep regressions here when the
     /// shape is useful beyond one optimizer pass: this is our first line of

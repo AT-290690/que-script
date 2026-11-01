@@ -571,7 +571,7 @@
         (mut j 0)
         (while (< j bits-len) (do
           (if (= (get j bits) 1)
-              (Vector/append/raw! (get j xs) subset))
+              (push! (get j xs) subset))
           (alter! j (+ j 1))))
         (Vector/push! subset out)
         (alter! i (+ i 1))))
@@ -595,12 +595,15 @@
 
 (let compact! (lambda xs (capacity! (length xs) xs)))
 
+; Build `n` values in their vector-index order. The callback sees
+; 0, 1, ..., n - 1, so `(fill n (lambda i i))` has the same order as
+; `(range 0 (- n 1))` for positive `n`.
 (let fill (lambda n fn (do
   (let out [])
-  (mut i n)
-  (while (> i 0) (do
-    (Vector/append/raw! (fn i) out)
-    (alter! i (- i 1))))
+  (mut i 0)
+  (while (< i n) (do
+    (push! (fn i) out)
+    (alter! i (+ i 1))))
   out)))
 
 (let transpose (lambda matrix (if (empty? matrix) matrix (do
