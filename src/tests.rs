@@ -1012,6 +1012,25 @@ xs)"#,
     }
 
     #[test]
+    fn test_runtime_decimal_compound_assignment_macros() {
+        let source = r#"(do
+            (mut value 1.0)
+            (+=. value 0.5)
+            (-=. value 0.25)
+            (*=. value 4.0)
+            (/=. value 2.0)
+            value)"#;
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, false).trim(),
+            "2.5"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true).trim(),
+            "2.5"
+        );
+    }
+
+    #[test]
     fn test_runtime_sequential_loops_can_reuse_index_name() {
         let source = r#"(do
             (mut total 0)
@@ -7836,6 +7855,32 @@ fn"#;
             !wat.contains("Unsupported free word"),
             "top-level let referencing mut should stay in main, got:\n{}",
             wat
+        );
+    }
+
+    #[test]
+    fn test_runtime_main_lambda_captured_by_nested_callback_is_initialized() {
+        // Mutating `zoom` moves the helpers that capture it into main. The
+        // nested Vector/new callback must receive the actual `trace` closure,
+        // rather than an elided, uninitialized main local.
+        let source = r#"(do
+            (&mut zoom 0.1)
+            (let width 2)
+            (let trace (lambda (x y) (*. (Int->Dec x) (&get zoom))))
+            (let screen
+              (Vector/new
+                (lambda (y)
+                  (Vector/new (lambda (x) (trace x y)) width))
+                width))
+            (&alter! zoom (+. (&get zoom) 0.1))
+            "ok")"#;
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, false).trim(),
+            "ok"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true).trim(),
+            "ok"
         );
     }
 

@@ -27,6 +27,7 @@ The bundled library implements many familiar forms as macros, including:
 - `|>`, `<|`, `comp`, `apply`
 - `loop`, `loop/for`, `loop/in`, `loop/in/i`, range-loop helpers, `times`
 - `let*`, `+=`, `-=`, `*=`, `/=`, `++`, `--`
+- Decimal compound assignment: `+=.`, `-=.`, `*=.`, `/=.`
 - `&mut`, `&get`, `&alter!`, `variable`
 - `match/string`
 
@@ -34,6 +35,18 @@ Use `que <file> --emit source` to inspect expanded source and understand what
 a macro call becomes. Formatter, LSP, and diagnostics preserve source
 locations where possible, but macro-generated code can still make a complex
 error easier to understand after looking at that expansion.
+
+The decimal forms mirror the integer ones while preserving fixed-point `Dec`
+arithmetic. They are intentionally compound assignments rather than a decimal
+`++.` shorthand:
+
+```que
+(mut opacity 0.25)
+(+=. opacity 0.10)
+(*=. opacity 2.0)
+opacity
+; 0.7
+```
 
 ## Macro discipline
 

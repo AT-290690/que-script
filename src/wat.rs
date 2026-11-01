@@ -8880,7 +8880,13 @@ fn compile_do(
                         }
                     });
                     let can_elide_lambda_value =
-                        devirtualize_mode_from_env()? != DevirtualizeMode::Off &&
+                        // Top-level bindings which depend on a top-level mutable are
+                        // lowered into `main`. A nested closure can then capture that
+                        // binding as a value, so its local must be initialized; the
+                        // direct-call shortcut only has a complete use picture inside
+                        // a compiled function body.
+                        ctx.current_function.is_some()
+                            && devirtualize_mode_from_env()? != DevirtualizeMode::Off &&
                         self_capture_idx.is_none() &&
                         !items_bind_name(name, &items[1..i]) &&
                         val_node
@@ -9381,7 +9387,11 @@ fn compile_tail_do(
                         }
                     });
                     let can_elide_lambda_value =
-                        devirtualize_mode_from_env()? != DevirtualizeMode::Off &&
+                        // See the equivalent `do` lowering above. Main-level lambda
+                        // values can be captured by nested closures after their
+                        // dependency chain has been moved into `main`.
+                        ctx.current_function.is_some()
+                            && devirtualize_mode_from_env()? != DevirtualizeMode::Off &&
                         self_capture_idx.is_none() &&
                         !items_bind_name(name, &items[1..i]) &&
                         val_node

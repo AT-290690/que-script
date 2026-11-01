@@ -139,6 +139,22 @@
   (lambda x n
     (qq (alter! (uq x) (/ (uq x) (uq n))))))
 
+(letmacro +=.
+  (lambda x n
+    (qq (alter! (uq x) (+. (uq x) (uq n))))))
+
+(letmacro -=.
+  (lambda x n
+    (qq (alter! (uq x) (-. (uq x) (uq n))))))
+
+(letmacro *=.
+  (lambda x n
+    (qq (alter! (uq x) (*. (uq x) (uq n))))))
+
+(letmacro /=.
+  (lambda x n
+    (qq (alter! (uq x) (/. (uq x) (uq n))))))
+
 (letmacro ++
   (lambda x
     (qq (alter! (uq x) (+ (uq x) 1)))))
