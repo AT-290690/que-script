@@ -353,6 +353,17 @@ que nvim
 que nvim --code "$(cat program.que)"
 ```
 
+Open and edit a real file with the same commands and keymaps:
+
+```bash
+que nvim --file program.que
+que nvim --file program.que --allow read
+```
+
+`--allow` flags are saved for `<Space>r` and `<Space>d`; they are not Neovim
+flags. The `--code` form is deliberately disposable, while `--file` edits the
+named file in place.
+
 The Neovim plugin provides LSP integration, formatting, hover and signature
 help, completion, and shortcuts for running, debugging, explaining, and viewing
 generated output. `<Space>g` (or `:QueLib`) opens a fuzzy browser for library

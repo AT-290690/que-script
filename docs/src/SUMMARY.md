@@ -47,6 +47,7 @@
 - [Recipes](examples/recipes.md)
 - [Grid paths: mutable dynamic programming](examples/grid-paths.md)
 - [Enum-keyed table round trip](examples/enum-table-serialization.md)
+- [Regular expressions](examples/regex.md)
 
 # Reference
 

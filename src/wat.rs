@@ -12674,6 +12674,38 @@ fn collect_loop_vector_get_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut Has
     }
 }
 
+// A loop-local `let`/`mut` is assigned on every iteration.  Local slots are
+// allocated for the whole Wasm function, so seeing its slot in `ctx.locals`
+// does *not* mean it has a value before the loop prelude runs.  In particular,
+// caching the data pointer for `(get 0 token)` before the loop would read the
+// zero-initialized `token` slot instead of the vector assigned in the body.
+//
+// Keep data-pointer hoisting to values that are already available at loop
+// entry.  This is deliberately conservative: losing a pointer cache is cheap;
+// reading an uninitialized managed slot is a miscompile.
+fn collect_loop_local_binding_slots(
+    expr: &Expression,
+    ctx: &Ctx<'_>,
+    out: &mut HashSet<usize>,
+) {
+    let Expression::Apply(items) = expr else {
+        return;
+    };
+    if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda") {
+        return;
+    }
+    if let [Expression::Word(op), Expression::Word(name), ..] = &items[..] {
+        if matches!(op.as_str(), "let" | "letrec" | "mut") {
+            if let Some(slot) = ctx.locals.get(name) {
+                out.insert(*slot);
+            }
+        }
+    }
+    for item in items {
+        collect_loop_local_binding_slots(item, ctx, out);
+    }
+}
+
 fn expr_mutates_any_local_vector(expr: &Expression, ctx: &Ctx<'_>) -> bool {
     match expr {
         Expression::Apply(items) => {
@@ -12708,6 +12740,9 @@ fn loop_hoisted_data_pointer_plan(
 
     let mut slots = HashSet::new();
     collect_loop_vector_get_slots(&body.expr, ctx, &mut slots);
+    let mut loop_local_slots = HashSet::new();
+    collect_loop_local_binding_slots(&body.expr, ctx, &mut loop_local_slots);
+    slots.retain(|slot| !loop_local_slots.contains(slot));
     slots.retain(|slot| !ctx.hoisted_scalar_vec_data_slots.contains_key(slot));
     let mutating_local_vector = expr_mutates_any_local_vector(&body.expr, ctx);
     slots.retain(|slot| {

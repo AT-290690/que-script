@@ -322,6 +322,35 @@ Other useful text functions are `String/find`, `String/find/last`,
 `String/dquote`, and `String/prepend-zeroes`. `match?` compares two character
 vectors exactly.
 
+### Regular expressions
+
+`String/regex` compiles a reusable regular expression. A compiled expression
+can be checked with `String/regex/valid?`, then used for either a whole-text
+match or a substring search. Both matching functions take the text last.
+
+```que
+(let identifier (String/regex "^[a-zA-Z_][a-zA-Z0-9_]*$"))
+
+(String/regex/valid? identifier)                 ; true
+(String/regex/matches? identifier "calque_2")    ; true
+(String/regex/matches? identifier "2calque")     ; false
+(String/regex/contains? (String/regex "cat") "concatenate")
+; true
+
+; One-off convenience forms compile the pattern for this call.
+(String/matches-regex? "[0-9]+" "2048")          ; true
+(String/contains-regex? "\\d+" "item-42")       ; true
+```
+
+The engine is a predictable Thompson NFA, not a PCRE implementation. It
+supports grouping, alternation (`|`), `*`, `+`, `?`, `.`, `^`, `$`, character
+classes (including negated ASCII ranges), and `\\d`, `\\D`, `\\w`, `\\W`, `\\s`,
+`\\S`, `\\n`, `\\r`, `\\t`, `\\f`, and `\\v`. Literal characters may be Unicode
+code points, but character classes and shorthand classes are ASCII-oriented.
+Counted repetitions (`{m,n}`), word boundaries, backreferences, look-around,
+and hexadecimal escapes are deliberately unsupported. An invalid pattern makes
+`String/regex/valid?` false; matching predicates return `false` for it.
+
 ## Numeric helpers
 
 Normal `Int` arithmetic is signed `i32`; decimals use `Dec` and dotted

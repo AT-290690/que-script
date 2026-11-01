@@ -174,10 +174,23 @@ end"#
 
 fn run_nvim(mut args: Vec<String>) -> Result<(), String> {
     if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
-        println!("Usage: que nvim [--code <source>] [program arguments and flags]\n\n<leader>r runs optimized; d debugs; w emits WAT; a types; e explains; z emits source; g browses library types.");
+        println!("Usage: que nvim [--file <program.que> | --code <source>] [program arguments and flags]\n\n--file opens the real file in Neovim. --code opens a disposable scratch buffer.\n\n<leader>r runs optimized; d debugs; w emits WAT; a types; e explains; z emits source; g browses library types.");
         return Ok(());
     }
+    let file = if let Some(index) = args.iter().position(|arg| arg == "--file") {
+        if index + 1 >= args.len() {
+            return Err("que nvim --file requires a Calque file path".into());
+        }
+        let file = args.remove(index + 1);
+        args.remove(index);
+        Some(file)
+    } else {
+        None
+    };
     let initial = if let Some(index) = args.iter().position(|arg| arg == "--code") {
+        if file.is_some() {
+            return Err("que nvim accepts either --file or --code, not both".into());
+        }
         if index + 1 >= args.len() {
             return Err("que nvim --code requires Calque source".into());
         }
@@ -187,6 +200,30 @@ fn run_nvim(mut args: Vec<String>) -> Result<(), String> {
     } else {
         String::new()
     };
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    if let Some(file) = file {
+        let mut editor = Command::new("nvim");
+        editor
+            .env("QUE_NVIM_EXE", &executable)
+            .env("QUE_NVIM_ARG_COUNT", args.len().to_string());
+        for (index, arg) in args.iter().enumerate() {
+            editor.env(format!("QUE_NVIM_ARG_{index}"), arg);
+        }
+        return match editor
+            .arg("-c")
+            .arg("setlocal filetype=que")
+            .arg("-c")
+            .arg(nvim_lua())
+            .arg(file)
+            .status()
+        {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                Err("nvim was not found in PATH".into())
+            }
+            Err(error) => Err(format!("failed to launch nvim: {error}")),
+            Ok(_) => Ok(()),
+        };
+    }
     let cwd = env::current_dir().map_err(|error| error.to_string())?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -195,7 +232,6 @@ fn run_nvim(mut args: Vec<String>) -> Result<(), String> {
     let source = cwd.join(format!("que-script-{nonce}.que"));
     let marker = source.with_extension("run");
     fs::write(&source, initial).map_err(|error| error.to_string())?;
-    let executable = env::current_exe().map_err(|error| error.to_string())?;
     let mut editor = Command::new("nvim");
     editor
         .env("QUE_NVIM_EXE", &executable)

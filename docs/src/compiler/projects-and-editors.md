@@ -123,5 +123,10 @@ The Neovim integration provides `:QueFormat` / `<Space>f` and `:QueLib` /
 `<Space>g`. In `que nvim`, scratch commands include optimized run, debug run,
 WAT, inferred types, `explain`, expanded source, and library browsing.
 
+Use `que nvim --file program.que` to open and edit an existing Calque file.
+The optional permission flags, such as `--allow read`, are forwarded to its
+run and debug mappings. `que nvim` and `que nvim --code "..."` instead open
+disposable scratch buffers.
+
 See the integration READMEs for installation details and configuration
 examples.

@@ -2038,6 +2038,53 @@ xs
     }
 
     #[test]
+    fn test_library_regex_engine_matches_in_debug_and_optimized_execution() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let source = include_str!("../tests/library/regex-engine.que");
+
+        let debug = {
+            let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
+            run_program_output_with_std_and_opts_unlocked(source, false)
+        };
+        let optimized = {
+            let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+            run_program_output_with_std_and_opts_unlocked(source, true)
+        };
+
+        assert_eq!(debug, "[[177 177 0 0 1 1]]");
+        assert_eq!(optimized, debug);
+    }
+
+    #[test]
+    fn test_library_regex_public_predicates_reject_malformed_program_data() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let source = r#"
+(let malformed [])
+{
+  (String/regex/valid? malformed)
+  (String/regex/matches? malformed "text")
+  (String/regex/contains? malformed "text")
+}
+"#;
+
+        let debug = {
+            let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "1");
+            run_program_output_with_std_and_opts_unlocked(source, false)
+        };
+        let optimized = {
+            let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+            run_program_output_with_std_and_opts_unlocked(source, true)
+        };
+
+        assert_eq!(debug, "{ false { false false } }");
+        assert_eq!(optimized, debug);
+    }
+
+    #[test]
     fn test_data_last_core_vector_operations_match_optimized_execution() {
         let source = r#"(do
             (let xs [])
@@ -10185,6 +10232,32 @@ n"#;
             main_wat
         );
         assert_eq!(run_program_output_unlocked(source), "6");
+    }
+
+    #[test]
+    fn test_runtime_loop_local_managed_vector_get_does_not_use_preloop_data_pointer() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _bounds = ScopedEnvVar::set("QUE_BOUNDS_CHECK", "0");
+        let source = r#"
+(let f (lambda _ (do
+  (let post [])
+  (push! [1 97] post)
+  (mut t 0)
+  (mut result -1)
+  (while (< t (length post))
+    (let token (get t post))
+    (alter! result (get 0 token))
+    (alter! t (+ t 1)))
+  result)))
+(f 0)
+"#;
+
+        let without_optimizer = run_program_output_with_std_and_opts_unlocked(source, false);
+        let with_optimizer = run_program_output_with_std_and_opts_unlocked(source, true);
+        assert_eq!(without_optimizer, "1");
+        assert_eq!(with_optimizer, without_optimizer);
     }
 
     #[test]

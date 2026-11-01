@@ -1,0 +1,128 @@
+; Test cases: [pattern, text, expected result, full(1)/search(0)].
+; Expected -1 means syntax rejection.
+(let patterns [
+  "" "" "a" "a" "a" "a" "abc" "abc"
+  "abc" "a|bc" "a|bc" "a|bc" "(a|b)c" "(a|b)c" "(a|b)c" "ab*c"
+  "ab*c" "ab*c" "ab+c" "ab+c" "ab+c" "ab?c" "ab?c" "ab?c"
+  "a.*z" "a.*z" "a.+z" "a.+z" "^[a-z]+$" "^[a-z]+$" "^[a-z]+$" "[a-zA-Z_][a-zA-Z0-9_]*"
+  "[a-zA-Z_][a-zA-Z0-9_]*" "[a-zA-Z_][a-zA-Z0-9_]*" "[^0-9]+" "[^0-9]+" "[0-9]+" "[0-9]+" "\\d+" "\\d+"
+  "\\D+" "\\D+" "\\w+" "\\w+" "\\W+" "\\W+" "\\s+" "\\s+"
+  "\\S+" "\\S+" "a\\.b" "a\\.b" "a\\+b" "a\\+b" "\\(x\\)" "^a"
+  "^a" "a$" "a$" "^$" "^$" "(ab|a)*b" "(ab|a)*b" "(ab|a)*b"
+  "(a|aa)*b" "(a|aa)*b" "(a|aa)*b" "a(b|c)d" "a(b|c)d" "(x|y)+z?" "[A-F0-9]+" "[A-F0-9]+"
+  "[^a-c]" "a" "abc" "^a$" "^a$" "(" ")" "[z-a]"
+  "[abc" "\\" "*a" "a|" "|a" "a**" "a(b" "a)"
+  "[a-" "a{3}" "[]" "(a|)" "[x-y]" "[^c]" ".1([a-zA-Z_])+" "\\n"
+  "((\\d)+)*$" "(\\S)" "^[a-c]$" "[a-c][^c]" "(\\.)+$" "^1" "([0-9])" "\\n"
+  "1" "\\n" "\\d" "[^c]" "." "c" "(\\n)+$" "(([0-9]))"
+  "\\D" "[\\d]+" "[\\d]+" "[\\w]+" "[\\w]+" "[\\s]+" "[\\s]+" "[^\\d]+"
+  "[^\\d]+" "[a\\d]+" "[a\\d]+" "[x\\w]+" "[x\\w]+" "[ \\s]+" "[ \\s]+" "[\\-]+"
+  "[\\-]+" "[\\]]+" "[\\[]+" "[\\^]+" "[a-c\\d]+" "[a-c\\d]+" "[\\w\\d_]+" "[^\\w]+"
+  "[-a]+" "[a-]+" "[]a]+" "[^]a]+" "\\D+" "\\S+" "^[a-z]+$" "a$"
+  "^a$" "\\." "[a-z]+$" "[\\d]" "[\\d]" "\\b" "\\q" "\\x41"
+  "\\Aabc" "[\\D]" "[\\W]" "[\\S]" "[\\q]" "[\\x]" "\\f" "\\v"
+  "[\\f]+" "[\\v]+" "é+" "[é-ê]+" "." "\\d+" "\\w+" "[\\w]+"
+  "a?" "(a?)*" "((a?)+)*" "^$" "^$" "[^\\d]+" "[0-9a-z]+" "abc"
+  "\\s+"
+])
+(let inputs [
+  "" "xyz" "a" "b" "aaaa" "za" "abc" "zabc"
+  "ab" "a" "bc" "abc" "ac" "bc" "abc" "ac"
+  "abbbc" "abc" "ac" "abc" "abbbc" "ac" "abc" "abbc"
+  "az" "a123z" "az" "abz" "abc" "abC" "abcx" "abc_93"
+  "93abc" "_" "abc@" "abc0" "123" "12a" "123" "a12"
+  "abc" "1abc" "var_123" "hello!" "!!!" "word!" " \t" "abc"
+  "hello" "hello world" "a.b" "aXb" "a+b" "aaab" "(x)" "abc"
+  "ba" "ba" "ab" "" "a" "aab" "ababb" "aba"
+  "aaab" "aaaa" "b" "abd" "acd" "xyxz" "AB0" "GH"
+  "D" "za" "zaabc" "a" "za" "" "" ""
+  "" "" "" "" "" "" "" ""
+  "" "" "" "" "" "1\n x" "_" "2.b"
+  "cx\n_" "xcx\t\t.a2\t." "x" "" " .\n1_\n" "b_" "\n" "\t\txc"
+  "\nx_2\n a2c" "" "" "\n" " \n\ta\n\tx  2" "\n\nb2 c_a1c" "_ .1" "._c\ncc\t"
+  ".a." "123" "abc" "a_91Z" "abc!" " \t\n" "a" "abc_"
+  "a9b" "a12" "a-b" "xy_1" "***" " \t" "abc" "--"
+  "a" "]]" "[[" "^^" "b123" "bxyz" "hi12_" "?!!"
+  "--aa" "aa--" "]a]" "bc" "abc" " x " "abc\n" "a\n"
+  "a\n" "." "ab\n" "1" "a" "a" "q" "A"
+  "abc" "5" "@" "q" "q" "x" [(Int->Char 12)] [(Int->Char 11)]
+  [(Int->Char 12) (Int->Char 12)] [(Int->Char 11) (Int->Char 11)] "éé" "éê" "é" "١٢٣" "é" "é"
+  "" "" "aaaa" "" "\n" "abc9" "hello12" "abc\n"
+  "\n\t"
+])
+(let expected [
+  1 0 1 0 0 0 1 0
+  0 1 1 0 1 1 0 1
+  1 1 0 1 1 1 1 0
+  1 1 0 1 1 0 1 1
+  0 1 1 0 1 0 1 0
+  1 0 1 0 1 0 1 0
+  1 0 1 0 1 0 1 1
+  0 1 0 1 0 1 1 0
+  1 0 1 1 1 1 1 0
+  1 1 1 1 0 -1 -1 -1
+  -1 -1 -1 -1 -1 -1 -1 -1
+  -1 -1 -1 -1 0 1 0 0
+  0 0 0 0 0 0 0 0
+  0 0 0 1 0 0 0 0
+  1 1 0 1 0 1 0 1
+  0 1 0 1 0 1 0 1
+  0 1 1 1 1 0 1 1
+  1 1 1 1 1 1 1 1
+  0 1 1 1 0 -1 -1 -1
+  -1 -1 -1 -1 -1 -1 1 1
+  1 1 1 1 1 0 0 0
+  1 1 1 1 1 0 1 1
+  1
+])
+(let modes [
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 0
+  0 0 0 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 0 0 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 0 1 0
+  1 1 0 1 1 0 0 1
+  0 1 1 0 1 1 1 1
+  0 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 0 0 0
+  1 1 0 0 0 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 1 1 1 1
+  1 1 1 1 0 1 1 0
+  1
+])
+
+(mut passed 0)
+(let failures [])
+(loop i (< i (length patterns))
+  (let regex (String/regex (get i patterns)))
+  (let actual
+    (if (= (get i expected) -1)
+      (if (String/regex/valid? regex) 0 -1)
+      (if (= (get i modes) 1)
+        (if (String/regex/matches? regex (get i inputs)) 1 0)
+        (if (String/regex/contains? regex (get i inputs)) 1 0))))
+  (if (= actual (get i expected))
+    (do (when (+/safe? passed 1) (alter! passed (+ passed 1))) 0)
+    (do (push! [i actual (get i expected)] failures) 0)))
+
+; Adversarial backtracking workload: Thompson NFA remains polynomial.
+(let adversarial (String/regex "^(a|aa)*b$"))
+(let long-a (Vector/of 5000 (get 0 "a")))
+(let without-b (if (String/regex/matches? adversarial long-a) 1 0))
+(push! (get 0 "b") long-a)
+(let with-b (if (String/regex/matches? adversarial long-a) 1 0))
+(let subs (String/regex "a+b"))
+(let search-long (if (String/regex/contains? subs long-a) 1 0))
+(let report [[passed (length patterns) (length failures) without-b with-b search-long]])
+(loop j (< j (length failures)) (push! (get j failures) report))
+report

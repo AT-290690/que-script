@@ -98,7 +98,9 @@ prefer the non-raw name unless you are extending the library itself.
   `String/starts?`, `String/ends?`, `String/contains?`, `String/equal?`,
   `String/lt?`, `String/lte?`, `String/gt?`, `String/gte?`, `String/find`,
   `String/find/last`, `String/matches-at?`, `String/damerau-levenshtein`,
-  `String/quote`, `String/dquote`, and `String/prepend-zeroes`.
+  `String/quote`, `String/dquote`, `String/prepend-zeroes`, `String/regex`,
+  `String/regex/valid?`, `String/regex/matches?`, `String/regex/contains?`,
+  `String/matches-regex?`, and `String/contains-regex?`.
 - Conversions: `String->Integer`, `Integer->String`, `String->Dec`,
   `Dec->String`, `String->Bool`, `String->Vector`, `Char->Int`, `Int->Char`,
   `Char->Bool`, `Bool->Char`, `Bool->Int`, `Int->Bool`, `Int->Dec`,
