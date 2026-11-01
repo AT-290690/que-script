@@ -2257,6 +2257,26 @@ xs
     }
 
     #[test]
+    fn test_top_level_effectful_binding_preserves_prior_alias_snapshot_order() {
+        // Top-level value defs are usually cached helpers.  The cache order
+        // must not let the pop run before the earlier get merely because the
+        // helper names have a different hash-map order.
+        let source = r#"(let heap [[0 0]])
+(let popped (get 0 heap))
+(let last (Vector/pop-val! heap))
+[popped last]"#;
+
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, false),
+            "[[0 0] [0 0]]"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "[[0 0] [0 0]]"
+        );
+    }
+
+    #[test]
     #[ignore = "manual benchmark"]
     fn bench_runtime_map_filter_reduce_pipeline() {
         let src = r#"(do

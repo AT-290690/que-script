@@ -997,12 +997,15 @@ fn compile_borrowed_top_level_cached_ref(
     )
 }
 
+/// Collect cached managed values in lexical encounter order. Their first
+/// cache reads can run initializers, so this is part of expression evaluation,
+/// not merely local-slot allocation.
 fn collect_top_level_managed_refs(
     expr: &Expression,
     locals: &HashMap<String, usize>,
     fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
     cached_top_level_names: &HashSet<String>,
-    out: &mut HashSet<String>,
+    out: &mut Vec<String>,
 ) {
     match expr {
         Expression::Word(name) => {
@@ -1015,8 +1018,9 @@ fn collect_top_level_managed_refs(
                         && is_managed_local_type(ret)
                         && !matches!(ret, Type::Function(_, _))
                 })
+                && !out.contains(name)
             {
-                out.insert(name.clone());
+                out.push(name.clone());
             }
         }
         Expression::Apply(items) => {
@@ -1035,10 +1039,8 @@ fn top_level_borrow_plan(
     cached_top_level_names: &HashSet<String>,
     first_slot: usize,
 ) -> (usize, String) {
-    let mut names = HashSet::new();
+    let mut names = Vec::new();
     collect_top_level_managed_refs(expr, locals, fn_sigs, cached_top_level_names, &mut names);
-    let mut names = names.into_iter().collect::<Vec<_>>();
-    names.sort();
     let scratch_slot = first_slot + names.len();
     let mut prelude = Vec::new();
     for (offset, name) in names.iter().enumerate() {
