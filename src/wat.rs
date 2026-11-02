@@ -778,7 +778,7 @@ fn expr_is_definitely_materialized_scalar_vector(
                 Some(Expression::Word(op))
                 if matches!(
                     op.as_str(),
-                    "vector" | "string" | "__vec_new_zeroed_i32" | "__vec_new_uninit_i32" | "integers" | "bools" | "decimals"
+                    "vector" | "string" | "__vec_new_zeroed_i32" | "__vec_new_uninit_i32" | "__vec_new_filled_i32" | "integers" | "bools" | "decimals"
                 )
         ),
         _ => false,
@@ -881,7 +881,7 @@ fn top_level_expr_is_definitely_materialized_scalar_vector(
                 Some(Expression::Word(op))
                     if matches!(
                         op.as_str(),
-                        "vector" | "string" | "__vec_new_zeroed_i32" | "__vec_new_uninit_i32" | "integers" | "bools" | "decimals"
+                        "vector" | "string" | "__vec_new_zeroed_i32" | "__vec_new_uninit_i32" | "__vec_new_filled_i32" | "integers" | "bools" | "decimals"
                     )
             ) {
                 return true;
@@ -1139,6 +1139,7 @@ fn is_special_word(w: &str) -> bool {
             | "strings"
             | "__vec_new_zeroed_i32"
             | "__vec_new_uninit_i32"
+            | "__vec_new_filled_i32"
             | "tuple"
             | "length"
             | "__table-key-hash"
@@ -8380,6 +8381,7 @@ fn is_borrowed_managed_rhs_with_env(
                     | "strings"
                     | "__vec_new_zeroed_i32"
                     | "__vec_new_uninit_i32"
+                    | "__vec_new_filled_i32"
                     | "serialize"
                     | "deserialize"
             ) {
@@ -14447,6 +14449,21 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 ctx,
                             )?;
                             Ok(format!("{len}\ncall $vec_new_uninit_i32"))
+                        }
+                        "__vec_new_filled_i32" => {
+                            let len = compile_expr(
+                                node.children.get(1).ok_or_else(|| {
+                                    "__vec_new_filled_i32 missing len".to_string()
+                                })?,
+                                ctx,
+                            )?;
+                            let value = compile_expr(
+                                node.children.get(2).ok_or_else(|| {
+                                    "__vec_new_filled_i32 missing value".to_string()
+                                })?,
+                                ctx,
+                            )?;
+                            Ok(format!("{len}\n{value}\ncall $vec_new_filled_i32"))
                         }
                         "__vec_store_i32" => {
                             let xs = compile_expr(

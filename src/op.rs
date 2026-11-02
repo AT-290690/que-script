@@ -4828,6 +4828,25 @@ fn lower_scalar_builder_do(node: &TypedExpression) -> Option<TypedExpression> {
         });
     }
 
+    // A counted builder that writes one pure, index-independent scalar is a
+    // filled vector.  This also covers a scalar parameter such as `value`;
+    // only effectful values must keep the source loop because they are
+    // evaluated once per element there.
+    if value_node.effect == EffectFlags::PURE
+        && !expression_mentions_name(&value_node.expr, idx_name)
+    {
+        return Some(TypedExpression {
+            expr: Expression::Apply(vec![
+                Expression::Word("__vec_new_filled_i32".to_string()),
+                len_node.expr.clone(),
+                value_node.expr.clone(),
+            ]),
+            typ: node.typ.clone(),
+            effect: EffectFlags::PURE,
+            children: vec![pure_word("__vec_new_filled_i32"), len_node, value_node],
+        });
+    }
+
     let alloc_node = TypedExpression {
         expr: Expression::Apply(vec![
             Expression::Word("__vec_new_uninit_i32".to_string()),
@@ -5079,18 +5098,32 @@ fn extract_counted_scalar_builder_parts(
     {
         return None;
     }
-    if !matches!(set_items.get(1), Some(Expression::Word(w)) if w == board_name) {
+    // `set!` is public data-last syntax: `(set! index value vector)`.  The
+    // optimizer also still sees a few older internal data-first trees, so
+    // recognize both shapes while lowering them to the same private store.
+    let (index_expr, value_node) = if matches!(
+        set_items.get(3),
+        Some(Expression::Word(w)) if w == board_name
+    ) {
+        (set_items.get(1)?, set_node.children.get(2)?.clone())
+    } else if matches!(
+        set_items.get(1),
+        Some(Expression::Word(w)) if w == board_name
+    ) {
+        (set_items.get(2)?, set_node.children.get(3)?.clone())
+    } else {
         return None;
-    }
-    if !matches!(
-        set_items.get(2),
-        Some(Expression::Apply(len_items))
+    };
+    let appends_by_length = matches!(
+        index_expr,
+        Expression::Apply(len_items)
             if matches!(len_items.first(), Some(Expression::Word(w)) if w == "length")
                 && matches!(len_items.get(1), Some(Expression::Word(w)) if w == board_name)
-    ) {
+    );
+    let replaces_current_index = matches!(index_expr, Expression::Word(w) if w == idx_name);
+    if !appends_by_length && !replaces_current_index {
         return None;
     }
-    let value_node = set_node.children.get(3)?.clone();
     if expression_mentions_name(&value_node.expr, board_name) {
         return None;
     }
@@ -7272,6 +7305,7 @@ fn expr_contains_managed_constructor(expr: &Expression) -> bool {
                         | "tuple"
                         | "__vec_new_zeroed_i32"
                         | "__vec_new_uninit_i32"
+                        | "__vec_new_filled_i32"
                         | "integers"
                         | "bools"
                         | "decimals"

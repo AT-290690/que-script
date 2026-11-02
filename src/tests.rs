@@ -4155,6 +4155,24 @@ out"#,
     }
 
     #[test]
+    fn test_typed_optimization_lowers_invariant_scalar_builder_to_filled_vector() {
+        let typed = infer_typed(
+            r#"((lambda n value
+                  (do
+                    (let xs (vector))
+                    (mut i 0)
+                    (while (< i n)
+                      (do
+                        (set! (length xs) value xs)
+                        (alter! i (+ i 1))))
+                    xs))
+                5 7)"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert_eq!(optimized.expr.to_lisp(), "(__vec_new_filled_i32 5 7)");
+    }
+
+    #[test]
     fn test_typed_optimization_lowers_counted_scalar_builder_to_uninit_store_loop() {
         let typed = infer_typed(
             r#"((lambda n

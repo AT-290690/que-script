@@ -1509,6 +1509,14 @@ fn vector_length_info_at_depth(
                     minimum: length,
                 })
             }
+            [Expression::Word(op), length, _] if op == "__vec_new_filled_i32" => {
+                let length = integer_constant(length, state)?;
+                let length = usize::try_from(length).ok()?;
+                Some(VectorLengthInfo {
+                    exact: Some(length),
+                    minimum: length,
+                })
+            }
             [Expression::Word(op), Expression::Int(1), value] if op == "cdr" => {
                 let inner = vector_length_info_at_depth(value, state, expansion_depth)?;
                 Some(VectorLengthInfo {
