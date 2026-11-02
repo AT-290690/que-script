@@ -219,6 +219,7 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
 // receiver-first representation. A monomorphized body therefore needs this
 // entry point rather than `optimize_typed_ast`, which is the public data-last
 // boundary used for parsed source.
+#[cfg(feature = "compiler")]
 pub(crate) fn optimize_typed_ast_internal(node: &TypedExpression) -> TypedExpression {
     optimize_typed_ast_legacy(node)
 }

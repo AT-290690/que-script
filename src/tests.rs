@@ -9241,6 +9241,67 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_last_use_owned_argument_moves_through_direct_alias_wrapper() {
+        let moved_source = r#"(do
+            (let wrap (lambda xs (do
+              (let alias xs)
+              alias)))
+            (let run (lambda () (do
+              (let source [1 2 3])
+              (let out (wrap source))
+              (length out))))
+            (run))"#;
+        let retained_source = r#"(do
+            (let wrap (lambda xs (do
+              (let alias xs)
+              alias)))
+            (let run (lambda () (do
+              (let source [1 2 3])
+              (let out (wrap source))
+              (+ (length source) (length out)))))
+            (run))"#;
+        let ambiguous_source = r#"(do
+            (let choose (lambda flag left right
+              (if flag left right)))
+            (let run (lambda () (do
+              (let source [1 2 3])
+              (let other [4])
+              (let out (choose true source other))
+              (length out))))
+            (run))"#;
+        let moved_expr = crate::parser::build(moved_source).expect("program should build");
+        let retained_expr =
+            crate::parser::build(retained_source).expect("program should build");
+        let ambiguous_expr =
+            crate::parser::build(ambiguous_source).expect("program should build");
+        let moved_wat = crate::wat::compile_program_to_wat_with_opts(&moved_expr, false)
+            .expect("program should compile");
+        let retained_wat = crate::wat::compile_program_to_wat_with_opts(&retained_expr, false)
+            .expect("program should compile");
+        let ambiguous_wat = crate::wat::compile_program_to_wat_with_opts(&ambiguous_expr, false)
+            .expect("program should compile");
+        wat::parse_str(&moved_wat).expect("moved WAT should validate");
+        wat::parse_str(&retained_wat).expect("retained WAT should validate");
+        wat::parse_str(&ambiguous_wat).expect("ambiguous WAT should validate");
+        let moved_main = named_wat_function(&moved_wat, "v_run");
+        let retained_main = named_wat_function(&retained_wat, "v_run");
+        let ambiguous_main = named_wat_function(&ambiguous_wat, "v_run");
+
+        assert!(
+            !moved_main.contains("call $rc_retain_vec"),
+            "the final owner should move through a direct alias wrapper, got:\n{moved_main}"
+        );
+        assert!(
+            retained_main.contains("call $rc_retain_vec"),
+            "a source that remains live needs an independent owner, got:\n{retained_main}"
+        );
+        assert!(
+            ambiguous_main.contains("call $rc_retain_vec"),
+            "a wrapper that may return a different argument must retain, got:\n{ambiguous_main}"
+        );
+    }
+
+    #[test]
     fn test_wat_last_use_managed_alter_transfers_ownership() {
         let moved_source = r#"(do
             (let step (lambda board { [1 2] 1 }))

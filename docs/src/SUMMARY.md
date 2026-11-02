@@ -4,6 +4,7 @@
 - [Installation](installation.md)
 - [Getting started](getting-started.md)
 - [Language tour](language/tour.md)
+- [Calque, form by form](language/form-by-form.md)
 - [Build a file-report program](examples/file-report.md)
 
 # Language

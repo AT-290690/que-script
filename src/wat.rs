@@ -208,6 +208,10 @@ struct ClosureDef {
     key: String,
     name: String,
     captures: Vec<String>,
+    // An outer-program helper receives these immutable bindings from `main`.
+    // Their scalar-vector allocation is known to be materialized, rather than
+    // a slice/view supplied by an arbitrary caller.
+    materialized_scalar_captures: HashSet<String>,
     user_arity: usize,
     // True when this is one member of a top-level named helper group that is
     // only ever called directly. Such helpers can omit captured helper
@@ -920,6 +924,59 @@ fn collect_definitely_materialized_top_level_scalar_names(
     out
 }
 
+// `main` owns bindings which cannot become normal top-level definitions: a
+// named helper captures and mutates them.  They are nevertheless immutable
+// *bindings* and a literal scalar vector is materialized before that helper is
+// ever constructed.  Record only direct `let` bindings at program scope;
+// nested scopes can shadow the same spelling and must not inherit this fact.
+fn collect_definitely_materialized_main_scalar_names(
+    main_node: &TypedExpression,
+    definitely_materialized_top_level_scalar_names: &HashSet<String>,
+) -> HashSet<String> {
+    let Expression::Apply(items) = &main_node.expr else {
+        return HashSet::new();
+    };
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "do") {
+        return HashSet::new();
+    }
+    let child_offset = usize::from(main_node.children.len() + 1 == items.len());
+    let mut locals = HashMap::new();
+    let mut materialized_slots = HashSet::new();
+    let mut names = HashSet::new();
+    for (item_index, item) in items.iter().enumerate().skip(1) {
+        let Expression::Apply(binding) = item else {
+            continue;
+        };
+        let [Expression::Word(kw), Expression::Word(name), _] = &binding[..] else {
+            continue;
+        };
+        if kw != "let" {
+            continue;
+        }
+        let Some(node) = item_index
+            .checked_sub(child_offset)
+            .and_then(|index| main_node.children.get(index))
+        else {
+            continue;
+        };
+        let Some(rhs) = node.children.get(2) else {
+            continue;
+        };
+        let slot = locals.len();
+        locals.insert(name.clone(), slot);
+        if expr_is_definitely_materialized_scalar_vector(
+            rhs,
+            &materialized_slots,
+            &locals,
+            definitely_materialized_top_level_scalar_names,
+        ) {
+            materialized_slots.insert(slot);
+            names.insert(name.clone());
+        }
+    }
+    names
+}
+
 fn ident(name: &str) -> String {
     fn push_encoded(s: &mut String, c: char) {
         match c {
@@ -1604,6 +1661,56 @@ fn collect_direct_main_lambda_bindings(
         out.insert(name.clone(), rhs.clone());
     }
     out
+}
+
+// Return the syntactic identities of lambdas bound directly in the outer
+// program `do`. Their free names resolve against `main`, rather than a nested
+// lambda scope. We only keep identities which occur once in the typed tree:
+// closure conversion currently interns by syntax, so sharing a key across
+// scopes would lose the provenance needed for this optimization.
+fn collect_unique_main_lambda_keys(
+    main_node: &TypedExpression,
+    all_lambda_nodes: &[TypedExpression],
+) -> HashSet<String> {
+    let Expression::Apply(items) = &main_node.expr else {
+        return HashSet::new();
+    };
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "do") {
+        return HashSet::new();
+    }
+    let child_offset = usize::from(main_node.children.len() + 1 == items.len());
+    let mut keys = HashSet::new();
+    for (item_index, item) in items.iter().enumerate().skip(1) {
+        let Expression::Apply(binding) = item else {
+            continue;
+        };
+        let [Expression::Word(kw), Expression::Word(_), _] = &binding[..] else {
+            continue;
+        };
+        if kw != "let" && kw != "letrec" {
+            continue;
+        }
+        let Some(rhs) = item_index
+            .checked_sub(child_offset)
+            .and_then(|index| main_node.children.get(index))
+            .and_then(|node| node.children.get(2))
+        else {
+            continue;
+        };
+        if !matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(op)) if op == "lambda")) {
+            continue;
+        }
+        let key = rhs.expr.to_lisp();
+        if all_lambda_nodes
+            .iter()
+            .filter(|candidate| candidate.expr.to_lisp() == key)
+            .count()
+            == 1
+        {
+            keys.insert(key);
+        }
+    }
+    keys
 }
 
 fn lifted_main_lambda_capture_names(
@@ -8634,6 +8741,121 @@ fn direct_last_use_managed_move_source(
     Some(reference)
 }
 
+// Return the parameter origins of a wrapper which only returns one of its
+// arguments. This is intentionally a much narrower question than the borrow
+// analysis above: callers may transfer an owned local into the result only
+// when every return path resolves to one *specific* direct argument.
+fn direct_passthrough_param_origins(
+    expr: &Expression,
+    params: &[String],
+    aliases: &HashMap<String, HashSet<usize>>,
+) -> Option<HashSet<usize>> {
+    match expr {
+        Expression::Word(name) => aliases.get(name).cloned().or_else(|| {
+            params
+                .iter()
+                .position(|param| param == name)
+                .map(|index| HashSet::from([index]))
+        }),
+        Expression::Apply(items) if !items.is_empty() => {
+            let Expression::Word(op) = &items[0] else {
+                return None;
+            };
+            match op.as_str() {
+                "as" | "char" => items
+                    .get(1)
+                    .and_then(|inner| direct_passthrough_param_origins(inner, params, aliases)),
+                "do" | "block" => {
+                    let mut scoped_aliases = aliases.clone();
+                    for item in items.iter().skip(1).take(items.len().saturating_sub(2)) {
+                        if let Expression::Apply(binding) = item
+                        {
+                            if let [Expression::Word(kw), Expression::Word(name), rhs] =
+                                binding.as_slice()
+                            {
+                                if kw == "let" {
+                                    if let Some(origins) = direct_passthrough_param_origins(
+                                        rhs,
+                                        params,
+                                        &scoped_aliases,
+                                    ) {
+                                        scoped_aliases.insert(name.clone(), origins);
+                                        continue;
+                                    }
+                                }
+                                scoped_aliases.remove(name);
+                            }
+                        }
+                    }
+                    items.last().and_then(|last| {
+                        direct_passthrough_param_origins(last, params, &scoped_aliases)
+                    })
+                }
+                "if" => {
+                    let mut origins =
+                        direct_passthrough_param_origins(items.get(2)?, params, aliases)?;
+                    origins.extend(direct_passthrough_param_origins(
+                        items.get(3)?,
+                        params,
+                        aliases,
+                    )?);
+                    Some(origins)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn direct_call_returned_param_index(
+    value_node: &TypedExpression,
+    lambda_bindings: &HashMap<String, TypedExpression>,
+) -> Option<usize> {
+    let Expression::Apply(items) = &value_node.expr else {
+        return None;
+    };
+    let Expression::Word(name) = items.first()? else {
+        return None;
+    };
+    let lambda = lambda_bindings.get(name)?;
+    let (params, body) = lambda_params_and_body(lambda)?;
+    let origins = direct_passthrough_param_origins(&body.expr, &params, &HashMap::new())?;
+    if origins.len() != 1 {
+        return None;
+    }
+    let index = *origins.iter().next()?;
+    (index < value_node.children.len().saturating_sub(1)).then_some(index)
+}
+
+fn direct_last_use_managed_call_return_move_source(
+    value_node: Option<&TypedExpression>,
+    destination_name: &str,
+    managed_do_locals: &[(String, ManagedRefSlot)],
+    later_exprs: &[Expression],
+    lambda_bindings: &HashMap<String, TypedExpression>,
+) -> Option<ManagedRefSlot> {
+    let value_node = value_node?;
+    let argument_index = direct_call_returned_param_index(value_node, lambda_bindings)?;
+    let source_node = apply_child_at(value_node, argument_index + 1)?;
+    let Expression::Word(source_name) = &source_node.expr else {
+        return None;
+    };
+    if source_name == destination_name {
+        return None;
+    }
+    let reference = managed_do_locals
+        .iter()
+        .find_map(|(name, reference)| (name == source_name).then_some(*reference))?;
+    if later_exprs.iter().any(|expr| {
+        expr_uses_name_as_value(source_name, expr, false)
+            || expr_uses_name_via_local_lambda(source_name, expr, lambda_bindings)
+    }) {
+        return None;
+    }
+    Some(reference)
+}
+
 fn compile_last_use_managed_alter_move(
     node: &TypedExpression,
     later_exprs: &[Expression],
@@ -9055,6 +9277,15 @@ fn compile_do(
                                     &items[i + 1..],
                                     &scoped_lambda_bindings,
                                 )
+                                .or_else(|| {
+                                    direct_last_use_managed_call_return_move_source(
+                                        val_node,
+                                        name,
+                                        &managed_do_locals,
+                                        &items[i + 1..],
+                                        &scoped_lambda_bindings,
+                                    )
+                                })
                             })
                             .flatten();
                         let value = if managed_local
@@ -9141,6 +9372,15 @@ fn compile_do(
                             &items[i + 1..],
                             &scoped_lambda_bindings,
                         )
+                        .or_else(|| {
+                            direct_last_use_managed_call_return_move_source(
+                                val_node,
+                                name,
+                                &managed_do_locals,
+                                &items[i + 1..],
+                                &scoped_lambda_bindings,
+                            )
+                        })
                         .map(|reference| reference.slot),
                     );
                     continue;
@@ -9559,6 +9799,15 @@ fn compile_tail_do(
                                     &items[i + 1..],
                                     &scoped_lambda_bindings,
                                 )
+                                .or_else(|| {
+                                    direct_last_use_managed_call_return_move_source(
+                                        val_node,
+                                        name,
+                                        &managed_do_locals,
+                                        &items[i + 1..],
+                                        &scoped_lambda_bindings,
+                                    )
+                                })
                             })
                             .flatten();
                         let value = if managed_local
@@ -9643,6 +9892,15 @@ fn compile_tail_do(
                             &items[i + 1..],
                             &scoped_lambda_bindings,
                         )
+                        .or_else(|| {
+                            direct_last_use_managed_call_return_move_source(
+                                val_node,
+                                name,
+                                &managed_do_locals,
+                                &items[i + 1..],
+                                &scoped_lambda_bindings,
+                            )
+                        })
                         .map(|reference| reference.slot),
                     );
                     continue;
@@ -15589,6 +15847,7 @@ fn compile_closure_func(
     name: &str,
     lambda_node: &TypedExpression,
     captures: &[String],
+    materialized_scalar_captures: &HashSet<String>,
     fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
     fn_ids: &HashMap<String, i32>,
     lambda_ids: &HashMap<String, i32>,
@@ -15666,6 +15925,25 @@ fn compile_closure_func(
     for (n, t) in &local_defs {
         local_types.insert(n.clone(), t.clone());
     }
+    // These captures were proven materialized at the direct program scope
+    // where the closure is constructed. A closure retains that exact vector
+    // pointer, so it cannot become a slice/view by crossing the boundary.
+    let materialized_scalar_local_slots = captures
+        .iter()
+        .filter_map(|capture| {
+            materialized_scalar_captures
+                .contains(capture)
+                .then(|| {
+                    let slot = *locals.get(capture)?;
+                    // Captures use the untyped i32 Wasm ABI, so their local
+                    // type here is `Int` even when their source binding was a
+                    // scalar vector. The provenance set above already proved
+                    // that source type and materialized allocation.
+                    Some(slot)
+                })
+                .flatten()
+        })
+        .collect::<HashSet<_>>();
     let empty_extern_names = HashSet::new();
     let empty_proven_scalar_index_loads = HashSet::new();
     let empty_nonnegative_int_locals = HashSet::new();
@@ -15679,7 +15957,7 @@ fn compile_closure_func(
         current_function: Some(name),
         locals,
         local_types,
-        materialized_scalar_local_slots: HashSet::new(),
+        materialized_scalar_local_slots,
         hoisted_scalar_vec_data_slots: HashMap::new(),
         proven_scalar_vec_min_lengths: HashMap::new(),
         definitely_materialized_top_level_scalar_names,
@@ -16298,6 +16576,11 @@ fn compile_program_to_wat_build_typed_with_opts(
     }
     let definitely_materialized_top_level_scalar_names =
         collect_definitely_materialized_top_level_scalar_names(&top_defs);
+    let definitely_materialized_main_scalar_names =
+        collect_definitely_materialized_main_scalar_names(
+            &main_node,
+            &definitely_materialized_top_level_scalar_names,
+        );
 
     let mut fn_sigs: HashMap<String, (Vec<Type>, Type)> = HashMap::new();
     let mut top_level_lambda_key_to_name: HashMap<String, String> = HashMap::new();
@@ -16367,6 +16650,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     }
     let mut lambda_nodes = Vec::new();
     collect_lambda_nodes(typed_ast, &mut lambda_nodes);
+    let unique_main_lambda_keys = collect_unique_main_lambda_keys(&main_node, &lambda_nodes);
     let mut lambda_bindings: HashMap<String, TypedExpression> = HashMap::new();
     collect_top_level_lambda_bindings(&top_defs, &mut lambda_bindings);
     let direct_main_lambda_candidates = if devirtualize_mode_from_env()? == DevirtualizeMode::Off {
@@ -16443,6 +16727,23 @@ fn compile_program_to_wat_build_typed_with_opts(
                 } else {
                     lambda_capture_names(node, &top_defs)
                 };
+                // A lambda written directly in `main` captures these exact
+                // main bindings, even if the lambda itself later escapes as a
+                // closure. Nested closures can shadow the same spelling, so
+                // they retain the generic materialization guard.
+                let materialized_scalar_captures = if unique_main_lambda_keys.contains(&key) {
+                    captures
+                        .iter()
+                        .filter(|capture| {
+                            definitely_materialized_main_scalar_names.contains(*capture)
+                                || definitely_materialized_top_level_scalar_names
+                                    .contains(*capture)
+                        })
+                        .cloned()
+                        .collect()
+                } else {
+                    HashSet::new()
+                };
                 let mut all_ps = vec![Type::Int; captures.len()];
                 all_ps.extend(ps.clone());
                 fn_sigs.insert(name.clone(), (all_ps, ret));
@@ -16452,6 +16753,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                         key,
                         name,
                         captures,
+                        materialized_scalar_captures,
                         user_arity: ps.len(),
                         direct_only,
                     },
@@ -16504,6 +16806,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                 key,
                 name: name.clone(),
                 captures,
+                materialized_scalar_captures: HashSet::new(),
                 user_arity: total - provided,
                 direct_only: false,
             },
@@ -16702,6 +17005,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                 &def.name,
                 node,
                 &def.captures,
+                &def.materialized_scalar_captures,
                 &fn_sigs,
                 &fn_ids,
                 &lambda_ids,
