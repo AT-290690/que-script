@@ -9192,6 +9192,55 @@ fn"#;
     }
 
     #[test]
+    fn test_wat_direct_parameter_alias_is_borrowed_without_rc_churn() {
+        let source = r#"(do
+            (let observe (lambda xs (do
+              (let alias xs)
+              (length alias))))
+            (let identity-alias (lambda xs (do
+              (let alias xs)
+              alias)))
+            (let xs [1 2 3])
+            (let ys (identity-alias xs))
+            (set! 0 9 ys)
+            (+ (observe xs) (get 0 xs)))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        wat::parse_str(&wat).expect("debug WAT should validate");
+        let observe = named_wat_function(&wat, "v_observe");
+        let identity_alias = named_wat_function(&wat, "v_identity_dash_alias");
+
+        for (name, function_wat) in [("observe", observe), ("identity-alias", identity_alias)] {
+            assert!(
+                !function_wat.contains("call $rc_retain_vec")
+                    && !function_wat.contains("call $rc_release_vec"),
+                "a direct immutable alias of a managed parameter is borrowed in {name}, got:\n{function_wat}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_wat_mutable_parameter_alias_remains_an_rc_owner() {
+        let source = r#"(do
+            (let replace-local (lambda xs (do
+              (mut alias xs)
+              (alter! alias [9])
+              (+ (length xs) (length alias)))))
+            (replace-local [1 2]))"#;
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        wat::parse_str(&wat).expect("debug WAT should validate");
+        let function_wat = named_wat_function(&wat, "v_replace_dash_local");
+
+        assert!(
+            function_wat.contains("call $rc_retain_vec"),
+            "a mutable parameter alias may release its old value and must retain ownership, got:\n{function_wat}"
+        );
+    }
+
+    #[test]
     fn test_wat_last_use_managed_alter_transfers_ownership() {
         let moved_source = r#"(do
             (let step (lambda board { [1 2] 1 }))

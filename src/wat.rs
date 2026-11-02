@@ -14739,7 +14739,21 @@ fn collect_projection_bindings<'a>(
     }
 }
 
-fn borrowed_projection_names(body: &TypedExpression, params: &[(String, Type)]) -> HashSet<String> {
+// A local can use a managed value without owning a reference in two cases:
+//
+// * it is a projection from another live managed local; or
+// * it is a direct immutable alias of a managed parameter.
+//
+// Parameters are borrowed for the duration of a direct Calque call: the caller
+// keeps its reference until the callee returns.  Consequently a binding such
+// as `(let alias xs)` must not retain `xs` merely to release that retain again
+// at the end of the callee.  This is deliberately narrower than general alias
+// analysis.  In particular, mutable aliases remain owning locals because an
+// `alter!` of the binding may replace (and release) its old value.
+fn non_owning_borrowed_local_names(
+    body: &TypedExpression,
+    params: &[(String, Type)],
+) -> HashSet<String> {
     let mut live_roots = params
         .iter()
         .filter(|(_, typ)| is_managed_local_type(typ))
@@ -14764,7 +14778,73 @@ fn borrowed_projection_names(body: &TypedExpression, params: &[(String, Type)]) 
             live_roots.insert(name.to_string());
         }
     }
+    // Extend the existing projection rule with only the simplest parameter
+    // alias shape.  Restrict this to the immediate body sequence so names
+    // cannot cross a nested scope boundary, and reject a later rebinding or
+    // an `alter!` of the alias.  Operations which store a value (vectors and
+    // closures) retain it at their own ownership boundary, so they do not need
+    // an extra local owner here.
+    let managed_params = params
+        .iter()
+        .filter(|(_, typ)| is_managed_local_type(typ))
+        .map(|(name, _)| name.as_str())
+        .collect::<HashSet<_>>();
+    let Expression::Apply(items) = &body.expr else {
+        return borrowed;
+    };
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "do" || op == "block")
+    {
+        return borrowed;
+    }
+    let child_offset = usize::from(body.children.len() + 1 == items.len());
+    for i in 1..items.len().saturating_sub(1) {
+        let Some(binding) = body.children.get(i.saturating_sub(child_offset)) else {
+            continue;
+        };
+        let Expression::Apply(binding_items) = &binding.expr else {
+            continue;
+        };
+        let [Expression::Word(kw), Expression::Word(alias), Expression::Word(source)] =
+            binding_items.as_slice()
+        else {
+            continue;
+        };
+        if kw != "let" || !managed_params.contains(source.as_str()) {
+            continue;
+        }
+        if !binding
+            .children
+            .get(2)
+            .and_then(|rhs| rhs.typ.as_ref())
+            .is_some_and(is_managed_local_type)
+        {
+            continue;
+        }
+        let later = &items[i + 1..];
+        let rebound = later.iter().any(|expr| {
+            matches!(expr, Expression::Apply(xs)
+                if matches!(xs.as_slice(), [Expression::Word(kw), Expression::Word(name), ..]
+                    if (kw == "let" || kw == "letrec" || kw == "mut") && name == alias))
+        });
+        if !rebound && !expr_alters_binding(&body.expr, alias) {
+            borrowed.insert(alias.clone());
+        }
+    }
     borrowed
+}
+
+fn expr_alters_binding(expr: &Expression, name: &str) -> bool {
+    match expr {
+        Expression::Apply(items) => {
+            if matches!(items.as_slice(), [Expression::Word(op), Expression::Word(target), ..]
+                if op == "alter!" && target == name)
+            {
+                return true;
+            }
+            items.iter().any(|item| expr_alters_binding(item, name))
+        }
+        _ => false,
+    }
 }
 
 fn is_borrowed_projection_local(name: &str, ctx: &Ctx<'_>) -> bool {
@@ -15180,8 +15260,8 @@ fn compile_lambda_func(
     for (i, (n, _)) in local_defs.iter().enumerate() {
         locals.insert(n.clone(), params.len() + i);
     }
-    let borrowed_projection_names = borrowed_projection_names(body_node, &params);
-    for borrowed_name in &borrowed_projection_names {
+    let non_owning_borrowed_names = non_owning_borrowed_local_names(body_node, &params);
+    for borrowed_name in &non_owning_borrowed_names {
         if let Some(slot) = locals.get(borrowed_name).copied() {
             locals.insert(format!("__borrowed_projection::{borrowed_name}"), slot);
         }
@@ -15564,6 +15644,12 @@ fn compile_closure_func(
     }
     for (i, (n, _)) in local_defs.iter().enumerate() {
         locals.insert(n.clone(), params.len() + i);
+    }
+    let non_owning_borrowed_names = non_owning_borrowed_local_names(body_node, &params);
+    for borrowed_name in &non_owning_borrowed_names {
+        if let Some(slot) = locals.get(borrowed_name).copied() {
+            locals.insert(format!("__borrowed_projection::{borrowed_name}"), slot);
+        }
     }
 
     let tmp_i32 = params.len() + local_defs.len();
