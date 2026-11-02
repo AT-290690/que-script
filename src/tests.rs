@@ -4173,6 +4173,34 @@ out"#,
     }
 
     #[test]
+    fn test_wat_specializes_polymorphic_scalar_fill_helper_after_direct_calls() {
+        let source = r#"
+(let fill
+  (lambda n value
+    (do
+      (let xs [])
+      (mut i 0)
+      (while (< i n)
+        (do
+          (set! i value xs)
+          (alter! i (+ i 1))))
+      xs)))
+{(fill 4 7) (fill 3 2)}
+"#;
+        assert_eq!(run_program_output_with_std_and_opts(source, false), "{ [7 7 7 7] [2 2 2] }");
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "{ [7 7 7 7] [2 2 2] }");
+
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("program should compile");
+        assert!(
+            wat.contains("call $vec_new_filled_i32"),
+            "specialized scalar helper should use the bulk filled constructor, got:\n{}",
+            wat
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_lowers_counted_scalar_builder_to_uninit_store_loop() {
         let typed = infer_typed(
             r#"((lambda n

@@ -14802,15 +14802,39 @@ fn record_call_specialization(
 
 fn collect_call_specializations(
     node: &TypedExpression,
-    top_def_names: &HashSet<String>,
+    top_defs: &HashMap<String, TopDef>,
     out: &mut HashMap<String, CallSpecialization>,
 ) {
-    // The inferred type on a function-valued word represents the complete
-    // instantiation, including uses through higher-order functions and partial
-    // application. Recording those uses makes whole-program specialization
-    // safe: a definition is specialized only when every concrete use agrees.
+    // A fully-applied direct call gives the most useful specialization facts:
+    // its argument nodes carry the instantiated types even when the function
+    // definition itself is still polymorphic.  Keep recording bare function
+    // values below as well; that conservatively prevents specialization when
+    // a helper escapes through higher-order code.
+    if let Expression::Apply(items) = &node.expr {
+        if let Some(Expression::Word(name)) = items.first() {
+            if let Some(def) = top_defs.get(name) {
+                let arity = lambda_syntax_arity(&def.expr);
+                let provided = node.children.len().saturating_sub(1);
+                if arity == provided {
+                    let params = node
+                        .children
+                        .iter()
+                        .skip(1)
+                        .map(|arg| arg.typ.clone())
+                        .collect::<Option<Vec<_>>>();
+                    if let (Some(params), Some(ret)) = (params, node.typ.clone()) {
+                        record_call_specialization(name, params, ret, out);
+                    }
+                }
+            }
+        }
+    }
+
+    // A non-call function value may be used through higher-order application
+    // or partial application. Its inferred type is the only sound information
+    // we have in that case, so keep the existing conservative accounting.
     if let Expression::Word(name) = &node.expr {
-        if top_def_names.contains(name) {
+        if top_defs.contains_key(name) {
             if let Some(typ @ Type::Function(_, _)) = node.typ.as_ref() {
                 let (params, ret) = function_parts(typ);
                 record_call_specialization(name, params, ret, out);
@@ -14818,7 +14842,7 @@ fn collect_call_specializations(
         }
     }
     for ch in &node.children {
-        collect_call_specializations(ch, top_def_names, out);
+        collect_call_specializations(ch, top_defs, out);
     }
 }
 
@@ -15078,6 +15102,7 @@ fn compile_lambda_func(
     definitely_materialized_top_level_scalar_names: &HashSet<String>,
     cached_top_level_names: &HashSet<String>,
     tail_call_mode: TailCallMode,
+    optimize_specialized_body: bool,
 ) -> Result<String, String> {
     let items = match lambda_expr {
         Expression::Apply(xs) => xs,
@@ -15133,6 +15158,15 @@ fn compile_lambda_func(
         collect_type_subst(&decl_ret, &ret_ty, &mut subst);
     }
     let body_node_owned = specialize_typed_expr(body_node_raw, &subst);
+    // The whole-program optimizer sees the generic definition. Once all
+    // direct uses agree on concrete types, specialize first and then optimize
+    // the body again: scalar-only rewrites are now legal, while debug builds
+    // retain their original generic body.
+    let body_node_owned = if optimize_specialized_body && !subst.is_empty() {
+        crate::op::optimize_typed_ast_internal(&body_node_owned)
+    } else {
+        body_node_owned
+    };
     let body_node = &body_node_owned;
 
     let mut local_defs = Vec::new();
@@ -16187,7 +16221,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     collect_dynamic_partial_specs(typed_ast, &top_def_names, &mut dynamic_partial_specs);
     let mut call_specs: HashMap<String, CallSpecialization> = HashMap::new();
     if enable_optimizer {
-        collect_call_specializations(typed_ast, &top_def_names, &mut call_specs);
+        collect_call_specializations(typed_ast, &top_defs, &mut call_specs);
     }
     for (name, def) in &top_defs {
         let is_lambda_def = matches!(
@@ -16509,6 +16543,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                     &definitely_materialized_top_level_scalar_names,
                     &cached_top_level_names,
                     tail_call_mode,
+                    enable_optimizer,
                 )?);
             }
             expr if top_level_value_fn_ptr(expr, &top_defs, &fn_ids).is_some() => {
@@ -16571,6 +16606,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                 &definitely_materialized_top_level_scalar_names,
                 &cached_top_level_names,
                 tail_call_mode,
+                enable_optimizer,
             )?);
         }
     }

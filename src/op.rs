@@ -215,6 +215,14 @@ pub fn optimize_typed_ast(node: &TypedExpression) -> TypedExpression {
     restore_data_last_core_forms(&optimize_typed_ast_legacy(&legacy))
 }
 
+// WAT lowering keeps top-level function bodies in the optimizer's private
+// receiver-first representation. A monomorphized body therefore needs this
+// entry point rather than `optimize_typed_ast`, which is the public data-last
+// boundary used for parsed source.
+pub(crate) fn optimize_typed_ast_internal(node: &TypedExpression) -> TypedExpression {
+    optimize_typed_ast_legacy(node)
+}
+
 fn optimize_typed_ast_legacy(node: &TypedExpression) -> TypedExpression {
     let mut seed = node.clone();
     let fused_expr = fuse_entry_expression_for_program(&node.expr);
