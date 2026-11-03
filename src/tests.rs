@@ -3574,6 +3574,49 @@ out"#,
     }
 
     #[test]
+    fn test_typed_optimization_propagates_direct_recursive_scalar_base_case() {
+        let source = r#"(do
+(letrec fibonacci (lambda n
+  (if (< n 2)
+      n
+      (+ (fibonacci (- n 1))
+         (fibonacci (- n 2))))))
+(fibonacci 10))"#;
+        let typed = infer_typed(source);
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        let optimized_lisp = optimized.expr.to_lisp();
+
+        assert!(
+            optimized_lisp.contains("__basecase_arg_"),
+            "a direct recursive scalar call should receive an inlined base-case guard, got: {optimized_lisp}"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "55",
+            "base-case propagation must preserve recursive program output"
+        );
+    }
+
+    #[test]
+    fn test_typed_optimization_does_not_propagate_base_case_using_global_state() {
+        let typed = infer_typed(
+            r#"(do
+(let limit 2)
+(letrec fibonacci (lambda n
+  (if (< n limit)
+      n
+      (+ (fibonacci (- n 1))
+         (fibonacci (- n 2))))))
+(fibonacci 10))"#,
+        );
+        let optimized = crate::op::optimize_typed_ast(&typed);
+        assert!(
+            !optimized.expr.to_lisp().contains("__basecase_arg_"),
+            "base-case propagation must not duplicate a guard that reads a non-parameter binding"
+        );
+    }
+
+    #[test]
     fn test_typed_optimization_constant_folds_if_branch() {
         let typed = infer_typed("(if true (+ 1 2) (+ 100 200))");
         let optimized = crate::op::optimize_typed_ast(&typed);

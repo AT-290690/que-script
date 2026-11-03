@@ -12,6 +12,17 @@ const MAX_LOOP_UNROLL_MAX: usize = 16;
 const MAX_LOOP_UNROLL_COST: usize = 2000;
 const MAX_INLINE_FIXPOINT_PASSES: usize = 16;
 const MAX_OPT_FIXPOINT_PASSES: usize = 8;
+// A direct recursive call can cheaply test its callee's scalar base case at
+// the call site.  Keep this deliberately small: unlike ordinary inlining, it
+// applies inside a recursive definition, so an unbounded rewrite would inflate
+// every activation's body.
+// This first form is deliberately unary. At this raw-AST stage we can prove
+// the recursive argument's scalar expression, but not yet each parameter's
+// storage class. Keeping it unary prevents a managed accumulator/vector
+// parameter from interfering with later recursive-worker specialization.
+const MAX_BASE_CASE_INLINE_PARAMS: usize = 1;
+const MAX_BASE_CASE_INLINE_CALLS: usize = 4;
+const MAX_BASE_CASE_INLINE_COST: usize = 32;
 
 #[derive(Clone)]
 enum MapFilterOp {
@@ -226,8 +237,23 @@ pub(crate) fn optimize_typed_ast_internal(node: &TypedExpression) -> TypedExpres
 
 fn optimize_typed_ast_legacy(node: &TypedExpression) -> TypedExpression {
     let mut seed = node.clone();
-    let fused_expr = fuse_entry_expression_for_program(&node.expr);
-    if fused_expr.to_lisp() != node.expr.to_lisp() {
+    // This pass is intentionally before the ordinary optimizer. It exposes
+    // leaf calls in a simple recursive tree to constant folding and native
+    // backend inlining, while preserving argument evaluation order by binding
+    // every recursive argument once in the replacement block.
+    let source_expr = restore_data_last_core_expression(&node.expr);
+    let base_case_expr = inline_direct_recursive_base_cases(&source_expr);
+    if base_case_expr.to_lisp() != source_expr.to_lisp() {
+        if let Ok((_typ, typed)) = crate::infer::infer_with_builtins_typed(
+            &base_case_expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        ) {
+            seed = lower_data_last_core_forms(&typed);
+        }
+    }
+
+    let fused_expr = fuse_entry_expression_for_program(&seed.expr);
+    if fused_expr.to_lisp() != seed.expr.to_lisp() {
         let source_fused_expr = restore_data_last_core_expression(&fused_expr);
         if let Ok((_typ, fused_typed)) = crate::infer::infer_with_builtins_typed(
             &source_fused_expr,
@@ -258,6 +284,340 @@ fn optimize_typed_ast_legacy(node: &TypedExpression) -> TypedExpression {
     let cur = run_loop_unroll_pass(&cur);
     let cur = optimize_typed_ast_once(&cur);
     dead_code_eliminate_top_level_defs(&cur)
+}
+
+struct BaseCaseInlineState {
+    used_names: HashSet<String>,
+    next_id: usize,
+}
+
+impl BaseCaseInlineState {
+    fn new(root: &Expression) -> Self {
+        let mut used_names = HashSet::new();
+        collect_word_names(root, &mut used_names);
+        Self {
+            used_names,
+            next_id: 0,
+        }
+    }
+
+    fn fresh_arg(&mut self) -> String {
+        loop {
+            let name = format!("__basecase_arg_{}", self.next_id);
+            self.next_id += 1;
+            if self.used_names.insert(name.clone()) {
+                return name;
+            }
+        }
+    }
+}
+
+/// Propagate a small scalar base case to direct recursive call sites.
+///
+/// Given a definition shaped like:
+///
+/// ```text
+/// (letrec f (lambda n (if (< n 2) n (... (f (- n 1)) ...))))
+/// ```
+///
+/// a direct call becomes a scoped form equivalent to:
+///
+/// ```text
+/// (do
+///   (let arg (- n 1))
+///   (if (< arg 2) arg (f arg)))
+/// ```
+///
+/// The restrictions are important. The guard and leaf expression may only use
+/// scalar parameters/literals and pure scalar primitives; the definition has a
+/// single scalar parameter and bounded direct self calls; and a shadowing
+/// binding for the recursive name disables the rewrite. This makes it a
+/// semantics-preserving exposure of work that was already present in the
+/// callee, rather than general recursive inlining.
+fn inline_direct_recursive_base_cases(root: &Expression) -> Expression {
+    let mut state = BaseCaseInlineState::new(root);
+    inline_direct_recursive_base_cases_expr(root, &mut state)
+}
+
+fn inline_direct_recursive_base_cases_expr(
+    expr: &Expression,
+    state: &mut BaseCaseInlineState,
+) -> Expression {
+    let Expression::Apply(items) = expr else {
+        return expr.clone();
+    };
+    let mut rewritten = items
+        .iter()
+        .map(|item| inline_direct_recursive_base_cases_expr(item, state))
+        .collect::<Vec<_>>();
+
+    let Some(Expression::Word(keyword)) = rewritten.first() else {
+        return Expression::Apply(rewritten);
+    };
+    if keyword != "letrec" || rewritten.len() != 3 {
+        return Expression::Apply(rewritten);
+    }
+    let Some(Expression::Word(name)) = rewritten.get(1) else {
+        return Expression::Apply(rewritten);
+    };
+    let Some(rhs) = rewritten.get(2).cloned() else {
+        return Expression::Apply(rewritten);
+    };
+    let Some(rhs) = inline_base_case_in_letrec(name, &rhs, state) else {
+        return Expression::Apply(rewritten);
+    };
+    rewritten[2] = rhs;
+    Expression::Apply(rewritten)
+}
+
+fn inline_base_case_in_letrec(
+    name: &str,
+    rhs: &Expression,
+    state: &mut BaseCaseInlineState,
+) -> Option<Expression> {
+    let Expression::Apply(lambda_items) = rhs else {
+        return None;
+    };
+    if !matches!(lambda_items.first(), Some(Expression::Word(word)) if word == "lambda")
+        || lambda_items.len() < 3
+    {
+        return None;
+    }
+    let params = lambda_items[1..lambda_items.len() - 1]
+        .iter()
+        .map(|param| match param {
+            Expression::Word(name) if name != "_" => Some(name.clone()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    if params.is_empty() || params.len() > MAX_BASE_CASE_INLINE_PARAMS {
+        return None;
+    }
+
+    let body = lambda_items.last()?;
+    let Expression::Apply(body_items) = body else {
+        return None;
+    };
+    let [Expression::Word(if_word), guard, base, recursive_body] = &body_items[..] else {
+        return None;
+    };
+    if if_word != "if"
+        || !is_base_case_scalar_expr(guard, &params)
+        || !is_base_case_scalar_expr(base, &params)
+        || contains_word(base, name)
+        || contains_binding_named(recursive_body, name)
+    {
+        return None;
+    }
+
+    let call_count = count_direct_recursive_calls(recursive_body, name, params.len());
+    if call_count == 0 || call_count > MAX_BASE_CASE_INLINE_CALLS {
+        return None;
+    }
+    let expansion_cost = call_count
+        * (inline_body_cost(guard) + inline_body_cost(base) + params.len() + 3);
+    if expansion_cost > MAX_BASE_CASE_INLINE_COST {
+        return None;
+    }
+
+    let rewritten_body = rewrite_direct_recursive_calls(
+        recursive_body,
+        name,
+        &params,
+        guard,
+        base,
+        state,
+    );
+    if rewritten_body.to_lisp() == recursive_body.to_lisp() {
+        return None;
+    }
+    let mut out = lambda_items.clone();
+    let last = out.len() - 1;
+    out[last] = Expression::Apply(vec![
+        Expression::Word("if".to_string()),
+        guard.clone(),
+        base.clone(),
+        rewritten_body,
+    ]);
+    Some(Expression::Apply(out))
+}
+
+fn is_base_case_scalar_expr(expr: &Expression, params: &[String]) -> bool {
+    match expr {
+        Expression::Int(_) | Expression::Dec(_) => true,
+        Expression::Word(word) => {
+            matches!(word.as_str(), "true" | "false")
+                || params.iter().any(|param| param == word)
+        }
+        Expression::Apply(items) => {
+            let Some(Expression::Word(op)) = items.first() else {
+                return false;
+            };
+            matches!(
+                op.as_str(),
+                "+"
+                    | "-"
+                    | "*"
+                    | "/"
+                    | "%"
+                    | "+."
+                    | "-."
+                    | "*."
+                    | "/."
+                    | "%."
+                    | "="
+                    | "=?"
+                    | "=#"
+                    | "=~"
+                    | "=."
+                    | "<"
+                    | ">"
+                    | "<="
+                    | ">="
+                    | "<#"
+                    | ">#"
+                    | "<=#"
+                    | ">=#"
+                    | "<."
+                    | ">."
+                    | "<=."
+                    | ">=."
+                    | "and"
+                    | "or"
+                    | "not"
+                    | "Int->Dec"
+                    | "Dec->Int"
+            ) && items
+                .iter()
+                .skip(1)
+                .all(|item| is_base_case_scalar_expr(item, params))
+        }
+    }
+}
+
+fn contains_binding_named(expr: &Expression, name: &str) -> bool {
+    let Expression::Apply(items) = expr else {
+        return false;
+    };
+    if let Some(Expression::Word(keyword)) = items.first() {
+        match keyword.as_str() {
+            "lambda" => {
+                return items[1..items.len().saturating_sub(1)]
+                    .iter()
+                    .any(|param| binding_pattern_contains_name(param, name));
+            }
+            "let" | "letrec" | "mut" => {
+                if items
+                    .get(1)
+                    .is_some_and(|pattern| binding_pattern_contains_name(pattern, name))
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    items.iter().any(|item| contains_binding_named(item, name))
+}
+
+fn binding_pattern_contains_name(pattern: &Expression, name: &str) -> bool {
+    match pattern {
+        Expression::Word(bound) => bound == name,
+        Expression::Apply(items) => items
+            .iter()
+            .any(|item| binding_pattern_contains_name(item, name)),
+        Expression::Int(_) | Expression::Dec(_) => false,
+    }
+}
+
+fn count_direct_recursive_calls(expr: &Expression, name: &str, arity: usize) -> usize {
+    let Expression::Apply(items) = expr else {
+        return 0;
+    };
+    if matches!(items.first(), Some(Expression::Word(word)) if word == "lambda" || word == "letrec") {
+        return 0;
+    }
+    let self_call = matches!(items.first(), Some(Expression::Word(word)) if word == name)
+        && items.len() == arity + 1;
+    usize::from(self_call)
+        + if self_call {
+            0
+        } else {
+            items
+                .iter()
+                .map(|item| count_direct_recursive_calls(item, name, arity))
+                .sum()
+        }
+}
+
+fn substitute_base_case_params(
+    expr: &Expression,
+    substitutions: &HashMap<String, Expression>,
+) -> Expression {
+    match expr {
+        Expression::Word(word) => substitutions
+            .get(word)
+            .cloned()
+            .unwrap_or_else(|| expr.clone()),
+        Expression::Apply(items) => Expression::Apply(
+            items
+                .iter()
+                .map(|item| substitute_base_case_params(item, substitutions))
+                .collect(),
+        ),
+        _ => expr.clone(),
+    }
+}
+
+fn rewrite_direct_recursive_calls(
+    expr: &Expression,
+    name: &str,
+    params: &[String],
+    guard: &Expression,
+    base: &Expression,
+    state: &mut BaseCaseInlineState,
+) -> Expression {
+    let Expression::Apply(items) = expr else {
+        return expr.clone();
+    };
+    if matches!(items.first(), Some(Expression::Word(word)) if word == "lambda" || word == "letrec") {
+        return expr.clone();
+    }
+    if matches!(items.first(), Some(Expression::Word(word)) if word == name)
+        && items.len() == params.len() + 1
+    {
+        let mut substitutions = HashMap::new();
+        let mut block_items = vec![Expression::Word("do".to_string())];
+        for (param, argument) in params.iter().zip(items.iter().skip(1)) {
+            let temp = state.fresh_arg();
+            let temp_expr = Expression::Word(temp.clone());
+            substitutions.insert(param.clone(), temp_expr);
+            block_items.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(temp),
+                argument.clone(),
+            ]));
+        }
+        let fallback_args = params
+            .iter()
+            .map(|param| substitutions.get(param).expect("every parameter is substituted").clone())
+            .collect::<Vec<_>>();
+        let mut fallback = vec![Expression::Word(name.to_string())];
+        fallback.extend(fallback_args);
+        block_items.push(Expression::Apply(vec![
+            Expression::Word("if".to_string()),
+            substitute_base_case_params(guard, &substitutions),
+            substitute_base_case_params(base, &substitutions),
+            Expression::Apply(fallback),
+        ]));
+        return Expression::Apply(block_items);
+    }
+    Expression::Apply(
+        items
+            .iter()
+            .map(|item| rewrite_direct_recursive_calls(item, name, params, guard, base, state))
+            .collect(),
+    )
 }
 
 fn small_scalar_helper_inline_body_cost_limit() -> usize {
@@ -7741,5 +8101,21 @@ fn lambda_takes_only_scalar_args(typ: &Type) -> bool {
                 return true;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod base_case_inline_tests {
+    use super::*;
+
+    #[test]
+    fn direct_recursive_scalar_base_case_is_rewritten() {
+        let source = r#"(do
+(letrec fibonacci (lambda n
+  (if (< n 2) n (+ (fibonacci (- n 1)) (fibonacci (- n 2))))))
+(fibonacci 10))"#;
+        let parsed = crate::parser::build(source).expect("source should parse");
+        let rewritten = inline_direct_recursive_base_cases(&parsed).to_lisp();
+        assert!(rewritten.contains("__basecase_arg_"), "{rewritten}");
     }
 }
