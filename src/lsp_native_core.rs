@@ -3,7 +3,7 @@ use crate::parser::{self, Expression};
 use crate::types::{create_builtin_environment, Type, TypeEnv};
 use std::collections::{HashMap, HashSet};
 
-pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 20] = [
+pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 21] = [
     ("alter!", "T -> T -> ()"),
     ("&alter!", "[T] -> T -> ()"),
     ("vector", "T... -> [T]"),
@@ -22,6 +22,7 @@ pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 20] = [
     ("macroexpand", "compile-time full macro expansion"),
     ("macroexpand-1", "compile-time single-step macro expansion"),
     ("enum", "Name -> Variant... -> ()"),
+    ("record", "Name -> field -> Type ... -> ()"),
     ("match", "Enum -> Variant -> T ... -> T"),
     ("=~", "Enum -> Enum -> Bool"),
 ];
@@ -438,7 +439,7 @@ fn estimate_syntax_effect(
                         effect |= estimate_syntax_effect(body, known_effects);
                     }
                 }
-                Some(Expression::Word(op)) if op == "sig" || op == "extern" || op == "enum" => {}
+                Some(Expression::Word(op)) if op == "sig" || op == "extern" || op == "enum" || op == "record" => {}
                 Some(Expression::Word(op)) => {
                     for item in items.iter().skip(1) {
                         effect |= estimate_syntax_effect(item, known_effects);
@@ -533,6 +534,7 @@ fn is_known_pure_syntax_call(op: &str) -> bool {
             | "block"
             | "cond"
             | "enum"
+            | "record"
             | "match"
     )
 }
@@ -959,6 +961,7 @@ fn type_specificity_score(typ: &Type) -> i32 {
     match typ {
         Type::Var(_) => 0,
         Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit | Type::Enum(_) => 1,
+        Type::Record(record) => 2 + record.fields.iter().map(|field| type_specificity_score(&field.typ)).sum::<i32>(),
         Type::List(inner) => 2 + type_specificity_score(inner),
         Type::Tuple(items) => 2 + items.iter().map(type_specificity_score).sum::<i32>(),
         Type::Function(a, b) => 3 + type_specificity_score(a) + type_specificity_score(b),
@@ -1646,6 +1649,15 @@ fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
                 for variant in items.iter().skip(2) {
                     if let Expression::Word(name) = variant {
                         out.insert(name.clone());
+                    }
+                }
+            } else if head == "record" {
+                if let Some(Expression::Word(name)) = items.get(1) {
+                    out.insert(name.clone());
+                    for pair in items.iter().skip(2).collect::<Vec<_>>().chunks_exact(2) {
+                        if let Expression::Word(field) = pair[0] {
+                            out.insert(format!("{}/{}", name, field));
+                        }
                     }
                 }
             }

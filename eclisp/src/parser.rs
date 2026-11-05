@@ -68,6 +68,20 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                                 continue;
                             }
                         }
+                        if let Expression::Apply(record_items) = it {
+                            if matches!(record_items.first(), Some(Expression::Word(w)) if w == "record")
+                            {
+                                if let Some(Expression::Word(name)) = record_items.get(1) {
+                                    bound.insert(name.clone());
+                                    for pair in record_items.iter().skip(2).collect::<Vec<_>>().chunks_exact(2) {
+                                        if let Expression::Word(field) = pair[0] {
+                                            bound.insert(format!("{}/{}", name, field));
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                        }
                         if let Expression::Apply(let_items) = it {
                             if let [Expression::Word(kw), Expression::Word(name), rhs] =
                                 &let_items[..]
@@ -86,7 +100,7 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                 if op == "sig" {
                     return;
                 }
-                if op == "enum" {
+                if op == "enum" || op == "record" {
                     return;
                 }
                 if op == "match" {
@@ -771,7 +785,7 @@ fn split_macro_definitions(
                     (items.first(), items.get(1))
                 {
                     if kw == "letmacro" {
-                        if matches!(name.as_str(), "sig" | "enum" | "match") {
+                        if matches!(name.as_str(), "sig" | "enum" | "record" | "match") {
                             return Err(format!(
                                 "Macro name '{}' is reserved by the language",
                                 name
@@ -785,7 +799,7 @@ fn split_macro_definitions(
             }
             if let [Expression::Word(kw), Expression::Word(name), _rhs] = &items[..] {
                 if kw == "letmacro" {
-                    if matches!(name.as_str(), "sig" | "enum" | "match") {
+                    if matches!(name.as_str(), "sig" | "enum" | "record" | "match") {
                         return Err(format!("Macro name '{}' is reserved by the language", name));
                     }
                     let macro_def = parse_macro_definition(&items[2..], name)?;
@@ -1899,6 +1913,52 @@ fn destructure_pattern(
 
                     Ok((bindings, Expression::Word(temp_var)))
                 } else {
+                    // Nominal record destructuring uses the declared record
+                    // name followed by its field names:
+                    //
+                    //   (let (Point x y) point)
+                    //
+                    // The parser intentionally does not need to know the
+                    // record declaration here.  It expands each binding to
+                    // its generated accessor (`Point/x`, `Point/y`); type
+                    // inference then verifies that the record and fields
+                    // actually exist and match the value.
+                    if elements.iter().all(|element| matches!(element, Expression::Word(_))) {
+                        let mut bindings = vec![];
+                        let temp_var = if let Expression::Word(name) = &value_expr {
+                            name.clone()
+                        } else {
+                            let temp_var =
+                                next_destructure_temp("temp_record", arg_index, binding_counter);
+                            bindings.push(Expression::Apply(vec![
+                                Expression::Word("let".to_string()),
+                                Expression::Word(temp_var.clone()),
+                                value_expr,
+                            ]));
+                            temp_var
+                        };
+
+                        for field_pattern in elements {
+                            let Expression::Word(field_name) = field_pattern else {
+                                unreachable!("record patterns were checked to contain only names");
+                            };
+                            if field_name == "_" {
+                                continue;
+                            }
+                            let (field_bindings, _) = destructure_pattern(
+                                field_pattern,
+                                Expression::Apply(vec![
+                                    Expression::Word(format!("{vector_kw}/{field_name}")),
+                                    Expression::Word(temp_var.clone()),
+                                ]),
+                                arg_index,
+                                binding_counter,
+                            )?;
+                            bindings.extend(field_bindings);
+                        }
+
+                        return Ok((bindings, Expression::Word(temp_var)));
+                    }
                     // Check if second element is a tuple pattern
                     if elements.len() >= 1 {
                         if let Expression::Apply(inner_exprs) = &elements[0] {
@@ -2547,12 +2607,14 @@ fn cons_transform(mut exprs: Vec<Expression>) -> Expression {
 enum DestructuringKind {
     Tuple,
     Vector,
+    Record,
 }
 fn destructuring_kind(pattern: &Expression) -> Option<DestructuringKind> {
     match pattern {
         Expression::Apply(exprs) => match exprs.as_slice() {
             [Expression::Word(kw), ..] if kw == "tuple" => Some(DestructuringKind::Tuple),
             [Expression::Word(kw), ..] if kw == "vector" => Some(DestructuringKind::Vector),
+            [Expression::Word(_), Expression::Word(_), ..] => Some(DestructuringKind::Record),
             _ => None,
         },
         _ => None,
@@ -2576,6 +2638,7 @@ fn transform_let_destructuring_in_do(
                             let prefix = match kind {
                                 DestructuringKind::Tuple => "tuple",
                                 DestructuringKind::Vector => "vec",
+                                DestructuringKind::Record => "record",
                             };
 
                             let temp_var = next_destructure_temp(
@@ -3155,7 +3218,8 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                                 || kw == "mut"
                                 || kw == "extern"
                                 || kw == "sig"
-                                || kw == "enum")
+                                || kw == "enum"
+                                || kw == "record")
                                 && matches!(name, Some(Expression::Word(_)))
                             {
                                 let Expression::Word(name) = name.unwrap() else {

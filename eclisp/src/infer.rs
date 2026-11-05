@@ -1,5 +1,5 @@
 use crate::parser::Expression;
-use crate::types::{generalize, EnumType, Type, TypeEnv, TypeScheme, TypeVar};
+use crate::types::{generalize, EnumType, RecordField, RecordType, Type, TypeEnv, TypeScheme, TypeVar};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::{BitOr, BitOrAssign};
 use std::sync::Arc;
@@ -270,6 +270,7 @@ fn is_intrinsic_pure_op(op: &str) -> bool {
             | "mut"
             | "do"
             | "enum"
+            | "record"
             | "match"
     )
 }
@@ -2093,6 +2094,7 @@ pub struct InferenceContext {
     pub mut_scopes: Vec<HashSet<String>>,
     pub declared_type_scopes: Vec<HashMap<String, (DeclaredType, bool)>>,
     pub enum_scopes: Vec<HashMap<String, Arc<EnumType>>>,
+    pub record_scopes: Vec<HashMap<String, Arc<RecordType>>>,
     pub lambda_scope_bases: Vec<usize>,
     pub constraints: Vec<(Type, Type, TypeError)>,
     /// `=~` first unifies its operands, then this records the requirement
@@ -2196,6 +2198,7 @@ impl InferenceContext {
         self.mut_scopes.push(HashSet::new());
         self.declared_type_scopes.push(HashMap::new());
         self.enum_scopes.push(HashMap::new());
+        self.record_scopes.push(HashMap::new());
     }
 
     pub fn exit_lexical_scope(&mut self) {
@@ -2208,6 +2211,9 @@ impl InferenceContext {
         }
         if self.enum_scopes.len() > 1 {
             self.enum_scopes.pop();
+        }
+        if self.record_scopes.len() > 1 {
+            self.record_scopes.pop();
         }
     }
 
@@ -2312,11 +2318,21 @@ impl InferenceContext {
         })
     }
 
+    pub fn record_type(&self, name: &str) -> Option<Arc<RecordType>> {
+        self.record_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).cloned())
+    }
+
     pub fn declare_enum(
         &mut self,
         name: String,
         variants: Vec<String>,
     ) -> Result<Arc<EnumType>, String> {
+        if matches!(name.as_str(), "Int" | "Dec" | "Bool" | "Char") {
+            return Err(format!("enum '{}' conflicts with the built-in type name", name));
+        }
         if variants.is_empty() {
             return Err(format!("enum '{}' needs at least one variant", name));
         }
@@ -2345,6 +2361,65 @@ impl InferenceContext {
             )?;
         }
         Ok(enum_type)
+    }
+
+    pub fn declare_record(
+        &mut self,
+        name: String,
+        fields: Vec<RecordField>,
+    ) -> Result<Arc<RecordType>, String> {
+        if matches!(name.as_str(), "Int" | "Dec" | "Bool" | "Char") {
+            return Err(format!("record '{}' conflicts with the built-in type name", name));
+        }
+        if fields.is_empty() {
+            return Err(format!("record '{}' needs at least one field", name));
+        }
+        if self.enum_type(&name).is_some() {
+            return Err(format!("record '{}' conflicts with an enum of the same name", name));
+        }
+        if self.record_type(&name).is_some() {
+            return Err(format!("record '{}' already declared in this scope", name));
+        }
+        let current_bindings = self
+            .env
+            .scopes
+            .last()
+            .ok_or_else(|| "internal error: missing type scope".to_string())?;
+        if current_bindings.contains_key(&name) {
+            return Err(format!("record constructor '{}' is already defined in this scope", name));
+        }
+        for field in &fields {
+            let accessor = format!("{}/{}", name, field.name);
+            if current_bindings.contains_key(&accessor) {
+                return Err(format!("record accessor '{}' is already defined in this scope", accessor));
+            }
+        }
+
+        let record_type = Arc::new(RecordType {
+            name: name.clone(),
+            fields,
+        });
+        let Some(scope) = self.record_scopes.last_mut() else {
+            return Err("internal error: missing record scope".to_string());
+        };
+        scope.insert(name.clone(), record_type.clone());
+
+        let mut constructor_type = Type::Record(record_type.clone());
+        for field in record_type.fields.iter().rev() {
+            constructor_type = Type::Function(Box::new(field.typ.clone()), Box::new(constructor_type));
+        }
+        self.env
+            .insert(name.clone(), TypeScheme::monotype(constructor_type))?;
+        for field in &record_type.fields {
+            self.env.insert(
+                format!("{}/{}", name, field.name),
+                TypeScheme::monotype(Type::Function(
+                    Box::new(Type::Record(record_type.clone())),
+                    Box::new(field.typ.clone()),
+                )),
+            )?;
+        }
+        Ok(record_type)
     }
 }
 
@@ -2385,6 +2460,7 @@ fn infer_expr(expr: &Expression, ctx: &mut InferenceContext) -> Result<Type, Str
                     "extern" => infer_extern(&exprs, ctx),
                     "sig" => infer_sig(&exprs, ctx),
                     "enum" => infer_enum(&exprs, ctx),
+                    "record" => infer_record(&exprs, ctx),
                     "match" => infer_match(&exprs, ctx),
                     "alter!" => infer_alter(&exprs, ctx),
                     "do" => infer_do(expr, &exprs, ctx),
@@ -2449,6 +2525,7 @@ fn parse_type_hint_with_named_vars(
             _ => Ok(ctx
                 .enum_type(name)
                 .map(Type::Enum)
+                .or_else(|| ctx.record_type(name).map(Type::Record))
                 .unwrap_or_else(|| {
                     named_vars
                         .entry(name.clone())
@@ -2623,6 +2700,49 @@ fn infer_enum(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, 
         names.push(variant.clone());
     }
     ctx.declare_enum(name.clone(), names)?;
+    Ok(Type::Unit)
+}
+
+fn is_valid_record_field_type(typ: &Type) -> bool {
+    // Records are concrete declarations rather than generic type constructors.
+    // Every managed field has a fixed layout, so its retain/release behaviour
+    // is known when the record is declared.  A function field is also valid:
+    // the RC-cycle pass follows captures through record construction.
+    !matches!(typ, Type::Var(_))
+}
+
+fn infer_record(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
+    let [Expression::Word(_kw), Expression::Word(name), field_items @ ..] = exprs else {
+        return Err("record expects: (record Name field Type ...)".to_string());
+    };
+    if field_items.is_empty() || field_items.len() % 2 != 0 {
+        return Err(format!(
+            "record '{}' fields must be name/type pairs: field Type ...",
+            name
+        ));
+    }
+    let mut fields = Vec::with_capacity(field_items.len() / 2);
+    let mut seen = HashSet::new();
+    for pair in field_items.chunks_exact(2) {
+        let Expression::Word(field_name) = &pair[0] else {
+            return Err(format!("record '{}' field names must be names", name));
+        };
+        if field_name == "_" || !seen.insert(field_name.clone()) {
+            return Err(format!("record '{}' has an invalid or duplicate field '{}'", name, field_name));
+        }
+        let field_type = parse_type_hint(&pair[1], ctx)?;
+        if !is_valid_record_field_type(&field_type) {
+            return Err(format!(
+                "record '{}' field '{}' must have a concrete type, got {}",
+                name, field_name, field_type
+            ));
+        }
+        fields.push(RecordField {
+            name: field_name.clone(),
+            typ: field_type,
+        });
+    }
+    ctx.declare_record(name.clone(), fields)?;
     Ok(Type::Unit)
 }
 
@@ -3394,7 +3514,13 @@ impl<'a> SignatureMatcher<'a> {
             Type::Var(_) => Ok(()),
             _ => match &inferred {
                 Type::Var(var) if !self.is_rigid(var.id) => self.bind_inferred(var.id, declared),
-                Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit | Type::Enum(_) => {
+                Type::Int
+                | Type::Dec
+                | Type::Bool
+                | Type::Char
+                | Type::Unit
+                | Type::Enum(_)
+                | Type::Record(_) => {
                     if declared == &inferred {
                         Ok(())
                     } else {
@@ -4265,6 +4391,7 @@ fn infer_with_builtins_typed_internal(
         mut_scopes: vec![HashSet::new()],
         declared_type_scopes: vec![HashMap::new()],
         enum_scopes: vec![HashMap::new()],
+        record_scopes: vec![HashMap::new()],
         lambda_scope_bases: Vec::new(),
         constraints: Vec::new(),
         enum_equality_constraints: Vec::new(),

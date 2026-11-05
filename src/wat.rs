@@ -3,6 +3,7 @@ use crate::parser::{DecimalLiteral, Expression};
 use crate::types::Type;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Clone, Default)]
 struct WasiOverrides {
@@ -232,6 +233,7 @@ struct StorageSummary {
     value_param: usize,
 }
 
+#[derive(Clone)]
 struct Ctx<'a> {
     fn_sigs: &'a HashMap<String, (Vec<Type>, Type)>,
     fn_ids: &'a HashMap<String, i32>,
@@ -635,6 +637,7 @@ fn is_i32ish_type(t: &Type) -> bool {
             | Type::Unit
             | Type::List(_)
             | Type::Tuple(_)
+            | Type::Record(_)
             | Type::Var(_)
             | Type::Function(_, _)
     )
@@ -643,21 +646,25 @@ fn is_i32ish_type(t: &Type) -> bool {
 fn is_ref_type(t: &Type) -> bool {
     matches!(
         t,
-        Type::List(_) | Type::Tuple(_) | Type::Function(_, _) | Type::Var(_)
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Function(_, _) | Type::Var(_)
     )
 }
 
 fn is_managed_local_type(t: &Type) -> bool {
     matches!(
         t,
-        Type::List(_) | Type::Tuple(_) | Type::Function(_, _) | Type::Var(_)
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Function(_, _) | Type::Var(_)
     )
 }
 
 fn rc_retain_for_type(t: &Type) -> &'static str {
     match t {
-        Type::List(_) | Type::Tuple(_) => "$rc_retain_vec",
-        Type::Function(_, _) => "$closure_retain",
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) => "$rc_retain_vec",
+        // A function value can be either a heap closure or a small immediate
+        // function tag (builtins and generated record functions).  The
+        // generic helper recognizes both; calling $closure_retain directly
+        // would interpret a tag as an address.
+        Type::Function(_, _) => "$rc_retain",
         Type::Var(_) => "$rc_retain",
         _ => "$rc_retain",
     }
@@ -665,8 +672,8 @@ fn rc_retain_for_type(t: &Type) -> &'static str {
 
 fn rc_release_for_type(t: &Type) -> &'static str {
     match t {
-        Type::List(_) | Type::Tuple(_) => "$rc_release_vec",
-        Type::Function(_, _) => "$closure_release",
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) => "$rc_release_vec",
+        Type::Function(_, _) => "$rc_release",
         Type::Var(_) => "$rc_release",
         _ => "$rc_release",
     }
@@ -685,7 +692,7 @@ enum RcKind {
 impl RcKind {
     fn for_type(t: &Type) -> Self {
         match t {
-            Type::List(_) | Type::Tuple(_) => Self::Vector,
+            Type::List(_) | Type::Tuple(_) | Type::Record(_) => Self::Vector,
             Type::Function(_, _) | Type::Var(_) => Self::Dynamic,
             _ => Self::Dynamic,
         }
@@ -717,7 +724,7 @@ impl ManagedRefSlot {
 fn closure_store_op_for_type(t: &Type) -> &'static str {
     match t {
         Type::Function(_, _) => "closure_set_fun",
-        Type::List(_) | Type::Var(_) => "closure_set_ref",
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Var(_) => "closure_set_ref",
         _ => "closure_set",
     }
 }
@@ -725,7 +732,7 @@ fn closure_store_op_for_type(t: &Type) -> &'static str {
 fn closure_store_op_for_type_wat(t: &Type) -> &'static str {
     match t {
         Type::Function(_, _) => "$closure_set_fun",
-        Type::List(_) | Type::Var(_) => "$closure_set_ref",
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Var(_) => "$closure_set_ref",
         _ => "$closure_set",
     }
 }
@@ -1131,7 +1138,7 @@ fn top_level_borrow_plan(
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
         Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => Ok("i32"),
-        Type::List(_) | Type::Tuple(_) => Ok("i32"),
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) => Ok("i32"),
         Type::Var(_) => Ok("i32"),
         Type::Function(_, _) => Ok("i32"),
     }
@@ -1153,7 +1160,8 @@ fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
         | Type::Enum(_)
         | Type::Unit
         | Type::List(_)
-        | Type::Tuple(_) => Ok(VecElemKind::I32),
+        | Type::Tuple(_)
+        | Type::Record(_) => Ok(VecElemKind::I32),
         Type::Var(_) => Ok(VecElemKind::I32),
         Type::Function(_, _) => Ok(VecElemKind::I32),
     }
@@ -1187,6 +1195,7 @@ fn is_special_word(w: &str) -> bool {
             | "if"
             | "match"
             | "enum"
+            | "record"
             | "sig"
             | "vector"
             | "string"
@@ -1353,6 +1362,9 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     }
                     return;
                 }
+                if op == "record" {
+                    return;
+                }
                 if op == "match" {
                     if let Some(value) = items.get(1) {
                         collect_refs(value, bound, out);
@@ -1396,6 +1408,37 @@ fn collect_enum_variant_words(node: &TypedExpression, out: &mut HashSet<String>)
     }
 }
 
+/// Record constructors and accessors are compiler-provided names, like enum
+/// variants. They have inferred function types but no runtime closure to
+/// capture when used inside a lambda.
+fn collect_record_generated_words(node: &TypedExpression, out: &mut HashSet<String>) {
+    if let (Expression::Word(word), Some(typ)) = (&node.expr, &node.typ) {
+        let mut current = typ;
+        while let Type::Function(_, result) = current {
+            current = result;
+        }
+        if let Type::Record(record) = current {
+            if word == &record.name {
+                out.insert(word.clone());
+            }
+        }
+        if let Type::Function(input, _) = typ {
+            if let Type::Record(record) = input.as_ref() {
+                if record
+                    .fields
+                    .iter()
+                    .any(|field| word == &format!("{}/{}", record.name, field.name))
+                {
+                    out.insert(word.clone());
+                }
+            }
+        }
+    }
+    for child in &node.children {
+        collect_record_generated_words(child, out);
+    }
+}
+
 fn lambda_free_names(node: &TypedExpression) -> HashSet<String> {
     let items = match &node.expr {
         Expression::Apply(xs) => xs,
@@ -1418,6 +1461,9 @@ fn lambda_free_names(node: &TypedExpression) -> HashSet<String> {
     let mut enum_variants = HashSet::new();
     collect_enum_variant_words(node, &mut enum_variants);
     refs.retain(|name| !enum_variants.contains(name));
+    let mut record_generated = HashSet::new();
+    collect_record_generated_words(node, &mut record_generated);
+    refs.retain(|name| !record_generated.contains(name));
     refs
 }
 
@@ -1845,6 +1891,18 @@ fn closure_capture_roots(node: &TypedExpression, env: &RcCycleCheckEnv) -> Optio
                 }
                 if let Some(captured) = env.closure_captures.get(&cap) {
                     roots.extend(captured.iter().cloned());
+                }
+            }
+            Some(roots)
+        }
+        // A record owns every managed field.  Propagating closure captures
+        // through construction lets the existing storage-cycle check reject
+        // `vector -> record -> closure -> vector` cycles too.
+        Expression::Apply(_) if matches!(node.typ.as_ref(), Some(Type::Record(_))) => {
+            let mut roots = HashSet::new();
+            for field in node.children.iter().skip(1) {
+                if let Some(captures) = closure_capture_roots(field, env) {
+                    roots.extend(captures);
                 }
             }
             Some(roots)
@@ -2842,6 +2900,8 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $data i32)
     (local $v i32)
+    (local $ref_map i32)
+    (local $ref_word i32)
     local.get $ptr
     i32.eqz
     if
@@ -2889,6 +2949,86 @@ fn emit_vector_runtime(
       local.set $backing
       local.get $backing
       call $rc_release
+      drop
+      local.get $ptr
+      call $free
+      drop
+      i32.const 0
+      return
+    end
+    ;; Records use the normal vector header for their reference count and
+    ;; field storage, plus a per-field reference bitmap at offset 24.  Unlike
+    ;; a vector, adjacent record fields may mix scalar and managed values.
+    local.get $magic
+    i32.const 1447380019
+    i32.eq
+    if
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      local.set $data
+      local.get $ptr
+      i32.const 24
+      i32.add
+      i32.load
+      local.set $ref_map
+      local.get $ptr
+      i32.load
+      local.set $len
+      local.get $ref_map
+      i32.eqz
+      if
+      else
+        i32.const 0
+        local.set $i
+        block $record_done
+          loop $record_fields
+            local.get $i
+            local.get $len
+            i32.ge_s
+            br_if $record_done
+            local.get $ref_map
+            local.get $i
+            i32.const 5
+            i32.shr_u
+            i32.const 4
+            i32.mul
+            i32.add
+            i32.load
+            local.set $ref_word
+            local.get $ref_word
+            i32.const 1
+            local.get $i
+            i32.const 31
+            i32.and
+            i32.shl
+            i32.and
+            i32.eqz
+            if
+            else
+              local.get $data
+              local.get $i
+              i32.const 4
+              i32.mul
+              i32.add
+              i32.load
+              call $rc_release
+              drop
+            end
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            br $record_fields
+          end
+        end
+        local.get $ref_map
+        call $free
+        drop
+      end
+      local.get $data
+      call $free
       drop
       local.get $ptr
       call $free
@@ -3600,6 +3740,55 @@ fn emit_vector_runtime(
       return
     end
     local.get $magic
+    i32.const 1447380019
+    i32.eq
+    if
+      local.get $rc
+      i32.const 0
+      i32.le_s
+      if
+        i32.const 0
+        return
+      end
+      local.get $len
+      i32.const 0
+      i32.lt_s
+      if
+        i32.const 0
+        return
+      end
+      local.get $cap
+      local.get $len
+      i32.ne
+      if
+        i32.const 0
+        return
+      end
+      local.get $elem_ref
+      i32.const 2
+      i32.ne
+      if
+        i32.const 0
+        return
+      end
+      local.get $data
+      i32.const 65536
+      i32.lt_u
+      if
+        i32.const 0
+        return
+      end
+      local.get $data
+      local.get $mem_end
+      i32.ge_u
+      if
+        i32.const 0
+        return
+      end
+      i32.const 1
+      return
+    end
+    local.get $magic
     i32.const 1447380017
     i32.ne
     if
@@ -4079,6 +4268,69 @@ fn emit_vector_runtime(
     i32.const 20
     i32.add
     i32.const 1447380017
+    i32.store
+    local.get $ptr
+  )
+
+  ;; A record is a fixed-size vector with a per-field ownership bitmap.  This
+  ;; lets `{ Int [Char] Bool }` use one compact allocation while releasing
+  ;; only the managed fields when its final reference goes away.
+  (func $record_new_i32 (param $len i32) (param $ref_words i32) (result i32)
+    (local $ptr i32)
+    (local $data i32)
+    (local $ref_map i32)
+    i32.const 28
+    call $alloc
+    local.set $ptr
+    local.get $len
+    i32.const 4
+    i32.mul
+    call $alloc
+    local.set $data
+    local.get $ref_words
+    i32.eqz
+    if
+      i32.const 0
+      local.set $ref_map
+    else
+      local.get $ref_words
+      i32.const 4
+      i32.mul
+      call $alloc
+      local.set $ref_map
+    end
+    local.get $ptr
+    local.get $len
+    i32.store
+    local.get $ptr
+    i32.const 4
+    i32.add
+    local.get $len
+    i32.store
+    local.get $ptr
+    i32.const 8
+    i32.add
+    i32.const 1
+    i32.store
+    local.get $ptr
+    i32.const 12
+    i32.add
+    i32.const 2
+    i32.store
+    local.get $ptr
+    i32.const 16
+    i32.add
+    local.get $data
+    i32.store
+    local.get $ptr
+    i32.const 20
+    i32.add
+    i32.const 1447380019
+    i32.store
+    local.get $ptr
+    i32.const 24
+    i32.add
+    local.get $ref_map
     i32.store
     local.get $ptr
   )
@@ -7631,7 +7883,7 @@ fn compile_table_key_hash(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
             "$table_key_hash_scalar"
         }
         Some(Type::Var(_)) | None => "$table_key_hash_dynamic",
-        Some(Type::Tuple(_)) | Some(Type::Function(_, _)) => {
+        Some(Type::Tuple(_)) | Some(Type::Record(_)) | Some(Type::Function(_, _)) => {
             return Err(
                 "Table keys must be scalar values, enum values, or vectors; tuple and function keys are not supported"
                     .to_string(),
@@ -7658,7 +7910,7 @@ fn compile_table_key_equal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
             "i32.eq"
         }
         Some(Type::Var(_)) | None => "call $table_key_equal_dynamic",
-        Some(Type::Tuple(_)) | Some(Type::Function(_, _)) => {
+        Some(Type::Tuple(_)) | Some(Type::Record(_)) | Some(Type::Function(_, _)) => {
             return Err(
                 "Table keys must be scalar values, enum values, or vectors; tuple and function keys are not supported"
                     .to_string(),
@@ -10546,6 +10798,301 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
          local.get {out_tmp}"
     ));
     Ok(out.join("\n"))
+}
+
+fn record_constructor_type(node: &TypedExpression) -> Option<&crate::types::RecordType> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let Expression::Word(name) = items.first()? else {
+        return None;
+    };
+    let Type::Record(record) = node.typ.as_ref()? else {
+        return None;
+    };
+    (name == &record.name).then_some(record.as_ref())
+}
+
+fn record_accessor_index(node: &TypedExpression) -> Option<usize> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let Expression::Word(accessor) = items.first()? else {
+        return None;
+    };
+    if items.len() != 2 {
+        return None;
+    }
+    let Type::Function(input, _) = node.children.first()?.typ.as_ref()? else {
+        return None;
+    };
+    let Type::Record(record) = input.as_ref() else {
+        return None;
+    };
+    let field_name = accessor.strip_prefix(&format!("{}/", record.name))?;
+    record
+        .fields
+        .iter()
+        .position(|field| field.name == field_name)
+}
+
+/// Collect the nominal record declarations reachable from a typed program.
+/// Generated record functions are emitted as ordinary first-class functions,
+/// so this deliberately follows field types as well as expression types.
+fn collect_record_types_from_type(
+    typ: &Type,
+    out: &mut BTreeMap<String, Arc<crate::types::RecordType>>,
+) {
+    match typ {
+        Type::Record(record) => {
+            if out.insert(record.name.clone(), record.clone()).is_none() {
+                for field in &record.fields {
+                    collect_record_types_from_type(&field.typ, out);
+                }
+            }
+        }
+        Type::List(inner) => collect_record_types_from_type(inner, out),
+        Type::Tuple(parts) => {
+            for part in parts {
+                collect_record_types_from_type(part, out);
+            }
+        }
+        Type::Function(input, result) => {
+            collect_record_types_from_type(input, out);
+            collect_record_types_from_type(result, out);
+        }
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit | Type::Enum(_) | Type::Var(_) => {}
+    }
+}
+
+fn collect_record_types(
+    node: &TypedExpression,
+    out: &mut BTreeMap<String, Arc<crate::types::RecordType>>,
+) {
+    if let Some(typ) = &node.typ {
+        collect_record_types_from_type(typ, out);
+    }
+    for child in &node.children {
+        collect_record_types(child, out);
+    }
+}
+
+fn record_constructor_signature(record: &crate::types::RecordType) -> (Vec<Type>, Type) {
+    (
+        record.fields.iter().map(|field| field.typ.clone()).collect(),
+        Type::Record(Arc::new(record.clone())),
+    )
+}
+
+fn record_accessor_signature(field: &crate::types::RecordField, record: &crate::types::RecordType) -> (Vec<Type>, Type) {
+    (vec![Type::Record(Arc::new(record.clone()))], field.typ.clone())
+}
+
+fn record_ref_bitmap_words(record: &crate::types::RecordType) -> Vec<u32> {
+    let mut words = vec![0_u32; record.fields.len().div_ceil(32)];
+    for (index, field) in record.fields.iter().enumerate() {
+        if is_ref_type(&field.typ) {
+            words[index / 32] |= 1_u32 << (index % 32);
+        }
+    }
+    while words.last().is_some_and(|word| *word == 0) {
+        words.pop();
+    }
+    words
+}
+
+fn emit_record_ref_map_initialization(
+    record: &crate::types::RecordType,
+    record_tmp: usize,
+) -> Vec<String> {
+    record_ref_bitmap_words(record)
+        .into_iter()
+        .enumerate()
+        .map(|(index, word)| {
+            format!(
+                "local.get {record_tmp}\n\
+                 i32.const 24\n\
+                 i32.add\n\
+                 i32.load\n\
+                 i32.const {}\n\
+                 i32.add\n\
+                 i32.const {}\n\
+                 i32.store",
+                index * 4,
+                word as i32
+            )
+        })
+        .collect()
+}
+
+fn compile_record_constructor(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let record = record_constructor_type(node)
+        .ok_or_else(|| "internal error: expected record constructor".to_string())?;
+    if node.children.len() != record.fields.len() + 1 {
+        return Err(format!(
+            "record '{}' constructor expected {} fields",
+            record.name,
+            record.fields.len()
+        ));
+    }
+    let out_tmp = ctx.tmp_i32;
+    let value_tmp = ctx.tmp_i32 + 1;
+    let data_tmp = ctx.tmp_i32 + 2;
+    let nested_ctx = Ctx {
+        tmp_i32: ctx.tmp_i32 + 3,
+        ..ctx.clone()
+    };
+    let ref_words = record_ref_bitmap_words(record);
+    let mut out = vec![format!(
+        "i32.const {}\n\
+         i32.const {}\n\
+         call $record_new_i32\n\
+         local.set {out_tmp}",
+        record.fields.len(),
+        ref_words.len(),
+    )];
+    out.extend(emit_record_ref_map_initialization(record, out_tmp));
+    out.push(format!(
+        "local.get {out_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         local.set {data_tmp}"
+    ));
+    for (index, child) in node.children.iter().skip(1).enumerate() {
+        let value = compile_expr(child, &nested_ctx)?;
+        out.push(format!("{value}\nlocal.set {value_tmp}"));
+        if child.typ.as_ref().is_some_and(is_managed_local_type)
+            && !should_release_set_rhs(child, ctx.lambda_bindings)
+        {
+            let retain = rc_retain_for_type(
+                child
+                    .typ
+                    .as_ref()
+                    .expect("managed record field type"),
+            );
+            out.push(format!("local.get {value_tmp}\ncall {retain}\ndrop"));
+        }
+        out.push(format!(
+            "local.get {data_tmp}\n\
+             i32.const {}\n\
+             i32.add\n\
+             local.get {value_tmp}\n\
+             i32.store",
+            index * 4
+        ));
+    }
+    out.push(format!("local.get {out_tmp}"));
+    Ok(out.join("\n"))
+}
+
+fn compile_record_accessor(node: &TypedExpression, field_index: usize, ctx: &Ctx<'_>) -> Result<String, String> {
+    let input = node
+        .children
+        .get(1)
+        .ok_or_else(|| "record accessor missing record value".to_string())?;
+    let record = compile_expr(
+        input,
+        &Ctx {
+            tmp_i32: ctx.tmp_i32 + 2,
+            ..ctx.clone()
+        },
+    )?;
+    let record_tmp = ctx.tmp_i32;
+    let value_tmp = ctx.tmp_i32 + 1;
+    let field_type = node
+        .typ
+        .as_ref()
+        .ok_or_else(|| "record accessor missing result type".to_string())?;
+    let mut out = vec![format!(
+        "{record}\n\
+         local.set {record_tmp}\n\
+         local.get {record_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         i32.const {}\n\
+         i32.add\n\
+         i32.load\n\
+         local.set {value_tmp}",
+        field_index * 4
+    )];
+    if is_managed_local_type(field_type) {
+        out.push(format!(
+            "local.get {value_tmp}\ncall {}\ndrop",
+            rc_retain_for_type(field_type)
+        ));
+    }
+    if should_release_set_rhs(input, ctx.lambda_bindings) {
+        let release = rc_release_for_opt_type(input.typ.as_ref());
+        out.push(format!("local.get {record_tmp}\ncall {release}\ndrop"));
+    }
+    out.push(format!("local.get {value_tmp}"));
+    Ok(out.join("\n"))
+}
+
+/// Emit the function behind a record constructor when it escapes as a value
+/// (or is partially applied).  Direct, saturated construction has a smaller
+/// lowering above; this version has normal borrowed-function argument
+/// semantics, so managed arguments are retained for the newly-created record.
+fn compile_record_constructor_func(record: &crate::types::RecordType) -> String {
+    let ref_words = record_ref_bitmap_words(record);
+    let mut out = String::new();
+    out.push_str(&format!("  (func ${}", ident(&record.name)));
+    for _ in &record.fields {
+        out.push_str(" (param i32)");
+    }
+    out.push_str(" (result i32)\n    (local $out i32) (local $data i32)\n");
+    out.push_str(&format!(
+        "    i32.const {}\n    i32.const {}\n    call $record_new_i32\n    local.set $out\n",
+        record.fields.len(),
+        ref_words.len()
+    ));
+    for (index, word) in ref_words.iter().enumerate() {
+        out.push_str(&format!(
+            "    local.get $out\n    i32.const 24\n    i32.add\n    i32.load\n    i32.const {}\n    i32.add\n    i32.const {}\n    i32.store\n",
+            index * 4,
+            *word as i32
+        ));
+    }
+    out.push_str("    local.get $out\n    i32.const 16\n    i32.add\n    i32.load\n    local.set $data\n");
+    for (index, field) in record.fields.iter().enumerate() {
+        if is_ref_type(&field.typ) {
+            out.push_str(&format!(
+                "    local.get {}\n    call {}\n    drop\n",
+                index,
+                rc_retain_for_type(&field.typ)
+            ));
+        }
+        out.push_str(&format!(
+            "    local.get $data\n    i32.const {}\n    i32.add\n    local.get {}\n    i32.store\n",
+            index * 4,
+            index
+        ));
+    }
+    out.push_str("    local.get $out\n  )\n");
+    out
+}
+
+/// Emit the function behind a record accessor when it is used as a value.
+/// Returning a managed field creates an independent owned result, just like
+/// the direct accessor lowering.
+fn compile_record_accessor_func(record: &crate::types::RecordType, field_index: usize) -> String {
+    let field = &record.fields[field_index];
+    let name = format!("{}/{}", record.name, field.name);
+    let mut out = format!(
+        "  (func ${} (param $record i32) (result i32)\n    (local $value i32)\n    local.get $record\n    i32.const 16\n    i32.add\n    i32.load\n    i32.const {}\n    i32.add\n    i32.load\n    local.set $value\n",
+        ident(&name),
+        field_index * 4
+    );
+    if is_ref_type(&field.typ) {
+        out.push_str(&format!(
+            "    local.get $value\n    call {}\n    drop\n",
+            rc_retain_for_type(&field.typ)
+        ));
+    }
+    out.push_str("    local.get $value\n  )\n");
+    out
 }
 
 fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -13787,6 +14334,28 @@ fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<Str
             }
             format!("{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $data i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    local.get $out i32.const 123 call $vec_push_i32 drop\n    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n{fields}    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $out i32.const 125 call $vec_push_i32 drop\n    local.get $out)\n")
         }
+        Type::Record(record) => {
+            let mut nested = String::new();
+            for field in &record.fields {
+                nested.push_str(&emit_wasi_serializer(&field.typ, emitted)?);
+            }
+            let mut fields = String::new();
+            for (index, field) in record.fields.iter().enumerate() {
+                fields.push_str(&format!(
+                    "    {}\n    local.get $data i32.const {} i32.add i32.load call $__wasi_serialize_{} local.set $tmp\n    local.get $out local.get $tmp call $__serde_append\n    local.get $tmp call $rc_release_vec drop\n",
+                    wasi_append_literal("$out", &format!("{} ", field.name)).replace('\n', "\n    "),
+                    index * 4,
+                    wasi_serde_name(&field.typ)
+                ));
+                if index + 1 < record.fields.len() {
+                    fields.push_str("    local.get $out i32.const 32 call $vec_push_i32 drop\n");
+                }
+            }
+            format!(
+                "{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $data i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    {}\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n{fields}    local.get $out i32.const 125 call $vec_push_i32 drop\n    local.get $out)\n",
+                wasi_append_literal("$out", &format!("{}{{ ", record.name)).replace('\n', "\n    ")
+            )
+        }
         Type::Enum(enum_type) => {
             // Enums are compact i32 tags at runtime, but values crossing the
             // WASI boundary should remain readable Calque data.  Print the
@@ -13930,6 +14499,36 @@ fn emit_wasi_deserializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<S
                 if is_ref_type(part) { fields.push_str("    local.get $item call $rc_release drop\n"); }
             }
             format!("{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $item i32)\n    i32.const 123 call $__deser_expect\n    i32.const 0 i32.const 1 call $vec_new_i32 local.set $out\n{fields}    i32.const 125 call $__deser_expect\n    local.get $out)\n")
+        }
+        Type::Record(record) => {
+            let mut nested = String::new();
+            for field in &record.fields {
+                nested.push_str(&emit_wasi_deserializer(&field.typ, emitted)?);
+            }
+            let ref_words = record_ref_bitmap_words(record);
+            let mut ref_map = String::new();
+            for (index, word) in ref_words.iter().enumerate() {
+                ref_map.push_str(&format!(
+                    "    local.get $out i32.const 24 i32.add i32.load i32.const {} i32.add i32.const {} i32.store\n",
+                    index * 4,
+                    *word as i32
+                ));
+            }
+            let mut fields = String::new();
+            for (index, field) in record.fields.iter().enumerate() {
+                fields.push_str(&format!(
+                    "    {}    call $__wasi_deserialize_{} local.set $item\n    local.get $data i32.const {} i32.add local.get $item i32.store\n",
+                    wasi_expect_literal(&format!("{} ", field.name)).replace('\n', "\n    "),
+                    wasi_serde_name(&field.typ),
+                    index * 4,
+                ));
+            }
+            format!(
+                "{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $data i32) (local $item i32)\n    {}    i32.const {} i32.const {} call $record_new_i32 local.set $out\n{ref_map}    local.get $out i32.const 16 i32.add i32.load local.set $data\n{fields}    i32.const 125 call $__deser_expect\n    local.get $out)\n",
+                wasi_expect_literal(&format!("{}{{ ", record.name)).replace('\n', "\n    "),
+                record.fields.len(),
+                ref_words.len(),
+            )
         }
         Type::Enum(enum_type) => {
             let body = emit_wasi_enum_deserializer(&enum_type.variants);
@@ -14348,7 +14947,18 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
         .children
         .first()
         .ok_or_else(|| "call missing function".to_string())?;
-    let f = compile_expr(f_node, ctx)?;
+    // A partial dynamic call allocates its closure in `ctx.tmp_i32`.  The
+    // function expression may itself need scratch storage (for example an
+    // accessor applied to a cached top-level record), so reserve the closure
+    // and transfer scratch slots before compiling it.  Otherwise evaluating
+    // that expression can overwrite the newly allocated partial closure.
+    let f = compile_expr(
+        f_node,
+        &Ctx {
+            tmp_i32: ctx.tmp_i32 + 2,
+            ..ctx.clone()
+        },
+    )?;
     let args = &node.children[1..];
     let head_ty = f_node
         .typ
@@ -14684,6 +15294,16 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 compile_call(node, op_full, ctx)
                             }
                         }
+                        _ if record_constructor_type(node).is_some() => {
+                            compile_record_constructor(node, ctx)
+                        }
+                        _ if record_accessor_index(node).is_some() => {
+                            compile_record_accessor(
+                                node,
+                                record_accessor_index(node).expect("record accessor was checked"),
+                                ctx,
+                            )
+                        }
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
@@ -14744,7 +15364,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(emit_direct_builder_scalar_store_i32(&xs, &idx, &value, ctx))
                         }
-                        "extern" | "sig" | "enum" => Ok("i32.const 0".to_string()),
+                        "extern" | "sig" | "enum" | "record" => Ok("i32.const 0".to_string()),
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
                         }
@@ -16637,6 +17257,22 @@ fn compile_program_to_wat_build_typed_with_opts(
             top_level_lambda_key_to_name.insert(def.node.expr.to_lisp(), name.clone());
         }
     }
+    // A record declaration introduces ordinary callable constructor/accessor
+    // values as well as the direct construction/access lowering.  Register
+    // their signatures before function IDs and partial-application helpers
+    // are computed, so `(let make Point)`, `(Point 1)`, and `(map Point xs)`
+    // follow exactly the same first-class path as user functions.
+    let mut record_types = BTreeMap::new();
+    collect_record_types(typed_ast, &mut record_types);
+    for record in record_types.values() {
+        fn_sigs.insert(record.name.clone(), record_constructor_signature(record));
+        for field in &record.fields {
+            fn_sigs.insert(
+                format!("{}/{}", record.name, field.name),
+                record_accessor_signature(field, record),
+            );
+        }
+    }
     for extern_decl in used_extern_defs.values() {
         let (mut ps, ret) = function_parts(&extern_decl.typ);
         if ps.len() == 1 && matches!(ps[0], Type::Unit) {
@@ -16912,6 +17548,13 @@ fn compile_program_to_wat_build_typed_with_opts(
             .then(|| name.clone())
         })
         .collect::<HashSet<_>>();
+
+    for record in record_types.values() {
+        emitted_funcs.push(compile_record_constructor_func(record));
+        for (field_index, _) in record.fields.iter().enumerate() {
+            emitted_funcs.push(compile_record_accessor_func(record, field_index));
+        }
+    }
 
     for (name, def) in &top_defs {
         if partial_helpers.iter().any(|h| h.binding_name == *name) {

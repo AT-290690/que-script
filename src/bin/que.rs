@@ -9,6 +9,7 @@ const LEARN: &str = r#"Calque quick reference
 Bindings: (let x value), (mut x value), (alter! x value), (letrec f (lambda ...))
 Functions: (lambda (a b) body...), called as (f a b); extra body forms are sequenced.
 Data: vectors [1 2 3], tuples {a b}, strings "text", characters 'x'.
+Records: (record Point x Int y Int); construct with (Point 1 2), access with (Point/x point).
 Control: (if test yes no), (cond test value ... default), (while test body...), (loop i test body...).
 Mutation: (get i xs), (push! x xs), (set! i x xs), (pop! xs), (empty! xs), (capacity! n xs), (&mut cell), (&alter! cell value).
 Pipelines pass data last: (|> xs (map f) (select pred)).

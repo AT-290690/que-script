@@ -17,6 +17,21 @@ pub struct EnumType {
     pub variants: Vec<String>,
 }
 
+/// A nominal, fixed-field product type.  Record values deliberately retain
+/// their declaration identity: `{Int Int}` is not interchangeable with a
+/// `Point`, even when their fields happen to have the same types.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordType {
+    pub name: String,
+    pub fields: Vec<RecordField>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordField {
+    pub name: String,
+    pub typ: Type,
+}
+
 impl TypeVar {
     pub fn new(id: u64) -> Self {
         TypeVar { id }
@@ -37,6 +52,7 @@ pub enum Type {
     Bool,
     Char,
     Enum(Arc<EnumType>),
+    Record(Arc<RecordType>),
     Function(Box<Type>, Box<Type>),
     List(Box<Type>),
     Unit,
@@ -53,6 +69,7 @@ impl fmt::Display for Type {
             Type::Bool => write!(f, "Bool"),
             Type::Char => write!(f, "Char"),
             Type::Enum(enum_type) => write!(f, "{}", enum_type.name),
+            Type::Record(record_type) => write!(f, "{}", record_type.name),
             Type::Function(from, to) => match **from {
                 Type::Function(_, _) => write!(f, "({}) -> {}", from, to),
                 _ => write!(f, "{} -> {}", from, to),
@@ -176,6 +193,7 @@ impl Type {
             | Type::Bool
             | Type::Char
             | Type::Enum(_)
+            | Type::Record(_)
             | Type::Unit => {
                 self.clone()
             }
@@ -213,6 +231,7 @@ impl Type {
             | Type::Bool
             | Type::Char
             | Type::Enum(_)
+            | Type::Record(_)
             | Type::Unit => {}
             Type::Var(v) => {
                 vars.insert(v.id);

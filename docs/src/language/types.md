@@ -15,7 +15,7 @@ annotation; incompatible uses are errors before Wasm generation.
 | `[T]` | vector of values of type `T` |
 | `{A B}` | ordered tuple |
 | `A -> B` | function from `A` to `B` |
-| `Name` | a declared enum type |
+| `Name` | a declared enum or record type |
 
 Strings are `[Char]`. This makes string operations ordinary vector-oriented
 operations at the language level; it does **not** mean strings are a packed
@@ -27,6 +27,76 @@ UTF-8 byte array in the current runtime representation.
 (let title "Calque")       ; [Char]
 (let pair {count title})   ; {Int [Char]}
 ```
+
+## Records
+
+`record` declares a named, nominal fixed-field product type. Unlike a tuple,
+a record carries its declared identity: a raw `{Int Int}` tuple cannot be used
+where a `Point` is required, even if its elements have the same types.
+
+```que
+(record Point x Int y Int)
+
+(let origin (Point 0 0))
+(Point/x origin) ; 0
+(Point/y origin) ; 0
+```
+
+Destructure by naming the record and its fields. The compiler expands this to
+the generated accessors, then checks that the value really is that record:
+
+```que
+(let (Point x y) origin)
+(+ x y) ; 0
+```
+
+Use `_` to skip a field: `(let (Point x _) origin)`.
+
+The declaration syntax is flat: `(record Name field Type ...)`. It creates a
+constructor named `Name` and a typed accessor for every field, named
+`Name/field`. Fields may use any concrete Calque type, including strings,
+vectors, tuples, other already-declared records, and functions. Records work
+in vectors and functions:
+
+```que
+(record Message title [Char] tags [[Char]] count Int)
+(let message (Message "Calque" ["typed" "lisp"] 2))
+(Message/title message) ; "Calque"
+```
+
+Constructors and accessors are ordinary first-class, curried functions. They
+can be assigned, partially applied, or stored in collections:
+
+```que
+(record Point x Int y Int)
+(let make Point)
+(let make-x (make 4))
+(let get-x Point/x)
+(get-x (make-x 9)) ; 4
+```
+
+A record owns its managed fields. The runtime retains vector, tuple, record,
+and function fields on construction when necessary and releases them when the
+record's final reference is gone. Known ownership cycles involving a closure
+stored through a record are rejected by the same compile-time RC-cycle check
+used for vectors.
+
+Records are nominal now; their future packed `Vector<Record>` representation
+is a separate storage optimization. Do not rely on the current implementation
+layout as an FFI ABI.
+
+Records serialize with their type and field names, and can be deserialized
+when a `sig` supplies the expected record type:
+
+```que
+(record Point x Int y Int)
+(let saved (serialize (Point 3 4)))
+(sig restored Point)
+(let restored (deserialize saved))
+```
+
+Deserialization is strict: missing or malformed numeric fields trap instead of
+silently becoming `0`.
 
 ## Numeric types
 
@@ -77,7 +147,7 @@ diagnostic:
 
 ```text
 τ ::= Int | Dec | Bool | Char | () | α
-    | [τ] | {τ τ} | τ -> τ | EnumName
+    | [τ] | {τ τ} | τ -> τ | EnumName | RecordName
 
 σ ::= ∀α₁ … αₙ. τ
 Γ ⊢ e : τ
@@ -156,6 +226,10 @@ belong to that one named type. Its compact runtime `i32` tag does not make it
 an `Int` at the language level. `=~` requires both operands to have the same
 enum type, and `match` checks coverage of that closed variant set. See [Enums
 and matching](enums.md).
+
+**Records are nominal product types.** A record declaration fixes both its
+field names and field order. The type checker never treats a tuple with the
+same field types as that record, which prevents accidental field-order bugs.
 
 ### Mutation and the value restriction
 

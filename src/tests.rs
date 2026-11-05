@@ -136,6 +136,202 @@ xs)"#,
     }
 
     #[test]
+    fn test_record_is_nominal_and_supports_typed_construction_and_access() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let point (Point 3 4))
+            (+ (Point/x point) (Point/y point)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+
+        let raw_tuple = crate::parser::parse(
+            "(do (record Point x Int y Int) (Point/x (tuple 3 4)))",
+        )
+        .expect("record mismatch program should parse");
+        let err = crate::infer::infer_with_builtins_typed(
+            raw_tuple.first().expect("program should have a root expression"),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("a raw tuple must not be accepted as a nominal record");
+        assert!(err.contains("expected Point but got {Int Int}"), "{err}");
+    }
+
+    #[test]
+    fn test_record_cannot_shadow_a_builtin_type_name() {
+        let exprs = crate::parser::parse("(record Int value Int)").expect("record should parse");
+        let err = crate::infer::infer_with_builtins_typed(
+            exprs.first().expect("program should have a root expression"),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("record must not shadow Int");
+        assert!(err.contains("record 'Int' conflicts with the built-in type name"), "{err}");
+    }
+
+    #[test]
+    fn test_record_constructor_and_accessor_work_in_lambdas_and_vectors() {
+        let source = r#"(do
+            (record Node hash Int value Int left Int right Int)
+            (let make (lambda (x) (Node x (+ x 1) -1 -1)))
+            (let nodes [(make 3) (make 8)])
+            (let node (get 1 nodes))
+            (+ (Node/hash node) (Node/value node)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "17");
+    }
+
+    #[test]
+    fn test_record_constructor_and_accessor_are_first_class_and_curried() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (record Factory make (Int -> Int -> Point))
+            (let make Point)
+            (let get-x Point/x)
+            (let make-x (make 4))
+            (let makers [Point])
+            (let accessors [get-x])
+            (let factory (Factory Point))
+            (+ ((get 0 accessors) (make-x 9))
+               (Point/y ((get 0 makers) 3 8))
+               (Point/x ((Factory/make factory) 2 7))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "14");
+    }
+
+    #[test]
+    fn test_record_destructuring_uses_declared_field_accessors() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let point (Point 3 4))
+            (let (Point x y) point)
+            (+ x y))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+    }
+
+    #[test]
+    fn test_record_owns_mixed_scalar_and_managed_fields() {
+        let source = r#"(do
+            (record Message title [Char] tags [[Char]] count Int)
+            (let title "calque")
+            (let message (Message title ["typed" "lisp"] 2))
+            (+ (length (Message/title message))
+               (length (get 0 (Message/tags message)))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "11");
+    }
+
+    #[test]
+    fn test_record_managed_field_accessor_survives_temporary_owner_cleanup() {
+        let source = r#"(do
+            (record Label text [Char])
+            (let labels [(Label "first") (Label "second")])
+            (Label/text (get 1 labels)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "second");
+    }
+
+    #[test]
+    fn test_record_can_own_function_field() {
+        let source = r#"(do
+            (record Callback run (Int -> Int))
+            (let callback (Callback (lambda (x) (+ x 1))))
+            ((Callback/run callback) 4))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "5");
+    }
+
+    #[test]
+    fn test_record_closure_field_cannot_form_a_managed_cycle() {
+        let program = r#"(do
+            (record Holder callback (Int -> Int))
+            (let xs [])
+            (let callback (lambda (n) (length xs)))
+            (push! (Holder callback) xs)
+            0)"#;
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) => {
+                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std")
+            }
+            _ => panic!("std ast should be (do ...)"),
+        };
+        let err = crate::wat::compile_program_to_wat(&wrapped)
+            .expect_err("record-mediated RC cycle should fail at compile time");
+        assert!(
+            err.contains("compile-time RC cycle check") && err.contains("set!"),
+            "expected record-mediated RC cycle error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_record_names_are_available_in_signatures() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (sig shift (Point -> Point))
+            (let shift (lambda (point) (Point (+ (Point/x point) 1) (Point/y point))))
+            (shift (Point 4 9)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "Point{ x 5 y 9}"
+        );
+    }
+
+    #[test]
+    fn test_record_serialization_round_trip() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let saved (serialize (Point 3 4)))
+            (sig restored Point)
+            (let restored (deserialize saved))
+            (+ (Point/x restored) (Point/y restored)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+    }
+
+    #[test]
+    fn test_record_managed_field_serialization_round_trip() {
+        let source = r#"(do
+            (record Person name [Char] tags [[Char]])
+            (let saved (serialize (Person "Ada" ["math" "logic"])))
+            (sig restored Person)
+            (let restored (deserialize saved))
+            (+ (length (Person/name restored))
+               (length (get 1 (Person/tags restored)))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "8");
+    }
+
+    #[test]
+    fn test_wasi_deserialize_rejects_missing_record_integer_fields() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (sig point Point)
+            (let point (deserialize "Point{ x  y }"))
+            (Point/x point))"#;
+        let error = run_program_error_with_debug_guards(source);
+        assert!(
+            !error.is_empty(),
+            "missing integer field must trap rather than deserialize as zero"
+        );
+    }
+
+    #[test]
+    fn test_wasi_deserialize_rejects_an_empty_decimal() {
+        let source = r#"(do
+            (sig value Dec)
+            (let value (deserialize ""))
+            value)"#;
+        let error = run_program_error_with_debug_guards(source);
+        assert!(
+            !error.is_empty(),
+            "an empty decimal must trap rather than deserialize as zero"
+        );
+    }
+
+    #[test]
     fn test_enum_match_runtime_and_optimizer_agree() {
         let source = r#"(do
             (enum Letter A B C)

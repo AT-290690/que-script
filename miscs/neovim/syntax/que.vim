@@ -13,7 +13,7 @@ syn match queNumber /\v<[-+]?\d+(\.\d+)?>/
 
 " --- Keywords (Control Flow & Structure) ---
 syn keyword queKeyword
-      \ lambda comp if let letrec letmacro mut do block while enum match
+      \ lambda comp if let letrec letmacro mut do block while enum record match
       \ cond unless when when-not loop and or not quote qq uq uqs gensym
       \ fst snd
       \ macroexpand macroexpand-1 as sig
@@ -24,7 +24,7 @@ syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(&alter!\|&mut\|alter!
 
 " Keep language forms independent of a user's 'iskeyword' setting (the Lisp
 " ftplugin may extend it) and recognise the legacy string matcher too.
-syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(enum\|match\|match\/string\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
+syn match queKeyword /\%([[:alnum:]_\/.!?&<>=+#*-]\)\@<!\%(enum\|record\|match\|match\/string\)\%([[:alnum:]_\/.!?&<>=+#*-]\)\@!/
 
 " Arithmetic operators share one highlight group, including Dec variants.
 syn match queOperator /\%([[:alnum:]_\/.!?&<>=+#*%-]\)\@<!\%(=\~\|[+*\/%-]\.\|[+*\/%-]\)\%([[:alnum:]_\/.!?&<>=+#*%-]\)\@!/

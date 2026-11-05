@@ -264,6 +264,27 @@ equality—no string conversion or allocation is involved:
 (Table/set! B 3 points)
 ```
 
+### Nominal records
+
+Use `record` for a named fixed-field product type. It is not an alias for a
+tuple: a raw tuple with the same element types is rejected where the record is
+expected.
+
+```lisp
+(record Point x Int y Int)
+(let point (Point 3 4))
+(Point/x point) ; 3
+
+(let (Point x y) point)
+(+ x y) ; 7
+```
+
+The declaration creates the constructor `Point` and accessors such as
+`Point/x`. Fields can use concrete Calque types, including strings, vectors,
+tuples, other declared records, and functions; managed fields are retained and
+released with the record. Constructors and accessors are ordinary first-class,
+curried functions, and records can be stored in vectors.
+
 ## IO and permissions
 
 IO is exposed through typed host imports and denied unless the matching
