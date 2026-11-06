@@ -414,20 +414,14 @@ fn inline_base_case_in_letrec(
     if call_count == 0 || call_count > MAX_BASE_CASE_INLINE_CALLS {
         return None;
     }
-    let expansion_cost = call_count
-        * (inline_body_cost(guard) + inline_body_cost(base) + params.len() + 3);
+    let expansion_cost =
+        call_count * (inline_body_cost(guard) + inline_body_cost(base) + params.len() + 3);
     if expansion_cost > MAX_BASE_CASE_INLINE_COST {
         return None;
     }
 
-    let rewritten_body = rewrite_direct_recursive_calls(
-        recursive_body,
-        name,
-        &params,
-        guard,
-        base,
-        state,
-    );
+    let rewritten_body =
+        rewrite_direct_recursive_calls(recursive_body, name, &params, guard, base, state);
     if rewritten_body.to_lisp() == recursive_body.to_lisp() {
         return None;
     }
@@ -446,8 +440,7 @@ fn is_base_case_scalar_expr(expr: &Expression, params: &[String]) -> bool {
     match expr {
         Expression::Int(_) | Expression::Dec(_) => true,
         Expression::Word(word) => {
-            matches!(word.as_str(), "true" | "false")
-                || params.iter().any(|param| param == word)
+            matches!(word.as_str(), "true" | "false") || params.iter().any(|param| param == word)
         }
         Expression::Apply(items) => {
             let Some(Expression::Word(op)) = items.first() else {
@@ -455,8 +448,7 @@ fn is_base_case_scalar_expr(expr: &Expression, params: &[String]) -> bool {
             };
             matches!(
                 op.as_str(),
-                "+"
-                    | "-"
+                "+" | "-"
                     | "*"
                     | "/"
                     | "%"
@@ -534,7 +526,8 @@ fn count_direct_recursive_calls(expr: &Expression, name: &str, arity: usize) -> 
     let Expression::Apply(items) = expr else {
         return 0;
     };
-    if matches!(items.first(), Some(Expression::Word(word)) if word == "lambda" || word == "letrec") {
+    if matches!(items.first(), Some(Expression::Word(word)) if word == "lambda" || word == "letrec")
+    {
         return 0;
     }
     let self_call = matches!(items.first(), Some(Expression::Word(word)) if word == name)
@@ -580,7 +573,8 @@ fn rewrite_direct_recursive_calls(
     let Expression::Apply(items) = expr else {
         return expr.clone();
     };
-    if matches!(items.first(), Some(Expression::Word(word)) if word == "lambda" || word == "letrec") {
+    if matches!(items.first(), Some(Expression::Word(word)) if word == "lambda" || word == "letrec")
+    {
         return expr.clone();
     }
     if matches!(items.first(), Some(Expression::Word(word)) if word == name)
@@ -600,7 +594,12 @@ fn rewrite_direct_recursive_calls(
         }
         let fallback_args = params
             .iter()
-            .map(|param| substitutions.get(param).expect("every parameter is substituted").clone())
+            .map(|param| {
+                substitutions
+                    .get(param)
+                    .expect("every parameter is substituted")
+                    .clone()
+            })
             .collect::<Vec<_>>();
         let mut fallback = vec![Expression::Word(name.to_string())];
         fallback.extend(fallback_args);

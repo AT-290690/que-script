@@ -13,7 +13,7 @@ avoids needless retain/release traffic.
 
 ## What is managed
 
-`Int`, `Dec`, `Bool`, `Char`, unit, and enum tags are immediate `i32` values.
+`Int`, `Dec`, `Bool`, `Char`, unit, and zero-payload enum tags are immediate `i32` values. Payload enums are boxed managed values.
 They do not allocate and do not participate in reference counting.
 
 Vectors, strings (`[Char]`), tuples containing managed values, and closures

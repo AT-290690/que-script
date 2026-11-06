@@ -111,6 +111,35 @@ xs)"#,
     }
 
     #[test]
+    fn test_payload_enum_supports_recursive_construction_and_match_bindings() {
+        let source = r#"(do
+            (enum Tree Empty (Node value Int left Tree right Tree))
+            (let tree (Node 4 (Node 2 Empty Empty) (Node 7 Empty Empty)))
+            (letrec size
+              (lambda (tree)
+                (match tree
+                  Empty 0
+                  (Node value left right) (+ 1 (+ (size left) (size right))))))
+            (size tree))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "3");
+    }
+
+    #[test]
+    fn test_payload_enum_match_requires_correct_binding_arity() {
+        let exprs = crate::parser::parse(
+            "(do (enum Maybe None (Some value Int)) (match (Some 1) None 0 (Some) 1))",
+        )
+        .unwrap();
+        let err = crate::infer::infer_with_builtins_typed(
+            exprs.first().expect("payload enum program should parse"),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("wrong match binding arity must fail");
+        assert!(err.contains("needs 1 bindings, got 0"), "{err}");
+    }
+
+    #[test]
     fn test_enum_match_requires_exhaustive_variants() {
         let exprs = crate::parser::parse("(do (enum Letter A B C) (match A A 1 B 2))").unwrap();
         let err = crate::infer::infer_with_builtins_typed(
@@ -144,12 +173,13 @@ xs)"#,
         assert_std_program_output_matches_with_and_without_optimizer(source);
         assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
 
-        let raw_tuple = crate::parser::parse(
-            "(do (record Point x Int y Int) (Point/x (tuple 3 4)))",
-        )
-        .expect("record mismatch program should parse");
+        let raw_tuple =
+            crate::parser::parse("(do (record Point x Int y Int) (Point/x (tuple 3 4)))")
+                .expect("record mismatch program should parse");
         let err = crate::infer::infer_with_builtins_typed(
-            raw_tuple.first().expect("program should have a root expression"),
+            raw_tuple
+                .first()
+                .expect("program should have a root expression"),
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
         .expect_err("a raw tuple must not be accepted as a nominal record");
@@ -160,11 +190,16 @@ xs)"#,
     fn test_record_cannot_shadow_a_builtin_type_name() {
         let exprs = crate::parser::parse("(record Int value Int)").expect("record should parse");
         let err = crate::infer::infer_with_builtins_typed(
-            exprs.first().expect("program should have a root expression"),
+            exprs
+                .first()
+                .expect("program should have a root expression"),
             crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
         )
         .expect_err("record must not shadow Int");
-        assert!(err.contains("record 'Int' conflicts with the built-in type name"), "{err}");
+        assert!(
+            err.contains("record 'Int' conflicts with the built-in type name"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -4426,8 +4461,14 @@ out"#,
       xs)))
 {(fill 4 7) (fill 3 2)}
 "#;
-        assert_eq!(run_program_output_with_std_and_opts(source, false), "{ [7 7 7 7] [2 2 2] }");
-        assert_eq!(run_program_output_with_std_and_opts(source, true), "{ [7 7 7 7] [2 2 2] }");
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, false),
+            "{ [7 7 7 7] [2 2 2] }"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ [7 7 7 7] [2 2 2] }"
+        );
 
         let expr = crate::parser::build(source).expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
@@ -9509,10 +9550,8 @@ fn"#;
               (length out))))
             (run))"#;
         let moved_expr = crate::parser::build(moved_source).expect("program should build");
-        let retained_expr =
-            crate::parser::build(retained_source).expect("program should build");
-        let ambiguous_expr =
-            crate::parser::build(ambiguous_source).expect("program should build");
+        let retained_expr = crate::parser::build(retained_source).expect("program should build");
+        let ambiguous_expr = crate::parser::build(ambiguous_source).expect("program should build");
         let moved_wat = crate::wat::compile_program_to_wat_with_opts(&moved_expr, false)
             .expect("program should compile");
         let retained_wat = crate::wat::compile_program_to_wat_with_opts(&retained_expr, false)

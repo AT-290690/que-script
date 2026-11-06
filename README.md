@@ -249,8 +249,19 @@ different enums, or an enum and an `Int`, is a type error:
 (=~ A B) ; false
 ```
 
-These first-class enums are deliberately compact: each value lowers to an
-`i32` tag. Payload variants can be added later without changing this syntax.
+These first-class zero-payload enums are deliberately compact: each value
+lowers to an `i32` tag. For recursive or data-carrying values, use a payload
+variant:
+
+```lisp
+(enum Tree Empty (Node value Int left Tree right Tree))
+(match (Node 1 Empty Empty)
+  Empty 0
+  (Node value left right) value) ; 1
+```
+
+Payload enums are boxed and RC-managed; recursive trees are allowed, while
+ownership cycles remain rejected.
 The former string-dispatch macro is available explicitly as `match/string`.
 
 Enums are also valid `Table` keys. The table keeps its normal structural

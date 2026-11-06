@@ -77,12 +77,20 @@ mod tests {
             errors[0]
         );
         assert!(
-            errors[1].message.contains("Undefined variable: missing-name"),
+            errors[1]
+                .message
+                .contains("Undefined variable: missing-name"),
             "unexpected second diagnostic: {:?}",
             errors[1]
         );
-        assert_eq!(errors[0].scope.as_ref().map(|scope| scope.user_top_form), Some(0));
-        assert_eq!(errors[1].scope.as_ref().map(|scope| scope.user_top_form), Some(2));
+        assert_eq!(
+            errors[0].scope.as_ref().map(|scope| scope.user_top_form),
+            Some(0)
+        );
+        assert_eq!(
+            errors[1].scope.as_ref().map(|scope| scope.user_top_form),
+            Some(2)
+        );
     }
 
     #[test]

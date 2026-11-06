@@ -647,19 +647,20 @@ fn is_ref_type(t: &Type) -> bool {
     matches!(
         t,
         Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Function(_, _) | Type::Var(_)
-    )
+    ) || matches!(t, Type::Enum(enum_type) if enum_type.boxed)
 }
 
 fn is_managed_local_type(t: &Type) -> bool {
     matches!(
         t,
         Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Function(_, _) | Type::Var(_)
-    )
+    ) || matches!(t, Type::Enum(enum_type) if enum_type.boxed)
 }
 
 fn rc_retain_for_type(t: &Type) -> &'static str {
     match t {
         Type::List(_) | Type::Tuple(_) | Type::Record(_) => "$rc_retain_vec",
+        Type::Enum(enum_type) if enum_type.boxed => "$rc_retain_vec",
         // A function value can be either a heap closure or a small immediate
         // function tag (builtins and generated record functions).  The
         // generic helper recognizes both; calling $closure_retain directly
@@ -673,6 +674,7 @@ fn rc_retain_for_type(t: &Type) -> &'static str {
 fn rc_release_for_type(t: &Type) -> &'static str {
     match t {
         Type::List(_) | Type::Tuple(_) | Type::Record(_) => "$rc_release_vec",
+        Type::Enum(enum_type) if enum_type.boxed => "$rc_release_vec",
         Type::Function(_, _) => "$rc_release",
         Type::Var(_) => "$rc_release",
         _ => "$rc_release",
@@ -693,6 +695,7 @@ impl RcKind {
     fn for_type(t: &Type) -> Self {
         match t {
             Type::List(_) | Type::Tuple(_) | Type::Record(_) => Self::Vector,
+            Type::Enum(enum_type) if enum_type.boxed => Self::Vector,
             Type::Function(_, _) | Type::Var(_) => Self::Dynamic,
             _ => Self::Dynamic,
         }
@@ -725,6 +728,7 @@ fn closure_store_op_for_type(t: &Type) -> &'static str {
     match t {
         Type::Function(_, _) => "closure_set_fun",
         Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Var(_) => "closure_set_ref",
+        Type::Enum(enum_type) if enum_type.boxed => "closure_set_ref",
         _ => "closure_set",
     }
 }
@@ -733,6 +737,7 @@ fn closure_store_op_for_type_wat(t: &Type) -> &'static str {
     match t {
         Type::Function(_, _) => "$closure_set_fun",
         Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Var(_) => "$closure_set_ref",
+        Type::Enum(enum_type) if enum_type.boxed => "$closure_set_ref",
         _ => "$closure_set",
     }
 }
@@ -1369,8 +1374,18 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     if let Some(value) = items.get(1) {
                         collect_refs(value, bound, out);
                     }
-                    for branch in items.iter().skip(3).step_by(2) {
-                        collect_refs(branch, bound, out);
+                    for pair in items[2..].chunks_exact(2) {
+                        let mut branch_bound = bound.clone();
+                        if let Expression::Apply(pattern) = &pair[0] {
+                            for binding in pattern.iter().skip(1) {
+                                if let Expression::Word(name) = binding {
+                                    if name != "_" {
+                                        branch_bound.insert(name.clone());
+                                    }
+                                }
+                            }
+                        }
+                        collect_refs(&pair[1], &mut branch_bound, out);
                     }
                     return;
                 }
@@ -1399,7 +1414,11 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
 /// environment.
 fn collect_enum_variant_words(node: &TypedExpression, out: &mut HashSet<String>) {
     if let (Expression::Word(word), Some(Type::Enum(enum_type))) = (&node.expr, &node.typ) {
-        if enum_type.variants.iter().any(|variant| variant == word) {
+        if enum_type
+            .variants()
+            .iter()
+            .any(|variant| variant.name == *word)
+        {
             out.insert(word.clone());
         }
     }
@@ -1439,6 +1458,23 @@ fn collect_record_generated_words(node: &TypedExpression, out: &mut HashSet<Stri
     }
 }
 
+fn collect_enum_generated_words(node: &TypedExpression, out: &mut HashSet<String>) {
+    if let (Expression::Word(word), Some(typ)) = (&node.expr, &node.typ) {
+        let mut current = typ;
+        while let Type::Function(_, result) = current {
+            current = result;
+        }
+        if let Type::Enum(enum_type) = current {
+            if enum_type.boxed && enum_type.variant(word).is_some() {
+                out.insert(word.clone());
+            }
+        }
+    }
+    for child in &node.children {
+        collect_enum_generated_words(child, out);
+    }
+}
+
 fn lambda_free_names(node: &TypedExpression) -> HashSet<String> {
     let items = match &node.expr {
         Expression::Apply(xs) => xs,
@@ -1464,6 +1500,9 @@ fn lambda_free_names(node: &TypedExpression) -> HashSet<String> {
     let mut record_generated = HashSet::new();
     collect_record_generated_words(node, &mut record_generated);
     refs.retain(|name| !record_generated.contains(name));
+    let mut enum_generated = HashSet::new();
+    collect_enum_generated_words(node, &mut enum_generated);
+    refs.retain(|name| !enum_generated.contains(name));
     refs
 }
 
@@ -1743,7 +1782,8 @@ fn collect_unique_main_lambda_keys(
         else {
             continue;
         };
-        if !matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(op)) if op == "lambda")) {
+        if !matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(op)) if op == "lambda"))
+        {
             continue;
         }
         let key = rhs.expr.to_lisp();
@@ -1898,7 +1938,10 @@ fn closure_capture_roots(node: &TypedExpression, env: &RcCycleCheckEnv) -> Optio
         // A record owns every managed field.  Propagating closure captures
         // through construction lets the existing storage-cycle check reject
         // `vector -> record -> closure -> vector` cycles too.
-        Expression::Apply(_) if matches!(node.typ.as_ref(), Some(Type::Record(_))) => {
+        Expression::Apply(_)
+            if matches!(node.typ.as_ref(), Some(Type::Record(_)))
+                || matches!(node.typ.as_ref(), Some(Type::Enum(enum_type)) if enum_type.boxed) =>
+        {
             let mut roots = HashSet::new();
             for field in node.children.iter().skip(1) {
                 if let Some(captures) = closure_capture_roots(field, env) {
@@ -4332,6 +4375,34 @@ fn emit_vector_runtime(
     i32.add
     local.get $ref_map
     i32.store
+    local.get $ptr
+  )
+
+  ;; Payload enums use the record ownership layout plus one word for their
+  ;; discriminant.  Keeping the same magic lets the ordinary RC vector path
+  ;; release their mixed managed fields through the bitmap above.
+  (func $enum_new_i32 (param $tag i32) (param $len i32) (param $ref_words i32) (result i32)
+    (local $ptr i32)
+    (local $data i32)
+    (local $ref_map i32)
+    i32.const 32
+    call $alloc
+    local.set $ptr
+    local.get $len i32.const 4 i32.mul call $alloc local.set $data
+    local.get $ref_words i32.eqz
+    if
+      i32.const 0 local.set $ref_map
+    else
+      local.get $ref_words i32.const 4 i32.mul call $alloc local.set $ref_map
+    end
+    local.get $ptr local.get $len i32.store
+    local.get $ptr i32.const 4 i32.add local.get $len i32.store
+    local.get $ptr i32.const 8 i32.add i32.const 1 i32.store
+    local.get $ptr i32.const 12 i32.add i32.const 2 i32.store
+    local.get $ptr i32.const 16 i32.add local.get $data i32.store
+    local.get $ptr i32.const 20 i32.add i32.const 1447380019 i32.store
+    local.get $ptr i32.const 24 i32.add local.get $ref_map i32.store
+    local.get $ptr i32.const 28 i32.add local.get $tag i32.store
     local.get $ptr
   )
 
@@ -7879,6 +7950,9 @@ fn compile_table_key_hash(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     let capacity_code = compile_expr(capacity, ctx)?;
     let helper = match key.typ.as_ref() {
         Some(Type::List(_)) => "$table_key_hash_vec",
+        Some(Type::Enum(enum_type)) if enum_type.boxed => {
+            return Err("payload enum values are not supported as Table keys; use a scalar key or an explicit ID".to_string());
+        }
         Some(Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit) => {
             "$table_key_hash_scalar"
         }
@@ -7906,6 +7980,9 @@ fn compile_table_key_equal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     let right_code = compile_expr(right, ctx)?;
     let helper = match left.typ.as_ref() {
         Some(Type::List(_)) => "call $table_key_equal_vec",
+        Some(Type::Enum(enum_type)) if enum_type.boxed => {
+            return Err("payload enum values are not supported as Table keys; use a scalar key or an explicit ID".to_string());
+        }
         Some(Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit) => {
             "i32.eq"
         }
@@ -7978,6 +8055,13 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         .get(2)
         .ok_or_else(|| format!("Missing rhs for {}", op))
         .and_then(|n| compile_expr(n, ctx))?;
+    if op == "=~"
+        && matches!(node.children.get(1).and_then(|child| child.typ.as_ref()), Some(Type::Enum(enum_type)) if enum_type.boxed)
+    {
+        return Ok(format!(
+            "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\ni32.const 28\ni32.add\ni32.load\nlocal.get {rhs_local}\ni32.const 28\ni32.add\ni32.load\ni32.eq"
+        ));
+    }
     let code = match op {
         "+" | "+#" => {
             if checks.int_overflow_check && !integer_arithmetic_is_proven_safe {
@@ -8214,26 +8298,60 @@ fn compile_match(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         ctx: &Ctx<'_>,
     ) -> Result<String, String> {
         let pattern_index = 2 + clause_index * 2;
-        let pattern = items
-            .get(pattern_index)
-            .and_then(|expr| match expr {
-                Expression::Word(pattern) => Some(pattern.as_str()),
-                _ => None,
-            })
-            .ok_or_else(|| "match pattern must be a variant".to_string())?;
+        let (pattern, bindings): (&str, Vec<&str>) = match items.get(pattern_index) {
+            Some(Expression::Word(pattern)) => (pattern.as_str(), Vec::new()),
+            Some(Expression::Apply(parts)) => {
+                let Some(Expression::Word(pattern)) = parts.first() else {
+                    return Err("match pattern must be a variant".to_string());
+                };
+                let mut bindings = Vec::new();
+                for binding in &parts[1..] {
+                    let Expression::Word(binding) = binding else {
+                        return Err("match bindings must be names".to_string());
+                    };
+                    bindings.push(binding.as_str());
+                }
+                (pattern.as_str(), bindings)
+            }
+            _ => return Err("match pattern must be a variant".to_string()),
+        };
         let body = node
             .children
             .get(pattern_index + 1)
             .ok_or_else(|| "match branch missing body".to_string())?;
-        let body_code = compile_expr(body, ctx)?;
         if pattern == "_" {
-            return Ok(body_code);
+            return compile_expr(body, ctx);
         }
-        let tag = enum_type
-            .variants
+        let variants = enum_type.variants();
+        let (tag, variant) = variants
             .iter()
-            .position(|variant| variant == pattern)
+            .enumerate()
+            .find(|(_, variant)| variant.name == pattern)
             .ok_or_else(|| format!("unknown enum variant '{}'", pattern))?;
+        let mut body_ctx = ctx.clone();
+        let data_slot = value_slot + 1;
+        let mut binding_prelude = Vec::new();
+        if enum_type.boxed {
+            binding_prelude.push(format!(
+                "local.get {value_slot}\ni32.const 16\ni32.add\ni32.load\nlocal.set {data_slot}"
+            ));
+            for (index, (binding, field)) in bindings.iter().zip(variant.fields.iter()).enumerate()
+            {
+                if *binding == "_" {
+                    continue;
+                }
+                let slot = value_slot + 2 + index;
+                body_ctx.locals.insert((*binding).to_string(), slot);
+                body_ctx
+                    .local_types
+                    .insert((*binding).to_string(), field.typ.clone());
+                binding_prelude.push(format!(
+                    "local.get {data_slot}\ni32.const {}\ni32.add\ni32.load\nlocal.set {slot}",
+                    index * 4
+                ));
+            }
+        }
+        let body_code = compile_expr(body, &body_ctx)?;
         let next_pattern_index = pattern_index + 2;
         let otherwise = if next_pattern_index < items.len() {
             compile_branches(
@@ -8251,7 +8369,9 @@ fn compile_match(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
             "unreachable".to_string()
         };
         Ok(format!(
-            "local.get {value_slot}\ni32.const {tag}\ni32.eq\n(if (result {result_type})\n  (then\n    {body_code}\n  )\n  (else\n    {otherwise}\n  )\n)"
+            "local.get {value_slot}\n{}\ni32.const {tag}\ni32.eq\n(if (result {result_type})\n  (then\n    {}{body_code}\n  )\n  (else\n    {otherwise}\n  )\n)",
+            if enum_type.boxed { "i32.const 28\ni32.add\ni32.load" } else { "" },
+            if binding_prelude.is_empty() { String::new() } else { format!("{}\n", binding_prelude.join("\n")) },
         ))
     }
 
@@ -9020,8 +9140,7 @@ fn direct_passthrough_param_origins(
                 "do" | "block" => {
                     let mut scoped_aliases = aliases.clone();
                     for item in items.iter().skip(1).take(items.len().saturating_sub(2)) {
-                        if let Expression::Apply(binding) = item
-                        {
+                        if let Expression::Apply(binding) = item {
                             if let [Expression::Word(kw), Expression::Word(name), rhs] =
                                 binding.as_slice()
                             {
@@ -10836,6 +10955,138 @@ fn record_accessor_index(node: &TypedExpression) -> Option<usize> {
         .position(|field| field.name == field_name)
 }
 
+fn enum_constructor_variant(
+    node: &TypedExpression,
+) -> Option<(Arc<crate::types::EnumType>, crate::types::EnumVariant)> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let Expression::Word(name) = items.first()? else {
+        return None;
+    };
+    let Type::Enum(enum_type) = node.typ.as_ref()? else {
+        return None;
+    };
+    enum_type
+        .variant(name)
+        .map(|variant| (enum_type.clone(), variant))
+}
+
+fn enum_ref_bitmap_words(variant: &crate::types::EnumVariant) -> Vec<u32> {
+    let mut words = vec![0_u32; variant.fields.len().div_ceil(32)];
+    for (index, field) in variant.fields.iter().enumerate() {
+        if is_ref_type(&field.typ) {
+            words[index / 32] |= 1_u32 << (index % 32);
+        }
+    }
+    while words.last().is_some_and(|word| *word == 0) {
+        words.pop();
+    }
+    words
+}
+
+fn compile_enum_constructor(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let (enum_type, variant) = enum_constructor_variant(node)
+        .ok_or_else(|| "internal error: expected enum constructor".to_string())?;
+    if !enum_type.boxed {
+        return Err("internal error: immediate enum constructor was called".to_string());
+    }
+    if node.children.len() != variant.fields.len() + 1 {
+        return Err(format!(
+            "enum variant '{}' expected {} fields",
+            variant.name,
+            variant.fields.len()
+        ));
+    }
+    let tag = enum_type
+        .variants()
+        .iter()
+        .position(|case| case.name == variant.name)
+        .expect("enum constructor belongs to enum");
+    let out_tmp = ctx.tmp_i32;
+    let value_tmp = ctx.tmp_i32 + 1;
+    let data_tmp = ctx.tmp_i32 + 2;
+    let nested_ctx = Ctx {
+        tmp_i32: ctx.tmp_i32 + 3,
+        ..ctx.clone()
+    };
+    let ref_words = enum_ref_bitmap_words(&variant);
+    let mut out = vec![format!(
+        "i32.const {tag}\ni32.const {}\ni32.const {}\ncall $enum_new_i32\nlocal.set {out_tmp}",
+        variant.fields.len(),
+        ref_words.len()
+    )];
+    for (index, word) in ref_words.iter().enumerate() {
+        out.push(format!("local.get {out_tmp}\ni32.const 24\ni32.add\ni32.load\ni32.const {}\ni32.add\ni32.const {}\ni32.store", index * 4, *word as i32));
+    }
+    out.push(format!(
+        "local.get {out_tmp}\ni32.const 16\ni32.add\ni32.load\nlocal.set {data_tmp}"
+    ));
+    for (index, child) in node.children.iter().skip(1).enumerate() {
+        let value = compile_expr(child, &nested_ctx)?;
+        out.push(format!("{value}\nlocal.set {value_tmp}"));
+        if child.typ.as_ref().is_some_and(is_managed_local_type)
+            && !should_release_set_rhs(child, ctx.lambda_bindings)
+        {
+            out.push(format!(
+                "local.get {value_tmp}\ncall {}\ndrop",
+                rc_retain_for_type(child.typ.as_ref().unwrap())
+            ));
+        }
+        out.push(format!(
+            "local.get {data_tmp}\ni32.const {}\ni32.add\nlocal.get {value_tmp}\ni32.store",
+            index * 4
+        ));
+    }
+    out.push(format!("local.get {out_tmp}"));
+    Ok(out.join("\n"))
+}
+
+fn enum_constructor_signature(
+    enum_type: &Arc<crate::types::EnumType>,
+    variant: &crate::types::EnumVariant,
+) -> (Vec<Type>, Type) {
+    (
+        variant
+            .fields
+            .iter()
+            .map(|field| field.typ.clone())
+            .collect(),
+        Type::Enum(enum_type.clone()),
+    )
+}
+
+fn compile_enum_constructor_func(
+    _enum_type: &crate::types::EnumType,
+    variant: &crate::types::EnumVariant,
+    tag: usize,
+) -> String {
+    let ref_words = enum_ref_bitmap_words(variant);
+    let mut out = format!("  (func ${}{}", ident(&variant.name), "");
+    for _ in &variant.fields {
+        out.push_str(" (param i32)");
+    }
+    out.push_str(" (result i32)\n    (local $out i32) (local $data i32)\n");
+    out.push_str(&format!("    i32.const {tag}\n    i32.const {}\n    i32.const {}\n    call $enum_new_i32\n    local.set $out\n", variant.fields.len(), ref_words.len()));
+    for (index, word) in ref_words.iter().enumerate() {
+        out.push_str(&format!("    local.get $out\n    i32.const 24\n    i32.add\n    i32.load\n    i32.const {}\n    i32.add\n    i32.const {}\n    i32.store\n", index * 4, *word as i32));
+    }
+    out.push_str(
+        "    local.get $out\n    i32.const 16\n    i32.add\n    i32.load\n    local.set $data\n",
+    );
+    for (index, field) in variant.fields.iter().enumerate() {
+        if is_ref_type(&field.typ) {
+            out.push_str(&format!(
+                "    local.get {index}\n    call {}\n    drop\n",
+                rc_retain_for_type(&field.typ)
+            ));
+        }
+        out.push_str(&format!("    local.get $data\n    i32.const {}\n    i32.add\n    local.get {index}\n    i32.store\n", index * 4));
+    }
+    out.push_str("    local.get $out\n  )\n");
+    out
+}
+
 /// Collect the nominal record declarations reachable from a typed program.
 /// Generated record functions are emitted as ordinary first-class functions,
 /// so this deliberately follows field types as well as expression types.
@@ -10861,7 +11112,61 @@ fn collect_record_types_from_type(
             collect_record_types_from_type(input, out);
             collect_record_types_from_type(result, out);
         }
-        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit | Type::Enum(_) | Type::Var(_) => {}
+        Type::Int
+        | Type::Dec
+        | Type::Bool
+        | Type::Char
+        | Type::Unit
+        | Type::Enum(_)
+        | Type::Var(_) => {}
+    }
+}
+
+fn collect_enum_types_from_type(
+    typ: &Type,
+    out: &mut BTreeMap<String, Arc<crate::types::EnumType>>,
+) {
+    match typ {
+        Type::Enum(enum_type) => {
+            if out
+                .insert(enum_type.name.clone(), enum_type.clone())
+                .is_none()
+            {
+                for variant in enum_type.variants() {
+                    for field in variant.fields {
+                        collect_enum_types_from_type(&field.typ, out);
+                    }
+                }
+            }
+        }
+        Type::Record(record) => {
+            for field in &record.fields {
+                collect_enum_types_from_type(&field.typ, out);
+            }
+        }
+        Type::List(inner) => collect_enum_types_from_type(inner, out),
+        Type::Tuple(parts) => {
+            for part in parts {
+                collect_enum_types_from_type(part, out);
+            }
+        }
+        Type::Function(input, result) => {
+            collect_enum_types_from_type(input, out);
+            collect_enum_types_from_type(result, out);
+        }
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit | Type::Var(_) => {}
+    }
+}
+
+fn collect_enum_types(
+    node: &TypedExpression,
+    out: &mut BTreeMap<String, Arc<crate::types::EnumType>>,
+) {
+    if let Some(typ) = &node.typ {
+        collect_enum_types_from_type(typ, out);
+    }
+    for child in &node.children {
+        collect_enum_types(child, out);
     }
 }
 
@@ -10879,13 +11184,23 @@ fn collect_record_types(
 
 fn record_constructor_signature(record: &crate::types::RecordType) -> (Vec<Type>, Type) {
     (
-        record.fields.iter().map(|field| field.typ.clone()).collect(),
+        record
+            .fields
+            .iter()
+            .map(|field| field.typ.clone())
+            .collect(),
         Type::Record(Arc::new(record.clone())),
     )
 }
 
-fn record_accessor_signature(field: &crate::types::RecordField, record: &crate::types::RecordType) -> (Vec<Type>, Type) {
-    (vec![Type::Record(Arc::new(record.clone()))], field.typ.clone())
+fn record_accessor_signature(
+    field: &crate::types::RecordField,
+    record: &crate::types::RecordType,
+) -> (Vec<Type>, Type) {
+    (
+        vec![Type::Record(Arc::new(record.clone()))],
+        field.typ.clone(),
+    )
 }
 
 fn record_ref_bitmap_words(record: &crate::types::RecordType) -> Vec<u32> {
@@ -10965,12 +11280,7 @@ fn compile_record_constructor(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<S
         if child.typ.as_ref().is_some_and(is_managed_local_type)
             && !should_release_set_rhs(child, ctx.lambda_bindings)
         {
-            let retain = rc_retain_for_type(
-                child
-                    .typ
-                    .as_ref()
-                    .expect("managed record field type"),
-            );
+            let retain = rc_retain_for_type(child.typ.as_ref().expect("managed record field type"));
             out.push(format!("local.get {value_tmp}\ncall {retain}\ndrop"));
         }
         out.push(format!(
@@ -10986,7 +11296,11 @@ fn compile_record_constructor(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<S
     Ok(out.join("\n"))
 }
 
-fn compile_record_accessor(node: &TypedExpression, field_index: usize, ctx: &Ctx<'_>) -> Result<String, String> {
+fn compile_record_accessor(
+    node: &TypedExpression,
+    field_index: usize,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
     let input = node
         .children
         .get(1)
@@ -11055,7 +11369,9 @@ fn compile_record_constructor_func(record: &crate::types::RecordType) -> String 
             *word as i32
         ));
     }
-    out.push_str("    local.get $out\n    i32.const 16\n    i32.add\n    i32.load\n    local.set $data\n");
+    out.push_str(
+        "    local.get $out\n    i32.const 16\n    i32.add\n    i32.load\n    local.set $data\n",
+    );
     for (index, field) in record.fields.iter().enumerate() {
         if is_ref_type(&field.typ) {
             out.push_str(&format!(
@@ -13490,11 +13806,7 @@ fn collect_loop_vector_get_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut Has
 // Keep data-pointer hoisting to values that are already available at loop
 // entry.  This is deliberately conservative: losing a pointer cache is cheap;
 // reading an uninitialized managed slot is a miscompile.
-fn collect_loop_local_binding_slots(
-    expr: &Expression,
-    ctx: &Ctx<'_>,
-    out: &mut HashSet<usize>,
-) {
+fn collect_loop_local_binding_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut HashSet<usize>) {
     let Expression::Apply(items) = expr else {
         return;
     };
@@ -14357,18 +14669,21 @@ fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<Str
             )
         }
         Type::Enum(enum_type) => {
+            if enum_type.boxed {
+                return Err("payload enum WASI serialization is not implemented yet".into());
+            }
             // Enums are compact i32 tags at runtime, but values crossing the
             // WASI boundary should remain readable Calque data.  Print the
             // declared variant name rather than leaking its implementation tag.
             let mut branches = String::new();
-            for (tag, variant) in enum_type.variants.iter().enumerate() {
-                let literal = wasi_append_literal("$out", variant).replace('\n', "\n      ");
+            for (tag, variant) in enum_type.variants().iter().enumerate() {
+                let literal = wasi_append_literal("$out", &variant.name).replace('\n', "\n      ");
                 branches.push_str(&format!(
                     "    local.get $value\n    i32.const {tag}\n    i32.eq\n    if\n      {literal}\n    else\n"
                 ));
             }
             branches.push_str("      unreachable\n");
-            for _ in &enum_type.variants {
+            for _ in enum_type.variants() {
                 branches.push_str("    end\n");
             }
             format!("  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32)\n    i32.const 0\n    i32.const 0\n    call $vec_new_i32\n    local.set $out\n{branches}    local.get $out)\n")
@@ -14531,7 +14846,11 @@ fn emit_wasi_deserializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<S
             )
         }
         Type::Enum(enum_type) => {
-            let body = emit_wasi_enum_deserializer(&enum_type.variants);
+            if enum_type.boxed {
+                return Err("payload enum WASI deserialization is not implemented yet".into());
+            }
+            let names = enum_type.variants().into_iter().map(|variant| variant.name).collect::<Vec<_>>();
+            let body = emit_wasi_enum_deserializer(&names);
             format!("  (func $__wasi_deserialize_{name} (result i32)\n    (local $c i32)\n{}\n  )\n", body.replace('\n', "\n    "))
         }
         Type::Var(_) | Type::Function(_, _) => return Err("unsupported WASI deserialization type".into()),
@@ -15216,6 +15535,11 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                     Ok(format!("local.get {}", local_idx))
                 } else if w == "ARGV" {
                     Ok("call $__argv_get".to_string())
+                } else if matches!(node.typ.as_ref(), Some(Type::Enum(enum_type)) if enum_type.boxed && enum_type.variant(w).is_some())
+                {
+                    // A nullary payload-enum case is a generated constructor,
+                    // not a cached top-level binding.
+                    Ok(format!("call ${}", ident(w)))
                 } else if let Some(borrowed) =
                     compile_borrowed_top_level_cached_ref(w, ctx, ctx.tmp_i32)
                 {
@@ -15237,9 +15561,9 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                     // only an otherwise-unbound enum-typed word is a variant
                     // constructor.
                     let tag = enum_type
-                        .variants
+                        .variants()
                         .iter()
-                        .position(|variant| variant == w)
+                        .position(|variant| variant.name == *w)
                         .ok_or_else(|| format!("Unknown enum variant '{}'", w))?;
                     Ok(format!("i32.const {}", tag))
                 } else if let Some(tag) = builtin_fn_tag(w) {
@@ -15294,16 +15618,17 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 compile_call(node, op_full, ctx)
                             }
                         }
+                        _ if enum_constructor_variant(node).is_some() => {
+                            compile_enum_constructor(node, ctx)
+                        }
                         _ if record_constructor_type(node).is_some() => {
                             compile_record_constructor(node, ctx)
                         }
-                        _ if record_accessor_index(node).is_some() => {
-                            compile_record_accessor(
-                                node,
-                                record_accessor_index(node).expect("record accessor was checked"),
-                                ctx,
-                            )
-                        }
+                        _ if record_accessor_index(node).is_some() => compile_record_accessor(
+                            node,
+                            record_accessor_index(node).expect("record accessor was checked"),
+                            ctx,
+                        ),
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
@@ -15670,8 +15995,7 @@ fn non_owning_borrowed_local_names(
     let Expression::Apply(items) = &body.expr else {
         return borrowed;
     };
-    if !matches!(items.first(), Some(Expression::Word(op)) if op == "do" || op == "block")
-    {
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "do" || op == "block") {
         return borrowed;
     }
     let child_offset = usize::from(body.children.len() + 1 == items.len());
@@ -17273,6 +17597,16 @@ fn compile_program_to_wat_build_typed_with_opts(
             );
         }
     }
+    let mut enum_types = BTreeMap::new();
+    collect_enum_types(typed_ast, &mut enum_types);
+    for enum_type in enum_types.values().filter(|enum_type| enum_type.boxed) {
+        for variant in enum_type.variants() {
+            fn_sigs.insert(
+                variant.name.clone(),
+                enum_constructor_signature(enum_type, &variant),
+            );
+        }
+    }
     for extern_decl in used_extern_defs.values() {
         let (mut ps, ret) = function_parts(&extern_decl.typ);
         if ps.len() == 1 && matches!(ps[0], Type::Unit) {
@@ -17372,8 +17706,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                         .iter()
                         .filter(|capture| {
                             definitely_materialized_main_scalar_names.contains(*capture)
-                                || definitely_materialized_top_level_scalar_names
-                                    .contains(*capture)
+                                || definitely_materialized_top_level_scalar_names.contains(*capture)
                         })
                         .cloned()
                         .collect()
@@ -17553,6 +17886,11 @@ fn compile_program_to_wat_build_typed_with_opts(
         emitted_funcs.push(compile_record_constructor_func(record));
         for (field_index, _) in record.fields.iter().enumerate() {
             emitted_funcs.push(compile_record_accessor_func(record, field_index));
+        }
+    }
+    for enum_type in enum_types.values().filter(|enum_type| enum_type.boxed) {
+        for (tag, variant) in enum_type.variants().iter().enumerate() {
+            emitted_funcs.push(compile_enum_constructor_func(enum_type, variant, tag));
         }
     }
 

@@ -8,7 +8,7 @@
 (alter! name value)
 (letrec name (lambda (args) body))
 (sig name Type)
-(enum Name Variant...)
+(enum Name Variant... (PayloadVariant field Type ...))
 ```
 
 ## Control

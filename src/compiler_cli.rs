@@ -676,12 +676,8 @@ fn run_wasi(mut args: Vec<String>) -> Result<(), String> {
     // (terminal animations, servers, REPLs) appear completely silent. stdout
     // stays attached to the terminal; stderr is retained for the structured
     // Calque error messages produced after a terminating runtime failure.
-    let mut runtime_command = runtime_adapter.command(
-        runtime_executable.clone(),
-        &wasm,
-        &args,
-        grants_filesystem,
-    );
+    let mut runtime_command =
+        runtime_adapter.command(runtime_executable.clone(), &wasm, &args, grants_filesystem);
     runtime_command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())

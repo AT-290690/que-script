@@ -1,5 +1,7 @@
 use crate::parser::Expression;
-use crate::types::{generalize, EnumType, RecordField, RecordType, Type, TypeEnv, TypeScheme, TypeVar};
+use crate::types::{
+    generalize, EnumType, EnumVariant, RecordField, RecordType, Type, TypeEnv, TypeScheme, TypeVar,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::{BitOr, BitOrAssign};
 use std::sync::Arc;
@@ -156,13 +158,7 @@ fn collect_top_level_extern_names(root: &TypedExpression) -> HashSet<String> {
 fn is_mutating_op(op: &str) -> bool {
     matches!(
         op,
-        "set!"
-            | "alter!"
-            | "push!"
-            | "pop!"
-            | "pop-val!"
-            | "empty!"
-            | "capacity!"
+        "set!" | "alter!" | "push!" | "pop!" | "pop-val!" | "empty!" | "capacity!"
     )
 }
 
@@ -1137,8 +1133,12 @@ fn expr_mutates_non_receiver_param(
                 Expression::Word(op)
                     if is_mutation_contract_call_op(op, known_mutates_final_arg) =>
                 {
-                    if let Some(target) = mutation_contract_target(op, items, known_mutates_final_arg) {
-                        if let Some(idx) = target_non_receiver_param_index(target, scopes, allowed_param_index) {
+                    if let Some(target) =
+                        mutation_contract_target(op, items, known_mutates_final_arg)
+                    {
+                        if let Some(idx) =
+                            target_non_receiver_param_index(target, scopes, allowed_param_index)
+                        {
                             return Some(idx);
                         }
                     }
@@ -1182,7 +1182,9 @@ fn expr_mutates_non_receiver_param(
                                     };
                                     let binding = items
                                         .get(idx + 1)
-                                        .and_then(|arg| target_param_binding(arg, scopes, allowed_param_index))
+                                        .and_then(|arg| {
+                                            target_param_binding(arg, scopes, allowed_param_index)
+                                        })
                                         .unwrap_or(MutationBinding::Local);
                                     Some((name.clone(), binding))
                                 })
@@ -1336,7 +1338,9 @@ fn expr_mutates_receiver_param(
                 Expression::Word(op)
                     if is_mutation_contract_call_op(op, known_mutates_final_arg) =>
                 {
-                    if let Some(target) = mutation_contract_target(op, items, known_mutates_final_arg) {
+                    if let Some(target) =
+                        mutation_contract_target(op, items, known_mutates_final_arg)
+                    {
                         if matches!(
                             target_param_binding(target, scopes, receiver_param_index),
                             Some(MutationBinding::Param(idx)) if idx == receiver_param_index
@@ -1381,7 +1385,9 @@ fn expr_mutates_receiver_param(
                                     };
                                     let binding = items
                                         .get(idx + 1)
-                                        .and_then(|arg| target_param_binding(arg, scopes, receiver_param_index))
+                                        .and_then(|arg| {
+                                            target_param_binding(arg, scopes, receiver_param_index)
+                                        })
                                         .unwrap_or(MutationBinding::Local);
                                     Some((name.clone(), binding))
                                 })
@@ -2278,10 +2284,7 @@ impl InferenceContext {
             return Err("internal error: missing declared type scope".to_string());
         };
         if scope.contains_key(&name) {
-            return Err(format!(
-                "sig for '{}' already declared in this scope",
-                name
-            ));
+            return Err(format!("sig for '{}' already declared in this scope", name));
         }
         scope.insert(name, (typ, false));
         Ok(())
@@ -2313,7 +2316,7 @@ impl InferenceContext {
         self.enum_scopes.iter().rev().find_map(|scope| {
             scope
                 .values()
-                .find(|enum_type| enum_type.variants.iter().any(|name| name == variant))
+                .find(|enum_type| enum_type.variant(variant).is_some())
                 .cloned()
         })
     }
@@ -2325,15 +2328,19 @@ impl InferenceContext {
             .find_map(|scope| scope.get(name).cloned())
     }
 
-    pub fn declare_enum(
+    fn begin_enum(
         &mut self,
         name: String,
-        variants: Vec<String>,
+        variant_names: &[String],
+        boxed: bool,
     ) -> Result<Arc<EnumType>, String> {
         if matches!(name.as_str(), "Int" | "Dec" | "Bool" | "Char") {
-            return Err(format!("enum '{}' conflicts with the built-in type name", name));
+            return Err(format!(
+                "enum '{}' conflicts with the built-in type name",
+                name
+            ));
         }
-        if variants.is_empty() {
+        if variant_names.is_empty() {
             return Err(format!("enum '{}' needs at least one variant", name));
         }
         let Some(scope) = self.enum_scopes.last_mut() else {
@@ -2347,20 +2354,39 @@ impl InferenceContext {
             .scopes
             .last()
             .ok_or_else(|| "internal error: missing type scope".to_string())?;
-        for variant in &variants {
+        for variant in variant_names {
             if current_bindings.contains_key(variant) {
-                return Err(format!("enum variant '{}' is already defined in this scope", variant));
+                return Err(format!(
+                    "enum variant '{}' is already defined in this scope",
+                    variant
+                ));
             }
         }
-        let enum_type = Arc::new(EnumType { name: name.clone(), variants });
+        let enum_type = Arc::new(EnumType {
+            name: name.clone(),
+            variants: Arc::new(std::sync::RwLock::new(Vec::new())),
+            boxed,
+        });
         scope.insert(name, enum_type.clone());
-        for variant in &enum_type.variants {
-            self.env.insert(
-                variant.clone(),
-                TypeScheme::monotype(Type::Enum(enum_type.clone())),
-            )?;
-        }
         Ok(enum_type)
+    }
+
+    fn finish_enum(
+        &mut self,
+        enum_type: Arc<EnumType>,
+        variants: Vec<EnumVariant>,
+    ) -> Result<(), String> {
+        enum_type.set_variants(variants);
+        for variant in enum_type.variants() {
+            let mut constructor_type = Type::Enum(enum_type.clone());
+            for field in variant.fields.iter().rev() {
+                constructor_type =
+                    Type::Function(Box::new(field.typ.clone()), Box::new(constructor_type));
+            }
+            self.env
+                .insert(variant.name, TypeScheme::monotype(constructor_type))?;
+        }
+        Ok(())
     }
 
     pub fn declare_record(
@@ -2369,13 +2395,19 @@ impl InferenceContext {
         fields: Vec<RecordField>,
     ) -> Result<Arc<RecordType>, String> {
         if matches!(name.as_str(), "Int" | "Dec" | "Bool" | "Char") {
-            return Err(format!("record '{}' conflicts with the built-in type name", name));
+            return Err(format!(
+                "record '{}' conflicts with the built-in type name",
+                name
+            ));
         }
         if fields.is_empty() {
             return Err(format!("record '{}' needs at least one field", name));
         }
         if self.enum_type(&name).is_some() {
-            return Err(format!("record '{}' conflicts with an enum of the same name", name));
+            return Err(format!(
+                "record '{}' conflicts with an enum of the same name",
+                name
+            ));
         }
         if self.record_type(&name).is_some() {
             return Err(format!("record '{}' already declared in this scope", name));
@@ -2386,12 +2418,18 @@ impl InferenceContext {
             .last()
             .ok_or_else(|| "internal error: missing type scope".to_string())?;
         if current_bindings.contains_key(&name) {
-            return Err(format!("record constructor '{}' is already defined in this scope", name));
+            return Err(format!(
+                "record constructor '{}' is already defined in this scope",
+                name
+            ));
         }
         for field in &fields {
             let accessor = format!("{}/{}", name, field.name);
             if current_bindings.contains_key(&accessor) {
-                return Err(format!("record accessor '{}' is already defined in this scope", accessor));
+                return Err(format!(
+                    "record accessor '{}' is already defined in this scope",
+                    accessor
+                ));
             }
         }
 
@@ -2406,7 +2444,8 @@ impl InferenceContext {
 
         let mut constructor_type = Type::Record(record_type.clone());
         for field in record_type.fields.iter().rev() {
-            constructor_type = Type::Function(Box::new(field.typ.clone()), Box::new(constructor_type));
+            constructor_type =
+                Type::Function(Box::new(field.typ.clone()), Box::new(constructor_type));
         }
         self.env
             .insert(name.clone(), TypeScheme::monotype(constructor_type))?;
@@ -2683,23 +2722,94 @@ fn infer_sig(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, S
 
 fn infer_enum(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type, String> {
     let [Expression::Word(_kw), Expression::Word(name), variants @ ..] = exprs else {
-        return Err("enum expects: (enum Name Variant ...)".to_string());
+        return Err("enum expects: (enum Name Variant | (Variant field Type ...) ...)".to_string());
     };
     let mut names = Vec::with_capacity(variants.len());
     let mut seen = HashSet::new();
     for variant in variants {
-        let Expression::Word(variant) = variant else {
-            return Err(format!("enum '{}' variants must be names", name));
+        let variant_name = match variant {
+            Expression::Word(variant) => variant,
+            Expression::Apply(items) => match items.first() {
+                Some(Expression::Word(variant)) => variant,
+                _ => return Err(format!("enum '{}' variants must start with a name", name)),
+            },
+            _ => {
+                return Err(format!(
+                    "enum '{}' variants must be names or payload forms",
+                    name
+                ))
+            }
         };
-        if variant == "_" {
+        if variant_name == "_" {
             return Err(format!("enum '{}' cannot use '_' as a variant", name));
         }
-        if !seen.insert(variant.clone()) {
-            return Err(format!("enum '{}' declares '{}' more than once", name, variant));
+        if !seen.insert(variant_name.clone()) {
+            return Err(format!(
+                "enum '{}' declares '{}' more than once",
+                name, variant_name
+            ));
         }
-        names.push(variant.clone());
+        names.push(variant_name.clone());
     }
-    ctx.declare_enum(name.clone(), names)?;
+    let boxed = variants
+        .iter()
+        .any(|variant| matches!(variant, Expression::Apply(_)));
+    // Install a shared shell before parsing fields.  This is what makes a
+    // field annotation such as `left Tree` resolve to this very declaration.
+    let enum_type = ctx.begin_enum(name.clone(), &names, boxed)?;
+    let mut parsed = Vec::with_capacity(variants.len());
+    for variant in variants {
+        match variant {
+            Expression::Word(variant_name) => parsed.push(EnumVariant {
+                name: variant_name.clone(),
+                fields: Vec::new(),
+            }),
+            Expression::Apply(items) => {
+                let [Expression::Word(variant_name), field_items @ ..] = &items[..] else {
+                    return Err(format!("enum '{}' variants must start with a name", name));
+                };
+                if field_items.len() % 2 != 0 {
+                    return Err(format!(
+                        "enum '{}' variant '{}' fields must be name/type pairs",
+                        name, variant_name
+                    ));
+                }
+                let mut fields = Vec::with_capacity(field_items.len() / 2);
+                let mut field_names = HashSet::new();
+                for pair in field_items.chunks_exact(2) {
+                    let Expression::Word(field_name) = &pair[0] else {
+                        return Err(format!(
+                            "enum '{}' variant '{}' field names must be names",
+                            name, variant_name
+                        ));
+                    };
+                    if field_name == "_" || !field_names.insert(field_name.clone()) {
+                        return Err(format!(
+                            "enum '{}' variant '{}' has an invalid or duplicate field '{}'",
+                            name, variant_name, field_name
+                        ));
+                    }
+                    let typ = parse_type_hint(&pair[1], ctx)?;
+                    if !is_valid_record_field_type(&typ) {
+                        return Err(format!(
+                            "enum '{}' variant '{}' field '{}' must have a concrete type, got {}",
+                            name, variant_name, field_name, typ
+                        ));
+                    }
+                    fields.push(RecordField {
+                        name: field_name.clone(),
+                        typ,
+                    });
+                }
+                parsed.push(EnumVariant {
+                    name: variant_name.clone(),
+                    fields,
+                });
+            }
+            _ => unreachable!("enum syntax was validated above"),
+        }
+    }
+    ctx.finish_enum(enum_type, parsed)?;
     Ok(Type::Unit)
 }
 
@@ -2728,7 +2838,10 @@ fn infer_record(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type
             return Err(format!("record '{}' field names must be names", name));
         };
         if field_name == "_" || !seen.insert(field_name.clone()) {
-            return Err(format!("record '{}' has an invalid or duplicate field '{}'", name, field_name));
+            return Err(format!(
+                "record '{}' has an invalid or duplicate field '{}'",
+                name, field_name
+            ));
         }
         let field_type = parse_type_hint(&pair[1], ctx)?;
         if !is_valid_record_field_type(&field_type) {
@@ -2760,8 +2873,22 @@ fn infer_match(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     let mut branch_type: Option<Type> = None;
 
     for (clause_index, pair) in clauses.chunks_exact(2).enumerate() {
-        let Expression::Word(pattern) = &pair[0] else {
-            return Err("match patterns must be enum variants or '_'".to_string());
+        let (pattern, bindings): (&str, Vec<&String>) = match &pair[0] {
+            Expression::Word(pattern) => (pattern, Vec::new()),
+            Expression::Apply(items) => {
+                let Some(Expression::Word(pattern)) = items.first() else {
+                    return Err("match patterns must be enum variants or '_'".to_string());
+                };
+                let mut bindings = Vec::new();
+                for item in &items[1..] {
+                    let Expression::Word(binding) = item else {
+                        return Err("enum match bindings must be names".to_string());
+                    };
+                    bindings.push(binding);
+                }
+                (pattern, bindings)
+            }
+            _ => return Err("match patterns must be enum variants or '_'".to_string()),
         };
         if pattern == "_" {
             if has_default {
@@ -2783,11 +2910,49 @@ fn infer_match(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
                     ));
                 }
             } else {
-                enum_type = Some(found_enum);
+                enum_type = Some(found_enum.clone());
             }
-            if !covered.insert(pattern.clone()) {
+            if !covered.insert(pattern.to_string()) {
                 return Err(format!("duplicate match branch '{}'", pattern));
             }
+            let variant = found_enum
+                .variant(pattern)
+                .expect("enum variant was found by enum_for_variant");
+            if bindings.len() != variant.fields.len() {
+                return Err(format!(
+                    "match variant '{}' needs {} bindings, got {}",
+                    pattern,
+                    variant.fields.len(),
+                    bindings.len()
+                ));
+            }
+            let mut binding_names = HashSet::new();
+            ctx.enter_lexical_scope();
+            let inferred_body = (|| {
+                for (binding, field) in bindings.iter().zip(variant.fields.iter()) {
+                    if *binding == "_" {
+                        continue;
+                    }
+                    if !binding_names.insert((*binding).clone()) {
+                        return Err(format!("duplicate match binding '{}'", binding));
+                    }
+                    ctx.env
+                        .insert((*binding).clone(), TypeScheme::monotype(field.typ.clone()))?;
+                }
+                infer_expr(&pair[1], ctx)
+            })();
+            ctx.exit_lexical_scope();
+            let current_branch_type = inferred_body?;
+            if let Some(expected_type) = &branch_type {
+                ctx.add_constraint(
+                    expected_type.clone(),
+                    current_branch_type,
+                    ctx.type_error(TypeErrorVariant::IfBody, vec![pair[1].clone()]),
+                );
+            } else {
+                branch_type = Some(current_branch_type);
+            }
+            continue;
         }
 
         let current_branch_type = infer_expr(&pair[1], ctx)?;
@@ -2802,13 +2967,14 @@ fn infer_match(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
         }
     }
 
-    let enum_type = enum_type.ok_or_else(|| "match needs at least one enum variant branch".to_string())?;
+    let enum_type =
+        enum_type.ok_or_else(|| "match needs at least one enum variant branch".to_string())?;
     if !has_default {
         let missing = enum_type
-            .variants
-            .iter()
-            .filter(|variant| !covered.contains(*variant))
-            .cloned()
+            .variants()
+            .into_iter()
+            .map(|variant| variant.name)
+            .filter(|variant| !covered.contains(variant.as_str()))
             .collect::<Vec<_>>();
         if !missing.is_empty() {
             return Err(format!(
@@ -3306,9 +3472,7 @@ pub fn solve_constraints_list(
 /// used to annotate the partial typed tree returned to editor clients, so a
 /// single bad expression does not turn every surrounding hover into an
 /// anonymous type variable.
-fn solve_constraints_best_effort(
-    constraints: &[(Type, Type, TypeError)],
-) -> HashMap<u64, Type> {
+fn solve_constraints_best_effort(constraints: &[(Type, Type, TypeError)]) -> HashMap<u64, Type> {
     let mut unifier = Unifier::new();
     let mut work: VecDeque<(Type, Type)> = constraints
         .iter()
@@ -3413,12 +3577,9 @@ impl<'a> SignatureMatcher<'a> {
                 Box::new(self.apply_inferred(output)),
             ),
             Type::List(inner) => Type::List(Box::new(self.apply_inferred(inner))),
-            Type::Tuple(items) => Type::Tuple(
-                items
-                    .iter()
-                    .map(|item| self.apply_inferred(item))
-                    .collect(),
-            ),
+            Type::Tuple(items) => {
+                Type::Tuple(items.iter().map(|item| self.apply_inferred(item)).collect())
+            }
             _ => typ.clone(),
         }
     }

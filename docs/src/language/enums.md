@@ -1,6 +1,7 @@
 # Enums and matching
 
-An `enum` declares a closed set of zero-payload values:
+An `enum` declares a closed set of variants. A zero-payload enum is the most
+compact form:
 
 ```que
 (enum Shape Rock Paper Scissors)
@@ -77,5 +78,36 @@ compared directly—there is no conversion to a string:
 (Table/set! Paper 2 points)
 ```
 
-Current enums have no payload variants. `match/string` remains available for
-the older string-dispatch macro use case.
+## Payload and recursive variants
+
+A parenthesized variant declares named payload fields. This is how to model
+trees, linked values, ASTs, and other recursive data:
+
+```que
+(enum Tree
+  Empty
+  (Node value Int left Tree right Tree))
+
+(let tree (Node 4 (Node 2 Empty Empty) (Node 7 Empty Empty)))
+
+(letrec size
+  (lambda (tree)
+    (match tree
+      Empty 0
+      (Node value left right)
+        (+ 1 (+ (size left) (size right))))))
+
+(size tree) ; 3
+```
+
+The payload binding count must match the variant declaration. Payload enums
+are boxed and reference-counted; plain zero-payload enums remain immediate
+`i32` tags. Recursive *types* are therefore fine, but managed ownership
+cycles are not: a tree may own its children, while a cycle such as `a → b → a`
+is rejected by Calque's RC-cycle checks.
+
+`=~` remains useful for zero-payload state enums. It is not structural payload
+equality; use `match` to inspect a payload variant. Payload enums are not
+currently supported as `Table` keys or WASI serialization values.
+
+`match/string` remains available for the older string-dispatch macro use case.

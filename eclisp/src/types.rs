@@ -1,20 +1,70 @@
 use crate::infer::apply_subst_map_to_type;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeVar {
     pub id: u64,
 }
 
-/// A closed, zero-payload sum type.  Its runtime representation is the
-/// zero-based i32 index of a variant, while the full definition stays here so
-/// inference can prove constructor membership and match coverage.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// One case of a nominal sum type.  A case with no fields remains an immediate
+/// tag when the whole enum has no payload cases; otherwise every case is a
+/// boxed value carrying this tag.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumVariant {
+    pub name: String,
+    pub fields: Vec<RecordField>,
+}
+
+/// A nominal sum type.  Its declaration cell is deliberately shared: while
+/// parsing `(enum Tree Empty (Node left Tree right Tree))`, `Tree` must already
+/// be visible in the field annotations.  The cell is filled before inference
+/// continues, so recursive occurrences and the final declaration are the same
+/// nominal type.
+#[derive(Debug, Clone)]
 pub struct EnumType {
     pub name: String,
-    pub variants: Vec<String>,
+    pub variants: Arc<RwLock<Vec<EnumVariant>>>,
+    pub boxed: bool,
+}
+
+impl EnumType {
+    pub fn variants(&self) -> Vec<EnumVariant> {
+        self.variants
+            .read()
+            .expect("enum declaration lock poisoned")
+            .clone()
+    }
+
+    pub fn variant(&self, name: &str) -> Option<EnumVariant> {
+        self.variants()
+            .into_iter()
+            .find(|variant| variant.name == name)
+    }
+
+    pub fn set_variants(&self, variants: Vec<EnumVariant>) {
+        *self
+            .variants
+            .write()
+            .expect("enum declaration lock poisoned") = variants;
+    }
+}
+
+// Enums are nominal.  In particular, the temporary shared declaration used
+// for a recursive field must compare equal to its completed declaration.
+impl PartialEq for EnumType {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for EnumType {}
+
+impl std::hash::Hash for EnumType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
 }
 
 /// A nominal, fixed-field product type.  Record values deliberately retain
@@ -194,9 +244,7 @@ impl Type {
             | Type::Char
             | Type::Enum(_)
             | Type::Record(_)
-            | Type::Unit => {
-                self.clone()
-            }
+            | Type::Unit => self.clone(),
             Type::Var(v) => {
                 if let Some(ty) = subst.get(&v.id) {
                     ty.clone()
@@ -351,7 +399,10 @@ pub fn create_builtin_environment(mut env: TypeEnv) -> (TypeEnv, u64) {
                 vec![a.var_id().unwrap()],
                 Type::Function(
                     Box::new(Type::Int),
-                    Box::new(Type::Function(Box::new(Type::List(Box::new(a.clone()))), Box::new(a))),
+                    Box::new(Type::Function(
+                        Box::new(Type::List(Box::new(a.clone()))),
+                        Box::new(a),
+                    )),
                 ),
             ),
         );

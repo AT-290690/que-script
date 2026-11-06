@@ -15,6 +15,7 @@ Mutation: (get i xs), (push! x xs), (set! i x xs), (pop! xs), (empty! xs), (capa
 Pipelines pass data last: (|> xs (map f) (select pred)).
 Enums: (enum Letter A B C); values are compact typed tags, not Ints.
 Match enums exhaustively: (match letter A value-a B value-b C value-c), or use _ as the final default.
+Payload enums: (enum Tree Empty (Node value Int left Tree right Tree)); match with (Node value left right).
 Compare values from the same enum with (=~ a b); cross-enum comparisons are rejected.
 Enums can be Table keys directly: (Table/set! A 1 points), (Table/get A points); no string conversion occurs.
 See `que --examples` for a complete enum, match, Table, and serialize/deserialize example.

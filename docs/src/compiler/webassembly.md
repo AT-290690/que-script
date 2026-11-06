@@ -1,7 +1,7 @@
 # WebAssembly target
 
 Calque lowers its typed AST into WebAssembly. Core scalar values fit the Wasm
-`i32` model: `Int`, `Bool`, `Char`, enum tags, `Dec`, and unit all have compact
+`i32` model: `Int`, `Bool`, `Char`, zero-payload enum tags, `Dec`, and unit all have compact
 scalar lowering. Managed collections and closures use the runtime’s reference
 counted representation.
 

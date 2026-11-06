@@ -73,7 +73,12 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                             {
                                 if let Some(Expression::Word(name)) = record_items.get(1) {
                                     bound.insert(name.clone());
-                                    for pair in record_items.iter().skip(2).collect::<Vec<_>>().chunks_exact(2) {
+                                    for pair in record_items
+                                        .iter()
+                                        .skip(2)
+                                        .collect::<Vec<_>>()
+                                        .chunks_exact(2)
+                                    {
                                         if let Expression::Word(field) = pair[0] {
                                             bound.insert(format!("{}/{}", name, field));
                                         }
@@ -1254,19 +1259,22 @@ fn eval_compile_time_syntax_op(
     match op {
         "syntax/list?" => {
             expect_arity(1)?;
-            Ok(Expression::Word(matches!(values[0], Expression::Apply(_)).to_string()))
+            Ok(Expression::Word(
+                matches!(values[0], Expression::Apply(_)).to_string(),
+            ))
         }
         "syntax/empty?" => {
             expect_arity(1)?;
-            Ok(Expression::Word(expect_list(values[0].clone())?.is_empty().to_string()))
+            Ok(Expression::Word(
+                expect_list(values[0].clone())?.is_empty().to_string(),
+            ))
         }
         "syntax/head" => {
             expect_arity(1)?;
             let items = expect_list(values[0].clone())?;
-            items
-                .into_iter()
-                .next()
-                .ok_or_else(|| "compile-time 'syntax/head' expected a non-empty syntax list".to_string())
+            items.into_iter().next().ok_or_else(|| {
+                "compile-time 'syntax/head' expected a non-empty syntax list".to_string()
+            })
         }
         "syntax/tail" => {
             expect_arity(1)?;
@@ -1293,7 +1301,9 @@ fn eval_compile_time_syntax_op(
         }
         "syntax/word?" => {
             expect_arity(1)?;
-            Ok(Expression::Word(matches!(values[0], Expression::Word(_)).to_string()))
+            Ok(Expression::Word(
+                matches!(values[0], Expression::Word(_)).to_string(),
+            ))
         }
         "syntax/word=?" => {
             expect_arity(2)?;
@@ -1458,9 +1468,9 @@ fn expand_macros_expr(
         Expression::Apply(items) if !items.is_empty() => {
             if let Some(Expression::Word(head)) = items.first() {
                 match head.as_str() {
-                    "quote" | "qq" | "uq" | "uqs" | "gensym"
-                    | "syntax/list?" | "syntax/empty?" | "syntax/head" | "syntax/tail"
-                    | "syntax/prepend" | "syntax/append" | "syntax/word?" | "syntax/word=?" => {
+                    "quote" | "qq" | "uq" | "uqs" | "gensym" | "syntax/list?" | "syntax/empty?"
+                    | "syntax/head" | "syntax/tail" | "syntax/prepend" | "syntax/append"
+                    | "syntax/word?" | "syntax/word=?" => {
                         return Err(format!(
                             "Compile-time form '{}' can only appear inside letmacro bodies",
                             head
@@ -1923,7 +1933,10 @@ fn destructure_pattern(
                     // its generated accessor (`Point/x`, `Point/y`); type
                     // inference then verifies that the record and fields
                     // actually exist and match the value.
-                    if elements.iter().all(|element| matches!(element, Expression::Word(_))) {
+                    if elements
+                        .iter()
+                        .all(|element| matches!(element, Expression::Word(_)))
+                    {
                         let mut bindings = vec![];
                         let temp_var = if let Expression::Word(name) = &value_expr {
                             name.clone()
