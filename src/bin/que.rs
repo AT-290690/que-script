@@ -59,6 +59,13 @@ const EXAMPLES: &str = r#"Calque examples
 (sig restored [[{ Shape Int }]])
 (let restored (deserialize saved))
 
+; Recursive payload enums use the same explicit readable format.
+(enum Tree Empty (Node value Int left Tree right Tree))
+(let tree-text (serialize (Node 4 Empty Empty)))
+; Tree{ Node 4 Tree{ Empty } Tree{ Empty } }
+(sig restored-tree Tree)
+(let restored-tree (deserialize tree-text))
+
 (match Rock
   Rock (if (beats? Rock Scissors) (snd (get 0 (Table/get Rock restored))) 0)
   Paper 0

@@ -261,7 +261,9 @@ variant:
 ```
 
 Payload enums are boxed and RC-managed; recursive trees are allowed, while
-ownership cycles remain rejected.
+ownership cycles remain rejected. They serialize in a readable recursive
+format such as `Tree{ Node 1 Tree{ Empty } Tree{ Empty } }`; give
+`deserialize` a concrete type with `sig` before decoding one.
 The former string-dispatch macro is available explicitly as `match/string`.
 
 Enums are also valid `Table` keys. The table keeps its normal structural

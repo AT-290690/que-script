@@ -826,6 +826,12 @@ impl ServerState {
             }
         }
 
+        for (name, signature) in
+            native_core::payload_enum_constructor_signatures_in_source(&doc.text)
+        {
+            inferred_signatures.entry(name).or_insert(signature);
+        }
+
         if let Some(form_signatures) = self.form_signatures_at(doc, position) {
             for (name, signature) in form_signatures {
                 if should_hide_completion_symbol(name) {
@@ -2184,6 +2190,36 @@ mod tests {
                 markup.value
             );
         }
+    }
+
+    #[test]
+    fn native_hover_reports_payload_constructor_and_pattern_field_types() {
+        let source = "(enum Tree Empty (Node value Int left Tree right Tree))\n(let tree (Node 4 Empty Empty))\n(match tree Empty 0 (Node value left right) value)";
+        let state = test_server_state();
+        for (position, expected) in [
+            (Position::new(1, 6), "tree : Tree"),
+            (Position::new(1, 12), "Node : Int -> Tree -> Tree -> Tree"),
+            (Position::new(2, 27), "value : Int"),
+        ] {
+            let hover = state.hover_for_text(source, position).expect("payload enum hover");
+            let HoverContents::Markup(markup) = hover.contents else { panic!("expected Markdown hover"); };
+            assert!(markup.value.contains(expected), "unexpected hover: {}", markup.value);
+        }
+    }
+
+    #[test]
+    fn native_completions_include_payload_enum_constructor() {
+        let state = test_server_state();
+        let items = state.completion_items_for_text(
+            "(enum Tree Empty (Node value Int left Tree right Tree))\nNo",
+            Position::new(1, 2),
+        );
+        let item = items
+            .iter()
+            .find(|item| item.label == "Node")
+            .expect("payload constructor should be offered as a completion");
+        assert_eq!(item.detail.as_deref(), Some("Int -> Tree -> Tree -> Tree"));
+        assert_eq!(item.kind, Some(CompletionItemKind::FUNCTION));
     }
 
     #[test]

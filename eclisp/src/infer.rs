@@ -2873,7 +2873,7 @@ fn infer_match(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
     let mut branch_type: Option<Type> = None;
 
     for (clause_index, pair) in clauses.chunks_exact(2).enumerate() {
-        let (pattern, bindings): (&str, Vec<&String>) = match &pair[0] {
+        let (pattern, bindings): (&str, Vec<(&String, &Expression)>) = match &pair[0] {
             Expression::Word(pattern) => (pattern, Vec::new()),
             Expression::Apply(items) => {
                 let Some(Expression::Word(pattern)) = items.first() else {
@@ -2884,7 +2884,7 @@ fn infer_match(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
                     let Expression::Word(binding) = item else {
                         return Err("enum match bindings must be names".to_string());
                     };
-                    bindings.push(binding);
+                    bindings.push((binding, item));
                 }
                 (pattern, bindings)
             }
@@ -2929,7 +2929,7 @@ fn infer_match(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
             let mut binding_names = HashSet::new();
             ctx.enter_lexical_scope();
             let inferred_body = (|| {
-                for (binding, field) in bindings.iter().zip(variant.fields.iter()) {
+                for ((binding, binding_expr), field) in bindings.iter().zip(variant.fields.iter()) {
                     if *binding == "_" {
                         continue;
                     }
@@ -2938,6 +2938,14 @@ fn infer_match(exprs: &[Expression], ctx: &mut InferenceContext) -> Result<Type,
                     }
                     ctx.env
                         .insert((*binding).clone(), TypeScheme::monotype(field.typ.clone()))?;
+                    if ctx.collect_expr_types {
+                        // Match payload names are bindings even though the
+                        // pattern itself is syntax rather than an evaluated
+                        // expression. Record them so hover/completion can
+                        // expose their declared field type.
+                        ctx.expr_types
+                            .insert(expression_id(binding_expr), field.typ.clone());
+                    }
                 }
                 infer_expr(&pair[1], ctx)
             })();

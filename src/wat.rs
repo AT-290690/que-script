@@ -8330,6 +8330,10 @@ fn compile_match(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
             .ok_or_else(|| format!("unknown enum variant '{}'", pattern))?;
         let mut body_ctx = ctx.clone();
         let data_slot = value_slot + 1;
+        // Pattern fields occupy scratch locals after the scrutinee. Nested
+        // matches/body expressions must start beyond them or a nested binding
+        // could overwrite an outer pattern value.
+        body_ctx.tmp_i32 = value_slot + 2 + bindings.len();
         let mut binding_prelude = Vec::new();
         if enum_type.boxed {
             binding_prelude.push(format!(
@@ -14670,7 +14674,34 @@ fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<Str
         }
         Type::Enum(enum_type) => {
             if enum_type.boxed {
-                return Err("payload enum WASI serialization is not implemented yet".into());
+                let variants = enum_type.variants();
+                let mut nested = String::new();
+                for variant in &variants {
+                    for field in &variant.fields {
+                        nested.push_str(&emit_wasi_serializer(&field.typ, emitted)?);
+                    }
+                }
+                let mut branches = String::new();
+                for (tag, variant) in variants.iter().enumerate() {
+                    let mut fields = String::new();
+                    for (index, field) in variant.fields.iter().enumerate() {
+                        fields.push_str(&format!(
+                            "      local.get $out i32.const 32 call $vec_push_i32 drop\n      local.get $data i32.const {} i32.add i32.load call $__wasi_serialize_{} local.set $tmp\n      local.get $out local.get $tmp call $__serde_append\n      local.get $tmp call $rc_release_vec drop\n",
+                            index * 4,
+                            wasi_serde_name(&field.typ)
+                        ));
+                    }
+                    branches.push_str(&format!(
+                        "    local.get $tag i32.const {tag} i32.eq\n    if\n      {}\n{fields}    else\n",
+                        wasi_append_literal("$out", &variant.name).replace('\n', "\n      "),
+                    ));
+                }
+                branches.push_str("      unreachable\n");
+                for _ in &variants { branches.push_str("    end\n"); }
+                return Ok(format!(
+                    "{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $data i32) (local $tmp i32) (local $tag i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    {}\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n    local.get $value i32.const 28 i32.add i32.load local.set $tag\n{branches}    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $out i32.const 125 call $vec_push_i32 drop\n    local.get $out)\n",
+                    wasi_append_literal("$out", &format!("{}{{ ", enum_type.name)).replace('\n', "\n    "),
+                ));
             }
             // Enums are compact i32 tags at runtime, but values crossing the
             // WASI boundary should remain readable Calque data.  Print the
@@ -14847,7 +14878,43 @@ fn emit_wasi_deserializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<S
         }
         Type::Enum(enum_type) => {
             if enum_type.boxed {
-                return Err("payload enum WASI deserialization is not implemented yet".into());
+                let variants = enum_type.variants();
+                let mut nested = String::new();
+                for variant in &variants {
+                    for field in &variant.fields {
+                        nested.push_str(&emit_wasi_deserializer(&field.typ, emitted)?);
+                    }
+                }
+                let mut branches = String::new();
+                for (tag, variant) in variants.iter().enumerate() {
+                    let ref_words = enum_ref_bitmap_words(variant);
+                    let mut ref_map = String::new();
+                    for (index, word) in ref_words.iter().enumerate() {
+                        ref_map.push_str(&format!(
+                            "      local.get $out i32.const 24 i32.add i32.load i32.const {} i32.add i32.const {} i32.store\n",
+                            index * 4, *word as i32
+                        ));
+                    }
+                    let mut fields = String::new();
+                    for (index, field) in variant.fields.iter().enumerate() {
+                        fields.push_str(&format!(
+                            "      call $__wasi_deserialize_{} local.set $item\n      local.get $data i32.const {} i32.add local.get $item i32.store\n",
+                            wasi_serde_name(&field.typ), index * 4
+                        ));
+                    }
+                    branches.push_str(&format!(
+                        "    local.get $tag i32.const {tag} i32.eq\n    if (result i32)\n      i32.const {tag} i32.const {} i32.const {} call $enum_new_i32 local.set $out\n{ref_map}      local.get $out i32.const 16 i32.add i32.load local.set $data\n{fields}      i32.const 125 call $__deser_expect\n      local.get $out\n    else\n",
+                        variant.fields.len(), ref_words.len(),
+                    ));
+                }
+                branches.push_str("      unreachable\n");
+                for _ in &variants { branches.push_str("    end\n"); }
+                let names = variants.iter().map(|variant| variant.name.clone()).collect::<Vec<_>>();
+                return Ok(format!(
+                    "{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $data i32) (local $item i32) (local $tag i32) (local $c i32)\n    {}    {}\n    local.set $tag\n{branches}  )\n",
+                    wasi_expect_literal(&format!("{}{{ ", enum_type.name)).replace('\n', "\n    "),
+                    emit_wasi_enum_deserializer(&names).replace('\n', "\n    "),
+                ));
             }
             let names = enum_type.variants().into_iter().map(|variant| variant.name).collect::<Vec<_>>();
             let body = emit_wasi_enum_deserializer(&names);

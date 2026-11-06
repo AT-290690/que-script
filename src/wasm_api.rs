@@ -365,6 +365,11 @@ fn lsp_completions_with_prefix(
                 inferred_signatures.insert(name.clone(), signature.clone());
             }
         }
+        for (name, signature) in
+            native_core::payload_enum_constructor_signatures_in_source(&text)
+        {
+            inferred_signatures.entry(name).or_insert(signature);
+        }
 
         let mut items = Vec::new();
         for keyword in [

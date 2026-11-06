@@ -1605,7 +1605,8 @@ pub fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut Has
     }
 }
 
-/// Return the declared enum type for a variant written in this source file.
+/// Return the declared type/signature for an enum constructor written in this
+/// source file.
 ///
 /// Enum variants in an `(enum ...)` declaration and in a `match` arm are
 /// syntax, rather than ordinary evaluated expressions. Consequently they do
@@ -1622,12 +1623,32 @@ pub fn enum_variant_type_in_source(text: &str, symbol: &str) -> Option<String> {
 
         if let [Expression::Word(keyword), Expression::Word(enum_name), variants @ ..] = &items[..]
         {
-            if keyword == "enum"
-                && variants
-                    .iter()
-                    .any(|variant| matches!(variant, Expression::Word(name) if name == symbol))
-            {
-                return Some(enum_name.clone());
+            if keyword == "enum" {
+                for variant in variants {
+                    match variant {
+                        Expression::Word(name) if name == symbol => return Some(enum_name.clone()),
+                        Expression::Apply(parts) => {
+                            if !matches!(parts.first(), Some(Expression::Word(name)) if name == symbol) {
+                                continue;
+                            }
+                            // `(Node value Int left Tree)` is a curried
+                            // constructor `Int -> Tree -> Tree`. The normal
+                            // type-occurrence index does not include enum
+                            // declaration syntax, so retain this source-level
+                            // signature for hover in declarations and
+                            // incomplete documents.
+                            let mut signature = parts
+                                .iter()
+                                .skip(2)
+                                .step_by(2)
+                                .map(Expression::to_lisp)
+                                .collect::<Vec<_>>();
+                            signature.push(enum_name.clone());
+                            return Some(signature.join(" -> "));
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
 
@@ -1639,6 +1660,59 @@ pub fn enum_variant_type_in_source(text: &str, symbol: &str) -> Option<String> {
     exprs
         .iter()
         .find_map(|expr| find_variant_type(expr, symbol))
+}
+
+/// Collect payload-enum constructor signatures directly from source.
+///
+/// Constructors are entered into inference's environment, but an enum form is
+/// declaration syntax and therefore does not necessarily leave a normal
+/// expression occurrence in the LSP index. This keeps completion useful even
+/// while the user is still writing the first constructor use.
+pub fn payload_enum_constructor_signatures_in_source(text: &str) -> Vec<(String, String)> {
+    let Some(exprs) = parse_user_exprs_for_symbol_collection(text) else {
+        return Vec::new();
+    };
+
+    fn collect(expr: &Expression, out: &mut Vec<(String, String)>) {
+        let Expression::Apply(items) = expr else {
+            return;
+        };
+        if let [Expression::Word(keyword), Expression::Word(enum_name), variants @ ..] = &items[..]
+        {
+            if keyword == "enum" {
+                for variant in variants {
+                    let Expression::Apply(parts) = variant else {
+                        continue;
+                    };
+                    let Some(Expression::Word(name)) = parts.first() else {
+                        continue;
+                    };
+                    if parts.len() < 3 || parts.len() % 2 == 0 {
+                        continue;
+                    }
+                    let mut signature = parts
+                        .iter()
+                        .skip(2)
+                        .step_by(2)
+                        .map(Expression::to_lisp)
+                        .collect::<Vec<_>>();
+                    signature.push(enum_name.clone());
+                    out.push((name.clone(), signature.join(" -> ")));
+                }
+            }
+        }
+        for item in items {
+            collect(item, out);
+        }
+    }
+
+    let mut constructors = Vec::new();
+    for expr in &exprs {
+        collect(expr, &mut constructors);
+    }
+    constructors.sort_by(|left, right| left.0.cmp(&right.0));
+    constructors.dedup_by(|left, right| left.0 == right.0);
+    constructors
 }
 
 fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
@@ -1654,8 +1728,16 @@ fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
                 }
             } else if head == "enum" {
                 for variant in items.iter().skip(2) {
-                    if let Expression::Word(name) = variant {
-                        out.insert(name.clone());
+                    match variant {
+                        Expression::Word(name) => {
+                            out.insert(name.clone());
+                        }
+                        Expression::Apply(parts) => {
+                            if let Some(Expression::Word(name)) = parts.first() {
+                                out.insert(name.clone());
+                            }
+                        }
+                        _ => {}
                     }
                 }
             } else if head == "record" {

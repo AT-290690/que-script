@@ -327,6 +327,37 @@ xs)"#,
     }
 
     #[test]
+    fn test_recursive_payload_enum_serialization_round_trip() {
+        let source = r#"(do
+            (enum Tree Empty (Node value Int left Tree right Tree))
+            (let saved (serialize (Node 4 (Node 2 Empty Empty) Empty)))
+            (sig restored Tree)
+            (let restored (deserialize saved))
+            (match restored
+              Empty 0
+              (Node value left right)
+                (match left
+                  Empty 0
+                  (Node left-value left-left left-right) (+ value left-value))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "6");
+    }
+
+    #[test]
+    fn test_wasi_deserialize_rejects_missing_payload_enum_fields() {
+        let source = r#"(do
+            (enum Tree Empty (Node value Int left Tree right Tree))
+            (sig tree Tree)
+            (let tree (deserialize "Tree{ Node 4 Tree{ Empty } }"))
+            tree)"#;
+        let error = run_program_error_with_debug_guards(source);
+        assert!(
+            !error.is_empty(),
+            "a payload enum with missing fields must trap rather than invent a value"
+        );
+    }
+
+    #[test]
     fn test_record_managed_field_serialization_round_trip() {
         let source = r#"(do
             (record Person name [Char] tags [[Char]])
@@ -6242,6 +6273,37 @@ out"#,
                 .expect("enum variant should have hover contents");
             assert_eq!(contents, "Forward : Direction");
         }
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_reports_payload_constructor_and_pattern_field_types() {
+        let program = "(enum Tree Empty (Node value Int left Tree right Tree))\n(let tree (Node 4 Empty Empty))\n(match tree Empty 0 (Node value left right) value)";
+        for (line, character, expected) in [
+            (1, 6, "tree : Tree"),
+            (1, 12, "Node : Int -> Tree -> Tree -> Tree"),
+            (2, 27, "value : Int"),
+        ] {
+            let hover_json = crate::wasm_api::lsp_hover(program.to_string(), line, character);
+            let hover: serde_json::Value = serde_json::from_str(&hover_json).expect("valid hover JSON");
+            let contents = hover["contents"].as_str().expect("payload enum hover contents");
+            assert!(contents.contains(expected), "unexpected hover: {contents}");
+        }
+    }
+
+    #[test]
+    fn test_wasm_lsp_completions_include_payload_enum_constructor() {
+        let program = "(enum Tree Empty (Node value Int left Tree right Tree))\nNo";
+        let completion_json = crate::wasm_api::lsp_completions_at(program.to_string(), 1, 2);
+        let items: serde_json::Value = serde_json::from_str(&completion_json)
+            .expect("completion response should be valid JSON");
+        let item = items
+            .as_array()
+            .expect("completion response should be an array")
+            .iter()
+            .find(|item| item["label"] == "Node")
+            .expect("payload constructor should be offered as a completion");
+        assert_eq!(item["detail"], "Int -> Tree -> Tree -> Tree");
+        assert_eq!(item["kind"], "function");
     }
 
     #[test]

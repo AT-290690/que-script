@@ -108,6 +108,26 @@ is rejected by Calque's RC-cycle checks.
 
 `=~` remains useful for zero-payload state enums. It is not structural payload
 equality; use `match` to inspect a payload variant. Payload enums are not
-currently supported as `Table` keys or WASI serialization values.
+currently supported as `Table` keys.
+
+## Serialize payload enums
+
+Payload enums use an explicit, readable recursive format. `serialize` writes
+the enum type, variant, and each field; `deserialize` validates that exact
+shape against the concrete type supplied by `sig`:
+
+```que
+(enum Tree Empty (Node value Int left Tree right Tree))
+
+(let saved (serialize (Node 4 Empty Empty)))
+; Tree{ Node 4 Tree{ Empty } Tree{ Empty } }
+
+(sig restored Tree)
+(let restored (deserialize saved))
+```
+
+Malformed text, an unknown variant, or a missing field is an error. Recursive
+payloads are decoded recursively, so this format also round-trips ordinary
+trees and ASTs without a separate schema.
 
 `match/string` remains available for the older string-dispatch macro use case.
