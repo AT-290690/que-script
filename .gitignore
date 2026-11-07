@@ -38,6 +38,8 @@ examples/*
 examples/demo/*
 !examples/demo/03-grid-paths.que
 !examples/demo/04-enum-table-round-trip.que
+!examples/benchmarks/
+!examples/benchmarks/*.que
 !docs/src/examples/
 !docs/src/examples/grid-paths.md
 !docs/src/examples/enum-table-serialization.md

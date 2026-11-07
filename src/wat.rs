@@ -1018,6 +1018,41 @@ fn is_scalar_vector_type(t: &Type) -> bool {
     matches!(t, Type::List(inner) if !is_ref_type(inner))
 }
 
+/// Scalar records can live inline in a vector: each element is its fixed
+/// sequence of i32 fields rather than a pointer to a separately allocated
+/// record. Managed fields deliberately stay on the established vector-of-
+/// references representation because their per-element ownership needs a
+/// bitmap and release path.
+fn packed_scalar_record_vector(t: &Type) -> Option<&crate::types::RecordType> {
+    let Type::List(inner) = t else {
+        return None;
+    };
+    let Type::Record(record) = inner.as_ref() else {
+        return None;
+    };
+    record
+        .fields
+        .iter()
+        .all(|field| !is_ref_type(&field.typ))
+        .then_some(record.as_ref())
+}
+
+/// A direct record constructor can be written straight into a packed vector
+/// slot.  This is deliberately stricter than merely checking the value type:
+/// it only applies to the matching constructor syntax, so the fallback still
+/// handles a record value obtained from a variable, function, or ordinary
+/// vector representation.
+fn packed_record_constructor_for_vector<'a>(
+    vector: &'a TypedExpression,
+    value: &'a TypedExpression,
+) -> Option<&'a crate::types::RecordType> {
+    let vector_record = packed_scalar_record_vector(vector.typ.as_ref()?)?;
+    let value_record = record_constructor_type(value)?;
+    (vector_record.name == value_record.name
+        && vector_record.fields.len() == value_record.fields.len())
+    .then_some(vector_record)
+}
+
 fn expr_is_definitely_materialized_scalar_vector(
     expr: &TypedExpression,
     materialized_scalar_local_slots: &HashSet<usize>,
@@ -3325,6 +3360,24 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    ;; Inline scalar-record vectors own only their backing storage. Their
+    ;; cells are raw fields, never independently reference-counted pointers.
+    local.get $magic
+    i32.const 1447380021
+    i32.eq
+    if
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      call $free
+      drop
+      local.get $ptr
+      call $free
+      drop
+      i32.const 0
+      return
+    end
     local.get $ptr
     i32.const 12
     i32.add
@@ -4085,7 +4138,20 @@ fn emit_vector_runtime(
     i32.const 1447380017
     i32.ne
     if
-      i32.const 0
+      local.get $magic
+      i32.const 1447380021
+      i32.ne
+      if
+        i32.const 0
+        return
+      end
+      local.get $rc i32.const 0 i32.le_s if i32.const 0 return end
+      local.get $len i32.const 0 i32.lt_s if i32.const 0 return end
+      local.get $cap local.get $len i32.lt_s if i32.const 0 return end
+      local.get $elem_ref i32.const 1 i32.lt_s if i32.const 0 return end
+      local.get $data i32.const 65536 i32.lt_u if i32.const 0 return end
+      local.get $data local.get $mem_end i32.ge_u if i32.const 0 return end
+      i32.const 1
       return
     end
     local.get $rc
@@ -4636,6 +4702,131 @@ fn emit_vector_runtime(
     local.get $ptr
   )
 
+  ;; A homogeneous vector of a record whose fields are all scalar stores the
+  ;; fields inline (array-of-structs). Offset 12 is its fixed field count;
+  ;; this magic is intentionally distinct from ordinary scalar vectors.
+  (func $vec_new_packed_record_i32 (param $len i32) (param $fields i32) (result i32)
+    (local $cap i32) (local $ptr i32) (local $data i32)
+    local.get $len i32.const 1 i32.lt_s
+    if (result i32) i32.const 1 else local.get $len end
+    local.set $cap
+    i32.const 24 call $alloc local.set $ptr
+    local.get $cap local.get $fields i32.mul i32.const 4 i32.mul call $alloc local.set $data
+    local.get $ptr local.get $len i32.store
+    local.get $ptr i32.const 4 i32.add local.get $cap i32.store
+    local.get $ptr i32.const 8 i32.add i32.const 1 i32.store
+    local.get $ptr i32.const 12 i32.add local.get $fields i32.store
+    local.get $ptr i32.const 16 i32.add local.get $data i32.store
+    local.get $ptr i32.const 20 i32.add i32.const 1447380021 i32.store
+    local.get $ptr
+  )
+
+  (func $vec_packed_record_addr (param $ptr i32) (param $idx i32) (result i32)
+    local.get $ptr i32.const 16 i32.add i32.load
+    local.get $idx
+    local.get $ptr i32.const 12 i32.add i32.load
+    i32.mul i32.const 4 i32.mul i32.add
+  )
+
+  (func $vec_grow_packed_record_i32 (param $ptr i32) (result i32)
+    (local $cap i32) (local $new_cap i32) (local $len i32)
+    (local $fields i32) (local $old i32) (local $new i32) (local $words i32)
+    local.get $ptr i32.const 4 i32.add i32.load local.set $cap
+    local.get $cap i32.const __VEC_GROWTH_NUM__ i32.mul i32.const __VEC_GROWTH_DEN__ i32.div_s local.set $new_cap
+    local.get $new_cap local.get $cap i32.le_s if local.get $cap i32.const 1 i32.add local.set $new_cap end
+    local.get $new_cap i32.const 1 i32.lt_s if i32.const 1 local.set $new_cap end
+    local.get $ptr i32.load local.set $len
+    local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+    local.get $ptr i32.const 16 i32.add i32.load local.set $old
+    local.get $new_cap local.get $fields i32.mul local.set $words
+    local.get $words i32.const 4 i32.mul call $alloc local.set $new
+    local.get $new local.get $old local.get $len local.get $fields i32.mul i32.const 4 i32.mul memory.copy
+    local.get $old call $free drop
+    local.get $ptr i32.const 4 i32.add local.get $new_cap i32.store
+    local.get $ptr i32.const 16 i32.add local.get $new i32.store
+    i32.const 0
+  )
+
+  (func $vec_push_packed_record_i32 (param $ptr i32) (param $value i32) (result i32)
+    (local $len i32) (local $cap i32) (local $fields i32) (local $dst i32) (local $src i32)
+    local.get $ptr i32.load local.set $len
+    local.get $ptr i32.const 4 i32.add i32.load local.set $cap
+    local.get $len local.get $cap i32.lt_s i32.eqz if local.get $ptr call $vec_grow_packed_record_i32 drop end
+    local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+    local.get $ptr local.get $len call $vec_packed_record_addr local.set $dst
+    local.get $value i32.const 16 i32.add i32.load local.set $src
+    local.get $dst local.get $src local.get $fields i32.const 4 i32.mul memory.copy
+    local.get $ptr local.get $len i32.const 1 i32.add i32.store
+    i32.const 0
+  )
+
+  (func $vec_set_packed_record_i32 (param $ptr i32) (param $idx i32) (param $value i32) (result i32)
+    (local $len i32) (local $fields i32) (local $dst i32) (local $src i32)
+    local.get $ptr i32.load local.set $len
+    local.get $idx local.get $len i32.eq
+    if
+      local.get $ptr local.get $value call $vec_push_packed_record_i32 return
+    end
+    local.get $idx i32.const 0 i32.ge_s local.get $idx local.get $len i32.lt_s i32.and
+    if
+      local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+      local.get $ptr local.get $idx call $vec_packed_record_addr local.set $dst
+      local.get $value i32.const 16 i32.add i32.load local.set $src
+      local.get $dst local.get $src local.get $fields i32.const 4 i32.mul memory.copy
+      i32.const 0 return
+    end
+    unreachable
+  )
+
+  ;; Reserve the destination slot for a packed scalar record update.  Keeping
+  ;; this separate from `$vec_set_packed_record_i32` lets the compiler lower
+  ;; `(set! i (Point x y) points)` without first allocating a temporary Point
+  ;; only to copy its fields into the inline array.
+  (func $vec_prepare_packed_record_set_i32 (param $ptr i32) (param $idx i32) (result i32)
+    (local $len i32) (local $cap i32)
+    local.get $ptr i32.load local.set $len
+    local.get $idx local.get $len i32.eq
+    if
+      local.get $ptr i32.const 4 i32.add i32.load local.set $cap
+      local.get $len local.get $cap i32.lt_s i32.eqz
+      if local.get $ptr call $vec_grow_packed_record_i32 drop end
+      local.get $ptr local.get $len i32.const 1 i32.add i32.store
+      local.get $ptr local.get $len call $vec_packed_record_addr
+      return
+    end
+    local.get $idx i32.const 0 i32.ge_s local.get $idx local.get $len i32.lt_s i32.and
+    if
+      local.get $ptr local.get $idx call $vec_packed_record_addr
+      return
+    end
+    unreachable
+  )
+
+  (func $vec_get_packed_record_i32 (param $ptr i32) (param $idx i32) (result i32)
+    (local $fields i32) (local $out i32) (local $dst i32) (local $src i32)
+    local.get $idx i32.const 0 i32.ge_s local.get $idx local.get $ptr i32.load i32.lt_s i32.and
+    i32.eqz if unreachable end
+    local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+    local.get $fields i32.const 0 call $record_new_i32 local.set $out
+    local.get $out i32.const 16 i32.add i32.load local.set $dst
+    local.get $ptr local.get $idx call $vec_packed_record_addr local.set $src
+    local.get $dst local.get $src local.get $fields i32.const 4 i32.mul memory.copy
+    local.get $out
+  )
+
+  (func $vec_slice_packed_record_i32 (param $ptr i32) (param $start i32) (result i32)
+    (local $len i32) (local $fields i32) (local $out i32) (local $src i32) (local $dst i32)
+    local.get $ptr i32.load local.set $len
+    local.get $start i32.const 0 i32.ge_s local.get $start local.get $len i32.le_s i32.and
+    i32.eqz if unreachable end
+    local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+    local.get $len local.get $start i32.sub local.get $fields call $vec_new_packed_record_i32 local.set $out
+    local.get $ptr local.get $start call $vec_packed_record_addr local.set $src
+    local.get $out i32.const 16 i32.add i32.load local.set $dst
+    local.get $dst local.get $src local.get $len local.get $start i32.sub local.get $fields i32.mul i32.const 4 i32.mul memory.copy
+    local.get $out
+  )
+
   ;; Payload enums use the same inline record layout plus one word for their
   ;; discriminant. Their distinct magic lets Table's polymorphic helpers
   ;; perform structural hashing/equality, while the RC path still releases
@@ -4670,6 +4861,11 @@ fn emit_vector_runtime(
   (func $vec_get_i32 (param $ptr i32) (param $idx i32) (result i32)
     (local $len i32)
     ;; __VEC_GET_BOUNDS_CHECK__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr local.get $idx call $vec_get_packed_record_i32
+      return
+    end
     local.get $ptr
     i32.const 16
     i32.add
@@ -4828,6 +5024,11 @@ fn emit_vector_runtime(
     (local $new_data i32)
     (local $i i32)
     (local $v i32)
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr call $vec_grow_packed_record_i32
+      return
+    end
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -4926,11 +5127,23 @@ fn emit_vector_runtime(
     (local $new_data i32)
     (local $i i32)
     (local $v i32)
-    local.get $requested
-    i32.const 0
-    i32.lt_s
+    local.get $requested i32.const 0 i32.lt_s if unreachable end
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
-      unreachable
+      ;; Reuse the ordinary capacity algorithm below after changing its unit
+      ;; from cells to field words would be error-prone. Grow until enough
+      ;; capacity, and deliberately keep a larger existing allocation.
+      block $packed_done
+        loop $packed_grow
+          local.get $ptr i32.const 4 i32.add i32.load
+          local.get $requested i32.ge_s
+          br_if $packed_done
+          local.get $ptr call $vec_grow_packed_record_i32 drop
+          br $packed_grow
+        end
+      end
+      local.get $ptr
+      return
     end
     local.get $ptr
     call $vec_materialize_i32
@@ -5044,6 +5257,11 @@ fn emit_vector_runtime(
     (local $cap i32)
     (local $addr i32)
     (local $elem_ref i32)
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr local.get $v call $vec_push_packed_record_i32
+      return
+    end
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5276,6 +5494,11 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $old i32)
     ;; __DBG_RC_VEC_SET_INC__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr local.get $idx local.get $v call $vec_set_packed_record_i32
+      return
+    end
     ;; __DBG_RC_VEC_SET_PTR_CHECK__
     local.get $ptr
     call $vec_materialize_i32
@@ -5546,6 +5769,13 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $addr i32)
     (local $v i32)
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr i32.load i32.const 0 i32.gt_s
+      if local.get $ptr local.get $ptr i32.load i32.const 1 i32.sub i32.store end
+      i32.const 0
+      return
+    end
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5599,6 +5829,12 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $data i32)
     (local $i i32)
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr i32.const 0 i32.store
+      i32.const 0
+      return
+    end
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5661,6 +5897,15 @@ fn emit_vector_runtime(
     (local $len i32)
     (local $addr i32)
     (local $v i32)
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr i32.load i32.const 0 i32.le_s if unreachable end
+      local.get $ptr
+      local.get $ptr i32.load i32.const 1 i32.sub
+      call $vec_get_packed_record_i32
+      local.get $ptr local.get $ptr i32.load i32.const 1 i32.sub i32.store
+      return
+    end
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -10713,6 +10958,9 @@ fn compile_tail_do(
 }
 
 fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if let Some(record) = node.typ.as_ref().and_then(packed_scalar_record_vector) {
+        return compile_packed_scalar_record_vector_literal(node, record, ctx);
+    }
     let elem_kind = match node.typ.as_ref() {
         Some(Type::List(inner)) => vec_elem_kind_from_type(inner)?,
         Some(other) => {
@@ -10787,6 +11035,36 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         }
     }
     out.push(format!("local.get {}", ctx.tmp_i32));
+    Ok(out.join("\n"))
+}
+
+fn compile_packed_scalar_record_vector_literal(
+    node: &TypedExpression,
+    record: &crate::types::RecordType,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
+    let args = &node.children[1..];
+    let vec_tmp = ctx.tmp_i32;
+    let value_tmp = ctx.tmp_i32 + 1;
+    let nested_ctx = Ctx {
+        tmp_i32: ctx.tmp_i32 + 2,
+        ..ctx.clone()
+    };
+    let mut out = vec![format!(
+        "i32.const {}\ni32.const {}\ncall $vec_new_packed_record_i32\nlocal.set {vec_tmp}",
+        args.len(),
+        record.fields.len(),
+    )];
+    for arg in args {
+        let value = compile_expr(arg, &nested_ctx)?;
+        out.push(format!(
+            "{value}\nlocal.set {value_tmp}\nlocal.get {vec_tmp}\nlocal.get {value_tmp}\ncall $vec_push_packed_record_i32\ndrop"
+        ));
+        if should_release_set_rhs(arg, ctx.lambda_bindings) {
+            out.push(format!("local.get {value_tmp}\ncall $rc_release_vec\ndrop"));
+        }
+    }
+    out.push(format!("local.get {vec_tmp}"));
     Ok(out.join("\n"))
 }
 
@@ -11589,6 +11867,9 @@ fn compile_record_accessor(
         .children
         .get(1)
         .ok_or_else(|| "record accessor missing record value".to_string())?;
+    if let Some(packed) = compile_packed_record_accessor(input, field_index, ctx)? {
+        return Ok(packed);
+    }
     let record = compile_expr(
         input,
         &Ctx {
@@ -11627,6 +11908,78 @@ fn compile_record_accessor(
     }
     out.push(format!("local.get {value_tmp}"));
     Ok(out.join("\n"))
+}
+
+/// Fuse `Point/x (get i points)` when `points : [Point]` has only scalar
+/// fields. The vector stores those fields inline, so materialising a temporary
+/// `Point` merely to immediately project one field would defeat the layout.
+fn compile_packed_record_accessor(
+    input: &TypedExpression,
+    field_index: usize,
+    ctx: &Ctx<'_>,
+) -> Result<Option<String>, String> {
+    let Expression::Apply(items) = &input.expr else {
+        return Ok(None);
+    };
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "get") || items.len() != 3 {
+        return Ok(None);
+    }
+    let Some(vector) = apply_child_at(input, 1) else {
+        return Ok(None);
+    };
+    let Some(vector_type) = vector.typ.as_ref() else {
+        return Ok(None);
+    };
+    if packed_scalar_record_vector(vector_type).is_none() {
+        return Ok(None);
+    }
+    let index = apply_child_at(input, 2).ok_or_else(|| "get missing index".to_string())?;
+    let nested = Ctx {
+        tmp_i32: ctx.tmp_i32 + 3,
+        ..ctx.clone()
+    };
+    let vec_code = compile_expr(vector, &nested)?;
+    let index_code = compile_expr(index, &nested)?;
+    let ptr = ctx.tmp_i32;
+    let idx = ctx.tmp_i32 + 1;
+    let len = ctx.tmp_i32 + 2;
+    let checks = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        format!(
+            "local.get {idx}\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend\n\
+             local.get {ptr}\ni32.load\nlocal.set {len}\n\
+             local.get {idx}\nlocal.get {len}\ni32.ge_s\nif\n  unreachable\nend\n"
+        )
+    } else {
+        String::new()
+    };
+    // `[Point]` is normally packed, but a generic collection helper can still
+    // supply an ordinary vector with the same static type.  Dispatch on the
+    // layout tag so this fusion is always a performance choice, never a
+    // representation assumption visible to source programs.
+    let record_tmp = ctx.tmp_i32 + 3;
+    let value_tmp = ctx.tmp_i32 + 4;
+    Ok(Some(format!(
+        "{vec_code}\nlocal.set {ptr}\n{index_code}\nlocal.set {idx}\n{checks}\
+         local.get {ptr}\ni32.const 20\ni32.add\ni32.load\n\
+         i32.const 1447380021\ni32.eq\n\
+         if (result i32)\n\
+           local.get {ptr}\ni32.const 16\ni32.add\ni32.load\n\
+           local.get {idx}\nlocal.get {ptr}\ni32.const 12\ni32.add\ni32.load\n\
+           i32.mul\ni32.const 4\ni32.mul\ni32.add\n\
+           i32.const {}\ni32.add\ni32.load\n\
+         else\n\
+           local.get {ptr}\nlocal.get {idx}\ncall $vec_get_i32\n\
+           local.set {record_tmp}\n\
+           local.get {record_tmp}\ncall $rc_retain_vec\ndrop\n\
+           local.get {record_tmp}\ni32.const 16\ni32.add\ni32.load\n\
+           i32.const {}\ni32.add\ni32.load\n\
+           local.set {value_tmp}\n\
+           local.get {record_tmp}\ncall $rc_release_vec\ndrop\n\
+           local.get {value_tmp}\n\
+         end",
+        field_index * 4,
+        field_index * 4,
+    )))
 }
 
 /// Emit the function behind a record constructor when it escapes as a value
@@ -12481,6 +12834,41 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             return Err("get missing return type".to_string());
         }
     };
+    // Packed scalar-record vectors store fields rather than record pointers.
+    // A bare `get` must therefore materialise an ordinary record value; the
+    // accessor fusion above avoids this allocation for immediate projections.
+    // A generic vector builder may still produce ordinary storage for the same
+    // static `[Record]` type, so choose the representation by its runtime tag.
+    if matches!(node.typ.as_ref(), Some(Type::Record(_)))
+        && xs_node
+            .typ
+            .as_ref()
+            .and_then(packed_scalar_record_vector)
+            .is_some()
+    {
+        let ptr_tmp = ctx.tmp_i32;
+        let idx_tmp = ctx.tmp_i32 + 1;
+        let value_tmp = ctx.tmp_i32 + 2;
+        let load = format!(
+            "{xs}\nlocal.set {ptr_tmp}\n\
+             {idx}\nlocal.set {idx_tmp}\n\
+             local.get {ptr_tmp}\ni32.const 20\ni32.add\ni32.load\n\
+             i32.const 1447380021\ni32.eq\n\
+             if (result i32)\n\
+               local.get {ptr_tmp}\nlocal.get {idx_tmp}\ncall $vec_get_packed_record_i32\n\
+             else\n\
+               local.get {ptr_tmp}\nlocal.get {idx_tmp}\ncall $vec_get_i32\n\
+             end"
+        );
+        if release_xs_after {
+            return Ok(format!(
+                "{load}\nlocal.set {value_tmp}\n\
+                 local.get {ptr_tmp}\ncall $rc_release_vec\ndrop\n\
+                 local.get {value_tmp}"
+            ));
+        }
+        return Ok(load);
+    }
     let statically_in_bounds =
         static_proof_is_safe(crate::static_analysis::ProofKind::BoundsRead, &node.expr);
     let runtime_bounds_check =
@@ -12629,6 +13017,106 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     }
 }
 
+/// Lower a direct scalar record constructor store into a packed record vector.
+///
+/// The runtime magic check is important: `[Point]` does not by itself promise
+/// that a value came from the packed constructor path (for example, a future
+/// generic collection helper may still build an ordinary vector).  The packed
+/// arm writes fields directly; the ordinary-vector arm preserves the existing
+/// allocate-and-store implementation and ownership behaviour.
+fn compile_packed_record_constructor_set(
+    vector: &TypedExpression,
+    index: &TypedExpression,
+    value: &TypedExpression,
+    record: &crate::types::RecordType,
+    xs: &str,
+    release_target: bool,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
+    let ptr_tmp = ctx.tmp_i32 + 3;
+    let value_tmp = ctx.tmp_i32;
+    let dst_tmp = ctx.tmp_i32 + 1;
+    let index_tmp = ctx.tmp_i32 + 2;
+    let keep_tmp = ctx.tmp_i32 + 4;
+    let nested_ctx = Ctx {
+        tmp_i32: ctx.tmp_i32 + 5,
+        ..ctx.clone()
+    };
+    let index_code = compile_expr(index, &nested_ctx)?;
+    let managed_slots = managed_local_slots(ctx);
+    let target_release = if release_target {
+        emit_release_managed_temp_if_not_local_alias(
+            ptr_tmp,
+            keep_tmp,
+            &managed_slots,
+            vector.typ.as_ref(),
+        )
+    } else {
+        String::new()
+    };
+
+    let mut packed_fields = Vec::with_capacity(record.fields.len());
+    for (field_index, field) in value.children.iter().skip(1).enumerate() {
+        let field_code = compile_expr(field, &nested_ctx)?;
+        packed_fields.push(format!(
+            "{field_code}\nlocal.set {value_tmp}\n\
+             local.get {dst_tmp}\n\
+             i32.const {}\n\
+             i32.add\n\
+             local.get {value_tmp}\n\
+             i32.store",
+            field_index * 4
+        ));
+    }
+
+    // The direct constructor is fresh.  The ordinary vector fallback retains
+    // it, so release the temporary owner exactly as the generic `set!` path
+    // does after the call.
+    let fallback_value = compile_record_constructor(value, &nested_ctx)?;
+    let fallback_release = if should_release_set_rhs(value, ctx.lambda_bindings) {
+        format!(
+            "\nlocal.get {value_tmp}\ncall {}\ndrop",
+            rc_release_for_opt_type(value.typ.as_ref())
+        )
+    } else {
+        String::new()
+    };
+    let target_release_suffix = if target_release.is_empty() {
+        String::new()
+    } else {
+        format!("\n{target_release}")
+    };
+
+    Ok(format!(
+        "{xs}\n\
+         local.set {ptr_tmp}\n\
+         {index_code}\n\
+         local.set {index_tmp}\n\
+         local.get {ptr_tmp}\n\
+         i32.const 20\n\
+         i32.add\n\
+         i32.load\n\
+         i32.const 1447380021\n\
+         i32.eq\n\
+         if\n\
+           local.get {ptr_tmp}\n\
+           local.get {index_tmp}\n\
+           call $vec_prepare_packed_record_set_i32\n\
+           local.set {dst_tmp}\n\
+           {}\n\
+         else\n\
+           local.get {ptr_tmp}\n\
+           local.get {index_tmp}\n\
+           {fallback_value}\n\
+           local.tee {value_tmp}\n\
+           call $vec_set_i32\n\
+           drop{fallback_release}\n\
+         end{target_release_suffix}\n\
+         i32.const 0",
+        packed_fields.join("\n"),
+    ))
+}
+
 fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs_node = node
         .children
@@ -12677,7 +13165,6 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .children
         .get(3)
         .ok_or_else(|| "set! missing value".to_string())?;
-    let v = compile_expr(val_node, &nested_ctx)?;
     val_node
         .typ
         .as_ref()
@@ -12715,7 +13202,7 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     let target_prefix = if release_target {
         format!("{xs}\nlocal.tee {target_tmp}")
     } else {
-        xs
+        xs.clone()
     };
     let target_release = if release_target {
         emit_release_managed_temp_if_not_local_alias(
@@ -12727,6 +13214,20 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     } else {
         String::new()
     };
+    if let Some(record) = packed_record_constructor_for_vector(xs_node, val_node) {
+        return compile_packed_record_constructor_set(
+            xs_node,
+            node.children
+                .get(2)
+                .ok_or_else(|| "set! missing index".to_string())?,
+            val_node,
+            record,
+            &xs,
+            release_target,
+            ctx,
+        );
+    }
+    let v = compile_expr(val_node, &nested_ctx)?;
     let proven_replacement = static_proof_is_safe(
         crate::static_analysis::ProofKind::BoundsWriteReplacement,
         &node.expr,
@@ -14292,6 +14793,14 @@ fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     } else {
         "i32.const 1".to_string()
     };
+    if xs_node
+        .typ
+        .as_ref()
+        .and_then(packed_scalar_record_vector)
+        .is_some()
+    {
+        return Ok(format!("{xs}\n{start}\ncall $vec_slice_packed_record_i32"));
+    }
     let elem = match xs_node.typ.as_ref() {
         Some(Type::List(inner)) => vec_elem_kind_from_type(inner)?,
         Some(other) => {
@@ -16077,6 +16586,15 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                     return Err("car missing return type".to_string());
                                 }
                             };
+                            if node
+                                .children
+                                .get(1)
+                                .and_then(|xs| xs.typ.as_ref())
+                                .and_then(packed_scalar_record_vector)
+                                .is_some()
+                            {
+                                return Ok(format!("{xs}\ni32.const 0\ncall $vec_get_packed_record_i32"));
+                            }
                             if static_proof_is_safe(
                                 crate::static_analysis::ProofKind::NonEmpty,
                                 &node.expr,

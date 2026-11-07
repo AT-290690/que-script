@@ -241,6 +241,61 @@ xs)"#,
     }
 
     #[test]
+    fn test_scalar_record_vectors_store_fields_inline_and_preserve_vector_operations() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let points [])
+            (capacity! 4 points)
+            (push! (Point 1 2) points)
+            (push! (Point 3 4) points)
+            (set! 0 (Point 5 6) points)
+            (let point (get 0 points))
+            {(Point/x point) (Point/y point) (length points)})"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 5 { 6 2 } }"
+        );
+
+        let expr = crate::parser::build(source).expect("packed-record program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("packed-record program should compile");
+        assert!(
+            wat.contains("$vec_new_packed_record_i32"),
+            "scalar record vectors should use inline array-of-struct storage:\n{wat}"
+        );
+        assert!(
+            wat.contains("call $vec_prepare_packed_record_set_i32"),
+            "direct record constructors stored in packed vectors must reserve an inline slot before writing their fields:\n{wat}"
+        );
+        wat::parse_str(&wat).expect("packed-record module should encode");
+    }
+
+    #[test]
+    fn test_scalar_record_vector_fusion_falls_back_for_generic_vector_builders() {
+        // `Vector/new` currently uses the general vector builder.  Accessor
+        // fusion must therefore preserve the ordinary record-vector path as
+        // well as the inline packed representation.
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let points (Vector/new (lambda (i) (Point i (+ i 1))) 2))
+            (let point (get 1 points))
+            {(Point/x point) (Point/y point)})"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 1 2 }"
+        );
+
+        let wat = compile_std_program_to_wat(source, true);
+        assert!(
+            wat.contains("i32.const 1447380021") && wat.contains("call $vec_get_i32"),
+            "record accessor fusion should select packed versus ordinary storage at runtime:\n{wat}"
+        );
+        wat::parse_str(&wat).expect("generic record-vector module should encode");
+    }
+
+    #[test]
     fn test_optimized_scalar_record_projections_elide_the_record_allocation() {
         let source = r#"(do
             (record Point x Int y Int)

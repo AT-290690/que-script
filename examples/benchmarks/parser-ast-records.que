@@ -1,0 +1,95 @@
+; Record-based version of the parser-ast-eval benchmark.
+; Expected result: 62405004
+
+(let MOD 100000007)
+(let EVAL-MOD 32749)
+(let OP-ADD -1)
+(let OP-SUB -2)
+(let OP-MUL -3)
+(let EXPRESSIONS 2500)
+(let DEPTH 7)
+(let NODES-PER-EXPR (- (<< 1 (+ DEPTH 1)) 1))
+(let TOTAL-NODES (* EXPRESSIONS NODES-PER-EXPR))
+
+(record Ast kind Int value Int left Int right Int)
+
+(let op-for
+  (lambda (seed)
+    (cond
+      (= (% seed 3) 0) OP-ADD
+      (= (% seed 3) 1) OP-SUB
+      OP-MUL)))
+
+(let value-for
+  (lambda (seed)
+    (+ 1 (% (+ (* seed 17) 13) 997))))
+
+(letrec generate-expr!
+  (lambda (depth seed tokens)
+    (if (= depth 0)
+        (push! (value-for seed) tokens)
+        (block
+          (push! (op-for seed) tokens)
+          (generate-expr! (- depth 1) (+ (* seed 3) 1) tokens)
+          (generate-expr! (- depth 1) (+ (* seed 3) 2) tokens)))))
+
+(let generate-tokens
+  (lambda ()
+    (block
+      (let tokens [])
+      (capacity! TOTAL-NODES tokens)
+      (loop i (< i EXPRESSIONS)
+        (generate-expr! DEPTH (+ i 1) tokens))
+      tokens)))
+
+; One vector of records replaces the four parallel vectors for each field.
+(let NODES [])
+(capacity! TOTAL-NODES NODES)
+
+(let Ast/new!
+  (lambda (kind value left right nodes)
+    (block
+      (let id (length nodes))
+      (push! (Ast kind value left right) nodes)
+      id)))
+
+(&mut PARSE-POS 0)
+
+(letrec Parser/parse!
+  (lambda (tokens nodes)
+    (block
+      (let token (get (&get PARSE-POS) tokens))
+      (&alter! PARSE-POS (+ (&get PARSE-POS) 1))
+      (if (> token 0)
+          (Ast/new! 0 token -1 -1 nodes)
+          (block
+            (let left-node (Parser/parse! tokens nodes))
+            (let right-node (Parser/parse! tokens nodes))
+            (Ast/new! token 0 left-node right-node nodes))))))
+
+(letrec Ast/eval
+  (lambda (node-id nodes)
+    (block
+      (let node (get node-id nodes))
+      (if (= (Ast/kind node) 0)
+          (Ast/value node)
+          (block
+            (let left (Ast/eval (Ast/left node) nodes))
+            (let right (Ast/eval (Ast/right node) nodes))
+            (cond
+              (= (Ast/kind node) OP-ADD) (% (+ left right) EVAL-MOD)
+              (= (Ast/kind node) OP-SUB) (% (+ left EVAL-MOD (- 0 right)) EVAL-MOD)
+              (% (* left right) EVAL-MOD)))))))
+
+(let tokens (generate-tokens))
+(mut index 1)
+(mut checksum 0)
+
+(while (< index (+ EXPRESSIONS 1))
+  (block
+    (let root (Parser/parse! tokens NODES))
+    (let value (Ast/eval root NODES))
+    (alter! checksum (% (+ checksum (* index value)) MOD))
+    (++ index)))
+
+checksum

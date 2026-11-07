@@ -1,0 +1,121 @@
+; Record-based version of the binary-trees-hash benchmark.
+; Expected result: 5766567
+
+(let MOD 100000007)
+(let NO-HASH -1)
+(let NO-VALUE 0)
+(let NO-CHILD -1)
+(let MAX-DEPTH 12)
+
+(record Node hash Int value Int left Int right Int)
+
+(let Bool->Int
+  (lambda (value)
+    (if value 1 0)))
+
+(let SCRATCH [])
+(let LONG [])
+
+(let Node/new!
+  (lambda (hash value left right nodes)
+    (block
+      (let id (length nodes))
+      (push! (Node hash value left right) nodes)
+      id)))
+
+(letrec Tree/create!
+  (lambda (depth nodes)
+    (if (> depth 0)
+        (block
+          (let next-depth (- depth 1))
+          (Node/new! NO-HASH NO-VALUE
+                     (Tree/create! next-depth nodes)
+                     (Tree/create! next-depth nodes)
+                     nodes))
+        (Node/new! NO-HASH 1 NO-CHILD NO-CHILD nodes))))
+
+(letrec Tree/check?
+  (lambda (node-id nodes)
+    (block
+      (let node (get node-id nodes))
+      (if (= (Node/hash node) NO-HASH)
+          false
+          (if (not (= (Node/value node) NO-VALUE))
+              true
+              (block
+                (let left (Node/left node))
+                (let right (Node/right node))
+                (and
+                  (not (= left NO-CHILD))
+                  (not (= right NO-CHILD))
+                  (Tree/check? left nodes)
+                  (Tree/check? right nodes))))))))
+
+(letrec Tree/cal-hash!
+  (lambda (node-id nodes)
+    (block
+      (let node (get node-id nodes))
+      (let cached (Node/hash node))
+      (if (= cached NO-HASH)
+          (if (not (= (Node/value node) NO-VALUE))
+              (block
+                (let value (Node/value node))
+                (set! node-id
+                      (Node value value (Node/left node) (Node/right node))
+                      nodes)
+                value)
+              (block
+                (let left (Node/left node))
+                (let right (Node/right node))
+                (let total (+ (Tree/cal-hash! left nodes)
+                              (Tree/cal-hash! right nodes)))
+                (set! node-id
+                      (Node total (Node/value node) left right)
+                      nodes)
+                total))
+          cached))))
+
+(let stretch-depth (+ MAX-DEPTH 1))
+(mut acc 0)
+
+(empty! SCRATCH)
+(let stretch-root (Tree/create! stretch-depth SCRATCH))
+(let stretch-hash (Tree/cal-hash! stretch-root SCRATCH))
+(let stretch-check (Bool->Int (Tree/check? stretch-root SCRATCH)))
+(alter! acc
+  (% (+ acc
+        (* stretch-depth 3)
+        (* stretch-hash 5)
+        (* stretch-check 7))
+     MOD))
+
+(empty! LONG)
+(let long-lived-root (Tree/create! MAX-DEPTH LONG))
+
+(loop/for depth 4 (<= depth MAX-DEPTH) (+= depth 2)
+  (block
+    (let iterations (<< 1 (+ (- MAX-DEPTH depth) 4)))
+    (mut total 0)
+    (mut i 0)
+    (while (< i iterations)
+      (empty! SCRATCH)
+      (let root (Tree/create! depth SCRATCH))
+      (alter! total (+ total (Tree/cal-hash! root SCRATCH)))
+      (++ i))
+    (alter! acc
+      (% (+ acc
+            (* iterations 11)
+            (* depth 13)
+            (* total 17))
+         MOD))))
+
+(let long-lived-hash (Tree/cal-hash! long-lived-root LONG))
+(let long-lived-check (Bool->Int (Tree/check? long-lived-root LONG)))
+(alter! acc
+  (% (+ acc
+        (* MAX-DEPTH 19)
+        (* long-lived-hash 23)
+        (* long-lived-check 29))
+     MOD))
+
+acc

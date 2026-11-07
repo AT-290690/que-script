@@ -357,6 +357,10 @@ struct ScalarRecordBinding {
     name: String,
     record_name: String,
     field_names: Vec<String>,
+    // Expressions evaluated once to obtain each scalar field.  For a direct
+    // constructor these are its arguments; for a packed vector element they
+    // are accessor projections that the Wasm backend can load in place.
+    field_values: Vec<Expression>,
 }
 
 fn typed_child_at(node: &TypedExpression, item_idx: usize) -> Option<&TypedExpression> {
@@ -383,24 +387,46 @@ fn scalar_record_binding(node: &TypedExpression) -> Option<ScalarRecordBinding> 
     let Type::Record(record) = rhs.typ.as_ref()? else {
         return None;
     };
+    if record.fields.iter().any(|field| is_managed_value_type(&field.typ)) {
+        return None;
+    }
     let Expression::Apply(rhs_items) = &rhs.expr else {
         return None;
     };
-    if !matches!(rhs_items.first(), Some(Expression::Word(constructor)) if constructor == &record.name)
-        || rhs_items.len() != record.fields.len() + 1
+    let field_values = if matches!(rhs_items.first(), Some(Expression::Word(constructor)) if constructor == &record.name)
+        && rhs_items.len() == record.fields.len() + 1
     {
+        if (1..rhs_items.len()).any(|index| {
+            let Some(field) = typed_child_at(rhs, index) else {
+                return true;
+            };
+            !field.effect.is_pure() || !is_trivially_total_scalar_record_field(&field.expr)
+        }) {
+            return None;
+        }
+        rhs_items[1..].to_vec()
+    } else if matches!(rhs_items.first(), Some(Expression::Word(op)) if op == "get")
+        && rhs_items.len() == 3
+        && rhs_items[1..]
+            .iter()
+            .all(is_trivially_total_scalar_record_field)
+    {
+        // Keep the vector and index trivial: the generated projections below
+        // then preserve their evaluation order and make a scalar packed record
+        // element observable only through its fields.
+        record
+            .fields
+            .iter()
+            .map(|field| {
+                Expression::Apply(vec![
+                    Expression::Word(format!("{}/{}", record.name, field.name)),
+                    rhs.expr.clone(),
+                ])
+            })
+            .collect()
+    } else {
         return None;
-    }
-    if (1..rhs_items.len()).any(|index| {
-        let Some(field) = typed_child_at(rhs, index) else {
-            return true;
-        };
-        !field.effect.is_pure()
-            || !is_trivially_total_scalar_record_field(&field.expr)
-            || field.typ.as_ref().is_none_or(is_managed_value_type)
-    }) {
-        return None;
-    }
+    };
     Some(ScalarRecordBinding {
         name: name.clone(),
         record_name: record.name.clone(),
@@ -409,6 +435,7 @@ fn scalar_record_binding(node: &TypedExpression) -> Option<ScalarRecordBinding> 
             .iter()
             .map(|field| field.name.clone())
             .collect(),
+        field_values,
     })
 }
 
@@ -631,15 +658,6 @@ fn scalar_replace_non_escaping_records_expr(
         {
             continue;
         }
-        let Some((_name, rhs)) = let_binding_parts(&rewritten[index]) else {
-            continue;
-        };
-        let Expression::Apply(constructor_items) = rhs else {
-            continue;
-        };
-        if constructor_items.len() != binding.field_names.len() + 1 {
-            continue;
-        }
         let field_temps = (0..binding.field_names.len())
             .map(|_| state.fresh_field())
             .collect::<Vec<_>>();
@@ -652,7 +670,7 @@ fn scalar_replace_non_escaping_records_expr(
         };
 
         let mut field_bindings = Vec::with_capacity(binding.field_names.len());
-        for (temp, value) in field_temps.iter().zip(constructor_items.iter().skip(1)) {
+        for (temp, value) in field_temps.iter().zip(&binding.field_values) {
             field_bindings.push(Expression::Apply(vec![
                 Expression::Word("let".to_string()),
                 Expression::Word(temp.clone()),
