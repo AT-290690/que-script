@@ -1037,6 +1037,60 @@ fn packed_scalar_record_vector(t: &Type) -> Option<&crate::types::RecordType> {
         .then_some(record.as_ref())
 }
 
+/// The packed-record vector runtime is sizeable.  Emit it only for a module
+/// whose lowered program can actually produce one.  Looking through function
+/// and tuple types matters because a concrete `[Point]` can travel through a
+/// helper before it reaches the vector operation that uses the packed path.
+fn type_uses_packed_scalar_record_vector(t: &Type) -> bool {
+    if packed_scalar_record_vector(t).is_some() {
+        return true;
+    }
+    match t {
+        Type::Function(input, output) => {
+            type_uses_packed_scalar_record_vector(input)
+                || type_uses_packed_scalar_record_vector(output)
+        }
+        Type::List(element) => type_uses_packed_scalar_record_vector(element),
+        Type::Tuple(items) => items.iter().any(type_uses_packed_scalar_record_vector),
+        _ => false,
+    }
+}
+
+fn typed_ast_uses_packed_scalar_record_vectors(node: &TypedExpression) -> bool {
+    node.typ
+        .as_ref()
+        .is_some_and(type_uses_packed_scalar_record_vector)
+        || node
+            .children
+            .iter()
+            .any(typed_ast_uses_packed_scalar_record_vectors)
+}
+
+const PACKED_RECORD_RUNTIME_BEGIN: &str = ";; __PACKED_RECORD_RUNTIME_BEGIN__";
+const PACKED_RECORD_RUNTIME_END: &str = ";; __PACKED_RECORD_RUNTIME_END__";
+
+/// Delete optional packed-record sections from a runtime template.  Keeping
+/// the ordinary-vector path around each section intact makes this a strictly
+/// additive representation optimization: a program that does not use
+/// `[ScalarRecord]` gets precisely the established ordinary vector runtime.
+fn select_packed_record_runtime(mut wat: String, enabled: bool) -> String {
+    if enabled {
+        return wat
+            .replace(PACKED_RECORD_RUNTIME_BEGIN, "")
+            .replace(PACKED_RECORD_RUNTIME_END, "");
+    }
+
+    while let Some(start) = wat.find(PACKED_RECORD_RUNTIME_BEGIN) {
+        let content_start = start + PACKED_RECORD_RUNTIME_BEGIN.len();
+        let end_relative = wat[content_start..]
+            .find(PACKED_RECORD_RUNTIME_END)
+            .expect("packed runtime marker must have a matching end marker");
+        let end = content_start + end_relative + PACKED_RECORD_RUNTIME_END.len();
+        wat.replace_range(start..end, "");
+    }
+    wat
+}
+
 /// A direct record constructor can be written straight into a packed vector
 /// slot.  This is deliberately stricter than merely checking the value type:
 /// it only applies to the matching constructor syntax, so the fallback still
@@ -2669,6 +2723,7 @@ fn emit_vector_runtime(
     fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
     closure_defs: &HashMap<String, ClosureDef>,
     apply_arities: &HashSet<usize>,
+    uses_packed_scalar_record_vectors: bool,
 ) -> String {
     fn parse_env_i32(name: &str, default: i32, min: i32, max: i32) -> i32 {
         std::env::var(name)
@@ -3360,6 +3415,7 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     ;; Inline scalar-record vectors own only their backing storage. Their
     ;; cells are raw fields, never independently reference-counted pointers.
     local.get $magic
@@ -3378,6 +3434,7 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     i32.const 12
     i32.add
@@ -4138,20 +4195,22 @@ fn emit_vector_runtime(
     i32.const 1447380017
     i32.ne
     if
+      ;; __PACKED_RECORD_RUNTIME_BEGIN__
       local.get $magic
       i32.const 1447380021
-      i32.ne
+      i32.eq
       if
-        i32.const 0
+        local.get $rc i32.const 0 i32.le_s if i32.const 0 return end
+        local.get $len i32.const 0 i32.lt_s if i32.const 0 return end
+        local.get $cap local.get $len i32.lt_s if i32.const 0 return end
+        local.get $elem_ref i32.const 1 i32.lt_s if i32.const 0 return end
+        local.get $data i32.const 65536 i32.lt_u if i32.const 0 return end
+        local.get $data local.get $mem_end i32.ge_u if i32.const 0 return end
+        i32.const 1
         return
       end
-      local.get $rc i32.const 0 i32.le_s if i32.const 0 return end
-      local.get $len i32.const 0 i32.lt_s if i32.const 0 return end
-      local.get $cap local.get $len i32.lt_s if i32.const 0 return end
-      local.get $elem_ref i32.const 1 i32.lt_s if i32.const 0 return end
-      local.get $data i32.const 65536 i32.lt_u if i32.const 0 return end
-      local.get $data local.get $mem_end i32.ge_u if i32.const 0 return end
-      i32.const 1
+      ;; __PACKED_RECORD_RUNTIME_END__
+      i32.const 0
       return
     end
     local.get $rc
@@ -4702,6 +4761,7 @@ fn emit_vector_runtime(
     local.get $ptr
   )
 
+  ;; __PACKED_RECORD_RUNTIME_BEGIN__
   ;; A homogeneous vector of a record whose fields are all scalar stores the
   ;; fields inline (array-of-structs). Offset 12 is its fixed field count;
   ;; this magic is intentionally distinct from ordinary scalar vectors.
@@ -4826,6 +4886,7 @@ fn emit_vector_runtime(
     local.get $dst local.get $src local.get $len local.get $start i32.sub local.get $fields i32.mul i32.const 4 i32.mul memory.copy
     local.get $out
   )
+  ;; __PACKED_RECORD_RUNTIME_END__
 
   ;; Payload enums use the same inline record layout plus one word for their
   ;; discriminant. Their distinct magic lets Table's polymorphic helpers
@@ -4861,11 +4922,13 @@ fn emit_vector_runtime(
   (func $vec_get_i32 (param $ptr i32) (param $idx i32) (result i32)
     (local $len i32)
     ;; __VEC_GET_BOUNDS_CHECK__
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
       local.get $ptr local.get $idx call $vec_get_packed_record_i32
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     i32.const 16
     i32.add
@@ -5024,11 +5087,13 @@ fn emit_vector_runtime(
     (local $new_data i32)
     (local $i i32)
     (local $v i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
       local.get $ptr call $vec_grow_packed_record_i32
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5128,6 +5193,7 @@ fn emit_vector_runtime(
     (local $i i32)
     (local $v i32)
     local.get $requested i32.const 0 i32.lt_s if unreachable end
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
       ;; Reuse the ordinary capacity algorithm below after changing its unit
@@ -5145,6 +5211,7 @@ fn emit_vector_runtime(
       local.get $ptr
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5257,11 +5324,13 @@ fn emit_vector_runtime(
     (local $cap i32)
     (local $addr i32)
     (local $elem_ref i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
       local.get $ptr local.get $v call $vec_push_packed_record_i32
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5494,11 +5563,13 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $old i32)
     ;; __DBG_RC_VEC_SET_INC__
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
       local.get $ptr local.get $idx local.get $v call $vec_set_packed_record_i32
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     ;; __DBG_RC_VEC_SET_PTR_CHECK__
     local.get $ptr
     call $vec_materialize_i32
@@ -5769,6 +5840,7 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $addr i32)
     (local $v i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
       local.get $ptr i32.load i32.const 0 i32.gt_s
@@ -5776,6 +5848,7 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5829,12 +5902,14 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $data i32)
     (local $i i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
       local.get $ptr i32.const 0 i32.store
       i32.const 0
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5897,6 +5972,7 @@ fn emit_vector_runtime(
     (local $len i32)
     (local $addr i32)
     (local $v i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
     local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
       local.get $ptr i32.load i32.const 0 i32.le_s if unreachable end
@@ -5906,6 +5982,7 @@ fn emit_vector_runtime(
       local.get $ptr local.get $ptr i32.load i32.const 1 i32.sub i32.store
       return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -7201,7 +7278,7 @@ fn emit_vector_runtime(
     for (needle, replacement) in replacements {
         out = out.replace(needle, replacement);
     }
-    out
+    select_packed_record_runtime(out, uses_packed_scalar_record_vectors)
 }
 
 fn emit_wasi_print_runtime() -> &'static str {
@@ -11052,9 +11129,20 @@ fn compile_packed_scalar_record_vector_literal(
     };
     let mut out = vec![format!(
         "i32.const {}\ni32.const {}\ncall $vec_new_packed_record_i32\nlocal.set {vec_tmp}",
-        args.len(),
+        0,
         record.fields.len(),
     )];
+    // `$vec_new_packed_record_i32` takes a logical length because slice
+    // construction uses it to create an already-filled destination.  A
+    // source literal, however, appends its elements below, so it must begin
+    // at length zero. Reserve the final capacity separately to avoid both
+    // leading zero records and needless growth while emitting the literal.
+    if !args.is_empty() {
+        out.push(format!(
+            "local.get {vec_tmp}\ni32.const {}\ncall $vec_capacity_i32\ndrop",
+            args.len()
+        ));
+    }
     for arg in args {
         let value = compile_expr(arg, &nested_ctx)?;
         out.push(format!(
@@ -11547,6 +11635,32 @@ fn enum_ref_bitmap_words(variant: &crate::types::EnumVariant) -> Vec<u32> {
     words
 }
 
+/// First-class generic constructors are emitted once for the nominal
+/// declaration, while each call may instantiate its parameters differently.
+/// Their field map therefore cannot be chosen from one particular use such as
+/// `Option Int`: a later `Option [Char]` must remain valid.  Marking an
+/// unknown field as managed is safe because `$rc_retain`/`$rc_release` first
+/// reject scalar immediates; it is deliberately only used for these erased
+/// helper functions.  Direct saturated construction still uses the exact map.
+fn conservative_enum_ref_bitmap_words(
+    enum_type: &crate::types::EnumType,
+    variant: &crate::types::EnumVariant,
+) -> Vec<u32> {
+    if enum_type.type_params.is_empty() {
+        return enum_ref_bitmap_words(variant);
+    }
+    let words = vec![u32::MAX; variant.fields.len().div_ceil(32)];
+    if words.is_empty() {
+        return words;
+    }
+    let mut words = words;
+    let remainder = variant.fields.len() % 32;
+    if remainder != 0 {
+        *words.last_mut().expect("non-empty ref bitmap") = (1_u32 << remainder) - 1;
+    }
+    words
+}
+
 fn compile_enum_constructor(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let (enum_type, variant) = enum_constructor_variant(node)
         .ok_or_else(|| "internal error: expected enum constructor".to_string())?;
@@ -11619,11 +11733,12 @@ fn enum_constructor_signature(
 }
 
 fn compile_enum_constructor_func(
-    _enum_type: &crate::types::EnumType,
+    enum_type: &crate::types::EnumType,
     variant: &crate::types::EnumVariant,
     tag: usize,
 ) -> String {
-    let ref_words = enum_ref_bitmap_words(variant);
+    let generic = !enum_type.type_params.is_empty();
+    let ref_words = conservative_enum_ref_bitmap_words(enum_type, variant);
     let mut out = format!("  (func ${}{}", ident(&variant.name), "");
     for _ in &variant.fields {
         out.push_str(" (param i32)");
@@ -11637,10 +11752,10 @@ fn compile_enum_constructor_func(
         "    local.get $out\n    i32.const 16\n    i32.add\n    i32.load\n    local.set $data\n",
     );
     for (index, field) in variant.fields.iter().enumerate() {
-        if is_ref_type(&field.typ) {
+        if generic || is_ref_type(&field.typ) {
             out.push_str(&format!(
                 "    local.get {index}\n    call {}\n    drop\n",
-                rc_retain_for_type(&field.typ)
+                if generic { "$rc_retain" } else { rc_retain_for_type(&field.typ) }
             ));
         }
         out.push_str(&format!("    local.get $data\n    i32.const {}\n    i32.add\n    local.get {index}\n    i32.store\n", index * 4));
@@ -11774,6 +11889,22 @@ fn record_ref_bitmap_words(record: &crate::types::RecordType) -> Vec<u32> {
     }
     while words.last().is_some_and(|word| *word == 0) {
         words.pop();
+    }
+    words
+}
+
+fn conservative_record_ref_bitmap_words(record: &crate::types::RecordType) -> Vec<u32> {
+    if record.type_params.is_empty() {
+        return record_ref_bitmap_words(record);
+    }
+    let words = vec![u32::MAX; record.fields.len().div_ceil(32)];
+    if words.is_empty() {
+        return words;
+    }
+    let mut words = words;
+    let remainder = record.fields.len() % 32;
+    if remainder != 0 {
+        *words.last_mut().expect("non-empty ref bitmap") = (1_u32 << remainder) - 1;
     }
     words
 }
@@ -11987,7 +12118,8 @@ fn compile_packed_record_accessor(
 /// lowering above; this version has normal borrowed-function argument
 /// semantics, so managed arguments are retained for the newly-created record.
 fn compile_record_constructor_func(record: &crate::types::RecordType) -> String {
-    let ref_words = record_ref_bitmap_words(record);
+    let generic = !record.type_params.is_empty();
+    let ref_words = conservative_record_ref_bitmap_words(record);
     let mut out = String::new();
     out.push_str(&format!("  (func ${}", ident(&record.name)));
     for _ in &record.fields {
@@ -12010,11 +12142,11 @@ fn compile_record_constructor_func(record: &crate::types::RecordType) -> String 
         "    local.get $out\n    i32.const 16\n    i32.add\n    i32.load\n    local.set $data\n",
     );
     for (index, field) in record.fields.iter().enumerate() {
-        if is_ref_type(&field.typ) {
+        if generic || is_ref_type(&field.typ) {
             out.push_str(&format!(
                 "    local.get {}\n    call {}\n    drop\n",
                 index,
-                rc_retain_for_type(&field.typ)
+                if generic { "$rc_retain" } else { rc_retain_for_type(&field.typ) }
             ));
         }
         out.push_str(&format!(
@@ -12038,10 +12170,14 @@ fn compile_record_accessor_func(record: &crate::types::RecordType, field_index: 
         ident(&name),
         field_index * 4
     );
-    if is_ref_type(&field.typ) {
+    if !record.type_params.is_empty() || is_ref_type(&field.typ) {
         out.push_str(&format!(
             "    local.get $value\n    call {}\n    drop\n",
-            rc_retain_for_type(&field.typ)
+            if record.type_params.is_empty() {
+                rc_retain_for_type(&field.typ)
+            } else {
+                "$rc_retain"
+            }
         ));
     }
     out.push_str("    local.get $value\n  )\n");
@@ -19322,7 +19458,13 @@ fn compile_program_to_wat_build_typed_with_opts(
         ));
     }
 
-    let runtime_body = emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs, &apply_arities);
+    let runtime_body = emit_vector_runtime(
+        &fn_ids,
+        &fn_sigs,
+        &closure_defs,
+        &apply_arities,
+        typed_ast_uses_packed_scalar_record_vectors(typed_ast),
+    );
     let (generic_runtime_body, apply_runtime_body) =
         split_generic_runtime_and_apply_runtime(&runtime_body);
     let mut emitted_funcs_body = String::new();

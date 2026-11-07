@@ -15,7 +15,8 @@ annotation; incompatible uses are errors before Wasm generation.
 | `[T]` | vector of values of type `T` |
 | `{A B}` | ordered tuple |
 | `A -> B` | function from `A` to `B` |
-| `Name` | a declared enum or record type |
+| `Name` | a declared non-generic enum or record type |
+| `(Name T K)` | an application of a parameterized enum or record type |
 
 Strings are `[Char]`. This makes string operations ordinary vector-oriented
 operations at the language level; it does **not** mean strings are a packed
@@ -75,6 +76,33 @@ can be assigned, partially applied, or stored in collections:
 (get-x (make-x 9)) ; 4
 ```
 
+### Parameterized records
+
+Records can take named type parameters after their name. These are ordinary
+Hindley–Milner type variables: the constructor and accessors are polymorphic,
+while every individual record value has one concrete instantiation.
+
+```que
+(record Pair T K first T second K)
+
+(let number-and-name (Pair 7 "Calque"))
+(Pair/first number-and-name)  ; 7
+(Pair/second number-and-name) ; "Calque"
+```
+
+In type annotations, apply the type constructor with parentheses:
+
+```que
+(sig swap ((Pair T K) -> (Pair K T)))
+(let swap
+  (lambda (pair)
+    (Pair (Pair/second pair) (Pair/first pair))))
+```
+
+`T` and `K` are just conventional parameter names; different names denote
+different roles. A generic declaration is nominal, so `(Pair Int [Char])` is
+still distinct from a tuple `{Int [Char]}`.
+
 A record owns its managed fields. The runtime retains vector, tuple, record,
 and function fields on construction when necessary and releases them when the
 record's final reference is gone. Known ownership cycles involving a closure
@@ -98,6 +126,15 @@ when a `sig` supplies the expected record type:
 (let saved (serialize (Point 3 4)))
 (sig restored Point)
 (let restored (deserialize saved))
+```
+
+The same applies to a parameterized record: provide its fully instantiated
+type at the deserialization boundary.
+
+```que
+(record Pair T K first T second K)
+(sig restored (Pair Int [Char]))
+(let restored (deserialize "Pair{ first 3 second \"Calque\" }"))
 ```
 
 Deserialization is strict: missing or malformed numeric fields trap instead of

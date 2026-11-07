@@ -17,6 +17,15 @@ pub struct EnumVariant {
     pub fields: Vec<RecordField>,
 }
 
+/// A declared parameter of a nominal type constructor.  The id is the
+/// declaration-local HM variable used by constructor/accessor schemes; the
+/// name is retained for diagnostics and rendering.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeParameter {
+    pub name: String,
+    pub var: TypeVar,
+}
+
 /// A nominal sum type.  Its declaration cell is deliberately shared: while
 /// parsing `(enum Tree Empty (Node left Tree right Tree))`, `Tree` must already
 /// be visible in the field annotations.  The cell is filled before inference
@@ -25,16 +34,52 @@ pub struct EnumVariant {
 #[derive(Debug, Clone)]
 pub struct EnumType {
     pub name: String,
+    pub type_params: Vec<TypeParameter>,
+    /// The concrete arguments of this use of the nominal constructor.  The
+    /// declaration shell itself holds its parameter variables here.
+    pub type_args: Vec<Type>,
     pub variants: Arc<RwLock<Vec<EnumVariant>>>,
     pub boxed: bool,
 }
 
 impl EnumType {
+    fn type_substitution(&self) -> HashMap<u64, Type> {
+        self.type_params
+            .iter()
+            .zip(&self.type_args)
+            .map(|(param, arg)| (param.var.id, arg.clone()))
+            .collect()
+    }
+
+    pub fn instantiate(&self, type_args: Vec<Type>) -> Arc<Self> {
+        debug_assert_eq!(type_args.len(), self.type_params.len());
+        Arc::new(Self {
+            name: self.name.clone(),
+            type_params: self.type_params.clone(),
+            type_args,
+            variants: self.variants.clone(),
+            boxed: self.boxed,
+        })
+    }
+
     pub fn variants(&self) -> Vec<EnumVariant> {
+        let substitution = self.type_substitution();
         self.variants
             .read()
             .expect("enum declaration lock poisoned")
-            .clone()
+            .iter()
+            .map(|variant| EnumVariant {
+                name: variant.name.clone(),
+                fields: variant
+                    .fields
+                    .iter()
+                    .map(|field| RecordField {
+                        name: field.name.clone(),
+                        typ: field.typ.substitute(&substitution),
+                    })
+                    .collect(),
+            })
+            .collect()
     }
 
     pub fn variant(&self, name: &str) -> Option<EnumVariant> {
@@ -55,7 +100,7 @@ impl EnumType {
 // for a recursive field must compare equal to its completed declaration.
 impl PartialEq for EnumType {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
+        self.name == other.name && self.type_args == other.type_args
     }
 }
 
@@ -64,17 +109,61 @@ impl Eq for EnumType {}
 impl std::hash::Hash for EnumType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.name.hash(state);
+        for arg in &self.type_args {
+            arg.to_string().hash(state);
+        }
     }
 }
 
 /// A nominal, fixed-field product type.  Record values deliberately retain
 /// their declaration identity: `{Int Int}` is not interchangeable with a
 /// `Point`, even when their fields happen to have the same types.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct RecordType {
     pub name: String,
+    pub type_params: Vec<TypeParameter>,
+    pub type_args: Vec<Type>,
+    /// Declaration fields before type-argument substitution.  Keeping this
+    /// template is essential when an HM variable inside an already-created
+    /// `Pair T K` later resolves: each substitution must start from `T`/`K`,
+    /// not from an earlier partially specialized field list.
+    pub field_templates: Vec<RecordField>,
     pub fields: Vec<RecordField>,
 }
+
+impl RecordType {
+    pub fn instantiate(&self, type_args: Vec<Type>) -> Arc<Self> {
+        debug_assert_eq!(type_args.len(), self.type_params.len());
+        let substitution = self
+            .type_params
+            .iter()
+            .zip(&type_args)
+            .map(|(param, arg)| (param.var.id, arg.clone()))
+            .collect::<HashMap<_, _>>();
+        Arc::new(Self {
+            name: self.name.clone(),
+            type_params: self.type_params.clone(),
+            type_args,
+            field_templates: self.field_templates.clone(),
+            fields: self
+                .field_templates
+                .iter()
+                .map(|field| RecordField {
+                    name: field.name.clone(),
+                    typ: field.typ.substitute(&substitution),
+                })
+                .collect(),
+        })
+    }
+}
+
+impl PartialEq for RecordType {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.type_args == other.type_args
+    }
+}
+
+impl Eq for RecordType {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordField {
@@ -118,8 +207,10 @@ impl fmt::Display for Type {
             Type::Dec => write!(f, "Dec"),
             Type::Bool => write!(f, "Bool"),
             Type::Char => write!(f, "Char"),
-            Type::Enum(enum_type) => write!(f, "{}", enum_type.name),
-            Type::Record(record_type) => write!(f, "{}", record_type.name),
+            Type::Enum(enum_type) => write_nominal_type(f, &enum_type.name, &enum_type.type_args),
+            Type::Record(record_type) => {
+                write_nominal_type(f, &record_type.name, &record_type.type_args)
+            }
             Type::Function(from, to) => match **from {
                 Type::Function(_, _) => write!(f, "({}) -> {}", from, to),
                 _ => write!(f, "{} -> {}", from, to),
@@ -134,6 +225,18 @@ impl fmt::Display for Type {
                 write!(f, "{{{}}}", inner)
             }
         }
+    }
+}
+
+fn write_nominal_type(f: &mut fmt::Formatter<'_>, name: &str, args: &[Type]) -> fmt::Result {
+    if args.is_empty() {
+        write!(f, "{name}")
+    } else {
+        write!(f, "({name}")?;
+        for arg in args {
+            write!(f, " {arg}")?;
+        }
+        write!(f, ")")
     }
 }
 
@@ -242,9 +345,21 @@ impl Type {
             | Type::Dec
             | Type::Bool
             | Type::Char
-            | Type::Enum(_)
-            | Type::Record(_)
             | Type::Unit => self.clone(),
+            Type::Enum(enum_type) => Type::Enum(enum_type.instantiate(
+                enum_type
+                    .type_args
+                    .iter()
+                    .map(|arg| arg.substitute(subst))
+                    .collect(),
+            )),
+            Type::Record(record_type) => Type::Record(record_type.instantiate(
+                record_type
+                    .type_args
+                    .iter()
+                    .map(|arg| arg.substitute(subst))
+                    .collect(),
+            )),
             Type::Var(v) => {
                 if let Some(ty) = subst.get(&v.id) {
                     ty.clone()
@@ -278,9 +393,17 @@ impl Type {
             | Type::Dec
             | Type::Bool
             | Type::Char
-            | Type::Enum(_)
-            | Type::Record(_)
             | Type::Unit => {}
+            Type::Enum(enum_type) => {
+                for arg in &enum_type.type_args {
+                    arg.collect_free_vars(vars);
+                }
+            }
+            Type::Record(record_type) => {
+                for arg in &record_type.type_args {
+                    arg.collect_free_vars(vars);
+                }
+            }
             Type::Var(v) => {
                 vars.insert(v.id);
             }

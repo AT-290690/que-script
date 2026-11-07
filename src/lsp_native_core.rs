@@ -21,8 +21,8 @@ pub const LSP_SPECIAL_KEYWORD_SIGNATURES: [(&str, &str); 21] = [
     ("gensym", "compile-time fresh symbol"),
     ("macroexpand", "compile-time full macro expansion"),
     ("macroexpand-1", "compile-time single-step macro expansion"),
-    ("enum", "Name -> Variant... -> ()"),
-    ("record", "Name -> field -> Type ... -> ()"),
+    ("enum", "Name [T K ...] -> Variant... -> ()"),
+    ("record", "Name [T K ...] -> field -> Type ... -> ()"),
     ("match", "Enum -> Variant -> T ... -> T"),
     ("=~", "Enum -> Enum -> Bool"),
 ];
@@ -1605,6 +1605,59 @@ pub fn collect_user_bound_symbols_from_exprs(exprs: &[Expression], out: &mut Has
     }
 }
 
+fn is_source_type_parameter_name(name: &str) -> bool {
+    name.chars().next().is_some_and(|first| first.is_ascii_uppercase())
+        && !matches!(name, "Int" | "Dec" | "Bool" | "Char")
+}
+
+fn collect_source_type_words(expr: &Expression, out: &mut HashSet<String>) {
+    match expr {
+        Expression::Word(word) => {
+            out.insert(word.clone());
+        }
+        Expression::Apply(items) => {
+            for item in items {
+                collect_source_type_words(item, out);
+            }
+        }
+        Expression::Int(_) | Expression::Dec(_) => {}
+    }
+}
+
+/// Mirrors inference's deliberately conservative enum-header rule. A leading
+/// uppercase word is a type parameter only when it is used by a payload type;
+/// this preserves ordinary `(enum Letter A B C)` declarations.
+fn source_enum_type_parameter_count(items: &[Expression]) -> usize {
+    let mut annotation_words = HashSet::new();
+    for item in items {
+        if let Expression::Apply(parts) = item {
+            for type_expr in parts.iter().skip(2).step_by(2) {
+                collect_source_type_words(type_expr, &mut annotation_words);
+            }
+        }
+    }
+    items
+        .iter()
+        .take_while(|item| {
+            matches!(item, Expression::Word(word) if is_source_type_parameter_name(word) && annotation_words.contains(word))
+        })
+        .count()
+}
+
+fn source_nominal_type(name: &str, params: &[Expression]) -> String {
+    if params.is_empty() {
+        return name.to_string();
+    }
+    format!(
+        "({name} {})",
+        params
+            .iter()
+            .map(Expression::to_lisp)
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
 /// Return the declared type/signature for an enum constructor written in this
 /// source file.
 ///
@@ -1621,12 +1674,16 @@ pub fn enum_variant_type_in_source(text: &str, symbol: &str) -> Option<String> {
             return None;
         };
 
-        if let [Expression::Word(keyword), Expression::Word(enum_name), variants @ ..] = &items[..]
+        if let [Expression::Word(keyword), Expression::Word(enum_name), declared @ ..] = &items[..]
         {
             if keyword == "enum" {
+                let generic_count = source_enum_type_parameter_count(declared);
+                let type_params = &declared[..generic_count];
+                let variants = &declared[generic_count..];
+                let result = source_nominal_type(enum_name, type_params);
                 for variant in variants {
                     match variant {
-                        Expression::Word(name) if name == symbol => return Some(enum_name.clone()),
+                        Expression::Word(name) if name == symbol => return Some(result.clone()),
                         Expression::Apply(parts) => {
                             if !matches!(parts.first(), Some(Expression::Word(name)) if name == symbol) {
                                 continue;
@@ -1643,7 +1700,7 @@ pub fn enum_variant_type_in_source(text: &str, symbol: &str) -> Option<String> {
                                 .step_by(2)
                                 .map(Expression::to_lisp)
                                 .collect::<Vec<_>>();
-                            signature.push(enum_name.clone());
+                            signature.push(result.clone());
                             return Some(signature.join(" -> "));
                         }
                         _ => {}
@@ -1677,9 +1734,13 @@ pub fn payload_enum_constructor_signatures_in_source(text: &str) -> Vec<(String,
         let Expression::Apply(items) = expr else {
             return;
         };
-        if let [Expression::Word(keyword), Expression::Word(enum_name), variants @ ..] = &items[..]
+        if let [Expression::Word(keyword), Expression::Word(enum_name), declared @ ..] = &items[..]
         {
             if keyword == "enum" {
+                let generic_count = source_enum_type_parameter_count(declared);
+                let type_params = &declared[..generic_count];
+                let variants = &declared[generic_count..];
+                let result = source_nominal_type(enum_name, type_params);
                 for variant in variants {
                     let Expression::Apply(parts) = variant else {
                         continue;
@@ -1696,7 +1757,7 @@ pub fn payload_enum_constructor_signatures_in_source(text: &str) -> Vec<(String,
                         .step_by(2)
                         .map(Expression::to_lisp)
                         .collect::<Vec<_>>();
-                    signature.push(enum_name.clone());
+                    signature.push(result.clone());
                     out.push((name.clone(), signature.join(" -> ")));
                 }
             }
@@ -1727,7 +1788,9 @@ fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
                     collect_pattern_words(param, out);
                 }
             } else if head == "enum" {
-                for variant in items.iter().skip(2) {
+                let declared = &items[2..];
+                let generic_count = source_enum_type_parameter_count(declared);
+                for variant in declared.iter().skip(generic_count) {
                     match variant {
                         Expression::Word(name) => {
                             out.insert(name.clone());
@@ -1743,8 +1806,15 @@ fn collect_user_bound_symbols(expr: &Expression, out: &mut HashSet<String>) {
             } else if head == "record" {
                 if let Some(Expression::Word(name)) = items.get(1) {
                     out.insert(name.clone());
-                    for pair in items.iter().skip(2).collect::<Vec<_>>().chunks_exact(2) {
-                        if let Expression::Word(field) = pair[0] {
+                    let fields = &items[2..];
+                    let generic_count = fields
+                        .iter()
+                        .take_while(|item| {
+                            matches!(item, Expression::Word(word) if is_source_type_parameter_name(word))
+                        })
+                        .count();
+                    for pair in fields[generic_count..].chunks_exact(2) {
+                        if let Expression::Word(field) = &pair[0] {
                             out.insert(format!("{}/{}", name, field));
                         }
                     }

@@ -109,6 +109,42 @@ is rejected by Calque's RC-cycle checks.
 `=~` remains useful for zero-payload state enums. It is not structural payload
 equality; use `match` to inspect a payload variant.
 
+### Parameterized enums
+
+Payload enums can also take type parameters. This makes the type relationship
+between a payload and its enclosing variant explicit without giving up
+exhaustive matching:
+
+```que
+(enum Option T
+  None
+  (Some value T))
+
+(let read-or
+  (lambda (fallback option)
+    (match option
+      None fallback
+      (Some value) value)))
+
+{(read-or 0 (Some 4))
+ (read-or "none" (Some "Calque"))}
+; {4 "Calque"}
+```
+
+Use the applied form in annotations: `(Option Int)`, `(Option [Char])`, or a
+generic relationship such as `(Option T)`. Recursive generic enums work the
+same way:
+
+```que
+(enum Tree T
+  Empty
+  (Node value T left (Tree T) right (Tree T)))
+```
+
+Every use chooses one payload type. `(Some 1)` and `(Some "one")` can coexist
+in a program, but they have different types: `(Option Int)` and
+`(Option [Char])`.
+
 Payload enums are also valid `Table` keys. Their tag and fields are hashed and
 compared structurally, including nested payload enums, vectors, tuples, and
 records:
@@ -134,12 +170,12 @@ the enum type, variant, and each field; `deserialize` validates that exact
 shape against the concrete type supplied by `sig`:
 
 ```que
-(enum Tree Empty (Node value Int left Tree right Tree))
+(enum Tree T Empty (Node value T left (Tree T) right (Tree T)))
 
 (let saved (serialize (Node 4 Empty Empty)))
 ; Tree{ Node 4 Tree{ Empty } Tree{ Empty } }
 
-(sig restored Tree)
+(sig restored (Tree Int))
 (let restored (deserialize saved))
 ```
 

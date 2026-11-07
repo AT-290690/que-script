@@ -241,6 +241,116 @@ xs)"#,
     }
 
     #[test]
+    fn test_parameterized_records_and_enums_infer_independent_instantiations() {
+        let source = r#"(do
+            (record Pair T K first T second K)
+            (enum Option T None (Some value T))
+            (enum Result T E (Ok value T) (Err error E))
+            (let ints (Some 7))
+            (let text (Some "calque"))
+            (let pair (Pair ints text))
+            (let failure (Err "no"))
+            (+ (match (Pair/first pair)
+                 None 0
+                 (Some value) value)
+               (match failure
+                 (Ok value) 0
+                 (Err error) (length error))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "9");
+
+        let mixed = r#"(do
+            (enum Option T None (Some value T))
+            [(Some 1) (Some "not-an-int")])"#;
+        let expr = crate::parser::build(mixed).expect("generic mismatch program should build");
+        let err = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect_err("distinct Option instantiations must not unify");
+        assert!(
+            err.contains("Vector element 2") && err.contains("Int") && err.contains("[Char]"),
+            "unexpected generic mismatch: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parameterized_recursive_enum_and_rigid_signature() {
+        let source = r#"(do
+            (enum Tree T
+              Empty
+              (Node value T left (Tree T) right (Tree T)))
+            (sig count ((Tree T) -> Int))
+            (let count
+              (lambda (tree)
+                (match tree
+                  Empty 0
+                  (Node _ _ _) 1)))
+            (let tree (Node 8 (Node 3 Empty Empty) Empty))
+            (count tree))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
+
+        let expr = crate::parser::build(source).expect("generic tree program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("generic tree program should compile");
+        wat::parse_str(&wat).expect("generic tree module should encode");
+    }
+
+    #[test]
+    fn test_parameterized_adt_helpers_and_serde_are_polymorphic_and_safe() {
+        // Constructors and accessors used as values are emitted once per
+        // nominal declaration.  Exercise scalar and managed instantiations in
+        // the same program so their erased helper ownership map cannot be
+        // accidentally specialized to whichever call happens to come first.
+        let helpers = r#"(do
+            (record Box T value T)
+            (enum Option T None (Some value T))
+            (let box Box)
+            (let unbox Box/value)
+            (let some Some)
+            (+ (unbox (box 4))
+               (+ (length (unbox (box "managed")))
+                  (length (match (some "text")
+                            None ""
+                            (Some value) value)))) )"#;
+        assert_std_program_output_matches_with_and_without_optimizer(helpers);
+        assert_eq!(
+            run_program_output_with_std_and_opts(helpers, true),
+            "15"
+        );
+
+        let serde = r#"(do
+            (record Pair T K first T second K)
+            (enum Tree T Empty (Node value T left (Tree T) right (Tree T)))
+            (let pair-text (serialize (Pair 3 "Calque")))
+            (sig pair (Pair Int [Char]))
+            (let pair (deserialize pair-text))
+            (let tree-text (serialize (Node 4 Empty Empty)))
+            (sig tree (Tree Int))
+            (let tree (deserialize tree-text))
+            (match tree
+              Empty 0
+              (Node value left right) (+ (Pair/first pair) value)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(serde);
+        assert_eq!(run_program_output_with_std_and_opts(serde, true), "7");
+    }
+
+    #[test]
+    fn test_lsp_source_fallback_understands_parameterized_enum_headers() {
+        let source = r#"(enum Option T None (Some value T))"#;
+        assert_eq!(
+            crate::lsp_native_core::enum_variant_type_in_source(source, "None"),
+            Some("(Option T)".to_string())
+        );
+        assert_eq!(
+            crate::lsp_native_core::enum_variant_type_in_source(source, "Some"),
+            Some("T -> (Option T)".to_string())
+        );
+        assert_eq!(
+            crate::lsp_native_core::payload_enum_constructor_signatures_in_source(source),
+            vec![("Some".to_string(), "T -> (Option T)".to_string())]
+        );
+    }
+
+    #[test]
     fn test_scalar_record_vectors_store_fields_inline_and_preserve_vector_operations() {
         let source = r#"(do
             (record Point x Int y Int)
@@ -293,6 +403,32 @@ xs)"#,
             "record accessor fusion should select packed versus ordinary storage at runtime:\n{wat}"
         );
         wat::parse_str(&wat).expect("generic record-vector module should encode");
+    }
+
+    #[test]
+    fn test_packed_record_vector_runtime_is_omitted_without_scalar_record_vectors() {
+        let plain_source = r#"(do
+            (let xs [])
+            (push! 1 xs)
+            (get 0 xs))"#;
+        let plain_wat = compile_std_program_to_wat(plain_source, true);
+        assert!(
+            !plain_wat.contains("$vec_new_packed_record_i32")
+                && !plain_wat.contains("1447380021"),
+            "ordinary programs should not carry the packed record-vector runtime:\n{plain_wat}"
+        );
+        wat::parse_str(&plain_wat).expect("ordinary vector module should encode");
+
+        let record_without_vector = r#"(do
+            (record Point x Int y Int)
+            (let point (Point 3 4))
+            (+ (Point/x point) (Point/y point)))"#;
+        let record_wat = compile_std_program_to_wat(record_without_vector, true);
+        assert!(
+            !record_wat.contains("$vec_new_packed_record_i32"),
+            "a scalar record alone should not enable the packed vector runtime:\n{record_wat}"
+        );
+        wat::parse_str(&record_wat).expect("record-only module should encode");
     }
 
     #[test]
