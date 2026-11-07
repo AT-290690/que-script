@@ -42,8 +42,8 @@ control over performance matters.
 - Compilation to expanded source, optimized source, WAT, split WAT, or Wasm
 - Wasmtime execution through `que`, plus an optional wasm2c/native-C path
 - Capability-gated filesystem, standard-input, terminal, and clock IO
-- Native and Wasm language servers, a formatter, Neovim integration, and a
-  VS Code extension
+- Native and Wasm language servers, a formatter, Neovim and Emacs
+  integrations, and a VS Code extension
 - Static diagnostics for unproven bounds, arithmetic safety, empty-vector
   operations, mutation, and suspicious non-termination
 
@@ -110,6 +110,7 @@ Windows installs into `%LOCALAPPDATA%\Programs\Que`.
 ### Editor support
 
 - [Neovim setup](miscs/neovim/README.md)
+- [Emacs setup](miscs/emacs/README.md)
 - [VS Code extension](miscs/extension/que-lang/README.md)
 
 ## Quick start
@@ -261,7 +262,11 @@ variant:
 ```
 
 Payload enums are boxed and RC-managed; recursive trees are allowed, while
-ownership cycles remain rejected. They serialize in a readable recursive
+ownership cycles remain rejected. They are structural `Table` keys, so an
+independently constructed tree with the same tag and fields retrieves the same
+entry—even when payloads contain nested vectors, tuples, records, or other
+payload enums. As with `[Char]` keys, do not mutate managed keys after
+insertion. They serialize in a readable recursive
 format such as `Tree{ Node 1 Tree{ Empty } Tree{ Empty } }`; give
 `deserialize` a concrete type with `sig` before decoding one.
 The former string-dispatch macro is available explicitly as `match/string`.
@@ -404,6 +409,11 @@ generated output. `<Space>g` (or `:QueLib`) opens a fuzzy browser for library
 type signatures; patterns such as `map*` and names ending in `!` are passed
 directly to `que --lib` without shell escaping.
 
+Emacs 29.1+ is supported through `que-mode` and its built-in Eglot client.
+It provides the same `quelsp` diagnostics, inferred-type hover, completion,
+signatures, definitions, formatting, and run/debug commands. See the
+[Emacs setup](miscs/emacs/README.md) for installation and bindings.
+
 ## Native C output
 
 Calque programs compile to standard Wasm and can be run by any compatible host.
@@ -416,6 +426,11 @@ For native experiments, the repository also contains a wasm2c host adapter:
 
 This requires WABT's `wasm2c`. The maintained C host implementation lives in
 [`miscs/native-c`](miscs/native-c/README.md).
+
+The native path uses the same in-guest `serialize`/`deserialize` implementation
+as the WASI path, including records and payload enums. A native program can
+therefore round-trip Calque data without a separate C serialization format, or
+return one of those values directly for readable native output.
 
 ## Lightweight compiler and native-C path
 
@@ -512,6 +527,7 @@ eclisp/             parser and type system
 lisp/               bundled language libraries and macros
 src/                optimizer, Wasm compiler, runtime, IO host, LSP, analysis
 miscs/neovim/       Neovim integration
+miscs/emacs/         Emacs mode and Eglot integration
 miscs/extension/    VS Code extension
 miscs/native-c/     optional wasm2c host
 examples/           example Calque programs

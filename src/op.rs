@@ -237,6 +237,46 @@ pub(crate) fn optimize_typed_ast_internal(node: &TypedExpression) -> TypedExpres
 
 fn optimize_typed_ast_legacy(node: &TypedExpression) -> TypedExpression {
     let mut seed = node.clone();
+    // A trivially total scalar-only record that is only projected through its
+    // generated accessors never needs a runtime identity. Replace its binding
+    // with one scalar binding per field before the ordinary optimizer runs.
+    // Effectful, managed, and potentially trapping fields deliberately stay
+    // out of this pass: preserving their evaluation and retain/release timing
+    // needs a richer ownership summary than this local proof.
+    for _ in 0..MAX_OPT_FIXPOINT_PASSES {
+        let payload_match_expr = scalar_replace_immediate_payload_enum_matches(&seed);
+        let mut changed = false;
+        if payload_match_expr.to_lisp() != seed.expr.to_lisp() {
+            let source_expr = restore_data_last_core_expression(&payload_match_expr);
+            let Ok((_typ, typed)) = crate::infer::infer_with_builtins_typed(
+                &source_expr,
+                crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+            ) else {
+                break;
+            };
+            seed = lower_data_last_core_forms(&typed);
+            changed = true;
+        }
+
+        let mut scalar_record_state = ScalarRecordReplaceState::new(&seed.expr);
+        let scalar_record_expr =
+            scalar_replace_non_escaping_records_expr(&seed, &mut scalar_record_state);
+        if scalar_record_expr.to_lisp() == seed.expr.to_lisp() {
+            if !changed {
+                break;
+            }
+            continue;
+        }
+        let source_expr = restore_data_last_core_expression(&scalar_record_expr);
+        let Ok((_typ, typed)) = crate::infer::infer_with_builtins_typed(
+            &source_expr,
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        ) else {
+            break;
+        };
+        seed = lower_data_last_core_forms(&typed);
+    }
+
     // This pass is intentionally before the ordinary optimizer. It exposes
     // leaf calls in a simple recursive tree to constant folding and native
     // backend inlining, while preserving argument evaluation order by binding
@@ -284,6 +324,345 @@ fn optimize_typed_ast_legacy(node: &TypedExpression) -> TypedExpression {
     let cur = run_loop_unroll_pass(&cur);
     let cur = optimize_typed_ast_once(&cur);
     dead_code_eliminate_top_level_defs(&cur)
+}
+
+struct ScalarRecordReplaceState {
+    used_names: HashSet<String>,
+    next_id: usize,
+}
+
+impl ScalarRecordReplaceState {
+    fn new(root: &Expression) -> Self {
+        let mut used_names = HashSet::new();
+        collect_word_names(root, &mut used_names);
+        Self {
+            used_names,
+            next_id: 0,
+        }
+    }
+
+    fn fresh_field(&mut self) -> String {
+        loop {
+            let name = format!("__record_field_{}", self.next_id);
+            self.next_id += 1;
+            if self.used_names.insert(name.clone()) {
+                return name;
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ScalarRecordBinding {
+    name: String,
+    record_name: String,
+    field_names: Vec<String>,
+}
+
+fn typed_child_at(node: &TypedExpression, item_idx: usize) -> Option<&TypedExpression> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let child_offset = usize::from(node.children.len() + 1 == items.len());
+    item_idx
+        .checked_sub(child_offset)
+        .and_then(|index| node.children.get(index))
+}
+
+fn scalar_record_binding(node: &TypedExpression) -> Option<ScalarRecordBinding> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let [Expression::Word(keyword), Expression::Word(name), _rhs] = &items[..] else {
+        return None;
+    };
+    if keyword != "let" {
+        return None;
+    }
+    let rhs = typed_child_at(node, 2)?;
+    let Type::Record(record) = rhs.typ.as_ref()? else {
+        return None;
+    };
+    let Expression::Apply(rhs_items) = &rhs.expr else {
+        return None;
+    };
+    if !matches!(rhs_items.first(), Some(Expression::Word(constructor)) if constructor == &record.name)
+        || rhs_items.len() != record.fields.len() + 1
+    {
+        return None;
+    }
+    if (1..rhs_items.len()).any(|index| {
+        let Some(field) = typed_child_at(rhs, index) else {
+            return true;
+        };
+        !field.effect.is_pure()
+            || !is_trivially_total_scalar_record_field(&field.expr)
+            || field.typ.as_ref().is_none_or(is_managed_value_type)
+    }) {
+        return None;
+    }
+    Some(ScalarRecordBinding {
+        name: name.clone(),
+        record_name: record.name.clone(),
+        field_names: record
+            .fields
+            .iter()
+            .map(|field| field.name.clone())
+            .collect(),
+    })
+}
+
+/// These expressions can be copied into local bindings without moving an
+/// effect or a possible debug safety trap. Broader scalar replacement needs
+/// proof facts for arithmetic and indexed reads, rather than assuming every
+/// `PURE` expression is total.
+fn is_trivially_total_scalar_record_field(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_)
+    )
+}
+
+fn is_managed_value_type(typ: &Type) -> bool {
+    matches!(
+        typ,
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Function(_, _) | Type::Var(_)
+    ) || matches!(typ, Type::Enum(enum_type) if enum_type.boxed)
+}
+
+/// Replace every use of `binding.name` with an accessor projection. Any other
+/// use means the record can escape (or be observed as a nominal value), so the
+/// caller abandons the rewrite.
+fn replace_scalar_record_accesses(
+    expr: &Expression,
+    binding: &ScalarRecordBinding,
+    field_temps: &[String],
+) -> Option<Expression> {
+    match expr {
+        Expression::Word(word) => (word != &binding.name).then(|| expr.clone()),
+        Expression::Int(_) | Expression::Dec(_) => Some(expr.clone()),
+        Expression::Apply(items) => {
+            if let [Expression::Word(accessor), Expression::Word(value)] = &items[..] {
+                if value == &binding.name {
+                    let field = accessor.strip_prefix(&format!("{}/", binding.record_name))?;
+                    let index = binding.field_names.iter().position(|name| name == field)?;
+                    return Some(Expression::Word(field_temps[index].clone()));
+                }
+            }
+            items
+                .iter()
+                .map(|item| replace_scalar_record_accesses(item, binding, field_temps))
+                .collect::<Option<Vec<_>>>()
+                .map(Expression::Apply)
+        }
+    }
+}
+
+/// A directly constructed payload enum followed immediately by `match` has no
+/// observable identity. Bind each scalar payload field once, then enter the
+/// known arm with its pattern names bound to those locals. This keeps source
+/// evaluation order—including effects and debug traps in scalar field
+/// expressions—while avoiding the temporary enum allocation entirely.
+///
+/// Managed payloads deliberately keep the ordinary constructor/match path.
+/// Their retain/release ownership is correct today, but eliminating that
+/// object needs a proper call/return ownership summary rather than a local
+/// rewrite.
+fn scalar_replace_immediate_payload_enum_matches(node: &TypedExpression) -> Expression {
+    let mut state = ScalarRecordReplaceState::new(&node.expr);
+    scalar_replace_immediate_payload_enum_matches_expr(node, &mut state)
+}
+
+fn scalar_replace_immediate_payload_enum_matches_expr(
+    node: &TypedExpression,
+    state: &mut ScalarRecordReplaceState,
+) -> Expression {
+    let Expression::Apply(items) = &node.expr else {
+        return node.expr.clone();
+    };
+    let rewritten = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            typed_child_at(node, index)
+                .map(|child| scalar_replace_immediate_payload_enum_matches_expr(child, state))
+                .unwrap_or_else(|| item.clone())
+        })
+        .collect::<Vec<_>>();
+    if !matches!(rewritten.first(), Some(Expression::Word(keyword)) if keyword == "match") {
+        return Expression::Apply(rewritten);
+    }
+
+    let Some(value_node) = typed_child_at(node, 1) else {
+        return Expression::Apply(rewritten);
+    };
+    let Some(Type::Enum(enum_type)) = value_node.typ.as_ref() else {
+        return Expression::Apply(rewritten);
+    };
+    if !enum_type.boxed {
+        return Expression::Apply(rewritten);
+    }
+    let Some(Expression::Apply(constructor_items)) = rewritten.get(1) else {
+        return Expression::Apply(rewritten);
+    };
+    let Some(Expression::Word(variant_name)) = constructor_items.first() else {
+        return Expression::Apply(rewritten);
+    };
+    let Some(variant) = enum_type.variant(variant_name) else {
+        return Expression::Apply(rewritten);
+    };
+    if variant.fields.is_empty()
+        || constructor_items.len() != variant.fields.len() + 1
+        || variant
+            .fields
+            .iter()
+            .any(|field| is_managed_value_type(&field.typ))
+    {
+        return Expression::Apply(rewritten);
+    }
+
+    let mut selected = None;
+    for pattern_index in (2..rewritten.len()).step_by(2) {
+        let Some(pattern) = rewritten.get(pattern_index) else {
+            return Expression::Apply(rewritten);
+        };
+        let Some((name, bindings)) = payload_enum_match_pattern(pattern) else {
+            return Expression::Apply(rewritten);
+        };
+        if name == "_" {
+            let Some(body) = rewritten.get(pattern_index + 1) else {
+                return Expression::Apply(rewritten);
+            };
+            selected = Some((Vec::new(), body.clone()));
+            break;
+        }
+        if name == variant.name {
+            if bindings.len() != variant.fields.len() {
+                return Expression::Apply(rewritten);
+            }
+            let Some(body) = rewritten.get(pattern_index + 1) else {
+                return Expression::Apply(rewritten);
+            };
+            selected = Some((bindings, body.clone()));
+            break;
+        }
+    }
+    let Some((bindings, body)) = selected else {
+        return Expression::Apply(rewritten);
+    };
+
+    let field_temps = (0..variant.fields.len())
+        .map(|_| state.fresh_field())
+        .collect::<Vec<_>>();
+    let mut out = Vec::with_capacity(1 + field_temps.len() + bindings.len() + 1);
+    out.push(Expression::Word("do".to_string()));
+    for (temp, value) in field_temps.iter().zip(constructor_items.iter().skip(1)) {
+        out.push(Expression::Apply(vec![
+            Expression::Word("let".to_string()),
+            Expression::Word(temp.clone()),
+            value.clone(),
+        ]));
+    }
+    for (binding, temp) in bindings.iter().zip(&field_temps) {
+        if binding != "_" {
+            out.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(binding.clone()),
+                Expression::Word(temp.clone()),
+            ]));
+        }
+    }
+    out.push(body);
+    Expression::Apply(out)
+}
+
+fn payload_enum_match_pattern(pattern: &Expression) -> Option<(String, Vec<String>)> {
+    match pattern {
+        Expression::Word(name) => Some((name.clone(), Vec::new())),
+        Expression::Apply(parts) => {
+            let Expression::Word(name) = parts.first()? else {
+                return None;
+            };
+            let bindings = parts[1..]
+                .iter()
+                .map(|binding| match binding {
+                    Expression::Word(name) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some((name.clone(), bindings))
+        }
+        Expression::Int(_) | Expression::Dec(_) => None,
+    }
+}
+
+fn scalar_replace_non_escaping_records_expr(
+    node: &TypedExpression,
+    state: &mut ScalarRecordReplaceState,
+) -> Expression {
+    let Expression::Apply(items) = &node.expr else {
+        return node.expr.clone();
+    };
+    let mut rewritten = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            typed_child_at(node, index)
+                .map(|child| scalar_replace_non_escaping_records_expr(child, state))
+                .unwrap_or_else(|| item.clone())
+        })
+        .collect::<Vec<_>>();
+    if !matches!(rewritten.first(), Some(Expression::Word(keyword)) if keyword == "do") {
+        return Expression::Apply(rewritten);
+    }
+
+    for index in 1..rewritten.len() {
+        let Some(binding_node) = typed_child_at(node, index) else {
+            continue;
+        };
+        let Some(binding) = scalar_record_binding(binding_node) else {
+            continue;
+        };
+        // A later binding of the same name creates a scope boundary which is
+        // correct but not worth threading through this small local pass.
+        if rewritten[index + 1..]
+            .iter()
+            .any(|expr| contains_binding_named(expr, &binding.name))
+        {
+            continue;
+        }
+        let Some((_name, rhs)) = let_binding_parts(&rewritten[index]) else {
+            continue;
+        };
+        let Expression::Apply(constructor_items) = rhs else {
+            continue;
+        };
+        if constructor_items.len() != binding.field_names.len() + 1 {
+            continue;
+        }
+        let field_temps = (0..binding.field_names.len())
+            .map(|_| state.fresh_field())
+            .collect::<Vec<_>>();
+        let replacement_tail = rewritten[index + 1..]
+            .iter()
+            .map(|expr| replace_scalar_record_accesses(expr, &binding, &field_temps))
+            .collect::<Option<Vec<_>>>();
+        let Some(replacement_tail) = replacement_tail else {
+            continue;
+        };
+
+        let mut field_bindings = Vec::with_capacity(binding.field_names.len());
+        for (temp, value) in field_temps.iter().zip(constructor_items.iter().skip(1)) {
+            field_bindings.push(Expression::Apply(vec![
+                Expression::Word("let".to_string()),
+                Expression::Word(temp.clone()),
+                value.clone(),
+            ]));
+        }
+        rewritten.splice(index.., field_bindings.into_iter().chain(replacement_tail));
+        break;
+    }
+    Expression::Apply(rewritten)
 }
 
 struct BaseCaseInlineState {

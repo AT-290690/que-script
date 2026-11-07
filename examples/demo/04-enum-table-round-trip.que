@@ -5,8 +5,8 @@
 
 (sig points [[{ Shape Int }]])
 (let points (Table/new))
-(Table/set! points Rock 1)
-(Table/set! points Scissors 2)
+(Table/set! Rock 1 points)
+(Table/set! Scissors 2 points)
 
 (let text (serialize points))
 

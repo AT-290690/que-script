@@ -107,8 +107,25 @@ cycles are not: a tree may own its children, while a cycle such as `a → b → 
 is rejected by Calque's RC-cycle checks.
 
 `=~` remains useful for zero-payload state enums. It is not structural payload
-equality; use `match` to inspect a payload variant. Payload enums are not
-currently supported as `Table` keys.
+equality; use `match` to inspect a payload variant.
+
+Payload enums are also valid `Table` keys. Their tag and fields are hashed and
+compared structurally, including nested payload enums, vectors, tuples, and
+records:
+
+```que
+(let table (Table/new))
+(Table/set! (Node 1 Empty Empty) "stored" table)
+(Table/get (Node 1 Empty Empty) table)
+```
+
+The same rule applies to a payload such as `(Named ["calque" "lisp"])`: a
+separately allocated value with the same nested text is the same key. Tuples
+and records can also be used directly as structural `Table` keys.
+
+Like existing `[Char]` keys, do not mutate a managed value after using it as a
+key: changing its contents can change its hash and make it unreachable in the
+table.
 
 ## Serialize payload enums
 

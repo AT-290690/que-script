@@ -48,5 +48,10 @@ This is useful for completed compute-heavy programs and native benchmarking.
 It is not a different source language: static typing, macro expansion, and
 Wasm generation occur first in the same compiler.
 
+`serialize` and `deserialize` also stay in the generated guest Wasm on this
+path. Their record and payload-enum format is therefore the same under
+Wasmtime and under wasm2c/native C. The native wrapper uses that codec for a
+program's final result too, including direct record and payload-enum returns.
+
 For the debug/optimized safety boundary and a release checklist, see [Debug,
 optimized, and native execution](release-safety.md).

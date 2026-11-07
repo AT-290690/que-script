@@ -117,6 +117,7 @@ together rather than spreading them across lines.
 and project-aware definitions. The repository includes:
 
 - a thin Neovim plugin in `miscs/neovim`
+- an Emacs 29.1+ mode with built-in Eglot support in `miscs/emacs`
 - a VS Code extension in `miscs/extension/que-lang`
 
 The Neovim integration provides `:QueFormat` / `<Space>f` and `:QueLib` /
@@ -127,6 +128,10 @@ Use `que nvim --file program.que` to open and edit an existing Calque file.
 The optional permission flags, such as `--allow read`, are forwarded to its
 run and debug mappings. `que nvim` and `que nvim --code "..."` instead open
 disposable scratch buffers.
+
+In Emacs, `que-mode` starts Eglot automatically when `quelsp` is on `PATH`.
+Its buffer-local bindings are `C-c C-f` (format), `C-c C-r` (optimized run),
+`C-c C-d` (debug run), `C-c C-w` (WAT), and `C-c C-e` (`explain`).
 
 See the integration READMEs for installation details and configuration
 examples.

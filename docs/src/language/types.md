@@ -85,6 +85,11 @@ Records are nominal now; their future packed `Vector<Record>` representation
 is a separate storage optimization. Do not rely on the current implementation
 layout as an FFI ABI.
 
+An individual record uses one runtime allocation: its fixed fields and the
+small ownership bitmap for managed fields are stored inline with its header.
+Boxed payload-enum values use the same compact layout. This is an internal
+runtime detail, not an FFI ABI guarantee.
+
 Records serialize with their type and field names, and can be deserialized
 when a `sig` supplies the expected record type:
 

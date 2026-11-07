@@ -153,10 +153,47 @@ fn generated_sources() -> Vec<(String, String)> {
         ));
         calls.push(format!("(calc-{case})"));
     }
-    vec![(
-        "generated-mixed-corpus".to_string(),
-        format!("{}\n[{}]", definitions.join("\n"), calls.join(" ")),
-    )]
+    vec![
+        (
+            "generated-mixed-corpus".to_string(),
+            format!("{}\n[{}]", definitions.join("\n"), calls.join(" ")),
+        ),
+        (
+            "recursive-record-and-payload-enum".to_string(),
+            r#"(do
+                (record Point x Int y Int label [Char])
+                (enum Tree Empty (Node point Point left Tree right Tree))
+                (Node
+                  (Point 3 4 "root")
+                  (Node (Point 1 2 "left") Empty Empty)
+                  (Node (Point 5 6 "right") Empty Empty)))"#
+                .to_string(),
+        ),
+        (
+            "immediate-scalar-payload-enum-match".to_string(),
+            r#"(do
+                (enum Choice Other (Pair left Int right Int))
+                (match (Pair (+ 1 2) (* 2 3))
+                  Other 0
+                  (Pair left right) (+ left right)))"#
+                .to_string(),
+        ),
+        (
+            "managed-constructor-and-accessor-wrappers".to_string(),
+            r#"(do
+                (record Label text [Char])
+                (enum Message Empty (Text contents [Char]))
+                (let make-label (lambda (text) (Label text)))
+                (let text-of (lambda (label) (Label/text label)))
+                (let make-text (lambda (contents) (Text contents)))
+                (let label (make-label "calque"))
+                (let message (make-text (text-of label)))
+                (match message
+                  Empty 0
+                  (Text contents) (length contents)))"#
+                .to_string(),
+        ),
+    ]
 }
 
 fn assert_same(name: &str, source: &str, debug: &Outcome, optimized: &Outcome, native: &Outcome) {

@@ -76,7 +76,15 @@ export QUE_INT_OVERFLOW_CHECK="${QUE_INT_OVERFLOW_CHECK:-0}"
 export QUE_DEC_OVERFLOW_CHECK="${QUE_DEC_OVERFLOW_CHECK:-0}"
 export QUE_DIV_ZERO_CHECK="${QUE_DIV_ZERO_CHECK:-0}"
 export QUE_VEC_MIN_CAP="${QUE_VEC_MIN_CAP:-8}"
-"$que_bin" compile "$input_file" --out "$wasm_file"
+# Serialization stays inside guest Wasm for native builds. This gives wasm2c
+# the same record/payload-enum codec as the WASI path and avoids maintaining a
+# second, narrower C implementation of the data format. The final value is
+# likewise rendered by that codec before the C host prints it.
+case "$result_type" in
+  *"->"*) native_result_serde=0 ;;
+  *) native_result_serde=1 ;;
+esac
+QUE_GUEST_SERDE=1 QUE_NATIVE_RESULT_SERIALIZE="$native_result_serde" "$que_bin" compile "$input_file" --out "$wasm_file"
 wasm2c "$wasm_file" -n "$module_name" -o "$c_file"
 
 if grep -q 'struct w2c_host' "$output_dir/$module_name.h"; then
@@ -198,9 +206,15 @@ cat >> "$host_file" <<'EOF'
 EOF
 
 if [ "$result_type" != "()" ]; then
-  cat >> "$host_file" <<EOF
+  if [ "$native_result_serde" -eq 1 ]; then
+    cat >> "$host_file" <<'EOF'
+    print_char_vector(&instance, result);
+EOF
+  else
+    cat >> "$host_file" <<EOF
     que_host_print_result(&host, result, "$result_type");
 EOF
+  fi
 fi
 
 cat >> "$host_file" <<'EOF'

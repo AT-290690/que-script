@@ -449,24 +449,34 @@ fn emit_table_key_runtime() -> &'static str {
     local.get $cap i32.rem_u
   )
 
-  (func $table_key_hash_vec (param $key i32) (param $cap i32) (result i32)
+  ;; Table's polymorphic library may conservatively allocate a `[Char]` as a
+  ;; reference vector even though another equal string is a scalar vector.
+  ;; Ownership metadata therefore cannot be part of key identity: recurse
+  ;; through every cell, and let the dynamic dispatcher decide whether that
+  ;; particular value is scalar or another managed container.
+  (func $table_key_hash_vec_structural (param $key i32) (param $cap i32) (result i32)
     (local $len i32) (local $data i32) (local $i i32) (local $hash i32)
+    (local $field_hash i32) (local $value i32)
     local.get $cap i32.eqz
     if i32.const 0 return end
+    i32.const 1 local.get $cap call $table_key_hash_scalar local.set $hash
     local.get $key i32.load local.set $len
     local.get $key i32.const 16 i32.add i32.load local.set $data
     block $done loop $items
       local.get $i local.get $len i32.ge_u br_if $done
-      local.get $hash i32.const 131 i32.mul
       local.get $data local.get $i i32.const 4 i32.mul i32.add i32.load
-      i32.add local.get $cap i32.rem_u local.set $hash
+      local.set $value
+      local.get $value local.get $cap call $table_key_hash_dynamic
+      local.set $field_hash
+      local.get $hash i32.const 131 i32.mul local.get $field_hash i32.add
+      local.get $cap i32.rem_u local.set $hash
       local.get $i i32.const 1 i32.add local.set $i
       br $items
     end end
     local.get $hash
   )
 
-  (func $table_key_equal_vec (param $left i32) (param $right i32) (result i32)
+  (func $table_key_equal_vec_structural (param $left i32) (param $right i32) (result i32)
     (local $len i32) (local $left_data i32) (local $right_data i32) (local $i i32)
     local.get $left local.get $right i32.eq
     if i32.const 1 return end
@@ -479,9 +489,195 @@ fn emit_table_key_runtime() -> &'static str {
       local.get $i local.get $len i32.ge_u br_if $equal
       local.get $left_data local.get $i i32.const 4 i32.mul i32.add i32.load
       local.get $right_data local.get $i i32.const 4 i32.mul i32.add i32.load
-      i32.ne if i32.const 0 return end
+      call $table_key_equal_dynamic
+      i32.eqz if i32.const 0 return end
       local.get $i i32.const 1 i32.add local.set $i
       br $items
+    end end
+    i32.const 1
+  )
+
+  ;; Records have a fixed vector-shaped payload plus a bitmap saying which
+  ;; fields are managed.  This is shared by ordinary nominal records and by
+  ;; boxed payload enums (the latter add a variant tag at offset 28).
+  (func $table_key_hash_record (param $key i32) (param $cap i32) (result i32)
+    (local $len i32) (local $data i32) (local $ref_map i32)
+    (local $i i32) (local $ref_word i32) (local $hash i32)
+    (local $field_hash i32) (local $value i32)
+    local.get $cap i32.eqz
+    if i32.const 0 return end
+    i32.const 2 local.get $cap call $table_key_hash_scalar local.set $hash
+    local.get $key i32.load local.set $len
+    local.get $key i32.const 16 i32.add i32.load local.set $data
+    local.get $key i32.const 24 i32.add i32.load local.set $ref_map
+    block $done loop $fields
+      local.get $i local.get $len i32.ge_u br_if $done
+      local.get $data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $value
+      local.get $ref_map i32.eqz
+      if (result i32)
+        local.get $value local.get $cap call $table_key_hash_scalar
+      else
+        local.get $ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $ref_word
+        local.get $ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        if (result i32)
+          local.get $value local.get $cap call $table_key_hash_dynamic
+        else
+          local.get $value local.get $cap call $table_key_hash_scalar
+        end
+      end
+      local.set $field_hash
+      local.get $hash i32.const 131 i32.mul local.get $field_hash i32.add
+      local.get $cap i32.rem_u local.set $hash
+      local.get $i i32.const 1 i32.add local.set $i
+      br $fields
+    end end
+    local.get $hash
+  )
+
+  (func $table_key_equal_record (param $left i32) (param $right i32) (result i32)
+    (local $len i32) (local $left_data i32) (local $right_data i32)
+    (local $left_ref_map i32) (local $right_ref_map i32) (local $i i32)
+    (local $left_ref_word i32) (local $right_ref_word i32)
+    (local $left_value i32) (local $right_value i32)
+    local.get $left local.get $right i32.eq
+    if i32.const 1 return end
+    local.get $left i32.load local.tee $len
+    local.get $right i32.load i32.ne
+    if i32.const 0 return end
+    local.get $left i32.const 16 i32.add i32.load local.set $left_data
+    local.get $right i32.const 16 i32.add i32.load local.set $right_data
+    local.get $left i32.const 24 i32.add i32.load local.set $left_ref_map
+    local.get $right i32.const 24 i32.add i32.load local.set $right_ref_map
+    block $equal loop $fields
+      local.get $i local.get $len i32.ge_u br_if $equal
+      local.get $left_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $left_value
+      local.get $right_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $right_value
+      local.get $left_ref_map i32.eqz
+      if
+        local.get $right_ref_map i32.eqz
+        if else i32.const 0 return end
+        local.get $left_value local.get $right_value i32.ne
+        if i32.const 0 return end
+      else
+        local.get $left_ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $left_ref_word
+        local.get $right_ref_map i32.eqz
+        if i32.const 0 return end
+        local.get $right_ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $right_ref_word
+        local.get $left_ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        local.get $right_ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        i32.ne if i32.const 0 return end
+        local.get $left_ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        if
+          local.get $left_value local.get $right_value call $table_key_equal_dynamic
+          i32.eqz if i32.const 0 return end
+        else
+          local.get $left_value local.get $right_value i32.ne
+          if i32.const 0 return end
+        end
+      end
+      local.get $i i32.const 1 i32.add local.set $i
+      br $fields
+    end end
+    i32.const 1
+  )
+
+  ;; Boxed payload enums carry their discriminant and a field-reference bitmap
+  ;; in their header. That makes structural table keys possible without a
+  ;; per-language-enum runtime registration: scalar fields compare directly,
+  ;; while managed fields recurse through this same representation dispatch.
+  (func $table_key_hash_enum (param $key i32) (param $cap i32) (result i32)
+    (local $len i32) (local $data i32) (local $ref_map i32)
+    (local $tag i32) (local $i i32) (local $ref_word i32)
+    (local $hash i32) (local $field_hash i32) (local $value i32)
+    local.get $cap i32.eqz
+    if i32.const 0 return end
+    local.get $key i32.load local.set $len
+    local.get $key i32.const 16 i32.add i32.load local.set $data
+    local.get $key i32.const 24 i32.add i32.load local.set $ref_map
+    local.get $key i32.const 28 i32.add i32.load local.set $tag
+    local.get $tag local.get $cap call $table_key_hash_scalar local.set $hash
+    block $done loop $fields
+      local.get $i local.get $len i32.ge_u br_if $done
+      local.get $data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $value
+      local.get $ref_map i32.eqz
+      if (result i32)
+        local.get $value local.get $cap call $table_key_hash_scalar
+      else
+        local.get $ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $ref_word
+        local.get $ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        if (result i32)
+          local.get $value local.get $cap call $table_key_hash_dynamic
+        else
+          local.get $value local.get $cap call $table_key_hash_scalar
+        end
+      end
+      local.set $field_hash
+      local.get $hash i32.const 131 i32.mul local.get $field_hash i32.add
+      local.get $cap i32.rem_u local.set $hash
+      local.get $i i32.const 1 i32.add local.set $i
+      br $fields
+    end end
+    local.get $hash
+  )
+
+  (func $table_key_equal_enum (param $left i32) (param $right i32) (result i32)
+    (local $len i32) (local $left_data i32) (local $right_data i32)
+    (local $ref_map i32) (local $i i32) (local $ref_word i32)
+    (local $left_value i32) (local $right_value i32)
+    local.get $left local.get $right i32.eq
+    if i32.const 1 return end
+    local.get $left i32.load local.tee $len
+    local.get $right i32.load i32.ne
+    if i32.const 0 return end
+    local.get $left i32.const 28 i32.add i32.load
+    local.get $right i32.const 28 i32.add i32.load i32.ne
+    if i32.const 0 return end
+    local.get $left i32.const 16 i32.add i32.load local.set $left_data
+    local.get $right i32.const 16 i32.add i32.load local.set $right_data
+    local.get $left i32.const 24 i32.add i32.load local.set $ref_map
+    block $equal loop $fields
+      local.get $i local.get $len i32.ge_u br_if $equal
+      local.get $left_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $left_value
+      local.get $right_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $right_value
+      local.get $ref_map i32.eqz
+      if
+        local.get $left_value local.get $right_value i32.ne
+        if i32.const 0 return end
+      else
+        local.get $ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $ref_word
+        local.get $ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        if
+          local.get $left_value local.get $right_value call $table_key_equal_dynamic
+          i32.eqz if i32.const 0 return end
+        else
+          local.get $left_value local.get $right_value i32.ne
+          if i32.const 0 return end
+        end
+      end
+      local.get $i i32.const 1 i32.add local.set $i
+      br $fields
     end end
     i32.const 1
   )
@@ -490,25 +686,77 @@ fn emit_table_key_runtime() -> &'static str {
   (func $table_key_hash_dynamic (param $key i32) (param $cap i32) (result i32)
     local.get $key call $is_vec_ptr
     if (result i32)
-      local.get $key local.get $cap call $table_key_hash_vec
+      local.get $key i32.const 20 i32.add i32.load
+      i32.const 1447380020 i32.eq
+      if (result i32)
+        local.get $key local.get $cap call $table_key_hash_enum
+      else
+        local.get $key i32.const 20 i32.add i32.load
+        i32.const 1447380019 i32.eq
+        if (result i32)
+          local.get $key local.get $cap call $table_key_hash_record
+        else
+          local.get $key local.get $cap call $table_key_hash_vec_structural
+        end
+      end
     else
       local.get $key local.get $cap call $table_key_hash_scalar
     end
   )
 
   (func $table_key_equal_dynamic (param $left i32) (param $right i32) (result i32)
+    (local $left_magic i32) (local $right_magic i32)
     local.get $left local.get $right i32.eq
     if i32.const 1 return end
     local.get $left call $is_vec_ptr
     if (result i32)
       local.get $right call $is_vec_ptr
       if (result i32)
-        local.get $left local.get $right call $table_key_equal_vec
+        local.get $left i32.const 20 i32.add i32.load
+        local.set $left_magic
+        local.get $right i32.const 20 i32.add i32.load
+        local.set $right_magic
+        local.get $left_magic i32.const 1447380020 i32.eq
+        if (result i32)
+          local.get $right_magic i32.const 1447380020 i32.eq
+          if (result i32)
+            local.get $left local.get $right call $table_key_equal_enum
+          else
+            i32.const 0
+          end
+        else
+          local.get $left_magic i32.const 1447380019 i32.eq
+          if (result i32)
+            local.get $right_magic i32.const 1447380019 i32.eq
+            if (result i32)
+              local.get $left local.get $right call $table_key_equal_record
+            else
+              i32.const 0
+            end
+          else
+            ;; A non-enum/non-record vector must never compare equal to a
+            ;; record or payload enum merely because its cells happen to line
+            ;; up.
+            local.get $right_magic i32.const 1447380020 i32.eq
+            local.get $right_magic i32.const 1447380019 i32.eq
+            i32.or
+            if (result i32)
+              i32.const 0
+            else
+              local.get $left local.get $right call $table_key_equal_vec_structural
+            end
+          end
+        end
       else
         i32.const 0
       end
     else
-      i32.const 0
+      local.get $right call $is_vec_ptr
+      if (result i32)
+        i32.const 0
+      else
+        local.get $left local.get $right i32.eq
+      end
     end
   )
 "#
@@ -2999,12 +3247,16 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
-    ;; Records use the normal vector header for their reference count and
-    ;; field storage, plus a per-field reference bitmap at offset 24.  Unlike
+    ;; Records and payload enums retain their established header ABI, but their
+    ;; fields and ownership bitmap live inline in the same allocation. Unlike
     ;; a vector, adjacent record fields may mix scalar and managed values.
     local.get $magic
     i32.const 1447380019
     i32.eq
+    local.get $magic
+    i32.const 1447380020
+    i32.eq
+    i32.or
     if
       local.get $ptr
       i32.const 16
@@ -3066,13 +3318,7 @@ fn emit_vector_runtime(
             br $record_fields
           end
         end
-        local.get $ref_map
-        call $free
-        drop
       end
-      local.get $data
-      call $free
-      drop
       local.get $ptr
       call $free
       drop
@@ -3785,6 +4031,10 @@ fn emit_vector_runtime(
     local.get $magic
     i32.const 1447380019
     i32.eq
+    local.get $magic
+    i32.const 1447380020
+    i32.eq
+    i32.or
     if
       local.get $rc
       i32.const 0
@@ -4315,20 +4565,27 @@ fn emit_vector_runtime(
     local.get $ptr
   )
 
-  ;; A record is a fixed-size vector with a per-field ownership bitmap.  This
-  ;; lets `{ Int [Char] Bool }` use one compact allocation while releasing
-  ;; only the managed fields when its final reference goes away.
+  ;; A record has a fixed header followed by inline fields and a per-field
+  ;; ownership bitmap. This is one allocation, while still letting mixed
+  ;; `{ Int [Char] Bool }` records release only their managed fields.
   (func $record_new_i32 (param $len i32) (param $ref_words i32) (result i32)
     (local $ptr i32)
     (local $data i32)
     (local $ref_map i32)
     i32.const 28
-    call $alloc
-    local.set $ptr
     local.get $len
     i32.const 4
     i32.mul
+    i32.add
+    local.get $ref_words
+    i32.const 4
+    i32.mul
+    i32.add
     call $alloc
+    local.set $ptr
+    local.get $ptr
+    i32.const 28
+    i32.add
     local.set $data
     local.get $ref_words
     i32.eqz
@@ -4336,10 +4593,11 @@ fn emit_vector_runtime(
       i32.const 0
       local.set $ref_map
     else
-      local.get $ref_words
+      local.get $data
+      local.get $len
       i32.const 4
       i32.mul
-      call $alloc
+      i32.add
       local.set $ref_map
     end
     local.get $ptr
@@ -4378,29 +4636,32 @@ fn emit_vector_runtime(
     local.get $ptr
   )
 
-  ;; Payload enums use the record ownership layout plus one word for their
-  ;; discriminant.  Keeping the same magic lets the ordinary RC vector path
-  ;; release their mixed managed fields through the bitmap above.
+  ;; Payload enums use the same inline record layout plus one word for their
+  ;; discriminant. Their distinct magic lets Table's polymorphic helpers
+  ;; perform structural hashing/equality, while the RC path still releases
+  ;; mixed managed fields through the bitmap above.
   (func $enum_new_i32 (param $tag i32) (param $len i32) (param $ref_words i32) (result i32)
     (local $ptr i32)
     (local $data i32)
     (local $ref_map i32)
     i32.const 32
+    local.get $len i32.const 4 i32.mul i32.add
+    local.get $ref_words i32.const 4 i32.mul i32.add
     call $alloc
     local.set $ptr
-    local.get $len i32.const 4 i32.mul call $alloc local.set $data
+    local.get $ptr i32.const 32 i32.add local.set $data
     local.get $ref_words i32.eqz
     if
       i32.const 0 local.set $ref_map
     else
-      local.get $ref_words i32.const 4 i32.mul call $alloc local.set $ref_map
+      local.get $data local.get $len i32.const 4 i32.mul i32.add local.set $ref_map
     end
     local.get $ptr local.get $len i32.store
     local.get $ptr i32.const 4 i32.add local.get $len i32.store
     local.get $ptr i32.const 8 i32.add i32.const 1 i32.store
     local.get $ptr i32.const 12 i32.add i32.const 2 i32.store
     local.get $ptr i32.const 16 i32.add local.get $data i32.store
-    local.get $ptr i32.const 20 i32.add i32.const 1447380019 i32.store
+    local.get $ptr i32.const 20 i32.add i32.const 1447380020 i32.store
     local.get $ptr i32.const 24 i32.add local.get $ref_map i32.store
     local.get $ptr i32.const 28 i32.add local.get $tag i32.store
     local.get $ptr
@@ -7933,10 +8194,9 @@ fn emit_wasi_list_dir_runtime() -> &'static str {
     include_str!("wasi_list_dir.wat")
 }
 
-/// Table keys have two efficient physical representations today: scalar i32
-/// values (including enum tags) and vectors (the existing string keys).  The
-/// library remains polymorphic, so an unresolved key type uses the guarded
-/// runtime dispatch.  Concrete optimized specializations take the direct path.
+/// Table keys have compact scalar/vector fast paths and a representation
+/// dispatcher for nested data. The library remains polymorphic, so unresolved
+/// key types use the guarded runtime dispatcher.
 fn compile_table_key_hash(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let key = node
         .children
@@ -7949,18 +8209,18 @@ fn compile_table_key_hash(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     let key_code = compile_expr(key, ctx)?;
     let capacity_code = compile_expr(capacity, ctx)?;
     let helper = match key.typ.as_ref() {
-        Some(Type::List(_)) => "$table_key_hash_vec",
-        Some(Type::Enum(enum_type)) if enum_type.boxed => {
-            return Err("payload enum values are not supported as Table keys; use a scalar key or an explicit ID".to_string());
-        }
+        // The dynamic representation dispatcher keeps scalar vectors on the
+        // same compact path, while recursively hashing nested vectors,
+        // tuples, records, and boxed payload enums.
+        Some(Type::List(_) | Type::Tuple(_) | Type::Record(_)) => "$table_key_hash_dynamic",
+        Some(Type::Enum(enum_type)) if enum_type.boxed => "$table_key_hash_dynamic",
         Some(Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit) => {
             "$table_key_hash_scalar"
         }
         Some(Type::Var(_)) | None => "$table_key_hash_dynamic",
-        Some(Type::Tuple(_)) | Some(Type::Record(_)) | Some(Type::Function(_, _)) => {
+        Some(Type::Function(_, _)) => {
             return Err(
-                "Table keys must be scalar values, enum values, or vectors; tuple and function keys are not supported"
-                    .to_string(),
+                "Table keys must be data values; function keys are not supported".to_string(),
             );
         }
     };
@@ -7979,18 +8239,15 @@ fn compile_table_key_equal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     let left_code = compile_expr(left, ctx)?;
     let right_code = compile_expr(right, ctx)?;
     let helper = match left.typ.as_ref() {
-        Some(Type::List(_)) => "call $table_key_equal_vec",
-        Some(Type::Enum(enum_type)) if enum_type.boxed => {
-            return Err("payload enum values are not supported as Table keys; use a scalar key or an explicit ID".to_string());
-        }
+        Some(Type::List(_) | Type::Tuple(_) | Type::Record(_)) => "call $table_key_equal_dynamic",
+        Some(Type::Enum(enum_type)) if enum_type.boxed => "call $table_key_equal_dynamic",
         Some(Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit) => {
             "i32.eq"
         }
         Some(Type::Var(_)) | None => "call $table_key_equal_dynamic",
-        Some(Type::Tuple(_)) | Some(Type::Record(_)) | Some(Type::Function(_, _)) => {
+        Some(Type::Function(_, _)) => {
             return Err(
-                "Table keys must be scalar values, enum values, or vectors; tuple and function keys are not supported"
-                    .to_string(),
+                "Table keys must be data values; function keys are not supported".to_string(),
             );
         }
     };
@@ -8050,14 +8307,26 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         .get(1)
         .ok_or_else(|| format!("Missing lhs for {}", op))
         .and_then(|n| compile_expr(n, ctx))?;
+    // A boxed-enum comparison must materialize the left pointer before
+    // evaluating the right operand. Constructors use the normal temporary
+    // scratch locals, so compiling the right side in the same context could
+    // overwrite `lhs_local` before its tag is loaded.
+    let boxed_enum_equality = op == "=~"
+        && matches!(node.children.get(1).and_then(|child| child.typ.as_ref()), Some(Type::Enum(enum_type)) if enum_type.boxed);
+    let rhs_ctx = if boxed_enum_equality {
+        Ctx {
+            tmp_i32: ctx.tmp_i32 + 3,
+            ..ctx.clone()
+        }
+    } else {
+        ctx.clone()
+    };
     let b = node
         .children
         .get(2)
         .ok_or_else(|| format!("Missing rhs for {}", op))
-        .and_then(|n| compile_expr(n, ctx))?;
-    if op == "=~"
-        && matches!(node.children.get(1).and_then(|child| child.typ.as_ref()), Some(Type::Enum(enum_type)) if enum_type.boxed)
-    {
+        .and_then(|n| compile_expr(n, &rhs_ctx))?;
+    if boxed_enum_equality {
         return Ok(format!(
             "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\ni32.const 28\ni32.add\ni32.load\nlocal.get {rhs_local}\ni32.const 28\ni32.add\ni32.load\ni32.eq"
         ));
@@ -8687,6 +8956,17 @@ fn is_borrowed_managed_rhs_with_env(
                         )
                     })
                     .unwrap_or(false);
+            }
+            // These generated operations return a value with an owned result:
+            // constructors allocate a fresh owner, while a managed record
+            // accessor explicitly retains its field before returning it.
+            // Recognising them here lets the existing interprocedural borrow
+            // analysis propagate that fact through ordinary wrapper lambdas.
+            if record_constructor_type(node).is_some()
+                || enum_constructor_variant(node).is_some()
+                || record_accessor_index(node).is_some()
+            {
+                return false;
             }
             if is_borrowing_accessor_expr(node) {
                 return apply_child_at(node, 1)
@@ -15007,8 +15287,12 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
         tmp_i32: ctx.tmp_i32 + 4,
     };
     let arg_code = compile_expr(arg, &nested_ctx)?;
-    let wasi_host = wasi_bool("QUE_WASI_HOST");
-    if wasi_host && op == "serialize" {
+    // The serializer/deserializer is ordinary guest Wasm; it does not depend
+    // on WASI itself. Native wasm2c builds opt into it so records and payload
+    // enums use this one implementation rather than the old, narrower C host
+    // codec.
+    let guest_serde = wasi_bool("QUE_WASI_HOST") || parse_env_bool_like("QUE_GUEST_SERDE", false);
+    if guest_serde && op == "serialize" {
         let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
         let mut out = vec![
             format!("{arg_code}\nlocal.set {arg_slot}"),
@@ -15026,7 +15310,7 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
         out.push(format!("local.get {result_slot}"));
         return Ok(out.join("\n"));
     }
-    if wasi_host && op == "deserialize" {
+    if guest_serde && op == "deserialize" {
         let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
         let mut out = vec![
             format!("{arg_code}\nlocal.set {arg_slot}"),
@@ -18106,6 +18390,29 @@ fn compile_program_to_wat_build_typed_with_opts(
         tmp_i32: main_local_defs.len() + main_borrowed_top_level_count,
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;
+    // wasm2c's small C host deliberately does not reimplement Calque's
+    // nominal record and payload-enum layouts.  For native executables, turn
+    // the final value into the same text representation used by the guest
+    // serializer and let the host print that character vector.
+    let native_result_serialize = parse_env_bool_like("QUE_NATIVE_RESULT_SERIALIZE", false)
+        && !matches!(main_ret_ty, Type::Function(_, _));
+    let main_result_code = if native_result_serialize {
+        let release_value = if is_managed_local_type(main_ret_ty) {
+            format!(
+                "\nlocal.get $native_result_value\ncall {}\ndrop",
+                rc_release_for_type(main_ret_ty)
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            "{main_code}\nlocal.set $native_result_value\nlocal.get $native_result_value\ncall $__wasi_serialize_{}{}",
+            wasi_serde_name(main_ret_ty),
+            release_value,
+        )
+    } else {
+        main_code.clone()
+    };
     let mut apply_arities: HashSet<usize> = HashSet::new();
     for func in &emitted_funcs {
         collect_apply_arities_from_code(func, &mut apply_arities);
@@ -18124,7 +18431,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     let main_base_local_count = main_local_defs.len() + main_borrowed_top_level_count;
     let main_scratch_i32_locals = scratch_i32_locals_needed(
         main_base_local_count,
-        &[&main_borrowed_top_level_prelude, &main_code],
+        &[&main_borrowed_top_level_prelude, &main_result_code],
         false,
     );
 
@@ -18144,6 +18451,11 @@ fn compile_program_to_wat_build_typed_with_opts(
     }
     emit_i32_locals(&mut main_func, main_borrowed_top_level_count);
     emit_i32_locals(&mut main_func, main_scratch_i32_locals);
+    // This comes after all indexed locals so it cannot disturb the local-slot
+    // numbering already embedded in generated expression code.
+    if native_result_serialize {
+        main_func.push_str("    (local $native_result_value i32)\n");
+    }
     if !main_borrowed_top_level_prelude.is_empty() {
         main_func.push_str(&format!(
             "    {}\n",
@@ -18153,7 +18465,10 @@ fn compile_program_to_wat_build_typed_with_opts(
     if wasi_codegen && uses_argv {
         main_func.push_str("    call $__wasi_init_argv\n    drop\n");
     }
-    main_func.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
+    main_func.push_str(&format!(
+        "    {}\n",
+        main_result_code.replace('\n', "\n    ")
+    ));
     main_func.push_str("  )\n");
     if wasi_codegen {
         if wasi_no_result {
@@ -18421,7 +18736,13 @@ fn compile_program_to_wat_build_typed_with_opts(
             used_extern_defs.contains_key("read/lines!"),
         ));
     }
-    if wasi_host && (wasi_prints_result || generated_code.contains("call $__wasi_serialize_")) {
+    let guest_serde =
+        wasi_host || parse_env_bool_like("QUE_GUEST_SERDE", false) || native_result_serialize;
+    if guest_serde
+        && (wasi_prints_result
+            || native_result_serialize
+            || generated_code.contains("call $__wasi_serialize_"))
+    {
         let scale = decimal_scale_i64();
         let digits = scale.to_string().len().saturating_sub(1);
         extern_imports.push_str(
@@ -18431,12 +18752,21 @@ fn compile_program_to_wat_build_typed_with_opts(
         );
         let mut types = Vec::new();
         collect_wasi_serialize_types(typed_ast, &mut types);
-        if wasi_prints_result
-            && !matches!(
-                main_ret_ty,
-                Type::Char | Type::Unit | Type::Var(_) | Type::Function(_, _)
-            )
-            && !matches!(main_ret_ty, Type::List(inner) if matches!(inner.as_ref(), Type::Char))
+        // WASI renders Char, (), and [Char] directly in `_start`, so it has
+        // no need for a specialized serializer for those result types.
+        // Native wasm2c rendering instead converts *every* non-function
+        // result to a character vector before the C host prints it.  Keep the
+        // two paths distinct: omitting [Char] here made `(serialize value)`
+        // compile a call to its serializer without ever defining that helper.
+        let main_result_needs_serializer = native_result_serialize
+            || (wasi_prints_result
+                && !matches!(
+                    main_ret_ty,
+                    Type::Char | Type::Unit | Type::Var(_) | Type::Function(_, _)
+                )
+                && !matches!(main_ret_ty, Type::List(inner) if matches!(inner.as_ref(), Type::Char)));
+        if main_result_needs_serializer
+            && !matches!(main_ret_ty, Type::Function(_, _))
             && !types.iter().any(|existing| existing == main_ret_ty)
         {
             types.push(main_ret_ty.clone());
@@ -18446,7 +18776,7 @@ fn compile_program_to_wat_build_typed_with_opts(
             extern_imports.push_str(&emit_wasi_serializer(&typ, &mut emitted)?);
         }
     }
-    if wasi_host && generated_code.contains("call $__wasi_deserialize_") {
+    if guest_serde && generated_code.contains("call $__wasi_deserialize_") {
         let scale = decimal_scale_i64();
         let digits = scale.to_string().len().saturating_sub(1);
         extern_imports.push_str(

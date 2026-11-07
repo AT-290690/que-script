@@ -57,13 +57,14 @@ copy_release_artifacts "./target/release" "${HOST_TARGET}" ""
 copy_release_artifacts "./target/${LINUX_TARGET}/release" "${LINUX_TARGET}" ""
 copy_release_artifacts "./target/${WINDOWS_TARGET}/release" "${WINDOWS_TARGET}" ".exe"
 cp -R "miscs/neovim" "releases/que-nvim"
+cp -R "miscs/emacs" "releases/que-emacs"
 cp "dist/calque-ai-runner.zip" "releases/"
 cp "dist/calque-ai-native-linux-x86_64.zip" "releases/"
 
 echo "[8/9] Building VS Code extension"
 ./scripts/build-extension.sh
 
-echo "[9/9] Neovim plugin staged"
+echo "[9/9] Editor integrations staged"
 
 echo "All builds completed successfully."
 echo "Release artifacts copied to ./releases"

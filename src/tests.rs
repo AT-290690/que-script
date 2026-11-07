@@ -140,6 +140,23 @@ xs)"#,
     }
 
     #[test]
+    fn test_payload_enum_equality_compares_tags_for_both_operands() {
+        let source = r#"(do
+            (enum Choice Zero (A value Int) (B value Int) Other)
+            [
+              (=~ Zero Zero) (=~ Zero (A 1)) (=~ Zero (B 2)) (=~ Zero Other)
+              (=~ (A 1) Zero) (=~ (A 1) (A 1)) (=~ (A 1) (B 2)) (=~ (A 1) Other)
+              (=~ (B 2) Zero) (=~ (B 2) (A 1)) (=~ (B 2) (B 2)) (=~ (B 2) Other)
+              (=~ Other Zero) (=~ Other (A 1)) (=~ Other (B 2)) (=~ Other Other)
+            ])"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "[true false false false false true false false false false true false false false false true]"
+        );
+    }
+
+    #[test]
     fn test_enum_match_requires_exhaustive_variants() {
         let exprs = crate::parser::parse("(do (enum Letter A B C) (match A A 1 B 2))").unwrap();
         let err = crate::infer::infer_with_builtins_typed(
@@ -184,6 +201,154 @@ xs)"#,
         )
         .expect_err("a raw tuple must not be accepted as a nominal record");
         assert!(err.contains("expected Point but got {Int Int}"), "{err}");
+    }
+
+    #[test]
+    fn test_record_and_payload_enum_runtime_use_single_inline_allocation() {
+        let expr = crate::parser::build(
+            r#"(do
+                (record Point x Int label [Char])
+                (enum Tree Empty (Node point Point left Tree right Tree))
+                (Node (Point 3 "root") Empty Empty))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("record program should compile");
+
+        let record_start = wat
+            .find("  (func $record_new_i32")
+            .expect("record runtime should be present");
+        let enum_start = wat
+            .find("  (func $enum_new_i32")
+            .expect("payload-enum runtime should be present");
+        let vec_start = wat
+            .find("  (func $vec_get_i32")
+            .expect("vector runtime should follow record runtime");
+        let record_runtime = &wat[record_start..enum_start];
+        let enum_runtime = &wat[enum_start..vec_start];
+
+        assert_eq!(
+            record_runtime.matches("call $alloc").count(),
+            1,
+            "records should allocate header, fields, and ref bitmap together:\n{record_runtime}"
+        );
+        assert_eq!(
+            enum_runtime.matches("call $alloc").count(),
+            1,
+            "payload enums should allocate header, fields, and ref bitmap together:\n{enum_runtime}"
+        );
+        wat::parse_str(&wat).expect("compact record module should encode");
+    }
+
+    #[test]
+    fn test_optimized_scalar_record_projections_elide_the_record_allocation() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let sum-point
+              (lambda (x y)
+                (let point (Point x y))
+                (+ (Point/x point) (Point/y point))))
+            (sum-point 3 4))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("optimized record projection program should compile");
+        assert_eq!(
+            wat.matches("call $record_new_i32").count(),
+            0,
+            "a scalar record used only by its accessors should stay in locals:\n{wat}"
+        );
+        wat::parse_str(&wat).expect("scalar-replaced record module should encode");
+    }
+
+    #[test]
+    fn test_scalar_record_replacement_preserves_field_effect_order_and_keeps_managed_records() {
+        let scalar_source = r#"(do
+            (record Point x Int y Int)
+            (let seen [])
+            (let mark (lambda (n) (push! n seen) n))
+            (let point (Point (mark 3) (mark 4)))
+            {(Point/x point) seen})"#;
+        assert_std_program_output_matches_with_and_without_optimizer(scalar_source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(scalar_source, true),
+            "{ 3 [3 4] }"
+        );
+
+        let scalar_expr = crate::parser::build(scalar_source).expect("program should build");
+        let scalar_wat = crate::wat::compile_program_to_wat_with_opts(&scalar_expr, true)
+            .expect("optimized scalar record program should compile");
+        assert!(
+            scalar_wat.contains("call $record_new_i32"),
+            "effectful scalar fields must retain their source evaluation order:\n{scalar_wat}"
+        );
+
+        let managed_source = r#"(do
+            (record Label text [Char])
+            (let label (Label "calque"))
+            (Label/text label))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(managed_source);
+        let managed_expr = crate::parser::build(managed_source).expect("program should build");
+        let managed_wat = crate::wat::compile_program_to_wat_with_opts(&managed_expr, true)
+            .expect("managed record program should compile");
+        assert!(
+            managed_wat.contains("call $record_new_i32"),
+            "managed fields must retain normal record ownership semantics:\n{managed_wat}"
+        );
+
+        let trapping_source = r#"(do
+            (record Point x Int y Int)
+            (let xs [1])
+            (let point (Point 1 (get 4 xs)))
+            (Point/x point))"#;
+        let trapping_expr = crate::parser::build(trapping_source).expect("program should build");
+        let trapping_wat = crate::wat::compile_program_to_wat_with_opts(&trapping_expr, true)
+            .expect("trapping record program should compile");
+        assert!(
+            trapping_wat.contains("call $record_new_i32"),
+            "a potentially trapping field must not be discarded:\n{trapping_wat}"
+        );
+    }
+
+    #[test]
+    fn test_optimized_immediate_scalar_payload_match_elides_enum_allocation() {
+        let source = r#"(do
+            (enum Choice Other (Pair left Int right Int))
+            (let seen [])
+            (let mark (lambda (n) (push! n seen) n))
+            (match (Pair (mark 3) (mark 4))
+              Other {0 seen}
+              (Pair left right) {(+ left right) seen}))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 7 [3 4] }"
+        );
+
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("optimized immediate match should compile");
+        assert_eq!(
+            wat.matches("call $enum_new_i32").count(),
+            0,
+            "a scalar payload enum matched immediately should stay in locals:\n{wat}"
+        );
+
+        let managed_source = r#"(do
+            (enum Message Empty (Text contents [Char]))
+            (match (Text "hello")
+              Empty 0
+              (Text contents) (length contents)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(managed_source);
+        let managed_expr = crate::parser::build(managed_source).expect("program should build");
+        let managed_wat = crate::wat::compile_program_to_wat_with_opts(&managed_expr, true)
+            .expect("managed immediate match should compile");
+        assert!(
+            managed_wat.contains("call $enum_new_i32"),
+            "managed enum payloads must retain normal ownership semantics:\n{managed_wat}"
+        );
     }
 
     #[test]
@@ -263,6 +428,51 @@ xs)"#,
             (Label/text (get 1 labels)))"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
         assert_eq!(run_program_output_with_std_and_opts(source, true), "second");
+    }
+
+    #[test]
+    fn test_wat_managed_record_wrapper_summaries_avoid_caller_retain_churn() {
+        let source = r#"(do
+            (record Label text [Char])
+            (let make-label (lambda (text) (Label text)))
+            (let text-of (lambda (label) (Label/text label)))
+            (let label (make-label "hello"))
+            (let text (text-of label))
+            (length text))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "5");
+
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main = &wat[main_start..];
+        assert!(
+            !main.contains("call $rc_retain_vec"),
+            "calls returning a fresh record or owned record field should transfer ownership to the destination local:\n{main}"
+        );
+
+        let enum_source = r#"(do
+            (enum Message Empty (Text contents [Char]))
+            (let make-text (lambda (contents) (Text contents)))
+            (let message (make-text "hello"))
+            (match message
+              Empty 0
+              (Text contents) (length contents)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(enum_source);
+        let enum_expr = crate::parser::build(enum_source).expect("program should build");
+        let enum_wat = crate::wat::compile_program_to_wat_with_opts(&enum_expr, false)
+            .expect("program should compile");
+        let enum_main_start = enum_wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let enum_main = &enum_wat[enum_main_start..];
+        assert!(
+            !enum_main.contains("call $rc_retain_vec"),
+            "a wrapper returning a fresh payload enum should transfer ownership to its destination local:\n{enum_main}"
+        );
     }
 
     #[test]
@@ -507,6 +717,82 @@ xs)"#,
             (snd (get 0 (Table/get A points))))"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
         assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
+    }
+
+    #[test]
+    fn test_table_uses_structural_payload_enum_keys() {
+        let source = r#"(do
+            (enum Tree Empty (Node value Int left Tree right Tree))
+            (let table (Table/new))
+            (Table/set! (Node 1 (Node 2 Empty Empty) Empty) 7 table)
+            {
+              (Table/has? (Node 1 (Node 2 Empty Empty) Empty) table)
+              (Table/has? (Node 1 (Node 3 Empty Empty) Empty) table)
+              (snd (get 0 (Table/get (Node 1 (Node 2 Empty Empty) Empty) table)))
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ true { false 7 } }"
+        );
+    }
+
+    #[test]
+    fn test_table_payload_enum_keys_recurse_through_nested_vectors() {
+        let source = r#"(do
+            (enum Label End (Named words [[Char]]))
+            (let table (Table/new))
+            (Table/set! (Named ["calque" "lisp"]) 7 table)
+            {
+              (Table/has? (Named ["calque" "lisp"]) table)
+              (Table/has? (Named ["calque" "rust"]) table)
+              (snd (get 0 (Table/get (Named ["calque" "lisp"]) table)))
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ true { false 7 } }"
+        );
+    }
+
+    #[test]
+    fn test_table_payload_enum_keys_recurse_through_records_and_tuples() {
+        let source = r#"(do
+            (record Point x Int label [Char])
+            (enum Marker End (At point Point pair { [Char] Int }))
+            (let table (Table/new))
+            (Table/set! (At (Point 3 "north") {"origin" 9}) 42 table)
+            {
+              (Table/has? (At (Point 3 "north") {"origin" 9}) table)
+              (Table/has? (At (Point 4 "north") {"origin" 9}) table)
+              (Table/has? (At (Point 3 "south") {"origin" 9}) table)
+              (Table/has? (At (Point 3 "north") {"other" 9}) table)
+              (snd (get 0 (Table/get (At (Point 3 "north") {"origin" 9}) table)))
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ true { false { false { false 42 } } } }"
+        );
+    }
+
+    #[test]
+    fn test_table_accepts_structural_tuple_and_record_keys() {
+        let source = r#"(do
+            (record Point x Int label [Char])
+            (let points (Table/new))
+            (Table/set! (Point 3 "north") 9 points)
+            (let origins (Table/new))
+            (Table/set! {"origin" 0} 4 origins)
+            {
+              (snd (get 0 (Table/get (Point 3 "north") points)))
+              (snd (get 0 (Table/get {"origin" 0} origins)))
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 9 4 }"
+        );
     }
 
     #[test]
@@ -6284,8 +6570,11 @@ out"#,
             (2, 27, "value : Int"),
         ] {
             let hover_json = crate::wasm_api::lsp_hover(program.to_string(), line, character);
-            let hover: serde_json::Value = serde_json::from_str(&hover_json).expect("valid hover JSON");
-            let contents = hover["contents"].as_str().expect("payload enum hover contents");
+            let hover: serde_json::Value =
+                serde_json::from_str(&hover_json).expect("valid hover JSON");
+            let contents = hover["contents"]
+                .as_str()
+                .expect("payload enum hover contents");
             assert!(contents.contains(expected), "unexpected hover: {contents}");
         }
     }
@@ -8914,6 +9203,81 @@ fn"#;
         assert!(wat.contains("call $__wasi_deserialize_"), "{wat}");
         assert!(wat.contains("func $__deser_string"), "{wat}");
         wat::parse_str(&wat).expect("specialized deserializer module should encode");
+    }
+
+    #[test]
+    fn test_native_guest_serde_specializes_records_and_payload_enums() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guest_serde = ScopedEnvVar::set("QUE_GUEST_SERDE", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (record Point x Int y Int)
+                (enum Tree Empty (Node point Point left Tree right Tree))
+                (let text (serialize (Node (Point 3 4) Empty Empty)))
+                (sig restored Tree)
+                (let restored (deserialize text))
+                (match restored
+                  Empty 0
+                  (Node point left right) (+ (Point/x point) (Point/y point))))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("native guest serde program should compile");
+
+        assert!(!wat.contains("(import \"host\" \"serialize\""), "{wat}");
+        assert!(!wat.contains("(import \"host\" \"deserialize\""), "{wat}");
+        assert!(wat.contains("call $__wasi_serialize_"), "{wat}");
+        assert!(wat.contains("call $__wasi_deserialize_"), "{wat}");
+        assert!(wat.contains("func $__serde_string"), "{wat}");
+        assert!(wat.contains("func $__deser_string"), "{wat}");
+        wat::parse_str(&wat).expect("native guest serde module should encode");
+    }
+
+    #[test]
+    fn test_native_result_renderer_serializes_direct_record_and_payload_enum_return() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _native_result = ScopedEnvVar::set("QUE_NATIVE_RESULT_SERIALIZE", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (record Point x Int y Int)
+                (enum Tree Empty (Node point Point left Tree right Tree))
+                (Node (Point 3 4) Empty Empty))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("native result renderer should compile");
+
+        assert!(wat.contains("local $native_result_value i32"), "{wat}");
+        assert!(wat.contains("call $__wasi_serialize_"), "{wat}");
+        assert!(wat.contains("func $__serde_string"), "{wat}");
+        assert!(!wat.contains("(import \"host\" \"serialize\""), "{wat}");
+        wat::parse_str(&wat).expect("native result renderer module should encode");
+    }
+
+    #[test]
+    fn test_native_result_renderer_emits_string_serializer_for_serialize_result() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _native_result = ScopedEnvVar::set("QUE_NATIVE_RESULT_SERIALIZE", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (enum Tree Empty (Node value Int left Tree right Tree))
+                (serialize (Node 4 Empty Empty)))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("native serialized-string result should compile");
+
+        assert!(
+            wat.contains("func $__wasi_serialize_5b436861725d"),
+            "native result renderer must emit the [Char] serializer:\n{wat}"
+        );
+        wat::parse_str(&wat).expect("native serialized-string result module should encode");
     }
 
     #[test]
